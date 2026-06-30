@@ -251,7 +251,7 @@ test("workflow editor keeps its title inline and reuses only the help toggle but
   );
 });
 
-test("workflow failover controls are gated by the runtime FEATURE_FALLBACK_MODE flag", () => {
+test("workflow failover controls are gated by the runtime FAILOVER_ENABLED flag", () => {
   const template = readDashboardTemplateSource();
 
   assert.match(

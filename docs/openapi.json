@@ -881,6 +881,336 @@
         }
       }
     },
+    "/admin/failover": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List failover mappings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/failover.View"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/failover"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or update one failover mapping",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.upsertFailoverRuleRequest"
+              }
+            }
+          },
+          "description": "Failover mapping",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/failover.View"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/failover"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete one failover mapping",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.deleteFailoverRuleRequest"
+              }
+            }
+          },
+          "description": "Failover primary model to remove",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/failover"
+          }
+        }
+      }
+    },
+    "/admin/failover/generate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Generate failover mapping suggestions",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/failover.View"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/failover/generate"
+          }
+        }
+      }
+    },
+    "/admin/failover/reset": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reset dashboard-managed failover mappings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/failover.View"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/failover/reset"
+          }
+        }
+      }
+    },
     "/admin/model-pricing-overrides": {
       "get": {
         "description": "Lists persisted USD pricing overrides. Selectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
@@ -1756,6 +2086,68 @@
         "x-mint": {
           "metadata": {
             "sidebarTitle": "/admin/usage/summary"
+          }
+        }
+      }
+    },
+    "/admin/usage/throughput": {
+      "get": {
+        "description": "Returns a fixed, trailing window of token-volume buckets\n(input / output / prompt-cached / locally-cached) at the\nrequested granularity, for the overview live chart.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get the live token-throughput window",
+        "parameters": [
+          {
+            "description": "Bucket granularity: second, minute, hour, day",
+            "name": "granularity",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/usage.TokenThroughput"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/throughput"
           }
         }
       }
@@ -6154,7 +6546,7 @@
           "DASHBOARD_LIVE_LOGS_ENABLED": {
             "type": "string"
           },
-          "FEATURE_FALLBACK_MODE": {
+          "FAILOVER_ENABLED": {
             "type": "string"
           },
           "GUARDRAILS_ENABLED": {
@@ -6380,6 +6772,14 @@
           "budget_key"
         ]
       },
+      "admin.deleteFailoverRuleRequest": {
+        "type": "object",
+        "properties": {
+          "primary_model": {
+            "type": "string"
+          }
+        }
+      },
       "admin.deleteModelPricingOverrideRequest": {
         "type": "object",
         "properties": {
@@ -6553,6 +6953,23 @@
           "amount",
           "budget_key"
         ]
+      },
+      "admin.upsertFailoverRuleRequest": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "fallback_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "primary_model": {
+            "type": "string"
+          }
+        }
       },
       "admin.upsertModelPricingOverrideRequest": {
         "type": "object",
@@ -8667,6 +9084,35 @@
           }
         }
       },
+      "failover.View": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "fallback_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "managed": {
+            "type": "boolean"
+          },
+          "managed_source": {
+            "type": "string"
+          },
+          "primary_model": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
       "pricingoverrides.Pricing": {
         "type": "object",
         "properties": {
@@ -8872,6 +9318,12 @@
       "usage.DailyUsage": {
         "type": "object",
         "properties": {
+          "cache_write_input_tokens": {
+            "type": "integer"
+          },
+          "cached_input_tokens": {
+            "type": "integer"
+          },
           "date": {
             "type": "string"
           },
@@ -8894,6 +9346,10 @@
             "type": "number"
           },
           "total_tokens": {
+            "type": "integer"
+          },
+          "uncached_input_tokens": {
+            "description": "Provider prompt-cache split of the period's input, folded per row from\nraw_data (same source as the summary). Zero when the storage layer does\nnot populate them.",
             "type": "integer"
           }
         }
@@ -8976,6 +9432,43 @@
           },
           "uncached_input_tokens": {
             "type": "integer"
+          }
+        }
+      },
+      "usage.ThroughputBucket": {
+        "type": "object",
+        "properties": {
+          "input_tokens": {
+            "type": "integer"
+          },
+          "locally_cached_tokens": {
+            "type": "integer"
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "prompt_cached_tokens": {
+            "type": "integer"
+          },
+          "start": {
+            "type": "string"
+          }
+        }
+      },
+      "usage.TokenThroughput": {
+        "type": "object",
+        "properties": {
+          "bucket_seconds": {
+            "type": "integer"
+          },
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/usage.ThroughputBucket"
+            }
+          },
+          "granularity": {
+            "type": "string"
           }
         }
       },

@@ -90,6 +90,7 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 }
 
 func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core.ChatRequest, workflow *core.Workflow) error {
+	s.observeLiveProviderAttempts(c, workflow)
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
@@ -124,6 +125,7 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 	if err != nil {
 		return handleError(c, err)
 	}
+	enrichAuditEntryWithProviderAttempts(c)
 	if result.Meta.UsedFallback {
 		markRequestFallbackUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)

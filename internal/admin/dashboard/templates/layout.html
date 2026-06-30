@@ -127,6 +127,182 @@
                 </form>
             </section>
         </div>
+        <div class="editor-modal-backdrop"
+             x-cloak
+             x-show="failoverFormOpen"
+             x-transition.opacity.duration.160ms
+             aria-hidden="true"></div>
+        <div class="editor-modal-shell"
+             x-cloak
+             x-show="failoverFormOpen"
+             x-transition.opacity.duration.160ms
+             @click="closeFailoverForm()"
+             @keydown.escape.window="failoverFormOpen && !authDialogOpen && closeFailoverForm()">
+            <section class="model-editor" x-show="failoverFormOpen" x-ref="failoverEditor" role="dialog" aria-modal="true" aria-label="Failover editor" @click.stop>
+                <form class="form" @submit.prevent="submitFailoverForm()">
+                    <div class="editor-header">
+                        <div>
+                            <p class="form-kicker">Failover mapping</p>
+                            <h3 x-text="failoverForm.source || 'Failover'"></h3>
+                        </div>
+                        <button type="button" class="dialog-close-btn" aria-label="Close failover editor" @click="closeFailoverForm()">
+                            {{template "x-icon"}}
+                        </button>
+                    </div>
+
+                    <p class="form-hint" x-show="failoverFormManaged" role="status">
+                        This failover mapping is defined in configuration and is read-only here.
+                    </p>
+
+                    <datalist id="failover-target-options">
+                        <template x-for="m in models" :key="'failover-target:' + qualifiedModelName(m)">
+                            <option :value="qualifiedModelName(m)" x-text="qualifiedModelName(m)"></option>
+                        </template>
+                    </datalist>
+
+                    <div class="form-field">
+                        <label class="form-field-label" for="failover-target">Fallback models</label>
+                        <div class="vm-target-list">
+                            <div class="vm-target-row">
+                                <input id="failover-target" type="text" list="failover-target-options" class="mono vm-target-model" placeholder="azure/gpt-4o" x-model="failoverForm.target_model" :disabled="failoverFormManaged" aria-label="Fallback model" data-modal-autofocus>
+                                <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn vm-target-remove" x-show="failoverForm.target_model" :disabled="failoverFormManaged" @click="removePrimaryFailoverTarget()" aria-label="Remove fallback model" title="Remove fallback model">
+                                    {{template "trash-icon"}}
+                                </button>
+                            </div>
+                            <template x-for="(target, index) in failoverForm.targets" :key="index">
+                                <div class="vm-target-row">
+                                    <input type="text" list="failover-target-options" class="mono vm-target-model" placeholder="gemini/gemini-2.5-pro" x-model="target.model" :disabled="failoverFormManaged" aria-label="Fallback model">
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn vm-target-remove" :disabled="failoverFormManaged" @click="removeFailoverTarget(index)" aria-label="Remove fallback model" title="Remove fallback model">
+                                        {{template "trash-icon"}}
+                                    </button>
+                                </div>
+                            </template>
+                        </div>
+                        <div class="failover-target-actions">
+                            <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="failoverFormManaged || failoverGenerating || failoverSaving" @click="addFailoverTarget()">
+                                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                                <span>Add fallback model</span>
+                            </button>
+                            <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="failoverFormManaged || failoverGenerating || failoverSaving || !failoverEnabled()" @click="generateFailoverForForm()">
+                                <i data-lucide="wand-sparkles" class="form-action-icon" aria-hidden="true"></i>
+                                <span x-text="failoverGenerating ? 'Generating...' : 'Generate automatically'"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="vm-status-row">
+                        <div class="vm-status-toggle">
+                            <button type="button" class="alias-toggle"
+                                    :class="{ enabled: failoverForm.enabled }"
+                                    :disabled="failoverFormManaged"
+                                    :aria-label="(failoverForm.enabled ? 'Disable' : 'Enable') + ' failover mapping'"
+                                    @click="!failoverFormManaged && (failoverForm.enabled = !failoverForm.enabled)">
+                                <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                <span x-text="failoverForm.enabled ? 'Enabled' : 'Disabled'"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <p class="form-error" x-show="failoverError" x-text="failoverError" role="alert" aria-live="assertive"></p>
+
+                    <div class="form-actions">
+                        <button type="button" class="pagination-btn" @click="closeFailoverForm()">Cancel</button>
+                        <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="failoverFormMode === 'edit' && !failoverFormManaged" :disabled="failoverSaving || failoverGenerating" @click="deleteFailoverRule()">Remove</button>
+                        <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" x-show="!failoverFormManaged" :disabled="failoverSaving || failoverGenerating">
+                            <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                            <span x-text="failoverSaving ? 'Saving...' : 'Save'"></span>
+                        </button>
+                    </div>
+                </form>
+            </section>
+        </div>
+        <div class="editor-modal-backdrop"
+             x-cloak
+             x-show="failoverDraftsOpen"
+             x-transition.opacity.duration.160ms
+             aria-hidden="true"></div>
+        <div class="editor-modal-shell"
+             x-cloak
+             x-show="failoverDraftsOpen"
+             x-transition.opacity.duration.160ms
+             @click="closeFailoverDraftsModal()"
+             @keydown.escape.window="failoverDraftsOpen && !authDialogOpen && closeFailoverDraftsModal()">
+            <section class="model-editor failover-drafts-editor" x-show="failoverDraftsOpen" role="dialog" aria-modal="true" aria-label="Generated failover drafts" @click.stop>
+                <div class="editor-header">
+                    <div>
+                        <p class="form-kicker">Generated drafts</p>
+                        <h3>Failover models</h3>
+                    </div>
+                    <div class="failover-draft-header-actions">
+                        <span class="failover-draft-counter" x-show="failoverGeneratedRules.length > 0" x-text="failoverDraftCountLabel()"></span>
+                        <button type="button" class="dialog-close-btn" aria-label="Close failover drafts" :disabled="failoverDraftSaving" @click="closeFailoverDraftsModal()">
+                            {{template "x-icon"}}
+                        </button>
+                    </div>
+                </div>
+
+                <div class="loading-state failover-drafts-loading" x-show="failoverGenerating" role="status" aria-live="polite">
+                    <div class="loading-spinner"></div>
+                    <span>Generating failover drafts...</span>
+                </div>
+
+                <div class="alert alert-success failover-draft-alert"
+                     role="status"
+                     aria-live="polite"
+                     aria-atomic="true"
+                     x-show="!failoverGenerating && failoverNotice && !failoverError"
+                     x-text="failoverNotice"></div>
+
+                <div class="failover-draft-toolbar" x-show="!failoverGenerating && failoverGeneratedRules.length > 0">
+                    <div class="filter-input-wrap">
+                        <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                        <input type="text" class="filter-input" placeholder="Filter failover drafts..." aria-label="Filter failover drafts" x-model="failoverDraftFilter">
+                    </div>
+                    <button type="button"
+                            class="pagination-btn pagination-btn-with-icon failover-draft-toggle-all"
+                            :disabled="failoverDraftSaving"
+                            @click="toggleAllFailoverDrafts()">
+                        <i data-lucide="check" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="allFailoverDraftsSelected() ? 'Deselect all' : 'Select all'"></span>
+                    </button>
+                </div>
+
+                <div class="failover-draft-list" x-show="!failoverGenerating && filteredFailoverDrafts().length > 0" role="list">
+                    <template x-for="rule in filteredFailoverDrafts()" :key="'failover-draft:' + failoverPrimaryModel(rule)">
+                        <label class="failover-draft-row" role="listitem">
+                            <input type="checkbox"
+                                   :checked="failoverDraftSelected(rule)"
+                                   :disabled="failoverDraftSaving"
+                                   @change="setFailoverDraftSelected(rule, $event.target.checked)"
+                                   :aria-label="'Select failover draft for ' + failoverPrimaryModel(rule)">
+                            <span class="failover-draft-copy">
+                                <span class="mono failover-draft-source" x-text="failoverPrimaryModel(rule)"></span>
+                                <span class="mono failover-draft-targets" x-text="failoverTargetLabel(rule)"></span>
+                            </span>
+                        </label>
+                    </template>
+                </div>
+
+                <p class="form-hint failover-drafts-empty" x-show="!failoverGenerating && failoverGeneratedRules.length === 0 && !failoverError">
+                    No failover suggestions were generated.
+                </p>
+                <p class="form-hint failover-drafts-empty" x-show="!failoverGenerating && failoverGeneratedRules.length > 0 && filteredFailoverDrafts().length === 0">
+                    No failover drafts match the filter.
+                </p>
+                <p class="form-error" x-show="failoverError" x-text="failoverError" role="alert" aria-live="assertive"></p>
+
+                <div class="form-actions failover-draft-actions">
+                    <button type="button" class="pagination-btn" :disabled="failoverDraftSaving" @click="closeFailoverDraftsModal()">Cancel</button>
+                    <button type="button"
+                            class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                            :disabled="failoverGenerating || failoverDraftSaving || selectedFailoverDraftCount() === 0"
+                            @click="saveSelectedFailoverDrafts()">
+                        <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="failoverDraftSaving ? 'Saving...' : 'Save selected'"></span>
+                    </button>
+                </div>
+            </section>
+        </div>
         {{template "typed-confirmation-dialog" .}}
     </div>
     <script src="{{assetURL "vendor/lucide.min.js"}}"></script>
@@ -140,6 +316,7 @@
     <script src="{{assetURL "js/modules/audit-list.js"}}"></script>
     <script src="{{assetURL "js/modules/live-logs.js"}}"></script>
     <script src="{{assetURL "js/modules/virtual-models.js"}}"></script>
+    <script src="{{assetURL "js/modules/failover.js"}}"></script>
     <script src="{{assetURL "js/modules/model-pricing-overrides.js"}}"></script>
     <script src="{{assetURL "js/modules/workflows.js"}}"></script>
     <script src="{{assetURL "js/modules/auth-keys.js"}}"></script>

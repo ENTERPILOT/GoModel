@@ -1,13 +1,18 @@
 {{define "audit-pane"}}
-<section class="audit-pane" x-data="auditPaneState({{.}})" x-effect="syncPane({{.}})">
-    <div class="audit-pane-head">
-        <h4 x-text="pane.title"></h4>
-    </div>
-    <div class="audit-pane-block" x-show="pane.showErrorMessage">
+<section class="audit-pane" x-data="auditPaneState({{.}})" x-effect="syncPane({{.}})" :class="{ 'audit-pane-split': pane && pane.layout === 'split', 'audit-pane-split-single': pane && pane.layout === 'split' && !(pane.showHeaders && pane.showBody) }">
+    <div class="audit-pane-block audit-pane-block-error" x-show="pane.showErrorMessage">
         <h5>Error Message</h5>
-        <pre class="audit-json audit-pane-error-message" x-text="pane.errorMessage"></pre>
+        <pre class="audit-json audit-pane-error-message"
+             :class="{ 'audit-pane-clickable-preview': canShowConversation(pane.entry) }"
+             :role="canShowConversation(pane.entry) ? 'button' : null"
+             :tabindex="canShowConversation(pane.entry) ? '0' : null"
+             x-text="pane.errorMessage"
+             @mousedown="startBodyInteraction($event)"
+             @keydown.enter.prevent="handleErrorConversationClick($event, pane.entry)"
+             @keydown.space.prevent="handleErrorConversationClick($event, pane.entry)"
+             @click="handleErrorConversationClick($event, pane.entry)"></pre>
     </div>
-    <div class="audit-pane-block" x-show="pane.showHeaders">
+    <div class="audit-pane-block audit-pane-block-headers" x-show="pane.showHeaders">
         <div class="audit-pane-block-head">
             <h5>Headers</h5>
             <button type="button" class="copy-feedback-btn audit-copy-btn"
@@ -24,7 +29,7 @@
         </div>
         <pre class="audit-json" x-text="formattedHeaders"></pre>
     </div>
-    <div class="audit-pane-block" x-show="pane.showBody">
+    <div class="audit-pane-block audit-pane-block-body" x-show="pane.showBody">
         <div class="audit-pane-block-head">
             <div class="audit-pane-block-title">
                 <h5>Body</h5>

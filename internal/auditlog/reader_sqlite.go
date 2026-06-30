@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -162,6 +163,12 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating audit log rows: %w", err)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close audit log rows: %w", err)
+	}
+	if err := r.loadAttempts(ctx, entries); err != nil {
+		return nil, err
+	}
 
 	return &LogListResult{
 		Entries: entries,
@@ -171,27 +178,40 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 	}, nil
 }
 
-// GetLogByID returns a single audit log entry by ID.
-func (r *SQLiteReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
-	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
-		client_ip, method, path, user_path, stream, error_type, data
-		FROM audit_logs WHERE id = ? LIMIT 1`
-
-	rows, err := r.db.QueryContext(ctx, query, id)
+// queryLogEntryWithAttempts runs a single-row audit log query, scans the entry,
+// and hydrates its provider attempts. Returns (nil, nil) when no row matches.
+func (r *SQLiteReader) queryLogEntryWithAttempts(ctx context.Context, query, arg string) (*LogEntry, error) {
+	rows, err := r.db.QueryContext(ctx, query, arg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query audit log by id: %w", err)
+		return nil, fmt.Errorf("failed to query audit log: %w", err)
 	}
 	defer rows.Close()
-
 	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("failed to read audit log row: %w", err)
+		}
 		return nil, nil
 	}
-
 	entry, err := scanSQLiteLogEntry(rows)
 	if err != nil {
 		return nil, err
 	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close audit log row: %w", err)
+	}
+	hydrated := []LogEntry{*entry}
+	if err := r.loadAttempts(ctx, hydrated); err != nil {
+		return nil, err
+	}
+	*entry = hydrated[0]
 	return entry, nil
+}
+
+// GetLogByID returns a single audit log entry by ID.
+func (r *SQLiteReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
+	return r.queryLogEntryWithAttempts(ctx, `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+		client_ip, method, path, user_path, stream, error_type, data
+		FROM audit_logs WHERE id = ? LIMIT 1`, id)
 }
 
 // GetConversation returns a linear conversation thread around a seed log entry.
@@ -298,41 +318,120 @@ func parseSQLTimestamp(ts string, entryID string) time.Time {
 }
 
 func (r *SQLiteReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
-	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	return r.queryLogEntryWithAttempts(ctx, `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE json_extract(data, '$.response_body.id') = ?
 		ORDER BY timestamp ASC
-		LIMIT 1`
-
-	rows, err := r.db.QueryContext(ctx, query, responseID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query audit log by response id: %w", err)
-	}
-	defer rows.Close()
-	if !rows.Next() {
-		return nil, nil
-	}
-	return scanSQLiteLogEntry(rows)
+		LIMIT 1`, responseID)
 }
 
 func (r *SQLiteReader) findByPreviousResponseID(ctx context.Context, previousResponseID string) (*LogEntry, error) {
-	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	return r.queryLogEntryWithAttempts(ctx, `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE json_extract(data, '$.request_body.previous_response_id') = ?
 		ORDER BY timestamp ASC
-		LIMIT 1`
+		LIMIT 1`, previousResponseID)
+}
 
-	rows, err := r.db.QueryContext(ctx, query, previousResponseID)
+func (r *SQLiteReader) loadAttempts(ctx context.Context, entries []LogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	// Batch all entries into a single query keyed by audit_log_id to avoid an
+	// N+1 read (one query per returned log) when hydrating a page of entries.
+	ids := make([]any, len(entries))
+	index := make(map[string]int, len(entries))
+	for i := range entries {
+		ids[i] = entries[i].ID
+		index[entries[i].ID] = i
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT audit_log_id, seq, kind, provider_type, provider_name, model, status_code, success,
+			error_type, error_code, error_message, response_body, response_headers, started_at, duration_ns
+		FROM audit_log_attempts
+		WHERE audit_log_id IN (%s)
+		ORDER BY audit_log_id ASC, seq ASC
+	`, placeholders), ids...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query audit log by previous_response_id: %w", err)
+		if isMissingSQLiteAuditAttemptsTable(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to query audit log attempts: %w", err)
 	}
 	defer rows.Close()
-	if !rows.Next() {
-		return nil, nil
+
+	grouped := make(map[string][]AttemptSnapshot, len(entries))
+	for rows.Next() {
+		var auditLogID string
+		var attempt AttemptSnapshot
+		var providerType, providerName, model sql.NullString
+		var errorType, errorCode, errorMessage sql.NullString
+		var responseBody, responseHeaders sql.NullString
+		var startedAt sql.NullString
+		var successInt int
+		if err := rows.Scan(
+			&auditLogID,
+			&attempt.Seq,
+			&attempt.Kind,
+			&providerType,
+			&providerName,
+			&model,
+			&attempt.StatusCode,
+			&successInt,
+			&errorType,
+			&errorCode,
+			&errorMessage,
+			&responseBody,
+			&responseHeaders,
+			&startedAt,
+			&attempt.DurationNs,
+		); err != nil {
+			return fmt.Errorf("failed to scan audit log attempt: %w", err)
+		}
+		attempt.Success = successInt == 1
+		if responseBody.Valid {
+			attempt.ResponseBody = unmarshalAttemptBody(&responseBody.String)
+		}
+		if responseHeaders.Valid {
+			attempt.ResponseHeaders = unmarshalAttemptHeaders(&responseHeaders.String)
+		}
+		if providerType.Valid {
+			attempt.ProviderType = providerType.String
+		}
+		if providerName.Valid {
+			attempt.ProviderName = providerName.String
+		}
+		if model.Valid {
+			attempt.Model = model.String
+		}
+		if errorType.Valid {
+			attempt.ErrorType = errorType.String
+		}
+		if errorCode.Valid {
+			attempt.ErrorCode = errorCode.String
+		}
+		if errorMessage.Valid {
+			attempt.ErrorMessage = errorMessage.String
+		}
+		if startedAt.Valid {
+			attempt.StartedAt = parseSQLTimestamp(startedAt.String, auditLogID)
+		}
+		grouped[auditLogID] = append(grouped[auditLogID], attempt)
 	}
-	return scanSQLiteLogEntry(rows)
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating audit log attempts: %w", err)
+	}
+
+	for id, attempts := range grouped {
+		if i, ok := index[id]; ok && len(attempts) > 0 {
+			ensureLogData(&entries[i]).Attempts = normalizeAttemptSnapshots(attempts)
+		}
+	}
+	return nil
 }
 
 func scanSQLiteLogEntry(rows *sql.Rows) (*LogEntry, error) {
@@ -391,4 +490,8 @@ func scanSQLiteLogEntry(rows *sql.Rows) (*LogEntry, error) {
 	}
 
 	return &e, nil
+}
+
+func isMissingSQLiteAuditAttemptsTable(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table: audit_log_attempts")
 }

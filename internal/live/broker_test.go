@@ -650,6 +650,46 @@ func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
 	}
 }
 
+func TestBrokerAuditPreviewIncludesCompactAttempts(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: time.Now(),
+		Data: &auditlog.LogData{
+			Attempts: []auditlog.AttemptSnapshot{
+				{Seq: 1, Kind: auditlog.AttemptKindPrimary, StatusCode: 404, ErrorMessage: "model not available",
+					ResponseBody:    map[string]any{"error": "nope"},
+					ResponseHeaders: map[string]string{"Retry-After": "30"}},
+				{Seq: 2, Kind: auditlog.AttemptKindFailover, StatusCode: 200, Success: true},
+			},
+		},
+	})
+
+	payload := eventPayload(t, b.events[0])
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("preview data = %T, want object", payload["data"])
+	}
+	attempts, ok := data["attempts"].([]any)
+	if !ok || len(attempts) != 2 {
+		t.Fatalf("attempts = %#v, want 2 compact attempts in the live preview", data["attempts"])
+	}
+	primary, ok := attempts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("attempt[0] = %T, want object", attempts[0])
+	}
+	if primary["kind"] != auditlog.AttemptKindPrimary || primary["status_code"].(float64) != 404 {
+		t.Fatalf("attempt[0] = %#v, want failed primary metadata", primary)
+	}
+	if _, present := primary["response_body"]; present {
+		t.Fatalf("live preview attempt should omit response_body, got %#v", primary)
+	}
+	if _, present := primary["response_headers"]; present {
+		t.Fatalf("live preview attempt should omit response_headers, got %#v", primary)
+	}
+}
+
 func TestAuditPreviewRemainsPendingUntilFlush(t *testing.T) {
 	entry := &auditlog.LogEntry{
 		ID:        "audit-1",

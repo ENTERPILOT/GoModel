@@ -243,6 +243,7 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 			RequestHeaders:  copyMap(baseEntry.Data.RequestHeaders),
 			ResponseHeaders: copyMap(baseEntry.Data.ResponseHeaders),
 			RequestBody:     baseEntry.Data.RequestBody,
+			Attempts:        normalizeAttemptSnapshots(baseEntry.Data.Attempts),
 		}
 		if baseEntry.Data.WorkflowFeatures != nil {
 			snapshot := *baseEntry.Data.WorkflowFeatures

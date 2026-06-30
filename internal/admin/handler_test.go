@@ -2163,7 +2163,7 @@ func timePtr(t time.Time) *time.Time { return &t }
 
 func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
-		FeatureFallbackMode:  "auto",
+		FailoverEnabled:      "on",
 		LoggingEnabled:       "on",
 		UsageEnabled:         "off",
 		BudgetsEnabled:       "on",
@@ -2187,8 +2187,8 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
-	if got := body.FeatureFallbackMode; got != "auto" {
-		t.Fatalf("FEATURE_FALLBACK_MODE = %q, want auto", got)
+	if got := body.FailoverEnabled; got != "on" {
+		t.Fatalf("FAILOVER_ENABLED = %q, want on", got)
 	}
 	if got := body.LoggingEnabled; got != "on" {
 		t.Fatalf("LOGGING_ENABLED = %q, want on", got)

@@ -517,6 +517,11 @@ type auditPreviewData struct {
 	ResponseBody               any                                `json:"response_body,omitempty"`
 	RequestBodyTooBigToHandle  bool                               `json:"request_body_too_big_to_handle,omitempty"`
 	ResponseBodyTooBigToHandle bool                               `json:"response_body_too_big_to_handle,omitempty"`
+	// Attempts carries the provider attempt summaries so the live audit row can
+	// surface the failover/retry indicator without waiting for the persisted
+	// entry. Per-attempt response bodies/headers are omitted to keep the live
+	// stream compact; they hydrate when the entry detail is fetched.
+	Attempts []auditlog.AttemptSnapshot `json:"attempts,omitempty"`
 }
 
 func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPreview {
@@ -555,6 +560,7 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 		data := auditPreviewData{
 			WorkflowFeatures: entry.Data.WorkflowFeatures,
 			Failover:         entry.Data.Failover,
+			Attempts:         compactAttemptsForPreview(entry.Data.Attempts),
 		}
 		if auditPreviewIncludesLiveRequestMetadata(eventType) {
 			data.UserAgent = entry.Data.UserAgent
@@ -612,7 +618,24 @@ func (d auditPreviewData) hasValues() bool {
 		d.RequestBody != nil ||
 		d.ResponseBody != nil ||
 		d.RequestBodyTooBigToHandle ||
-		d.ResponseBodyTooBigToHandle
+		d.ResponseBodyTooBigToHandle ||
+		len(d.Attempts) > 0
+}
+
+// compactAttemptsForPreview copies the attempt summaries for a live preview
+// while dropping the per-attempt response body/headers, which are heavy and
+// hydrate later from the persisted entry detail.
+func compactAttemptsForPreview(attempts []auditlog.AttemptSnapshot) []auditlog.AttemptSnapshot {
+	if len(attempts) == 0 {
+		return nil
+	}
+	compact := make([]auditlog.AttemptSnapshot, len(attempts))
+	for i, attempt := range attempts {
+		attempt.ResponseBody = nil
+		attempt.ResponseHeaders = nil
+		compact[i] = attempt
+	}
+	return compact
 }
 
 func auditEventTerminal(eventType string) bool {

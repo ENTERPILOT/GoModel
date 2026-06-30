@@ -65,6 +65,12 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"PUT /admin/virtual-models",
 		"DELETE /admin/virtual-models",
 
+		"GET /admin/failover",
+		"PUT /admin/failover",
+		"DELETE /admin/failover",
+		"POST /admin/failover/reset",
+		"POST /admin/failover/generate",
+
 		"GET /admin/model-pricing-overrides",
 		"PUT /admin/model-pricing-overrides",
 		"DELETE /admin/model-pricing-overrides",

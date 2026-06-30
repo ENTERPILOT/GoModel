@@ -178,6 +178,9 @@ func resetPostgreSQLStorage(t *testing.T) {
 	defer cancel()
 
 	tables := []string{
+		// audit_log_attempts has a FK to audit_logs, so it is listed first; the
+		// CASCADE below also covers any future dependents.
+		"audit_log_attempts",
 		"audit_logs",
 		"usage",
 		"budgets",
@@ -190,7 +193,7 @@ func resetPostgreSQLStorage(t *testing.T) {
 		"batches",
 	}
 	for _, table := range tables {
-		_, err := pool.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", table))
+		_, err := pool.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", table))
 		require.NoError(t, err, "failed to reset table %s", table)
 	}
 }

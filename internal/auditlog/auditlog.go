@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 )
@@ -36,6 +37,12 @@ const (
 )
 
 const (
+	AttemptKindPrimary  = "primary"
+	AttemptKindFailover = "failover"
+	AttemptKindRetry    = "retry"
+)
+
+const (
 	LiveEventAuditStarted   = "audit.started"
 	LiveEventAuditUpdated   = "audit.updated"
 	LiveEventAuditCompleted = "audit.completed"
@@ -43,6 +50,8 @@ const (
 	LiveEventAuditFlushed   = "audit.flushed"
 	LiveEventAuditRemoved   = "audit.removed"
 )
+
+const maxAttemptErrorMessageLength = 2048
 
 // LiveEventPublisher receives compact audit lifecycle snapshots for realtime
 // dashboard preview. Implementations must not block request handling.
@@ -110,6 +119,10 @@ type LogData struct {
 	// moved from the primary selector to a configured failover target.
 	Failover *FailoverSnapshot `json:"failover,omitempty" bson:"failover,omitempty"`
 
+	// Attempts captures provider calls made for this logical request. SQL
+	// stores split this into audit_log_attempts; Mongo stores it embedded.
+	Attempts []AttemptSnapshot `json:"attempts,omitempty" bson:"attempts,omitempty"`
+
 	// Request parameters
 	Temperature *float64 `json:"temperature,omitempty" bson:"temperature,omitempty"`
 	MaxTokens   *int     `json:"max_tokens,omitempty" bson:"max_tokens,omitempty"`
@@ -153,6 +166,30 @@ type FailoverSnapshot struct {
 	TargetModel string `json:"target_model,omitempty" bson:"target_model,omitempty"`
 }
 
+// AttemptSnapshot stores one external provider attempt made for a logical
+// request. It intentionally stores structured errors, not raw upstream bodies.
+type AttemptSnapshot struct {
+	Seq          int       `json:"seq" bson:"seq"`
+	Kind         string    `json:"kind" bson:"kind"`
+	ProviderType string    `json:"provider_type,omitempty" bson:"provider_type,omitempty"`
+	ProviderName string    `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
+	Model        string    `json:"model,omitempty" bson:"model,omitempty"`
+	StatusCode   int       `json:"status_code,omitempty" bson:"status_code,omitempty"`
+	Success      bool      `json:"success" bson:"success"`
+	ErrorType    string    `json:"error_type,omitempty" bson:"error_type,omitempty"`
+	ErrorCode    string    `json:"error_code,omitempty" bson:"error_code,omitempty"`
+	ErrorMessage string    `json:"error_message,omitempty" bson:"error_message,omitempty"`
+	StartedAt    time.Time `json:"started_at,omitempty" bson:"started_at,omitempty"`
+	DurationNs   int64     `json:"duration_ns,omitempty" bson:"duration_ns,omitempty"`
+
+	// ResponseBody and ResponseHeaders capture the raw upstream error response
+	// of a failed attempt. ResponseBody is the parsed JSON (or a string when the
+	// body is not JSON); ResponseHeaders is redacted. Both are populated only
+	// when audit body/header logging is enabled.
+	ResponseBody    any               `json:"response_body,omitempty" bson:"response_body,omitempty"`
+	ResponseHeaders map[string]string `json:"response_headers,omitempty" bson:"response_headers,omitempty"`
+}
+
 // marshalLogData marshals the Data field to JSON for SQL storage.
 // Returns nil if data is nil, or "{}" if marshaling fails.
 // This is used by PostgreSQL and SQLite stores.
@@ -160,12 +197,80 @@ func marshalLogData(data *LogData, entryID string) []byte {
 	if data == nil {
 		return nil
 	}
+	data = data.withoutAttempts()
 	dataJSON, err := json.Marshal(data)
 	if err != nil {
 		slog.Warn("failed to marshal log data", "error", err, "id", entryID)
 		return []byte("{}")
 	}
 	return dataJSON
+}
+
+func (d *LogData) withoutAttempts() *LogData {
+	if d == nil || len(d.Attempts) == 0 {
+		return d
+	}
+	clean := *d
+	clean.Attempts = nil
+	return &clean
+}
+
+func auditAttempts(entry *LogEntry) []AttemptSnapshot {
+	if entry == nil || entry.Data == nil || len(entry.Data.Attempts) == 0 {
+		return nil
+	}
+	return normalizeAttemptSnapshots(entry.Data.Attempts)
+}
+
+func normalizeAttemptSnapshots(attempts []AttemptSnapshot) []AttemptSnapshot {
+	if len(attempts) == 0 {
+		return nil
+	}
+	normalized := make([]AttemptSnapshot, 0, len(attempts))
+	for _, attempt := range attempts {
+		attempt.Kind = normalizeAttemptKind(attempt.Kind)
+		if attempt.Kind == "" {
+			continue
+		}
+		if attempt.Seq <= 0 {
+			attempt.Seq = len(normalized) + 1
+		}
+		attempt.ProviderType = strings.TrimSpace(attempt.ProviderType)
+		attempt.ProviderName = strings.TrimSpace(attempt.ProviderName)
+		attempt.Model = strings.TrimSpace(attempt.Model)
+		attempt.ErrorType = strings.TrimSpace(attempt.ErrorType)
+		attempt.ErrorCode = strings.TrimSpace(attempt.ErrorCode)
+		attempt.ErrorMessage = truncateAttemptErrorMessage(strings.TrimSpace(attempt.ErrorMessage))
+		normalized = append(normalized, attempt)
+	}
+	return normalized
+}
+
+func normalizeAttemptKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case AttemptKindPrimary:
+		return AttemptKindPrimary
+	case AttemptKindFailover:
+		return AttemptKindFailover
+	case AttemptKindRetry:
+		return AttemptKindRetry
+	default:
+		return ""
+	}
+}
+
+func truncateAttemptErrorMessage(message string) string {
+	if len(message) <= maxAttemptErrorMessageLength {
+		return message
+	}
+	// Back the cut off the byte limit to the nearest rune boundary so a
+	// multi-byte rune (common in non-ASCII provider errors) is never split into
+	// invalid UTF-8, which would be mangled when JSON-marshaled for storage.
+	cut := maxAttemptErrorMessageLength
+	for cut > 0 && !utf8.RuneStart(message[cut]) {
+		cut--
+	}
+	return message[:cut]
 }
 
 func normalizeCacheType(value string) string {

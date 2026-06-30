@@ -921,14 +921,14 @@ test("audit entry metadata is rendered as a labeled pill row at the bottom of th
   const detailsStart = indexTemplate.indexOf(
     '<div class="audit-entry-details">',
   );
-  const detailsEnd = indexTemplate.indexOf("</template>", detailsStart);
+  const detailsEnd = indexTemplate.indexOf("</details>", detailsStart);
 
   assert.notEqual(detailsStart, -1, "Expected audit entry details block");
-  assert.notEqual(detailsEnd, -1, "Expected lazy audit entry details wrapper");
+  assert.notEqual(detailsEnd, -1, "Expected expanded audit entry wrapper");
 
   const auditEntry = indexTemplate.slice(detailsStart, detailsEnd);
   const requestResponseIndex = auditEntry.indexOf(
-    '<div class="audit-request-response">',
+    '<div class="audit-request-response"',
   );
   const metadataIndex = auditEntry.indexOf(
     '<div class="audit-entry-metadata">',
@@ -937,6 +937,39 @@ test("audit entry metadata is rendered as a labeled pill row at the bottom of th
   assert.notEqual(requestResponseIndex, -1);
   assert.notEqual(metadataIndex, -1);
   assert.ok(requestResponseIndex < metadataIndex);
+
+  // Request/Response are presented as tabs, defaulting to the last valid
+  // response, with the request/response panes resolved by auditPanes(entry).
+  assert.match(
+    auditEntry,
+    /<div class="audit-pane-tablist" role="tablist"/,
+  );
+  assert.match(
+    auditEntry,
+    /:class="\{ 'audit-pane-tab-active': auditEffectiveTab\(active, entry\) === p\.id \}"/,
+  );
+  assert.match(
+    auditEntry,
+    /<div class="audit-pane-tabpanel" x-show="auditEffectiveTab\(active, entry\) === p\.id"/,
+  );
+  // Tabs expose the full ARIA contract: id/aria-controls pairing, roving
+  // tabindex, and keyboard navigation; panels point back via aria-labelledby.
+  assert.match(
+    auditEntry,
+    /:aria-controls="'audit-tabpanel-' \+ entry\.id \+ '-' \+ p\.id"/,
+  );
+  assert.match(
+    auditEntry,
+    /:tabindex="auditEffectiveTab\(active, entry\) === p\.id \? '0' : '-1'"/,
+  );
+  assert.match(
+    auditEntry,
+    /@keydown="active = \(auditTabKeydown\(\$event, entry, p\.id\) \?\? active\)"/,
+  );
+  assert.match(
+    auditEntry,
+    /:aria-labelledby="'audit-tab-' \+ entry\.id \+ '-' \+ p\.id"/,
+  );
   assert.match(
     auditEntry,
     /<span class="audit-entry-metadata-label">Metadata:<\/span>/,
@@ -962,12 +995,21 @@ test("audit entry metadata is rendered as a labeled pill row at the bottom of th
     /<span class="provider-badge mono" x-show="workflowFailoverTarget\(entry\)" x-text="'failover: ' \+ workflowFailoverTarget\(entry\)"><\/span>/,
   );
 
-  const requestResponseRule = readCSSRule(css, ".audit-request-response");
-  assert.match(
-    requestResponseRule,
-    /grid-template-columns:\s*minmax\(0,\s*1fr\) minmax\(0,\s*1fr\)/,
-  );
-  assert.match(requestResponseRule, /overflow-x:\s*auto/);
+  const tablistRule = readCSSRule(css, ".audit-pane-tablist");
+  assert.match(tablistRule, /display:\s*flex/);
+  assert.match(tablistRule, /border-bottom:\s*1px solid var\(--border\)/);
+
+  const tabRule = readCSSRule(css, ".audit-pane-tab");
+  assert.match(tabRule, /border-radius:\s*6px 6px 0 0/);
+
+  const tabActiveRule = readCSSRule(css, ".audit-pane-tab-active");
+  assert.match(tabActiveRule, /border-color:\s*var\(--border\)/);
+
+  const splitRule = readCSSRule(css, ".audit-pane-split");
+  assert.match(splitRule, /grid-template-columns:\s*1fr 2fr/);
+
+  const splitSingleRule = readCSSRule(css, ".audit-pane-split-single");
+  assert.match(splitSingleRule, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
 
   const paneRule = readCSSRule(css, ".audit-pane");
   assert.match(paneRule, /min-width:\s*0/);
@@ -1004,19 +1046,20 @@ test("audit entry details show prompt caching inside the request body pane", () 
   const detailsStart = indexTemplate.indexOf(
     '<div class="audit-entry-details">',
   );
-  const detailsEnd = indexTemplate.indexOf("</template>", detailsStart);
+  const detailsEnd = indexTemplate.indexOf("</details>", detailsStart);
 
   assert.notEqual(detailsStart, -1, "Expected audit entry details block");
-  assert.notEqual(detailsEnd, -1, "Expected lazy audit entry details wrapper");
+  assert.notEqual(detailsEnd, -1, "Expected expanded audit entry wrapper");
 
   const auditEntry = indexTemplate.slice(detailsStart, detailsEnd);
   const requestResponseIndex = auditEntry.indexOf(
-    '<div class="audit-request-response">',
+    '<div class="audit-request-response"',
   );
   const metadataIndex = auditEntry.indexOf(
     '<div class="audit-entry-metadata">',
   );
 
+  assert.notEqual(requestResponseIndex, -1);
   assert.ok(requestResponseIndex < metadataIndex);
   assert.doesNotMatch(auditEntry, /audit-cache-panel/);
   assert.match(
@@ -1325,6 +1368,56 @@ test("settings controls describe their inline helper copy", () => {
   );
 });
 
+test("settings failover actions generate before remove and use destructive remove copy", () => {
+  const indexTemplate = readDashboardTemplateSource();
+
+  assert.match(
+    indexTemplate,
+    /<h3>Failover<\/h3>[\s\S]*@click="generateFailoverRules\(\)"[\s\S]*Generate failover models automatically[\s\S]*pagination-btn-danger-outline[\s\S]*@click="openFailoverResetDialog\(\)"[\s\S]*Remove all the failover models/,
+  );
+  assert.doesNotMatch(indexTemplate, /Reset all the failover models/);
+  assert.match(
+    indexTemplate,
+    /class="alert alert-success settings-refresh-alert"[\s\S]*x-show="failoverNotice && !failoverError"[\s\S]*x-text="failoverNotice"/,
+  );
+  assert.match(
+    indexTemplate,
+    /class="alert alert-warning settings-refresh-alert"[\s\S]*x-show="failoverError"[\s\S]*x-text="failoverError"/,
+  );
+});
+
+test("failover drafts modal exposes filtering selection summary and bulk toggle", () => {
+  const shellTemplate = readDashboardShellTemplate();
+  const css = readFixture("../../css/dashboard.css");
+
+  assert.match(
+    shellTemplate,
+    /class="failover-draft-counter"[\s\S]*x-text="failoverDraftCountLabel\(\)"/,
+  );
+  assert.match(
+    shellTemplate,
+    /class="alert alert-success failover-draft-alert"[\s\S]*x-show="!failoverGenerating && failoverNotice && !failoverError"[\s\S]*x-text="failoverNotice"/,
+  );
+  assert.match(
+    shellTemplate,
+    /placeholder="Filter failover drafts\.\.\."[\s\S]*x-model="failoverDraftFilter"/,
+  );
+  assert.match(
+    shellTemplate,
+    /@click="toggleAllFailoverDrafts\(\)"[\s\S]*x-text="allFailoverDraftsSelected\(\) \? 'Deselect all' : 'Select all'"/,
+  );
+  assert.match(shellTemplate, /x-for="rule in filteredFailoverDrafts\(\)"/);
+
+  const toolbarRule = readCSSRule(css, ".failover-draft-toolbar");
+  assert.match(toolbarRule, /flex-wrap:\s*wrap/);
+
+  const listRule = readCSSRule(css, ".failover-draft-list");
+  assert.match(listRule, /overflow-y:\s*auto/);
+
+  const alertRule = readCSSRule(css, ".failover-draft-alert");
+  assert.match(alertRule, /margin:\s*0/);
+});
+
 test("usage and audit pages reuse a shared pagination template", () => {
   const indexTemplate = readDashboardTemplateSource();
   const paginationTemplate = readFixture("../../../templates/pagination.html");
@@ -1384,8 +1477,10 @@ test("audit request and response sections reuse a shared audit pane template", (
 
   assert.match(
     auditPaneTemplate,
-    /{{define "audit-pane"}}[\s\S]*x-data="auditPaneState\({{\.\}}\)"[\s\S]*x-effect="syncPane\({{\.\}}\)"[\s\S]*x-text="pane\.title"[\s\S]*x-show="pane\.showHeaders"[\s\S]*@click\.prevent="copyHeaders\(\)"[\s\S]*x-text="formattedHeaders"[\s\S]*x-show="pane\.showBody"[\s\S]*@click\.prevent="copyBody\(\)"[\s\S]*x-html="renderedBody"[\s\S]*x-text="pane\.emptyMessage"[\s\S]*x-text="pane\.tooLargeMessage"[\s\S]*{{end}}/,
+    /{{define "audit-pane"}}[\s\S]*x-data="auditPaneState\({{\.\}}\)"[\s\S]*x-effect="syncPane\({{\.\}}\)"[\s\S]*x-show="pane\.showHeaders"[\s\S]*@click\.prevent="copyHeaders\(\)"[\s\S]*x-text="formattedHeaders"[\s\S]*x-show="pane\.showBody"[\s\S]*@click\.prevent="copyBody\(\)"[\s\S]*x-html="renderedBody"[\s\S]*x-text="pane\.emptyMessage"[\s\S]*x-text="pane\.tooLargeMessage"[\s\S]*{{end}}/,
   );
+  // The shared pane is headless — its title/type/status live on the tab strip.
+  assert.doesNotMatch(auditPaneTemplate, /audit-pane-head/);
   assert.match(
     auditPaneTemplate,
     /aria-live="polite" aria-atomic="true" x-text="copyHeadersState\.error \? 'Copy failed' : \(copyHeadersState\.copied \? 'Copied' : 'Copy Headers'\)"/,
@@ -1396,15 +1491,11 @@ test("audit request and response sections reuse a shared audit pane template", (
   );
   assert.match(
     auditPaneTemplate,
-    /<pre class="audit-json audit-pane-error-message" x-text="pane\.errorMessage"><\/pre>/,
+    /<pre class="audit-json audit-pane-error-message"[\s\S]*x-text="pane\.errorMessage"[\s\S]*@click="handleErrorConversationClick\(\$event, pane\.entry\)"><\/pre>/,
   );
   assert.match(
     indexTemplate,
-    /{{template "audit-pane" "auditRequestPane\(entry\)"}}/,
-  );
-  assert.match(
-    indexTemplate,
-    /{{template "audit-pane" "auditResponsePane\(entry\)"}}/,
+    /{{template "audit-pane" "p\.pane"}}/,
   );
   assert.doesNotMatch(indexTemplate, /audit-error-summary/);
   assert.doesNotMatch(

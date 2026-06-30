@@ -80,6 +80,7 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 		ctx = context.Background()
 	}
 	ctx = core.WithRequestOrigin(ctx, core.RequestOriginGuardrail)
+	ctx = gateway.WithAttemptRecorder(ctx)
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	requested := core.NewRequestedModelSelector(req.Model, req.Provider)
@@ -234,6 +235,7 @@ func (e *InternalChatCompletionExecutor) finishAuditEntry(
 	entry.DurationNs = time.Since(start).Nanoseconds()
 	auditlog.EnrichLogEntryWithWorkflow(entry, workflow)
 	auditlog.EnrichLogEntryWithFailover(entry, failoverModel)
+	auditlog.EnrichLogEntryWithAttempts(entry, auditlog.GateAttemptCapture(auditAttemptsFromGateway(ctx), e.logger.Config()))
 	auditlog.EnrichLogEntryWithResolvedRoute(entry, qualifyExecutedModel(workflow, chatResponseModel(resp), providerName), providerType, providerName)
 	auditlog.EnrichLogEntryWithRequestContext(entry, ctx)
 	if workflow != nil && !workflow.AuditEnabled() {

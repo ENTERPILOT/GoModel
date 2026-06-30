@@ -84,6 +84,7 @@ func (s *translatedInferenceService) handleChatCompletion(c *echo.Context) error
 }
 
 func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req *core.ChatRequest, workflow *core.Workflow) error {
+	s.observeLiveProviderAttempts(c, workflow)
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
@@ -120,6 +121,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	if err != nil {
 		return handleError(c, err)
 	}
+	enrichAuditEntryWithProviderAttempts(c)
 	if result.Meta.UsedFallback {
 		markRequestFallbackUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
@@ -246,6 +248,7 @@ func handleWithCache[R any](
 }
 
 func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *core.ResponsesRequest, workflow *core.Workflow) error {
+	s.observeLiveProviderAttempts(c, workflow)
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
@@ -281,6 +284,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	if err != nil {
 		return handleError(c, err)
 	}
+	enrichAuditEntryWithProviderAttempts(c)
 	if result.Meta.UsedFallback {
 		markRequestFallbackUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
@@ -468,6 +472,21 @@ func attachPreparedWorkflow(c *echo.Context, ctx context.Context, workflow *core
 	storeWorkflow(c, workflow)
 }
 
+// observeLiveProviderAttempts surfaces provider attempts in the live audit
+// preview as they are recorded (e.g. a failed primary while failover is still
+// in flight), instead of only once the request finishes. It installs the
+// observer only when failover targets exist, so non-failover requests — the hot
+// path — take on no extra per-request work.
+func (s *translatedInferenceService) observeLiveProviderAttempts(c *echo.Context, workflow *core.Workflow) {
+	if len(s.inference().FallbackSelectors(workflow)) == 0 {
+		return
+	}
+	req := c.Request()
+	c.SetRequest(req.WithContext(gateway.WithAttemptObserver(req.Context(), func() {
+		enrichAuditEntryWithProviderAttempts(c)
+	})))
+}
+
 func cacheWorkflowResolutionHints(c *echo.Context, workflow *core.Workflow) {
 	if c == nil || workflow == nil || workflow.Resolution == nil {
 		return
@@ -493,6 +512,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 ) error {
 	auditlog.MarkEntryAsStreaming(c, true)
 	auditlog.EnrichEntryWithStream(c, true)
+	enrichAuditEntryWithProviderAttempts(c)
 	auditlog.EnrichEntryWithFailover(c, failoverModel)
 	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, model, providerName), provider, providerName)
 

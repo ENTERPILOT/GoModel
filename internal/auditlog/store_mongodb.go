@@ -141,6 +141,9 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*LogEntry) erro
 	// Convert entries to BSON documents
 	docs := make([]any, len(entries))
 	for i, e := range entries {
+		if e != nil && e.Data != nil {
+			e.Data.Attempts = normalizeAttemptSnapshots(e.Data.Attempts)
+		}
 		docs[i] = e
 	}
 

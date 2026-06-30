@@ -68,6 +68,14 @@
                             <span class="audit-path mono" x-text="entry.path || '-'"></span>
                             </div>
                             <div class="audit-entry-right">
+                                <span class="audit-attempt-track" x-show="auditHasAttemptTrack(entry)" role="img" :title="auditAttemptTrackTitle(entry)" :aria-label="auditAttemptTrackTitle(entry)">
+                                    <span class="audit-attempt-track-pips">
+                                        <template x-for="seg in auditAttemptTrack(entry)" :key="entry.id + '-pip-' + seg.seq">
+                                            <span class="audit-attempt-pip" :class="auditAttemptClass(seg)" :title="auditAttemptSegmentTitle(seg)"></span>
+                                        </template>
+                                    </span>
+                                    <span class="audit-attempt-track-count mono" x-text="auditAttemptTrackCount(entry)"></span>
+                                </span>
                                 <span class="mono font-size-md" x-text="formatTimestamp(entry.timestamp)" :title="timestampTitle(entry.timestamp)"></span>
                                 <span class="mono font-size-md" x-text="formatDurationNs(entry.duration_ns)"></span>
                                 <button type="button" class="audit-conversation-trigger"
@@ -86,9 +94,42 @@
                             <!-- Workflow Pipeline (workflow + runtime view) -->
                             {{template "workflow-chart" "workflowAuditChart(entry)"}}
 
-                            <div class="audit-request-response">
-                                {{template "audit-pane" "auditRequestPane(entry)"}}
-                                {{template "audit-pane" "auditResponsePane(entry)"}}
+                            <div class="audit-request-response" x-data="{ active: null }">
+                                <div class="audit-pane-tablist" role="tablist" aria-label="Request and response">
+                                    <template x-for="p in auditPanes(entry)" :key="p.id">
+                                        <button type="button" class="audit-pane-tab"
+                                            :class="{ 'audit-pane-tab-active': auditEffectiveTab(active, entry) === p.id }"
+                                            role="tab" :aria-selected="(auditEffectiveTab(active, entry) === p.id).toString()"
+                                            :id="'audit-tab-' + entry.id + '-' + p.id"
+                                            :aria-controls="'audit-tabpanel-' + entry.id + '-' + p.id"
+                                            :tabindex="auditEffectiveTab(active, entry) === p.id ? '0' : '-1'"
+                                            @keydown="active = (auditTabKeydown($event, entry, p.id) ?? active)"
+                                            @click="active = p.id">
+                                            <span class="audit-pane-icon" :class="'audit-pane-icon-' + (p.pane.direction || '')" aria-hidden="true">
+                                                <template x-if="p.pane.direction === 'request'">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" x2="19" y1="12" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                                                </template>
+                                                <template x-if="p.pane.direction === 'response'">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" x2="5" y1="12" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                                                </template>
+                                            </span>
+                                            <span class="audit-pane-tab-label" x-text="p.pane.title"></span>
+                                            <span class="audit-pane-seq mono" x-show="p.pane.seq" x-text="'#' + p.pane.seq"></span>
+                                            <span class="provider-badge audit-pane-kind" :class="'audit-pane-kind-' + (p.pane.kind || '')" x-show="p.pane.kind" x-text="p.pane.kind"></span>
+                                            <span class="audit-status-badge" :class="statusCodeClass(p.pane.statusCode)" x-show="p.pane.statusCode" x-text="p.pane.statusCode"></span>
+                                        </button>
+                                    </template>
+                                </div>
+                                <template x-for="p in auditPanes(entry)" :key="p.id">
+                                    <div class="audit-pane-tabpanel" x-show="auditEffectiveTab(active, entry) === p.id" role="tabpanel"
+                                        :id="'audit-tabpanel-' + entry.id + '-' + p.id"
+                                        :aria-labelledby="'audit-tab-' + entry.id + '-' + p.id"
+                                        x-transition:enter="audit-tabpanel-enter"
+                                        x-transition:enter-start="audit-tabpanel-enter-start"
+                                        x-transition:enter-end="audit-tabpanel-enter-end">
+                                        {{template "audit-pane" "p.pane"}}
+                                    </div>
+                                </template>
                             </div>
 
                             <div class="audit-entry-metadata">

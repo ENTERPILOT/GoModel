@@ -258,13 +258,10 @@ func runtimeRefreshStepByName(steps []admin.RuntimeRefreshStep, name string) *ad
 	return nil
 }
 
-func TestRuntimeWorkflowFeatureCaps_EnableFallbackFromOverride(t *testing.T) {
+func TestRuntimeWorkflowFeatureCaps_EnableFallbackFromExplicitFlag(t *testing.T) {
 	cfg := &config.Config{
 		Fallback: config.FallbackConfig{
-			DefaultMode: config.FallbackModeOff,
-			Overrides: map[string]config.FallbackModelOverride{
-				"gpt-4o": {Mode: config.FallbackModeManual},
-			},
+			Enabled: true,
 		},
 	}
 
@@ -277,7 +274,7 @@ func TestRuntimeWorkflowFeatureCaps_EnableFallbackFromOverride(t *testing.T) {
 func TestDefaultWorkflowInput_SetsFallbackFeature(t *testing.T) {
 	cfg := &config.Config{
 		Fallback: config.FallbackConfig{
-			DefaultMode: config.FallbackModeAuto,
+			Enabled: true,
 		},
 	}
 
@@ -434,45 +431,43 @@ func TestConfigGuardrailDefinitions_RejectsBlankNameOrType(t *testing.T) {
 	}
 }
 
-func TestDashboardRuntimeConfig_ExposesFallbackMode(t *testing.T) {
+func TestDashboardRuntimeConfig_ExposesFailoverEnabled(t *testing.T) {
 	cfg := &config.Config{
 		Fallback: config.FallbackConfig{
+			Enabled: true,
+		},
+	}
+
+	values := dashboardRuntimeConfig(cfg, false)
+	if got := values.FailoverEnabled; got != "on" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigFailoverEnabled, got)
+	}
+}
+
+func TestDashboardRuntimeConfig_FailoverDisabled(t *testing.T) {
+	cfg := &config.Config{
+		Fallback: config.FallbackConfig{
+			Enabled: false,
+		},
+	}
+
+	values := dashboardRuntimeConfig(cfg, false)
+	if got := values.FailoverEnabled; got != "off" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigFailoverEnabled, got)
+	}
+}
+
+func TestDashboardRuntimeConfig_DefaultModeDoesNotEnableFailover(t *testing.T) {
+	cfg := &config.Config{
+		Fallback: config.FallbackConfig{
+			Enabled:     false,
 			DefaultMode: config.FallbackModeManual,
 		},
 	}
 
 	values := dashboardRuntimeConfig(cfg, false)
-	if got := values.FeatureFallbackMode; got != string(config.FallbackModeManual) {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigFeatureFallbackMode, got, config.FallbackModeManual)
-	}
-}
-
-func TestDashboardRuntimeConfig_InvalidFallbackModeDefaultsOff(t *testing.T) {
-	cfg := &config.Config{
-		Fallback: config.FallbackConfig{
-			DefaultMode: config.FallbackMode("experimental"),
-		},
-	}
-
-	values := dashboardRuntimeConfig(cfg, false)
-	if got := values.FeatureFallbackMode; got != string(config.FallbackModeOff) {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigFeatureFallbackMode, got, config.FallbackModeOff)
-	}
-}
-
-func TestDashboardRuntimeConfig_FallbackOverrideEnablesVisibilityWhenDefaultModeIsOff(t *testing.T) {
-	cfg := &config.Config{
-		Fallback: config.FallbackConfig{
-			DefaultMode: config.FallbackModeOff,
-			Overrides: map[string]config.FallbackModelOverride{
-				"gpt-4o": {Mode: config.FallbackModeManual},
-			},
-		},
-	}
-
-	values := dashboardRuntimeConfig(cfg, false)
-	if got := values.FeatureFallbackMode; got != string(config.FallbackModeManual) {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigFeatureFallbackMode, got, config.FallbackModeManual)
+	if got := values.FailoverEnabled; got != "off" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigFailoverEnabled, got)
 	}
 }
 

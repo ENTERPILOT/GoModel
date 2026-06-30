@@ -98,6 +98,14 @@
                                 {{template "dollar-icon"}}
                             </button>
                             <button type="button" class="table-action-btn table-icon-btn"
+                                x-show="failoverAvailable && failoverEnabled()"
+                                :class="failoverButtonClass(row)"
+                                :aria-label="failoverButtonLabel(row)"
+                                :title="failoverButtonLabel(row)"
+                                @click="openFailoverForModel(row)">
+                                {{template "failover-icon"}}
+                            </button>
+                            <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="virtualModelsAvailable && row.masking_alias && row.masking_alias.name"
                                 :aria-label="'Edit redirect for ' + row.display_name"
                                 :title="'Edit redirect for ' + row.display_name"

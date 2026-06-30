@@ -1937,6 +1937,17 @@ td.col-price {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface-hover));
 }
 
+.table-action-btn-failover-active {
+  position: relative;
+  color: var(--info);
+  background: color-mix(in srgb, var(--cache-meter-prompt) 35%, var(--bg));
+  border-color: color-mix(in srgb, var(--info) 45%, var(--border));
+}
+
+.table-action-btn-failover-active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--cache-meter-prompt) 45%, var(--bg-surface-hover));
+}
+
 .table-icon-btn {
   width: 32px;
   min-width: 32px;
@@ -1959,6 +1970,18 @@ td.col-price {
   height: 6px;
   border-radius: 999px;
   background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-surface);
+}
+
+.table-icon-btn.table-action-btn-failover-active::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--info);
   box-shadow: 0 0 0 2px var(--bg-surface);
 }
 
@@ -2391,6 +2414,118 @@ textarea:focus {
   gap: 8px;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.failover-target-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.failover-drafts-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.failover-drafts-loading {
+  min-height: 96px;
+}
+
+.failover-draft-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.failover-draft-counter {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.failover-draft-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.failover-draft-toolbar .filter-input-wrap {
+  min-width: 0;
+}
+
+.failover-draft-toolbar .filter-input {
+  min-width: 0;
+}
+
+.failover-draft-toggle-all {
+  flex: 0 0 auto;
+}
+
+.failover-draft-alert {
+  margin: 0;
+}
+
+.failover-draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(52vh, 430px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.failover-draft-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.failover-draft-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: var(--bg-surface-hover);
+}
+
+.failover-draft-row input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+}
+
+.failover-draft-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.failover-draft-source,
+.failover-draft-targets {
+  overflow-wrap: anywhere;
+}
+
+.failover-draft-targets {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.failover-drafts-empty {
+  min-height: 96px;
+  display: flex;
+  align-items: center;
+}
+
+.failover-draft-actions {
+  margin-top: 0;
 }
 
 .model-row-actions {
@@ -3078,10 +3213,164 @@ textarea:focus {
 }
 
 .audit-request-response {
+  margin-top: 4px;
+}
+
+/* Request / Response(s) are presented as tabs; the tab strip carries the
+   direction icon, title, attempt type and status, and the active panel shows
+   that pane's content. */
+.audit-pane-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.audit-pane-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-bottom-color: transparent;
+  border-radius: 6px 6px 0 0;
+  margin-bottom: -1px;
+  margin-right: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background-color 0.15s;
+}
+
+.audit-pane-tab:not(.audit-pane-tab-active):hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+/* Active tab reads as a card: bordered top + sides with slightly rounded top
+   corners, and a background-colored bottom edge that blends into the content
+   area (covering the tablist underline). */
+.audit-pane-tab-active {
+  color: var(--text);
+  border-color: var(--border);
+  border-bottom-color: var(--bg);
+  background: var(--bg);
+}
+
+.audit-pane-tab-label {
+  font-weight: 600;
+}
+
+.audit-pane-tabpanel {
+  min-width: 0;
+}
+
+/* Tab content fades and rises in on switch; leave is instant so panels never
+   overlap or jump. */
+.audit-tabpanel-enter {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.audit-tabpanel-enter-start {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.audit-tabpanel-enter-end {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audit-tabpanel-enter {
+    transition: none;
+  }
+  .audit-tabpanel-enter-start {
+    transform: none;
+  }
+}
+
+/* Request and response panes place Headers (1/3) in the first column and
+   Body (2/3) in the second; full-width rows span both columns, and a pane
+   with only one of the two stretches it to fill. */
+.audit-pane-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
-  overflow-x: auto;
+  grid-template-columns: 1fr 2fr;
+  gap: 10px 14px;
+  align-items: start;
+}
+
+.audit-pane-split-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.audit-pane-split .audit-pane-block-headers,
+.audit-pane-split .audit-pane-block-body {
+  margin-top: 0;
+}
+
+.audit-pane-split .audit-pane-block-error,
+.audit-pane-split .audit-pane-empty,
+.audit-pane-split .audit-size-warning {
+  grid-column: 1 / -1;
+}
+
+/* Direction icon: request (→) vs response (←), distinct hues so the two panes
+   are scannable at a glance without relying on success/error color. */
+.audit-pane-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.audit-pane-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.audit-pane-icon-request {
+  color: var(--accent);
+}
+
+.audit-pane-icon-response {
+  color: var(--info);
+}
+
+.audit-pane-seq {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Attempt type rendered as a pill, accented so failover/retry stand out. */
+.audit-pane-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.audit-pane-kind-primary {
+  color: var(--text-muted);
+}
+
+.audit-pane-kind-failover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.audit-pane-kind-retry {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, var(--bg));
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
 }
 
 .audit-entry-metadata {
@@ -3109,25 +3398,48 @@ textarea:focus {
   gap: 8px;
 }
 
+/* Collapsed-row attempt indicator: one pip per provider attempt, colored by
+   outcome, so failover/retry is visible without expanding the record. */
+.audit-attempt-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.audit-attempt-track-pips {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.audit-attempt-pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--text-muted);
+}
+
+.audit-attempt-pip.audit-attempt-success {
+  background: var(--success);
+}
+
+.audit-attempt-pip.audit-attempt-error {
+  background: var(--danger);
+}
+
+.audit-attempt-track-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .audit-pane {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
   background: var(--bg);
   min-width: 0;
   padding: 12px;
-}
-
-.audit-pane-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.audit-pane h4 {
-  font-size: 14px;
-  font-weight: 600;
 }
 
 .audit-pane h5 {
@@ -3232,6 +3544,14 @@ textarea:focus {
 
 .audit-pane-error-message {
   color: var(--danger);
+}
+
+.audit-pane-clickable-preview {
+  cursor: pointer;
+}
+
+.audit-pane-clickable-preview:hover {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .audit-json-body {
@@ -4964,9 +5284,6 @@ body.conversation-drawer-open {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
-  }
-  .audit-request-response {
-    grid-template-columns: minmax(0, 1fr);
   }
   .conversation-drawer {
     width: 100%;

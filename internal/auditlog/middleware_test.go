@@ -42,6 +42,79 @@ func TestEnrichEntryWithWorkflow_PrefersProviderNameForResolvedModel(t *testing.
 	}
 }
 
+func TestEnrichEntryWithWorkflow_PreservesExecutedFailoverRoute(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	// The handler already recorded the actual executed failover route and the
+	// failover snapshot before the middleware re-applies the workflow.
+	entry := &LogEntry{
+		ID:            "failover-route",
+		Provider:      "openai",
+		ProviderName:  "openai",
+		ResolvedModel: "openai/gpt-5.5",
+		Data:          &LogData{Failover: &FailoverSnapshot{TargetModel: "openai/gpt-5.5"}},
+	}
+	c.Set(string(LogEntryKey), entry)
+
+	// The workflow still carries only the planned primary resolution.
+	EnrichEntryWithWorkflow(c, &core.Workflow{
+		ProviderType: "anthropic",
+		Resolution: &core.RequestModelResolution{
+			ResolvedSelector: core.ModelSelector{Provider: "anthropic", Model: "claude-fable-5"},
+			ProviderName:     "anthropic",
+		},
+	})
+
+	if got := entry.ResolvedModel; got != "openai/gpt-5.5" {
+		t.Fatalf("ResolvedModel = %q, want openai/gpt-5.5 (executed route must not be clobbered to primary)", got)
+	}
+	if got := entry.Provider; got != "openai" {
+		t.Fatalf("Provider = %q, want openai", got)
+	}
+	if got := entry.ProviderName; got != "openai" {
+		t.Fatalf("ProviderName = %q, want openai", got)
+	}
+}
+
+func TestEnrichEntryWithWorkflow_FailoverSnapshotDoesNotSuppressMissingRouteFields(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	// A failover snapshot exists, but the executed route only populated the
+	// resolved model — provider/provider_name came back empty. The snapshot
+	// alone must not suppress the remaining fields; the workflow's planned
+	// values should fill the gaps instead of leaving them blank.
+	entry := &LogEntry{
+		ID:            "failover-partial-route",
+		ResolvedModel: "openai/gpt-5.5",
+		Data:          &LogData{Failover: &FailoverSnapshot{TargetModel: "openai/gpt-5.5"}},
+	}
+	c.Set(string(LogEntryKey), entry)
+
+	EnrichEntryWithWorkflow(c, &core.Workflow{
+		ProviderType: "anthropic",
+		Resolution: &core.RequestModelResolution{
+			ResolvedSelector: core.ModelSelector{Provider: "anthropic", Model: "claude-fable-5"},
+			ProviderName:     "anthropic",
+		},
+	})
+
+	if got := entry.ResolvedModel; got != "openai/gpt-5.5" {
+		t.Fatalf("ResolvedModel = %q, want openai/gpt-5.5 (recorded route must win)", got)
+	}
+	if got := entry.Provider; got != "anthropic" {
+		t.Fatalf("Provider = %q, want anthropic (workflow fills the empty field)", got)
+	}
+	if got := entry.ProviderName; got != "anthropic" {
+		t.Fatalf("ProviderName = %q, want anthropic (workflow fills the empty field)", got)
+	}
+}
+
 func TestMiddlewarePublishesStartedEventWithRedactedRequestHeaders(t *testing.T) {
 	logger := &captureLiveLogger{
 		cfg: Config{

@@ -36,6 +36,42 @@
             <button type="button" class="pagination-btn" x-show="timezoneOverride" @click="clearTimezoneOverride()">Use Browser Timezone</button>
         </div>
 
+        <div class="settings-refresh-section">
+            <div>
+                <h3>Failover</h3>
+            </div>
+            <div class="settings-refresh-actions">
+                <button type="button"
+                        class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                        :disabled="failoverSaving || failoverGenerating || failoverDraftSaving || !failoverAvailable || !failoverEnabled()"
+                        @click="generateFailoverRules()">
+                    <i data-lucide="wand-sparkles" class="form-action-icon" aria-hidden="true"></i>
+                    <span x-text="failoverGenerating ? 'Generating...' : 'Generate failover models automatically'"></span>
+                </button>
+                <button type="button"
+                        class="pagination-btn pagination-btn-danger-outline pagination-btn-with-icon"
+                        :disabled="failoverSaving || failoverGenerating || failoverDraftSaving || !failoverAvailable || !failoverEnabled()"
+                        @click="openFailoverResetDialog()">
+                    <i data-lucide="trash-2" class="form-action-icon" aria-hidden="true"></i>
+                    <span>Remove all the failover models</span>
+                </button>
+            </div>
+        </div>
+        <div>
+            <div class="alert alert-success settings-refresh-alert"
+                 role="status"
+                 aria-live="polite"
+                 aria-atomic="true"
+                 x-show="failoverNotice && !failoverError"
+                 x-text="failoverNotice"></div>
+            <div class="alert alert-warning settings-refresh-alert"
+                 role="alert"
+                 aria-live="assertive"
+                 aria-atomic="true"
+                 x-show="failoverError"
+                 x-text="failoverError"></div>
+        </div>
+
         <div class="settings-refresh-section budget-settings-section" x-show="budgetManagementEnabled()">
             <div class="inline-help-section" x-data="{ open: false, copyId: 'budget-settings-help-copy', showLabel: 'Show budget help', hideLabel: 'Hide budget help', text: 'Budget reset anchors are stored in the database and evaluated in UTC. Hourly budgets reset at the top of each hour.' }">
                 <div class="inline-help-title-row">

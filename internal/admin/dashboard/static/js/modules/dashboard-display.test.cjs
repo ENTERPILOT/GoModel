@@ -107,6 +107,22 @@ test('auditModelDisplay shows requested → resolved when a redirect was applied
     );
 });
 
+test('auditModelDisplay shows requested → failover target on a runtime failover', () => {
+    const app = loadDashboardApp();
+
+    // resolved_model/provider may still reflect the primary; the failover
+    // target lives in data.failover.target_model.
+    assert.equal(
+        app.auditModelDisplay({
+            requested_model: 'anthropic/claude-fable-5',
+            alias_used: false,
+            resolved_model: 'anthropic/claude-fable-5',
+            data: { failover: { target_model: 'openai/gpt-5.5' } },
+        }),
+        'anthropic/claude-fable-5 ⮕ openai/gpt-5.5'
+    );
+});
+
 test('auditModelDisplay shows a single value when requested and resolved match', () => {
     const app = loadDashboardApp();
 

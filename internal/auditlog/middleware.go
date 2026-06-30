@@ -211,7 +211,20 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 	if requestedModel := workflow.RequestedQualifiedModel(); requestedModel != "" {
 		entry.RequestedModel = requestedModel
 	}
-	if resolvedModel := resolvedModelForAuditLog(workflow); resolvedModel != "" {
+
+	// When a runtime failover already recorded the actual executed route
+	// (resolved_model/provider, via EnrichEntryWithResolvedRoute), the workflow
+	// here only carries the planned primary resolution — so it must not clobber
+	// the real route the request ended up taking. A failover snapshot alone is
+	// not proof a given route field was populated, so gate each field on its own
+	// concrete value: if the executed route left a field empty, fall back to the
+	// workflow's planned value instead of leaving it blank.
+	failoverRecorded := entry.Data != nil && entry.Data.Failover != nil
+	executedResolvedModel := failoverRecorded && strings.TrimSpace(entry.ResolvedModel) != ""
+	executedProvider := failoverRecorded && strings.TrimSpace(entry.Provider) != ""
+	executedProviderName := failoverRecorded && strings.TrimSpace(entry.ProviderName) != ""
+
+	if resolvedModel := resolvedModelForAuditLog(workflow); resolvedModel != "" && !executedResolvedModel {
 		entry.ResolvedModel = resolvedModel
 	}
 	if workflow.Mode == core.ExecutionModePassthrough && workflow.Passthrough != nil {
@@ -219,13 +232,15 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 			entry.RequestedModel = model
 		}
 	}
-	if providerType := strings.TrimSpace(workflow.ProviderType); providerType != "" {
-		entry.Provider = providerType
-	} else if workflow.Resolution != nil && strings.TrimSpace(workflow.Resolution.ProviderType) != "" {
-		entry.Provider = strings.TrimSpace(workflow.Resolution.ProviderType)
+	if !executedProvider {
+		if providerType := strings.TrimSpace(workflow.ProviderType); providerType != "" {
+			entry.Provider = providerType
+		} else if workflow.Resolution != nil && strings.TrimSpace(workflow.Resolution.ProviderType) != "" {
+			entry.Provider = strings.TrimSpace(workflow.Resolution.ProviderType)
+		}
 	}
 	if workflow.Resolution != nil {
-		if providerName := strings.TrimSpace(workflow.Resolution.ProviderName); providerName != "" {
+		if providerName := strings.TrimSpace(workflow.Resolution.ProviderName); providerName != "" && !executedProviderName {
 			entry.ProviderName = providerName
 		}
 		entry.AliasUsed = workflow.Resolution.AliasApplied
@@ -563,10 +578,47 @@ func EnrichEntryWithFailover(c *echo.Context, targetModel string) {
 	publishLiveAuditUpdate(c, entry)
 }
 
+// EnrichEntryWithAttempts attaches provider attempt summaries to the live
+// audit entry. The attempt list belongs to the logical request, not to separate
+// top-level audit rows.
+func EnrichEntryWithAttempts(c *echo.Context, attempts []AttemptSnapshot) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	enrichEntryWithAttempts(entry, gateAttemptCaptureFromContext(c, attempts))
+	publishLiveAuditUpdate(c, entry)
+}
+
+// gateAttemptCaptureFromContext strips per-attempt response bodies/headers that
+// the request's audit config did not opt into. When the config cannot be
+// resolved, opt-in-only captures are dropped rather than persisted.
+func gateAttemptCaptureFromContext(c *echo.Context, attempts []AttemptSnapshot) []AttemptSnapshot {
+	if c == nil || len(attempts) == 0 {
+		return attempts
+	}
+	if logger, ok := c.Get(string(LogEntryLivePublisherKey)).(LoggerInterface); ok && logger != nil {
+		return GateAttemptCapture(attempts, logger.Config())
+	}
+	return GateAttemptCapture(attempts, Config{})
+}
+
 // EnrichLogEntryWithFailover attaches failover redirect metadata directly to an
 // existing audit log entry.
 func EnrichLogEntryWithFailover(entry *LogEntry, targetModel string) {
 	enrichEntryWithFailover(entry, targetModel)
+}
+
+// EnrichLogEntryWithAttempts attaches provider attempt summaries directly to an
+// existing audit log entry.
+func EnrichLogEntryWithAttempts(entry *LogEntry, attempts []AttemptSnapshot) {
+	enrichEntryWithAttempts(entry, attempts)
 }
 
 func enrichEntryWithResolvedRoute(entry *LogEntry, resolvedModel, providerType, providerName string) {
@@ -597,6 +649,17 @@ func enrichEntryWithFailover(entry *LogEntry, targetModel string) {
 	ensureLogData(entry).Failover = &FailoverSnapshot{
 		TargetModel: targetModel,
 	}
+}
+
+func enrichEntryWithAttempts(entry *LogEntry, attempts []AttemptSnapshot) {
+	if entry == nil {
+		return
+	}
+	normalized := normalizeAttemptSnapshots(attempts)
+	if len(normalized) == 0 {
+		return
+	}
+	ensureLogData(entry).Attempts = normalized
 }
 
 // EnrichEntryWithCacheType attaches cache-hit metadata to the live audit entry.

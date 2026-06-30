@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"gomodel/internal/core"
 )
@@ -70,7 +71,9 @@ func tryFallbackResponse[T any](
 			"error", lastErr,
 		)
 
+		started := time.Now()
 		resp, resolvedProviderType, err := call(selector, providerType, providerName)
+		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindFailover, firstNonEmptyString(resolvedProviderType, providerType), providerName, qualified, started, err))
 		if err == nil {
 			slog.Info("fallback model attempt succeeded",
 				"request_id", requestID,
@@ -112,7 +115,10 @@ func executeTranslatedWithFallback[Req any, Resp any](
 ) (Resp, string, string, string, bool, error) {
 	return executeWithFallbackResponse(ctx, o, workflow, model, provider,
 		func() (Resp, string, string, error) {
+			started := time.Now()
 			resp, responseProvider, err := call(ctx, req)
+			attemptProviderType := ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider)
+			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, attemptProviderType, ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider), started, err))
 			if err != nil {
 				var zero Resp
 				return zero, "", "", err
@@ -161,7 +167,9 @@ func tryFallbackStream(
 			"error", lastErr,
 		)
 
+		started := time.Now()
 		stream, resolvedProviderType, usageModel, err := call(selector, providerType, providerName)
+		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindFailover, firstNonEmptyString(resolvedProviderType, providerType), providerName, qualified, started, err))
 		if err == nil {
 			slog.Info("fallback stream attempt succeeded",
 				"request_id", requestID,
@@ -199,24 +207,46 @@ func ShouldAttemptFallback(err error) bool {
 	}
 
 	message := strings.ToLower(strings.TrimSpace(gatewayErr.Message))
-	if !strings.Contains(message, "model") {
-		return false
+	if strings.Contains(message, "model") {
+		for _, fragment := range []string{
+			"not found",
+			"does not exist",
+			"unsupported",
+			"unavailable",
+			"not available",
+			"deprecated",
+			"retired",
+			"disabled",
+		} {
+			if strings.Contains(message, fragment) {
+				return true
+			}
+		}
 	}
 
-	for _, fragment := range []string{
-		"not found",
-		"does not exist",
-		"unsupported",
-		"unavailable",
-		"not available",
-		"deprecated",
-		"retired",
-		"disabled",
-	} {
-		if strings.Contains(message, fragment) {
-			return true
+	if status == http.StatusNotFound {
+		for _, fragment := range []string{
+			"unsupported",
+			"unavailable",
+			"not available",
+			"deprecated",
+			"retired",
+			"disabled",
+		} {
+			if strings.Contains(message, fragment) {
+				return true
+			}
 		}
 	}
 
 	return false
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

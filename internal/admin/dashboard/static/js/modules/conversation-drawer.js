@@ -44,6 +44,21 @@
                 this.openConversation(entry, null, false, el);
             },
 
+            // handleErrorConversationClick opens the interactions preview from an
+            // error message block. The error text has no conversation segments to
+            // highlight, so the whole message acts as the trigger (skipping drags
+            // and text selections, like the body handler).
+            handleErrorConversationClick(event, entry) {
+                const wasDrag = this._isBodyDrag(event);
+                this.bodyPointerStart = null;
+                if (wasDrag) return;
+                if (this._hasActiveSelection()) return;
+                if (!this.canShowConversation(entry)) return;
+                event.preventDefault();
+                event.stopPropagation();
+                this.openConversation(entry, null, false, event.currentTarget);
+            },
+
             renderBodyWithConversationHighlights(entry, value, options) {
                 const h = getHelpers();
                 if (typeof h.renderBodyWithConversationHighlights !== 'function') {
