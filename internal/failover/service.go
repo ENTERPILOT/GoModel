@@ -18,8 +18,35 @@ import (
 type Service struct {
 	store      Store
 	configRows []Rule
-	current    atomic.Value // []Rule
+	current    atomic.Value // *ruleSnapshot
 	refreshMu  sync.Mutex
+}
+
+// ruleSnapshot is the immutable, atomically-published view of the merged rules.
+// It caches the derived Rules/Disabled lookup maps so the per-request resolver
+// hot path reads them without re-cloning rows or rebuilding maps on every call.
+// The maps and their slices must be treated as read-only by callers.
+type ruleSnapshot struct {
+	rows     []Rule
+	rules    map[string][]string
+	disabled map[string]bool
+}
+
+func newRuleSnapshot(rows []Rule) *ruleSnapshot {
+	rules := make(map[string][]string)
+	disabled := make(map[string]bool)
+	for _, row := range rows {
+		if !row.Enabled {
+			disabled[row.Source] = true
+			continue
+		}
+		targets := normalizeTargets(row.Targets)
+		if len(targets) == 0 {
+			continue
+		}
+		rules[row.Source] = targets
+	}
+	return &ruleSnapshot{rows: rows, rules: rules, disabled: disabled}
 }
 
 func NewService(store Store, cfg config.FallbackConfig) (*Service, error) {
@@ -27,7 +54,7 @@ func NewService(store Store, cfg config.FallbackConfig) (*Service, error) {
 		return nil, fmt.Errorf("store is required")
 	}
 	service := &Service{store: store, configRows: ConfigRules(cfg)}
-	service.current.Store([]Rule{})
+	service.current.Store(newRuleSnapshot(nil))
 	return service, nil
 }
 
@@ -84,7 +111,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list failover mappings: %w", err)
 	}
-	s.current.Store(s.mergeConfig(rows))
+	s.current.Store(newRuleSnapshot(s.mergeConfig(rows)))
 	return nil
 }
 
@@ -108,43 +135,41 @@ func (s *Service) mergeConfig(stored []Rule) []Rule {
 	return merged
 }
 
+// Rules returns the enabled source -> targets map. The returned map is the
+// cached snapshot and must not be mutated by callers.
 func (s *Service) Rules() map[string][]string {
-	rows := s.List()
-	result := make(map[string][]string, len(rows))
-	for _, row := range rows {
-		if !row.Enabled {
-			continue
-		}
-		targets := normalizeTargets(row.Targets)
-		if len(targets) == 0 {
-			continue
-		}
-		result[row.Source] = targets
-	}
-	return result
-}
-
-func (s *Service) Disabled() map[string]bool {
-	rows := s.List()
-	result := make(map[string]bool)
-	for _, row := range rows {
-		if !row.Enabled {
-			result[row.Source] = true
-		}
-	}
-	if len(result) == 0 {
+	snap := s.loadSnapshot()
+	if snap == nil {
 		return nil
 	}
-	return result
+	return snap.rules
 }
 
-func (s *Service) List() []Rule {
+// Disabled returns the set of disabled sources, or nil when none. The returned
+// map is the cached snapshot and must not be mutated by callers.
+func (s *Service) Disabled() map[string]bool {
+	snap := s.loadSnapshot()
+	if snap == nil || len(snap.disabled) == 0 {
+		return nil
+	}
+	return snap.disabled
+}
+
+func (s *Service) loadSnapshot() *ruleSnapshot {
 	if s == nil {
 		return nil
 	}
-	rows := s.current.Load().([]Rule)
-	out := make([]Rule, 0, len(rows))
-	for _, row := range rows {
+	snap, _ := s.current.Load().(*ruleSnapshot)
+	return snap
+}
+
+func (s *Service) List() []Rule {
+	snap := s.loadSnapshot()
+	if snap == nil {
+		return nil
+	}
+	out := make([]Rule, 0, len(snap.rows))
+	for _, row := range snap.rows {
 		out = append(out, row.clone())
 	}
 	return out

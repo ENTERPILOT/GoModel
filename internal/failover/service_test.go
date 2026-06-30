@@ -116,3 +116,36 @@ func TestServiceConfigRulesOverrideDashboardRules(t *testing.T) {
 		t.Fatalf("Get(gpt-4o) = %+v, %v; want config-managed rule", view, ok)
 	}
 }
+
+// TestServiceRulesReuseCachedSnapshot guards the resolver hot path: Rules and
+// Disabled are read on every request, so they must return the cached snapshot
+// maps rather than rebuilding (and re-cloning every rule) on each call. A new
+// snapshot is published only on Refresh.
+func TestServiceRulesReuseCachedSnapshot(t *testing.T) {
+	store := newMemoryStore(
+		Rule{Source: "gpt-4o", Targets: []string{"azure/gpt-4o"}, Enabled: true, ManagedSource: ManagedSourceDashboard},
+		Rule{Source: "gpt-4o-mini", Enabled: false, ManagedSource: ManagedSourceDashboard},
+	)
+	service, err := NewService(store, config.FallbackConfig{Enabled: true})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	if a, b := service.Rules(), service.Rules(); reflect.ValueOf(a).Pointer() != reflect.ValueOf(b).Pointer() {
+		t.Fatal("Rules() rebuilt the map; expected the cached snapshot reused across calls")
+	}
+	if a, b := service.Disabled(), service.Disabled(); reflect.ValueOf(a).Pointer() != reflect.ValueOf(b).Pointer() {
+		t.Fatal("Disabled() rebuilt the map; expected the cached snapshot reused across calls")
+	}
+
+	before := service.Rules()
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if reflect.ValueOf(before).Pointer() == reflect.ValueOf(service.Rules()).Pointer() {
+		t.Fatal("Refresh() did not publish a new snapshot")
+	}
+}
