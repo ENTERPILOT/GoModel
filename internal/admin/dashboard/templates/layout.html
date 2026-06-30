@@ -178,10 +178,16 @@
                                 </div>
                             </template>
                         </div>
-                        <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="failoverFormManaged" @click="addFailoverTarget()">
-                            <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
-                            <span>Add fallback model</span>
-                        </button>
+                        <div class="failover-target-actions">
+                            <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="failoverFormManaged || failoverGenerating || failoverSaving" @click="addFailoverTarget()">
+                                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                                <span>Add fallback model</span>
+                            </button>
+                            <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="failoverFormManaged || failoverGenerating || failoverSaving || !failoverEnabled()" @click="generateFailoverForForm()">
+                                <i data-lucide="wand-sparkles" class="form-action-icon" aria-hidden="true"></i>
+                                <span x-text="failoverGenerating ? 'Generating...' : 'Generate automatically'"></span>
+                            </button>
+                        </div>
                     </div>
 
                     <div class="vm-status-row">
@@ -201,8 +207,8 @@
 
                     <div class="form-actions">
                         <button type="button" class="pagination-btn" @click="closeFailoverForm()">Cancel</button>
-                        <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="failoverFormMode === 'edit' && !failoverFormManaged" :disabled="failoverSaving" @click="deleteFailoverRule()">Remove</button>
-                        <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" x-show="!failoverFormManaged" :disabled="failoverSaving">
+                        <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="failoverFormMode === 'edit' && !failoverFormManaged" :disabled="failoverSaving || failoverGenerating" @click="deleteFailoverRule()">Remove</button>
+                        <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" x-show="!failoverFormManaged" :disabled="failoverSaving || failoverGenerating">
                             <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
                             <span x-text="failoverSaving ? 'Saving...' : 'Save'"></span>
                         </button>

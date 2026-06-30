@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/failover"
 	fallbackresolver "gomodel/internal/fallback"
+	"gomodel/internal/providers"
 )
 
 type upsertFailoverRuleRequest struct {
@@ -21,6 +23,11 @@ type upsertFailoverRuleRequest struct {
 
 type deleteFailoverRuleRequest struct {
 	PrimaryModel string `json:"primary_model"`
+}
+
+type generateFailoverRulesRequest struct {
+	PrimaryModel string `json:"primary_model"`
+	Model        string `json:"model"`
 }
 
 // ListFailoverRules handles GET /admin/failover.
@@ -162,9 +169,12 @@ func (h *Handler) ResetFailoverRules(c *echo.Context) error {
 //
 // @Summary      Generate failover mapping suggestions
 // @Tags         admin
+// @Accept       json
 // @Produce      json
 // @Security     BearerAuth
+// @Param        request  body      generateFailoverRulesRequest  false  "Optional source model filter"
 // @Success      200  {array}   failover.View
+// @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/failover/generate [post]
@@ -174,6 +184,10 @@ func (h *Handler) GenerateFailoverRules(c *echo.Context) error {
 	}
 	if h.registry == nil {
 		return handleError(c, featureUnavailableError("failover feature is unavailable"))
+	}
+	primaryModel, err := failoverGenerateSource(c)
+	if err != nil {
+		return handleError(c, err)
 	}
 	resolver := fallbackresolver.NewResolverWithRuleProvider(config.FallbackConfig{Enabled: true}, h.registry, h.failoverRules)
 	if resolver == nil {
@@ -186,6 +200,9 @@ func (h *Handler) GenerateFailoverRules(c *echo.Context) error {
 		}
 		source := strings.TrimSpace(model.Selector)
 		if source == "" {
+			continue
+		}
+		if primaryModel != "" && !failoverSourceMatchesModel(primaryModel, source, model) {
 			continue
 		}
 		resolution := &core.RequestModelResolution{
@@ -213,6 +230,42 @@ func (h *Handler) GenerateFailoverRules(c *echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, suggestions)
+}
+
+func failoverGenerateSource(c *echo.Context) (string, error) {
+	source := strings.TrimSpace(c.QueryParam("primary_model"))
+	if source == "" {
+		source = strings.TrimSpace(c.QueryParam("model"))
+	}
+	if source != "" || c.Request().ContentLength == 0 {
+		return source, nil
+	}
+	var req generateFailoverRulesRequest
+	if err := c.Bind(&req); err != nil {
+		if errors.Is(err, io.EOF) {
+			return source, nil
+		}
+		return "", core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
+	}
+	source = strings.TrimSpace(req.PrimaryModel)
+	if source == "" {
+		source = strings.TrimSpace(req.Model)
+	}
+	return source, nil
+}
+
+func failoverSourceMatchesModel(filter string, source string, model providers.ModelWithProvider) bool {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return true
+	}
+	if filter == source || filter == strings.TrimSpace(model.Model.ID) {
+		return true
+	}
+	if model.ProviderName != "" && filter == model.ProviderName+"/"+model.Model.ID {
+		return true
+	}
+	return false
 }
 
 func modelSupportsCategory(meta *core.ModelMetadata, category core.ModelCategory) bool {

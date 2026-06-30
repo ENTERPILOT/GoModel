@@ -69,3 +69,38 @@ test('fetchFailoverRules skips admin endpoint when failover is globally disabled
     assert.equal(Array.isArray(module.failoverGeneratedRules), true);
     assert.equal(module.failoverGeneratedRules.length, 0);
 });
+
+test('generateFailoverForForm requests suggestions for the modal primary model', async() => {
+    const requests = [];
+    const module = createFailoverModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async() => [{
+                        primary_model: 'openai/gpt-4o',
+                        fallback_models: ['anthropic/claude-3-5-sonnet', 'gemini/gemini-2.5-pro'],
+                        enabled: true
+                    }]
+                };
+            }
+        }
+    });
+    module.failoverForm.source = 'openai/gpt-4o';
+    module.adminRequestOptions = (options) => ({ ...(options || {}), headers: {} });
+    module.handleFetchResponse = () => true;
+    module.focusFailoverEditor = () => {};
+
+    await module.generateFailoverForForm();
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/failover/generate');
+    assert.equal(requests[0].request.method, 'POST');
+    assert.deepEqual(JSON.parse(requests[0].request.body), { primary_model: 'openai/gpt-4o' });
+    assert.equal(module.failoverForm.target_model, 'anthropic/claude-3-5-sonnet');
+    assert.equal(module.failoverForm.targets.length, 1);
+    assert.equal(module.failoverForm.targets[0].model, 'gemini/gemini-2.5-pro');
+    assert.equal(module.failoverGenerating, false);
+});

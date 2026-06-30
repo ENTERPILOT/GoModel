@@ -5,6 +5,7 @@
             failoverRules: [],
             failoverLoading: false,
             failoverSaving: false,
+            failoverGenerating: false,
             failoverError: '',
             failoverNotice: '',
             failoverGeneratedRules: [],
@@ -132,6 +133,12 @@
                 return values.map((value) => String(value || '').trim()).filter(Boolean);
             },
 
+            setFailoverFormTargets(targets) {
+                const values = Array.isArray(targets) ? targets.map((value) => String(value || '').trim()).filter(Boolean) : [];
+                this.failoverForm.target_model = values[0] || '';
+                this.failoverForm.targets = values.slice(1).map((model) => ({ model }));
+            },
+
             addFailoverTarget() {
                 if (!Array.isArray(this.failoverForm.targets)) {
                     this.failoverForm.targets = [];
@@ -168,7 +175,7 @@
             },
 
             async submitFailoverForm() {
-                if (this.failoverSaving || this.failoverFormManaged) return;
+                if (this.failoverSaving || this.failoverGenerating || this.failoverFormManaged) return;
                 const payload = this.failoverRulePayload();
                 if (!payload.primary_model) {
                     this.failoverError = 'Primary model is required.';
@@ -208,7 +215,7 @@
 
             async deleteFailoverRule(rule) {
                 const source = String((rule && this.failoverPrimaryModel(rule)) || this.failoverForm.source || '').trim();
-                if (!source || this.failoverSaving) return;
+                if (!source || this.failoverSaving || this.failoverGenerating) return;
                 if (!this.confirmAction('Remove failover mapping for "' + source + '"?')) return;
                 this.failoverSaving = true;
                 this.failoverError = '';
@@ -234,6 +241,48 @@
                     this.failoverError = 'Failed to remove failover mapping.';
                 } finally {
                     this.failoverSaving = false;
+                }
+            },
+
+            async generateFailoverForForm() {
+                if (this.failoverGenerating || this.failoverSaving || this.failoverFormManaged) return;
+                const source = String(this.failoverForm.source || '').trim();
+                if (!source) {
+                    this.failoverError = 'Primary model is required.';
+                    return;
+                }
+                this.failoverGenerating = true;
+                this.failoverError = '';
+                this.failoverNotice = '';
+                try {
+                    const request = this.adminRequestOptions({
+                        method: 'POST',
+                        body: JSON.stringify({ primary_model: source })
+                    });
+                    const res = await fetch('/admin/failover/generate', request);
+                    const handled = this.handleFetchResponse(res, 'failover generation', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
+                        this.failoverError = 'Failed to generate failover mapping.';
+                        return;
+                    }
+                    const suggestions = this.normalizeFailoverRules(await res.json());
+                    const suggestion = suggestions.find((rule) => this.failoverPrimaryModel(rule) === source) || suggestions[0] || null;
+                    const targets = this.failoverTargets(suggestion);
+                    if (targets.length === 0) {
+                        this.failoverError = 'No failover suggestions were generated for this model.';
+                        return;
+                    }
+                    this.setFailoverFormTargets(targets);
+                    this.failoverNotice = 'Generated ' + targets.length + ' fallback model' + (targets.length === 1 ? '.' : 's.');
+                    this.focusFailoverEditor();
+                } catch (e) {
+                    console.error('Failed to generate failover mapping:', e);
+                    this.failoverError = 'Failed to generate failover mapping.';
+                } finally {
+                    this.failoverGenerating = false;
                 }
             },
 

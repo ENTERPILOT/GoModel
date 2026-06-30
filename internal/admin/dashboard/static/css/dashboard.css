@@ -2416,6 +2416,13 @@ textarea:focus {
   margin-top: 16px;
 }
 
+.failover-target-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .model-row-actions {
   text-align: right;
   width: 170px;

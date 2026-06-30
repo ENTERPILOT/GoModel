@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,7 +11,9 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/config"
+	"gomodel/internal/core"
 	failoverrules "gomodel/internal/failover"
+	"gomodel/internal/providers"
 )
 
 type failoverHandlerTestStore struct {
@@ -121,5 +124,68 @@ func TestFailoverEndpointsReturn503WhenRuntimeFlagDisabled(t *testing.T) {
 	}
 	if _, ok := store.rows["openai/gpt-4o"]; !ok {
 		t.Fatal("disabled failover delete/reset mutated the store")
+	}
+}
+
+func TestGenerateFailoverRulesFiltersByPrimaryModel(t *testing.T) {
+	registry := providers.NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(&handlerMockProvider{
+		models: &core.ModelsResponse{Data: []core.Model{
+			failoverSuggestionTestModel("gpt-4o", 1287),
+			failoverSuggestionTestModel("gpt-4.1", 1294),
+		}},
+	}, "openai", "openai")
+	registry.RegisterProviderWithNameAndType(&handlerMockProvider{
+		models: &core.ModelsResponse{Data: []core.Model{
+			failoverSuggestionTestModel("claude-3-5-sonnet", 1289),
+		}},
+	}, "anthropic", "anthropic")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	service := newFailoverHandlerTestService(t, newFailoverHandlerTestStore())
+	h := NewHandler(
+		nil,
+		registry,
+		WithFailover(service),
+		WithDashboardRuntimeConfig(DashboardConfigResponse{FailoverEnabled: "on"}),
+	)
+	e := echo.New()
+	h.RegisterRoutes(e.Group("/admin"))
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/failover/generate", bytes.NewBufferString(`{"primary_model":"openai/gpt-4o"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var body []failoverrules.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body) != 1 {
+		t.Fatalf("len(body) = %d, want 1: %+v", len(body), body)
+	}
+	if body[0].Source != "openai/gpt-4o" {
+		t.Fatalf("Source = %q, want openai/gpt-4o", body[0].Source)
+	}
+	if len(body[0].Targets) == 0 {
+		t.Fatalf("Targets empty, want generated fallback suggestions")
+	}
+}
+
+func failoverSuggestionTestModel(id string, elo float64) core.Model {
+	return core.Model{
+		ID: id,
+		Metadata: &core.ModelMetadata{
+			Categories: []core.ModelCategory{core.CategoryTextGeneration},
+			Rankings: map[string]core.ModelRanking{
+				"chatbot_arena": {Elo: &elo},
+			},
+		},
 	}
 }
