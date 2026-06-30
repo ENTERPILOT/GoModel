@@ -2,6 +2,7 @@ package failover
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -56,6 +57,34 @@ func (s *memoryStore) DeleteAll(context.Context) error {
 }
 
 func (s *memoryStore) Close() error { return nil }
+
+// errGetStore returns a fixed error from Get, simulating a transient storage
+// fault during the Upsert pre-read.
+type errGetStore struct {
+	*memoryStore
+	getErr error
+}
+
+func (s *errGetStore) Get(context.Context, string) (*Rule, error) {
+	return nil, s.getErr
+}
+
+func TestServiceUpsertPropagatesUnexpectedGetError(t *testing.T) {
+	wantErr := errors.New("boom")
+	store := &errGetStore{memoryStore: newMemoryStore(), getErr: wantErr}
+	service, err := NewService(store, config.FallbackConfig{Enabled: true})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	err = service.Upsert(context.Background(), Rule{Source: "gpt-4o", Targets: []string{"azure/gpt-4o"}})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Upsert() error = %v, want it to wrap %v", err, wantErr)
+	}
+	if _, ok := store.rows["gpt-4o"]; ok {
+		t.Fatalf("rule was written despite the failed pre-read")
+	}
+}
 
 func TestServiceConfigRulesOverrideDashboardRules(t *testing.T) {
 	store := newMemoryStore(Rule{

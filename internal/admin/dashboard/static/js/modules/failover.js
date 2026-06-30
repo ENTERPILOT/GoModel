@@ -16,7 +16,6 @@
             failoverFormOpen: false,
             failoverFormMode: 'create',
             failoverFormManaged: false,
-            failoverFormOriginalSource: '',
             failoverForm: {
                 source: '',
                 target_model: '',
@@ -75,7 +74,6 @@
             resetFailoverForm() {
                 this.failoverFormMode = 'create';
                 this.failoverFormManaged = false;
-                this.failoverFormOriginalSource = '';
                 this.failoverForm = {
                     source: '',
                     target_model: '',
@@ -97,7 +95,6 @@
                 this.failoverFormOpen = true;
                 this.failoverFormManaged = Boolean(rule.managed);
                 const source = this.failoverPrimaryModel(rule);
-                this.failoverFormOriginalSource = source;
                 const targets = this.failoverTargets(rule);
                 this.failoverForm = {
                     source,

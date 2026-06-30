@@ -2,6 +2,7 @@ package failover
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -180,7 +181,11 @@ func (s *Service) Upsert(ctx context.Context, rule Rule) error {
 		return ErrManaged
 	}
 	normalized.ManagedSource = ManagedSourceDashboard
-	if existing, err := s.store.Get(ctx, normalized.Source); err == nil && existing != nil {
+	existing, err := s.store.Get(ctx, normalized.Source)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("read existing failover rule: %w", err)
+	}
+	if existing != nil {
 		normalized.CreatedAt = existing.CreatedAt
 	}
 	if err := s.store.Upsert(ctx, normalized); err != nil {

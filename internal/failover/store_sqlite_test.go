@@ -31,7 +31,7 @@ func TestSQLiteStoreMigratesLegacyFailoverRulesSchema(t *testing.T) {
 		INSERT INTO failover_rules (
 			source, targets, description, enabled, managed_source, created_at, updated_at
 		) VALUES (
-			'gpt-4o',
+			' gpt-4o ',
 			'["azure/gpt-4o","gemini/gemini-2.5-pro"]',
 			'legacy note',
 			1,
@@ -55,12 +55,25 @@ func TestSQLiteStoreMigratesLegacyFailoverRulesSchema(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("List() returned %d rows, want 1", len(rows))
 	}
+	// The legacy primary key was padded; it must migrate trimmed so Get/Delete
+	// (which trim input) can find it.
 	if rows[0].Source != "gpt-4o" {
-		t.Fatalf("row source = %q, want gpt-4o", rows[0].Source)
+		t.Fatalf("row source = %q, want gpt-4o (trimmed)", rows[0].Source)
 	}
 	wantTargets := []string{"azure/gpt-4o", "gemini/gemini-2.5-pro"}
 	if !reflect.DeepEqual(rows[0].Targets, wantTargets) {
 		t.Fatalf("row targets = %v, want %v", rows[0].Targets, wantTargets)
+	}
+	// Metadata fields must migrate too.
+	if !rows[0].Enabled || rows[0].ManagedSource != "dashboard" {
+		t.Fatalf("row metadata = enabled:%v managed_source:%q, want enabled:true dashboard", rows[0].Enabled, rows[0].ManagedSource)
+	}
+	if rows[0].CreatedAt.Unix() != 100 || rows[0].UpdatedAt.Unix() != 200 {
+		t.Fatalf("row timestamps = created:%d updated:%d, want created:100 updated:200", rows[0].CreatedAt.Unix(), rows[0].UpdatedAt.Unix())
+	}
+	// The trimmed key is reachable by the trim-normalizing lookups.
+	if got, err := store.Get(context.Background(), "gpt-4o"); err != nil || got == nil {
+		t.Fatalf("Get(gpt-4o) after migration = %+v, %v; want the migrated rule", got, err)
 	}
 
 	columns := sqliteColumnsForTest(t, db)

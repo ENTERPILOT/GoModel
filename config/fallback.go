@@ -251,6 +251,9 @@ func fallbackDisabledModels(cfg *FallbackConfig) (map[string]bool, error) {
 	}
 	if raw := strings.TrimSpace(cfg.DisabledModelsJSON); raw != "" {
 		expanded := expandString(raw)
+		if strings.TrimSpace(expanded) == "null" {
+			return nil, fmt.Errorf("disabled models JSON: null not allowed; expected an array or object")
+		}
 		var list []string
 		if err := json.Unmarshal([]byte(expanded), &list); err == nil {
 			for _, model := range list {

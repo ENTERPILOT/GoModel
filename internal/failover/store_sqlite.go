@@ -102,7 +102,7 @@ func migrateSQLiteFailoverRules(db *sql.DB) error {
 			primary_model, fallback_models, enabled, managed_source, created_at, updated_at
 		)
 		SELECT
-			%s,
+			TRIM(%s),
 			%s,
 			%s,
 			%s,
