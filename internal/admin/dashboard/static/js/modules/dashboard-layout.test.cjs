@@ -1325,6 +1325,41 @@ test("settings controls describe their inline helper copy", () => {
   );
 });
 
+test("settings failover actions generate before remove and use destructive remove copy", () => {
+  const indexTemplate = readDashboardTemplateSource();
+
+  assert.match(
+    indexTemplate,
+    /<h3>Failover<\/h3>[\s\S]*@click="generateFailoverRules\(\)"[\s\S]*Generate failover models automatically[\s\S]*pagination-btn-danger-outline[\s\S]*@click="openFailoverResetDialog\(\)"[\s\S]*Remove all the failover models/,
+  );
+  assert.doesNotMatch(indexTemplate, /Reset all the failover models/);
+});
+
+test("failover drafts modal exposes filtering selection summary and bulk toggle", () => {
+  const shellTemplate = readDashboardShellTemplate();
+  const css = readFixture("../../css/dashboard.css");
+
+  assert.match(
+    shellTemplate,
+    /class="failover-draft-counter"[\s\S]*x-text="failoverDraftCountLabel\(\)"/,
+  );
+  assert.match(
+    shellTemplate,
+    /placeholder="Filter failover drafts\.\.\."[\s\S]*x-model="failoverDraftFilter"/,
+  );
+  assert.match(
+    shellTemplate,
+    /@click="toggleAllFailoverDrafts\(\)"[\s\S]*x-text="allFailoverDraftsSelected\(\) \? 'Deselect all' : 'Select all'"/,
+  );
+  assert.match(shellTemplate, /x-for="rule in filteredFailoverDrafts\(\)"/);
+
+  const toolbarRule = readCSSRule(css, ".failover-draft-toolbar");
+  assert.match(toolbarRule, /flex-wrap:\s*wrap/);
+
+  const listRule = readCSSRule(css, ".failover-draft-list");
+  assert.match(listRule, /overflow-y:\s*auto/);
+});
+
 test("usage and audit pages reuse a shared pagination template", () => {
   const indexTemplate = readDashboardTemplateSource();
   const paginationTemplate = readFixture("../../../templates/pagination.html");

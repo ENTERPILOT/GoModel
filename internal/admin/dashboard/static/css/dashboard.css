@@ -2433,6 +2433,39 @@ textarea:focus {
   min-height: 96px;
 }
 
+.failover-draft-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.failover-draft-counter {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.failover-draft-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.failover-draft-toolbar .filter-input-wrap {
+  min-width: 0;
+}
+
+.failover-draft-toolbar .filter-input {
+  min-width: 0;
+}
+
+.failover-draft-toggle-all {
+  flex: 0 0 auto;
+}
+
 .failover-draft-list {
   display: flex;
   flex-direction: column;

@@ -42,18 +42,18 @@
             </div>
             <div class="settings-refresh-actions">
                 <button type="button"
-                        class="pagination-btn pagination-btn-with-icon"
-                        :disabled="failoverSaving || failoverGenerating || failoverDraftSaving || !failoverAvailable || !failoverEnabled()"
-                        @click="openFailoverResetDialog()">
-                    <i data-lucide="rotate-ccw" class="form-action-icon" aria-hidden="true"></i>
-                    <span>Reset all the failover models</span>
-                </button>
-                <button type="button"
                         class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
                         :disabled="failoverSaving || failoverGenerating || failoverDraftSaving || !failoverAvailable || !failoverEnabled()"
                         @click="generateFailoverRules()">
                     <i data-lucide="wand-sparkles" class="form-action-icon" aria-hidden="true"></i>
                     <span x-text="failoverGenerating ? 'Generating...' : 'Generate failover models automatically'"></span>
+                </button>
+                <button type="button"
+                        class="pagination-btn pagination-btn-danger-outline pagination-btn-with-icon"
+                        :disabled="failoverSaving || failoverGenerating || failoverDraftSaving || !failoverAvailable || !failoverEnabled()"
+                        @click="openFailoverResetDialog()">
+                    <i data-lucide="trash-2" class="form-action-icon" aria-hidden="true"></i>
+                    <span>Remove all the failover models</span>
                 </button>
             </div>
         </div>

@@ -197,3 +197,41 @@ test('saveSelectedFailoverDrafts saves selected drafts only', async() => {
     assert.equal(module.failoverGeneratedRules.length, 0);
     assert.equal(Object.keys(module.failoverDraftSelections).length, 0);
 });
+
+test('failover draft filter counter and bulk toggle reflect generated drafts', () => {
+    const module = createFailoverModule();
+    module.failoverGeneratedRules = [
+        {
+            primary_model: 'openai/gpt-4o',
+            fallback_models: ['anthropic/claude-3-5-sonnet'],
+            enabled: true
+        },
+        {
+            primary_model: 'openai/gpt-4.1',
+            fallback_models: ['gemini/gemini-2.5-pro'],
+            enabled: true
+        },
+        {
+            primary_model: 'groq/llama-3.3-70b',
+            fallback_models: ['openrouter/meta-llama/llama-3.3-70b-instruct'],
+            enabled: true
+        }
+    ];
+    module.selectAllFailoverDrafts(module.failoverGeneratedRules);
+
+    assert.equal(module.failoverDraftCountLabel(), '3 / 3 selected');
+    assert.equal(module.allFailoverDraftsSelected(), true);
+
+    module.failoverDraftFilter = 'gemini';
+    assert.equal(module.filteredFailoverDrafts().length, 1);
+    assert.equal(module.failoverPrimaryModel(module.filteredFailoverDrafts()[0]), 'openai/gpt-4.1');
+
+    module.toggleAllFailoverDrafts();
+    assert.equal(module.selectedFailoverDraftCount(), 0);
+    assert.equal(module.failoverDraftCountLabel(), '0 / 3 selected');
+    assert.equal(module.filteredFailoverDrafts().length, 1);
+
+    module.toggleAllFailoverDrafts();
+    assert.equal(module.selectedFailoverDraftCount(), 3);
+    assert.equal(module.allFailoverDraftsSelected(), true);
+});

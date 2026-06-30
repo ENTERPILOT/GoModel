@@ -233,9 +233,12 @@
                         <p class="form-kicker">Generated drafts</p>
                         <h3>Failover models</h3>
                     </div>
-                    <button type="button" class="dialog-close-btn" aria-label="Close failover drafts" :disabled="failoverDraftSaving" @click="closeFailoverDraftsModal()">
-                        {{template "x-icon"}}
-                    </button>
+                    <div class="failover-draft-header-actions">
+                        <span class="failover-draft-counter" x-show="failoverGeneratedRules.length > 0" x-text="failoverDraftCountLabel()"></span>
+                        <button type="button" class="dialog-close-btn" aria-label="Close failover drafts" :disabled="failoverDraftSaving" @click="closeFailoverDraftsModal()">
+                            {{template "x-icon"}}
+                        </button>
+                    </div>
                 </div>
 
                 <div class="loading-state failover-drafts-loading" x-show="failoverGenerating" role="status" aria-live="polite">
@@ -243,8 +246,22 @@
                     <span>Generating failover drafts...</span>
                 </div>
 
-                <div class="failover-draft-list" x-show="!failoverGenerating && failoverGeneratedRules.length > 0" role="list">
-                    <template x-for="rule in failoverGeneratedRules" :key="'failover-draft:' + failoverPrimaryModel(rule)">
+                <div class="failover-draft-toolbar" x-show="!failoverGenerating && failoverGeneratedRules.length > 0">
+                    <div class="filter-input-wrap">
+                        <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                        <input type="text" class="filter-input" placeholder="Filter failover drafts..." aria-label="Filter failover drafts" x-model="failoverDraftFilter">
+                    </div>
+                    <button type="button"
+                            class="pagination-btn pagination-btn-with-icon failover-draft-toggle-all"
+                            :disabled="failoverDraftSaving"
+                            @click="toggleAllFailoverDrafts()">
+                        <i data-lucide="check" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="allFailoverDraftsSelected() ? 'Deselect all' : 'Select all'"></span>
+                    </button>
+                </div>
+
+                <div class="failover-draft-list" x-show="!failoverGenerating && filteredFailoverDrafts().length > 0" role="list">
+                    <template x-for="rule in filteredFailoverDrafts()" :key="'failover-draft:' + failoverPrimaryModel(rule)">
                         <label class="failover-draft-row" role="listitem">
                             <input type="checkbox"
                                    :checked="failoverDraftSelected(rule)"
@@ -262,13 +279,16 @@
                 <p class="form-hint failover-drafts-empty" x-show="!failoverGenerating && failoverGeneratedRules.length === 0 && !failoverError">
                     No failover suggestions were generated.
                 </p>
+                <p class="form-hint failover-drafts-empty" x-show="!failoverGenerating && failoverGeneratedRules.length > 0 && filteredFailoverDrafts().length === 0">
+                    No failover drafts match the filter.
+                </p>
                 <p class="form-error" x-show="failoverError" x-text="failoverError" role="alert" aria-live="assertive"></p>
 
                 <div class="form-actions failover-draft-actions">
                     <button type="button" class="pagination-btn" :disabled="failoverDraftSaving" @click="closeFailoverDraftsModal()">Cancel</button>
                     <button type="button"
                             class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
-                            :disabled="failoverGenerating || failoverDraftSaving || selectedFailoverDrafts().length === 0"
+                            :disabled="failoverGenerating || failoverDraftSaving || selectedFailoverDraftCount() === 0"
                             @click="saveSelectedFailoverDrafts()">
                         <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
                         <span x-text="failoverDraftSaving ? 'Saving...' : 'Save selected'"></span>

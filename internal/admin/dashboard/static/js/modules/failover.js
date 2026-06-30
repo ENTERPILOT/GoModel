@@ -11,6 +11,7 @@
             failoverGeneratedRules: [],
             failoverDraftsOpen: false,
             failoverDraftSelections: {},
+            failoverDraftFilter: '',
             failoverDraftSaving: false,
             failoverFormOpen: false,
             failoverFormMode: 'create',
@@ -35,6 +36,7 @@
                     this.failoverRules = [];
                     this.failoverGeneratedRules = [];
                     this.failoverDraftSelections = {};
+                    this.failoverDraftFilter = '';
                     this.failoverDraftsOpen = false;
                     this.failoverError = '';
                     this.failoverLoading = false;
@@ -292,13 +294,13 @@
 
             openFailoverResetDialog() {
                 this.openTypedConfirmationDialog({
-                    title: 'Reset failover models',
+                    title: 'Remove failover models',
                     titleId: 'failoverResetDialogTitle',
                     inputId: 'failover-reset-confirmation',
                     message: 'Remove every dashboard-managed failover mapping. Configuration-managed mappings remain active.',
-                    requiredText: 'reset',
-                    confirmLabel: 'Reset Failover',
-                    icon: 'rotate-ccw',
+                    requiredText: 'remove',
+                    confirmLabel: 'Remove Failover',
+                    icon: 'trash-2',
                     dialogClass: 'budget-reset-dialog',
                     loadingKey: 'failoverSaving',
                     errorKey: 'failoverError',
@@ -328,8 +330,9 @@
                     this.failoverRules = this.normalizeFailoverRules(payload);
                     this.failoverGeneratedRules = [];
                     this.failoverDraftSelections = {};
+                    this.failoverDraftFilter = '';
                     this.failoverDraftsOpen = false;
-                    this.failoverNotice = 'Dashboard-managed failover mappings reset.';
+                    this.failoverNotice = 'Dashboard-managed failover mappings removed.';
                     this.closeTypedConfirmationDialog();
                 } catch (e) {
                     console.error('Failed to reset failover mappings:', e);
@@ -346,6 +349,7 @@
                 this.failoverNotice = '';
                 this.failoverGeneratedRules = [];
                 this.failoverDraftSelections = {};
+                this.failoverDraftFilter = '';
                 this.failoverDraftsOpen = true;
                 try {
                     const request = this.adminRequestOptions({ method: 'POST' });
@@ -406,6 +410,40 @@
                 return this.failoverGeneratedRules.filter((rule) => this.failoverDraftSelected(rule));
             },
 
+            selectedFailoverDraftCount() {
+                return this.selectedFailoverDrafts().length;
+            },
+
+            failoverDraftCountLabel() {
+                return this.selectedFailoverDraftCount() + ' / ' + this.failoverGeneratedRules.length + ' selected';
+            },
+
+            allFailoverDraftsSelected() {
+                return this.failoverGeneratedRules.length > 0 && this.selectedFailoverDraftCount() === this.failoverGeneratedRules.length;
+            },
+
+            toggleAllFailoverDrafts() {
+                if (this.failoverDraftSaving || this.failoverGenerating || this.failoverGeneratedRules.length === 0) return;
+                if (this.allFailoverDraftsSelected()) {
+                    this.failoverDraftSelections = {};
+                    return;
+                }
+                this.selectAllFailoverDrafts(this.failoverGeneratedRules);
+            },
+
+            failoverDraftSearchText(rule) {
+                return [
+                    this.failoverPrimaryModel(rule),
+                    this.failoverTargets(rule).join(' ')
+                ].join(' ').toLowerCase();
+            },
+
+            filteredFailoverDrafts() {
+                const query = String(this.failoverDraftFilter || '').trim().toLowerCase();
+                if (!query) return this.failoverGeneratedRules;
+                return this.failoverGeneratedRules.filter((rule) => this.failoverDraftSearchText(rule).includes(query));
+            },
+
             failoverDraftPayload(rule) {
                 return {
                     primary_model: this.failoverPrimaryModel(rule),
@@ -449,6 +487,7 @@
                     this.failoverDraftsOpen = false;
                     this.failoverGeneratedRules = [];
                     this.failoverDraftSelections = {};
+                    this.failoverDraftFilter = '';
                     await this.fetchFailoverRules();
                 } catch (e) {
                     console.error('Failed to save generated failover mappings:', e);
