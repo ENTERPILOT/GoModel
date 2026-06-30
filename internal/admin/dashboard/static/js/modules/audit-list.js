@@ -572,6 +572,48 @@
                 return this.auditDefaultPaneTab(entry);
             },
 
+            // auditTabKeydown implements roving-tabindex keyboard navigation for the
+            // request/response tablist: Left/Up select the previous tab, Right/Down
+            // the next (wrapping), Home/End jump to the ends. It returns the tab id
+            // to activate (and moves DOM focus there), or null for unhandled keys so
+            // the caller can keep the current selection.
+            auditTabKeydown(event, entry, currentId) {
+                const ids = this.auditPanes(entry).map((p) => p.id);
+                if (!ids.length) return null;
+                let idx = ids.indexOf(currentId);
+                if (idx < 0) idx = 0;
+                let next = idx;
+                switch (event.key) {
+                    case 'ArrowRight':
+                    case 'ArrowDown':
+                        next = (idx + 1) % ids.length;
+                        break;
+                    case 'ArrowLeft':
+                    case 'ArrowUp':
+                        next = (idx - 1 + ids.length) % ids.length;
+                        break;
+                    case 'Home':
+                        next = 0;
+                        break;
+                    case 'End':
+                        next = ids.length - 1;
+                        break;
+                    default:
+                        return null;
+                }
+                event.preventDefault();
+                const tablist = event.currentTarget && event.currentTarget.closest
+                    ? event.currentTarget.closest('.audit-pane-tablist')
+                    : null;
+                if (tablist) {
+                    const buttons = tablist.querySelectorAll('.audit-pane-tab');
+                    if (buttons[next] && typeof buttons[next].focus === 'function') {
+                        buttons[next].focus();
+                    }
+                }
+                return ids[next];
+            },
+
             formatJSON(v) {
                 if (v == null || v === undefined || v === '') return 'Not captured';
 

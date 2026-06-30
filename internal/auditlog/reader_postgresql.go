@@ -253,74 +253,88 @@ func (r *PostgreSQLReader) findByPreviousResponseID(ctx context.Context, previou
 }
 
 func (r *PostgreSQLReader) loadAttempts(ctx context.Context, entries []LogEntry) error {
-	for i := range entries {
-		rows, err := r.pool.Query(ctx, `
-			SELECT seq, kind, provider_type, provider_name, model, status_code, success,
-				error_type, error_code, error_message, response_body, response_headers, started_at, duration_ns
-			FROM audit_log_attempts
-			WHERE audit_log_id::text = $1
-			ORDER BY seq ASC
-		`, entries[i].ID)
-		if err != nil {
-			return fmt.Errorf("failed to query audit log attempts: %w", err)
-		}
+	if len(entries) == 0 {
+		return nil
+	}
 
-		attempts := make([]AttemptSnapshot, 0)
-		for rows.Next() {
-			var attempt AttemptSnapshot
-			var providerType, providerName, model *string
-			var errorType, errorCode, errorMessage *string
-			var responseBody, responseHeaders *string
-			var startedAt *time.Time
-			if err := rows.Scan(
-				&attempt.Seq,
-				&attempt.Kind,
-				&providerType,
-				&providerName,
-				&model,
-				&attempt.StatusCode,
-				&attempt.Success,
-				&errorType,
-				&errorCode,
-				&errorMessage,
-				&responseBody,
-				&responseHeaders,
-				&startedAt,
-				&attempt.DurationNs,
-			); err != nil {
-				rows.Close()
-				return fmt.Errorf("failed to scan audit log attempt: %w", err)
-			}
-			attempt.ResponseBody = unmarshalAttemptBody(responseBody)
-			attempt.ResponseHeaders = unmarshalAttemptHeaders(responseHeaders)
-			if providerType != nil {
-				attempt.ProviderType = *providerType
-			}
-			if providerName != nil {
-				attempt.ProviderName = *providerName
-			}
-			if model != nil {
-				attempt.Model = *model
-			}
-			if errorType != nil {
-				attempt.ErrorType = *errorType
-			}
-			if errorCode != nil {
-				attempt.ErrorCode = *errorCode
-			}
-			if errorMessage != nil {
-				attempt.ErrorMessage = *errorMessage
-			}
-			if startedAt != nil {
-				attempt.StartedAt = *startedAt
-			}
-			attempts = append(attempts, attempt)
+	// Batch all entries into a single query keyed by audit_log_id to avoid an
+	// N+1 read (one query per returned log) when hydrating a page of entries.
+	ids := make([]string, len(entries))
+	index := make(map[string]int, len(entries))
+	for i := range entries {
+		ids[i] = entries[i].ID
+		index[entries[i].ID] = i
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT audit_log_id::text, seq, kind, provider_type, provider_name, model, status_code, success,
+			error_type, error_code, error_message, response_body, response_headers, started_at, duration_ns
+		FROM audit_log_attempts
+		WHERE audit_log_id::text = ANY($1)
+		ORDER BY audit_log_id ASC, seq ASC
+	`, ids)
+	if err != nil {
+		return fmt.Errorf("failed to query audit log attempts: %w", err)
+	}
+	defer rows.Close()
+
+	grouped := make(map[string][]AttemptSnapshot, len(entries))
+	for rows.Next() {
+		var auditLogID string
+		var attempt AttemptSnapshot
+		var providerType, providerName, model *string
+		var errorType, errorCode, errorMessage *string
+		var responseBody, responseHeaders *string
+		var startedAt *time.Time
+		if err := rows.Scan(
+			&auditLogID,
+			&attempt.Seq,
+			&attempt.Kind,
+			&providerType,
+			&providerName,
+			&model,
+			&attempt.StatusCode,
+			&attempt.Success,
+			&errorType,
+			&errorCode,
+			&errorMessage,
+			&responseBody,
+			&responseHeaders,
+			&startedAt,
+			&attempt.DurationNs,
+		); err != nil {
+			return fmt.Errorf("failed to scan audit log attempt: %w", err)
 		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("error iterating audit log attempts: %w", err)
+		attempt.ResponseBody = unmarshalAttemptBody(responseBody)
+		attempt.ResponseHeaders = unmarshalAttemptHeaders(responseHeaders)
+		if providerType != nil {
+			attempt.ProviderType = *providerType
 		}
-		if len(attempts) > 0 {
+		if providerName != nil {
+			attempt.ProviderName = *providerName
+		}
+		if model != nil {
+			attempt.Model = *model
+		}
+		if errorType != nil {
+			attempt.ErrorType = *errorType
+		}
+		if errorCode != nil {
+			attempt.ErrorCode = *errorCode
+		}
+		if errorMessage != nil {
+			attempt.ErrorMessage = *errorMessage
+		}
+		if startedAt != nil {
+			attempt.StartedAt = *startedAt
+		}
+		grouped[auditLogID] = append(grouped[auditLogID], attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating audit log attempts: %w", err)
+	}
+
+	for id, attempts := range grouped {
+		if i, ok := index[id]; ok && len(attempts) > 0 {
 			ensureLogData(&entries[i]).Attempts = normalizeAttemptSnapshots(attempts)
 		}
 	}

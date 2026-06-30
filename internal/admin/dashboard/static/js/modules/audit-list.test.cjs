@@ -825,3 +825,44 @@ test('auditPaneState marks copy failures and clears the error after reset', asyn
     assert.equal(paneState.copyBodyState.copied, false);
     assert.equal(paneState.copyBodyState.error, false);
 });
+
+test('auditTabKeydown roves the tablist with arrow and home/end keys', () => {
+    const module = createAuditListModule();
+    const entry = {
+        data: {
+            request_body: { model: 'gpt-5' },
+            response_body: { ok: true }
+        }
+    };
+
+    // A plain entry (no failed attempts) yields exactly the request + response tabs.
+    assert.equal(module.auditPanes(entry).map((p) => p.id).join(','), 'request,response');
+
+    const press = (key, currentId) => {
+        let prevented = false;
+        const event = {
+            key,
+            preventDefault() {
+                prevented = true;
+            },
+            currentTarget: { closest: () => null }
+        };
+        const result = module.auditTabKeydown(event, entry, currentId);
+        return { result, prevented };
+    };
+
+    // Next/previous, wrapping at the ends.
+    assert.deepEqual(press('ArrowRight', 'request'), { result: 'response', prevented: true });
+    assert.deepEqual(press('ArrowDown', 'request'), { result: 'response', prevented: true });
+    assert.deepEqual(press('ArrowRight', 'response'), { result: 'request', prevented: true });
+    assert.deepEqual(press('ArrowLeft', 'request'), { result: 'response', prevented: true });
+    assert.deepEqual(press('ArrowUp', 'request'), { result: 'response', prevented: true });
+
+    // Home/End jump to the ends.
+    assert.deepEqual(press('Home', 'response'), { result: 'request', prevented: true });
+    assert.deepEqual(press('End', 'request'), { result: 'response', prevented: true });
+
+    // Unhandled keys leave the selection untouched and do not swallow the event.
+    assert.deepEqual(press('Tab', 'request'), { result: null, prevented: false });
+    assert.deepEqual(press('a', 'request'), { result: null, prevented: false });
+});

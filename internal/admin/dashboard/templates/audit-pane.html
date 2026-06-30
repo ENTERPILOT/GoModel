@@ -4,8 +4,12 @@
         <h5>Error Message</h5>
         <pre class="audit-json audit-pane-error-message"
              :class="{ 'audit-pane-clickable-preview': canShowConversation(pane.entry) }"
+             :role="canShowConversation(pane.entry) ? 'button' : null"
+             :tabindex="canShowConversation(pane.entry) ? '0' : null"
              x-text="pane.errorMessage"
              @mousedown="startBodyInteraction($event)"
+             @keydown.enter.prevent="handleErrorConversationClick($event, pane.entry)"
+             @keydown.space.prevent="handleErrorConversationClick($event, pane.entry)"
              @click="handleErrorConversationClick($event, pane.entry)"></pre>
     </div>
     <div class="audit-pane-block audit-pane-block-headers" x-show="pane.showHeaders">

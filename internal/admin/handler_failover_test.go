@@ -178,6 +178,83 @@ func TestGenerateFailoverRulesFiltersByPrimaryModel(t *testing.T) {
 	}
 }
 
+func TestUpsertAndDeleteFailoverRuleLifecycle(t *testing.T) {
+	store := newFailoverHandlerTestStore()
+	service := newFailoverHandlerTestService(t, store)
+	h := NewHandler(
+		nil,
+		nil,
+		WithFailover(service),
+		WithDashboardRuntimeConfig(DashboardConfigResponse{FailoverEnabled: "on"}),
+	)
+	e := echo.New()
+	h.RegisterRoutes(e.Group("/admin"))
+
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Creating a rule returns 200 with the persisted view.
+	rec := do(http.MethodPut, "/admin/failover", `{"primary_model":"openai/gpt-4.1","fallback_models":["anthropic/claude-3-haiku"],"enabled":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upsert status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var view failoverrules.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode upsert response: %v", err)
+	}
+	if view.Source != "openai/gpt-4.1" {
+		t.Fatalf("view.Source = %q, want openai/gpt-4.1", view.Source)
+	}
+	if _, ok := store.rows["openai/gpt-4.1"]; !ok {
+		t.Fatal("upsert did not persist the rule")
+	}
+
+	// Deleting an existing rule returns 204 and removes it.
+	rec = do(http.MethodDelete, "/admin/failover", `{"primary_model":"openai/gpt-4.1"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204 body=%s", rec.Code, rec.Body.String())
+	}
+	if _, ok := store.rows["openai/gpt-4.1"]; ok {
+		t.Fatal("delete did not remove the rule")
+	}
+
+	// Deleting a missing rule maps ErrNotFound to 404.
+	rec = do(http.MethodDelete, "/admin/failover", `{"primary_model":"openai/gpt-4.1"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("delete-missing status = %d, want 404 body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGenerateFailoverRulesRejectsInvalidBody(t *testing.T) {
+	// The registry only needs to be non-nil: an invalid body is rejected before
+	// any model resolution runs, so no provider initialization is required.
+	registry := providers.NewModelRegistry()
+	service := newFailoverHandlerTestService(t, newFailoverHandlerTestStore())
+	h := NewHandler(
+		nil,
+		registry,
+		WithFailover(service),
+		WithDashboardRuntimeConfig(DashboardConfigResponse{FailoverEnabled: "on"}),
+	)
+	e := echo.New()
+	h.RegisterRoutes(e.Group("/admin"))
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/failover/generate", bytes.NewBufferString(`{not-json`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func failoverSuggestionTestModel(id string, elo float64) core.Model {
 	return core.Model{
 		ID: id,

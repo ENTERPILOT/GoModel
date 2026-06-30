@@ -100,6 +100,10 @@
                                         <button type="button" class="audit-pane-tab"
                                             :class="{ 'audit-pane-tab-active': auditEffectiveTab(active, entry) === p.id }"
                                             role="tab" :aria-selected="(auditEffectiveTab(active, entry) === p.id).toString()"
+                                            :id="'audit-tab-' + entry.id + '-' + p.id"
+                                            :aria-controls="'audit-tabpanel-' + entry.id + '-' + p.id"
+                                            :tabindex="auditEffectiveTab(active, entry) === p.id ? '0' : '-1'"
+                                            @keydown="active = (auditTabKeydown($event, entry, p.id) ?? active)"
                                             @click="active = p.id">
                                             <span class="audit-pane-icon" :class="'audit-pane-icon-' + (p.pane.direction || '')" aria-hidden="true">
                                                 <template x-if="p.pane.direction === 'request'">
@@ -118,6 +122,8 @@
                                 </div>
                                 <template x-for="p in auditPanes(entry)" :key="p.id">
                                     <div class="audit-pane-tabpanel" x-show="auditEffectiveTab(active, entry) === p.id" role="tabpanel"
+                                        :id="'audit-tabpanel-' + entry.id + '-' + p.id"
+                                        :aria-labelledby="'audit-tab-' + entry.id + '-' + p.id"
                                         x-transition:enter="audit-tabpanel-enter"
                                         x-transition:enter-start="audit-tabpanel-enter-start"
                                         x-transition:enter-end="audit-tabpanel-enter-end">

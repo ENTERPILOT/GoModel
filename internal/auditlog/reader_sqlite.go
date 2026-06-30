@@ -336,85 +336,98 @@ func (r *SQLiteReader) findByPreviousResponseID(ctx context.Context, previousRes
 }
 
 func (r *SQLiteReader) loadAttempts(ctx context.Context, entries []LogEntry) error {
-	for i := range entries {
-		rows, err := r.db.QueryContext(ctx, `
-			SELECT seq, kind, provider_type, provider_name, model, status_code, success,
-				error_type, error_code, error_message, response_body, response_headers, started_at, duration_ns
-			FROM audit_log_attempts
-			WHERE audit_log_id = ?
-			ORDER BY seq ASC
-		`, entries[i].ID)
-		if err != nil {
-			if isMissingSQLiteAuditAttemptsTable(err) {
-				return nil
-			}
-			return fmt.Errorf("failed to query audit log attempts: %w", err)
-		}
+	if len(entries) == 0 {
+		return nil
+	}
 
-		attempts := make([]AttemptSnapshot, 0)
-		for rows.Next() {
-			var attempt AttemptSnapshot
-			var providerType, providerName, model sql.NullString
-			var errorType, errorCode, errorMessage sql.NullString
-			var responseBody, responseHeaders sql.NullString
-			var startedAt sql.NullString
-			var successInt int
-			if err := rows.Scan(
-				&attempt.Seq,
-				&attempt.Kind,
-				&providerType,
-				&providerName,
-				&model,
-				&attempt.StatusCode,
-				&successInt,
-				&errorType,
-				&errorCode,
-				&errorMessage,
-				&responseBody,
-				&responseHeaders,
-				&startedAt,
-				&attempt.DurationNs,
-			); err != nil {
-				_ = rows.Close()
-				return fmt.Errorf("failed to scan audit log attempt: %w", err)
-			}
-			attempt.Success = successInt == 1
-			if responseBody.Valid {
-				attempt.ResponseBody = unmarshalAttemptBody(&responseBody.String)
-			}
-			if responseHeaders.Valid {
-				attempt.ResponseHeaders = unmarshalAttemptHeaders(&responseHeaders.String)
-			}
-			if providerType.Valid {
-				attempt.ProviderType = providerType.String
-			}
-			if providerName.Valid {
-				attempt.ProviderName = providerName.String
-			}
-			if model.Valid {
-				attempt.Model = model.String
-			}
-			if errorType.Valid {
-				attempt.ErrorType = errorType.String
-			}
-			if errorCode.Valid {
-				attempt.ErrorCode = errorCode.String
-			}
-			if errorMessage.Valid {
-				attempt.ErrorMessage = errorMessage.String
-			}
-			if startedAt.Valid {
-				attempt.StartedAt = parseSQLTimestamp(startedAt.String, entries[i].ID)
-			}
-			attempts = append(attempts, attempt)
+	// Batch all entries into a single query keyed by audit_log_id to avoid an
+	// N+1 read (one query per returned log) when hydrating a page of entries.
+	ids := make([]any, len(entries))
+	index := make(map[string]int, len(entries))
+	for i := range entries {
+		ids[i] = entries[i].ID
+		index[entries[i].ID] = i
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT audit_log_id, seq, kind, provider_type, provider_name, model, status_code, success,
+			error_type, error_code, error_message, response_body, response_headers, started_at, duration_ns
+		FROM audit_log_attempts
+		WHERE audit_log_id IN (%s)
+		ORDER BY audit_log_id ASC, seq ASC
+	`, placeholders), ids...)
+	if err != nil {
+		if isMissingSQLiteAuditAttemptsTable(err) {
+			return nil
 		}
-		if err := rows.Close(); err != nil {
-			return fmt.Errorf("failed to close audit log attempts rows: %w", err)
+		return fmt.Errorf("failed to query audit log attempts: %w", err)
+	}
+	defer rows.Close()
+
+	grouped := make(map[string][]AttemptSnapshot, len(entries))
+	for rows.Next() {
+		var auditLogID string
+		var attempt AttemptSnapshot
+		var providerType, providerName, model sql.NullString
+		var errorType, errorCode, errorMessage sql.NullString
+		var responseBody, responseHeaders sql.NullString
+		var startedAt sql.NullString
+		var successInt int
+		if err := rows.Scan(
+			&auditLogID,
+			&attempt.Seq,
+			&attempt.Kind,
+			&providerType,
+			&providerName,
+			&model,
+			&attempt.StatusCode,
+			&successInt,
+			&errorType,
+			&errorCode,
+			&errorMessage,
+			&responseBody,
+			&responseHeaders,
+			&startedAt,
+			&attempt.DurationNs,
+		); err != nil {
+			return fmt.Errorf("failed to scan audit log attempt: %w", err)
 		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("error iterating audit log attempts: %w", err)
+		attempt.Success = successInt == 1
+		if responseBody.Valid {
+			attempt.ResponseBody = unmarshalAttemptBody(&responseBody.String)
 		}
-		if len(attempts) > 0 {
+		if responseHeaders.Valid {
+			attempt.ResponseHeaders = unmarshalAttemptHeaders(&responseHeaders.String)
+		}
+		if providerType.Valid {
+			attempt.ProviderType = providerType.String
+		}
+		if providerName.Valid {
+			attempt.ProviderName = providerName.String
+		}
+		if model.Valid {
+			attempt.Model = model.String
+		}
+		if errorType.Valid {
+			attempt.ErrorType = errorType.String
+		}
+		if errorCode.Valid {
+			attempt.ErrorCode = errorCode.String
+		}
+		if errorMessage.Valid {
+			attempt.ErrorMessage = errorMessage.String
+		}
+		if startedAt.Valid {
+			attempt.StartedAt = parseSQLTimestamp(startedAt.String, auditLogID)
+		}
+		grouped[auditLogID] = append(grouped[auditLogID], attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating audit log attempts: %w", err)
+	}
+
+	for id, attempts := range grouped {
+		if i, ok := index[id]; ok && len(attempts) > 0 {
 			ensureLogData(&entries[i]).Attempts = normalizeAttemptSnapshots(attempts)
 		}
 	}

@@ -952,6 +952,24 @@ test("audit entry metadata is rendered as a labeled pill row at the bottom of th
     auditEntry,
     /<div class="audit-pane-tabpanel" x-show="auditEffectiveTab\(active, entry\) === p\.id"/,
   );
+  // Tabs expose the full ARIA contract: id/aria-controls pairing, roving
+  // tabindex, and keyboard navigation; panels point back via aria-labelledby.
+  assert.match(
+    auditEntry,
+    /:aria-controls="'audit-tabpanel-' \+ entry\.id \+ '-' \+ p\.id"/,
+  );
+  assert.match(
+    auditEntry,
+    /:tabindex="auditEffectiveTab\(active, entry\) === p\.id \? '0' : '-1'"/,
+  );
+  assert.match(
+    auditEntry,
+    /@keydown="active = \(auditTabKeydown\(\$event, entry, p\.id\) \?\? active\)"/,
+  );
+  assert.match(
+    auditEntry,
+    /:aria-labelledby="'audit-tab-' \+ entry\.id \+ '-' \+ p\.id"/,
+  );
   assert.match(
     auditEntry,
     /<span class="audit-entry-metadata-label">Metadata:<\/span>/,
