@@ -199,22 +199,35 @@ func ShouldAttemptFallback(err error) bool {
 	}
 
 	message := strings.ToLower(strings.TrimSpace(gatewayErr.Message))
-	if !strings.Contains(message, "model") {
-		return false
+	if strings.Contains(message, "model") {
+		for _, fragment := range []string{
+			"not found",
+			"does not exist",
+			"unsupported",
+			"unavailable",
+			"not available",
+			"deprecated",
+			"retired",
+			"disabled",
+		} {
+			if strings.Contains(message, fragment) {
+				return true
+			}
+		}
 	}
 
-	for _, fragment := range []string{
-		"not found",
-		"does not exist",
-		"unsupported",
-		"unavailable",
-		"not available",
-		"deprecated",
-		"retired",
-		"disabled",
-	} {
-		if strings.Contains(message, fragment) {
-			return true
+	if status == http.StatusNotFound {
+		for _, fragment := range []string{
+			"unsupported",
+			"unavailable",
+			"not available",
+			"deprecated",
+			"retired",
+			"disabled",
+		} {
+			if strings.Contains(message, fragment) {
+				return true
+			}
 		}
 	}
 
