@@ -582,7 +582,7 @@
                 if (!ids.length) return null;
                 let idx = ids.indexOf(currentId);
                 if (idx < 0) idx = 0;
-                let next = idx;
+                let next;
                 switch (event.key) {
                     case 'ArrowRight':
                     case 'ArrowDown':

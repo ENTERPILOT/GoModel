@@ -45,6 +45,9 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 				WHERE table_schema = current_schema() AND table_name = 'failover_rules' AND column_name = 'primary_model'
 			) THEN
 				ALTER TABLE failover_rules RENAME COLUMN source TO primary_model;
+				UPDATE failover_rules
+				SET primary_model = btrim(primary_model)
+				WHERE primary_model <> btrim(primary_model);
 			END IF;
 			IF EXISTS (
 				SELECT 1 FROM information_schema.columns
