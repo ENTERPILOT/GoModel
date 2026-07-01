@@ -48,6 +48,14 @@ func tryFailoverResponse[T any](
 ) (T, string, string, string, bool, error) {
 	var zero T
 
+	// A canceled or expired context means the client is gone or the deadline
+	// passed. A failover call on a done context can never succeed; attempting one
+	// only wastes attempts and charges spurious failures to healthy failover
+	// providers' circuit breakers. Short-circuit to the primary error instead.
+	if ctx.Err() != nil {
+		return zero, "", "", "", false, primaryErr
+	}
+
 	failovers := o.FailoverSelectors(workflow)
 	if len(failovers) == 0 || !ShouldAttemptFailover(primaryErr) {
 		return zero, "", "", "", false, primaryErr
@@ -57,6 +65,10 @@ func tryFailoverResponse[T any](
 	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
 	lastErr := primaryErr
 	for _, selector := range failovers {
+		// Stop sweeping if the client disconnected mid-failover.
+		if ctx.Err() != nil {
+			break
+		}
 		if o.modelAuthorizer != nil && !o.modelAuthorizer.AllowsModel(ctx, selector) {
 			continue
 		}
@@ -144,6 +156,12 @@ func tryFailoverStream(
 	primaryErr error,
 	call func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error),
 ) (io.ReadCloser, string, string, string, string, error) {
+	// See tryFailoverResponse: never sweep failover targets once the context is
+	// done, or the doomed attempts pollute healthy providers' circuit breakers.
+	if ctx.Err() != nil {
+		return nil, "", "", "", "", primaryErr
+	}
+
 	failovers := o.FailoverSelectors(workflow)
 	if len(failovers) == 0 || !ShouldAttemptFailover(primaryErr) {
 		return nil, "", "", "", "", primaryErr
@@ -153,6 +171,10 @@ func tryFailoverStream(
 	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
 	lastErr := primaryErr
 	for _, selector := range failovers {
+		// Stop sweeping if the client disconnected mid-failover.
+		if ctx.Err() != nil {
+			break
+		}
 		if o.modelAuthorizer != nil && !o.modelAuthorizer.AllowsModel(ctx, selector) {
 			continue
 		}
