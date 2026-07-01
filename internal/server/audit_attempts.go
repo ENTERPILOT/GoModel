@@ -13,6 +13,11 @@ func enrichAuditEntryWithProviderAttempts(c *echo.Context) {
 	if c == nil || c.Request() == nil {
 		return
 	}
+	// Without an audit entry (audit logging disabled) the snapshot conversion
+	// below — including per-attempt body capture — would be discarded anyway.
+	if auditlog.GetStreamEntryFromContext(c) == nil {
+		return
+	}
 	attempts := auditAttemptsFromGateway(c.Request().Context())
 	if len(attempts) == 0 {
 		return

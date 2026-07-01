@@ -434,8 +434,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// fraction of its former map[string]any-per-chunk cost (was 202/19.6KB).
 			name:      "openai_responses_stream_converter",
 			bench:     BenchmarkOpenAIResponsesStreamConverter,
-			maxAllocs: 91,        // baseline 86
-			maxBytes:  15 * 1024, // baseline ~13.7 KB
+			maxAllocs: 91,        // baseline 85
+			maxBytes:  12 * 1024, // baseline ~9.7 KB (leaves headroom for pool cold-starts)
 		},
 		{
 			name:      "shared_stream_audit_and_usage_observers",

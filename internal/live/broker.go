@@ -414,6 +414,8 @@ func deleteActiveSnapshotAliases(snapshots map[string]Event, keys activeSnapshot
 	}
 }
 
+// mergeEventData recursively merges two JSON objects, with patch members
+// winning on conflict. Whenever either side is not a JSON object, patch wins.
 func mergeEventData(base, patch json.RawMessage) json.RawMessage {
 	var baseObject map[string]json.RawMessage
 	var patchObject map[string]json.RawMessage
@@ -424,29 +426,7 @@ func mergeEventData(base, patch json.RawMessage) json.RawMessage {
 		return append(json.RawMessage(nil), patch...)
 	}
 	for key, value := range patchObject {
-		baseObject[key] = mergeEventDataValue(baseObject[key], value)
-	}
-	merged, err := json.Marshal(baseObject)
-	if err != nil {
-		return append(json.RawMessage(nil), patch...)
-	}
-	return merged
-}
-
-func mergeEventDataValue(base, patch json.RawMessage) json.RawMessage {
-	if len(base) == 0 || len(patch) == 0 {
-		return append(json.RawMessage(nil), patch...)
-	}
-	var baseObject map[string]json.RawMessage
-	var patchObject map[string]json.RawMessage
-	if err := json.Unmarshal(base, &baseObject); err != nil || baseObject == nil {
-		return append(json.RawMessage(nil), patch...)
-	}
-	if err := json.Unmarshal(patch, &patchObject); err != nil || patchObject == nil {
-		return append(json.RawMessage(nil), patch...)
-	}
-	for key, value := range patchObject {
-		baseObject[key] = mergeEventDataValue(baseObject[key], value)
+		baseObject[key] = mergeEventData(baseObject[key], value)
 	}
 	merged, err := json.Marshal(baseObject)
 	if err != nil {
