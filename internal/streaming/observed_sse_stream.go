@@ -24,6 +24,15 @@ type Observer interface {
 	OnStreamClose()
 }
 
+// EventFilter is an optional Observer extension. Observers that consume only
+// specific payloads can report disinterest from the raw event bytes; when no
+// observer wants an event, the stream skips JSON decoding entirely. Filters
+// must under-approximate disinterest only: an observer may still receive
+// events it did not ask for when another observer wants them.
+type EventFilter interface {
+	WantsJSONEvent(raw []byte) bool
+}
+
 // ObservedSSEStream proxies bytes unchanged while parsing SSE JSON events once
 // and fanning them out to observers.
 type ObservedSSEStream struct {
@@ -165,6 +174,15 @@ func (s *ObservedSSEStream) processBufferedEvents(data []byte) {
 }
 
 func (s *ObservedSSEStream) processEvent(event []byte) {
+	// Fast path: a single-line event (the common shape for chat SSE) needs no
+	// line splitting or payload joining.
+	if bytes.IndexByte(event, '\n') == -1 {
+		if jsonData, ok := parseDataLine(event); ok {
+			s.dispatchPayload(jsonData)
+		}
+		return
+	}
+
 	lines := bytes.Split(event, []byte("\n"))
 	payloadLines := make([][]byte, 0, len(lines))
 	for _, line := range lines {
@@ -177,9 +195,14 @@ func (s *ObservedSSEStream) processEvent(event []byte) {
 	if len(payloadLines) == 0 {
 		return
 	}
+	s.dispatchPayload(bytes.Join(payloadLines, []byte("\n")))
+}
 
-	jsonData := bytes.Join(payloadLines, []byte("\n"))
+func (s *ObservedSSEStream) dispatchPayload(jsonData []byte) {
 	if bytes.Equal(jsonData, donePayload) {
+		return
+	}
+	if !s.payloadWanted(jsonData) {
 		return
 	}
 
@@ -190,6 +213,16 @@ func (s *ObservedSSEStream) processEvent(event []byte) {
 	for _, observer := range s.observers {
 		observer.OnJSONEvent(payload)
 	}
+}
+
+func (s *ObservedSSEStream) payloadWanted(jsonData []byte) bool {
+	for _, observer := range s.observers {
+		filter, ok := observer.(EventFilter)
+		if !ok || filter.WantsJSONEvent(jsonData) {
+			return true
+		}
+	}
+	return false
 }
 
 func nextEventBoundary(data []byte) (idx int, sepLen int) {

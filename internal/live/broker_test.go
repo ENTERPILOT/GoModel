@@ -141,11 +141,11 @@ func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.publish(EventAuditUpdated, "", now, map[string]any{
+	b.publish(EventAuditUpdated, "audit-1", "", now, map[string]any{
 		"id":     "audit-1",
 		"method": "POST",
 	})
-	b.publish(EventAuditUpdated, "req-1", now.Add(time.Second), map[string]any{
+	b.publish(EventAuditUpdated, "audit-1", "req-1", now.Add(time.Second), map[string]any{
 		"id":         "audit-1",
 		"request_id": "req-1",
 		"provider":   "openai",
@@ -168,7 +168,7 @@ func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
 		t.Fatalf("snapshot provider = %v, want openai", got)
 	}
 
-	b.publish(EventAuditFlushed, "", now.Add(2*time.Second), map[string]any{
+	b.publish(EventAuditFlushed, "audit-1", "req-1", now.Add(2*time.Second), map[string]any{
 		"id":         "audit-1",
 		"request_id": "req-1",
 	})
@@ -186,11 +186,11 @@ func TestBrokerNormalizesUsageActiveSnapshotAliases(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.publish(EventUsageCompleted, "req-1", now, map[string]any{
+	b.publish(EventUsageCompleted, "", "req-1", now, map[string]any{
 		"request_id":   "req-1",
 		"total_tokens": 14,
 	})
-	b.publish(EventUsageCompleted, "", now.Add(time.Second), map[string]any{
+	b.publish(EventUsageCompleted, "usage-1", "req-1", now.Add(time.Second), map[string]any{
 		"id":         "usage-1",
 		"request_id": "req-1",
 		"model":      "gpt-test",
@@ -213,7 +213,7 @@ func TestBrokerNormalizesUsageActiveSnapshotAliases(t *testing.T) {
 		t.Fatalf("snapshot model = %v, want gpt-test", got)
 	}
 
-	b.publish(EventUsageFlushed, "", now.Add(2*time.Second), map[string]any{
+	b.publish(EventUsageFlushed, "usage-1", "req-1", now.Add(2*time.Second), map[string]any{
 		"id":         "usage-1",
 		"request_id": "req-1",
 	})
@@ -752,4 +752,26 @@ func eventPayload(t *testing.T, event Event) map[string]any {
 		t.Fatalf("unmarshal event payload: %v", err)
 	}
 	return payload
+}
+
+// BenchmarkBrokerPublishSteadyState measures publish cost once the replay
+// buffer is full — the steady state under sustained traffic.
+func BenchmarkBrokerPublishSteadyState(b *testing.B) {
+	broker := NewBroker(Config{Enabled: true, BufferSize: 10000, ReplayLimit: 1000})
+	entry := &usage.UsageEntry{
+		ID:        "usage-bench",
+		RequestID: "req-bench",
+		Timestamp: time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC),
+		Model:     "gpt-test",
+		Provider:  "openai",
+	}
+	for i := 0; i < 10001; i++ {
+		broker.PublishUsageEvent(EventUsageFlushed, entry)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		broker.PublishUsageEvent(EventUsageFlushed, entry)
+	}
 }

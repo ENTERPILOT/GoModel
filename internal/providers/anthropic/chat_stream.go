@@ -3,7 +3,6 @@ package anthropic
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -44,6 +43,7 @@ type streamConverter struct {
 	body              io.ReadCloser
 	model             string
 	msgID             string
+	created           int64
 	nextToolCallIndex int
 	toolCalls         map[int]*streamToolCallState
 	thinkingBlocks    map[int]bool // tracks which content block indices are thinking blocks
@@ -68,6 +68,7 @@ func newStreamConverter(body io.ReadCloser, model string) *streamConverter {
 		reader:         bufio.NewReader(body),
 		body:           body,
 		model:          model,
+		created:        time.Now().Unix(),
 		toolCalls:      make(map[int]*streamToolCallState),
 		thinkingBlocks: make(map[int]bool),
 		buffer:         streaming.NewStreamBuffer(1024),
@@ -162,7 +163,7 @@ func (sc *streamConverter) formatChatChunk(delta map[string]any, finishReason an
 	chunk := map[string]any{
 		"id":       sc.msgID,
 		"object":   "chat.completion.chunk",
-		"created":  time.Now().Unix(),
+		"created":  sc.created,
 		"model":    sc.model,
 		"provider": "anthropic",
 		"choices": []map[string]any{
@@ -183,7 +184,7 @@ func (sc *streamConverter) formatChatChunk(delta map[string]any, finishReason an
 		return ""
 	}
 
-	return fmt.Sprintf("data: %s\n\n", jsonData)
+	return "data: " + string(jsonData) + "\n\n"
 }
 
 func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {

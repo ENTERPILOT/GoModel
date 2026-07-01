@@ -643,12 +643,12 @@ func splitModelSelector(model string) (providerName, modelID string) {
 	if model == "" {
 		return "", ""
 	}
-	parts := strings.SplitN(model, "/", 2)
-	if len(parts) != 2 {
+	before, after, found := strings.Cut(model, "/")
+	if !found {
 		return "", model
 	}
-	providerName = strings.TrimSpace(parts[0])
-	modelID = strings.TrimSpace(parts[1])
+	providerName = strings.TrimSpace(before)
+	modelID = strings.TrimSpace(after)
 	if providerName == "" || modelID == "" {
 		return "", model
 	}

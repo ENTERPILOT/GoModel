@@ -23,7 +23,10 @@ resolution.
 
 `BenchmarkGatewayHotPathChatCompletionRouted` wires a real `Router` +
 `ModelRegistry` (the production shape) with a representative catalog, so it
-covers the per-request resolution path. This routed path currently allocates an
-order of magnitude more per request because resolution re-copies the full model
-catalog several times; its guard ceilings should tighten significantly once
-resolution is computed once per request and reused.
+covers the per-request resolution path. Resolution goes through an O(1)
+selector index, so the routed path costs only a few allocations more than the
+bare one and is independent of catalog size.
+
+`BenchmarkSharedStreamingObserversDefaultConfig` covers streaming observation
+with audit body capture disabled (the default), where the observed stream
+skips JSON decoding for chunks no observer wants.

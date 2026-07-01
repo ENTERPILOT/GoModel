@@ -321,6 +321,48 @@ func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
 	}
 }
 
+// BenchmarkSharedStreamingObserversDefaultConfig mirrors the observer
+// benchmark above with audit body capture disabled — the default
+// configuration, where the stream can skip decoding content-delta chunks.
+func BenchmarkSharedStreamingObserversDefaultConfig(b *testing.B) {
+	auditLogger := benchAuditLogger{cfg: auditlog.Config{Enabled: true}}
+	usageLogger := benchUsageLogger{cfg: usage.Config{Enabled: true}}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		entry := &auditlog.LogEntry{
+			ID:        "audit-bench",
+			Timestamp: time.Unix(1700000000, 0),
+			RequestID: "req-bench",
+			Method:    http.MethodPost,
+			Path:      "/v1/chat/completions",
+			Data:      &auditlog.LogData{},
+		}
+
+		stream := streaming.NewObservedSSEStream(
+			io.NopCloser(strings.NewReader(sampleChatStream)),
+			auditlog.NewStreamLogObserver(auditLogger, entry, "/v1/chat/completions"),
+			usage.NewStreamUsageObserver(
+				usageLogger,
+				"gpt-4o-mini",
+				"mock",
+				"req-bench",
+				"/v1/chat/completions",
+				nil,
+			),
+		)
+
+		if _, err := io.Copy(io.Discard, stream); err != nil {
+			b.Fatalf("drain wrapped stream: %v", err)
+		}
+		if err := stream.Close(); err != nil {
+			b.Fatalf("close wrapped stream: %v", err)
+		}
+	}
+}
+
 func TestFormatPerfGuardResult(t *testing.T) {
 	result := testing.BenchmarkResult{
 		N:         1,
@@ -388,16 +430,27 @@ func TestHotPathPerfGuard(t *testing.T) {
 			maxBytes:  15104, // baseline ~13.9 KB
 		},
 		{
+			// Typed chunk decoding + reused read buffer keep this converter at a
+			// fraction of its former map[string]any-per-chunk cost (was 202/19.6KB).
 			name:      "openai_responses_stream_converter",
 			bench:     BenchmarkOpenAIResponsesStreamConverter,
-			maxAllocs: 213,   // baseline 202
-			maxBytes:  21120, // baseline ~19.6 KB
+			maxAllocs: 91,        // baseline 86
+			maxBytes:  15 * 1024, // baseline ~13.7 KB
 		},
 		{
 			name:      "shared_stream_audit_and_usage_observers",
 			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
-			maxAllocs: 167,      // baseline 159
-			maxBytes:  9 * 1024, // baseline ~8.9 KB; already tight
+			maxAllocs: 160,      // baseline 152
+			maxBytes:  9 * 1024, // baseline ~8.2 KB
+		},
+		{
+			// Default configuration: audit body capture off, so the observed
+			// stream must skip JSON decoding for content-delta chunks entirely.
+			// A regression that decodes every chunk again would blow this limit.
+			name:      "shared_stream_observers_default_config",
+			bench:     BenchmarkSharedStreamingObserversDefaultConfig,
+			maxAllocs: 61,       // baseline 57
+			maxBytes:  4 * 1024, // baseline ~3.0 KB
 		},
 	}
 

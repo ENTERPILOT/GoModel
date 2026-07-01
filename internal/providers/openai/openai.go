@@ -3,6 +3,7 @@ package openai
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -109,23 +110,22 @@ func isReasoningChatModel(model string) bool {
 
 // adaptForReasoningChat rewrites a ChatRequest body for OpenAI reasoning chat
 // models, mapping max_tokens -> max_completion_tokens and dropping temperature
-// while preserving all unknown top-level JSON fields.
+// while preserving all unknown top-level JSON fields. It works on the typed
+// request directly so the body is marshaled only once, by the HTTP client.
 func adaptForReasoningChat(req *core.ChatRequest) (any, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, core.NewInvalidRequestError("failed to marshal reasoning request: "+err.Error(), err)
+	adapted := *req
+	adapted.Temperature = nil
+	if req.MaxTokens != nil {
+		adapted.MaxTokens = nil
+		extra, err := core.MergeUnknownJSONFields(req.ExtraFields, map[string]json.RawMessage{
+			"max_completion_tokens": json.RawMessage(strconv.Itoa(*req.MaxTokens)),
+		})
+		if err != nil {
+			return nil, core.NewInvalidRequestError("failed to adapt reasoning request: "+err.Error(), err)
+		}
+		adapted.ExtraFields = extra
 	}
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, core.NewInvalidRequestError("failed to decode reasoning request payload: "+err.Error(), err)
-	}
-	if maxTokens, ok := raw["max_tokens"]; ok {
-		raw["max_completion_tokens"] = maxTokens
-		delete(raw, "max_tokens")
-	}
-	delete(raw, "temperature")
-	return raw, nil
+	return &adapted, nil
 }
 
 // chatRequestBody returns the appropriate request body for the model.

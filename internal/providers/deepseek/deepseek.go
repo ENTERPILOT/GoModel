@@ -81,24 +81,24 @@ func adaptChatRequest(req *core.ChatRequest) (any, error) {
 		return req, nil
 	}
 
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, core.NewInvalidRequestError("failed to marshal deepseek request: "+err.Error(), err)
-	}
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, core.NewInvalidRequestError("failed to decode deepseek request payload: "+err.Error(), err)
-	}
-
-	effort, _ := json.Marshal(normalizeReasoningEffort(req.Reasoning.Effort))
-	raw["reasoning_effort"] = effort
-	// Delete the full reasoning object: DeepSeek accepts reasoning_effort as a
+	// Drop the full reasoning object: DeepSeek accepts reasoning_effort as a
 	// top-level string only. Other reasoning fields (e.g. budget_tokens) are not
 	// forwarded because DeepSeek has no equivalent. Update this if DeepSeek
 	// expands its reasoning API surface.
-	delete(raw, "reasoning")
-	return raw, nil
+	adapted := *req
+	adapted.Reasoning = nil
+	effort, err := json.Marshal(normalizeReasoningEffort(req.Reasoning.Effort))
+	if err != nil {
+		return nil, core.NewInvalidRequestError("failed to adapt deepseek request: "+err.Error(), err)
+	}
+	extra, err := core.MergeUnknownJSONFields(req.ExtraFields, map[string]json.RawMessage{
+		"reasoning_effort": effort,
+	})
+	if err != nil {
+		return nil, core.NewInvalidRequestError("failed to adapt deepseek request: "+err.Error(), err)
+	}
+	adapted.ExtraFields = extra
+	return &adapted, nil
 }
 
 // normalizeReasoningEffort maps GoModel's OpenAI-style effort levels to the two

@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"bytes"
 	"log/slog"
 	"strings"
 
@@ -52,6 +53,18 @@ func (o *StreamUsageObserver) SetProviderName(providerName string) {
 		return
 	}
 	o.providerName = strings.TrimSpace(providerName)
+}
+
+// usageKeyLiteral gates WantsJSONEvent: extractUsageFromEvent can only produce
+// an entry from payloads carrying a "usage" member (top-level or nested under
+// "response"), so events without the literal never matter.
+var usageKeyLiteral = []byte(`"usage"`)
+
+// WantsJSONEvent reports whether the raw SSE payload can carry usage data.
+// This lets the observed stream skip JSON decoding for the vast majority of
+// content-delta chunks.
+func (o *StreamUsageObserver) WantsJSONEvent(raw []byte) bool {
+	return bytes.Contains(raw, usageKeyLiteral)
 }
 
 func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]any) {

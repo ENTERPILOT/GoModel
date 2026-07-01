@@ -3,7 +3,6 @@ package anthropic
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -126,6 +125,7 @@ type responsesStreamConverter struct {
 	body            io.ReadCloser
 	model           string
 	responseID      string
+	createdAt       int64
 	output          *providers.ResponsesOutputEventState
 	nextOutputIndex int
 	toolCalls       map[int]*providers.ResponsesOutputToolCallState
@@ -144,6 +144,7 @@ func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStr
 		body:           body,
 		model:          model,
 		responseID:     responseID,
+		createdAt:      time.Now().Unix(),
 		output:         providers.NewResponsesOutputEventState(responseID),
 		toolCalls:      make(map[int]*providers.ResponsesOutputToolCallState),
 		thinkingBlocks: make(map[int]bool),
@@ -177,7 +178,7 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 						"status":     "completed",
 						"model":      sc.model,
 						"provider":   "anthropic",
-						"created_at": time.Now().Unix(),
+						"created_at": sc.createdAt,
 					}
 					// Include merged usage data captured across message_start/message_delta.
 					if sc.hasUsage {
@@ -284,7 +285,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 				"status":     "in_progress",
 				"model":      sc.model,
 				"provider":   "anthropic",
-				"created_at": time.Now().Unix(),
+				"created_at": sc.createdAt,
 			},
 		}
 		jsonData, err := json.Marshal(createdEvent)
@@ -292,7 +293,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 			slog.Error("failed to marshal response.created event", "error", err, "response_id", sc.responseID)
 			return ""
 		}
-		return fmt.Sprintf("event: response.created\ndata: %s\n\n", jsonData)
+		return "event: response.created\ndata: " + string(jsonData) + "\n\n"
 
 	case "content_block_start":
 		if event.ContentBlock != nil && event.ContentBlock.Type == "thinking" {
@@ -336,7 +337,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 					slog.Error("failed to marshal content delta event", "error", err, "response_id", sc.responseID)
 					return ""
 				}
-				return prefix + fmt.Sprintf("event: response.output_text.delta\ndata: %s\n\n", jsonData)
+				return prefix + "event: response.output_text.delta\ndata: " + string(jsonData) + "\n\n"
 			}
 		case "input_json_delta":
 			if event.Delta.PartialJSON == "" {

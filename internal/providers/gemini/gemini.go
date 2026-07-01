@@ -372,61 +372,51 @@ func nativeBaseURLFromOpenAICompatibleBaseURL(baseURL string) (string, bool) {
 
 // adaptChatRequest rewrites a ChatRequest for Gemini's OpenAI-compatible endpoint.
 // Gemini uses "reasoning_effort" as a top-level string (e.g. "low", "medium", "high"),
-// not the nested "reasoning": {"effort": "..."} format.
-func adaptChatRequest(req *core.ChatRequest) (any, error) {
+// not the nested "reasoning": {"effort": "..."} format. It works on the typed
+// request directly so the body is marshaled only once, by the HTTP client.
+func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if req.Reasoning == nil || req.Reasoning.Effort == "" {
 		return req, nil
 	}
 
-	body, err := json.Marshal(req)
+	adapted := *req
+	adapted.Reasoning = nil
+	effort, err := json.Marshal(req.Reasoning.Effort)
 	if err != nil {
-		return nil, core.NewInvalidRequestError("failed to marshal gemini request: "+err.Error(), err)
+		return nil, core.NewInvalidRequestError("failed to adapt gemini request: "+err.Error(), err)
 	}
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, core.NewInvalidRequestError("failed to decode gemini request payload: "+err.Error(), err)
-	}
-
-	effort, _ := json.Marshal(req.Reasoning.Effort)
-	raw["reasoning_effort"] = effort
-	delete(raw, "reasoning")
-	return raw, nil
-}
-
-func rewriteRequestModel(body any, model string) (any, error) {
-	if strings.TrimSpace(model) == "" {
-		return body, nil
-	}
-	encoded, err := json.Marshal(body)
+	extra, err := core.MergeUnknownJSONFields(req.ExtraFields, map[string]json.RawMessage{
+		"reasoning_effort": effort,
+	})
 	if err != nil {
-		return nil, core.NewInvalidRequestError("failed to marshal gemini request: "+err.Error(), err)
+		return nil, core.NewInvalidRequestError("failed to adapt gemini request: "+err.Error(), err)
 	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &raw); err != nil {
-		return nil, core.NewInvalidRequestError("failed to decode gemini request payload: "+err.Error(), err)
-	}
-	modelJSON, _ := json.Marshal(model)
-	raw["model"] = modelJSON
-	return raw, nil
+	adapted.ExtraFields = extra
+	return &adapted, nil
 }
 
 func (p *Provider) openAICompatibleChatBody(req *core.ChatRequest) (any, error) {
-	body, err := adaptChatRequest(req)
-	if err != nil {
-		return nil, err
+	if p.backend == geminiBackendVertex {
+		if model := vertexOpenAIModelID(req.Model); strings.TrimSpace(model) != "" {
+			rewritten := *req
+			rewritten.Model = model
+			req = &rewritten
+		}
 	}
-	if p.backend != geminiBackendVertex {
-		return body, nil
-	}
-	return rewriteRequestModel(body, vertexOpenAIModelID(req.Model))
+	return adaptChatRequest(req)
 }
 
 func (p *Provider) openAICompatibleEmbeddingBody(req *core.EmbeddingRequest) (any, error) {
 	if p.backend != geminiBackendVertex {
 		return req, nil
 	}
-	return rewriteRequestModel(req, vertexOpenAIModelID(req.Model))
+	model := vertexOpenAIModelID(req.Model)
+	if strings.TrimSpace(model) == "" {
+		return req, nil
+	}
+	rewritten := *req
+	rewritten.Model = model
+	return &rewritten, nil
 }
 
 // ChatCompletion sends a chat completion request to Gemini

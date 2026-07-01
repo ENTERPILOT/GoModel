@@ -2,9 +2,9 @@ package bedrock
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -59,6 +59,7 @@ type streamConverter struct {
 	stream    *bedrockruntime.ConverseStreamOutput
 	model     string
 	id        string
+	created   int64
 	closeOnce sync.Once
 	buf       []byte
 	done      bool
@@ -82,10 +83,12 @@ type toolStreamState struct {
 }
 
 func newOpenAIStream(out *bedrockruntime.ConverseStreamOutput, model string) *streamConverter {
+	now := time.Now()
 	return &streamConverter{
 		stream:      out,
 		model:       model,
-		id:          fmt.Sprintf("bedrock-%d", time.Now().UnixNano()),
+		id:          "bedrock-" + strconv.FormatInt(now.UnixNano(), 10),
+		created:     now.Unix(),
 		toolByIndex: make(map[int32]*toolStreamState),
 	}
 }
@@ -239,7 +242,7 @@ func (s *streamConverter) formatChunk(delta map[string]any, finishReason any, us
 	chunk := map[string]any{
 		"id":       s.id,
 		"object":   "chat.completion.chunk",
-		"created":  time.Now().Unix(),
+		"created":  s.created,
 		"model":    s.model,
 		"provider": providerName,
 		"choices": []map[string]any{{
