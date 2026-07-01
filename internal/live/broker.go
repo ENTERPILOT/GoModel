@@ -281,6 +281,9 @@ func (b *Broker) publish(eventType, entryID, requestID string, timestamp time.Ti
 		return
 	}
 
+	// Invariant: every assigned sequence is buffered, so sequences inside the
+	// ring are gapless — replayAfterLocked's offset arithmetic depends on it.
+	// Do not return between the increment and the ring write below.
 	b.nextSeq++
 	event := Event{
 		Seq:       b.nextSeq,

@@ -92,6 +92,10 @@ func (b *StreamBuffer) Consume(n int) {
 	b.read += n
 }
 
+// Release returns the buffer's storage to the pool. No slice derived from the
+// buffer (Unread, or bytes handed to a decoder that may alias its input) may
+// be retained past this call: the storage is immediately reusable by another
+// stream and retained views would see another request's data.
 func (b *StreamBuffer) Release() {
 	if b == nil {
 		return

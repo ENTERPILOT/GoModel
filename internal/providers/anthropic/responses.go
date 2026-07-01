@@ -277,7 +277,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 			sc.hasUsage = true
 		}
 		// Send response.created event
-		createdEvent := map[string]any{
+		return sc.output.WriteEvent("response.created", map[string]any{
 			"type": "response.created",
 			"response": map[string]any{
 				"id":         sc.responseID,
@@ -287,13 +287,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 				"provider":   "anthropic",
 				"created_at": sc.createdAt,
 			},
-		}
-		jsonData, err := json.Marshal(createdEvent)
-		if err != nil {
-			slog.Error("failed to marshal response.created event", "error", err, "response_id", sc.responseID)
-			return ""
-		}
-		return "event: response.created\ndata: " + string(jsonData) + "\n\n"
+		})
 
 	case "content_block_start":
 		if event.ContentBlock != nil && event.ContentBlock.Type == "thinking" {
@@ -328,16 +322,10 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 				sc.reserveAssistantMessageOutput()
 				prefix := sc.output.StartAssistantOutput(0)
 				sc.output.AppendAssistantText(event.Delta.Text)
-				deltaEvent := map[string]any{
+				return prefix + sc.output.WriteEvent("response.output_text.delta", map[string]any{
 					"type":  "response.output_text.delta",
 					"delta": event.Delta.Text,
-				}
-				jsonData, err := json.Marshal(deltaEvent)
-				if err != nil {
-					slog.Error("failed to marshal content delta event", "error", err, "response_id", sc.responseID)
-					return ""
-				}
-				return prefix + "event: response.output_text.delta\ndata: " + string(jsonData) + "\n\n"
+				})
 			}
 		case "input_json_delta":
 			if event.Delta.PartialJSON == "" {

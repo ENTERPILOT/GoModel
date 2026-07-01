@@ -37,7 +37,12 @@ type EventFilter interface {
 // and fanning them out to observers.
 type ObservedSSEStream struct {
 	io.ReadCloser
-	observers   []Observer
+	observers []Observer
+	// filters holds each observer's EventFilter, resolved once at
+	// construction. It is authoritative only when every observer contributed
+	// one (len(filters) == len(observers)); otherwise every event is decoded,
+	// which also keeps directly-constructed zero-value streams safe.
+	filters     []EventFilter
 	pending     []byte
 	discardTail []byte
 	closed      bool
@@ -55,10 +60,22 @@ func NewObservedSSEStream(stream io.ReadCloser, observers ...Observer) io.ReadCl
 	if len(filtered) == 0 {
 		return stream
 	}
-	return &ObservedSSEStream{
+
+	observed := &ObservedSSEStream{
 		ReadCloser: stream,
 		observers:  filtered,
 	}
+	for _, observer := range filtered {
+		filter, ok := observer.(EventFilter)
+		if !ok {
+			// An observer without a filter wants every event; leave filters
+			// short so payloadWanted always decodes.
+			observed.filters = nil
+			break
+		}
+		observed.filters = append(observed.filters, filter)
+	}
+	return observed
 }
 
 func (s *ObservedSSEStream) Read(p []byte) (n int, err error) {
@@ -216,9 +233,11 @@ func (s *ObservedSSEStream) dispatchPayload(jsonData []byte) {
 }
 
 func (s *ObservedSSEStream) payloadWanted(jsonData []byte) bool {
-	for _, observer := range s.observers {
-		filter, ok := observer.(EventFilter)
-		if !ok || filter.WantsJSONEvent(jsonData) {
+	if len(s.filters) != len(s.observers) {
+		return true
+	}
+	for _, filter := range s.filters {
+		if filter.WantsJSONEvent(jsonData) {
 			return true
 		}
 	}

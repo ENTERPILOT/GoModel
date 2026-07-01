@@ -67,3 +67,38 @@ func TestStreamBufferReleaseKeepsOriginalPooledSliceAfterGrowth(t *testing.T) {
 		t.Fatalf("pooled cap = %d, want original cap %d", got, originalCap)
 	}
 }
+
+func TestStreamBufferReleaseRecyclesGrownBuffer(t *testing.T) {
+	buffer := NewStreamBuffer(0)
+	pooled := buffer.pooled
+	initialCap := cap(*pooled)
+
+	buffer.AppendString(strings.Repeat("x", defaultStreamBufferCapacity*4))
+	grownCap := cap(buffer.data)
+	if grownCap <= initialCap {
+		t.Fatalf("active buffer cap = %d, want growth beyond initial %d", grownCap, initialCap)
+	}
+	if grownCap > maxPooledStreamBufferSize {
+		t.Fatalf("test setup: grown cap %d must stay within pool bound %d", grownCap, maxPooledStreamBufferSize)
+	}
+
+	buffer.Release()
+
+	if got := cap(*pooled); got != grownCap {
+		t.Fatalf("pooled cap = %d, want grown cap %d recycled into the pool", got, grownCap)
+	}
+	if got := len(*pooled); got != 0 {
+		t.Fatalf("pooled len = %d, want 0 after release", got)
+	}
+}
+
+func TestNewStreamBufferKeepsPoolSlotInSyncWithInitialCapacity(t *testing.T) {
+	buffer := NewStreamBuffer(4 * defaultStreamBufferCapacity)
+	if got := cap(buffer.data); got < 4*defaultStreamBufferCapacity {
+		t.Fatalf("buffer cap = %d, want at least requested %d", got, 4*defaultStreamBufferCapacity)
+	}
+	if got, want := cap(*buffer.pooled), cap(buffer.data); got != want {
+		t.Fatalf("pool slot cap = %d, want %d — the slot must track the buffer actually allocated", got, want)
+	}
+	buffer.Release()
+}

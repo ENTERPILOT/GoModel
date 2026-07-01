@@ -62,7 +62,9 @@ var usageKeyLiteral = []byte(`"usage"`)
 
 // WantsJSONEvent reports whether the raw SSE payload can carry usage data.
 // This lets the observed stream skip JSON decoding for the vast majority of
-// content-delta chunks.
+// content-delta chunks. Known trade-off: a provider that JSON-escapes key
+// characters (e.g. "usage") would slip past this byte scan; no known
+// provider does, and covering it would mean decoding every chunk again.
 func (o *StreamUsageObserver) WantsJSONEvent(raw []byte) bool {
 	return bytes.Contains(raw, usageKeyLiteral)
 }

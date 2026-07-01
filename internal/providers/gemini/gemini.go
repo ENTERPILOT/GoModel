@@ -372,27 +372,12 @@ func nativeBaseURLFromOpenAICompatibleBaseURL(baseURL string) (string, bool) {
 
 // adaptChatRequest rewrites a ChatRequest for Gemini's OpenAI-compatible endpoint.
 // Gemini uses "reasoning_effort" as a top-level string (e.g. "low", "medium", "high"),
-// not the nested "reasoning": {"effort": "..."} format. It works on the typed
-// request directly so the body is marshaled only once, by the HTTP client.
+// not the nested "reasoning": {"effort": "..."} format.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if req.Reasoning == nil || req.Reasoning.Effort == "" {
 		return req, nil
 	}
-
-	adapted := *req
-	adapted.Reasoning = nil
-	effort, err := json.Marshal(req.Reasoning.Effort)
-	if err != nil {
-		return nil, core.NewInvalidRequestError("failed to adapt gemini request: "+err.Error(), err)
-	}
-	extra, err := core.MergeUnknownJSONFields(req.ExtraFields, map[string]json.RawMessage{
-		"reasoning_effort": effort,
-	})
-	if err != nil {
-		return nil, core.NewInvalidRequestError("failed to adapt gemini request: "+err.Error(), err)
-	}
-	adapted.ExtraFields = extra
-	return &adapted, nil
+	return providers.AdaptReasoningEffortRequest(req, req.Reasoning.Effort)
 }
 
 func (p *Provider) openAICompatibleChatBody(req *core.ChatRequest) (any, error) {

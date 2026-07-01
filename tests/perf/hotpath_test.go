@@ -283,49 +283,18 @@ func BenchmarkOpenAIResponsesStreamConverter(b *testing.B) {
 }
 
 func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
-	auditLogger := benchAuditLogger{cfg: auditlog.Config{Enabled: true, LogBodies: true}}
-	usageLogger := benchUsageLogger{cfg: usage.Config{Enabled: true}}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		entry := &auditlog.LogEntry{
-			ID:        "audit-bench",
-			Timestamp: time.Unix(1700000000, 0),
-			RequestID: "req-bench",
-			Method:    http.MethodPost,
-			Path:      "/v1/chat/completions",
-			Data:      &auditlog.LogData{},
-		}
-
-		stream := streaming.NewObservedSSEStream(
-			io.NopCloser(strings.NewReader(sampleChatStream)),
-			auditlog.NewStreamLogObserver(auditLogger, entry, "/v1/chat/completions"),
-			usage.NewStreamUsageObserver(
-				usageLogger,
-				"gpt-4o-mini",
-				"mock",
-				"req-bench",
-				"/v1/chat/completions",
-				nil,
-			),
-		)
-
-		if _, err := io.Copy(io.Discard, stream); err != nil {
-			b.Fatalf("drain wrapped stream: %v", err)
-		}
-		if err := stream.Close(); err != nil {
-			b.Fatalf("close wrapped stream: %v", err)
-		}
-	}
+	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true, LogBodies: true})
 }
 
-// BenchmarkSharedStreamingObserversDefaultConfig mirrors the observer
-// benchmark above with audit body capture disabled — the default
-// configuration, where the stream can skip decoding content-delta chunks.
+// BenchmarkSharedStreamingObserversDefaultConfig runs the same pipeline with
+// audit body capture disabled — the default configuration, where the stream
+// can skip decoding content-delta chunks.
 func BenchmarkSharedStreamingObserversDefaultConfig(b *testing.B) {
-	auditLogger := benchAuditLogger{cfg: auditlog.Config{Enabled: true}}
+	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true})
+}
+
+func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config) {
+	auditLogger := benchAuditLogger{cfg: auditCfg}
 	usageLogger := benchUsageLogger{cfg: usage.Config{Enabled: true}}
 
 	b.ReportAllocs()
