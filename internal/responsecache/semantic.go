@@ -27,6 +27,17 @@ import (
 	"gomodel/internal/embedding"
 )
 
+// semanticCacheWriteJob carries one vector-store insert handed to a background
+// worker. Insert arguments are captured by value so the request goroutine can
+// return immediately.
+type semanticCacheWriteJob struct {
+	cacheKey   string
+	vec        []float32
+	data       []byte
+	paramsHash string
+	ttl        time.Duration
+}
+
 // SemanticCacheMiddleware implements the vector-similarity response cache layer.
 // It is the second cache layer, consulted only after an exact-match miss.
 type semanticCacheMiddleware struct {
@@ -34,17 +45,65 @@ type semanticCacheMiddleware struct {
 	store            VecStore
 	cfg              config.SemanticCacheConfig
 	embedderIdentity string
-	wg               sync.WaitGroup
 	hitRecorder      func(*echo.Context, []byte, string)
+
+	// Vector-store inserts run on a bounded worker pool so a burst of cache
+	// misses cannot spawn unbounded goroutines against the vector store. wg
+	// tracks queued jobs; workers drains them; mu guards closed/close(jobs).
+	jobs    chan semanticCacheWriteJob
+	wg      sync.WaitGroup
+	workers sync.WaitGroup
+	mu      sync.RWMutex
+	closed  bool
 }
 
 func newSemanticCacheMiddleware(emb embedding.Embedder, store VecStore, cfg config.SemanticCacheConfig, hitRecorder func(*echo.Context, []byte, string)) *semanticCacheMiddleware {
-	return &semanticCacheMiddleware{
+	m := &semanticCacheMiddleware{
 		embedder:         emb,
 		store:            store,
 		cfg:              cfg,
 		embedderIdentity: emb.Identity(),
 		hitRecorder:      hitRecorder,
+		jobs:             make(chan semanticCacheWriteJob, cacheWriteQueueSize),
+	}
+	m.startWorkers()
+	return m
+}
+
+func (m *semanticCacheMiddleware) startWorkers() {
+	for range cacheWriteWorkerCount {
+		m.workers.Go(func() {
+			for job := range m.jobs {
+				storeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				err := m.store.Insert(storeCtx, job.cacheKey, job.vec, job.data, job.paramsHash, job.ttl)
+				cancel()
+				if err != nil {
+					slog.Warn("semantic cache: store failed", "key", job.cacheKey, "err", err)
+				}
+				m.wg.Done()
+			}
+		})
+	}
+}
+
+// enqueueWrite hands a store insert to the worker pool. It mirrors
+// simpleCacheMiddleware.enqueueWrite: the read lock spans Add+send so close()
+// cannot race an untracked write, and a full queue rolls back the Add rather
+// than blocking the request goroutine.
+func (m *semanticCacheMiddleware) enqueueWrite(job semanticCacheWriteJob) {
+	m.mu.RLock()
+	if m.closed {
+		m.mu.RUnlock()
+		return
+	}
+	m.wg.Add(1)
+	select {
+	case m.jobs <- job:
+		m.mu.RUnlock()
+	default:
+		m.wg.Done()
+		m.mu.RUnlock()
+		slog.Warn("semantic cache write queue full", "key", job.cacheKey)
 	}
 }
 
@@ -140,20 +199,25 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 
 	cacheKey := sha256HexOf(embedText + "\x00" + paramsHash)
 
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		storeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := m.store.Insert(storeCtx, cacheKey, vec, data, paramsHash, ttl); err != nil {
-			slog.Warn("semantic cache: store failed", "key", cacheKey, "err", err)
-		}
-	}()
+	m.enqueueWrite(semanticCacheWriteJob{
+		cacheKey:   cacheKey,
+		vec:        vec,
+		data:       data,
+		paramsHash: paramsHash,
+		ttl:        ttl,
+	})
 
 	return nil
 }
 
 func (m *semanticCacheMiddleware) close() error {
+	m.mu.Lock()
+	if !m.closed {
+		m.closed = true
+		close(m.jobs)
+	}
+	m.mu.Unlock()
+	m.workers.Wait()
 	m.wg.Wait()
 	if m.embedder != nil {
 		_ = m.embedder.Close() //nolint:errcheck

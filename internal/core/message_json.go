@@ -151,17 +151,12 @@ func (t *ToolCall) UnmarshalJSON(data []byte) error {
 }
 
 // ToolCall.MarshalJSON marshals a ToolCall to JSON, including unknown JSON
-// members from ExtraFields.
+// members from ExtraFields. alias inherits ToolCall's fields and tags but drops
+// MarshalJSON so json.Marshal does not recurse; ExtraFields (json:"-") is merged
+// separately.
 func (t ToolCall) MarshalJSON() ([]byte, error) {
-	return marshalWithUnknownJSONFields(struct {
-		ID       string       `json:"id"`
-		Type     string       `json:"type"`
-		Function FunctionCall `json:"function"`
-	}{
-		ID:       t.ID,
-		Type:     t.Type,
-		Function: t.Function,
-	}, t.ExtraFields)
+	type alias ToolCall
+	return marshalWithUnknownJSONFields(alias(t), t.ExtraFields)
 }
 
 // FunctionCall.UnmarshalJSON unmarshals a FunctionCall from JSON, preserving
@@ -189,15 +184,12 @@ func (f *FunctionCall) UnmarshalJSON(data []byte) error {
 }
 
 // FunctionCall.MarshalJSON marshals a FunctionCall to JSON, including unknown
-// JSON members from ExtraFields.
+// JSON members from ExtraFields. alias inherits FunctionCall's fields and tags
+// but drops MarshalJSON so json.Marshal does not recurse; ExtraFields (json:"-")
+// is merged separately.
 func (f FunctionCall) MarshalJSON() ([]byte, error) {
-	return marshalWithUnknownJSONFields(struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	}{
-		Name:      f.Name,
-		Arguments: f.Arguments,
-	}, f.ExtraFields)
+	type alias FunctionCall
+	return marshalWithUnknownJSONFields(alias(f), f.ExtraFields)
 }
 
 func marshalMessageContent(raw MessageContent, toolCalls []ToolCall) (any, error) {

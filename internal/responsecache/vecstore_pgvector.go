@@ -3,6 +3,7 @@ package responsecache
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -47,8 +48,16 @@ func newPGVectorStore(cfg config.PGVectorConfig) (*pgVecStore, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if _, err := pool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("vecstore pgvector: create extension: %w", err)
+		// Managed Postgres (RDS, Cloud SQL, Heroku) often withholds CREATE
+		// EXTENSION from the application role even when a DBA has already
+		// installed pgvector. Tolerate the error only when the extension is
+		// actually present; otherwise it is genuinely missing and we cannot
+		// proceed.
+		if !pgExtensionInstalled(ctx, pool, "vector") {
+			pool.Close()
+			return nil, fmt.Errorf("vecstore pgvector: create extension: %w", err)
+		}
+		slog.Warn("vecstore pgvector: could not create the vector extension; continuing because it is already installed", "err", err)
 	}
 	ddl := fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS %s (
@@ -75,6 +84,17 @@ CREATE TABLE IF NOT EXISTS %s (
 	}
 	s.cleanup = startVecCleanup(s)
 	return s, nil
+}
+
+// pgExtensionInstalled reports whether a Postgres extension is already present.
+// A query error is treated as "not installed" so the caller surfaces the
+// original CREATE EXTENSION failure rather than masking it.
+func pgExtensionInstalled(ctx context.Context, pool *pgxpool.Pool, name string) bool {
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = $1)`, name).Scan(&exists); err != nil {
+		return false
+	}
+	return exists
 }
 
 func validatePGIdentifier(name string) error {

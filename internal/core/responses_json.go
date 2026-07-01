@@ -192,64 +192,12 @@ func (c ResponsesConversationRef) MarshalJSON() ([]byte, error) {
 }
 
 // MarshalJSON preserves dynamic input payloads while supporting Swagger-only schema fields.
+// alias inherits every field and json tag from ResponsesRequest but drops the
+// MarshalJSON method (so json.Marshal does not recurse); ExtraFields is json:"-"
+// and merged in separately. New typed fields round-trip automatically.
 func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
-	return marshalWithUnknownJSONFields(struct {
-		Model                string                    `json:"model"`
-		Provider             string                    `json:"provider,omitempty"`
-		Input                any                       `json:"input"`
-		Instructions         string                    `json:"instructions,omitempty"`
-		Tools                []map[string]any          `json:"tools,omitempty"`
-		ToolChoice           any                       `json:"tool_choice,omitempty"`
-		ParallelToolCalls    *bool                     `json:"parallel_tool_calls,omitempty"`
-		Temperature          *float64                  `json:"temperature,omitempty"`
-		TopP                 *float64                  `json:"top_p,omitempty"`
-		TopLogprobs          *int                      `json:"top_logprobs,omitempty"`
-		MaxOutputTokens      *int                      `json:"max_output_tokens,omitempty"`
-		Stream               bool                      `json:"stream,omitempty"`
-		StreamOptions        *StreamOptions            `json:"stream_options,omitempty"`
-		Metadata             map[string]string         `json:"metadata,omitempty"`
-		Reasoning            *Reasoning                `json:"reasoning,omitempty"`
-		Text                 any                       `json:"text,omitempty"`
-		Include              []string                  `json:"include,omitempty"`
-		Truncation           string                    `json:"truncation,omitempty"`
-		Store                *bool                     `json:"store,omitempty"`
-		PreviousResponseID   string                    `json:"previous_response_id,omitempty"`
-		Conversation         *ResponsesConversationRef `json:"conversation,omitempty"`
-		Prompt               any                       `json:"prompt,omitempty"`
-		PromptCacheRetention string                    `json:"prompt_cache_retention,omitempty"`
-		ContextManagement    any                       `json:"context_management,omitempty"`
-		User                 string                    `json:"user,omitempty"`
-		ServiceTier          string                    `json:"service_tier,omitempty"`
-		SafetyIdentifier     string                    `json:"safety_identifier,omitempty"`
-	}{
-		Model:                r.Model,
-		Provider:             r.Provider,
-		Input:                r.Input,
-		Instructions:         r.Instructions,
-		Tools:                r.Tools,
-		ToolChoice:           r.ToolChoice,
-		ParallelToolCalls:    r.ParallelToolCalls,
-		Temperature:          r.Temperature,
-		TopP:                 r.TopP,
-		TopLogprobs:          r.TopLogprobs,
-		MaxOutputTokens:      r.MaxOutputTokens,
-		Stream:               r.Stream,
-		StreamOptions:        r.StreamOptions,
-		Metadata:             r.Metadata,
-		Reasoning:            r.Reasoning,
-		Text:                 r.Text,
-		Include:              r.Include,
-		Truncation:           r.Truncation,
-		Store:                r.Store,
-		PreviousResponseID:   r.PreviousResponseID,
-		Conversation:         r.Conversation,
-		Prompt:               r.Prompt,
-		PromptCacheRetention: r.PromptCacheRetention,
-		ContextManagement:    r.ContextManagement,
-		User:                 r.User,
-		ServiceTier:          r.ServiceTier,
-		SafetyIdentifier:     r.SafetyIdentifier,
-	}, r.ExtraFields)
+	type alias ResponsesRequest
+	return marshalWithUnknownJSONFields(alias(r), r.ExtraFields)
 }
 
 type responseUtilityRequestJSON struct {

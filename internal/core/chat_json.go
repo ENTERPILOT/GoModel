@@ -62,37 +62,11 @@ func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 }
 
 func (r ChatRequest) MarshalJSON() ([]byte, error) {
-	type chatRequestAlias struct {
-		Temperature       *float64         `json:"temperature,omitempty"`
-		TopP              *float64         `json:"top_p,omitempty"`
-		MaxTokens         *int             `json:"max_tokens,omitempty"`
-		Model             string           `json:"model"`
-		Provider          string           `json:"provider,omitempty"`
-		Messages          []Message        `json:"messages"`
-		Tools             []map[string]any `json:"tools,omitempty"`
-		ToolChoice        any              `json:"tool_choice,omitempty"`
-		ParallelToolCalls *bool            `json:"parallel_tool_calls,omitempty"`
-		Stream            bool             `json:"stream,omitempty"`
-		StreamOptions     *StreamOptions   `json:"stream_options,omitempty"`
-		Reasoning         *Reasoning       `json:"reasoning,omitempty"`
-		User              string           `json:"user,omitempty"`
-		ServiceTier       string           `json:"service_tier,omitempty"`
-	}
-
-	return marshalWithUnknownJSONFields(chatRequestAlias{
-		Temperature:       r.Temperature,
-		TopP:              r.TopP,
-		MaxTokens:         r.MaxTokens,
-		Model:             r.Model,
-		Provider:          r.Provider,
-		Messages:          r.Messages,
-		Tools:             r.Tools,
-		ToolChoice:        r.ToolChoice,
-		ParallelToolCalls: r.ParallelToolCalls,
-		Stream:            r.Stream,
-		StreamOptions:     r.StreamOptions,
-		Reasoning:         r.Reasoning,
-		User:              r.User,
-		ServiceTier:       r.ServiceTier,
-	}, r.ExtraFields)
+	// alias inherits every field (and json tag) from ChatRequest but drops the
+	// MarshalJSON method, so json.Marshal uses default struct encoding without
+	// recursing. ExtraFields is json:"-", so it is skipped here and merged in
+	// separately. Adding a typed field to ChatRequest therefore round-trips
+	// automatically instead of being silently dropped.
+	type alias ChatRequest
+	return marshalWithUnknownJSONFields(alias(r), r.ExtraFields)
 }

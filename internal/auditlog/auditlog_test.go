@@ -124,6 +124,19 @@ func TestRedactHeaders(t *testing.T) {
 				"X-API-KEY":     "[REDACTED]",
 			},
 		},
+		{
+			name: "redact provider credential headers",
+			input: map[string]string{
+				"api-key":        "azure-secret",
+				"X-Goog-Api-Key": "gemini-secret",
+				"Content-Type":   "application/json",
+			},
+			expected: map[string]string{
+				"api-key":        "[REDACTED]",
+				"X-Goog-Api-Key": "[REDACTED]",
+				"Content-Type":   "application/json",
+			},
+		},
 	}
 
 	for _, tt := range tests {

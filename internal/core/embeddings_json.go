@@ -35,19 +35,8 @@ func (r *EmbeddingRequest) UnmarshalJSON(data []byte) error {
 }
 
 func (r EmbeddingRequest) MarshalJSON() ([]byte, error) {
-	type embeddingRequestAlias struct {
-		Model          string `json:"model"`
-		Provider       string `json:"provider,omitempty"`
-		Input          any    `json:"input"`
-		EncodingFormat string `json:"encoding_format,omitempty"`
-		Dimensions     *int   `json:"dimensions,omitempty"`
-	}
-
-	return marshalWithUnknownJSONFields(embeddingRequestAlias{
-		Model:          r.Model,
-		Provider:       r.Provider,
-		Input:          r.Input,
-		EncodingFormat: r.EncodingFormat,
-		Dimensions:     r.Dimensions,
-	}, r.ExtraFields)
+	// alias inherits EmbeddingRequest's fields and tags but drops MarshalJSON so
+	// json.Marshal does not recurse; ExtraFields (json:"-") is merged separately.
+	type alias EmbeddingRequest
+	return marshalWithUnknownJSONFields(alias(r), r.ExtraFields)
 }

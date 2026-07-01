@@ -54,6 +54,13 @@ func LogBatchUsageFromBatchResults(
 	hasOutputCost := false
 	hasTotalCost := false
 
+	// A batch can carry tens of thousands of items that mostly share a
+	// (model, provider) pair. ResolvePricing takes registry read locks on every
+	// call, so cache resolutions locally to keep this loop off the shared
+	// registry hot path. nil results are cached too so unpriced models resolve
+	// once.
+	pricingCache := make(map[string]*core.ModelPricing)
+
 	for _, item := range result.Data {
 		if item.StatusCode < http.StatusOK || item.StatusCode >= http.StatusMultipleChoices {
 			continue
@@ -84,7 +91,13 @@ func LogBatchUsageFromBatchResults(
 
 		var pricing *core.ModelPricing
 		if pricingResolver != nil && model != "" {
-			pricing = pricingResolver.ResolvePricing(model, provider)
+			cacheKey := model + "\x00" + provider
+			if cached, ok := pricingCache[cacheKey]; ok {
+				pricing = cached
+			} else {
+				pricing = pricingResolver.ResolvePricing(model, provider)
+				pricingCache[cacheKey] = pricing
+			}
 		}
 
 		entry := usage.ExtractFromSSEUsage(

@@ -35,21 +35,10 @@ func (r *BatchRequest) UnmarshalJSON(data []byte) error {
 }
 
 func (r BatchRequest) MarshalJSON() ([]byte, error) {
-	type batchRequestAlias struct {
-		InputFileID      string             `json:"input_file_id,omitempty"`
-		Endpoint         string             `json:"endpoint,omitempty"`
-		CompletionWindow string             `json:"completion_window,omitempty"`
-		Metadata         map[string]string  `json:"metadata,omitempty"`
-		Requests         []BatchRequestItem `json:"requests,omitempty"`
-	}
-
-	return marshalWithUnknownJSONFields(batchRequestAlias{
-		InputFileID:      r.InputFileID,
-		Endpoint:         r.Endpoint,
-		CompletionWindow: r.CompletionWindow,
-		Metadata:         r.Metadata,
-		Requests:         r.Requests,
-	}, r.ExtraFields)
+	// alias inherits BatchRequest's fields and tags but drops MarshalJSON so
+	// json.Marshal does not recurse; ExtraFields (json:"-") is merged separately.
+	type alias BatchRequest
+	return marshalWithUnknownJSONFields(alias(r), r.ExtraFields)
 }
 
 func (r *BatchRequestItem) UnmarshalJSON(data []byte) error {

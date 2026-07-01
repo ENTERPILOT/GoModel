@@ -296,6 +296,8 @@ func displayAuditProviderName(providerName, provider string) string {
 var RedactedHeaders = []string{
 	"authorization",
 	"x-api-key",
+	"api-key",        // Azure OpenAI credential header
+	"x-goog-api-key", // Google Gemini / Vertex credential header
 	"cookie",
 	"set-cookie",
 	"x-auth-token",
