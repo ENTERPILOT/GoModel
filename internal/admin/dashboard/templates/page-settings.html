@@ -226,7 +226,7 @@
             <div class="settings-refresh-actions tagging-settings-actions">
                 <button type="button"
                         class="pagination-btn pagination-btn-with-icon"
-                        :disabled="!taggingEditable || taggingSaving"
+                        :disabled="!taggingEditable || taggingSaving || taggingLoading"
                         @click="addTaggingHeader()">
                     <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
                     <span>Add Header</span>

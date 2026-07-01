@@ -40,11 +40,11 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.DELETE("/budgets", h.DeleteBudget)
 	g.GET("/budgets/settings", h.BudgetSettings)
 	g.PUT("/budgets/settings", h.UpdateBudgetSettings)
+	g.POST("/budgets/reset-one", h.ResetBudget)
+	g.POST("/budgets/reset", h.ResetBudgets)
 
 	g.GET("/tagging/settings", h.TaggingSettings)
 	g.PUT("/tagging/settings", h.UpdateTaggingSettings)
-	g.POST("/budgets/reset-one", h.ResetBudget)
-	g.POST("/budgets/reset", h.ResetBudgets)
 
 	g.GET("/models", h.ListModels)
 	g.GET("/models/categories", h.ListCategories)

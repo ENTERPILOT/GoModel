@@ -5,12 +5,30 @@
 package tagging
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"gomodel/config"
 )
+
+// ValidationError marks rule failures caused by caller input, so API handlers
+// can report them as a bad request instead of a storage failure.
+type ValidationError struct{ err error }
+
+func (e *ValidationError) Error() string { return e.err.Error() }
+func (e *ValidationError) Unwrap() error { return e.err }
+
+func newValidationError(format string, args ...any) error {
+	return &ValidationError{err: fmt.Errorf(format, args...)}
+}
+
+// IsValidationError reports whether err stems from invalid caller input.
+func IsValidationError(err error) bool {
+	var validationErr *ValidationError
+	return errors.As(err, &validationErr)
+}
 
 // DefaultDelimiter separates multiple labels inside one header value.
 const DefaultDelimiter = ","
@@ -39,18 +57,22 @@ type Rule struct {
 }
 
 // NormalizeRules canonicalizes header names, applies the default delimiter,
-// and rejects invalid or duplicate entries in place.
+// and rejects invalid, credential-bearing, or duplicate entries in place.
+// Rejections are ValidationErrors.
 func NormalizeRules(rules []Rule) error {
 	seen := make(map[string]struct{}, len(rules))
 	for i := range rules {
 		rule := &rules[i]
 		name, err := config.NormalizeHeaderName(rule.Header, "")
 		if err != nil {
-			return fmt.Errorf("tagging rule %d: %w", i, err)
+			return newValidationError("tagging rule %d: %v", i, err)
+		}
+		if config.DeniedTaggingHeader(name) {
+			return newValidationError("tagging rule %d: header %q may carry credentials and cannot be used for tagging", i, name)
 		}
 		rule.Header = name
 		if _, dup := seen[name]; dup {
-			return fmt.Errorf("tagging rules: duplicate header %q", name)
+			return newValidationError("tagging rules: duplicate header %q", name)
 		}
 		seen[name] = struct{}{}
 		if rule.Delimiter == "" {

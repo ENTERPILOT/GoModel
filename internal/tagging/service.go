@@ -118,7 +118,7 @@ func (s *Service) SaveRules(ctx context.Context, rules []Rule) ([]Rule, error) {
 	}
 	for _, rule := range rules {
 		if s.isManagedHeader(rule.Header) {
-			return nil, fmt.Errorf("header %q is managed by config/env and is read-only", rule.Header)
+			return nil, newValidationError("header %q is managed by config/env and is read-only", rule.Header)
 		}
 	}
 	for i := range rules {

@@ -37,6 +37,30 @@ type TaggingHeaderConfig struct {
 	Delimiter string `yaml:"delimiter,omitempty" json:"delimiter,omitempty"`
 }
 
+// deniedTaggingHeaders are credential-bearing headers that must never be used
+// as tagging label sources: their values would be persisted as plaintext
+// labels in usage and audit records, bypassing audit header redaction.
+// Keep in sync with auditlog.RedactedHeaders.
+var deniedTaggingHeaders = map[string]struct{}{
+	"authorization":       {},
+	"proxy-authorization": {},
+	"cookie":              {},
+	"set-cookie":          {},
+	"x-api-key":           {},
+	"api-key":             {},
+	"x-goog-api-key":      {},
+	"x-auth-token":        {},
+	"x-access-token":      {},
+	"x-gomodel-key":       {},
+}
+
+// DeniedTaggingHeader reports whether the header name carries credentials and
+// is rejected as a tagging label source. Matching is case-insensitive.
+func DeniedTaggingHeader(name string) bool {
+	_, denied := deniedTaggingHeaders[canonicalTextKey(name)]
+	return denied
+}
+
 var taggingHeaderEnvRegex = regexp.MustCompile(`^TAGGING_HEADER_([0-9]+)=`)
 
 // applyTaggingEnv reads TAGGING_HEADER_<N> env vars (with optional
@@ -89,6 +113,9 @@ func normalizeTaggingConfig(cfg *TaggingConfig) error {
 		name, err := NormalizeHeaderName(h.Header, "")
 		if err != nil {
 			return fmt.Errorf("tagging.headers[%d]: %w", i, err)
+		}
+		if DeniedTaggingHeader(name) {
+			return fmt.Errorf("tagging.headers[%d]: header %q may carry credentials and cannot be used for tagging", i, name)
 		}
 		h.Header = name
 		if _, dup := seen[name]; dup {

@@ -730,7 +730,15 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 6. Close workflows subsystem.
+	// 6. Close tagging subsystem.
+	if a.tagging != nil {
+		if err := a.tagging.Close(); err != nil {
+			slog.Error("tagging close error", "error", err)
+			errs = append(errs, fmt.Errorf("tagging close: %w", err))
+		}
+	}
+
+	// 7. Close workflows subsystem.
 	if a.workflows != nil {
 		if err := a.workflows.Close(); err != nil {
 			slog.Error("workflows close error", "error", err)
@@ -738,7 +746,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 6. Close model pricing overrides subsystem.
+	// 8. Close model pricing overrides subsystem.
 	if a.pricingOverrides != nil {
 		if err := a.pricingOverrides.Close(); err != nil {
 			slog.Error("model pricing overrides close error", "error", err)
@@ -746,7 +754,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 8. Close reusable guardrails subsystem.
+	// 9. Close reusable guardrails subsystem.
 	if a.guardrails != nil {
 		if err := a.guardrails.Close(); err != nil {
 			slog.Error("guardrails close error", "error", err)
@@ -754,7 +762,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 9. Close managed auth keys subsystem.
+	// 10. Close managed auth keys subsystem.
 	if a.authKeys != nil {
 		if err := a.authKeys.Close(); err != nil {
 			slog.Error("auth keys close error", "error", err)
@@ -762,7 +770,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 10. Close file mapping store.
+	// 11. Close file mapping store.
 	if a.fileStore != nil {
 		if err := a.fileStore.Close(); err != nil {
 			slog.Error("file mapping store close error", "error", err)
@@ -770,7 +778,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 11. Close batch store (flushes pending entries)
+	// 12. Close batch store (flushes pending entries)
 	if a.batch != nil {
 		if err := a.batch.Close(); err != nil {
 			slog.Error("batch store close error", "error", err)
@@ -778,7 +786,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 12. Close budget subsystem.
+	// 13. Close budget subsystem.
 	if a.budgets != nil {
 		if err := a.budgets.Close(); err != nil {
 			slog.Error("budgets close error", "error", err)
@@ -786,7 +794,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 13. Close usage tracking (flushes pending entries)
+	// 14. Close usage tracking (flushes pending entries)
 	if a.usage != nil {
 		if err := a.usage.Close(); err != nil {
 			slog.Error("usage logger close error", "error", err)
@@ -794,7 +802,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 14. Close audit logging (flushes pending logs)
+	// 15. Close audit logging (flushes pending logs)
 	if a.audit != nil {
 		if err := a.audit.Close(); err != nil {
 			slog.Error("audit logger close error", "error", err)

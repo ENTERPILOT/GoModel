@@ -285,6 +285,8 @@ func BenchmarkOpenAIResponsesStreamConverter(b *testing.B) {
 func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
 	auditLogger := benchAuditLogger{cfg: auditlog.Config{Enabled: true, LogBodies: true}}
 	usageLogger := benchUsageLogger{cfg: usage.Config{Enabled: true}}
+	// Labels mirror a tagged request so the guard exercises the labelled path.
+	labels := []string{"team-alpha", "prod"}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -296,20 +298,23 @@ func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
 			RequestID: "req-bench",
 			Method:    http.MethodPost,
 			Path:      "/v1/chat/completions",
-			Data:      &auditlog.LogData{},
+			Data:      &auditlog.LogData{Labels: labels},
 		}
+
+		usageObserver := usage.NewStreamUsageObserver(
+			usageLogger,
+			"gpt-4o-mini",
+			"mock",
+			"req-bench",
+			"/v1/chat/completions",
+			nil,
+		)
+		usageObserver.SetLabels(labels)
 
 		stream := streaming.NewObservedSSEStream(
 			io.NopCloser(strings.NewReader(sampleChatStream)),
 			auditlog.NewStreamLogObserver(auditLogger, entry, "/v1/chat/completions"),
-			usage.NewStreamUsageObserver(
-				usageLogger,
-				"gpt-4o-mini",
-				"mock",
-				"req-bench",
-				"/v1/chat/completions",
-				nil,
-			),
+			usageObserver,
 		)
 
 		if _, err := io.Copy(io.Discard, stream); err != nil {

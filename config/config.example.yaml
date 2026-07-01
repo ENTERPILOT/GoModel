@@ -24,7 +24,9 @@ models:
 # are recorded in usage tracking and audit logs. A header value can carry several
 # labels split by `delimiter` (default: ","). `prefix` is trimmed from each
 # extracted label only — the header itself is forwarded unchanged unless
-# `do_not_pass: true`. Env equivalents merge over this list and win per header:
+# `do_not_pass: true`. An env entry replaces the whole YAML entry with the same
+# header name (unset companion vars reset fields to defaults, they do not
+# inherit the YAML values); other env entries are appended:
 #   TAGGING_HEADER_1=X-My-Tags
 #   TAGGING_HEADER_1_PREFIX=tag-        # optional
 #   TAGGING_HEADER_1_DONOTPASS=true     # optional, default false (headers are passed as-is)

@@ -2,7 +2,6 @@ package admin
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -71,7 +70,7 @@ func (h *Handler) UpdateTaggingSettings(c *echo.Context) error {
 	defer h.mutationMu.Unlock()
 	merged, err := h.tagging.SaveRules(c.Request().Context(), req.Headers)
 	if err != nil {
-		if isTaggingValidationError(err) {
+		if tagging.IsValidationError(err) {
 			return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 		}
 		return handleError(c, featureUnavailableError("failed to save tagging rules: "+err.Error()))
@@ -80,16 +79,4 @@ func (h *Handler) UpdateTaggingSettings(c *echo.Context) error {
 		Headers:  merged,
 		Editable: h.tagging.Editable(),
 	})
-}
-
-// isTaggingValidationError separates caller mistakes (400) from storage
-// failures (503).
-func isTaggingValidationError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "invalid HTTP header name") ||
-		strings.Contains(msg, "duplicate header") ||
-		strings.Contains(msg, "read-only")
 }

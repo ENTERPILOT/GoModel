@@ -95,14 +95,20 @@ func TestNormalizeRules(t *testing.T) {
 		t.Fatalf("explicit delimiter overwritten: %#v", rules[1])
 	}
 
-	if err := NormalizeRules([]Rule{{Header: ""}}); err == nil {
-		t.Fatal("expected error for empty header")
-	}
-	if err := NormalizeRules([]Rule{{Header: "bad header"}}); err == nil {
-		t.Fatal("expected error for invalid header")
-	}
-	if err := NormalizeRules([]Rule{{Header: "X-Team"}, {Header: "x-team"}}); err == nil {
-		t.Fatal("expected error for duplicate header")
+	for name, rules := range map[string][]Rule{
+		"empty header":      {{Header: ""}},
+		"invalid header":    {{Header: "bad header"}},
+		"duplicate header":  {{Header: "X-Team"}, {Header: "x-team"}},
+		"credential header": {{Header: "Authorization"}},
+		"api key header":    {{Header: "x-api-key"}},
+	} {
+		err := NormalizeRules(rules)
+		if err == nil {
+			t.Fatalf("%s: expected error", name)
+		}
+		if !IsValidationError(err) {
+			t.Fatalf("%s: error %v must be a ValidationError", name, err)
+		}
 	}
 }
 
@@ -179,16 +185,16 @@ func TestServiceSaveRules(t *testing.T) {
 		t.Fatalf("store not updated: %#v", store.rules)
 	}
 
-	if _, err := service.SaveRules(context.Background(), []Rule{{Header: "X-Managed"}}); err == nil {
-		t.Fatal("expected read-only error for managed header")
+	if _, err := service.SaveRules(context.Background(), []Rule{{Header: "X-Managed"}}); err == nil || !IsValidationError(err) {
+		t.Fatalf("managed header: err = %v, want ValidationError", err)
 	}
-	if _, err := service.SaveRules(context.Background(), []Rule{{Header: "bad header"}}); err == nil {
-		t.Fatal("expected validation error")
+	if _, err := service.SaveRules(context.Background(), []Rule{{Header: "bad header"}}); err == nil || !IsValidationError(err) {
+		t.Fatalf("invalid header: err = %v, want ValidationError", err)
 	}
 
 	unavailable := NewService(nil, nil)
-	if _, err := unavailable.SaveRules(context.Background(), []Rule{{Header: "X-A"}}); err == nil {
-		t.Fatal("expected storage-unavailable error")
+	if _, err := unavailable.SaveRules(context.Background(), []Rule{{Header: "X-A"}}); err == nil || IsValidationError(err) {
+		t.Fatalf("storage-unavailable: err = %v, want non-validation error", err)
 	}
 	if unavailable.Editable() {
 		t.Fatal("service without store must not be editable")

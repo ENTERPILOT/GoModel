@@ -82,18 +82,25 @@ func TestNormalizeTaggingConfig(t *testing.T) {
 	}
 }
 
-func TestNormalizeTaggingConfig_RejectsInvalidAndDuplicate(t *testing.T) {
-	invalid := &TaggingConfig{Headers: []TaggingHeaderConfig{{Header: "bad header"}}}
-	if err := normalizeTaggingConfig(invalid); err == nil {
-		t.Fatalf("expected error for invalid header name")
+func TestNormalizeTaggingConfig_Rejections(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers []TaggingHeaderConfig
+	}{
+		{name: "invalid header name", headers: []TaggingHeaderConfig{{Header: "bad header"}}},
+		{name: "empty header name", headers: []TaggingHeaderConfig{{Header: "  "}}},
+		{name: "duplicate header name", headers: []TaggingHeaderConfig{{Header: "X-Team"}, {Header: "x-team"}}},
+		{name: "credential header authorization", headers: []TaggingHeaderConfig{{Header: "Authorization"}}},
+		{name: "credential header cookie", headers: []TaggingHeaderConfig{{Header: "cookie"}}},
+		{name: "credential header api key", headers: []TaggingHeaderConfig{{Header: "X-Api-Key"}}},
 	}
-	empty := &TaggingConfig{Headers: []TaggingHeaderConfig{{Header: "  "}}}
-	if err := normalizeTaggingConfig(empty); err == nil {
-		t.Fatalf("expected error for empty header name")
-	}
-	dup := &TaggingConfig{Headers: []TaggingHeaderConfig{{Header: "X-Team"}, {Header: "x-team"}}}
-	if err := normalizeTaggingConfig(dup); err == nil {
-		t.Fatalf("expected error for duplicate header name")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &TaggingConfig{Headers: tt.headers}
+			if err := normalizeTaggingConfig(cfg); err == nil {
+				t.Fatalf("expected error for %s", tt.name)
+			}
+		})
 	}
 }
 
