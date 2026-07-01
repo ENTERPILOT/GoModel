@@ -59,7 +59,8 @@ func LogBatchUsageFromBatchResults(
 	// call, so cache resolutions locally to keep this loop off the shared
 	// registry hot path. nil results are cached too so unpriced models resolve
 	// once.
-	pricingCache := make(map[string]*core.ModelPricing)
+	type pricingCacheKey struct{ model, provider string }
+	pricingCache := make(map[pricingCacheKey]*core.ModelPricing)
 
 	for _, item := range result.Data {
 		if item.StatusCode < http.StatusOK || item.StatusCode >= http.StatusMultipleChoices {
@@ -91,7 +92,7 @@ func LogBatchUsageFromBatchResults(
 
 		var pricing *core.ModelPricing
 		if pricingResolver != nil && model != "" {
-			cacheKey := model + "\x00" + provider
+			cacheKey := pricingCacheKey{model: model, provider: provider}
 			if cached, ok := pricingCache[cacheKey]; ok {
 				pricing = cached
 			} else {

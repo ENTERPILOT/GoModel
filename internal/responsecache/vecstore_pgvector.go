@@ -52,8 +52,13 @@ func newPGVectorStore(cfg config.PGVectorConfig) (*pgVecStore, error) {
 		// EXTENSION from the application role even when a DBA has already
 		// installed pgvector. Tolerate the error only when the extension is
 		// actually present; otherwise it is genuinely missing and we cannot
-		// proceed.
-		if !pgExtensionInstalled(ctx, pool, "vector") {
+		// proceed. Use a fresh timeout so a slow CREATE EXTENSION failure that
+		// drained the outer deadline cannot make this check spuriously report
+		// the extension as missing.
+		checkCtx, checkCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		installed := pgExtensionInstalled(checkCtx, pool, "vector")
+		checkCancel()
+		if !installed {
 			pool.Close()
 			return nil, fmt.Errorf("vecstore pgvector: create extension: %w", err)
 		}
