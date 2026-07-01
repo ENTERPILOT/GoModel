@@ -20,6 +20,25 @@ models:
   enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an access override allows one or more user paths
   configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists
 
+# Tagging based on headers: label every request from the listed headers. Labels
+# are recorded in usage tracking and audit logs. A header value can carry several
+# labels split by `delimiter` (default: ","). `prefix` is trimmed from each
+# extracted label only — the header itself is forwarded unchanged unless
+# `do_not_pass: true`. Env equivalents merge over this list and win per header:
+#   TAGGING_HEADER_1=X-My-Tags
+#   TAGGING_HEADER_1_PREFIX=tag-        # optional
+#   TAGGING_HEADER_1_DONOTPASS=true     # optional, default false (headers are passed as-is)
+#   TAGGING_HEADER_1_DELIMITER=";"      # optional, default ","
+# Entries declared here or via env are read-only in the dashboard; omit this
+# section to manage tagging headers only from the UI (Settings → Tagging based on headers).
+# tagging:
+#   headers:
+#     - header: X-My-Tags
+#       prefix: "tag-" # optional: "tag-alpha, beta" → labels "alpha", "beta"
+#     - header: X-Internal-Routing
+#       do_not_pass: true # stripped before forwarding to the provider
+#       delimiter: ";"
+
 # Virtual models as infrastructure-as-code: redirects, load balancers, and access
 # policies. These override admin-store rows with the same source and are read-only
 # in the dashboard. The VIRTUAL_MODELS env var (a JSON array) merges over this list

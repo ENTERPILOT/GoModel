@@ -396,8 +396,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "shared_stream_audit_and_usage_observers",
 			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
-			maxAllocs: 167,      // baseline 159
-			maxBytes:  9 * 1024, // baseline ~8.9 KB; already tight
+			maxAllocs: 167,  // baseline 159
+			maxBytes:  9400, // baseline ~9.0 KB since the UsageEntry labels field; already tight
 		},
 	}
 

@@ -4767,6 +4767,47 @@ body.conversation-drawer-open {
   gap: 10px;
 }
 
+.tagging-settings-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.tagging-settings-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(150px, 1fr) minmax(80px, 110px) auto minmax(90px, auto);
+  align-items: end;
+  gap: 12px;
+}
+
+.tagging-do-not-pass {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  font-size: 13px;
+  gap: 6px;
+  min-height: 35px;
+  white-space: nowrap;
+}
+
+.tagging-row-trailer {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-height: 35px;
+}
+
+.tagging-settings-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.tagging-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .budget-reset-dialog {
   max-width: 460px;
 }
@@ -5322,6 +5363,16 @@ body.conversation-drawer-open {
     width: 100%;
   }
   .budget-settings-actions .pagination-btn {
+    width: 100%;
+  }
+  .tagging-settings-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .tagging-settings-actions {
+    width: 100%;
+  }
+  .tagging-settings-actions .pagination-btn {
     width: 100%;
   }
   .pricing-recalculate-grid {

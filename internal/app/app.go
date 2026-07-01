@@ -32,6 +32,7 @@ import (
 	"gomodel/internal/responsecache"
 	"gomodel/internal/server"
 	"gomodel/internal/storage"
+	"gomodel/internal/tagging"
 	"gomodel/internal/usage"
 	"gomodel/internal/virtualmodels"
 	"gomodel/internal/workflows"
@@ -49,6 +50,7 @@ type App struct {
 	fileStore        *filestore.Result
 	virtualModels    *virtualmodels.Result
 	failover         *failover.Result
+	tagging          *tagging.Result
 	pricingOverrides *pricingoverrides.Result
 	authKeys         *authkeys.Result
 	guardrails       *guardrails.Result
@@ -263,6 +265,19 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	closers = append(closers, app.failover.Close)
 	claimSharedStorage(failoverResult.Storage)
 
+	var taggingResult *tagging.Result
+	if sharedStorage != nil {
+		taggingResult, err = tagging.NewWithSharedStorage(ctx, appCfg, sharedStorage)
+	} else {
+		taggingResult, err = tagging.New(ctx, appCfg)
+	}
+	if err != nil {
+		return fail("failed to initialize tagging", err)
+	}
+	app.tagging = taggingResult
+	closers = append(closers, app.tagging.Close)
+	claimSharedStorage(taggingResult.Storage)
+
 	var pricingOverrideResult *pricingoverrides.Result
 	if sharedStorage != nil {
 		pricingOverrideResult, err = pricingoverrides.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry, providerResult.Registry)
@@ -412,6 +427,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
 		UserPathHeader:                  appCfg.Server.UserPathHeader,
 		SwaggerEnabled:                  swaggerEnabled,
+		Tagging:                         taggingResult.Service,
 	}
 
 	// Wire the readiness storage probe. Storage is a required dependency, so a
@@ -442,6 +458,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			workflowResult.Service,
 			app.guardrails.Service,
 			budgetResult.Service,
+			taggingResult.Service,
 			app,
 			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard),
 			app.live,
@@ -860,6 +877,7 @@ func initAdmin(
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
 	budgetService *budget.Service,
+	taggingService *tagging.Service,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	liveBroker *live.Broker,
@@ -919,6 +937,7 @@ func initAdmin(
 		admin.WithWorkflows(workflowService),
 		admin.WithGuardrailService(guardrailService),
 		admin.WithBudgets(budgetService),
+		admin.WithTagging(taggingService),
 		admin.WithRuntimeRefresher(runtimeRefresher),
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 		admin.WithLiveBroker(liveBroker),

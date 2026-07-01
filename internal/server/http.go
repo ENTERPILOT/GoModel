@@ -26,6 +26,7 @@ import (
 	"gomodel/internal/filestore"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
+	"gomodel/internal/tagging"
 	"gomodel/internal/usage"
 )
 
@@ -86,6 +87,7 @@ type Config struct {
 	IPExtractor                     echo.IPExtractor                       // Optional: trusted client IP extraction strategy for proxied deployments
 	StorageProbe                    ReadinessProbe                         // Optional: primary storage connectivity check; failure makes /health/ready report not_ready (503)
 	CacheProbe                      ReadinessProbe                         // Optional: Redis cache connectivity check; failure makes /health/ready report degraded (200, non-blocking)
+	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
 }
 
 // ReadinessProbe verifies that a dependency the gateway owns is reachable.
@@ -269,6 +271,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Ingress capture (before auth/audit/model validation so they can consume shared raw request state)
 	userPathHeaderName := configuredUserPathHeader(cfg)
 	e.Use(RequestSnapshotCapture(userPathHeaderName))
+
+	// Request labelling from configured tagging headers (after snapshot capture so
+	// audit logging still sees the original headers, before audit logging so
+	// entries can record the labels)
+	if cfg != nil && cfg.Tagging != nil {
+		e.Use(TaggingCapture(cfg.Tagging))
+	}
 
 	if cfg != nil && len(cfg.PassthroughSemanticEnrichers) > 0 {
 		e.Use(PassthroughSemanticEnrichment(provider, cfg.PassthroughSemanticEnrichers, passthroughV1PrefixNormalizationEnabled(cfg)))

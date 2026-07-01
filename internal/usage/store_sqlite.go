@@ -16,7 +16,7 @@ import (
 // maxEntriesPerBatch derives from maxSQLiteParams / columnsPerUsageEntry.
 const (
 	maxSQLiteParams      = 999
-	columnsPerUsageEntry = 19
+	columnsPerUsageEntry = 20
 	maxEntriesPerBatch   = maxSQLiteParams / columnsPerUsageEntry // 52 entries
 )
 
@@ -70,6 +70,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		"ALTER TABLE usage ADD COLUMN provider_name TEXT",
 		"ALTER TABLE usage ADD COLUMN user_path TEXT",
 		"ALTER TABLE usage ADD COLUMN cache_type TEXT",
+		"ALTER TABLE usage ADD COLUMN labels JSON",
 	}
 	for _, migration := range costMigrations {
 		if _, err := db.Exec(migration); err != nil {
@@ -132,7 +133,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 
 		for j, e := range chunk {
 			e = normalizedUsageEntryForStorage(e)
-			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 			rawDataJSON := marshalRawData(e.RawData, e.ID)
 
@@ -153,6 +154,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 				e.Endpoint,
 				e.UserPath,
 				cacheTypeValue(e.CacheType),
+				marshalLabels(e.Labels, e.ID),
 				e.InputTokens,
 				e.OutputTokens,
 				e.TotalTokens,
@@ -166,7 +168,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 		}
 
 		query := `INSERT OR IGNORE INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name,
-			endpoint, user_path, cache_type, input_tokens, output_tokens, total_tokens, raw_data,
+			endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens, raw_data,
 			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat) VALUES ` +
 			strings.Join(placeholders, ",")
 
@@ -213,6 +215,20 @@ func (s *SQLiteStore) cleanup() {
 	if rowsAffected, err := result.RowsAffected(); err == nil && rowsAffected > 0 {
 		slog.Info("cleaned up old usage entries", "deleted", rowsAffected)
 	}
+}
+
+// marshalLabels marshals labels to a JSON array for SQL storage.
+// Returns nil (SQL NULL) when there are no labels or marshaling fails.
+func marshalLabels(labels []string, entryID string) any {
+	if len(labels) == 0 {
+		return nil
+	}
+	labelsJSON, err := json.Marshal(labels)
+	if err != nil {
+		slog.Warn("failed to marshal usage labels", "error", err, "id", entryID)
+		return nil
+	}
+	return string(labelsJSON)
 }
 
 // marshalRawData marshals raw_data to JSON for SQL storage.

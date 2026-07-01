@@ -14,14 +14,14 @@ import (
 )
 
 const (
-	usageInsertColumnCount     = 19
+	usageInsertColumnCount     = 20
 	postgresMaxBindParameters  = 65535
 	usageInsertMaxRowsPerQuery = postgresMaxBindParameters / usageInsertColumnCount
 )
 
 const usageInsertPrefix = `
 		INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name,
-			endpoint, user_path, cache_type, input_tokens, output_tokens, total_tokens, raw_data,
+			endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens, raw_data,
 			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat)
 		VALUES `
 
@@ -84,6 +84,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS provider_name TEXT",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS user_path TEXT",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS cache_type TEXT",
+		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS labels JSONB",
 	}
 	for _, migration := range costMigrations {
 		if _, err := pool.Exec(ctx, migration); err != nil {
@@ -215,6 +216,7 @@ func buildUsageInsert(entries []*UsageEntry) (string, []any) {
 			entry.Endpoint,
 			entry.UserPath,
 			cacheTypeValue(entry.CacheType),
+			marshalLabels(entry.Labels, entry.ID),
 			entry.InputTokens,
 			entry.OutputTokens,
 			entry.TotalTokens,

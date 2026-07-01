@@ -22,6 +22,7 @@ import (
 	"gomodel/internal/live"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
+	"gomodel/internal/tagging"
 	"gomodel/internal/usage"
 	"gomodel/internal/virtualmodels"
 	"gomodel/internal/workflows"
@@ -40,6 +41,7 @@ type Handler struct {
 	pricingOverrides    *pricingoverrides.Service
 	workflows           *workflows.Service
 	budgets             *budget.Service
+	tagging             *tagging.Service
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
 	liveBroker          *live.Broker
@@ -212,6 +214,13 @@ func WithWorkflows(service *workflows.Service) Option {
 func WithBudgets(service *budget.Service) Option {
 	return func(h *Handler) {
 		h.budgets = service
+	}
+}
+
+// WithTagging wires the header tagging service for label rule management.
+func WithTagging(service *tagging.Service) Option {
+	return func(h *Handler) {
+		h.tagging = service
 	}
 }
 

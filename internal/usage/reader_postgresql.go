@@ -180,7 +180,7 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	}
 
 	// Fetch page
-	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type,
+	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, '')
 		FROM "usage"%s ORDER BY timestamp DESC LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
 	dataArgs := append(append([]any(nil), args...), limit, offset)
@@ -222,7 +222,7 @@ func (r *PostgreSQLReader) GetUsageByRequestIDs(ctx context.Context, requestIDs 
 		placeholders = append(placeholders, fmt.Sprintf("$%d", idx+1))
 	}
 
-	query := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type,
+	query := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, '')
 		FROM "usage" WHERE request_id IN (%s) ORDER BY timestamp DESC, id DESC`, strings.Join(placeholders, ", "))
 
@@ -255,9 +255,15 @@ func scanPostgreSQLUsageLogEntries(rows pgxRows) ([]UsageLogEntry, error) {
 		var providerName *string
 		var userPath *string
 		var cacheType *string
-		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &e.Timestamp, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &cacheType,
+		var labelsJSON *string
+		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &e.Timestamp, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &cacheType, &labelsJSON,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &rawDataJSON, &e.CostsCalculationCaveat); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
+		}
+		if labelsJSON != nil && *labelsJSON != "" {
+			if err := json.Unmarshal([]byte(*labelsJSON), &e.Labels); err != nil {
+				slog.Warn("failed to unmarshal labels JSON", "request_id", e.RequestID, "error", err)
+			}
 		}
 		if rawDataJSON != nil && *rawDataJSON != "" {
 			if err := json.Unmarshal([]byte(*rawDataJSON), &e.RawData); err != nil {

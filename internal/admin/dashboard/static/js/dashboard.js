@@ -254,6 +254,9 @@ function dashboard() {
         if (typeof this.fetchBudgetSettings === "function") {
           this.fetchBudgetSettings();
         }
+        if (typeof this.fetchTaggingSettings === "function") {
+          this.fetchTaggingSettings();
+        }
       }
       if (page === "overview") {
         this.renderChart();
@@ -1176,6 +1179,12 @@ function dashboard() {
         ? dashboardBudgetsModule
         : null,
       "dashboardBudgetsModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardTaggingModule === "function"
+        ? dashboardTaggingModule
+        : null,
+      "dashboardTaggingModule",
     ),
     resolveModuleFactory(
       typeof dashboardPricingModule === "function"

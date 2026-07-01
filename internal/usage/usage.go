@@ -56,6 +56,9 @@ type UsageEntry struct {
 	UserPath     string `json:"user_path,omitempty" bson:"user_path,omitempty"`
 	CacheType    string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
 
+	// Labels are request labels extracted from configured tagging headers.
+	Labels []string `json:"labels,omitempty" bson:"labels,omitempty"`
+
 	// Standard token counts (normalized across providers)
 	InputTokens  int `json:"input_tokens" bson:"input_tokens"`
 	OutputTokens int `json:"output_tokens" bson:"output_tokens"`

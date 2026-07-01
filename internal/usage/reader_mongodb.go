@@ -27,6 +27,7 @@ type mongoUsageLogRow struct {
 	Endpoint               string         `bson:"endpoint"`
 	UserPath               string         `bson:"user_path"`
 	CacheType              string         `bson:"cache_type"`
+	Labels                 []string       `bson:"labels"`
 	InputTokens            int            `bson:"input_tokens"`
 	OutputTokens           int            `bson:"output_tokens"`
 	TotalTokens            int            `bson:"total_tokens"`
@@ -50,6 +51,7 @@ func (row mongoUsageLogRow) toUsageLogEntry() UsageLogEntry {
 		Endpoint:               row.Endpoint,
 		UserPath:               row.UserPath,
 		CacheType:              normalizeCacheType(row.CacheType),
+		Labels:                 row.Labels,
 		InputTokens:            row.InputTokens,
 		OutputTokens:           row.OutputTokens,
 		TotalTokens:            row.TotalTokens,

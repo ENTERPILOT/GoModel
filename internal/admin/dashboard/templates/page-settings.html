@@ -180,6 +180,80 @@
                  x-text="budgetSettingsError"></div>
         </div>
 
+        <div class="settings-refresh-section tagging-settings-section">
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'tagging-settings-help-copy', showLabel: 'Show tagging help', hideLabel: 'Hide tagging help', text: 'Each request is labelled from the listed headers; labels land in usage tracking and audit logs. A header value can carry several labels split by the delimiter (default: comma). The prefix is trimmed from each label only — the header itself is forwarded unchanged unless \'Do not pass\' is checked. Rows marked CONFIG come from config.yaml or TAGGING_HEADER_* env vars and are read-only here.' }">
+                <div class="inline-help-title-row">
+                    <h3>Tagging based on headers</h3>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+            <div class="tagging-settings-grid" aria-describedby="tagging-settings-help-copy">
+                <template x-for="(rule, index) in taggingHeaders" :key="index">
+                    <div class="tagging-settings-row">
+                        <div class="form-field">
+                            <label class="form-field-label" :for="'tagging-header-' + index">Header</label>
+                            <input :id="'tagging-header-' + index" class="form-input" type="text" placeholder="X-My-Tags"
+                                   x-model="rule.header" :disabled="rule.managed || !taggingEditable">
+                        </div>
+                        <div class="form-field">
+                            <label class="form-field-label" :for="'tagging-prefix-' + index">Prefix to trim (optional)</label>
+                            <input :id="'tagging-prefix-' + index" class="form-input" type="text" placeholder="tag-"
+                                   x-model="rule.prefix" :disabled="rule.managed || !taggingEditable">
+                        </div>
+                        <div class="form-field">
+                            <label class="form-field-label" :for="'tagging-delimiter-' + index">Delimiter</label>
+                            <input :id="'tagging-delimiter-' + index" class="form-input" type="text" placeholder=","
+                                   x-model="rule.delimiter" :disabled="rule.managed || !taggingEditable">
+                        </div>
+                        <label class="tagging-do-not-pass">
+                            <input type="checkbox" x-model="rule.do_not_pass" :disabled="rule.managed || !taggingEditable">
+                            <span>Do not pass upstream</span>
+                        </label>
+                        <div class="tagging-row-trailer">
+                            <span class="badge" x-show="rule.managed" title="Declared in config.yaml or TAGGING_HEADER_* env vars; read-only here.">config</span>
+                            <button type="button"
+                                    class="pagination-btn pagination-btn-danger-outline"
+                                    x-show="!rule.managed"
+                                    :disabled="!taggingEditable"
+                                    :aria-label="'Remove tagging header ' + (rule.header || index + 1)"
+                                    @click="removeTaggingHeader(index)">Remove</button>
+                        </div>
+                    </div>
+                </template>
+                <p class="tagging-settings-empty" x-show="!taggingLoading && taggingHeaders.length === 0">No tagging headers configured. Requests are not labelled.</p>
+            </div>
+            <div class="settings-refresh-actions tagging-settings-actions">
+                <button type="button"
+                        class="pagination-btn pagination-btn-with-icon"
+                        :disabled="!taggingEditable || taggingSaving"
+                        @click="addTaggingHeader()">
+                    <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                    <span>Add Header</span>
+                </button>
+                <button type="button"
+                        class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                        :disabled="!taggingEditable || taggingSaving || taggingLoading"
+                        :aria-busy="taggingSaving ? 'true' : 'false'"
+                        @click="saveTaggingSettings()">
+                    <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                    <span>Save Tagging Settings</span>
+                </button>
+            </div>
+        </div>
+        <div>
+            <div class="alert alert-success settings-refresh-alert"
+                 role="status"
+                 aria-live="polite"
+                 x-show="taggingNotice"
+                 x-text="taggingNotice"></div>
+            <div class="alert alert-warning settings-refresh-alert"
+                 role="alert"
+                 aria-live="assertive"
+                 x-show="taggingError"
+                 x-text="taggingError"></div>
+        </div>
+
         <div class="settings-refresh-section pricing-recalculate-section" x-show="pricingRecalculationEnabled()" x-cloak>
             <div class="inline-help-section" x-data="{ open: false, copyId: 'pricing-recalculate-help-copy', showLabel: 'Show pricing recalculation help', hideLabel: 'Hide pricing recalculation help', text: 'Recalculate stored usage costs from the current model pricing metadata. Filters are applied to the selected date range, user path subtree, and provider/model selector or alias.' }">
                 <div class="inline-help-title-row">

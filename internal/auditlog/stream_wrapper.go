@@ -238,6 +238,7 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 		entryCopy.Data = &LogData{
 			UserAgent:       baseEntry.Data.UserAgent,
 			APIKeyHash:      baseEntry.Data.APIKeyHash,
+			Labels:          baseEntry.Data.Labels,
 			Temperature:     baseEntry.Data.Temperature,
 			MaxTokens:       baseEntry.Data.MaxTokens,
 			RequestHeaders:  copyMap(baseEntry.Data.RequestHeaders),

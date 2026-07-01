@@ -34,6 +34,7 @@ func (o *InferenceOrchestrator) logUsage(
 	if entry := extractFn(pricing); entry != nil {
 		entry.ProviderName = strings.TrimSpace(providerName)
 		entry.UserPath = core.UserPathFromContext(ctx)
+		entry.Labels = core.RequestLabelsFromContext(ctx)
 		o.usageLogger.Write(entry)
 	}
 }

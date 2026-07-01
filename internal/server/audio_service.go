@@ -228,6 +228,7 @@ func (s *audioService) logUsage(ctx context.Context, route audioRoute, extract f
 	}
 	entry.ProviderName = strings.TrimSpace(route.providerName)
 	entry.UserPath = core.UserPathFromContext(ctx)
+	entry.Labels = core.RequestLabelsFromContext(ctx)
 	s.usageLogger.Write(entry)
 }
 

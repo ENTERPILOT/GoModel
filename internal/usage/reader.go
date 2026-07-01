@@ -236,6 +236,7 @@ type UsageLogEntry struct {
 	Endpoint               string         `json:"endpoint"`
 	UserPath               string         `json:"user_path,omitempty"`
 	CacheType              string         `json:"cache_type,omitempty"`
+	Labels                 []string       `json:"labels,omitempty"`
 	InputTokens            int            `json:"input_tokens"`
 	OutputTokens           int            `json:"output_tokens"`
 	TotalTokens            int            `json:"total_tokens"`

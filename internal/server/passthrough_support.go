@@ -84,10 +84,14 @@ func normalizePassthroughEndpoint(endpoint string, enabled bool) (string, error)
 func buildPassthroughHeaders(ctx context.Context, src http.Header) http.Header {
 	connectionHeaders := passthroughConnectionHeaders(src)
 	userPathHeaderName := http.CanonicalHeaderKey(core.UserPathHeaderNameFromContext(ctx))
+	taggingStrip := core.TaggingStripHeadersFromContext(ctx)
 	dst := make(http.Header)
 	for key, values := range src {
 		canonicalKey := http.CanonicalHeaderKey(strings.TrimSpace(key))
 		if skipPassthroughRequestHeader(canonicalKey, userPathHeaderName) || len(values) == 0 {
+			continue
+		}
+		if _, doNotPass := taggingStrip[canonicalKey]; doNotPass {
 			continue
 		}
 		if _, hopByHop := connectionHeaders[canonicalKey]; hopByHop {
@@ -293,6 +297,7 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 		if s.usageLogger != nil && s.usageLogger.Config().Enabled && (workflow == nil || workflow.UsageEnabled()) {
 			if observer := usage.NewStreamUsageObserver(s.usageLogger, model, providerType, requestID, usagePath, s.pricingResolver, core.UserPathFromContext(c.Request().Context())); observer != nil {
 				observer.SetProviderName(providerName)
+				observer.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 				observers = append(observers, observer)
 			}
 		}

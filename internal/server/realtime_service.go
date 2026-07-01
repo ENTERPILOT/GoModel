@@ -43,6 +43,7 @@ type realtimeRoute struct {
 	providerName string
 	requestID    string
 	userPath     string
+	labels       []string
 }
 
 // Realtime handles GET /v1/realtime, routing by the model query parameter.
@@ -116,6 +117,7 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 		providerName: selector.Provider,
 		requestID:    requestID,
 		userPath:     core.UserPathFromContext(ctx),
+		labels:       core.RequestLabelsFromContext(ctx),
 	}
 	if resolver, ok := s.provider.(core.ProviderNameResolver); ok {
 		if name := resolver.GetProviderName(qualified); name != "" {
@@ -185,6 +187,7 @@ func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute) fun
 		}
 		entry.ProviderName = strings.TrimSpace(route.providerName)
 		entry.UserPath = route.userPath
+		entry.Labels = route.labels
 		s.usageLogger.Write(entry)
 	}
 }

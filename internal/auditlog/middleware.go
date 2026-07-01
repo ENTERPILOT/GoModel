@@ -74,6 +74,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				UserPath:  userPath,
 				Data: &LogData{
 					UserAgent: req.UserAgent(),
+					Labels:    core.RequestLabelsFromContext(req.Context()),
 				},
 			}
 

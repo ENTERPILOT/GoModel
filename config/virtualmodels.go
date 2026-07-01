@@ -62,35 +62,8 @@ func applyVirtualModelsEnv(cfg *Config) error {
 	if err := json.Unmarshal([]byte(raw), &fromEnv); err != nil {
 		return fmt.Errorf("invalid %s: %w", envVirtualModels, err)
 	}
-	cfg.VirtualModels = mergeVirtualModels(cfg.VirtualModels, fromEnv)
+	cfg.VirtualModels = mergeByKey(cfg.VirtualModels, fromEnv, func(model VirtualModelConfig) string {
+		return canonicalTextKey(model.Source)
+	})
 	return nil
-}
-
-// mergeVirtualModels overlays override entries onto base, replacing any base entry
-// whose source matches (case-insensitively, trimmed). Replaced entries keep their
-// position; new ones are appended.
-func mergeVirtualModels(base, override []VirtualModelConfig) []VirtualModelConfig {
-	if len(override) == 0 {
-		return base
-	}
-	merged := make([]VirtualModelConfig, len(base))
-	copy(merged, base)
-	index := make(map[string]int, len(merged))
-	for i, vm := range merged {
-		index[virtualModelKey(vm.Source)] = i
-	}
-	for _, vm := range override {
-		key := virtualModelKey(vm.Source)
-		if pos, ok := index[key]; ok {
-			merged[pos] = vm
-			continue
-		}
-		index[key] = len(merged)
-		merged = append(merged, vm)
-	}
-	return merged
-}
-
-func virtualModelKey(source string) string {
-	return strings.ToLower(strings.TrimSpace(source))
 }

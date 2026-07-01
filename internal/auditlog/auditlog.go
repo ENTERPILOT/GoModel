@@ -110,6 +110,9 @@ type LogData struct {
 	UserAgent  string `json:"user_agent,omitempty" bson:"user_agent,omitempty"`
 	APIKeyHash string `json:"api_key_hash,omitempty" bson:"api_key_hash,omitempty"`
 
+	// Labels are request labels extracted from configured tagging headers.
+	Labels []string `json:"labels,omitempty" bson:"labels,omitempty"`
+
 	// WorkflowFeatures captures the request-time effective workflow features
 	// after runtime caps were applied. This keeps audit views historically accurate
 	// even if the active process config changes later.

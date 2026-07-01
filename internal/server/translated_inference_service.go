@@ -536,6 +536,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		usageObserver := usage.NewStreamUsageObserver(s.usageLogger, model, provider, requestID, endpoint, s.pricingResolver, core.UserPathFromContext(c.Request().Context()))
 		if usageObserver != nil {
 			usageObserver.SetProviderName(providerName)
+			usageObserver.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 			observers = append(observers, usageObserver)
 		}
 	}

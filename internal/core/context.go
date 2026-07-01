@@ -25,6 +25,12 @@ const (
 	// batchPreparationMetadataKey stores request-scoped batch preprocessing metadata.
 	batchPreparationMetadataKey contextKey = "batch-preparation-metadata"
 
+	// requestLabelsKey stores labels extracted from configured tagging headers.
+	requestLabelsKey contextKey = "request-labels"
+	// taggingStripHeadersKey stores canonical tagging header names that must not
+	// be forwarded to upstream providers.
+	taggingStripHeadersKey contextKey = "tagging-strip-headers"
+
 	// enforceReturningUsageDataKey stores whether streaming requests should ask providers
 	// to include usage when the provider supports it.
 	enforceReturningUsageDataKey contextKey = "enforce-returning-usage-data"
