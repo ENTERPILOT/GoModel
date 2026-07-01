@@ -426,6 +426,9 @@ func TestGetWorkflow(t *testing.T) {
 			t.Fatalf("effective_features missing lower-case key %q: %s", key, rec.Body.String())
 		}
 	}
+	if !effectiveFeatures["failover"] {
+		t.Fatalf("effective_features failover = false, want true (renamed field must round-trip): %s", rec.Body.String())
+	}
 	if _, ok := effectiveFeatures["Cache"]; ok {
 		t.Fatalf("effective_features leaked Go field key %q: %s", "Cache", rec.Body.String())
 	}
@@ -448,6 +451,9 @@ func TestGetWorkflow(t *testing.T) {
 	}
 	if !body.Payload.Features.Usage || !body.Payload.Features.Audit || !body.Payload.Features.Guardrails {
 		t.Fatalf("payload features = %+v, want usage/audit/guardrails enabled", body.Payload.Features)
+	}
+	if body.Payload.Features.Failover == nil || !*body.Payload.Features.Failover {
+		t.Fatalf("payload failover = %v, want true (renamed field must round-trip)", body.Payload.Features.Failover)
 	}
 }
 

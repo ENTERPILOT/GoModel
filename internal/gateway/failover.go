@@ -95,13 +95,13 @@ func executeWithFailoverResponse[T any](
 	workflow *core.Workflow,
 	model, provider string,
 	primary func() (T, string, string, error),
-	fallback func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
+	failoverFn func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
 ) (T, string, string, string, bool, error) {
 	resp, resolvedProviderType, resolvedProviderName, err := primary()
 	if err == nil {
 		return resp, resolvedProviderType, resolvedProviderName, "", false, nil
 	}
-	return tryFailoverResponse(ctx, o, workflow, model, provider, err, fallback)
+	return tryFailoverResponse(ctx, o, workflow, model, provider, err, failoverFn)
 }
 
 func executeTranslatedWithFailover[Req any, Resp any](

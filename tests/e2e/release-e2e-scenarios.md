@@ -1356,7 +1356,7 @@ require_release_artifact "$QA_WORKFLOW_JSON"
 require_release_artifact "$QA_WORKFLOW_ID_FILE"
 jq -e --arg user_path "$QA_USER_PATH" '
     {id,name,scope,workflow_payload}
-    | select(.id != null and .scope.scope_user_path == $user_path and .workflow_payload.features.cache == false)
+    | select(.id != null and .scope.scope_user_path == $user_path and .workflow_payload.features.cache == false and .workflow_payload.features.failover == false)
   ' "$QA_WORKFLOW_JSON"
 ```
 
@@ -1376,6 +1376,8 @@ jq -e --arg workflow_id "$WORKFLOW_ID" --arg user_path "$QA_USER_PATH" '
     .id == $workflow_id
     and .scope.scope_user_path == $user_path
     and .effective_features.cache == false
+    and .workflow_payload.features.failover == false
+    and .effective_features.failover == false
   ' "$WORKFLOW_DETAIL_FILE" >/dev/null
 ```
 
