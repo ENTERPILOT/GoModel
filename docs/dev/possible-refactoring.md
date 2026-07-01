@@ -86,38 +86,38 @@ Suggested action:
 - Introduce a small shared internal package for cache semantics.
 - Do it only if it can be done without creating import cycles.
 
-## 6. Centralize fallback-mode semantics in `config`
+## 6. Centralize failover-mode semantics in `config`
 
 Effort: low
 Risk: low
 
 Why:
-- `config.ResolveFallbackDefaultMode()` now owns the blank-to-`auto` defaulting rule.
-- `internal/app/app.go` still re-implements fallback-mode parsing in:
-  - `dashboardFallbackModeValue()`
-  - `fallbackFeatureEnabledGlobally()`
-  - `fallbackModeEnabled()`
+- `config.ResolveFailoverDefaultMode()` now owns the blank-to-`auto` defaulting rule.
+- `internal/app/app.go` still re-implements failover-mode parsing in:
+  - `dashboardFailoverModeValue()`
+  - `failoverFeatureEnabledGlobally()`
+  - `failoverModeEnabled()`
 - Those helpers currently perform their own `TrimSpace` / case-folding instead of reusing config-owned semantics.
 
 Suggested action:
 - Add small config-owned helpers for:
-  - "is fallback enabled for this mode?"
+  - "is failover enabled for this mode?"
   - "what dashboard mode should be exposed for this config?"
 - Remove the ad hoc mode parsing from `internal/app/app.go`.
 - This keeps blank, mixed-case, and future mode handling in one place.
 
-## 7. Collapse the duplicated translated fallback attempt loops
+## 7. Collapse the duplicated translated failover attempt loops
 
 Effort: medium
 Risk: medium
 
 Why:
-- `internal/server/translated_inference_service.go` has two near-identical fallback loops:
-  - `tryFallbackResponse()`
-  - `tryFallbackStream()`
+- `internal/server/translated_inference_service.go` has two near-identical failover loops:
+  - `tryFailoverResponse()`
+  - `tryFailoverStream()`
 - Both:
   - fetch selectors
-  - gate on `shouldAttemptFallback()`
+  - gate on `shouldAttemptFailover()`
   - derive `providerType`
   - log attempt/success messages
   - walk candidates while preserving the last error
@@ -130,13 +130,13 @@ Suggested action:
   - last-error handling
 - Keep the typed wrappers only for the response/stream result shapes.
 
-## 8. Precompute fallback source identity once per resolution
+## 8. Precompute failover source identity once per resolution
 
 Effort: medium
 Risk: low to medium
 
 Why:
-- `internal/fallback/resolver.go` recomputes trimmed selector identity several times per request:
+- `internal/failover/resolver.go` recomputes trimmed selector identity several times per request:
   - `sourceModelInfo()`
   - `modeFor()`
   - `manualSelectorsFor()`
@@ -145,21 +145,21 @@ Why:
 - `modeFor()` and `manualSelectorsFor()` each rebuild the same ordered match-key list.
 
 Suggested action:
-- Introduce a small internal struct for one fallback resolution pass, containing:
+- Introduce a small internal struct for one failover resolution pass, containing:
   - source model info
   - canonical source key
   - ordered match keys
-- Build it once in `ResolveFallbacks()` and pass it through helper calls.
+- Build it once in `ResolveFailovers()` and pass it through helper calls.
 - This would trim repeated string cleanup and make precedence rules easier to inspect.
 
-## 9. Extract manual fallback-rule file parsing from `loadFallbackConfig`
+## 9. Extract manual failover-rule file parsing from `loadFailoverConfig`
 
 Effort: medium
 Risk: low to medium
 
 Why:
-- `config.loadFallbackConfig()` currently owns both:
-  - fallback-mode validation/defaulting
+- `config.loadFailoverConfig()` currently owns both:
+  - failover-mode validation/defaulting
   - the custom JSON loader for `manual_rules_path`
 - The manual loader includes:
   - duplicate raw JSON key detection
@@ -169,11 +169,11 @@ Why:
 - That makes the config loader harder to scan than the rest of the config pipeline.
 
 Suggested action:
-- Move the manual-rule JSON parsing into a dedicated helper or file, for example `loadFallbackManualRules(path string)`.
-- Keep `loadFallbackConfig()` focused on policy validation and wiring.
+- Move the manual-rule JSON parsing into a dedicated helper or file, for example `loadFailoverManualRules(path string)`.
+- Keep `loadFailoverConfig()` focused on policy validation and wiring.
 - Preserve the current strict error messages and test coverage while isolating the parser.
 
-## 10. Pick one owner for workflow fallback defaults
+## 10. Pick one owner for workflow failover defaults
 
 Effort: medium
 Risk: medium
@@ -188,7 +188,7 @@ Suggested action:
 - Options:
   - expose default feature flags from the admin config endpoint
   - derive the initial dashboard form from the active managed default workflow
-- This reduces UI/backend drift for fallback and other workflow features.
+- This reduces UI/backend drift for failover and other workflow features.
 
 ## Recommended order
 
@@ -197,8 +197,8 @@ Suggested action:
 3. Keep cached-only policy in one layer.
 4. Remove the legacy middleware path.
 5. Centralize cache semantics in a shared package.
-6. Centralize fallback-mode semantics in `config`.
-7. Collapse the duplicated translated fallback attempt loops.
-8. Precompute fallback source identity once per resolution.
-9. Extract manual fallback-rule file parsing from `loadFallbackConfig`.
-10. Pick one owner for workflow fallback defaults.
+6. Centralize failover-mode semantics in `config`.
+7. Collapse the duplicated translated failover attempt loops.
+8. Precompute failover source identity once per resolution.
+9. Extract manual failover-rule file parsing from `loadFailoverConfig`.
+10. Pick one owner for workflow failover defaults.

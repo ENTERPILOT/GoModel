@@ -9,51 +9,51 @@ import (
 	"strings"
 )
 
-type FallbackMode string
+type FailoverMode string
 
 const (
-	FallbackModeOff    FallbackMode = "off"
-	FallbackModeManual FallbackMode = "manual"
-	FallbackModeAuto   FallbackMode = "auto"
+	FailoverModeOff    FailoverMode = "off"
+	FailoverModeManual FailoverMode = "manual"
+	FailoverModeAuto   FailoverMode = "auto"
 )
 
-// Valid reports whether mode is one of the supported fallback modes.
-func (m FallbackMode) Valid() bool {
-	switch normalizeFallbackMode(m) {
-	case FallbackModeOff, FallbackModeManual, FallbackModeAuto:
+// Valid reports whether mode is one of the supported failover modes.
+func (m FailoverMode) Valid() bool {
+	switch normalizeFailoverMode(m) {
+	case FailoverModeOff, FailoverModeManual, FailoverModeAuto:
 		return true
 	default:
 		return false
 	}
 }
 
-func normalizeFallbackMode(mode FallbackMode) FallbackMode {
-	return FallbackMode(strings.ToLower(strings.TrimSpace(string(mode))))
+func normalizeFailoverMode(mode FailoverMode) FailoverMode {
+	return FailoverMode(strings.ToLower(strings.TrimSpace(string(mode))))
 }
 
-// ResolveFallbackDefaultMode canonicalizes the global fallback default mode and
+// ResolveFailoverDefaultMode canonicalizes the global failover default mode and
 // applies the process default when unset.
-func ResolveFallbackDefaultMode(mode FallbackMode) FallbackMode {
-	mode = normalizeFallbackMode(mode)
+func ResolveFailoverDefaultMode(mode FailoverMode) FailoverMode {
+	mode = normalizeFailoverMode(mode)
 	if mode == "" {
-		return FallbackModeManual
+		return FailoverModeManual
 	}
 	return mode
 }
 
-// FallbackConfig holds translated-route model fallback policy.
-type FallbackConfig struct {
+// FailoverConfig holds translated-route model failover policy.
+type FailoverConfig struct {
 	// Enabled controls failover globally. It defaults to true; configured rules
-	// and workflow policy decide whether any request has fallback candidates.
+	// and workflow policy decide whether any request has failover candidates.
 	Enabled bool `yaml:"enabled" env:"FAILOVER_ENABLED"`
 
 	// DefaultMode is a deprecated compatibility field. It is accepted from old
-	// config files and FEATURE_FALLBACK_MODE, but runtime failover is manual-only.
-	DefaultMode FallbackMode `yaml:"default_mode" env:"FEATURE_FALLBACK_MODE"`
+	// config files and FAILOVER_MODE, but runtime failover is manual-only.
+	DefaultMode FailoverMode `yaml:"default_mode" env:"FAILOVER_MODE"`
 
 	// ManualRulesPath points to a JSON file that maps source model selectors to
-	// ordered fallback model selector lists. Empty disables manual rules.
-	ManualRulesPath string `yaml:"manual_rules_path" env:"FALLBACK_MANUAL_RULES_PATH"`
+	// ordered failover model selector lists. Empty disables manual rules.
+	ManualRulesPath string `yaml:"manual_rules_path" env:"FAILOVER_MANUAL_RULES_PATH"`
 
 	// Rules defines manual failover rules inline in config.yaml.
 	Rules map[string][]string `yaml:"rules"`
@@ -68,22 +68,22 @@ type FallbackConfig struct {
 	// env. It accepts either a JSON string array or object with boolean values.
 	DisabledModelsJSON string `yaml:"disabled_models_json" env:"FAILOVER_DISABLED_MODELS_JSON"`
 
-	// Manual holds the parsed manual fallback lists loaded from ManualRulesPath.
+	// Manual holds the parsed manual failover lists loaded from ManualRulesPath.
 	Manual map[string][]string `yaml:"-"`
 
 	// Disabled holds normalized per-model failover disables.
 	Disabled map[string]bool `yaml:"-"`
 }
 
-func loadFallbackConfig(cfg *FallbackConfig) error {
+func loadFailoverConfig(cfg *FailoverConfig) error {
 	if cfg == nil {
 		return nil
 	}
 
-	cfg.DefaultMode = ResolveFallbackDefaultMode(cfg.DefaultMode)
+	cfg.DefaultMode = ResolveFailoverDefaultMode(cfg.DefaultMode)
 
 	manual := make(map[string][]string)
-	if err := mergeFallbackRules(manual, cfg.Rules, "fallback.rules"); err != nil {
+	if err := mergeFailoverRules(manual, cfg.Rules, "failover.rules"); err != nil {
 		return err
 	}
 
@@ -91,23 +91,23 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 	if path != "" {
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("fallback.manual_rules_path: failed to read %q: %w", path, err)
+			return fmt.Errorf("failover.manual_rules_path: failed to read %q: %w", path, err)
 		}
-		decoded, err := decodeFallbackRuleJSON(string(raw), fmt.Sprintf("fallback.manual_rules_path: failed to parse %q", path))
+		decoded, err := decodeFailoverRuleJSON(string(raw), fmt.Sprintf("failover.manual_rules_path: failed to parse %q", path))
 		if err != nil {
 			return err
 		}
-		if err := mergeFallbackRules(manual, decoded, "fallback.manual_rules_path"); err != nil {
+		if err := mergeFailoverRules(manual, decoded, "failover.manual_rules_path"); err != nil {
 			return err
 		}
 	}
 
 	if inline := strings.TrimSpace(cfg.RulesJSON); inline != "" {
-		decoded, err := decodeFallbackRuleJSON(inline, "fallback.rules_json")
+		decoded, err := decodeFailoverRuleJSON(inline, "failover.rules_json")
 		if err != nil {
 			return err
 		}
-		if err := mergeFallbackRules(manual, decoded, "fallback.rules_json"); err != nil {
+		if err := mergeFailoverRules(manual, decoded, "failover.rules_json"); err != nil {
 			return err
 		}
 	}
@@ -117,7 +117,7 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 		cfg.Manual = manual
 	}
 
-	disabled, err := fallbackDisabledModels(cfg)
+	disabled, err := failoverDisabledModels(cfg)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 	return nil
 }
 
-func decodeFallbackRuleJSON(raw, label string) (map[string][]string, error) {
+func decodeFailoverRuleJSON(raw, label string) (map[string][]string, error) {
 	expanded := expandString(raw)
 	decoded := make(map[string][]string)
 	decoder := json.NewDecoder(strings.NewReader(expanded))
@@ -187,7 +187,7 @@ func decodeFallbackRuleJSON(raw, label string) (map[string][]string, error) {
 	return decoded, nil
 }
 
-func mergeFallbackRules(dst map[string][]string, src map[string][]string, label string) error {
+func mergeFailoverRules(dst map[string][]string, src map[string][]string, label string) error {
 	seen := make(map[string]struct{}, len(src))
 	for key, models := range src {
 		key = strings.TrimSpace(key)
@@ -211,7 +211,7 @@ func mergeFallbackRules(dst map[string][]string, src map[string][]string, label 
 	return nil
 }
 
-func fallbackDisabledModels(cfg *FallbackConfig) (map[string]bool, error) {
+func failoverDisabledModels(cfg *FailoverConfig) (map[string]bool, error) {
 	disabled := make(map[string]bool)
 	for _, model := range cfg.DisabledModels {
 		model = strings.TrimSpace(model)
@@ -236,7 +236,7 @@ func fallbackDisabledModels(cfg *FallbackConfig) (map[string]bool, error) {
 		}
 		var keyed map[string]bool
 		if err := json.Unmarshal([]byte(expanded), &keyed); err != nil {
-			return nil, fmt.Errorf("fallback.disabled_models_json: must be a JSON array or boolean object: %w", err)
+			return nil, fmt.Errorf("failover.disabled_models_json: must be a JSON array or boolean object: %w", err)
 		}
 		for key, value := range keyed {
 			key = strings.TrimSpace(key)

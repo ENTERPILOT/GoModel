@@ -256,11 +256,11 @@ test("workflow failover controls are gated by the runtime FAILOVER_ENABLED flag"
 
   assert.match(
     template,
-    /x-show="workflowFailoverVisible\(\)"[\s\S]*x-model="workflowForm\.features\.fallback"/,
+    /x-show="workflowFailoverVisible\(\)"[\s\S]*x-model="workflowForm\.features\.failover"/,
   );
   assert.match(
     template,
-    /x-show="workflowFailoverVisible\(\)"[\s\S]*x-text="'Failover: ' \+ workflowFallbackLabel\(workflow\)"/,
+    /x-show="workflowFailoverVisible\(\)"[\s\S]*x-text="'Failover: ' \+ workflowFailoverLabel\(workflow\)"/,
   );
 });
 
@@ -307,7 +307,7 @@ test("workflow editor renders a live preview card from the draft workflow state"
 
   assert.match(
     template,
-    /<article class="workflow-card workflow-preview-card">[\s\S]*x-text="workflowDisplayName\(workflowPreview\(\)\)"[\s\S]*x-text="workflowScopeLabel\(workflowPreview\(\)\)"[\s\S]*x-text="'Failover: ' \+ workflowFallbackLabel\(workflowPreview\(\)\)"[\s\S]*{{template "workflow-chart" "workflowChart\(workflowPreview\(\)\)"}}[\s\S]*x-show="workflowGuardrails\(workflowPreview\(\)\)\.length > 0"/,
+    /<article class="workflow-card workflow-preview-card">[\s\S]*x-text="workflowDisplayName\(workflowPreview\(\)\)"[\s\S]*x-text="workflowScopeLabel\(workflowPreview\(\)\)"[\s\S]*x-text="'Failover: ' \+ workflowFailoverLabel\(workflowPreview\(\)\)"[\s\S]*{{template "workflow-chart" "workflowChart\(workflowPreview\(\)\)"}}[\s\S]*x-show="workflowGuardrails\(workflowPreview\(\)\)\.length > 0"/,
   );
   assert.match(
     chartTemplate,

@@ -12,7 +12,7 @@ GoModel wraps every upstream provider call with two resilience layers:
    failing repeatedly, then probes once the timeout elapses.
 
 Both layers apply per provider. They do not switch to a different model or
-provider on failure. For cross-model fallback, see
+provider on failure. For cross-model failover, see
 [Failover](/features/failover).
 
 ## Defaults
@@ -115,5 +115,5 @@ Given the YAML above, the effective per-provider settings are:
 
 The retry and circuit breaker layers stay on a single provider. If you also
 want GoModel to try a different model or provider when the primary keeps
-failing, configure manual fallback rules. See
+failing, configure manual failover rules. See
 [Failover](/features/failover).

@@ -339,7 +339,7 @@ func captureResponseForCache(c *echo.Context, path, warnMessage string, next fun
 	if !shouldStoreCapturedResponse(capture.effectiveStatusCode()) || capture.body.Len() == 0 {
 		return nil, false, nil
 	}
-	if core.GetFallbackUsed(c.Request().Context()) {
+	if core.GetFailoverUsed(c.Request().Context()) {
 		return nil, false, nil
 	}
 	data, ok := capture.cachedBody(c.Response().Header().Get("Content-Type"))

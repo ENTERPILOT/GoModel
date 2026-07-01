@@ -37,7 +37,7 @@ func (o *InferenceOrchestrator) StreamChatCompletion(ctx context.Context, workfl
 		return nil, err
 	}
 	streamReq, providerType, providerName, usageModel := o.ResolveChatRoute(workflow, req)
-	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, failoverModel, usedFallback, err := o.streamChatCompletion(ctx, workflow, streamReq, providerType, providerName, usageModel)
+	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, failoverModel, usedFailover, err := o.streamChatCompletion(ctx, workflow, streamReq, providerType, providerName, usageModel)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func (o *InferenceOrchestrator) StreamChatCompletion(ctx context.Context, workfl
 			ProviderName:  resolvedProviderName,
 			Model:         resolvedUsageModel,
 			FailoverModel: failoverModel,
-			UsedFallback:  usedFallback,
+			UsedFailover:  usedFailover,
 		},
 	}, nil
 }
@@ -82,7 +82,7 @@ func (o *InferenceOrchestrator) StreamResponses(ctx context.Context, workflow *c
 	if (workflow == nil || workflow.UsageEnabled()) && o.ShouldEnforceReturningUsageData() {
 		ctx = core.WithEnforceReturningUsageData(ctx, true)
 	}
-	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, failoverModel, usedFallback, err := o.streamResponses(ctx, workflow, req, providerType, providerName, usageModel)
+	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, failoverModel, usedFailover, err := o.streamResponses(ctx, workflow, req, providerType, providerName, usageModel)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,7 @@ func (o *InferenceOrchestrator) StreamResponses(ctx context.Context, workflow *c
 			ProviderName:  resolvedProviderName,
 			Model:         resolvedUsageModel,
 			FailoverModel: failoverModel,
-			UsedFallback:  usedFallback,
+			UsedFailover:  usedFailover,
 		},
 	}, nil
 }
@@ -151,10 +151,10 @@ func (o *InferenceOrchestrator) ResolveChatRoute(workflow *core.Workflow, req *c
 	return streamReq, providerType, providerName, usageModel
 }
 
-func (o *InferenceOrchestrator) routeMetadata(workflow *core.Workflow, fallbackModel string) (string, string, string) {
+func (o *InferenceOrchestrator) routeMetadata(workflow *core.Workflow, failoverModel string) (string, string, string) {
 	providerType := ProviderTypeFromWorkflow(workflow)
 	providerName := ProviderNameFromWorkflow(workflow)
-	model := ResolvedModelFromWorkflow(workflow, fallbackModel)
+	model := ResolvedModelFromWorkflow(workflow, failoverModel)
 	return providerType, providerName, model
 }
 
@@ -325,7 +325,7 @@ func executeWithUsage[Resp any](
 	modelFromResponse func(Resp) string,
 	entry func(Resp, string, *core.ModelPricing) *usage.UsageEntry,
 ) (Resp, ExecutionMeta, error) {
-	resp, providerType, providerName, failoverModel, usedFallback, err := execute()
+	resp, providerType, providerName, failoverModel, usedFailover, err := execute()
 	if err != nil {
 		var zero Resp
 		return zero, ExecutionMeta{}, err
@@ -340,7 +340,7 @@ func executeWithUsage[Resp any](
 		ProviderName:  providerName,
 		Model:         model,
 		FailoverModel: failoverModel,
-		UsedFallback:  usedFallback,
+		UsedFailover:  usedFailover,
 	}, nil
 }
 
@@ -373,7 +373,7 @@ func executeTranslatedProviderRequest[Req any, Resp any](
 	call func(context.Context, Req) (Resp, error),
 	responseProvider func(Resp) string,
 ) (Resp, string, string, string, bool, error) {
-	return executeTranslatedWithFallback(ctx, o, workflow, req, model, provider, cloneForSelector,
+	return executeTranslatedWithFailover(ctx, o, workflow, req, model, provider, cloneForSelector,
 		func(ctx context.Context, req Req) (Resp, string, error) {
 			resp, err := call(ctx, req)
 			if err != nil {
@@ -406,7 +406,7 @@ func streamTranslatedProviderRequest[Req any](
 	}
 	recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, currentSelectorForWorkflow(workflow, model, provider), started, err))
 
-	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, failoverModel, err := tryFallbackStream(ctx, o, workflow, model, provider, err,
+	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, failoverModel, err := tryFailoverStream(ctx, o, workflow, model, provider, err,
 		func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error) {
 			stream, err := call(ctx, cloneForSelector(req, selector))
 			if err != nil {
@@ -550,16 +550,16 @@ func (o *InferenceOrchestrator) executeEmbeddings(
 		return resp, ResponseProviderType(providerType, resp.Provider), providerName, nil
 	}
 
-	return o.tryFallbackEmbeddings(ctx, workflow, req, err)
+	return o.tryFailoverEmbeddings(ctx, workflow, req, err)
 }
 
-func (o *InferenceOrchestrator) tryFallbackEmbeddings(
+func (o *InferenceOrchestrator) tryFailoverEmbeddings(
 	ctx context.Context,
 	workflow *core.Workflow,
 	req *core.EmbeddingRequest,
 	primaryErr error,
 ) (*core.EmbeddingResponse, string, string, error) {
-	// Embeddings fallback is intentionally disabled until the shared model
+	// Embeddings failover is intentionally disabled until the shared model
 	// contract can prove vector-size compatibility for alternates.
 	return nil, "", "", primaryErr
 }

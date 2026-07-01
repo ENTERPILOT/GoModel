@@ -1101,6 +1101,16 @@
           "admin"
         ],
         "summary": "Generate failover mapping suggestions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.generateFailoverRulesRequest"
+              }
+            }
+          },
+          "description": "Optional source model filter"
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -1111,6 +1121,16 @@
                   "items": {
                     "$ref": "#/components/schemas/failover.View"
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
                 }
               }
             }
@@ -6802,6 +6822,17 @@
           "source"
         ]
       },
+      "admin.generateFailoverRulesRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "primary_model": {
+            "type": "string"
+          }
+        }
+      },
       "admin.modelAccessResponse": {
         "type": "object",
         "properties": {
@@ -7278,6 +7309,56 @@
           }
         }
       },
+      "auditlog.AttemptSnapshot": {
+        "type": "object",
+        "properties": {
+          "duration_ns": {
+            "type": "integer"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "error_type": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "provider_type": {
+            "type": "string"
+          },
+          "response_body": {
+            "description": "ResponseBody and ResponseHeaders capture the raw upstream error response\nof a failed attempt. ResponseBody is the parsed JSON (or a string when the\nbody is not JSON); ResponseHeaders is redacted. Both are populated only\nwhen audit body/header logging is enabled."
+          },
+          "response_headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status_code": {
+            "type": "integer"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
       "auditlog.ConversationResult": {
         "type": "object",
         "properties": {
@@ -7305,6 +7386,13 @@
         "properties": {
           "api_key_hash": {
             "type": "string"
+          },
+          "attempts": {
+            "description": "Attempts captures provider calls made for this logical request. SQL\nstores split this into audit_log_attempts; Mongo stores it embedded.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/auditlog.AttemptSnapshot"
+            }
           },
           "error_code": {
             "type": "string"
@@ -7457,7 +7545,7 @@
           "cache": {
             "type": "boolean"
           },
-          "fallback": {
+          "failover": {
             "type": "boolean"
           },
           "guardrails": {

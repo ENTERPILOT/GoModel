@@ -26,7 +26,7 @@ type InternalChatCompletionExecutorConfig struct {
 	ModelResolver          RequestModelResolver
 	ModelAuthorizer        RequestModelAuthorizer
 	WorkflowPolicyResolver RequestWorkflowPolicyResolver
-	FallbackResolver       RequestFallbackResolver
+	FailoverResolver       RequestFailoverResolver
 	AuditLogger            auditlog.LoggerInterface
 	UsageLogger            usage.LoggerInterface
 	PricingResolver        usage.PricingResolver
@@ -46,7 +46,7 @@ type InternalChatCompletionExecutor struct {
 }
 
 // NewInternalChatCompletionExecutor creates a transport-free translated chat
-// executor that reuses workflow resolution, fallback, usage, and audit logic.
+// executor that reuses workflow resolution, failover, usage, and audit logic.
 func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg InternalChatCompletionExecutorConfig) *InternalChatCompletionExecutor {
 	return &InternalChatCompletionExecutor{
 		provider:               provider,
@@ -60,7 +60,7 @@ func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg Inter
 			ModelResolver:            cfg.ModelResolver,
 			ModelAuthorizer:          cfg.ModelAuthorizer,
 			WorkflowPolicyResolver:   cfg.WorkflowPolicyResolver,
-			FallbackResolver:         cfg.FallbackResolver,
+			FailoverResolver:         cfg.FailoverResolver,
 			UsageLogger:              cfg.UsageLogger,
 			PricingResolver:          cfg.PricingResolver,
 			TranslatedRequestPatcher: nil,
@@ -145,16 +145,16 @@ func (e *InternalChatCompletionExecutor) executeChatCompletion(
 		providerType  string
 		providerName  string
 		failoverModel string
-		usedFallback  bool
+		usedFailover  bool
 	)
 	result, err := e.responseCache.HandleInternalRequest(ctx, http.MethodPost, "/v1/chat/completions", body, func(c *echo.Context) error {
 		var execErr error
-		resp, providerType, providerName, failoverModel, usedFallback, execErr = e.orchestrator.DispatchChatCompletion(c.Request().Context(), workflow, req)
+		resp, providerType, providerName, failoverModel, usedFailover, execErr = e.orchestrator.DispatchChatCompletion(c.Request().Context(), workflow, req)
 		if execErr != nil {
 			return execErr
 		}
-		if usedFallback {
-			c.SetRequest(c.Request().WithContext(core.WithFallbackUsed(c.Request().Context())))
+		if usedFailover {
+			c.SetRequest(c.Request().WithContext(core.WithFailoverUsed(c.Request().Context())))
 		}
 		return c.JSON(http.StatusOK, resp)
 	})
@@ -174,7 +174,7 @@ func (e *InternalChatCompletionExecutor) executeChatCompletion(
 		}
 		return &cached, cachedProviderType, cachedProviderName, "", false, result.CacheType, nil
 	}
-	return resp, providerType, providerName, failoverModel, usedFallback, "", nil
+	return resp, providerType, providerName, failoverModel, usedFailover, "", nil
 }
 
 func (e *InternalChatCompletionExecutor) dispatchChatCompletionNoCache(
@@ -182,8 +182,8 @@ func (e *InternalChatCompletionExecutor) dispatchChatCompletionNoCache(
 	workflow *core.Workflow,
 	req *core.ChatRequest,
 ) (*core.ChatResponse, string, string, string, bool, string, error) {
-	resp, providerType, providerName, failoverModel, usedFallback, err := e.orchestrator.DispatchChatCompletion(ctx, workflow, req)
-	return resp, providerType, providerName, failoverModel, usedFallback, "", err
+	resp, providerType, providerName, failoverModel, usedFailover, err := e.orchestrator.DispatchChatCompletion(ctx, workflow, req)
+	return resp, providerType, providerName, failoverModel, usedFailover, "", err
 }
 
 func (e *InternalChatCompletionExecutor) newAuditEntry(

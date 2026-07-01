@@ -11,7 +11,6 @@ import (
 	"gomodel/config"
 	"gomodel/internal/core"
 	"gomodel/internal/failover"
-	fallbackresolver "gomodel/internal/fallback"
 	"gomodel/internal/providers"
 )
 
@@ -189,7 +188,7 @@ func (h *Handler) GenerateFailoverRules(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	resolver := fallbackresolver.NewResolverWithRuleProvider(config.FallbackConfig{Enabled: true}, h.registry, h.failoverRules)
+	resolver := failover.NewResolverWithRuleProvider(config.FailoverConfig{Enabled: true}, h.registry, h.failoverRules)
 	if resolver == nil {
 		return c.JSON(http.StatusOK, []failover.View{})
 	}
@@ -214,7 +213,7 @@ func (h *Handler) GenerateFailoverRules(c *echo.Context) error {
 			ProviderName: model.ProviderName,
 			ProviderType: model.ProviderType,
 		}
-		candidates := resolver.SuggestFallbacks(resolution, core.OperationChatCompletions)
+		candidates := resolver.SuggestFailovers(resolution, core.OperationChatCompletions)
 		if len(candidates) == 0 {
 			continue
 		}

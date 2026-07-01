@@ -62,12 +62,12 @@ test('workflowProviderOptions returns unique sorted provider names', () => {
     );
 });
 
-test('defaultWorkflowForm starts fallback enabled for new workflows', () => {
+test('defaultWorkflowForm starts failover enabled for new workflows', () => {
     const module = createWorkflowsModule();
 
-    assert.equal(module.workflowForm.features.fallback, true);
+    assert.equal(module.workflowForm.features.failover, true);
     assert.equal(module.workflowForm.features.budget, true);
-    assert.equal(module.defaultWorkflowForm().features.fallback, true);
+    assert.equal(module.defaultWorkflowForm().features.failover, true);
     assert.equal(module.defaultWorkflowForm().features.budget, true);
 });
 
@@ -83,7 +83,7 @@ test('workflowPreview mirrors the draft workflow card state from the editor form
             audit: false,
             usage: true,
             guardrails: true,
-            fallback: false
+            failover: false
         },
         guardrails: [
             { ref: 'policy-system', step: 10 }
@@ -110,7 +110,7 @@ test('workflowPreview mirrors the draft workflow card state from the editor form
                     usage: true,
                     budget: true,
                     guardrails: true,
-                    fallback: false
+                    failover: false
                 },
                 guardrails: [
                     { ref: 'policy-system', step: 10 }
@@ -133,7 +133,7 @@ test('workflowPreview renders path-scoped draft labels using canonical scope dis
             audit: true,
             usage: true,
             guardrails: false,
-            fallback: false
+            failover: false
         },
         guardrails: []
     };
@@ -159,7 +159,7 @@ test('workflowPreview renders path-scoped draft labels using canonical scope dis
                     usage: true,
                     budget: true,
                     guardrails: false,
-                    fallback: false
+                    failover: false
                 },
                 guardrails: []
             }
@@ -179,7 +179,7 @@ test('workflowPreview does not coerce blank guardrail steps into step zero', () 
             audit: true,
             usage: true,
             guardrails: true,
-            fallback: false
+            failover: false
         },
         guardrails: [
             { ref: 'policy-system', step: '   ' }
@@ -209,7 +209,7 @@ test('workflowChart returns the shared chart contract for workflow sources', () 
                     usage: false,
                     budget: true,
                     guardrails: true,
-                    fallback: true
+                    failover: true
                 },
                 guardrails: [
                     { ref: 'policy-system', step: 10 },
@@ -276,7 +276,7 @@ test('workflowChart masks globally disabled workflow features from persisted wor
                     usage: true,
                     budget: true,
                     guardrails: true,
-                    fallback: true
+                    failover: true
                 },
                 guardrails: [
                     { ref: 'policy-system', step: 10 }
@@ -420,7 +420,7 @@ test('workflowAuditChart returns the shared chart contract for audit runtime ent
                     usage: true,
                     budget: true,
                     guardrails: true,
-                    fallback: true
+                    failover: true
                 },
                 guardrails: [
                     { ref: 'policy-system', step: 10 }
@@ -533,7 +533,7 @@ test('workflowAuditChart prefers request-time workflow features over current wor
                     usage: true,
                     budget: true,
                     guardrails: true,
-                    fallback: true
+                    failover: true
                 },
                 guardrails: [
                     { ref: 'policy-system', step: 10 }
@@ -555,7 +555,7 @@ test('workflowAuditChart prefers request-time workflow features over current wor
                     usage: false,
                     budget: false,
                     guardrails: false,
-                    fallback: true
+                    failover: true
                 }
             }
         })),
@@ -609,7 +609,7 @@ test('workflowAuditChart highlights configured failover redirects and exposes th
                     usage: true,
                     budget: true,
                     guardrails: false,
-                    fallback: true
+                    failover: true
                 },
                 guardrails: []
             }
@@ -630,7 +630,7 @@ test('workflowAuditChart highlights configured failover redirects and exposes th
                     usage: true,
                     budget: true,
                     guardrails: false,
-                    fallback: true
+                    failover: true
                 },
                 failover: {
                     target_model: 'azure/gpt-4o'
@@ -832,7 +832,7 @@ test('workflowSubmitMode switches to save when an active workflow already matche
             audit: true,
             usage: true,
             guardrails: false,
-            fallback: false
+            failover: false
         },
         guardrails: []
     };
@@ -891,7 +891,7 @@ test('buildWorkflowRequest emits provider-model payload and strips guardrails wh
             audit: true,
             usage: true,
             guardrails: false,
-            fallback: false
+            failover: false
         },
         guardrails: [
             { ref: 'policy-system', step: 10 }
@@ -914,7 +914,7 @@ test('buildWorkflowRequest emits provider-model payload and strips guardrails wh
                     usage: true,
                     budget: true,
                     guardrails: false,
-                    fallback: false
+                    failover: false
                 },
                 guardrails: []
             }
@@ -939,7 +939,7 @@ test('buildWorkflowRequest disables budget when usage is disabled in the form', 
             usage: false,
             budget: true,
             guardrails: false,
-            fallback: true
+            failover: true
         },
         guardrails: []
     };
@@ -958,7 +958,7 @@ test('openWorkflowCreate hydrates saved features and guardrails from payload', (
         usage: true,
         budget: false,
         guardrails: true,
-        fallback: false
+        failover: false
     });
     module.workflowSourceGuardrails = () => ([
         { ref: 'policy-system', step: 30 }
@@ -994,7 +994,7 @@ test('openWorkflowCreate hydrates saved features and guardrails from payload', (
             usage: false,
             budget: true,
             guardrails: false,
-            fallback: true
+            failover: true
         })
     );
     assert.equal(module.workflowFormHydrated, true);
@@ -1022,7 +1022,7 @@ test('openWorkflowCreate drops blank guardrail steps instead of hydrating them a
                 audit: true,
                 usage: true,
                 guardrails: true,
-                fallback: false
+                failover: false
             },
             guardrails: [
                 { ref: 'policy-system', step: '   ' }
@@ -1077,7 +1077,7 @@ test('editing a cloned workflow preserves retired provider and model options', (
                 audit: true,
                 usage: true,
                 guardrails: false,
-                fallback: true
+                failover: true
             },
             guardrails: []
         }
@@ -1166,7 +1166,7 @@ test('buildWorkflowRequest preserves blank guardrail steps as invalid so validat
             audit: true,
             usage: true,
             guardrails: true,
-            fallback: true
+            failover: true
         },
         guardrails: [
             { ref: 'policy-system', step: '   ' }
@@ -1182,7 +1182,7 @@ test('buildWorkflowRequest preserves blank guardrail steps as invalid so validat
     );
 });
 
-test('workflowSourceFeatures defaults fallback to true when omitted', () => {
+test('workflowSourceFeatures defaults failover to true when omitted', () => {
     const module = createWorkflowsModule();
 
     assert.equal(
@@ -1202,7 +1202,7 @@ test('workflowSourceFeatures defaults fallback to true when omitted', () => {
             usage: true,
             budget: true,
             guardrails: false,
-            fallback: true
+            failover: true
         })
     );
 });
@@ -1218,7 +1218,7 @@ test('workflowSourceFeatures respects effective runtime features for persisted w
                     audit: true,
                     usage: true,
                     guardrails: true,
-                    fallback: true
+                    failover: true
                 }
             },
             effective_features: {
@@ -1227,7 +1227,7 @@ test('workflowSourceFeatures respects effective runtime features for persisted w
                 usage: true,
                 budget: true,
                 guardrails: false,
-                fallback: false
+                failover: false
             }
         })),
         JSON.stringify({
@@ -1236,7 +1236,7 @@ test('workflowSourceFeatures respects effective runtime features for persisted w
             usage: true,
             budget: true,
             guardrails: false,
-            fallback: true
+            failover: true
         })
     );
 });
@@ -1261,7 +1261,7 @@ test('workflowSourceFeatures masks raw workflow features by global runtime confi
                     audit: true,
                     usage: true,
                     guardrails: true,
-                    fallback: true
+                    failover: true
                 }
             }
         })),
@@ -1271,7 +1271,7 @@ test('workflowSourceFeatures masks raw workflow features by global runtime confi
             usage: false,
             budget: false,
             guardrails: false,
-            fallback: true
+            failover: true
         })
     );
 });
@@ -1376,7 +1376,7 @@ test('fetchWorkflowRuntimeConfig aborts hung requests and clears the timeout', a
     assert.equal(timeoutCleared, true);
 });
 
-test('buildWorkflowRequest omits fallback for new workflows when the control is hidden', () => {
+test('buildWorkflowRequest omits failover for new workflows when the control is hidden', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
         FAILOVER_ENABLED: 'off',
@@ -1390,13 +1390,13 @@ test('buildWorkflowRequest omits fallback for new workflows when the control is 
         scope_provider: 'openai',
         scope_model: 'gpt-5',
         name: 'OpenAI GPT-5',
-        description: 'Preserve hidden fallback state',
+        description: 'Preserve hidden failover state',
         features: {
             cache: true,
             audit: true,
             usage: true,
             guardrails: false,
-            fallback: false
+            failover: false
         },
         guardrails: []
     };
@@ -1413,7 +1413,7 @@ test('buildWorkflowRequest omits fallback for new workflows when the control is 
     );
 });
 
-test('buildWorkflowRequest preserves fallback state for hydrated workflows even when the control is hidden', () => {
+test('buildWorkflowRequest preserves failover state for hydrated workflows even when the control is hidden', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
         FAILOVER_ENABLED: 'off',
@@ -1432,13 +1432,13 @@ test('buildWorkflowRequest preserves fallback state for hydrated workflows even 
         scope_provider: 'openai',
         scope_model: 'gpt-5',
         name: 'OpenAI GPT-5',
-        description: 'Preserve hidden fallback state',
+        description: 'Preserve hidden failover state',
         features: {
             cache: true,
             audit: true,
             usage: true,
             guardrails: false,
-            fallback: false
+            failover: false
         },
         guardrails: []
     };
@@ -1451,12 +1451,12 @@ test('buildWorkflowRequest preserves fallback state for hydrated workflows even 
             usage: true,
             budget: true,
             guardrails: false,
-            fallback: false
+            failover: false
         })
     );
 });
 
-test('buildWorkflowRequest preserves hidden fallback for fresh save flows that match an active workflow', () => {
+test('buildWorkflowRequest preserves hidden failover for fresh save flows that match an active workflow', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
         FAILOVER_ENABLED: 'off',
@@ -1479,7 +1479,7 @@ test('buildWorkflowRequest preserves hidden fallback for fresh save flows that m
                     audit: true,
                     usage: true,
                     guardrails: false,
-                    fallback: false
+                    failover: false
                 },
                 guardrails: []
             }
@@ -1490,13 +1490,13 @@ test('buildWorkflowRequest preserves hidden fallback for fresh save flows that m
         scope_provider: 'openai',
         scope_model: 'gpt-5',
         name: 'OpenAI GPT-5',
-        description: 'Preserve hidden fallback from the active workflow',
+        description: 'Preserve hidden failover from the active workflow',
         features: {
             cache: true,
             audit: true,
             usage: true,
             guardrails: false,
-            fallback: true
+            failover: true
         },
         guardrails: []
     };
@@ -1510,12 +1510,12 @@ test('buildWorkflowRequest preserves hidden fallback for fresh save flows that m
             usage: true,
             budget: true,
             guardrails: false,
-            fallback: false
+            failover: false
         })
     );
 });
 
-test('buildWorkflowRequest omits hidden fallback when a hydrated workflow is retargeted to a new scope', () => {
+test('buildWorkflowRequest omits hidden failover when a hydrated workflow is retargeted to a new scope', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
         FAILOVER_ENABLED: 'off',
@@ -1534,13 +1534,13 @@ test('buildWorkflowRequest omits hidden fallback when a hydrated workflow is ret
         scope_provider: 'openai',
         scope_model: 'gpt-4o-mini',
         name: 'OpenAI GPT-4o mini',
-        description: 'Retargeted hidden fallback should not carry over',
+        description: 'Retargeted hidden failover should not carry over',
         features: {
             cache: true,
             audit: true,
             usage: true,
             guardrails: false,
-            fallback: true
+            failover: true
         },
         guardrails: []
     };
@@ -1578,7 +1578,7 @@ test('buildWorkflowRequest clamps globally disabled workflow features off even w
             audit: true,
             usage: true,
             guardrails: true,
-            fallback: true
+            failover: true
         },
         guardrails: [
             { ref: 'policy-system', step: 10 }
@@ -2239,7 +2239,7 @@ test('auditEntryWorkflow prefers an exact historical workflow version cache over
                     audit: false,
                     usage: false,
                     guardrails: false,
-                    fallback: true
+                    failover: true
                 },
                 guardrails: []
             }
@@ -2259,7 +2259,7 @@ test('auditEntryWorkflow prefers an exact historical workflow version cache over
                     audit: true,
                     usage: true,
                     guardrails: true,
-                    fallback: true
+                    failover: true
                 },
                 guardrails: [
                     { ref: 'policy-system', step: 10 }
@@ -2300,7 +2300,7 @@ test('fetchWorkflowVersion loads a historical workflow version once and caches m
                                 audit: true,
                                 usage: true,
                                 guardrails: false,
-                                fallback: true
+                                failover: true
                             },
                             guardrails: []
                         }

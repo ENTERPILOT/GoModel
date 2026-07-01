@@ -1,13 +1,13 @@
 ---
 title: "Failover"
-description: "Configure GoModel failover with manual mappings and know when fallback attempts run."
+description: "Configure GoModel failover with manual mappings and know when failover attempts run."
 icon: "shuffle"
 keywords: ["failover", "fallback"]
 ---
 
 ## Overview
 
-GoModel exposes failover through the `fallback` config block, environment
+GoModel exposes failover through the `failover` config block, environment
 variables, and the Dashboard.
 
 When a request fails, GoModel can retry it against alternate models. Runtime
@@ -16,13 +16,13 @@ failover uses manual rules only.
 ## Manual Mappings
 
 ```yaml
-fallback:
+failover:
   enabled: true
-  manual_rules_path: "config/fallback.json"
+  manual_rules_path: "config/failover.json"
 ```
 
-`config/fallback.json` is a JSON object where each primary model entry contains
-an ordered fallback model list (array); top-level keys are not ordered:
+`config/failover.json` is a JSON object where each primary model entry contains
+an ordered failover target list (array); top-level keys are not ordered:
 
 ```json
 {
@@ -45,7 +45,7 @@ For env-only deployments, use inline JSON:
 FAILOVER_RULES_JSON='{"gpt-4o":["azure/gpt-4o","gemini/gemini-2.5-pro"]}'
 ```
 
-`fallback.default_mode` and `FEATURE_FALLBACK_MODE` are deprecated
+`failover.default_mode` and `FAILOVER_MODE` are deprecated
 compatibility inputs. They are accepted but ignored by runtime failover.
 
 The Dashboard can generate suggested mappings from model metadata, but

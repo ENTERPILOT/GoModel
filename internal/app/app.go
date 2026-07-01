@@ -23,8 +23,7 @@ import (
 	"gomodel/internal/batch"
 	"gomodel/internal/budget"
 	"gomodel/internal/core"
-	failoverrules "gomodel/internal/failover"
-	"gomodel/internal/fallback"
+	"gomodel/internal/failover"
 	"gomodel/internal/filestore"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/live"
@@ -49,7 +48,7 @@ type App struct {
 	batch            *batch.Result
 	fileStore        *filestore.Result
 	virtualModels    *virtualmodels.Result
-	failover         *failoverrules.Result
+	failover         *failover.Result
 	pricingOverrides *pricingoverrides.Result
 	authKeys         *authkeys.Result
 	guardrails       *guardrails.Result
@@ -251,11 +250,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// listing.
 	vm := app.virtualModels.Service
 
-	var failoverResult *failoverrules.Result
+	var failoverResult *failover.Result
 	if sharedStorage != nil {
-		failoverResult, err = failoverrules.NewWithSharedStorage(ctx, appCfg, sharedStorage)
+		failoverResult, err = failover.NewWithSharedStorage(ctx, appCfg, sharedStorage)
 	} else {
-		failoverResult, err = failoverrules.New(ctx, appCfg)
+		failoverResult, err = failover.New(ctx, appCfg)
 	}
 	if err != nil {
 		return fail("failed to initialize failover rules", err)
@@ -397,7 +396,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		PricingResolver:                 pricingResolver,
 		ModelResolver:                   vm,
 		ModelAuthorizer:                 vm,
-		FallbackResolver:                fallback.NewResolverWithRuleProvider(appCfg.Fallback, providerResult.Registry, failoverResult.Service),
+		FailoverResolver:                failover.NewResolverWithRuleProvider(appCfg.Failover, providerResult.Registry, failoverResult.Service),
 		WorkflowPolicyResolver:          workflowResult.Service,
 		TranslatedRequestPatcher:        translatedRequestPatcher,
 		BatchRequestPreparer:            batchRequestPreparer,
@@ -500,7 +499,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		ModelResolver:          vm,
 		ModelAuthorizer:        vm,
 		WorkflowPolicyResolver: workflowResult.Service,
-		FallbackResolver:       serverCfg.FallbackResolver,
+		FailoverResolver:       serverCfg.FailoverResolver,
 		AuditLogger:            auditResult.Logger,
 		UsageLogger:            usageResult.Logger,
 		PricingResolver:        pricingResolver,
@@ -856,7 +855,7 @@ func initAdmin(
 	configuredProviders []providers.SanitizedProviderConfig,
 	authKeyService *authkeys.Service,
 	virtualModelService *virtualmodels.Service,
-	failoverService *failoverrules.Service,
+	failoverService *failover.Service,
 	pricingOverrideService *pricingoverrides.Service,
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
@@ -991,7 +990,7 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 }
 
 func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, configuredGuardrails []guardrails.Definition) workflows.CreateInput {
-	fallbackEnabled := fallbackFeatureEnabledGlobally(cfg)
+	failoverEnabled := failoverFeatureEnabledGlobally(cfg)
 	budgetEnabled := cfg.Budgets.Enabled
 	payload := workflows.Payload{
 		SchemaVersion: 1,
@@ -1000,7 +999,7 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 			Audit:    cfg.Logging.Enabled,
 			Usage:    cfg.Usage.Enabled,
 			Budget:   &budgetEnabled,
-			Fallback: &fallbackEnabled,
+			Failover: &failoverEnabled,
 		},
 	}
 	available := make(map[string]struct{}, len(availableGuardrails))
@@ -1045,7 +1044,7 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 
 func dashboardRuntimeConfig(cfg *config.Config, usageEnabled bool) admin.DashboardConfigResponse {
 	return admin.DashboardConfigResponse{
-		FailoverEnabled:      dashboardEnabledValue(fallbackFeatureEnabledGlobally(cfg)),
+		FailoverEnabled:      dashboardEnabledValue(failoverFeatureEnabledGlobally(cfg)),
 		LoggingEnabled:       dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
 		UsageEnabled:         dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
 		BudgetsEnabled:       dashboardEnabledValue(cfg != nil && cfg.Budgets.Enabled),
@@ -1082,7 +1081,7 @@ func runtimeWorkflowFeatureCaps(cfg *config.Config) core.WorkflowFeatures {
 		Usage:      cfg.Usage.Enabled,
 		Budget:     cfg.Budgets.Enabled,
 		Guardrails: cfg.Guardrails.Enabled,
-		Fallback:   fallbackFeatureEnabledGlobally(cfg),
+		Failover:   failoverFeatureEnabledGlobally(cfg),
 	}
 }
 
@@ -1120,6 +1119,6 @@ func semanticResponseCacheConfiguredFromResponse(cfg config.ResponseCacheConfig)
 	return cfg.Semantic != nil && config.SemanticCacheActive(cfg.Semantic)
 }
 
-func fallbackFeatureEnabledGlobally(cfg *config.Config) bool {
-	return cfg != nil && cfg.Fallback.Enabled
+func failoverFeatureEnabledGlobally(cfg *config.Config) bool {
+	return cfg != nil && cfg.Failover.Enabled
 }

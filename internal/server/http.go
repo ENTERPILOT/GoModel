@@ -60,7 +60,7 @@ type Config struct {
 	ModelResolver                   RequestModelResolver                   // Optional: explicit model resolver used during workflow resolution
 	ModelAuthorizer                 RequestModelAuthorizer                 // Optional: request-scoped concrete model access controller
 	WorkflowPolicyResolver          RequestWorkflowPolicyResolver          // Optional: persisted workflow resolver used during workflow resolution
-	FallbackResolver                RequestFallbackResolver                // Optional: translated-route fallback resolver
+	FailoverResolver                RequestFailoverResolver                // Optional: translated-route fallback resolver
 	TranslatedRequestPatcher        TranslatedRequestPatcher               // Optional: request patcher for translated routes after workflow resolution
 	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
@@ -127,17 +127,17 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	var modelResolver RequestModelResolver
 	var modelAuthorizer RequestModelAuthorizer
 	var workflowPolicyResolver RequestWorkflowPolicyResolver
-	var fallbackResolver RequestFallbackResolver
+	var failoverResolver RequestFailoverResolver
 	var translatedRequestPatcher TranslatedRequestPatcher
 	if cfg != nil {
 		modelResolver = cfg.ModelResolver
 		modelAuthorizer = cfg.ModelAuthorizer
 		workflowPolicyResolver = cfg.WorkflowPolicyResolver
-		fallbackResolver = cfg.FallbackResolver
+		failoverResolver = cfg.FailoverResolver
 		translatedRequestPatcher = cfg.TranslatedRequestPatcher
 	}
 
-	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, workflowPolicyResolver, fallbackResolver, translatedRequestPatcher)
+	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, workflowPolicyResolver, failoverResolver, translatedRequestPatcher)
 	handler.budgetChecker = budgetChecker
 	if cfg != nil {
 		handler.batchRequestPreparer = cfg.BatchRequestPreparer

@@ -14,7 +14,7 @@ type InferenceConfig struct {
 	ModelResolver            ModelResolver
 	ModelAuthorizer          ModelAuthorizer
 	WorkflowPolicyResolver   WorkflowPolicyResolver
-	FallbackResolver         FallbackResolver
+	FailoverResolver         FailoverResolver
 	TranslatedRequestPatcher TranslatedRequestPatcher
 	UsageLogger              usage.LoggerInterface
 	PricingResolver          usage.PricingResolver
@@ -22,13 +22,13 @@ type InferenceConfig struct {
 }
 
 // InferenceOrchestrator owns translated inference workflow resolution, request
-// patching, provider dispatch, fallback, usage logging, and cache metadata.
+// patching, provider dispatch, failover, usage logging, and cache metadata.
 type InferenceOrchestrator struct {
 	provider                 core.RoutableProvider
 	modelResolver            ModelResolver
 	modelAuthorizer          ModelAuthorizer
 	workflowPolicyResolver   WorkflowPolicyResolver
-	fallbackResolver         FallbackResolver
+	failoverResolver         FailoverResolver
 	translatedRequestPatcher TranslatedRequestPatcher
 	usageLogger              usage.LoggerInterface
 	pricingResolver          usage.PricingResolver
@@ -42,7 +42,7 @@ func NewInferenceOrchestrator(cfg InferenceConfig) *InferenceOrchestrator {
 		modelResolver:            cfg.ModelResolver,
 		modelAuthorizer:          cfg.ModelAuthorizer,
 		workflowPolicyResolver:   cfg.WorkflowPolicyResolver,
-		fallbackResolver:         cfg.FallbackResolver,
+		failoverResolver:         cfg.FailoverResolver,
 		translatedRequestPatcher: cfg.TranslatedRequestPatcher,
 		usageLogger:              cfg.UsageLogger,
 		pricingResolver:          cfg.PricingResolver,
@@ -84,7 +84,7 @@ type ExecutionMeta struct {
 	ProviderName  string
 	Model         string
 	FailoverModel string
-	UsedFallback  bool
+	UsedFailover  bool
 }
 
 // ChatCompletionResult is the non-streaming chat completion result.

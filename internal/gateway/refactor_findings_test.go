@@ -214,14 +214,14 @@ func TestStreamResponsesRejectsEmptyProviderStream(t *testing.T) {
 }
 
 func TestStreamResponsesFallsBackAfterEmptyPrimaryStream(t *testing.T) {
-	provider := &streamFallbackProvider{
+	provider := &streamFailoverProvider{
 		streamsByModel: map[string]io.ReadCloser{
 			"fallback": io.NopCloser(strings.NewReader("data: {}\n\n")),
 		},
 	}
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{
 		Provider: provider,
-		FallbackResolver: fallbackResolverFunc(func(*core.RequestModelResolution, core.Operation) []core.ModelSelector {
+		FailoverResolver: failoverResolverFunc(func(*core.RequestModelResolution, core.Operation) []core.ModelSelector {
 			return []core.ModelSelector{{Provider: "openai", Model: "fallback"}}
 		}),
 	})
@@ -238,7 +238,7 @@ func TestStreamResponsesFallsBackAfterEmptyPrimaryStream(t *testing.T) {
 				Audit:      true,
 				Usage:      true,
 				Guardrails: true,
-				Fallback:   true,
+				Failover:   true,
 			},
 		},
 	}
@@ -249,8 +249,8 @@ func TestStreamResponsesFallsBackAfterEmptyPrimaryStream(t *testing.T) {
 	}
 	defer result.Stream.Close()
 
-	if !result.Meta.UsedFallback {
-		t.Fatal("UsedFallback = false, want true")
+	if !result.Meta.UsedFailover {
+		t.Fatal("UsedFailover = false, want true")
 	}
 	if result.Meta.FailoverModel != "openai/fallback" {
 		t.Fatalf("FailoverModel = %q, want openai/fallback", result.Meta.FailoverModel)
@@ -260,45 +260,45 @@ func TestStreamResponsesFallsBackAfterEmptyPrimaryStream(t *testing.T) {
 	}
 }
 
-type fallbackResolverFunc func(*core.RequestModelResolution, core.Operation) []core.ModelSelector
+type failoverResolverFunc func(*core.RequestModelResolution, core.Operation) []core.ModelSelector
 
-func (f fallbackResolverFunc) ResolveFallbacks(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
+func (f failoverResolverFunc) ResolveFailovers(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
 	return f(resolution, op)
 }
 
-type streamFallbackProvider struct {
+type streamFailoverProvider struct {
 	streamsByModel      map[string]io.ReadCloser
 	responseStreamCalls []string
 }
 
-func (p *streamFallbackProvider) ChatCompletion(context.Context, *core.ChatRequest) (*core.ChatResponse, error) {
+func (p *streamFailoverProvider) ChatCompletion(context.Context, *core.ChatRequest) (*core.ChatResponse, error) {
 	return nil, nil
 }
 
-func (p *streamFallbackProvider) StreamChatCompletion(context.Context, *core.ChatRequest) (io.ReadCloser, error) {
+func (p *streamFailoverProvider) StreamChatCompletion(context.Context, *core.ChatRequest) (io.ReadCloser, error) {
 	return nil, nil
 }
 
-func (p *streamFallbackProvider) ListModels(context.Context) (*core.ModelsResponse, error) {
+func (p *streamFailoverProvider) ListModels(context.Context) (*core.ModelsResponse, error) {
 	return nil, nil
 }
 
-func (p *streamFallbackProvider) Responses(context.Context, *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+func (p *streamFailoverProvider) Responses(context.Context, *core.ResponsesRequest) (*core.ResponsesResponse, error) {
 	return nil, nil
 }
 
-func (p *streamFallbackProvider) StreamResponses(_ context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+func (p *streamFailoverProvider) StreamResponses(_ context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
 	p.responseStreamCalls = append(p.responseStreamCalls, req.Model)
 	return p.streamsByModel[req.Model], nil
 }
 
-func (p *streamFallbackProvider) Embeddings(context.Context, *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+func (p *streamFailoverProvider) Embeddings(context.Context, *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	return nil, nil
 }
 
-func (p *streamFallbackProvider) Supports(string) bool { return true }
+func (p *streamFailoverProvider) Supports(string) bool { return true }
 
-func (p *streamFallbackProvider) GetProviderType(model string) string {
+func (p *streamFailoverProvider) GetProviderType(model string) string {
 	selector, err := core.ParseModelSelector(model, "")
 	if err == nil && selector.Provider != "" {
 		return selector.Provider

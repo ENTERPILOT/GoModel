@@ -209,7 +209,7 @@ so a minimal config acts as an anonymizing preprocessor.
 
 When `llm_based_altering` calls the auxiliary model, GoModel runs that call
 through the normal translated request path in-process. That means ordinary
-workflow selection, fallback, usage, audit, and cache behavior still apply.
+workflow selection, failover, usage, audit, and cache behavior still apply.
 The internal request uses:
 
 - path: `/v1/chat/completions`

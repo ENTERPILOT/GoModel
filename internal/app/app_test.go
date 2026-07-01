@@ -258,32 +258,32 @@ func runtimeRefreshStepByName(steps []admin.RuntimeRefreshStep, name string) *ad
 	return nil
 }
 
-func TestRuntimeWorkflowFeatureCaps_EnableFallbackFromExplicitFlag(t *testing.T) {
+func TestRuntimeWorkflowFeatureCaps_EnableFailoverFromExplicitFlag(t *testing.T) {
 	cfg := &config.Config{
-		Fallback: config.FallbackConfig{
+		Failover: config.FailoverConfig{
 			Enabled: true,
 		},
 	}
 
 	caps := runtimeWorkflowFeatureCaps(cfg)
-	if !caps.Fallback {
-		t.Fatal("runtimeWorkflowFeatureCaps().Fallback = false, want true")
+	if !caps.Failover {
+		t.Fatal("runtimeWorkflowFeatureCaps().Failover = false, want true")
 	}
 }
 
-func TestDefaultWorkflowInput_SetsFallbackFeature(t *testing.T) {
+func TestDefaultWorkflowInput_SetsFailoverFeature(t *testing.T) {
 	cfg := &config.Config{
-		Fallback: config.FallbackConfig{
+		Failover: config.FailoverConfig{
 			Enabled: true,
 		},
 	}
 
 	input := defaultWorkflowInput(cfg, nil, nil)
-	if input.Payload.Features.Fallback == nil {
-		t.Fatal("defaultWorkflowInput().Payload.Features.Fallback = nil, want non-nil")
+	if input.Payload.Features.Failover == nil {
+		t.Fatal("defaultWorkflowInput().Payload.Features.Failover = nil, want non-nil")
 	}
-	if !*input.Payload.Features.Fallback {
-		t.Fatal("defaultWorkflowInput().Payload.Features.Fallback = false, want true")
+	if !*input.Payload.Features.Failover {
+		t.Fatal("defaultWorkflowInput().Payload.Features.Failover = false, want true")
 	}
 }
 
@@ -433,7 +433,7 @@ func TestConfigGuardrailDefinitions_RejectsBlankNameOrType(t *testing.T) {
 
 func TestDashboardRuntimeConfig_ExposesFailoverEnabled(t *testing.T) {
 	cfg := &config.Config{
-		Fallback: config.FallbackConfig{
+		Failover: config.FailoverConfig{
 			Enabled: true,
 		},
 	}
@@ -446,7 +446,7 @@ func TestDashboardRuntimeConfig_ExposesFailoverEnabled(t *testing.T) {
 
 func TestDashboardRuntimeConfig_FailoverDisabled(t *testing.T) {
 	cfg := &config.Config{
-		Fallback: config.FallbackConfig{
+		Failover: config.FailoverConfig{
 			Enabled: false,
 		},
 	}
@@ -459,9 +459,9 @@ func TestDashboardRuntimeConfig_FailoverDisabled(t *testing.T) {
 
 func TestDashboardRuntimeConfig_DefaultModeDoesNotEnableFailover(t *testing.T) {
 	cfg := &config.Config{
-		Fallback: config.FallbackConfig{
+		Failover: config.FailoverConfig{
 			Enabled:     false,
-			DefaultMode: config.FallbackModeManual,
+			DefaultMode: config.FailoverModeManual,
 		},
 	}
 

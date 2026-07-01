@@ -22,10 +22,10 @@ type UserPathModelResolver interface {
 	ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
-// FallbackResolver resolves alternate concrete model selectors for a translated
+// FailoverResolver resolves alternate concrete model selectors for a translated
 // request after the primary selector has already been resolved.
-type FallbackResolver interface {
-	ResolveFallbacks(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector
+type FailoverResolver interface {
+	ResolveFailovers(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector
 }
 
 // ModelAuthorizer validates request-scoped access to concrete models.

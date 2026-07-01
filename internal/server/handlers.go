@@ -23,7 +23,7 @@ type Handler struct {
 	provider                        core.RoutableProvider
 	modelResolver                   RequestModelResolver
 	modelAuthorizer                 RequestModelAuthorizer
-	fallbackResolver                RequestFallbackResolver
+	failoverResolver                RequestFailoverResolver
 	workflowPolicyResolver          RequestWorkflowPolicyResolver
 	translatedRequestPatcher        TranslatedRequestPatcher
 	batchRequestPreparer            BatchRequestPreparer
@@ -63,7 +63,7 @@ func newHandler(
 	pricingResolver usage.PricingResolver,
 	modelResolver RequestModelResolver,
 	workflowPolicyResolver RequestWorkflowPolicyResolver,
-	fallbackResolver RequestFallbackResolver,
+	failoverResolver RequestFailoverResolver,
 	translatedRequestPatcher TranslatedRequestPatcher,
 ) *Handler {
 	return newHandlerWithAuthorizer(
@@ -74,7 +74,7 @@ func newHandler(
 		modelResolver,
 		nil,
 		workflowPolicyResolver,
-		fallbackResolver,
+		failoverResolver,
 		translatedRequestPatcher,
 	)
 }
@@ -87,14 +87,14 @@ func newHandlerWithAuthorizer(
 	modelResolver RequestModelResolver,
 	modelAuthorizer RequestModelAuthorizer,
 	workflowPolicyResolver RequestWorkflowPolicyResolver,
-	fallbackResolver RequestFallbackResolver,
+	failoverResolver RequestFailoverResolver,
 	translatedRequestPatcher TranslatedRequestPatcher,
 ) *Handler {
 	return &Handler{
 		provider:                 provider,
 		modelResolver:            modelResolver,
 		modelAuthorizer:          modelAuthorizer,
-		fallbackResolver:         fallbackResolver,
+		failoverResolver:         failoverResolver,
 		workflowPolicyResolver:   workflowPolicyResolver,
 		translatedRequestPatcher: translatedRequestPatcher,
 		logger:                   logger,
@@ -169,7 +169,7 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 			modelResolver:            h.modelResolver,
 			modelAuthorizer:          h.modelAuthorizer,
 			workflowPolicyResolver:   h.workflowPolicyResolver,
-			fallbackResolver:         h.fallbackResolver,
+			failoverResolver:         h.failoverResolver,
 			translatedRequestPatcher: h.translatedRequestPatcher,
 			logger:                   h.logger,
 			usageLogger:              h.usageLogger,

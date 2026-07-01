@@ -34,11 +34,11 @@ const (
 	// PatchChatRequest; consumed by the semantic cache to build params_hash.
 	guardrailsHashKey contextKey = "guardrails-hash"
 
-	// fallbackUsedKey stores whether the translated execution path successfully
-	// served the request from a fallback model rather than the primary selector.
-	// Response cache writers use this to avoid storing fallback responses under
+	// failoverUsedKey stores whether the translated execution path successfully
+	// served the request from a failover model rather than the primary selector.
+	// Response cache writers use this to avoid storing failover responses under
 	// the primary request key.
-	fallbackUsedKey contextKey = "fallback-used"
+	failoverUsedKey contextKey = "failover-used"
 
 	// requestOriginKey stores the logical request origin for internal execution
 	// flows that still reuse the translated request pipeline.
@@ -205,14 +205,14 @@ func GetGuardrailsHash(ctx context.Context) string {
 	return ""
 }
 
-// WithFallbackUsed returns a new context marked as having used a fallback model.
-func WithFallbackUsed(ctx context.Context) context.Context {
-	return context.WithValue(ctx, fallbackUsedKey, true)
+// WithFailoverUsed returns a new context marked as having used a failover model.
+func WithFailoverUsed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, failoverUsedKey, true)
 }
 
-// GetFallbackUsed reports whether the request was served by a fallback model.
-func GetFallbackUsed(ctx context.Context) bool {
-	if v := ctx.Value(fallbackUsedKey); v != nil {
+// GetFailoverUsed reports whether the request was served by a failover model.
+func GetFailoverUsed(ctx context.Context) bool {
+	if v := ctx.Value(failoverUsedKey); v != nil {
 		if used, ok := v.(bool); ok {
 			return used
 		}

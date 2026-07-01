@@ -623,7 +623,7 @@ func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
 				Cache:    true,
 				Audit:    true,
 				Usage:    true,
-				Fallback: true,
+				Failover: true,
 			},
 			Failover: &auditlog.FailoverSnapshot{TargetModel: "fallback-model"},
 		},
@@ -638,7 +638,7 @@ func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
 	if !ok {
 		t.Fatalf("workflow_features = %T, want object", data["workflow_features"])
 	}
-	if features["cache"] != true || features["fallback"] != true {
+	if features["cache"] != true || features["failover"] != true {
 		t.Fatalf("workflow_features = %#v, want compact workflow flags", features)
 	}
 	failover, ok := data["failover"].(map[string]any)

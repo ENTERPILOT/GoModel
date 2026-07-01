@@ -7,7 +7,7 @@ import (
 	"gomodel/internal/core"
 )
 
-func TestShouldAttemptFallback(t *testing.T) {
+func TestShouldAttemptFailover(t *testing.T) {
 	tests := []struct {
 		name    string
 		status  int
@@ -39,8 +39,8 @@ func TestShouldAttemptFallback(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := core.NewProviderError("anthropic", tt.status, tt.message, nil)
-			if got := ShouldAttemptFallback(err); got != tt.want {
-				t.Fatalf("ShouldAttemptFallback(%d, %q) = %v, want %v", tt.status, tt.message, got, tt.want)
+			if got := ShouldAttemptFailover(err); got != tt.want {
+				t.Fatalf("ShouldAttemptFailover(%d, %q) = %v, want %v", tt.status, tt.message, got, tt.want)
 			}
 		})
 	}

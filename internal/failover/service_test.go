@@ -72,7 +72,7 @@ func (s *errGetStore) Get(context.Context, string) (*Rule, error) {
 func TestServiceUpsertPropagatesUnexpectedGetError(t *testing.T) {
 	wantErr := errors.New("boom")
 	store := &errGetStore{memoryStore: newMemoryStore(), getErr: wantErr}
-	service, err := NewService(store, config.FallbackConfig{Enabled: true})
+	service, err := NewService(store, config.FailoverConfig{Enabled: true})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -93,7 +93,7 @@ func TestServiceConfigRulesOverrideDashboardRules(t *testing.T) {
 		Enabled:       true,
 		ManagedSource: ManagedSourceDashboard,
 	})
-	service, err := NewService(store, config.FallbackConfig{
+	service, err := NewService(store, config.FailoverConfig{
 		Enabled: true,
 		Manual: map[string][]string{
 			"gpt-4o": {"azure/gpt-4o"},
@@ -126,7 +126,7 @@ func TestServiceRulesReuseCachedSnapshot(t *testing.T) {
 		Rule{Source: "gpt-4o", Targets: []string{"azure/gpt-4o"}, Enabled: true, ManagedSource: ManagedSourceDashboard},
 		Rule{Source: "gpt-4o-mini", Enabled: false, ManagedSource: ManagedSourceDashboard},
 	)
-	service, err := NewService(store, config.FallbackConfig{Enabled: true})
+	service, err := NewService(store, config.FailoverConfig{Enabled: true})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}

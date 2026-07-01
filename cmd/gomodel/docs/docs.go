@@ -673,6 +673,271 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/failover": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List failover mappings",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/failover.View"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create or update one failover mapping",
+                "parameters": [
+                    {
+                        "description": "Failover mapping",
+                        "name": "mapping",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.upsertFailoverRuleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/failover.View"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete one failover mapping",
+                "parameters": [
+                    {
+                        "description": "Failover primary model to remove",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.deleteFailoverRuleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/failover/generate": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Generate failover mapping suggestions",
+                "parameters": [
+                    {
+                        "description": "Optional source model filter",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/admin.generateFailoverRulesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/failover.View"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/failover/reset": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Reset dashboard-managed failover mappings",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/failover.View"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/model-pricing-overrides": {
             "get": {
                 "description": "Lists persisted USD pricing overrides. Selectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
@@ -1307,6 +1572,52 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/usage.UsageSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/usage/throughput": {
+            "get": {
+                "description": "Returns a fixed, trailing window of token-volume buckets\n(input / output / prompt-cached / locally-cached) at the\nrequested granularity, for the overview live chart.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get the live token-throughput window",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bucket granularity: second, minute, hour, day",
+                        "name": "granularity",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usage.TokenThroughput"
                         }
                     },
                     "400": {
@@ -4088,7 +4399,7 @@ const docTemplate = `{
                 "DASHBOARD_LIVE_LOGS_ENABLED": {
                     "type": "string"
                 },
-                "FEATURE_FALLBACK_MODE": {
+                "FAILOVER_ENABLED": {
                     "type": "string"
                 },
                 "GUARDRAILS_ENABLED": {
@@ -4299,6 +4610,14 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.deleteFailoverRuleRequest": {
+            "type": "object",
+            "properties": {
+                "primary_model": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.deleteModelPricingOverrideRequest": {
             "type": "object",
             "properties": {
@@ -4317,6 +4636,17 @@ const docTemplate = `{
             "required": [
                 "source"
             ]
+        },
+        "admin.generateFailoverRulesRequest": {
+            "type": "object",
+            "properties": {
+                "model": {
+                    "type": "string"
+                },
+                "primary_model": {
+                    "type": "string"
+                }
+            }
         },
         "admin.modelAccessResponse": {
             "type": "object",
@@ -4459,6 +4789,23 @@ const docTemplate = `{
                     "$ref": "#/definitions/admin.budgetKeyRequest"
                 },
                 "user_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.upsertFailoverRuleRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "fallback_models": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "primary_model": {
                     "type": "string"
                 }
             }
@@ -4766,6 +5113,56 @@ const docTemplate = `{
                 }
             }
         },
+        "auditlog.AttemptSnapshot": {
+            "type": "object",
+            "properties": {
+                "duration_ns": {
+                    "type": "integer"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "error_type": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "provider_name": {
+                    "type": "string"
+                },
+                "provider_type": {
+                    "type": "string"
+                },
+                "response_body": {
+                    "description": "ResponseBody and ResponseHeaders capture the raw upstream error response\nof a failed attempt. ResponseBody is the parsed JSON (or a string when the\nbody is not JSON); ResponseHeaders is redacted. Both are populated only\nwhen audit body/header logging is enabled."
+                },
+                "response_headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status_code": {
+                    "type": "integer"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
         "auditlog.ConversationResult": {
             "type": "object",
             "properties": {
@@ -4793,6 +5190,13 @@ const docTemplate = `{
             "properties": {
                 "api_key_hash": {
                     "type": "string"
+                },
+                "attempts": {
+                    "description": "Attempts captures provider calls made for this logical request. SQL\nstores split this into audit_log_attempts; Mongo stores it embedded.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auditlog.AttemptSnapshot"
+                    }
                 },
                 "error_code": {
                     "type": "string"
@@ -4945,7 +5349,7 @@ const docTemplate = `{
                 "cache": {
                     "type": "boolean"
                 },
-                "fallback": {
+                "failover": {
                     "type": "boolean"
                 },
                 "guardrails": {
@@ -6533,6 +6937,35 @@ const docTemplate = `{
                 }
             }
         },
+        "failover.View": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "fallback_models": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "managed": {
+                    "type": "boolean"
+                },
+                "managed_source": {
+                    "type": "string"
+                },
+                "primary_model": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "pricingoverrides.Pricing": {
             "type": "object",
             "properties": {
@@ -6736,6 +7169,12 @@ const docTemplate = `{
         "usage.DailyUsage": {
             "type": "object",
             "properties": {
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
                 "date": {
                     "type": "string"
                 },
@@ -6758,6 +7197,10 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "total_tokens": {
+                    "type": "integer"
+                },
+                "uncached_input_tokens": {
+                    "description": "Provider prompt-cache split of the period's input, folded per row from\nraw_data (same source as the summary). Zero when the storage layer does\nnot populate them.",
                     "type": "integer"
                 }
             }
@@ -6840,6 +7283,43 @@ const docTemplate = `{
                 },
                 "uncached_input_tokens": {
                     "type": "integer"
+                }
+            }
+        },
+        "usage.ThroughputBucket": {
+            "type": "object",
+            "properties": {
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "locally_cached_tokens": {
+                    "type": "integer"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "prompt_cached_tokens": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "string"
+                }
+            }
+        },
+        "usage.TokenThroughput": {
+            "type": "object",
+            "properties": {
+                "bucket_seconds": {
+                    "type": "integer"
+                },
+                "buckets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.ThroughputBucket"
+                    }
+                },
+                "granularity": {
+                    "type": "string"
                 }
             }
         },

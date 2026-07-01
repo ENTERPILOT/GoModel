@@ -57,13 +57,13 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 }
 
 func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
-	fallbackEnabled := true
+	failoverEnabled := true
 	compiled, err := NewCompilerWithFeatureCaps(nil, core.WorkflowFeatures{
 		Cache:      false,
 		Audit:      true,
 		Usage:      false,
 		Guardrails: false,
-		Fallback:   false,
+		Failover:   false,
 	}).Compile(Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
@@ -71,7 +71,7 @@ func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 		Name:    "global",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true, Fallback: &fallbackEnabled},
+			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true, Failover: &failoverEnabled},
 			Guardrails: []GuardrailStep{
 				{Ref: "policy-system", Step: 10},
 			},
@@ -95,8 +95,8 @@ func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 	if compiled.Policy.Features.Guardrails {
 		t.Fatal("Policy.Features.Guardrails = true, want false")
 	}
-	if compiled.Policy.Features.Fallback {
-		t.Fatal("Policy.Features.Fallback = true, want false")
+	if compiled.Policy.Features.Failover {
+		t.Fatal("Policy.Features.Failover = true, want false")
 	}
 	if compiled.Pipeline != nil {
 		t.Fatal("compiled pipeline is not nil")
@@ -106,7 +106,7 @@ func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 	}
 }
 
-func TestCompilerCompile_DefaultsFallbackEnabledWhenUnset(t *testing.T) {
+func TestCompilerCompile_DefaultsFailoverEnabledWhenUnset(t *testing.T) {
 	compiled, err := NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()).Compile(Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
@@ -128,8 +128,8 @@ func TestCompilerCompile_DefaultsFallbackEnabledWhenUnset(t *testing.T) {
 	if compiled == nil || compiled.Policy == nil {
 		t.Fatal("Compile() returned nil policy")
 	}
-	if !compiled.Policy.Features.Fallback {
-		t.Fatal("Policy.Features.Fallback = false, want true")
+	if !compiled.Policy.Features.Failover {
+		t.Fatal("Policy.Features.Failover = false, want true")
 	}
 }
 

@@ -156,7 +156,7 @@ type WorkflowFeaturesSnapshot struct {
 	Usage      bool `json:"usage" bson:"usage"`
 	Budget     bool `json:"budget" bson:"budget"`
 	Guardrails bool `json:"guardrails" bson:"guardrails"`
-	Fallback   bool `json:"fallback" bson:"fallback"`
+	Failover   bool `json:"failover" bson:"failover"`
 }
 
 // FailoverSnapshot stores the runtime failover selection used for one request.

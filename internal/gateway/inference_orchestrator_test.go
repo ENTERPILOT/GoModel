@@ -154,7 +154,7 @@ func TestInferenceOrchestratorWithCacheRequestContextClearsInheritedGuardrailsHa
 				Audit:      true,
 				Usage:      true,
 				Guardrails: false,
-				Fallback:   true,
+				Failover:   true,
 			},
 		},
 	}

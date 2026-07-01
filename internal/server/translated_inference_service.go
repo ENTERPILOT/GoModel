@@ -32,7 +32,7 @@ type translatedInferenceService struct {
 	modelResolver            RequestModelResolver
 	modelAuthorizer          RequestModelAuthorizer
 	workflowPolicyResolver   RequestWorkflowPolicyResolver
-	fallbackResolver         RequestFallbackResolver
+	failoverResolver         RequestFailoverResolver
 	translatedRequestPatcher TranslatedRequestPatcher
 	logger                   auditlog.LoggerInterface
 	usageLogger              usage.LoggerInterface
@@ -67,7 +67,7 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		ModelResolver:            s.modelResolver,
 		ModelAuthorizer:          s.modelAuthorizer,
 		WorkflowPolicyResolver:   s.workflowPolicyResolver,
-		FallbackResolver:         s.fallbackResolver,
+		FailoverResolver:         s.failoverResolver,
 		TranslatedRequestPatcher: s.translatedRequestPatcher,
 		UsageLogger:              s.usageLogger,
 		PricingResolver:          s.pricingResolver,
@@ -93,7 +93,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	}
 
 	if req.Stream {
-		if len(s.inference().FallbackSelectors(workflow)) == 0 {
+		if len(s.inference().FailoverSelectors(workflow)) == 0 {
 			if handled, err := s.tryFastPathStreamingChatPassthrough(c, workflow, req); handled {
 				return err
 			}
@@ -102,8 +102,8 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		if err != nil {
 			return handleStreamingDispatchError(c, err)
 		}
-		if result.Meta.UsedFallback {
-			markRequestFallbackUsed(c)
+		if result.Meta.UsedFailover {
+			markRequestFailoverUsed(c)
 		}
 		return s.handleStreamingReadCloser(
 			c,
@@ -122,8 +122,8 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		return handleError(c, err)
 	}
 	enrichAuditEntryWithProviderAttempts(c)
-	if result.Meta.UsedFallback {
-		markRequestFallbackUsed(c)
+	if result.Meta.UsedFailover {
+		markRequestFailoverUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
 	auditlog.EnrichEntryWithResolvedRoute(
@@ -261,8 +261,8 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		if err != nil {
 			return handleStreamingDispatchError(c, err)
 		}
-		if result.Meta.UsedFallback {
-			markRequestFallbackUsed(c)
+		if result.Meta.UsedFailover {
+			markRequestFailoverUsed(c)
 		}
 		stream := result.Stream
 		if turn := conversationTurnFromContext(ctx); turn != nil {
@@ -285,8 +285,8 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		return handleError(c, err)
 	}
 	enrichAuditEntryWithProviderAttempts(c)
-	if result.Meta.UsedFallback {
-		markRequestFallbackUsed(c)
+	if result.Meta.UsedFailover {
+		markRequestFailoverUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
 	auditlog.EnrichEntryWithResolvedRoute(
@@ -478,7 +478,7 @@ func attachPreparedWorkflow(c *echo.Context, ctx context.Context, workflow *core
 // observer only when failover targets exist, so non-failover requests — the hot
 // path — take on no extra per-request work.
 func (s *translatedInferenceService) observeLiveProviderAttempts(c *echo.Context, workflow *core.Workflow) {
-	if len(s.inference().FallbackSelectors(workflow)) == 0 {
+	if len(s.inference().FailoverSelectors(workflow)) == 0 {
 		return
 	}
 	req := c.Request()
@@ -662,11 +662,11 @@ func qualifyExecutedModel(workflow *core.Workflow, model, providerName string) s
 	return gateway.QualifyExecutedModel(workflow, model, providerName)
 }
 
-func markRequestFallbackUsed(c *echo.Context) {
+func markRequestFailoverUsed(c *echo.Context) {
 	if c == nil || c.Request() == nil {
 		return
 	}
-	c.SetRequest(c.Request().WithContext(core.WithFallbackUsed(c.Request().Context())))
+	c.SetRequest(c.Request().WithContext(core.WithFailoverUsed(c.Request().Context())))
 }
 
 func resolvedModelFromWorkflow(workflow *core.Workflow, fallback string) string {

@@ -80,7 +80,7 @@ func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storag
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(store, cfg.Fallback)
+	service, err := NewService(store, cfg.Failover)
 	if err != nil {
 		return nil, err
 	}

@@ -205,7 +205,7 @@ func newWorkflowHandlerWithModelRegistry(t *testing.T, store workflows.Store, mo
 }
 
 func TestListWorkflows(t *testing.T) {
-	fallbackDisabled := false
+	failoverDisabled := false
 	store := &workflowTestStore{
 		versions: []workflows.Version{
 			{
@@ -217,7 +217,7 @@ func TestListWorkflows(t *testing.T) {
 				Name:     "global",
 				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false, Fallback: &fallbackDisabled},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false, Failover: &failoverDisabled},
 				},
 				WorkflowHash: "hash-global",
 			},
@@ -247,14 +247,14 @@ func TestListWorkflows(t *testing.T) {
 	if body[0].ScopeDisplay != "global" {
 		t.Fatalf("scope display = %q, want global", body[0].ScopeDisplay)
 	}
-	if body[0].Payload.Features.Fallback == nil || *body[0].Payload.Features.Fallback {
-		t.Fatalf("payload fallback = %v, want explicit false", body[0].Payload.Features.Fallback)
+	if body[0].Payload.Features.Failover == nil || *body[0].Payload.Features.Failover {
+		t.Fatalf("payload failover = %v, want explicit false", body[0].Payload.Features.Failover)
 	}
 	if !body[0].EffectiveFeatures.Cache || !body[0].EffectiveFeatures.Audit || !body[0].EffectiveFeatures.Usage {
 		t.Fatalf("effective features = %+v, want cache/audit/usage enabled", body[0].EffectiveFeatures)
 	}
-	if body[0].EffectiveFeatures.Fallback {
-		t.Fatalf("effective features = %+v, want fallback disabled", body[0].EffectiveFeatures)
+	if body[0].EffectiveFeatures.Failover {
+		t.Fatalf("effective features = %+v, want failover disabled", body[0].EffectiveFeatures)
 	}
 }
 
@@ -354,7 +354,7 @@ func TestWorkflowsEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 }
 
 func TestGetWorkflow(t *testing.T) {
-	fallbackEnabled := true
+	failoverEnabled := true
 	store := &workflowTestStore{
 		versions: []workflows.Version{
 			{
@@ -389,7 +389,7 @@ func TestGetWorkflow(t *testing.T) {
 						Audit:      true,
 						Usage:      true,
 						Guardrails: true,
-						Fallback:   &fallbackEnabled,
+						Failover:   &failoverEnabled,
 					},
 					Guardrails: []workflows.GuardrailStep{
 						{Ref: "policy-system", Step: 10},
@@ -421,7 +421,7 @@ func TestGetWorkflow(t *testing.T) {
 	if err := json.Unmarshal(rawBody["effective_features"], &effectiveFeatures); err != nil {
 		t.Fatalf("unmarshal effective_features: %v", err)
 	}
-	for _, key := range []string{"cache", "audit", "usage", "guardrails", "fallback"} {
+	for _, key := range []string{"cache", "audit", "usage", "guardrails", "failover"} {
 		if _, ok := effectiveFeatures[key]; !ok {
 			t.Fatalf("effective_features missing lower-case key %q: %s", key, rec.Body.String())
 		}
@@ -552,7 +552,7 @@ func TestCreateWorkflow(t *testing.T) {
 		"description":"provider-model workflow",
 		"workflow_payload":{
 			"schema_version":1,
-			"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"fallback":false},
+			"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},
 			"guardrails":[]
 		}
 	}`))
@@ -577,8 +577,8 @@ func TestCreateWorkflow(t *testing.T) {
 	if body.Name != "openai gpt-5" {
 		t.Fatalf("name = %q, want openai gpt-5", body.Name)
 	}
-	if body.Payload.Features.Fallback == nil || *body.Payload.Features.Fallback {
-		t.Fatalf("payload fallback = %v, want explicit false", body.Payload.Features.Fallback)
+	if body.Payload.Features.Failover == nil || *body.Payload.Features.Failover {
+		t.Fatalf("payload failover = %v, want explicit false", body.Payload.Features.Failover)
 	}
 
 	views, err := h.workflows.ListViews(context.Background())

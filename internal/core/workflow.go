@@ -98,7 +98,7 @@ type WorkflowFeatures struct {
 	Usage      bool `json:"usage"`
 	Budget     bool `json:"budget"`
 	Guardrails bool `json:"guardrails"`
-	Fallback   bool `json:"fallback"`
+	Failover   bool `json:"failover"`
 }
 
 // ApplyUpperBound returns features with process-level caps applied.
@@ -110,7 +110,7 @@ func (f WorkflowFeatures) ApplyUpperBound(caps WorkflowFeatures) WorkflowFeature
 		Usage:      usage,
 		Budget:     usage && f.Budget && caps.Budget,
 		Guardrails: f.Guardrails && caps.Guardrails,
-		Fallback:   f.Fallback && caps.Fallback,
+		Failover:   f.Failover && caps.Failover,
 	}
 }
 
@@ -123,7 +123,7 @@ func DefaultWorkflowFeatures() WorkflowFeatures {
 		Usage:      true,
 		Budget:     true,
 		Guardrails: true,
-		Fallback:   true,
+		Failover:   true,
 	}
 }
 
@@ -205,9 +205,9 @@ func (p *Workflow) GuardrailsEnabled() bool {
 	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Guardrails })
 }
 
-// FallbackEnabled reports whether translated-route fallback is enabled for the request.
-func (p *Workflow) FallbackEnabled() bool {
-	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Fallback })
+// FailoverEnabled reports whether translated-route failover is enabled for the request.
+func (p *Workflow) FailoverEnabled() bool {
+	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Failover })
 }
 
 // GuardrailsHash returns the matched workflow's guardrails hash.

@@ -103,8 +103,8 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		if err != nil {
 			return handleStreamingDispatchError(c, err)
 		}
-		if result.Meta.UsedFallback {
-			markRequestFallbackUsed(c)
+		if result.Meta.UsedFailover {
+			markRequestFailoverUsed(c)
 		}
 		model := result.Meta.Model
 		return s.handleStreamingReadCloser(
@@ -126,8 +126,8 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		return handleError(c, err)
 	}
 	enrichAuditEntryWithProviderAttempts(c)
-	if result.Meta.UsedFallback {
-		markRequestFallbackUsed(c)
+	if result.Meta.UsedFailover {
+		markRequestFailoverUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
 	auditlog.EnrichEntryWithResolvedRoute(

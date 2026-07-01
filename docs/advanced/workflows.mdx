@@ -15,7 +15,7 @@ They currently control gateway-owned behavior such as:
 - audit logging
 - usage tracking
 - guardrails
-- translated-route fallback
+- translated-route failover
 
 Each request matches exactly one active workflow.
 
@@ -113,7 +113,7 @@ curl -X POST http://localhost:8080/admin/workflows \
         "audit": true,
         "usage": true,
         "guardrails": false,
-        "fallback": true
+        "failover": true
       },
       "guardrails": []
     }

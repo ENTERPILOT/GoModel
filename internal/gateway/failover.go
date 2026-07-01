@@ -12,12 +12,12 @@ import (
 	"gomodel/internal/core"
 )
 
-// FallbackSelectors returns fallback selectors for a translated workflow.
-func (o *InferenceOrchestrator) FallbackSelectors(workflow *core.Workflow) []core.ModelSelector {
-	if o.fallbackResolver == nil || workflow == nil || workflow.Resolution == nil || !workflow.FallbackEnabled() {
+// FailoverSelectors returns failover selectors for a translated workflow.
+func (o *InferenceOrchestrator) FailoverSelectors(workflow *core.Workflow) []core.ModelSelector {
+	if o.failoverResolver == nil || workflow == nil || workflow.Resolution == nil || !workflow.FailoverEnabled() {
 		return nil
 	}
-	return o.fallbackResolver.ResolveFallbacks(workflow.Resolution, workflow.Endpoint.Operation)
+	return o.failoverResolver.ResolveFailovers(workflow.Resolution, workflow.Endpoint.Operation)
 }
 
 // ProviderTypeForSelector returns the provider type for a selector.
@@ -38,7 +38,7 @@ func (o *InferenceOrchestrator) ProviderTypeForSelector(selector core.ModelSelec
 	return fallback
 }
 
-func tryFallbackResponse[T any](
+func tryFailoverResponse[T any](
 	ctx context.Context,
 	o *InferenceOrchestrator,
 	workflow *core.Workflow,
@@ -48,22 +48,22 @@ func tryFallbackResponse[T any](
 ) (T, string, string, string, bool, error) {
 	var zero T
 
-	fallbacks := o.FallbackSelectors(workflow)
-	if len(fallbacks) == 0 || !ShouldAttemptFallback(primaryErr) {
+	failovers := o.FailoverSelectors(workflow)
+	if len(failovers) == 0 || !ShouldAttemptFailover(primaryErr) {
 		return zero, "", "", "", false, primaryErr
 	}
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
 	lastErr := primaryErr
-	for _, selector := range fallbacks {
+	for _, selector := range failovers {
 		if o.modelAuthorizer != nil && !o.modelAuthorizer.AllowsModel(ctx, selector) {
 			continue
 		}
 		qualified := selector.QualifiedModel()
 		providerType := o.ProviderTypeForSelector(selector, ProviderTypeFromWorkflow(workflow))
 		providerName := ResolvedProviderName(o.provider, selector, ProviderNameFromWorkflow(workflow))
-		slog.Warn("primary model attempt failed, trying fallback",
+		slog.Warn("primary model attempt failed, trying failover",
 			"request_id", requestID,
 			"from", primaryModel,
 			"to", qualified,
@@ -75,7 +75,7 @@ func tryFallbackResponse[T any](
 		resp, resolvedProviderType, err := call(selector, providerType, providerName)
 		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindFailover, firstNonEmptyString(resolvedProviderType, providerType), providerName, qualified, started, err))
 		if err == nil {
-			slog.Info("fallback model attempt succeeded",
+			slog.Info("failover model attempt succeeded",
 				"request_id", requestID,
 				"from", primaryModel,
 				"to", qualified,
@@ -89,7 +89,7 @@ func tryFallbackResponse[T any](
 	return zero, "", "", "", false, lastErr
 }
 
-func executeWithFallbackResponse[T any](
+func executeWithFailoverResponse[T any](
 	ctx context.Context,
 	o *InferenceOrchestrator,
 	workflow *core.Workflow,
@@ -101,10 +101,10 @@ func executeWithFallbackResponse[T any](
 	if err == nil {
 		return resp, resolvedProviderType, resolvedProviderName, "", false, nil
 	}
-	return tryFallbackResponse(ctx, o, workflow, model, provider, err, fallback)
+	return tryFailoverResponse(ctx, o, workflow, model, provider, err, fallback)
 }
 
-func executeTranslatedWithFallback[Req any, Resp any](
+func executeTranslatedWithFailover[Req any, Resp any](
 	ctx context.Context,
 	o *InferenceOrchestrator,
 	workflow *core.Workflow,
@@ -113,7 +113,7 @@ func executeTranslatedWithFallback[Req any, Resp any](
 	cloneForSelector func(Req, core.ModelSelector) Req,
 	call func(context.Context, Req) (Resp, string, error),
 ) (Resp, string, string, string, bool, error) {
-	return executeWithFallbackResponse(ctx, o, workflow, model, provider,
+	return executeWithFailoverResponse(ctx, o, workflow, model, provider,
 		func() (Resp, string, string, error) {
 			started := time.Now()
 			resp, responseProvider, err := call(ctx, req)
@@ -136,7 +136,7 @@ func executeTranslatedWithFallback[Req any, Resp any](
 	)
 }
 
-func tryFallbackStream(
+func tryFailoverStream(
 	ctx context.Context,
 	o *InferenceOrchestrator,
 	workflow *core.Workflow,
@@ -144,22 +144,22 @@ func tryFallbackStream(
 	primaryErr error,
 	call func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error),
 ) (io.ReadCloser, string, string, string, string, error) {
-	fallbacks := o.FallbackSelectors(workflow)
-	if len(fallbacks) == 0 || !ShouldAttemptFallback(primaryErr) {
+	failovers := o.FailoverSelectors(workflow)
+	if len(failovers) == 0 || !ShouldAttemptFailover(primaryErr) {
 		return nil, "", "", "", "", primaryErr
 	}
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
 	lastErr := primaryErr
-	for _, selector := range fallbacks {
+	for _, selector := range failovers {
 		if o.modelAuthorizer != nil && !o.modelAuthorizer.AllowsModel(ctx, selector) {
 			continue
 		}
 		qualified := selector.QualifiedModel()
 		providerType := o.ProviderTypeForSelector(selector, ProviderTypeFromWorkflow(workflow))
 		providerName := ResolvedProviderName(o.provider, selector, ProviderNameFromWorkflow(workflow))
-		slog.Warn("primary model attempt failed, trying fallback stream",
+		slog.Warn("primary model attempt failed, trying failover stream",
 			"request_id", requestID,
 			"from", primaryModel,
 			"to", qualified,
@@ -171,7 +171,7 @@ func tryFallbackStream(
 		stream, resolvedProviderType, usageModel, err := call(selector, providerType, providerName)
 		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindFailover, firstNonEmptyString(resolvedProviderType, providerType), providerName, qualified, started, err))
 		if err == nil {
-			slog.Info("fallback stream attempt succeeded",
+			slog.Info("failover stream attempt succeeded",
 				"request_id", requestID,
 				"from", primaryModel,
 				"to", qualified,
@@ -185,8 +185,8 @@ func tryFallbackStream(
 	return nil, "", "", "", "", lastErr
 }
 
-// ShouldAttemptFallback reports whether err should trigger translated fallback.
-func ShouldAttemptFallback(err error) bool {
+// ShouldAttemptFailover reports whether err should trigger translated failover.
+func ShouldAttemptFailover(err error) bool {
 	var gatewayErr *core.GatewayError
 	if !errors.As(err, &gatewayErr) || gatewayErr == nil {
 		return false

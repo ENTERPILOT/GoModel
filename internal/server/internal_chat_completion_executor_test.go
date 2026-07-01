@@ -69,7 +69,7 @@ func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *te
 					Audit:      true,
 					Usage:      true,
 					Guardrails: true,
-					Fallback:   true,
+					Failover:   true,
 				},
 			}, nil
 		}),

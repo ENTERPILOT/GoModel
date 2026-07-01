@@ -49,7 +49,7 @@ func newRuleSnapshot(rows []Rule) *ruleSnapshot {
 	return &ruleSnapshot{rows: rows, rules: rules, disabled: disabled}
 }
 
-func NewService(store Store, cfg config.FallbackConfig) (*Service, error) {
+func NewService(store Store, cfg config.FailoverConfig) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
@@ -58,7 +58,7 @@ func NewService(store Store, cfg config.FallbackConfig) (*Service, error) {
 	return service, nil
 }
 
-func ConfigRules(cfg config.FallbackConfig) []Rule {
+func ConfigRules(cfg config.FailoverConfig) []Rule {
 	rows := make([]Rule, 0, len(cfg.Manual))
 	now := time.Now().UTC()
 	for source, targets := range cfg.Manual {

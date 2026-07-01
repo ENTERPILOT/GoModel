@@ -255,7 +255,7 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 			Usage:      workflow.Policy.Features.Usage,
 			Budget:     workflow.Policy.Features.Budget,
 			Guardrails: workflow.Policy.Features.Guardrails,
-			Fallback:   workflow.Policy.Features.Fallback,
+			Failover:   workflow.Policy.Features.Failover,
 		}
 	}
 }

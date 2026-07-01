@@ -14,9 +14,9 @@ import (
 // selectors before provider execution.
 type RequestModelResolver = gateway.ModelResolver
 
-// RequestFallbackResolver resolves alternate concrete model selectors for a
+// RequestFailoverResolver resolves alternate concrete model selectors for a
 // translated request after the primary selector has already been resolved.
-type RequestFallbackResolver = gateway.FallbackResolver
+type RequestFailoverResolver = gateway.FailoverResolver
 
 func workflowProviderNameForType(provider core.RoutableProvider, providerType string) string {
 	return gateway.WorkflowProviderNameForType(provider, providerType)

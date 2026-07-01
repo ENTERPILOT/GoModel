@@ -53,7 +53,7 @@ func TestManagedAuthKeyWorkflow_AuditAndUsageValidity_PostgreSQL(t *testing.T) {
 				Audit:      true,
 				Usage:      true,
 				Guardrails: false,
-				Fallback:   boolPtr(false),
+				Failover:   boolPtr(false),
 			},
 			Guardrails: []workflows.GuardrailStep{},
 		},
@@ -106,7 +106,7 @@ func TestManagedAuthKeyWorkflow_AuditAndUsageValidity_PostgreSQL(t *testing.T) {
 	assert.True(t, auditEntry.Data.WorkflowFeatures.Audit)
 	assert.True(t, auditEntry.Data.WorkflowFeatures.Usage)
 	assert.False(t, auditEntry.Data.WorkflowFeatures.Guardrails)
-	assert.False(t, auditEntry.Data.WorkflowFeatures.Fallback)
+	assert.False(t, auditEntry.Data.WorkflowFeatures.Failover)
 
 	usageEntries := dbassert.QueryUsageByRequestID(t, fixture.PgPool, requestID)
 	require.Len(t, usageEntries, 1, "expected one usage entry")
@@ -162,7 +162,7 @@ func TestGuardrailWorkflow_RewritesUpstreamRequestAndPreservesAuditUsage_Postgre
 				Audit:      true,
 				Usage:      true,
 				Guardrails: true,
-				Fallback:   boolPtr(false),
+				Failover:   boolPtr(false),
 			},
 			Guardrails: []workflows.GuardrailStep{
 				{Ref: "policy-system", Step: 10},
@@ -234,7 +234,7 @@ func TestGuardrailWorkflow_RewritesUpstreamRequestAndPreservesAuditUsage_Postgre
 	assert.True(t, auditEntry.Data.WorkflowFeatures.Audit)
 	assert.True(t, auditEntry.Data.WorkflowFeatures.Usage)
 	assert.True(t, auditEntry.Data.WorkflowFeatures.Guardrails)
-	assert.False(t, auditEntry.Data.WorkflowFeatures.Fallback)
+	assert.False(t, auditEntry.Data.WorkflowFeatures.Failover)
 
 	usageEntries := dbassert.QueryUsageByRequestID(t, fixture.PgPool, requestID)
 	require.Len(t, usageEntries, 1, "expected one usage entry")

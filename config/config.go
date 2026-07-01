@@ -24,7 +24,7 @@ type Config struct {
 	HTTP       HTTPConfig       `yaml:"http"`
 	Admin      AdminConfig      `yaml:"admin"`
 	Guardrails GuardrailsConfig `yaml:"guardrails"`
-	Fallback   FallbackConfig   `yaml:"fallback"`
+	Failover   FailoverConfig   `yaml:"failover"`
 	Workflows  WorkflowsConfig  `yaml:"workflows"`
 	Resilience ResilienceConfig `yaml:"resilience"`
 
@@ -113,9 +113,9 @@ func buildDefaultConfig() *Config {
 			Timeout:               600,
 			ResponseHeaderTimeout: 600,
 		},
-		Fallback: FallbackConfig{
+		Failover: FailoverConfig{
 			Enabled:     true,
-			DefaultMode: FallbackModeManual,
+			DefaultMode: FailoverModeManual,
 		},
 		Workflows: WorkflowsConfig{
 			RefreshInterval: time.Minute,
@@ -182,7 +182,7 @@ func Load() (*LoadResult, error) {
 		return nil, fmt.Errorf("models.configured_provider_models_mode must be one of: fallback, allowlist")
 	}
 
-	if err := loadFallbackConfig(&cfg.Fallback); err != nil {
+	if err := loadFailoverConfig(&cfg.Failover); err != nil {
 		return nil, err
 	}
 

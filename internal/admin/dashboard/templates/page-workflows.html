@@ -127,7 +127,7 @@
                         <span>Guardrails</span>
                     </label>
                     <label class="workflow-feature-toggle" x-show="workflowFailoverVisible()">
-                        <input type="checkbox" x-model="workflowForm.features.fallback">
+                        <input type="checkbox" x-model="workflowForm.features.failover">
                         <span>Failover</span>
                     </label>
                 </div>
@@ -150,7 +150,7 @@
                         </div>
 
                         <p class="workflow-card-description" x-show="workflowPreview().description" x-text="workflowPreview().description"></p>
-                        <p class="form-hint" x-show="workflowFailoverVisible()" x-text="'Failover: ' + workflowFallbackLabel(workflowPreview())"></p>
+                        <p class="form-hint" x-show="workflowFailoverVisible()" x-text="'Failover: ' + workflowFailoverLabel(workflowPreview())"></p>
 
                         {{template "workflow-chart" "workflowChart(workflowPreview())"}}
 
@@ -235,7 +235,7 @@
                         </div>
 
                         <p class="workflow-card-description" x-show="workflow.description" x-text="workflow.description"></p>
-                        <p class="form-hint" x-show="workflowFailoverVisible()" x-text="'Failover: ' + workflowFallbackLabel(workflow)"></p>
+                        <p class="form-hint" x-show="workflowFailoverVisible()" x-text="'Failover: ' + workflowFailoverLabel(workflow)"></p>
 
                         {{template "workflow-chart" "workflowChart(workflow)"}}
 

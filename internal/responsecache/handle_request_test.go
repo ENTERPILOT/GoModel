@@ -284,7 +284,7 @@ func TestInternalCacheType_ParsesHeaderShapes(t *testing.T) {
 	}
 }
 
-func TestHandleRequest_FallbackUsedSkipsCacheWrites(t *testing.T) {
+func TestHandleRequest_FailoverUsedSkipsCacheWrites(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
 
@@ -305,7 +305,7 @@ func TestHandleRequest_FallbackUsedSkipsCacheWrites(t *testing.T) {
 	e := echo.New()
 	handlerCalls := 0
 
-	run := func(markFallback bool) *httptest.ResponseRecorder {
+	run := func(markFailover bool) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -313,8 +313,8 @@ func TestHandleRequest_FallbackUsedSkipsCacheWrites(t *testing.T) {
 		c := e.NewContext(req, rec)
 		if err := m.HandleRequest(c, body, func() error {
 			handlerCalls++
-			if markFallback {
-				c.SetRequest(c.Request().WithContext(core.WithFallbackUsed(c.Request().Context())))
+			if markFailover {
+				c.SetRequest(c.Request().WithContext(core.WithFailoverUsed(c.Request().Context())))
 			}
 			return c.JSON(http.StatusOK, map[string]string{"n": "1"})
 		}); err != nil {
@@ -325,7 +325,7 @@ func TestHandleRequest_FallbackUsedSkipsCacheWrites(t *testing.T) {
 
 	rec1 := run(true)
 	if rec1.Header().Get("X-Cache") != "" {
-		t.Fatalf("fallback-served response should not be cached, got X-Cache=%q", rec1.Header().Get("X-Cache"))
+		t.Fatalf("failover-served response should not be cached, got X-Cache=%q", rec1.Header().Get("X-Cache"))
 	}
 	if handlerCalls != 1 {
 		t.Fatalf("expected 1 handler invocation after first request, got %d", handlerCalls)
@@ -336,7 +336,7 @@ func TestHandleRequest_FallbackUsedSkipsCacheWrites(t *testing.T) {
 
 	rec2 := run(false)
 	if rec2.Header().Get("X-Cache") != "" {
-		t.Fatalf("fallback-served response should not populate cache, got X-Cache=%q", rec2.Header().Get("X-Cache"))
+		t.Fatalf("failover-served response should not populate cache, got X-Cache=%q", rec2.Header().Get("X-Cache"))
 	}
 	if handlerCalls != 2 {
 		t.Fatalf("expected second request to execute handler again, got %d calls", handlerCalls)

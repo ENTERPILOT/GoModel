@@ -436,7 +436,7 @@ SELECT
       'usage', json('true'),
       'budget', json('true'),
       'guardrails', json('false'),
-      'fallback', json('true')
+      'failover', json('true')
     ),
     'cache_type', cache_type,
     'cache_story', CASE

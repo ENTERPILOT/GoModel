@@ -1,4 +1,4 @@
-package fallback
+package failover
 
 import (
 	"testing"
@@ -21,21 +21,21 @@ func (r *fakeRegistry) ListModelsWithProvider() []providers.ModelWithProvider {
 	return append([]providers.ModelWithProvider(nil), r.models...)
 }
 
-func TestResolverManualModeUsesConfiguredFallbacks(t *testing.T) {
+func TestResolverManualModeUsesConfiguredFailovers(t *testing.T) {
 	registry := newFakeRegistry(
 		modelInfo("gpt-4o", "openai", "openai", 1287, "gpt-4o"),
 		modelInfo("gpt-4o", "azure", "azure", 1287, "gpt-4o"),
 		modelInfo("gemini-2.5-pro", "gemini", "gemini", 1290, "gemini-2.5-pro"),
 	)
 
-	resolver := NewResolver(config.FallbackConfig{
+	resolver := NewResolver(config.FailoverConfig{
 		Enabled: true,
 		Manual: map[string][]string{
 			"gpt-4o": []string{"azure/gpt-4o", "gemini/gemini-2.5-pro"},
 		},
 	}, registry)
 
-	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(&core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
@@ -52,7 +52,7 @@ func TestResolverManualModeUsesConfiguredFallbacks(t *testing.T) {
 	}
 }
 
-func TestResolverSuggestFallbacksReturnsRankingCandidates(t *testing.T) {
+func TestResolverSuggestFailoversReturnsRankingCandidates(t *testing.T) {
 	registry := newFakeRegistry(
 		modelInfo("gpt-4o", "openai", "openai", 1287, "gpt-4o"),
 		modelInfo("gpt-4o", "azure", "azure", 1287, "gpt-4o"),
@@ -60,14 +60,14 @@ func TestResolverSuggestFallbacksReturnsRankingCandidates(t *testing.T) {
 		modelInfo("claude-sonnet-4", "anthropic", "anthropic", 1305, "claude-sonnet"),
 	)
 
-	resolver := NewResolver(config.FallbackConfig{
+	resolver := NewResolver(config.FailoverConfig{
 		Enabled: true,
 		Manual: map[string][]string{
 			"gpt-4o": []string{"azure/gpt-4o"},
 		},
 	}, registry)
 
-	got := resolver.SuggestFallbacks(&core.RequestModelResolution{
+	got := resolver.SuggestFailovers(&core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
@@ -84,19 +84,19 @@ func TestResolverSuggestFallbacksReturnsRankingCandidates(t *testing.T) {
 	}
 }
 
-func TestResolverBlankDefaultModeUsesManualFallback(t *testing.T) {
+func TestResolverBlankDefaultModeUsesManualFailover(t *testing.T) {
 	registry := newFakeRegistry(
 		modelInfo("gpt-4o", "openai", "openai", 1287, "gpt-4o"),
 		modelInfo("gpt-4o", "azure", "azure", 1287, "gpt-4o"),
 		modelInfo("gemini-2.5-pro", "gemini", "gemini", 1290, "gemini-2.5-pro"),
 	)
 
-	resolver := NewResolver(config.FallbackConfig{Enabled: true}, registry)
+	resolver := NewResolver(config.FailoverConfig{Enabled: true}, registry)
 	if resolver == nil {
 		t.Fatal("NewResolver() = nil, want manual-enabled resolver")
 	}
 
-	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(&core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
@@ -107,13 +107,13 @@ func TestResolverBlankDefaultModeUsesManualFallback(t *testing.T) {
 	}
 }
 
-func TestResolverOverrideOffDisablesFallbacks(t *testing.T) {
+func TestResolverOverrideOffDisablesFailovers(t *testing.T) {
 	registry := newFakeRegistry(
 		modelInfo("gpt-4o", "openai", "openai", 1287, "gpt-4o"),
 		modelInfo("gpt-4o", "azure", "azure", 1287, "gpt-4o"),
 	)
 
-	resolver := NewResolver(config.FallbackConfig{
+	resolver := NewResolver(config.FailoverConfig{
 		Enabled: true,
 		Manual: map[string][]string{
 			"gpt-4o": []string{"azure/gpt-4o"},
@@ -123,7 +123,7 @@ func TestResolverOverrideOffDisablesFallbacks(t *testing.T) {
 		},
 	}, registry)
 
-	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(&core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
@@ -134,20 +134,20 @@ func TestResolverOverrideOffDisablesFallbacks(t *testing.T) {
 	}
 }
 
-func TestResolverDoesNotReturnFallbacksForEmbeddings(t *testing.T) {
+func TestResolverDoesNotReturnFailoversForEmbeddings(t *testing.T) {
 	registry := newFakeRegistry(
 		modelInfoWithCategories("text-embedding-3-small", "openai", "openai", 1287, "text-embedding-3", core.CategoryEmbedding),
 		modelInfoWithCategories("text-embedding-3-large", "azure", "azure", 1288, "text-embedding-3", core.CategoryEmbedding),
 	)
 
-	resolver := NewResolver(config.FallbackConfig{
+	resolver := NewResolver(config.FailoverConfig{
 		Enabled: true,
 		Manual: map[string][]string{
 			"text-embedding-3-small": []string{"azure/text-embedding-3-large"},
 		},
 	}, registry)
 
-	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(&core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("text-embedding-3-small", ""),
 		ResolvedSelector: core.ModelSelector{Model: "text-embedding-3-small", Provider: "openai"},
 		ProviderType:     "openai",
@@ -165,7 +165,7 @@ func TestResolverPrefersProviderQualifiedOverrideForBareRequests(t *testing.T) {
 		modelInfo("gemini-2.5-pro", "gemini", "gemini", 1290, "gemini-2.5-pro"),
 	)
 
-	resolver := NewResolver(config.FallbackConfig{
+	resolver := NewResolver(config.FailoverConfig{
 		Enabled: true,
 		Manual: map[string][]string{
 			"gpt-4o":        []string{"gemini/gemini-2.5-pro"},
@@ -173,7 +173,7 @@ func TestResolverPrefersProviderQualifiedOverrideForBareRequests(t *testing.T) {
 		},
 	}, registry)
 
-	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(&core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o", Provider: "openai"},
 		ProviderType:     "openai",
@@ -193,14 +193,14 @@ func TestResolverTreatsBareModelIDsContainingSlashAsGenericKeys(t *testing.T) {
 		modelInfo("meta-llama/Meta-Llama-3-70B", "groq", "groq", 1287, "llama-3"),
 	)
 
-	resolver := NewResolver(config.FallbackConfig{
+	resolver := NewResolver(config.FailoverConfig{
 		Enabled: true,
 		Manual: map[string][]string{
 			"openrouter/meta-llama/Meta-Llama-3-70B": {"groq/meta-llama/Meta-Llama-3-70B"},
 		},
 	}, registry)
 
-	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(&core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("meta-llama/Meta-Llama-3-70B", ""),
 		ResolvedSelector: core.ModelSelector{Model: "meta-llama/Meta-Llama-3-70B", Provider: "openrouter"},
 		ProviderType:     "openrouter",
@@ -240,7 +240,7 @@ func TestResolverDynamicRuleProviderOverridesStaticRules(t *testing.T) {
 		modelInfo("gemini-2.5-pro", "gemini", "gemini", 1290, "gemini-2.5-pro"),
 	)
 
-	resolver := NewResolverWithRuleProvider(config.FallbackConfig{
+	resolver := NewResolverWithRuleProvider(config.FailoverConfig{
 		Enabled: true,
 		Manual:  map[string][]string{"gpt-4o": {"azure/gpt-4o"}},
 	}, registry, &fakeRuleProvider{
@@ -249,7 +249,7 @@ func TestResolverDynamicRuleProviderOverridesStaticRules(t *testing.T) {
 		},
 	})
 
-	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(&core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
@@ -264,7 +264,7 @@ func TestResolverDynamicRuleProviderOverridesStaticRules(t *testing.T) {
 	}
 }
 
-// A dynamic disabled entry suppresses fallback even when a static manual rule
+// A dynamic disabled entry suppresses failover even when a static manual rule
 // exists for the same model.
 func TestResolverDynamicDisabledSuppressesStaticRule(t *testing.T) {
 	registry := newFakeRegistry(
@@ -272,21 +272,21 @@ func TestResolverDynamicDisabledSuppressesStaticRule(t *testing.T) {
 		modelInfo("gpt-4o", "azure", "azure", 1287, "gpt-4o"),
 	)
 
-	resolver := NewResolverWithRuleProvider(config.FallbackConfig{
+	resolver := NewResolverWithRuleProvider(config.FailoverConfig{
 		Enabled: true,
 		Manual:  map[string][]string{"gpt-4o": {"azure/gpt-4o"}},
 	}, registry, &fakeRuleProvider{
 		disabled: map[string]bool{"gpt-4o": true},
 	})
 
-	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(&core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
 	}, core.OperationChatCompletions)
 
 	if len(got) != 0 {
-		t.Fatalf("len(got) = %d, want 0 (dynamic disabled suppresses fallback)", len(got))
+		t.Fatalf("len(got) = %d, want 0 (dynamic disabled suppresses failover)", len(got))
 	}
 }
 

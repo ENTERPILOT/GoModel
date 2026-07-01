@@ -1420,7 +1420,7 @@ func TestCreateStreamEntry(t *testing.T) {
 				Audit:      true,
 				Usage:      true,
 				Guardrails: false,
-				Fallback:   true,
+				Failover:   true,
 			},
 			Failover: &FailoverSnapshot{
 				TargetModel: "azure/gpt-4o",
@@ -1523,8 +1523,8 @@ func TestCreateStreamEntry(t *testing.T) {
 	if streamEntry.Data.WorkflowFeatures.Guardrails != baseEntry.Data.WorkflowFeatures.Guardrails {
 		t.Error("WorkflowFeatures.Guardrails mismatch")
 	}
-	if streamEntry.Data.WorkflowFeatures.Fallback != baseEntry.Data.WorkflowFeatures.Fallback {
-		t.Error("WorkflowFeatures.Fallback mismatch")
+	if streamEntry.Data.WorkflowFeatures.Failover != baseEntry.Data.WorkflowFeatures.Failover {
+		t.Error("WorkflowFeatures.Failover mismatch")
 	}
 }
 
@@ -1545,7 +1545,7 @@ func TestEnrichEntryWithWorkflowStoresWorkflowFeatures(t *testing.T) {
 				Audit:      true,
 				Usage:      false,
 				Guardrails: true,
-				Fallback:   false,
+				Failover:   false,
 			},
 		},
 	})
@@ -1568,8 +1568,8 @@ func TestEnrichEntryWithWorkflowStoresWorkflowFeatures(t *testing.T) {
 	if !entry.Data.WorkflowFeatures.Guardrails {
 		t.Fatal("WorkflowFeatures.Guardrails = false, want true")
 	}
-	if entry.Data.WorkflowFeatures.Fallback {
-		t.Fatal("WorkflowFeatures.Fallback = true, want false")
+	if entry.Data.WorkflowFeatures.Failover {
+		t.Fatal("WorkflowFeatures.Failover = true, want false")
 	}
 }
 

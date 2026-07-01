@@ -66,7 +66,7 @@ func (s *failoverHandlerTestStore) Close() error { return nil }
 
 func newFailoverHandlerTestService(t *testing.T, store *failoverHandlerTestStore) *failoverrules.Service {
 	t.Helper()
-	service, err := failoverrules.NewService(store, config.FallbackConfig{Enabled: true})
+	service, err := failoverrules.NewService(store, config.FailoverConfig{Enabled: true})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -174,7 +174,7 @@ func TestGenerateFailoverRulesFiltersByPrimaryModel(t *testing.T) {
 		t.Fatalf("Source = %q, want openai/gpt-4o", body[0].Source)
 	}
 	if len(body[0].Targets) == 0 {
-		t.Fatalf("Targets empty, want generated fallback suggestions")
+		t.Fatalf("Targets empty, want generated failover suggestions")
 	}
 }
 

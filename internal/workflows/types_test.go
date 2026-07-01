@@ -110,7 +110,7 @@ func TestNormalizeCreateInput_RejectsManagedDefaultForNonGlobalScope(t *testing.
 	}
 }
 
-func TestFeatureFlagsRuntimeFeatures_FallbackDefaultsToTrue(t *testing.T) {
+func TestFeatureFlagsRuntimeFeatures_FailoverDefaultsToTrue(t *testing.T) {
 	features := FeatureFlags{
 		Cache:      true,
 		Audit:      true,
@@ -118,8 +118,8 @@ func TestFeatureFlagsRuntimeFeatures_FallbackDefaultsToTrue(t *testing.T) {
 		Guardrails: false,
 	}.runtimeFeatures()
 
-	if !features.Fallback {
-		t.Fatal("runtimeFeatures().Fallback = false, want true")
+	if !features.Failover {
+		t.Fatal("runtimeFeatures().Failover = false, want true")
 	}
 }
 
@@ -167,7 +167,7 @@ func TestFeatureFlagsRuntimeFeatures_DisablesBudgetWhenUsageDisabled(t *testing.
 	}
 }
 
-func TestNormalizePayload_CanonicalizesFallbackForStableWorkflowHash(t *testing.T) {
+func TestNormalizePayload_CanonicalizesFailoverForStableWorkflowHash(t *testing.T) {
 	explicitTrue := true
 
 	implicitPayload, implicitHash, err := normalizePayload(Payload{
@@ -190,7 +190,7 @@ func TestNormalizePayload_CanonicalizesFallbackForStableWorkflowHash(t *testing.
 			Audit:      true,
 			Usage:      true,
 			Guardrails: false,
-			Fallback:   &explicitTrue,
+			Failover:   &explicitTrue,
 			Budget:     &explicitTrue,
 		},
 	})
@@ -198,11 +198,11 @@ func TestNormalizePayload_CanonicalizesFallbackForStableWorkflowHash(t *testing.
 		t.Fatalf("normalizePayload() error = %v", err)
 	}
 
-	if implicitPayload.Features.Fallback == nil || !*implicitPayload.Features.Fallback {
-		t.Fatalf("implicit payload fallback = %v, want explicit true", implicitPayload.Features.Fallback)
+	if implicitPayload.Features.Failover == nil || !*implicitPayload.Features.Failover {
+		t.Fatalf("implicit payload failover = %v, want explicit true", implicitPayload.Features.Failover)
 	}
-	if explicitPayload.Features.Fallback == nil || !*explicitPayload.Features.Fallback {
-		t.Fatalf("explicit payload fallback = %v, want explicit true", explicitPayload.Features.Fallback)
+	if explicitPayload.Features.Failover == nil || !*explicitPayload.Features.Failover {
+		t.Fatalf("explicit payload failover = %v, want explicit true", explicitPayload.Features.Failover)
 	}
 	if implicitPayload.Features.Budget == nil || !*implicitPayload.Features.Budget {
 		t.Fatalf("implicit payload budget = %v, want explicit true", implicitPayload.Features.Budget)

@@ -1,4 +1,4 @@
-package fallback
+package failover
 
 import (
 	"math"
@@ -10,7 +10,7 @@ import (
 	"gomodel/internal/providers"
 )
 
-const maxAutoFallbackCandidates = 5
+const maxAutoFailoverCandidates = 5
 
 var preferredRankingNames = []string{
 	"chatbot_arena",
@@ -20,7 +20,7 @@ var preferredRankingNames = []string{
 	"chatbot_arena_vision",
 }
 
-// Registry is the minimal provider inventory surface needed for fallback
+// Registry is the minimal provider inventory surface needed for failover
 // candidate resolution.
 type Registry interface {
 	GetModel(model string) *providers.ModelInfo
@@ -33,7 +33,7 @@ type RuleProvider interface {
 	Disabled() map[string]bool
 }
 
-// Resolver computes fallback model chains for translated routes.
+// Resolver computes failover model chains for translated routes.
 type Resolver struct {
 	enabled      bool
 	manual       map[string][]string
@@ -42,15 +42,15 @@ type Resolver struct {
 	registry     Registry
 }
 
-// NewResolver builds a fallback resolver from config and the current model
-// inventory. Returns nil when fallback is effectively disabled.
-func NewResolver(cfg config.FallbackConfig, registry Registry) *Resolver {
+// NewResolver builds a failover resolver from config and the current model
+// inventory. Returns nil when failover is effectively disabled.
+func NewResolver(cfg config.FailoverConfig, registry Registry) *Resolver {
 	return NewResolverWithRuleProvider(cfg, registry, nil)
 }
 
 // NewResolverWithRuleProvider builds a resolver backed by static config and an
 // optional dynamic manual-rule provider.
-func NewResolverWithRuleProvider(cfg config.FallbackConfig, registry Registry, ruleProvider RuleProvider) *Resolver {
+func NewResolverWithRuleProvider(cfg config.FailoverConfig, registry Registry, ruleProvider RuleProvider) *Resolver {
 	if registry == nil {
 		return nil
 	}
@@ -80,10 +80,10 @@ func NewResolverWithRuleProvider(cfg config.FallbackConfig, registry Registry, r
 	}
 }
 
-// ResolveFallbacks returns the ordered fallback chain for a resolved request.
-// Manual fallbacks preserve configured order. Runtime auto mode is intentionally
+// ResolveFailovers returns the ordered failover chain for a resolved request.
+// Manual failovers preserve configured order. Runtime auto mode is intentionally
 // not used; generated candidates must be saved as manual rules first.
-func (r *Resolver) ResolveFallbacks(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
+func (r *Resolver) ResolveFailovers(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
 	if r == nil || resolution == nil || r.registry == nil || !r.enabled {
 		return nil
 	}
@@ -166,9 +166,9 @@ func (r *Resolver) manualSelectorsFor(
 	return nil
 }
 
-// SuggestFallbacks returns ranked candidate selectors for an operator to review
+// SuggestFailovers returns ranked candidate selectors for an operator to review
 // and save as a manual rule. Suggestions are never used directly at runtime.
-func (r *Resolver) SuggestFallbacks(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
+func (r *Resolver) SuggestFailovers(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
 	if r == nil || resolution == nil || r.registry == nil || !r.enabled {
 		return nil
 	}
@@ -327,7 +327,7 @@ func (r *Resolver) autoSelectorsFor(
 		return a.key < b.key
 	})
 
-	limit := maxAutoFallbackCandidates
+	limit := maxAutoFailoverCandidates
 	if len(candidates) < limit {
 		limit = len(candidates)
 	}

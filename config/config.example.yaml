@@ -194,9 +194,9 @@ guardrails:
     #     skip_content_prefix: "### safe"
     #     # prompt: "Custom rewrite instructions here."
 
-fallback:
+failover:
   enabled: true # env: FAILOVER_ENABLED; default true
-  manual_rules_path: "config/fallback.example.json" # optional JSON map: {"primary-model": ["fallback-1", "provider/model"]}
+  manual_rules_path: "config/failover.example.json" # optional JSON map: {"primary-model": ["fallback-1", "provider/model"]}
   rules:
     "gpt-4o":
       - "azure/gpt-4o"

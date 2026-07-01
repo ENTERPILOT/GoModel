@@ -55,7 +55,7 @@
                     usage: true,
                     budget: true,
                     guardrails: false,
-                    fallback: true
+                    failover: true
                 },
                 guardrails: []
             },
@@ -73,7 +73,7 @@
                         usage: true,
                         budget: true,
                         guardrails: false,
-                        fallback: true
+                        failover: true
                     },
                     guardrails: []
                 };
@@ -148,7 +148,7 @@
 	                    usage: this.workflowUsageVisible(),
 	                    budget: this.workflowBudgetVisible(),
 	                    guardrails: this.workflowGuardrailsVisible(),
-	                    fallback: this.workflowFailoverVisible()
+	                    failover: this.workflowFailoverVisible()
 	                };
 	            },
 
@@ -184,7 +184,7 @@
 	                    usage: !!this.workflowReadFeatureFlag(raw, 'usage', false),
 	                    budget: this.workflowReadFeatureFlag(raw, 'budget', true) !== false,
 	                    guardrails: !!this.workflowReadFeatureFlag(raw, 'guardrails', false),
-	                    fallback: this.workflowReadFeatureFlag(raw, 'fallback', true) !== false
+	                    failover: this.workflowReadFeatureFlag(raw, 'failover', true) !== false
 	                };
 	            },
 
@@ -198,12 +198,12 @@
 	                    usage,
 	                    budget: usage && features.budget && caps.budget,
 	                    guardrails: features.guardrails && caps.guardrails,
-	                    fallback: features.fallback && caps.fallback
+	                    failover: features.failover && caps.failover
 	                };
 	            },
 
-            workflowFallbackLabel(source) {
-                return this.workflowSourceFeatures(source).fallback ? 'On' : 'Off';
+            workflowFailoverLabel(source) {
+                return this.workflowSourceFeatures(source).failover ? 'On' : 'Off';
             },
 
             defaultWorkflowGuardrailStep(step) {
@@ -399,7 +399,7 @@
                 const scope = this.workflowCurrentScope();
                 const rawFeatures = this.workflowNormalizedFeatures(form.features || {});
                 const features = this.workflowApplyGlobalFeatureCaps(rawFeatures);
-                features.fallback = rawFeatures.fallback;
+                features.failover = rawFeatures.failover;
                 const guardrailsEnabled = !!features.guardrails;
                 const guardrails = guardrailsEnabled ? this.workflowSourceGuardrails(form) : [];
                 const scopeType = this.workflowScopeType(scope);
@@ -424,7 +424,7 @@
                             usage: !!features.usage,
                             budget: !!features.budget,
                             guardrails: guardrailsEnabled,
-                            fallback: !!features.fallback
+                            failover: !!features.failover
                         },
                         guardrails
                     }
@@ -443,7 +443,7 @@
 	                const features = this.workflowApplyGlobalFeatureCaps(effective || raw);
 	                return {
 	                    ...features,
-	                    fallback: this.workflowNormalizedFeatures(raw).fallback
+	                    failover: this.workflowNormalizedFeatures(raw).failover
 	                };
 	            },
 
@@ -584,7 +584,7 @@
                         usage: !!storedFeatures.usage,
                         budget: !!storedFeatures.budget,
                         guardrails: !!storedFeatures.guardrails,
-                        fallback: !!storedFeatures.fallback
+                        failover: !!storedFeatures.failover
                     },
                     guardrails: storedGuardrails.map((step) => ({
                         ref: String(step && step.ref || ''),
@@ -689,9 +689,9 @@
                 const features = this.workflowApplyGlobalFeatureCaps(rawFeatures);
                 const activeScopeMatch = this.workflowActiveScopeMatch();
                 const activeScopeFeatures = activeScopeMatch && activeScopeMatch.workflow_payload && activeScopeMatch.workflow_payload.features;
-                const activeScopeHasFallback = this.workflowHasDefinedFeatureFlag(activeScopeFeatures, 'fallback');
-                const preservedActiveFallback = activeScopeHasFallback
-                    ? this.workflowReadFeatureFlag(activeScopeFeatures, 'fallback', true) !== false
+                const activeScopeHasFailover = this.workflowHasDefinedFeatureFlag(activeScopeFeatures, 'failover');
+                const preservedActiveFailover = activeScopeHasFailover
+                    ? this.workflowReadFeatureFlag(activeScopeFeatures, 'failover', true) !== false
                     : null;
                 const hydratedScope = this.workflowHydratedScope || {
                     scope_provider: '',
@@ -701,13 +701,13 @@
                 const sameHydratedScope = String(hydratedScope.scope_provider || '').trim() === provider
                     && String(hydratedScope.scope_model || '').trim() === model
                     && this.normalizeWorkflowScopeUserPath(hydratedScope.scope_user_path) === this.normalizeWorkflowScopeUserPath(userPath);
-                const includeFallback = this.workflowFailoverVisible()
+                const includeFailover = this.workflowFailoverVisible()
                     || (!!this.workflowFormHydrated
                         && sameHydratedScope
-                        && Object.prototype.hasOwnProperty.call(rawFeatures, 'fallback'))
+                        && Object.prototype.hasOwnProperty.call(rawFeatures, 'failover'))
                     || (!this.workflowFormHydrated
                         && !!activeScopeMatch
-                        && activeScopeHasFallback);
+                        && activeScopeHasFailover);
 
                 const guardrails = !!features.guardrails
                     ? (Array.isArray(form.guardrails) ? form.guardrails : []).map((step) => {
@@ -736,13 +736,13 @@
                         guardrails
                     }
                 };
-                if (includeFallback) {
-                    payload.workflow_payload.features.fallback = !this.workflowFailoverVisible()
+                if (includeFailover) {
+                    payload.workflow_payload.features.failover = !this.workflowFailoverVisible()
                         && !this.workflowFormHydrated
                         && !!activeScopeMatch
-                        && activeScopeHasFallback
-                        ? preservedActiveFallback
-                        : !!rawFeatures.fallback;
+                        && activeScopeHasFailover
+                        ? preservedActiveFailover
+                        : !!rawFeatures.failover;
                 }
 
                 return payload;
@@ -1222,7 +1222,7 @@
                 const showUsage = !!features.usage;
                 const showAudit = forceAudit || !!features.audit;
                 const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
-                const showFailover = !!features.fallback || this.workflowRuntimeUsedFailover(runtime);
+                const showFailover = !!features.failover || this.workflowRuntimeUsedFailover(runtime);
                 const workflowID = this.workflowChartWorkflowID(source, config.entry);
                 const liveStep = this.workflowLiveCurrentStep(config.entry, runtime, features);
                 const usagePending = this.workflowLiveUsagePending(config.entry);
@@ -1278,7 +1278,7 @@
                             usage: false,
                             budget: false,
                             guardrails: false,
-                            fallback: false
+                            failover: false
                         });
                 return this.workflowChartModel(source, runtime, {
                     entry,

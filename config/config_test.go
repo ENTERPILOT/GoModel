@@ -61,7 +61,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"DASHBOARD_LIVE_LOGS_ENABLED", "DASHBOARD_LIVE_LOGS_BUFFER_SIZE",
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
-		"FEATURE_FALLBACK_MODE", "FALLBACK_MANUAL_RULES_PATH", "FAILOVER_ENABLED", "FAILOVER_RULES_JSON", "FAILOVER_DISABLED_MODELS", "FAILOVER_DISABLED_MODELS_JSON",
+		"FAILOVER_MODE", "FAILOVER_MANUAL_RULES_PATH", "FAILOVER_ENABLED", "FAILOVER_RULES_JSON", "FAILOVER_DISABLED_MODELS", "FAILOVER_DISABLED_MODELS_JSON",
 		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
 		"WORKFLOW_REFRESH_INTERVAL",
@@ -226,11 +226,11 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Guardrails.EnableForBatchProcessing {
 		t.Error("expected Guardrails.EnableForBatchProcessing=false")
 	}
-	if cfg.Fallback.DefaultMode != FallbackModeManual {
-		t.Errorf("expected Fallback.DefaultMode=manual, got %q", cfg.Fallback.DefaultMode)
+	if cfg.Failover.DefaultMode != FailoverModeManual {
+		t.Errorf("expected Failover.DefaultMode=manual, got %q", cfg.Failover.DefaultMode)
 	}
-	if !cfg.Fallback.Enabled {
-		t.Error("expected Fallback.Enabled=true")
+	if !cfg.Failover.Enabled {
+		t.Error("expected Failover.Enabled=true")
 	}
 	if cfg.Cache.Response.Simple != nil {
 		t.Errorf("expected Cache.Response.Simple=nil in defaults, got %+v", cfg.Cache.Response.Simple)
@@ -637,33 +637,33 @@ logging:
 	})
 }
 
-func TestLoad_FallbackManualRules(t *testing.T) {
+func TestLoad_FailoverManualRules(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
-		manualRulesPath := filepath.Join(dir, "fallback.json")
+		manualRulesPath := filepath.Join(dir, "failover.json")
 		if err := os.WriteFile(manualRulesPath, []byte(`{
 			"gpt-4o": ["azure/gpt-4o", "gemini/gemini-2.5-pro"],
 			"claude-sonnet-4": ["openai/gpt-5-mini"]
 		}`), 0644); err != nil {
-			t.Fatalf("Failed to write fallback rules: %v", err)
+			t.Fatalf("Failed to write failover rules: %v", err)
 		}
 
 		type yamlConfig struct {
-			Fallback struct {
+			Failover struct {
 				DefaultMode     string                       `yaml:"default_mode"`
 				ManualRulesPath string                       `yaml:"manual_rules_path"`
 				Overrides       map[string]map[string]string `yaml:"overrides"`
-			} `yaml:"fallback"`
+			} `yaml:"failover"`
 		}
 
 		yamlCfg := yamlConfig{}
-		yamlCfg.Fallback.DefaultMode = "auto"
-		yamlCfg.Fallback.ManualRulesPath = manualRulesPath
-		// A legacy fallback.overrides block (removed feature) must still load
+		yamlCfg.Failover.DefaultMode = "auto"
+		yamlCfg.Failover.ManualRulesPath = manualRulesPath
+		// A legacy failover.overrides block (removed feature) must still load
 		// without error and must no longer affect behavior — even mode: off no
 		// longer disables failover. Operators migrate to disabled_models.
-		yamlCfg.Fallback.Overrides = map[string]map[string]string{
+		yamlCfg.Failover.Overrides = map[string]map[string]string{
 			"gpt-4o": {"mode": "off"},
 		}
 
@@ -681,26 +681,26 @@ func TestLoad_FallbackManualRules(t *testing.T) {
 		}
 
 		cfg := result.Config
-		if cfg.Fallback.DefaultMode != FallbackModeAuto {
-			t.Fatalf("Fallback.DefaultMode = %q, want %q", cfg.Fallback.DefaultMode, FallbackModeAuto)
+		if cfg.Failover.DefaultMode != FailoverModeAuto {
+			t.Fatalf("Failover.DefaultMode = %q, want %q", cfg.Failover.DefaultMode, FailoverModeAuto)
 		}
-		if cfg.Fallback.Disabled["gpt-4o"] {
-			t.Fatal("legacy fallback.overrides mode:off must no longer disable failover")
+		if cfg.Failover.Disabled["gpt-4o"] {
+			t.Fatal("legacy failover.overrides mode:off must no longer disable failover")
 		}
-		got := cfg.Fallback.Manual["gpt-4o"]
+		got := cfg.Failover.Manual["gpt-4o"]
 		want := []string{"azure/gpt-4o", "gemini/gemini-2.5-pro"}
 		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-			t.Fatalf("Fallback.Manual[gpt-4o] = %v, want %v", got, want)
+			t.Fatalf("Failover.Manual[gpt-4o] = %v, want %v", got, want)
 		}
 	})
 }
 
-func TestLoad_DeprecatedFallbackDefaultModeIsAccepted(t *testing.T) {
+func TestLoad_DeprecatedFailoverDefaultModeIsAccepted(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
 		yaml := `
-fallback:
+failover:
   default_mode: invalid
 `
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
@@ -711,8 +711,8 @@ fallback:
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Fallback.DefaultMode != FallbackMode("invalid") {
-			t.Fatalf("Fallback.DefaultMode = %q, want invalid compatibility value", result.Config.Fallback.DefaultMode)
+		if result.Config.Failover.DefaultMode != FailoverMode("invalid") {
+			t.Fatalf("Failover.DefaultMode = %q, want invalid compatibility value", result.Config.Failover.DefaultMode)
 		}
 	})
 }
@@ -739,12 +739,12 @@ models:
 	})
 }
 
-func TestLoad_EmptyFallbackOverrideModeIsAccepted(t *testing.T) {
+func TestLoad_EmptyFailoverOverrideModeIsAccepted(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
 		yaml := `
-fallback:
+failover:
   overrides:
     "gpt-4o": {}
 `
@@ -758,12 +758,12 @@ fallback:
 	})
 }
 
-func TestLoad_ManualFallbackModeAllowsMissingManualRulesPath(t *testing.T) {
+func TestLoad_ManualFailoverModeAllowsMissingManualRulesPath(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
 		yaml := `
-fallback:
+failover:
   default_mode: manual
 `
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
@@ -774,24 +774,24 @@ fallback:
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Fallback.DefaultMode != FallbackModeManual {
-			t.Fatalf("Fallback.DefaultMode = %q, want %q", result.Config.Fallback.DefaultMode, FallbackModeManual)
+		if result.Config.Failover.DefaultMode != FailoverModeManual {
+			t.Fatalf("Failover.DefaultMode = %q, want %q", result.Config.Failover.DefaultMode, FailoverModeManual)
 		}
-		if result.Config.Fallback.Manual != nil {
-			t.Fatalf("Fallback.Manual = %v, want nil", result.Config.Fallback.Manual)
+		if result.Config.Failover.Manual != nil {
+			t.Fatalf("Failover.Manual = %v, want nil", result.Config.Failover.Manual)
 		}
 	})
 }
 
-func TestLoad_LegacyFallbackOverridesAreIgnored(t *testing.T) {
+func TestLoad_LegacyFailoverOverridesAreIgnored(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
-		// The removed fallback.overrides block must still load without error
+		// The removed failover.overrides block must still load without error
 		// (yaml ignores the unknown key) and must have no effect: even mode: off
 		// no longer disables failover. Operators migrate to disabled_models.
 		yamlData := `
-fallback:
+failover:
   overrides:
     "gpt-4o":
       mode: "off"
@@ -804,35 +804,35 @@ fallback:
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Fallback.Disabled["gpt-4o"] {
-			t.Fatal("legacy fallback.overrides mode:off must no longer disable failover")
+		if result.Config.Failover.Disabled["gpt-4o"] {
+			t.Fatal("legacy failover.overrides mode:off must no longer disable failover")
 		}
-		if result.Config.Fallback.Manual != nil {
-			t.Fatalf("Fallback.Manual = %v, want nil", result.Config.Fallback.Manual)
+		if result.Config.Failover.Manual != nil {
+			t.Fatalf("Failover.Manual = %v, want nil", result.Config.Failover.Manual)
 		}
 	})
 }
 
-func TestLoad_FallbackManualRulesDuplicateKeyAfterTrim(t *testing.T) {
+func TestLoad_FailoverManualRulesDuplicateKeyAfterTrim(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
-		manualRulesPath := filepath.Join(dir, "fallback.json")
+		manualRulesPath := filepath.Join(dir, "failover.json")
 		if err := os.WriteFile(manualRulesPath, []byte(`{
 			"gpt-4o": ["azure/gpt-4o"],
 			" gpt-4o ": ["gemini/gemini-2.5-pro"]
 		}`), 0644); err != nil {
-			t.Fatalf("Failed to write fallback rules: %v", err)
+			t.Fatalf("Failed to write failover rules: %v", err)
 		}
 
 		type yamlConfig struct {
-			Fallback struct {
+			Failover struct {
 				ManualRulesPath string `yaml:"manual_rules_path"`
-			} `yaml:"fallback"`
+			} `yaml:"failover"`
 		}
 
 		yamlCfg := yamlConfig{}
-		yamlCfg.Fallback.ManualRulesPath = manualRulesPath
+		yamlCfg.Failover.ManualRulesPath = manualRulesPath
 		yamlData, err := yaml.Marshal(yamlCfg)
 		if err != nil {
 			t.Fatalf("Failed to marshal config.yaml: %v", err)
@@ -844,34 +844,34 @@ func TestLoad_FallbackManualRulesDuplicateKeyAfterTrim(t *testing.T) {
 
 		_, err = Load()
 		if err == nil {
-			t.Fatal("expected Load() to fail for duplicate fallback manual rule keys after trimming")
+			t.Fatal("expected Load() to fail for duplicate failover manual rule keys after trimming")
 		}
-		if !strings.Contains(err.Error(), `fallback.manual_rules_path: duplicate manual rule key after trimming: "gpt-4o"`) {
+		if !strings.Contains(err.Error(), `failover.manual_rules_path: duplicate manual rule key after trimming: "gpt-4o"`) {
 			t.Fatalf("Load() error = %v, want duplicate trimmed manual rule key error", err)
 		}
 	})
 }
 
-func TestLoad_FallbackManualRulesRejectsDuplicateRawJSONKeys(t *testing.T) {
+func TestLoad_FailoverManualRulesRejectsDuplicateRawJSONKeys(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
-		manualRulesPath := filepath.Join(dir, "fallback.json")
+		manualRulesPath := filepath.Join(dir, "failover.json")
 		if err := os.WriteFile(manualRulesPath, []byte(`{
 			"gpt-4o": ["azure/gpt-4o"],
 			"gpt-4o": ["gemini/gemini-2.5-pro"]
 		}`), 0644); err != nil {
-			t.Fatalf("Failed to write fallback rules: %v", err)
+			t.Fatalf("Failed to write failover rules: %v", err)
 		}
 
 		type yamlConfig struct {
-			Fallback struct {
+			Failover struct {
 				ManualRulesPath string `yaml:"manual_rules_path"`
-			} `yaml:"fallback"`
+			} `yaml:"failover"`
 		}
 
 		yamlCfg := yamlConfig{}
-		yamlCfg.Fallback.ManualRulesPath = manualRulesPath
+		yamlCfg.Failover.ManualRulesPath = manualRulesPath
 		yamlData, err := yaml.Marshal(yamlCfg)
 		if err != nil {
 			t.Fatalf("Failed to marshal config.yaml: %v", err)
@@ -883,7 +883,7 @@ func TestLoad_FallbackManualRulesRejectsDuplicateRawJSONKeys(t *testing.T) {
 
 		_, err = Load()
 		if err == nil {
-			t.Fatal("expected Load() to fail for duplicate raw JSON keys in fallback manual rules")
+			t.Fatal("expected Load() to fail for duplicate raw JSON keys in failover manual rules")
 		}
 		if !strings.Contains(err.Error(), `duplicate JSON key "gpt-4o"`) {
 			t.Fatalf("Load() error = %v, want duplicate raw JSON key error", err)
@@ -891,25 +891,25 @@ func TestLoad_FallbackManualRulesRejectsDuplicateRawJSONKeys(t *testing.T) {
 	})
 }
 
-func TestLoad_FallbackManualRulesRejectsNullValues(t *testing.T) {
+func TestLoad_FailoverManualRulesRejectsNullValues(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
-		manualRulesPath := filepath.Join(dir, "fallback.json")
+		manualRulesPath := filepath.Join(dir, "failover.json")
 		if err := os.WriteFile(manualRulesPath, []byte(`{
 			"gpt-4o": null
 		}`), 0644); err != nil {
-			t.Fatalf("Failed to write fallback rules: %v", err)
+			t.Fatalf("Failed to write failover rules: %v", err)
 		}
 
 		type yamlConfig struct {
-			Fallback struct {
+			Failover struct {
 				ManualRulesPath string `yaml:"manual_rules_path"`
-			} `yaml:"fallback"`
+			} `yaml:"failover"`
 		}
 
 		yamlCfg := yamlConfig{}
-		yamlCfg.Fallback.ManualRulesPath = manualRulesPath
+		yamlCfg.Failover.ManualRulesPath = manualRulesPath
 		yamlData, err := yaml.Marshal(yamlCfg)
 		if err != nil {
 			t.Fatalf("Failed to marshal config.yaml: %v", err)
@@ -921,7 +921,7 @@ func TestLoad_FallbackManualRulesRejectsNullValues(t *testing.T) {
 
 		_, err = Load()
 		if err == nil {
-			t.Fatal("expected Load() to fail for null fallback manual rule values")
+			t.Fatal("expected Load() to fail for null failover manual rule values")
 		}
 		if !strings.Contains(err.Error(), `null not allowed for "gpt-4o"`) {
 			t.Fatalf("Load() error = %v, want null manual rule value error", err)
@@ -929,22 +929,22 @@ func TestLoad_FallbackManualRulesRejectsNullValues(t *testing.T) {
 	})
 }
 
-func TestLoad_FeatureFallbackModeEnvOverridesFallbackDefaultMode(t *testing.T) {
+func TestLoad_FeatureFailoverModeEnvOverridesFailoverDefaultMode(t *testing.T) {
 	clearAllConfigEnvVars(t)
-	t.Setenv("FEATURE_FALLBACK_MODE", "auto")
+	t.Setenv("FAILOVER_MODE", "auto")
 
 	withTempDir(t, func(_ string) {
 		result, err := Load()
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Fallback.DefaultMode != FallbackModeAuto {
-			t.Fatalf("Fallback.DefaultMode = %q, want %q", result.Config.Fallback.DefaultMode, FallbackModeAuto)
+		if result.Config.Failover.DefaultMode != FailoverModeAuto {
+			t.Fatalf("Failover.DefaultMode = %q, want %q", result.Config.Failover.DefaultMode, FailoverModeAuto)
 		}
 	})
 }
 
-func TestLoad_FallbackRulesJSONEnvOnly(t *testing.T) {
+func TestLoad_FailoverRulesJSONEnvOnly(t *testing.T) {
 	clearAllConfigEnvVars(t)
 	t.Setenv("FAILOVER_RULES_JSON", `{"gpt-4o":["azure/gpt-4o","gemini/gemini-2.5-pro"]}`)
 	t.Setenv("FAILOVER_DISABLED_MODELS_JSON", `["claude-sonnet-4"]`)
@@ -954,23 +954,23 @@ func TestLoad_FallbackRulesJSONEnvOnly(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		got := result.Config.Fallback.Manual["gpt-4o"]
+		got := result.Config.Failover.Manual["gpt-4o"]
 		want := []string{"azure/gpt-4o", "gemini/gemini-2.5-pro"}
 		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("Fallback.Manual[gpt-4o] = %v, want %v", got, want)
+			t.Fatalf("Failover.Manual[gpt-4o] = %v, want %v", got, want)
 		}
-		if !result.Config.Fallback.Disabled["claude-sonnet-4"] {
-			t.Fatal("Fallback.Disabled[claude-sonnet-4] = false, want true")
+		if !result.Config.Failover.Disabled["claude-sonnet-4"] {
+			t.Fatal("Failover.Disabled[claude-sonnet-4] = false, want true")
 		}
 	})
 }
 
-func TestLoad_BlankFallbackDefaultModeResolvesToManual(t *testing.T) {
+func TestLoad_BlankFailoverDefaultModeResolvesToManual(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
 		yaml := `
-fallback:
+failover:
   default_mode: ""
 `
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
@@ -981,8 +981,8 @@ fallback:
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Fallback.DefaultMode != FallbackModeManual {
-			t.Fatalf("Fallback.DefaultMode = %q, want %q", result.Config.Fallback.DefaultMode, FallbackModeManual)
+		if result.Config.Failover.DefaultMode != FailoverModeManual {
+			t.Fatalf("Failover.DefaultMode = %q, want %q", result.Config.Failover.DefaultMode, FailoverModeManual)
 		}
 	})
 }
@@ -1088,13 +1088,13 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read config.example.yaml: %v", err)
 	}
-	fallbackExamplePath, err := filepath.Abs("fallback.example.json")
+	failoverExamplePath, err := filepath.Abs("failover.example.json")
 	if err != nil {
-		t.Fatalf("Failed to resolve fallback.example.json path: %v", err)
+		t.Fatalf("Failed to resolve failover.example.json path: %v", err)
 	}
-	fallbackExampleData, err := os.ReadFile(fallbackExamplePath)
+	failoverExampleData, err := os.ReadFile(failoverExamplePath)
 	if err != nil {
-		t.Fatalf("Failed to read fallback.example.json: %v", err)
+		t.Fatalf("Failed to read failover.example.json: %v", err)
 	}
 
 	withTempDir(t, func(dir string) {
@@ -1104,8 +1104,8 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "config", "config.yaml"), exampleData, 0644); err != nil {
 			t.Fatalf("Failed to write config/config.yaml: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "config", "fallback.example.json"), fallbackExampleData, 0644); err != nil {
-			t.Fatalf("Failed to write fallback.example.json: %v", err)
+		if err := os.WriteFile(filepath.Join(dir, "config", "failover.example.json"), failoverExampleData, 0644); err != nil {
+			t.Fatalf("Failed to write failover.example.json: %v", err)
 		}
 
 		result, err := Load()

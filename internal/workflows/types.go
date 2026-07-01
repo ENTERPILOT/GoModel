@@ -69,7 +69,7 @@ type FeatureFlags struct {
 	Usage      bool  `json:"usage" bson:"usage"`
 	Budget     *bool `json:"budget,omitempty" bson:"budget,omitempty"`
 	Guardrails bool  `json:"guardrails" bson:"guardrails"`
-	Fallback   *bool `json:"fallback,omitempty" bson:"fallback,omitempty"`
+	Failover   *bool `json:"failover,omitempty" bson:"failover,omitempty"`
 }
 
 func (f FeatureFlags) canonicalize() FeatureFlags {
@@ -77,9 +77,9 @@ func (f FeatureFlags) canonicalize() FeatureFlags {
 		budgetEnabled := true
 		f.Budget = &budgetEnabled
 	}
-	if f.Fallback == nil {
-		fallbackEnabled := true
-		f.Fallback = &fallbackEnabled
+	if f.Failover == nil {
+		failoverEnabled := true
+		f.Failover = &failoverEnabled
 	}
 	return f
 }
@@ -92,7 +92,7 @@ func (f FeatureFlags) runtimeFeatures() core.WorkflowFeatures {
 		Usage:      f.Usage,
 		Budget:     f.Usage && *f.Budget,
 		Guardrails: f.Guardrails,
-		Fallback:   *f.Fallback,
+		Failover:   *f.Failover,
 	}
 }
 
