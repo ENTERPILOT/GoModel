@@ -4,15 +4,13 @@ import (
 	"bufio"
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/goccy/go-json"
-
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
+	"gomodel/internal/providers"
 	"gomodel/internal/streaming"
 )
 
@@ -160,31 +158,7 @@ func (sc *streamConverter) mapStreamStopReason(reason string) string {
 }
 
 func (sc *streamConverter) formatChatChunk(delta map[string]any, finishReason any, usage *anthropicUsage) string {
-	chunk := map[string]any{
-		"id":       sc.msgID,
-		"object":   "chat.completion.chunk",
-		"created":  sc.created,
-		"model":    sc.model,
-		"provider": "anthropic",
-		"choices": []map[string]any{
-			{
-				"index":         0,
-				"delta":         delta,
-				"finish_reason": finishReason,
-			},
-		},
-	}
-	if usage != nil {
-		chunk["usage"] = anthropicChatUsagePayload(usage)
-	}
-
-	jsonData, err := json.Marshal(chunk)
-	if err != nil {
-		slog.Error("failed to marshal chat completion chunk", "error", err, "msg_id", sc.msgID)
-		return ""
-	}
-
-	return "data: " + string(jsonData) + "\n\n"
+	return providers.FormatChatChunkSSE(sc.msgID, sc.created, sc.model, "anthropic", delta, finishReason, anthropicChatUsagePayload(usage))
 }
 
 func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {

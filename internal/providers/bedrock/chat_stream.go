@@ -3,18 +3,16 @@ package bedrock
 import (
 	"context"
 	"io"
-	"log/slog"
 	"strconv"
 	"sync"
 	"time"
-
-	"github.com/goccy/go-json"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"gomodel/internal/core"
+	"gomodel/internal/providers"
 )
 
 // StreamChatCompletion runs Bedrock ConverseStream and exposes an
@@ -239,31 +237,15 @@ func (s *streamConverter) flushFinish() {
 }
 
 func (s *streamConverter) formatChunk(delta map[string]any, finishReason any, usage *brtypes.TokenUsage) string {
-	chunk := map[string]any{
-		"id":       s.id,
-		"object":   "chat.completion.chunk",
-		"created":  s.created,
-		"model":    s.model,
-		"provider": providerName,
-		"choices": []map[string]any{{
-			"index":         0,
-			"delta":         delta,
-			"finish_reason": finishReason,
-		}},
-	}
+	var usagePayload map[string]any
 	if usage != nil {
-		chunk["usage"] = map[string]any{
+		usagePayload = map[string]any{
 			"prompt_tokens":     int(awssdk.ToInt32(usage.InputTokens)),
 			"completion_tokens": int(awssdk.ToInt32(usage.OutputTokens)),
 			"total_tokens":      int(awssdk.ToInt32(usage.TotalTokens)),
 		}
 	}
-	buf, err := json.Marshal(chunk)
-	if err != nil {
-		slog.Warn("failed to marshal bedrock stream chunk", "error", err)
-		return ""
-	}
-	return "data: " + string(buf) + "\n\n"
+	return providers.FormatChatChunkSSE(s.id, s.created, s.model, providerName, delta, finishReason, usagePayload)
 }
 
 var _ io.ReadCloser = (*streamConverter)(nil)
