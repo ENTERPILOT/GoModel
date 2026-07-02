@@ -2,19 +2,17 @@ package bedrock
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"log/slog"
+	"strconv"
 	"sync"
 	"time"
-
-	"github.com/goccy/go-json"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"gomodel/internal/core"
+	"gomodel/internal/providers"
 )
 
 // StreamChatCompletion runs Bedrock ConverseStream and exposes an
@@ -59,6 +57,7 @@ type streamConverter struct {
 	stream    *bedrockruntime.ConverseStreamOutput
 	model     string
 	id        string
+	created   int64
 	closeOnce sync.Once
 	buf       []byte
 	done      bool
@@ -82,10 +81,12 @@ type toolStreamState struct {
 }
 
 func newOpenAIStream(out *bedrockruntime.ConverseStreamOutput, model string) *streamConverter {
+	now := time.Now()
 	return &streamConverter{
 		stream:      out,
 		model:       model,
-		id:          fmt.Sprintf("bedrock-%d", time.Now().UnixNano()),
+		id:          "bedrock-" + strconv.FormatInt(now.UnixNano(), 10),
+		created:     now.Unix(),
 		toolByIndex: make(map[int32]*toolStreamState),
 	}
 }
@@ -236,31 +237,15 @@ func (s *streamConverter) flushFinish() {
 }
 
 func (s *streamConverter) formatChunk(delta map[string]any, finishReason any, usage *brtypes.TokenUsage) string {
-	chunk := map[string]any{
-		"id":       s.id,
-		"object":   "chat.completion.chunk",
-		"created":  time.Now().Unix(),
-		"model":    s.model,
-		"provider": providerName,
-		"choices": []map[string]any{{
-			"index":         0,
-			"delta":         delta,
-			"finish_reason": finishReason,
-		}},
-	}
+	var usagePayload map[string]any
 	if usage != nil {
-		chunk["usage"] = map[string]any{
+		usagePayload = map[string]any{
 			"prompt_tokens":     int(awssdk.ToInt32(usage.InputTokens)),
 			"completion_tokens": int(awssdk.ToInt32(usage.OutputTokens)),
 			"total_tokens":      int(awssdk.ToInt32(usage.TotalTokens)),
 		}
 	}
-	buf, err := json.Marshal(chunk)
-	if err != nil {
-		slog.Warn("failed to marshal bedrock stream chunk", "error", err)
-		return ""
-	}
-	return "data: " + string(buf) + "\n\n"
+	return providers.FormatChatChunkSSE(s.id, s.created, s.model, providerName, delta, finishReason, usagePayload)
 }
 
 var _ io.ReadCloser = (*streamConverter)(nil)

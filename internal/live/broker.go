@@ -77,11 +77,15 @@ type Broker struct {
 	subscriberBuffer int
 	heartbeat        time.Duration
 
-	mu          sync.Mutex
-	nextSeq     uint64
-	nextSubID   uint64
-	closed      bool
+	mu        sync.Mutex
+	nextSeq   uint64
+	nextSubID uint64
+	closed    bool
+	// events is a circular buffer of the most recent events. While it is
+	// filling, head is 0 and events are ordered; once full, head indexes the
+	// oldest event and each publish overwrites it in place (O(1)).
 	events      []Event
+	head        int
 	subscribers map[uint64]chan Event
 	activeAudit map[string]Event
 	activeUsage map[string]Event
@@ -169,30 +173,45 @@ func (b *Broker) Subscribe(cursor uint64) *Subscription {
 }
 
 func (b *Broker) replayAfterLocked(cursor uint64) ([]Event, bool) {
+	count := len(b.events)
 	if cursor == 0 {
 		return b.activeSnapshotsLocked(), false
 	}
-	if len(b.events) == 0 {
+	if count == 0 {
 		return b.activeSnapshotsLocked(), true
 	}
-	latest := b.events[len(b.events)-1].Seq
+	latest := b.eventAtLocked(count - 1).Seq
 	if cursor > latest {
 		return b.activeSnapshotsLocked(), true
 	}
-	oldest := b.events[0].Seq
+	oldest := b.eventAtLocked(0).Seq
 	if cursor < oldest-1 {
 		return b.activeSnapshotsLocked(), true
 	}
 	if cursor < latest && latest-cursor > uint64(b.replayLimit) {
 		return b.activeSnapshotsLocked(), true
 	}
-	replay := make([]Event, 0, min(len(b.events), b.replayLimit))
-	for _, event := range b.events {
-		if event.Seq > cursor {
-			replay = append(replay, event)
-		}
+	// Sequences are consecutive within the buffer, so the first event after
+	// the cursor sits at a computable offset from the oldest.
+	start := 0
+	if cursor >= oldest {
+		start = int(cursor - oldest + 1)
+	}
+	replay := make([]Event, 0, count-start)
+	for i := start; i < count; i++ {
+		replay = append(replay, b.eventAtLocked(i))
 	}
 	return replay, false
+}
+
+// eventAtLocked returns the i-th event in publish order (0 = oldest).
+// Caller must hold b.mu.
+func (b *Broker) eventAtLocked(i int) Event {
+	idx := b.head + i
+	if idx >= len(b.events) {
+		idx -= len(b.events)
+	}
+	return b.events[idx]
 }
 
 func (b *Broker) activeSnapshotsLocked() []Event {
@@ -240,7 +259,7 @@ func (b *Broker) Close() {
 	}
 }
 
-func (b *Broker) publish(eventType, requestID string, timestamp time.Time, payload any) {
+func (b *Broker) publish(eventType, entryID, requestID string, timestamp time.Time, payload any) {
 	if b == nil || !b.enabled {
 		return
 	}
@@ -262,6 +281,9 @@ func (b *Broker) publish(eventType, requestID string, timestamp time.Time, paylo
 		return
 	}
 
+	// Invariant: every assigned sequence is buffered, so sequences inside the
+	// ring are gapless — replayAfterLocked's offset arithmetic depends on it.
+	// Do not return between the increment and the ring write below.
 	b.nextSeq++
 	event := Event{
 		Seq:       b.nextSeq,
@@ -270,15 +292,15 @@ func (b *Broker) publish(eventType, requestID string, timestamp time.Time, paylo
 		Timestamp: timestamp.UTC(),
 		Data:      data,
 	}
-	b.updateActiveSnapshotsLocked(&event)
-	b.events = append(b.events, event)
-	if len(b.events) > b.bufferSize {
-		drop := len(b.events) - b.bufferSize
-		copy(b.events, b.events[drop:])
-		for i := b.bufferSize; i < len(b.events); i++ {
-			b.events[i] = Event{}
+	b.updateActiveSnapshotsLocked(&event, entryID)
+	if len(b.events) < b.bufferSize {
+		b.events = append(b.events, event)
+	} else {
+		b.events[b.head] = event
+		b.head++
+		if b.head == len(b.events) {
+			b.head = 0
 		}
-		b.events = b.events[:b.bufferSize]
 	}
 
 	for id, ch := range b.subscribers {
@@ -291,21 +313,21 @@ func (b *Broker) publish(eventType, requestID string, timestamp time.Time, paylo
 	}
 }
 
-func (b *Broker) updateActiveSnapshotsLocked(event *Event) {
+func (b *Broker) updateActiveSnapshotsLocked(event *Event, entryID string) {
 	if event == nil {
 		return
 	}
 	switch event.Type {
 	case EventAuditFailed, EventAuditFlushed, EventAuditRemoved:
-		deleteActiveSnapshot(b.activeAudit, auditActiveKeys(*event))
+		deleteActiveSnapshot(b.activeAudit, auditActiveKeys(*event, entryID))
 		return
 	case EventUsageFailed, EventUsageFlushed:
-		deleteActiveSnapshot(b.activeUsage, usageActiveKeys(*event))
+		deleteActiveSnapshot(b.activeUsage, usageActiveKeys(*event, entryID))
 		return
 	}
 
 	if strings.HasPrefix(event.Type, "audit.") {
-		keys := auditActiveKeys(*event)
+		keys := auditActiveKeys(*event, entryID)
 		if keys.canonical == "" {
 			return
 		}
@@ -317,7 +339,7 @@ func (b *Broker) updateActiveSnapshotsLocked(event *Event) {
 		return
 	}
 	if strings.HasPrefix(event.Type, "usage.") {
-		keys := usageActiveKeys(*event)
+		keys := usageActiveKeys(*event, entryID)
 		if keys.canonical == "" {
 			return
 		}
@@ -329,23 +351,14 @@ func (b *Broker) updateActiveSnapshotsLocked(event *Event) {
 	}
 }
 
-type eventIdentity struct {
-	ID        string `json:"id"`
-	RequestID string `json:"request_id"`
-}
-
 type activeSnapshotKeys struct {
 	canonical string
 	aliases   []string
 }
 
-func auditActiveKeys(event Event) activeSnapshotKeys {
-	identity := eventIdentityFromData(event.Data)
+func auditActiveKeys(event Event, id string) activeSnapshotKeys {
 	requestID := strings.TrimSpace(event.RequestID)
-	if requestID == "" {
-		requestID = strings.TrimSpace(identity.RequestID)
-	}
-	id := strings.TrimSpace(identity.ID)
+	id = strings.TrimSpace(id)
 	keys := activeSnapshotKeys{}
 	if requestID != "" {
 		keys.canonical = "request:" + requestID
@@ -360,13 +373,9 @@ func auditActiveKeys(event Event) activeSnapshotKeys {
 	return keys
 }
 
-func usageActiveKeys(event Event) activeSnapshotKeys {
-	identity := eventIdentityFromData(event.Data)
-	id := strings.TrimSpace(identity.ID)
+func usageActiveKeys(event Event, id string) activeSnapshotKeys {
+	id = strings.TrimSpace(id)
 	requestID := strings.TrimSpace(event.RequestID)
-	if requestID == "" {
-		requestID = strings.TrimSpace(identity.RequestID)
-	}
 	keys := activeSnapshotKeys{}
 	if id != "" {
 		keys.canonical = "id:" + id
@@ -408,12 +417,8 @@ func deleteActiveSnapshotAliases(snapshots map[string]Event, keys activeSnapshot
 	}
 }
 
-func eventIdentityFromData(data json.RawMessage) eventIdentity {
-	var identity eventIdentity
-	_ = json.Unmarshal(data, &identity)
-	return identity
-}
-
+// mergeEventData recursively merges two JSON objects, with patch members
+// winning on conflict. Whenever either side is not a JSON object, patch wins.
 func mergeEventData(base, patch json.RawMessage) json.RawMessage {
 	var baseObject map[string]json.RawMessage
 	var patchObject map[string]json.RawMessage
@@ -424,29 +429,7 @@ func mergeEventData(base, patch json.RawMessage) json.RawMessage {
 		return append(json.RawMessage(nil), patch...)
 	}
 	for key, value := range patchObject {
-		baseObject[key] = mergeEventDataValue(baseObject[key], value)
-	}
-	merged, err := json.Marshal(baseObject)
-	if err != nil {
-		return append(json.RawMessage(nil), patch...)
-	}
-	return merged
-}
-
-func mergeEventDataValue(base, patch json.RawMessage) json.RawMessage {
-	if len(base) == 0 || len(patch) == 0 {
-		return append(json.RawMessage(nil), patch...)
-	}
-	var baseObject map[string]json.RawMessage
-	var patchObject map[string]json.RawMessage
-	if err := json.Unmarshal(base, &baseObject); err != nil || baseObject == nil {
-		return append(json.RawMessage(nil), patch...)
-	}
-	if err := json.Unmarshal(patch, &patchObject); err != nil || patchObject == nil {
-		return append(json.RawMessage(nil), patch...)
-	}
-	for key, value := range patchObject {
-		baseObject[key] = mergeEventDataValue(baseObject[key], value)
+		baseObject[key] = mergeEventData(baseObject[key], value)
 	}
 	merged, err := json.Marshal(baseObject)
 	if err != nil {
@@ -461,7 +444,7 @@ func (b *Broker) PublishAuditEvent(eventType string, entry *auditlog.LogEntry) {
 		return
 	}
 	payload := auditPreviewFromEntry(eventType, entry)
-	b.publish(eventType, entry.RequestID, entry.Timestamp, payload)
+	b.publish(eventType, entry.ID, entry.RequestID, entry.Timestamp, payload)
 }
 
 // PublishUsageEvent publishes a compact usage log event. Cached usage entries
@@ -472,7 +455,7 @@ func (b *Broker) PublishUsageEvent(eventType string, entry *usage.UsageEntry) {
 		return
 	}
 	payload := usagePreviewFromEntry(entry)
-	b.publish(eventType, entry.RequestID, entry.Timestamp, payload)
+	b.publish(eventType, entry.ID, entry.RequestID, entry.Timestamp, payload)
 }
 
 type auditPreview struct {

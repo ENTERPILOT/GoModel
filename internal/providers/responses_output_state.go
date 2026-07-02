@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -44,7 +43,14 @@ func (s *ResponsesOutputEventState) WriteEvent(eventName string, payload map[str
 		slog.Error("failed to marshal responses stream event", "error", err, "event", eventName, "response_id", s.responseID)
 		return ""
 	}
-	return fmt.Sprintf("event: %s\ndata: %s\n\n", eventName, jsonData)
+	var b strings.Builder
+	b.Grow(len("event: \ndata: \n\n") + len(eventName) + len(jsonData))
+	b.WriteString("event: ")
+	b.WriteString(eventName)
+	b.WriteString("\ndata: ")
+	b.Write(jsonData)
+	b.WriteString("\n\n")
+	return b.String()
 }
 
 // ReserveAssistant marks that the assistant message output item occupies index 0.

@@ -283,7 +283,18 @@ func BenchmarkOpenAIResponsesStreamConverter(b *testing.B) {
 }
 
 func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
-	auditLogger := benchAuditLogger{cfg: auditlog.Config{Enabled: true, LogBodies: true}}
+	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true, LogBodies: true})
+}
+
+// BenchmarkSharedStreamingObserversDefaultConfig runs the same pipeline with
+// audit body capture disabled — the default configuration, where the stream
+// can skip decoding content-delta chunks.
+func BenchmarkSharedStreamingObserversDefaultConfig(b *testing.B) {
+	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true})
+}
+
+func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config) {
+	auditLogger := benchAuditLogger{cfg: auditCfg}
 	usageLogger := benchUsageLogger{cfg: usage.Config{Enabled: true}}
 	// Labels mirror a tagged request so the guard exercises the labelled path.
 	labels := []string{"team-alpha", "prod"}
@@ -393,16 +404,27 @@ func TestHotPathPerfGuard(t *testing.T) {
 			maxBytes:  15104, // baseline ~13.9 KB
 		},
 		{
+			// Typed chunk decoding + reused read buffer keep this converter at a
+			// fraction of its former map[string]any-per-chunk cost (was 202/19.6KB).
 			name:      "openai_responses_stream_converter",
 			bench:     BenchmarkOpenAIResponsesStreamConverter,
-			maxAllocs: 213,   // baseline 202
-			maxBytes:  21120, // baseline ~19.6 KB
+			maxAllocs: 91,        // baseline 85
+			maxBytes:  12 * 1024, // baseline ~9.7 KB (leaves headroom for pool cold-starts)
 		},
 		{
 			name:      "shared_stream_audit_and_usage_observers",
 			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
-			maxAllocs: 167,  // baseline 159
-			maxBytes:  9400, // baseline ~9.0 KB since the UsageEntry labels field; already tight
+			maxAllocs: 163,  // baseline 155 (incl. request labels on both observers)
+			maxBytes:  9400, // baseline ~8.5 KB
+		},
+		{
+			// Default configuration: audit body capture off, so the observed
+			// stream must skip JSON decoding for content-delta chunks entirely.
+			// A regression that decodes every chunk again would blow this limit.
+			name:      "shared_stream_observers_default_config",
+			bench:     BenchmarkSharedStreamingObserversDefaultConfig,
+			maxAllocs: 64,       // baseline 60 (incl. request labels on both observers)
+			maxBytes:  4 * 1024, // baseline ~3.3 KB
 		},
 	}
 

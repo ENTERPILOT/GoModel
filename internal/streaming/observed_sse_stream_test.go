@@ -335,3 +335,95 @@ func TestJoinedSuffix(t *testing.T) {
 		})
 	}
 }
+
+// filteringObserver is a trackingObserver that additionally implements
+// EventFilter with a configurable predicate.
+type filteringObserver struct {
+	trackingObserver
+	wants func(raw []byte) bool
+}
+
+func (o *filteringObserver) WantsJSONEvent(raw []byte) bool {
+	return o.wants(raw)
+}
+
+func TestObservedSSEStreamSkipsDecodingWhenNoObserverWantsEvent(t *testing.T) {
+	uninterested := &filteringObserver{wants: func([]byte) bool { return false }}
+
+	stream := NewObservedSSEStream(
+		io.NopCloser(strings.NewReader("data: {\"a\":1}\n\ndata: {\"b\":2}\n\ndata: [DONE]\n\n")),
+		uninterested,
+	)
+	if _, err := io.Copy(io.Discard, stream); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if got := uninterested.eventCount; got != 0 {
+		t.Fatalf("uninterested observer received %d events, want 0", got)
+	}
+	if !uninterested.closed {
+		t.Fatal("observer OnStreamClose not called")
+	}
+}
+
+func TestObservedSSEStreamDeliversToAllObserversWhenAnyWantsEvent(t *testing.T) {
+	uninterested := &filteringObserver{wants: func([]byte) bool { return false }}
+	selective := &filteringObserver{wants: func(raw []byte) bool {
+		return strings.Contains(string(raw), `"usage"`)
+	}}
+	plain := &trackingObserver{}
+
+	stream := NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(
+			"data: {\"a\":1}\n\ndata: {\"usage\":{\"total_tokens\":7}}\n\ndata: [DONE]\n\n",
+		)),
+		uninterested, selective, plain,
+	)
+	if _, err := io.Copy(io.Discard, stream); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// The unfiltered observer forces decoding of every event, so all three
+	// observers see both payloads: filters gate decoding, not delivery.
+	for name, observer := range map[string]*trackingObserver{
+		"uninterested": &uninterested.trackingObserver,
+		"selective":    &selective.trackingObserver,
+		"plain":        plain,
+	} {
+		if got := observer.eventCount; got != 2 {
+			t.Fatalf("%s observer received %d events, want 2", name, got)
+		}
+	}
+}
+
+func TestObservedSSEStreamDecodesOnlyWantedEventsForFilteredObservers(t *testing.T) {
+	selective := &filteringObserver{wants: func(raw []byte) bool {
+		return strings.Contains(string(raw), `"usage"`)
+	}}
+
+	stream := NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(
+			"data: {\"a\":1}\n\ndata: {\"usage\":{\"total_tokens\":7}}\n\ndata: [DONE]\n\n",
+		)),
+		selective,
+	)
+	if _, err := io.Copy(io.Discard, stream); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if got := selective.eventCount; got != 1 {
+		t.Fatalf("selective observer received %d events, want only the usage event", got)
+	}
+	if _, ok := selective.lastPayload["usage"]; !ok {
+		t.Fatalf("delivered event = %#v, want the usage payload", selective.lastPayload)
+	}
+}

@@ -236,3 +236,89 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 
 	return events
 }
+
+// TestOpenAIResponsesStreamConverter_TolerantChunkFallback covers chunks that
+// fail the typed fast-path decode: one off-spec member must only skip itself,
+// not discard the chunk's remaining deltas or usage.
+func TestOpenAIResponsesStreamConverter_TolerantChunkFallback(t *testing.T) {
+	// content is an off-spec parts array; usage and finish_reason must survive.
+	// The second chunk carries a float tool-call index (Python-style encoders)
+	// alongside junk entries (non-object, index missing) that must be skipped
+	// without discarding the valid call.
+	mockStream := `data: {"choices":[{"delta":{"content":[{"type":"text","text":"ignored"}]},"finish_reason":null}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}
+
+data: {"choices":[{"delta":{"tool_calls":["junk",{"id":"call_no_index"},{"index":0.0,"id":"call_f","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "groq")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("failed to read from converter: %v", err)
+	}
+
+	events := parseTestSSEEvents(t, string(raw))
+	var completed map[string]any
+	foundToolAdded := false
+	for _, event := range events {
+		if event.Done {
+			continue
+		}
+		switch event.Name {
+		case "response.completed":
+			completed, _ = event.Payload["response"].(map[string]any)
+		case "response.output_item.added":
+			item, _ := event.Payload["item"].(map[string]any)
+			if item["type"] == "function_call" && item["name"] == "lookup" {
+				foundToolAdded = true
+			}
+		}
+	}
+
+	if completed == nil {
+		t.Fatal("expected response.completed event")
+	}
+	usage, ok := completed["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("response.completed usage = %#v, want object captured from off-spec chunk", completed["usage"])
+	}
+	if usage["total_tokens"] != float64(7) {
+		t.Fatalf("usage total_tokens = %v, want 7", usage["total_tokens"])
+	}
+	if !foundToolAdded {
+		t.Fatal("expected function_call output item from float-index tool call delta")
+	}
+}
+
+// TestOpenAIResponsesStreamConverter_DropsNonObjectUsage ensures off-spec
+// non-object usage values never leak into the response.completed payload.
+func TestOpenAIResponsesStreamConverter_DropsNonObjectUsage(t *testing.T) {
+	mockStream := `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}],"usage":"n/a"}
+
+data: [DONE]
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "groq")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("failed to read from converter: %v", err)
+	}
+
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done || event.Name != "response.completed" {
+			continue
+		}
+		response, _ := event.Payload["response"].(map[string]any)
+		if response == nil {
+			t.Fatal("response.completed missing response object")
+		}
+		if usage, present := response["usage"]; present {
+			t.Fatalf("response.completed usage = %#v, want omitted for non-object usage", usage)
+		}
+		return
+	}
+	t.Fatal("expected response.completed event")
+}

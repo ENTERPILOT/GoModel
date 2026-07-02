@@ -23,18 +23,15 @@ type StreamBuffer struct {
 }
 
 func NewStreamBuffer(initialCapacity int) StreamBuffer {
-	if initialCapacity <= 0 {
+	if initialCapacity < defaultStreamBufferCapacity {
 		initialCapacity = defaultStreamBufferCapacity
 	}
 
 	pooled := streamBufferPool.Get().(*[]byte)
 	data := (*pooled)[:0]
-	if cap(data) == 0 || cap(data) > maxPooledStreamBufferSize {
-		data = make([]byte, 0, defaultStreamBufferCapacity)
-		*pooled = data
-	}
-	if cap(data) < initialCapacity {
+	if cap(data) == 0 || cap(data) > maxPooledStreamBufferSize || cap(data) < initialCapacity {
 		data = make([]byte, 0, initialCapacity)
+		*pooled = data
 	}
 
 	return StreamBuffer{
@@ -95,17 +92,27 @@ func (b *StreamBuffer) Consume(n int) {
 	b.read += n
 }
 
+// Release returns the buffer's storage to the pool. No slice derived from the
+// buffer (Unread, or bytes handed to a decoder that may alias its input) may
+// be retained past this call: the storage is immediately reusable by another
+// stream and retained views would see another request's data.
 func (b *StreamBuffer) Release() {
 	if b == nil {
 		return
 	}
 
 	if b.pooled != nil {
-		pooledData := (*b.pooled)[:0]
+		// Prefer returning the live data buffer: appends may have grown it past
+		// the originally pooled allocation, and recycling the grown buffer is
+		// what lets later streams skip re-growing from scratch.
+		pooledData := b.data
 		if cap(pooledData) == 0 || cap(pooledData) > maxPooledStreamBufferSize {
-			pooledData = make([]byte, 0, defaultStreamBufferCapacity)
+			pooledData = *b.pooled
+			if cap(pooledData) == 0 || cap(pooledData) > maxPooledStreamBufferSize {
+				pooledData = make([]byte, 0, defaultStreamBufferCapacity)
+			}
 		}
-		*b.pooled = pooledData
+		*b.pooled = pooledData[:0]
 		streamBufferPool.Put(b.pooled)
 	}
 	b.data = nil

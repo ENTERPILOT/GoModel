@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/goccy/go-json"
-
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
 	"gomodel/internal/providers"
@@ -80,25 +78,7 @@ func adaptChatRequest(req *core.ChatRequest) (any, error) {
 	if req == nil || req.Reasoning == nil || strings.TrimSpace(req.Reasoning.Effort) == "" {
 		return req, nil
 	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, core.NewInvalidRequestError("failed to marshal deepseek request: "+err.Error(), err)
-	}
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, core.NewInvalidRequestError("failed to decode deepseek request payload: "+err.Error(), err)
-	}
-
-	effort, _ := json.Marshal(normalizeReasoningEffort(req.Reasoning.Effort))
-	raw["reasoning_effort"] = effort
-	// Delete the full reasoning object: DeepSeek accepts reasoning_effort as a
-	// top-level string only. Other reasoning fields (e.g. budget_tokens) are not
-	// forwarded because DeepSeek has no equivalent. Update this if DeepSeek
-	// expands its reasoning API surface.
-	delete(raw, "reasoning")
-	return raw, nil
+	return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Reasoning.Effort))
 }
 
 // normalizeReasoningEffort maps GoModel's OpenAI-style effort levels to the two

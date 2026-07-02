@@ -23,14 +23,16 @@ type OpenAIResponsesStreamConverter struct {
 	model       string
 	provider    string
 	responseID  string
+	createdAt   int64
 	output      *ResponsesOutputEventState
 	toolCalls   map[int]*ResponsesOutputToolCallState
 	buffer      streaming.StreamBuffer
 	lineBuffer  streaming.StreamBuffer
+	readBuf     []byte
 	closed      bool
 	sentCreate  bool
 	sentDone    bool
-	cachedUsage map[string]any // Stores usage from final chunk for inclusion in response.completed
+	cachedUsage json.RawMessage // Stores usage from final chunk for inclusion in response.completed
 }
 
 // NewOpenAIResponsesStreamConverter creates a new converter that transforms
@@ -42,22 +44,35 @@ func NewOpenAIResponsesStreamConverter(reader io.ReadCloser, model, provider str
 		model:      model,
 		provider:   provider,
 		responseID: responseID,
+		createdAt:  time.Now().Unix(),
 		output:     NewResponsesOutputEventState(responseID),
 		toolCalls:  make(map[int]*ResponsesOutputToolCallState),
 		buffer:     streaming.NewStreamBuffer(4096),
 		lineBuffer: streaming.NewStreamBuffer(1024),
+		readBuf:    make([]byte, 1024),
 	}
 }
 
-func normalizeToolCallIndex(value any) (int, bool) {
-	switch v := value.(type) {
-	case int:
-		return v, true
-	case float64:
-		return int(v), true
-	default:
-		return 0, false
-	}
+// openAIStreamChunk is the subset of an OpenAI chat.completion.chunk the
+// converter consumes. Typed decoding avoids a map[string]any per chunk.
+type openAIStreamChunk struct {
+	Usage   json.RawMessage `json:"usage"`
+	Choices []struct {
+		Delta struct {
+			Content   string                `json:"content"`
+			ToolCalls []openAIChunkToolCall `json:"tool_calls"`
+		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+}
+
+type openAIChunkToolCall struct {
+	Index    *int   `json:"index"`
+	ID       string `json:"id"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 func (sc *OpenAIResponsesStreamConverter) ensureToolCallState(index int) *ResponsesOutputToolCallState {
@@ -118,34 +133,27 @@ func (sc *OpenAIResponsesStreamConverter) completePendingToolCalls() string {
 	return out.String()
 }
 
-func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []any) string {
+func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []openAIChunkToolCall) string {
 	var out bytes.Buffer
 
 	if sc.output.AssistantStarted() && !sc.output.AssistantDone() {
 		out.WriteString(sc.output.CompleteAssistantOutput(0))
 	}
 
-	for _, item := range toolCalls {
-		toolCall, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		index, ok := normalizeToolCallIndex(toolCall["index"])
-		if !ok {
+	for _, toolCall := range toolCalls {
+		if toolCall.Index == nil {
 			continue
 		}
 
-		state := sc.ensureToolCallState(index)
-		if callID, _ := toolCall["id"].(string); callID != "" {
-			state.CallID = callID
+		state := sc.ensureToolCallState(*toolCall.Index)
+		if toolCall.ID != "" {
+			state.CallID = toolCall.ID
+		}
+		if toolCall.Function.Name != "" {
+			state.Name = toolCall.Function.Name
 		}
 
-		function, _ := toolCall["function"].(map[string]any)
-		if name, _ := function["name"].(string); name != "" {
-			state.Name = name
-		}
-
-		arguments, _ := function["arguments"].(string)
+		arguments := toolCall.Function.Arguments
 		hadStarted := state.Started
 		if arguments != "" {
 			_, _ = state.Arguments.WriteString(arguments)
@@ -173,6 +181,163 @@ func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []any) 
 	return out.String()
 }
 
+// processChunk translates one chat.completion.chunk payload into Responses
+// API events appended to the output buffer.
+func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
+	var chunk openAIStreamChunk
+	if err := json.Unmarshal(data, &chunk); err != nil {
+		// One off-spec member type aborts the whole typed decode; re-parse
+		// tolerantly so the chunk's remaining deltas and usage still flow
+		// (Postel's law), paying the generic-map cost only for such chunks.
+		sc.processChunkTolerant(data)
+		return
+	}
+
+	// Capture usage if present and object-shaped (OpenAI sends it in the
+	// final chunk); anything else must not leak into response.completed.
+	if usage := bytes.TrimSpace(chunk.Usage); len(usage) > 0 && usage[0] == '{' {
+		sc.cachedUsage = usage
+	}
+
+	if len(chunk.Choices) == 0 {
+		return
+	}
+	choice := &chunk.Choices[0]
+
+	if choice.Delta.Content != "" {
+		sc.appendTextDelta(choice.Delta.Content)
+	}
+	if len(choice.Delta.ToolCalls) > 0 {
+		sc.buffer.AppendString(sc.handleToolCallDeltas(choice.Delta.ToolCalls))
+	}
+	if choice.FinishReason == "tool_calls" {
+		sc.buffer.AppendString(sc.completePendingToolCalls())
+	}
+}
+
+// processChunkTolerant mirrors processChunk with per-field type assertions, so
+// a single off-spec member only skips itself instead of the whole chunk.
+func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
+	var chunk map[string]any
+	if err := json.Unmarshal(data, &chunk); err != nil {
+		return
+	}
+
+	if usage, ok := chunk["usage"].(map[string]any); ok {
+		if raw, err := json.Marshal(usage); err == nil {
+			sc.cachedUsage = raw
+		}
+	}
+
+	choices, ok := chunk["choices"].([]any)
+	if !ok || len(choices) == 0 {
+		return
+	}
+	choice, ok := choices[0].(map[string]any)
+	if !ok {
+		return
+	}
+	if delta, ok := choice["delta"].(map[string]any); ok {
+		if content, ok := delta["content"].(string); ok && content != "" {
+			sc.appendTextDelta(content)
+		}
+		if toolCalls, ok := delta["tool_calls"].([]any); ok && len(toolCalls) > 0 {
+			sc.buffer.AppendString(sc.handleToolCallDeltas(chunkToolCallsFromAny(toolCalls)))
+		}
+	}
+	if finishReason, _ := choice["finish_reason"].(string); finishReason == "tool_calls" {
+		sc.buffer.AppendString(sc.completePendingToolCalls())
+	}
+}
+
+// chunkToolCallsFromAny converts generically parsed tool-call deltas into the
+// typed form, dropping entries without a usable numeric index.
+func chunkToolCallsFromAny(items []any) []openAIChunkToolCall {
+	calls := make([]openAIChunkToolCall, 0, len(items))
+	for _, item := range items {
+		toolCall, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		index, ok := normalizeToolCallIndex(toolCall["index"])
+		if !ok {
+			continue
+		}
+		call := openAIChunkToolCall{Index: &index}
+		call.ID, _ = toolCall["id"].(string)
+		if function, ok := toolCall["function"].(map[string]any); ok {
+			call.Function.Name, _ = function["name"].(string)
+			call.Function.Arguments, _ = function["arguments"].(string)
+		}
+		calls = append(calls, call)
+	}
+	return calls
+}
+
+func normalizeToolCallIndex(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case float64:
+		return int(v), true
+	default:
+		return 0, false
+	}
+}
+
+// appendTextDelta records assistant text and emits its output_text.delta event.
+func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
+	sc.reserveAssistantOutput()
+	sc.buffer.AppendString(sc.output.StartAssistantOutput(0))
+	sc.output.AppendAssistantText(content)
+	jsonData, err := json.Marshal(struct {
+		Type  string `json:"type"`
+		Delta string `json:"delta"`
+	}{Type: "response.output_text.delta", Delta: content})
+	if err != nil {
+		slog.Error("failed to marshal content delta event", "error", err, "response_id", sc.responseID)
+		return
+	}
+	sc.buffer.AppendString("event: response.output_text.delta\ndata: ")
+	sc.buffer.AppendBytes(jsonData)
+	sc.buffer.AppendString("\n\n")
+}
+
+// appendCompletedEvents flushes open output items and appends the final
+// response.completed event plus the trailing [DONE] marker exactly once.
+func (sc *OpenAIResponsesStreamConverter) appendCompletedEvents() {
+	if sc.sentDone {
+		return
+	}
+	sc.sentDone = true
+	sc.buffer.AppendString(sc.output.CompleteAssistantOutput(0))
+	sc.buffer.AppendString(sc.completePendingToolCalls())
+	responseData := map[string]any{
+		"id":         sc.responseID,
+		"object":     "response",
+		"status":     "completed",
+		"model":      sc.model,
+		"provider":   sc.provider,
+		"created_at": sc.createdAt,
+	}
+	// Include usage data if captured from OpenAI stream
+	if sc.cachedUsage != nil {
+		responseData["usage"] = sc.cachedUsage
+	}
+	doneEvent := map[string]any{
+		"type":     "response.completed",
+		"response": responseData,
+	}
+	jsonData, err := json.Marshal(doneEvent)
+	if err != nil {
+		slog.Error("failed to marshal response.completed event", "error", err, "response_id", sc.responseID)
+		return
+	}
+	sc.buffer.AppendString("event: response.completed\ndata: ")
+	sc.buffer.AppendBytes(jsonData)
+	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+}
+
 func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 	if sc.closed {
 		return 0, io.EOF
@@ -194,7 +359,7 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 				"status":     "in_progress",
 				"model":      sc.model,
 				"provider":   sc.provider,
-				"created_at": time.Now().Unix(),
+				"created_at": sc.createdAt,
 			},
 		}
 		jsonData, err := json.Marshal(createdEvent)
@@ -209,10 +374,9 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 	}
 
 	// Read from the underlying stream
-	tempBuf := make([]byte, 1024)
-	nr, readErr := sc.reader.Read(tempBuf)
+	nr, readErr := sc.reader.Read(sc.readBuf)
 	if nr > 0 {
-		sc.lineBuffer.AppendBytes(tempBuf[:nr])
+		sc.lineBuffer.AppendBytes(sc.readBuf[:nr])
 
 		// Process complete lines
 		for {
@@ -233,80 +397,10 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 			if after, ok := bytes.CutPrefix(line, []byte("data: ")); ok {
 				data := after
 				if bytes.Equal(data, []byte("[DONE]")) {
-					// Send done event
-					if !sc.sentDone {
-						sc.sentDone = true
-						sc.buffer.AppendString(sc.output.CompleteAssistantOutput(0))
-						sc.buffer.AppendString(sc.completePendingToolCalls())
-						responseData := map[string]any{
-							"id":         sc.responseID,
-							"object":     "response",
-							"status":     "completed",
-							"model":      sc.model,
-							"provider":   sc.provider,
-							"created_at": time.Now().Unix(),
-						}
-						// Include usage data if captured from OpenAI stream
-						if sc.cachedUsage != nil {
-							responseData["usage"] = sc.cachedUsage
-						}
-						doneEvent := map[string]any{
-							"type":     "response.completed",
-							"response": responseData,
-						}
-						jsonData, err := json.Marshal(doneEvent)
-						if err != nil {
-							slog.Error("failed to marshal response.completed event", "error", err, "response_id", sc.responseID)
-							continue
-						}
-						sc.buffer.AppendString("event: response.completed\ndata: ")
-						sc.buffer.AppendBytes(jsonData)
-						sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
-					}
+					sc.appendCompletedEvents()
 					continue
 				}
-
-				// Parse the chat completion chunk
-				var chunk map[string]any
-				if err := json.Unmarshal(data, &chunk); err != nil {
-					continue
-				}
-
-				// Capture usage data if present (OpenAI sends this in the final chunk)
-				if usage, ok := chunk["usage"].(map[string]any); ok {
-					sc.cachedUsage = usage
-				}
-
-				// Extract content delta
-				if choices, ok := chunk["choices"].([]any); ok && len(choices) > 0 {
-					if choice, ok := choices[0].(map[string]any); ok {
-						if delta, ok := choice["delta"].(map[string]any); ok {
-							if content, ok := delta["content"].(string); ok && content != "" {
-								sc.reserveAssistantOutput()
-								sc.buffer.AppendString(sc.output.StartAssistantOutput(0))
-								sc.output.AppendAssistantText(content)
-								deltaEvent := map[string]any{
-									"type":  "response.output_text.delta",
-									"delta": content,
-								}
-								jsonData, err := json.Marshal(deltaEvent)
-								if err != nil {
-									slog.Error("failed to marshal content delta event", "error", err, "response_id", sc.responseID)
-									continue
-								}
-								sc.buffer.AppendString("event: response.output_text.delta\ndata: ")
-								sc.buffer.AppendBytes(jsonData)
-								sc.buffer.AppendString("\n\n")
-							}
-							if toolCalls, ok := delta["tool_calls"].([]any); ok && len(toolCalls) > 0 {
-								sc.buffer.AppendString(sc.handleToolCallDeltas(toolCalls))
-							}
-						}
-						if finishReason, _ := choice["finish_reason"].(string); finishReason == "tool_calls" {
-							sc.buffer.AppendString(sc.completePendingToolCalls())
-						}
-					}
-				}
+				sc.processChunk(data)
 			}
 		}
 	}
@@ -314,35 +408,7 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 	if readErr != nil {
 		if readErr == io.EOF {
 			// Send final done event if we haven't already
-			if !sc.sentDone {
-				sc.sentDone = true
-				sc.buffer.AppendString(sc.output.CompleteAssistantOutput(0))
-				sc.buffer.AppendString(sc.completePendingToolCalls())
-				responseData := map[string]any{
-					"id":         sc.responseID,
-					"object":     "response",
-					"status":     "completed",
-					"model":      sc.model,
-					"provider":   sc.provider,
-					"created_at": time.Now().Unix(),
-				}
-				// Include usage data if captured from OpenAI stream
-				if sc.cachedUsage != nil {
-					responseData["usage"] = sc.cachedUsage
-				}
-				doneEvent := map[string]any{
-					"type":     "response.completed",
-					"response": responseData,
-				}
-				jsonData, err := json.Marshal(doneEvent)
-				if err != nil {
-					slog.Error("failed to marshal final response.completed event", "error", err, "response_id", sc.responseID)
-				} else {
-					sc.buffer.AppendString("event: response.completed\ndata: ")
-					sc.buffer.AppendBytes(jsonData)
-					sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
-				}
-			}
+			sc.appendCompletedEvents()
 
 			if sc.buffer.Len() > 0 {
 				return sc.buffer.Read(p), nil

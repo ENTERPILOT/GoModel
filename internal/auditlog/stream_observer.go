@@ -51,6 +51,13 @@ func NewStreamLogObserver(logger LoggerInterface, entry *LogEntry, path string) 
 	}
 }
 
+// WantsJSONEvent reports whether this observer consumes stream payloads at
+// all. With body capture disabled it consumes none, letting the observed
+// stream skip per-chunk JSON decoding on its behalf.
+func (o *StreamLogObserver) WantsJSONEvent([]byte) bool {
+	return o.logBodies && o.builder != nil
+}
+
 func (o *StreamLogObserver) OnJSONEvent(event map[string]any) {
 	if !o.logBodies || o.builder == nil {
 		return

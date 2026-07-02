@@ -3,17 +3,14 @@ package anthropic
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/goccy/go-json"
-
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
+	"gomodel/internal/providers"
 	"gomodel/internal/streaming"
 )
 
@@ -44,6 +41,7 @@ type streamConverter struct {
 	body              io.ReadCloser
 	model             string
 	msgID             string
+	created           int64
 	nextToolCallIndex int
 	toolCalls         map[int]*streamToolCallState
 	thinkingBlocks    map[int]bool // tracks which content block indices are thinking blocks
@@ -68,6 +66,7 @@ func newStreamConverter(body io.ReadCloser, model string) *streamConverter {
 		reader:         bufio.NewReader(body),
 		body:           body,
 		model:          model,
+		created:        time.Now().Unix(),
 		toolCalls:      make(map[int]*streamToolCallState),
 		thinkingBlocks: make(map[int]bool),
 		buffer:         streaming.NewStreamBuffer(1024),
@@ -159,31 +158,7 @@ func (sc *streamConverter) mapStreamStopReason(reason string) string {
 }
 
 func (sc *streamConverter) formatChatChunk(delta map[string]any, finishReason any, usage *anthropicUsage) string {
-	chunk := map[string]any{
-		"id":       sc.msgID,
-		"object":   "chat.completion.chunk",
-		"created":  time.Now().Unix(),
-		"model":    sc.model,
-		"provider": "anthropic",
-		"choices": []map[string]any{
-			{
-				"index":         0,
-				"delta":         delta,
-				"finish_reason": finishReason,
-			},
-		},
-	}
-	if usage != nil {
-		chunk["usage"] = anthropicChatUsagePayload(usage)
-	}
-
-	jsonData, err := json.Marshal(chunk)
-	if err != nil {
-		slog.Error("failed to marshal chat completion chunk", "error", err, "msg_id", sc.msgID)
-		return ""
-	}
-
-	return fmt.Sprintf("data: %s\n\n", jsonData)
+	return providers.FormatChatChunkSSE(sc.msgID, sc.created, sc.model, "anthropic", delta, finishReason, anthropicChatUsagePayload(usage))
 }
 
 func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {

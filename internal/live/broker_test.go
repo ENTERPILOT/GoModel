@@ -141,11 +141,11 @@ func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.publish(EventAuditUpdated, "", now, map[string]any{
+	b.publish(EventAuditUpdated, "audit-1", "", now, map[string]any{
 		"id":     "audit-1",
 		"method": "POST",
 	})
-	b.publish(EventAuditUpdated, "req-1", now.Add(time.Second), map[string]any{
+	b.publish(EventAuditUpdated, "audit-1", "req-1", now.Add(time.Second), map[string]any{
 		"id":         "audit-1",
 		"request_id": "req-1",
 		"provider":   "openai",
@@ -168,7 +168,7 @@ func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
 		t.Fatalf("snapshot provider = %v, want openai", got)
 	}
 
-	b.publish(EventAuditFlushed, "", now.Add(2*time.Second), map[string]any{
+	b.publish(EventAuditFlushed, "audit-1", "req-1", now.Add(2*time.Second), map[string]any{
 		"id":         "audit-1",
 		"request_id": "req-1",
 	})
@@ -186,11 +186,11 @@ func TestBrokerNormalizesUsageActiveSnapshotAliases(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.publish(EventUsageCompleted, "req-1", now, map[string]any{
+	b.publish(EventUsageCompleted, "", "req-1", now, map[string]any{
 		"request_id":   "req-1",
 		"total_tokens": 14,
 	})
-	b.publish(EventUsageCompleted, "", now.Add(time.Second), map[string]any{
+	b.publish(EventUsageCompleted, "usage-1", "req-1", now.Add(time.Second), map[string]any{
 		"id":         "usage-1",
 		"request_id": "req-1",
 		"model":      "gpt-test",
@@ -213,7 +213,7 @@ func TestBrokerNormalizesUsageActiveSnapshotAliases(t *testing.T) {
 		t.Fatalf("snapshot model = %v, want gpt-test", got)
 	}
 
-	b.publish(EventUsageFlushed, "", now.Add(2*time.Second), map[string]any{
+	b.publish(EventUsageFlushed, "usage-1", "req-1", now.Add(2*time.Second), map[string]any{
 		"id":         "usage-1",
 		"request_id": "req-1",
 	})
@@ -752,4 +752,89 @@ func eventPayload(t *testing.T, event Event) map[string]any {
 		t.Fatalf("unmarshal event payload: %v", err)
 	}
 	return payload
+}
+
+// BenchmarkBrokerPublishSteadyState measures publish cost once the replay
+// buffer is full — the steady state under sustained traffic.
+func BenchmarkBrokerPublishSteadyState(b *testing.B) {
+	broker := NewBroker(Config{Enabled: true, BufferSize: 10000, ReplayLimit: 1000})
+	entry := &usage.UsageEntry{
+		ID:        "usage-bench",
+		RequestID: "req-bench",
+		Timestamp: time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC),
+		Model:     "gpt-test",
+		Provider:  "openai",
+	}
+	for i := 0; i < 10001; i++ {
+		broker.PublishUsageEvent(EventUsageFlushed, entry)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		broker.PublishUsageEvent(EventUsageFlushed, entry)
+	}
+}
+
+// TestBrokerReplayAfterBufferWrap fills the circular replay buffer past
+// capacity so the head index has advanced, then checks replay content and
+// ordering for cursors inside and outside the retained window.
+func TestBrokerReplayAfterBufferWrap(t *testing.T) {
+	b := NewBroker(Config{Enabled: true, BufferSize: 4, ReplayLimit: 4})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	// Publish 6 usage-flushed events (seq 1..6); the buffer retains seq 3..6
+	// with the ring head pointing mid-slice.
+	for i := 0; i < 6; i++ {
+		b.PublishUsageEvent(EventUsageFlushed, &usage.UsageEntry{
+			ID:        "usage-wrap",
+			RequestID: "req-wrap",
+			Timestamp: now.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	sub := b.Subscribe(4)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+	if sub.Reset {
+		t.Fatal("Subscribe reset = true, want false for cursor inside retained window")
+	}
+	if len(sub.Replay) != 2 {
+		t.Fatalf("replay len = %d, want 2", len(sub.Replay))
+	}
+	for i, wantSeq := range []uint64{5, 6} {
+		if got := sub.Replay[i].Seq; got != wantSeq {
+			t.Fatalf("replay[%d].Seq = %d, want %d", i, got, wantSeq)
+		}
+	}
+
+	// Cursor exactly one before the oldest retained event replays the whole window.
+	subFull := b.Subscribe(2)
+	if subFull == nil {
+		t.Fatal("Subscribe(2) returned nil")
+	}
+	defer subFull.Close()
+	if subFull.Reset {
+		t.Fatal("Subscribe(2) reset = true, want false")
+	}
+	if len(subFull.Replay) != 4 {
+		t.Fatalf("full replay len = %d, want 4", len(subFull.Replay))
+	}
+	for i, wantSeq := range []uint64{3, 4, 5, 6} {
+		if got := subFull.Replay[i].Seq; got != wantSeq {
+			t.Fatalf("full replay[%d].Seq = %d, want %d", i, got, wantSeq)
+		}
+	}
+
+	// A cursor older than the retained window resets to active snapshots.
+	subStale := b.Subscribe(1)
+	if subStale == nil {
+		t.Fatal("Subscribe(1) returned nil")
+	}
+	defer subStale.Close()
+	if !subStale.Reset {
+		t.Fatal("Subscribe(1) reset = false, want true for cursor before retained window")
+	}
 }
