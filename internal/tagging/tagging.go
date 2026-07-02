@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"gomodel/config"
+	"gomodel/internal/core"
 )
 
 // ValidationError marks rule failures caused by caller input, so API handlers
@@ -67,7 +68,7 @@ func NormalizeRules(rules []Rule) error {
 		if err != nil {
 			return newValidationError("tagging rule %d: %v", i, err)
 		}
-		if config.DeniedTaggingHeader(name) {
+		if core.IsCredentialHeader(name) {
 			return newValidationError("tagging rule %d: header %q may carry credentials and cannot be used for tagging", i, name)
 		}
 		rule.Header = name
