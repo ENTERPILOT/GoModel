@@ -16,10 +16,13 @@ import (
 type RequestMutator func(*llmclient.Request)
 
 type CompatibleProviderConfig struct {
-	ProviderName   string
-	BaseURL        string
-	SetHeaders     func(*http.Request, string)
-	RequestMutator RequestMutator
+	ProviderName               string
+	BaseURL                    string
+	SetHeaders                 func(*http.Request, string)
+	RequestMutator             RequestMutator
+	CustomUpstreamHeaders      map[string]string
+	PassthroughUserHeaders     bool
+	PassthroughUserHeadersSkip []string
 }
 
 type CompatibleProvider struct {
@@ -42,11 +45,14 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
-	p.client = llmclient.New(clientCfg, func(req *http.Request) {
+	setHeaders := func(req *http.Request) {
 		if cfg.SetHeaders != nil {
 			cfg.SetHeaders(req, apiKey)
 		}
-	})
+		// Run last so custom/passthrough headers win over the auth header above.
+		providers.ApplyRequestHeaderOverrides(req.Context(), req.Header, cfg.CustomUpstreamHeaders, cfg.PassthroughUserHeaders, cfg.PassthroughUserHeadersSkip...)
+	}
+	p.client = llmclient.New(clientCfg, setHeaders)
 	return p
 }
 
@@ -61,11 +67,13 @@ func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client,
 	}
 	clientCfg := llmclient.DefaultConfig(cfg.ProviderName, cfg.BaseURL)
 	clientCfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, clientCfg, func(req *http.Request) {
+	setHeaders := func(req *http.Request) {
 		if cfg.SetHeaders != nil {
 			cfg.SetHeaders(req, apiKey)
 		}
-	})
+		providers.ApplyRequestHeaderOverrides(req.Context(), req.Header, cfg.CustomUpstreamHeaders, cfg.PassthroughUserHeaders, cfg.PassthroughUserHeadersSkip...)
+	}
+	p.client = llmclient.NewWithHTTPClient(httpClient, clientCfg, setHeaders)
 	return p
 }
 

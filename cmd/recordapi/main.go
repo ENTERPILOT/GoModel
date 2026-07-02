@@ -9,6 +9,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"flag"
 	"fmt"
 	"io"
@@ -21,7 +22,10 @@ import (
 	"github.com/goccy/go-json"
 )
 
-const oracleDefaultModel = "openai.gpt-oss-120b"
+const (
+	oracleDefaultModel = "openai.gpt-oss-120b"
+	kimiDefaultModel   = "kimi-for-coding"
+)
 
 // Provider configurations
 var providerConfigs = map[string]struct {
@@ -30,6 +34,7 @@ var providerConfigs = map[string]struct {
 	envKey      string
 	authHeader  string
 	contentType string
+	setHeaders  func(*http.Request)
 }{
 	"openai": {
 		baseURL:     "https://api.openai.com",
@@ -60,6 +65,13 @@ var providerConfigs = map[string]struct {
 		envKey:      "XAI_API_KEY",
 		authHeader:  "Authorization",
 		contentType: "application/json",
+	},
+	"kimi": {
+		baseURL:     "https://api.kimi.com/coding",
+		envKey:      "KIMI_API_KEY",
+		authHeader:  "Authorization",
+		contentType: "application/json",
+		setHeaders:  setKimiHeaders,
 	},
 	"oracle": {
 		baseURLEnv:  "ORACLE_BASE_URL",
@@ -155,7 +167,7 @@ func providerSupportsResponses(provider string) bool {
 }
 
 func main() {
-	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, groq, xai, oracle)")
+	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, groq, xai, kimi, oracle)")
 	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream)")
 	output := flag.String("output", "", "Output file path (required)")
 	model := flag.String("model", "", "Override model in request")
@@ -203,12 +215,12 @@ func main() {
 	if eConfig.requestBody != nil {
 		reqBody := eConfig.requestBody
 
-		// Oracle's OpenAI-compatible endpoint expects OCI-hosted model IDs,
-		// so use a provider-specific default instead of the generic gpt-4o-mini fixture.
 		if *model != "" {
 			reqBody["model"] = *model
 		} else if *provider == "oracle" {
 			reqBody["model"] = oracleDefaultModel
+		} else if *provider == "kimi" {
+			reqBody["model"] = kimiDefaultModel
 		}
 
 		// Adjust request for different providers
@@ -250,6 +262,11 @@ func main() {
 		req.Header.Set("anthropic-version", "2023-06-01")
 	}
 
+	// Apply provider-specific header overrides
+	if pConfig.setHeaders != nil {
+		pConfig.setHeaders(req)
+	}
+
 	// Send request
 	client := &http.Client{Timeout: 60 * time.Second}
 	fmt.Printf("Sending request to %s %s...\n", eConfig.method, url)
@@ -263,8 +280,18 @@ func main() {
 
 	fmt.Printf("Response status: %d %s\n", resp.StatusCode, resp.Status)
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	// Decompress if the server honored an explicit Accept-Encoding header.
+	var respReader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating gzip reader: %v\n", err)
+			os.Exit(1)
+		}
+		defer gr.Close()
+		respReader = gr
+	}
+	body, err := io.ReadAll(respReader)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading response: %v\n", err)
 		os.Exit(1)
@@ -309,6 +336,26 @@ func main() {
 			fmt.Printf("Model: %s\n", model)
 		}
 	}
+}
+
+// setKimiHeaders installs the client-identity header bundle Kimi's coding
+// endpoint expects from an OpenAI-SDK-style client.
+func setKimiHeaders(req *http.Request) {
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
+	req.Header.Set("Accept-Language", "*")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Http-Referer", "https://github.com/Zoo-Code-Org/Zoo-Code")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("User-Agent", "ZooCode/3.62.0")
+	req.Header.Set("X-Stainless-Arch", "x64")
+	req.Header.Set("X-Stainless-Lang", "js")
+	req.Header.Set("X-Stainless-Os", "Linux")
+	req.Header.Set("X-Stainless-Package-Version", "5.12.2")
+	req.Header.Set("X-Stainless-Retry-Count", "0")
+	req.Header.Set("X-Stainless-Runtime", "node")
+	req.Header.Set("X-Stainless-Runtime-Version", "v22.22.1")
+	req.Header.Set("X-Title", "Zoo Code")
 }
 
 // adjustForAnthropic converts OpenAI-style request to Anthropic format

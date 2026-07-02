@@ -37,9 +37,12 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	apiVersion := providers.ResolveAPIVersion(providerCfg.APIVersion, defaultAPIVersion)
 	p := &Provider{apiVersion: apiVersion, apiKey: providerCfg.APIKey}
 	clientCfg := openai.CompatibleProviderConfig{
-		ProviderName: "azure",
-		BaseURL:      baseURL,
-		SetHeaders:   setHeaders,
+		ProviderName:               "azure",
+		BaseURL:                    baseURL,
+		SetHeaders:                 setHeaders,
+		CustomUpstreamHeaders:      providerCfg.CustomUpstreamHeaders,
+		PassthroughUserHeaders:     providerCfg.PassthroughUserHeaders,
+		PassthroughUserHeadersSkip: providerCfg.PassthroughUserHeadersSkip,
 	}
 	p.CompatibleProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)
 	p.resourceProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)

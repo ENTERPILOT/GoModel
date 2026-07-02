@@ -1,0 +1,118 @@
+---
+title: "Provider Header Passthrough"
+description: "Tune outbound request headers per provider — pick one: static custom_upstream_headers OR inbound passthrough. Kimi defaults to passthrough on."
+icon: "shuffle"
+---
+
+## Overview
+
+Each provider block accepts two optional, **mutually exclusive** header fields.
+Setting both fails config-load validation.
+
+| Field | Purpose |
+| --- | --- |
+| `custom_upstream_headers` | Static map of header name → value, written on every outbound request. YAML-only. |
+| `passthrough_user_headers` | Boolean. When `true`, every non-skipped inbound header is forwarded onto the outbound request. |
+
+Pick the path that fits the upstream:
+
+- **Forward what the caller sent** → `passthrough_user_headers: true`. Defaults
+  to `true` for Kimi, `false` for every other provider. Drop specific keys the
+  upstream rejects with `passthrough_user_headers_skip`.
+- **Write a static bundle** → `passthrough_user_headers: false` +
+  `custom_upstream_headers`. The outbound request gets only the static headers
+  + provider-set auth, never anything the caller sent.
+
+Provider-set authentication headers (e.g. `Authorization: Bearer …`) are
+written by the provider factory before any of this runs; the feature never
+touches them.
+
+Override precedence, highest wins: env var > YAML field > provider-type
+default.
+
+```bash
+export KIMI_PASSTHROUGH_USER_HEADERS=false
+```
+
+This is unrelated to the [HTTP passthrough API](/features/passthrough-api) at
+`/p/{provider}/...`, which proxies provider-native bodies verbatim.
+
+## Static custom headers (passthrough off)
+
+`passthrough_user_headers: false` plus a `custom_upstream_headers` map writes
+the same bundle on every request — useful for stable client identity, tracing,
+or any upstream-specific static key the inbound call shouldn't influence.
+
+```yaml
+providers:
+  <provider-type>:
+    api_key: "<your-key>"
+    passthrough_user_headers: false
+    custom_upstream_headers:
+      User-Agent: "my-app/1.0"
+      X-Trace-Source: "gomodel"
+```
+
+Header names are canonicalized with `http.CanonicalHeaderKey`, so
+`x-trace-source` and `X-Trace-Source` are the same key. There is no env-var
+equivalent — keep static bundles in `config.yaml`.
+
+## Inbound header passthrough (custom headers off)
+
+`passthrough_user_headers: true` forwards every non-skipped inbound header
+onto the outbound request. Provider auth headers win over inbound ones;
+cookies and `X-Forwarded-*` are never forwarded.
+
+```yaml
+providers:
+  <provider-type>:
+    api_key: "<your-key>"
+    passthrough_user_headers: true
+```
+
+### Per-provider skip additions
+
+When the upstream rejects a header the always-on floor doesn't already cover,
+list it under `passthrough_user_headers_skip` (or the
+`<PROVIDER>_PASSTHROUGH_USER_HEADERS_SKIP` env var, comma-separated; env wins
+over YAML).
+
+```yaml
+providers:
+  <provider-type>:
+    api_key: "<your-key>"
+    passthrough_user_headers: true
+    passthrough_user_headers_skip:
+      - X-MyOrg-Trace
+      - X-Internal-Id
+```
+
+```bash
+export KIMI_PASSTHROUGH_USER_HEADERS_SKIP="X-MyOrg-Trace, X-Internal-Id"
+```
+
+Keys are matched with `http.CanonicalHeaderKey`, so `x-myorg-trace` and
+`X-MyOrg-Trace` are the same.
+
+## Skip list
+
+The always-on floor drops the following from inbound passthrough on every
+provider, and is not per-provider configurable — only additions via
+`passthrough_user_headers_skip` are:
+
+- **Credential headers**: `Authorization`, `X-Api-Key`
+- **Transport-managed / hop-by-hop (RFC 7230)**: `Host`, `Content-Length`,
+  `Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Proxy-Authorization`,
+  `Te`, `Trailer`, `Transfer-Encoding`, `Upgrade`
+- **Cookies and forwarding context**: `Cookie`, `Set-Cookie`, `Forwarded`,
+  every `X-Forwarded-*` prefix
+
+The skip list has no effect when `passthrough_user_headers: false`.
+
+## See also
+
+- [Kimi provider guide](/providers/kimi) — Kimi's passthrough default and the
+  client-identity headers its coding endpoint expects.
+- [Configuration reference](/advanced/configuration) — full `config.yaml`
+  schema.
+- [Providers overview](/providers/overview) — comparison matrix.

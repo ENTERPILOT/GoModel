@@ -54,6 +54,10 @@ type Provider struct {
 	useNativeAPI bool
 	modelsURL    string
 	configErr    error
+
+	customHeaders   map[string]string
+	passthrough     bool
+	passthroughSkip []string
 }
 
 // New creates a new Gemini provider.
@@ -75,11 +79,14 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 	baseURL, nativeBaseURL := geminiBaseURLs(providerCfg, backend)
 	modelsURL := geminiModelsBaseURL(backend, nativeBaseURL)
 	p := &Provider{
-		apiKey:       providerCfg.APIKey,
-		backend:      backend,
-		authType:     authType,
-		useNativeAPI: useNativeAPI(providerCfg.APIMode),
-		modelsURL:    modelsURL,
+		apiKey:          providerCfg.APIKey,
+		backend:         backend,
+		authType:        authType,
+		useNativeAPI:    useNativeAPI(providerCfg.APIMode),
+		modelsURL:       modelsURL,
+		customHeaders:   providerCfg.CustomUpstreamHeaders,
+		passthrough:     providerCfg.PassthroughUserHeaders,
+		passthroughSkip: providerCfg.PassthroughUserHeadersSkip,
 	}
 	p.validateConfig(providerCfg)
 	if !preauthenticated {
@@ -123,11 +130,14 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 	baseURL, nativeBaseURL := geminiBaseURLs(providerCfg, geminiBackendAIStudio)
 	modelsURL := geminiModelsBaseURL(geminiBackendAIStudio, nativeBaseURL)
 	p := &Provider{
-		apiKey:       apiKey,
-		backend:      geminiBackendAIStudio,
-		authType:     geminiAuthTypeAPIKey,
-		useNativeAPI: useNativeAPIFromEnv(),
-		modelsURL:    modelsURL,
+		apiKey:          apiKey,
+		backend:         geminiBackendAIStudio,
+		authType:        geminiAuthTypeAPIKey,
+		useNativeAPI:    useNativeAPIFromEnv(),
+		modelsURL:       modelsURL,
+		customHeaders:   providerCfg.CustomUpstreamHeaders,
+		passthrough:     providerCfg.PassthroughUserHeaders,
+		passthroughSkip: providerCfg.PassthroughUserHeadersSkip,
 	}
 	modelsCfg := llmclient.DefaultConfig("gemini", modelsURL)
 	modelsCfg.Hooks = hooks
@@ -235,6 +245,8 @@ func (p *Provider) setHeaders(req *http.Request) {
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {
 		req.Header.Set("X-Request-Id", requestID)
 	}
+
+	providers.ApplyRequestHeaderOverrides(req.Context(), req.Header, p.customHeaders, p.passthrough, p.passthroughSkip...)
 }
 
 // setNativeHeaders sets the required headers for Gemini native API requests.

@@ -82,6 +82,10 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 
 	providerMap, credentialResolved := resolveProviders(result.RawProviders, result.Config.Resilience, factory.discoveryConfigsSnapshot())
 
+	if err := validateMutuallyExclusiveHeaders(providerMap); err != nil {
+		return nil, fmt.Errorf("invalid provider header configuration: %w", err)
+	}
+
 	modelCache, err := initCache(result.Config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize cache: %w", err)

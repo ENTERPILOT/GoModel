@@ -29,6 +29,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | xAI (Grok) | `XAI_API_KEY` | `grok-4` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/providers/bailian) |
+| Kimi | `KIMI_API_KEY` (`KIMI_BASE_URL` optional) | `kimi-for-coding` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Kimi](/providers/kimi) |
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
 | OpenCode Go | `OPENCODE_GO_API_KEY` (`OPENCODE_GO_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [OpenCode Go](/providers/opencode-go) |
@@ -66,6 +67,13 @@ support, not every individual model capability exposed by an upstream provider.
   for providers that define a list, skipping their upstream `/models` calls.
 - **vLLM** — set `VLLM_API_KEY` only if the upstream server was started with
   `--api-key`.
+- **Per-provider header customization** — each provider block accepts
+  `custom_upstream_headers` (static bundle, YAML-only) and
+  `passthrough_user_headers` (forward inbound headers after a skip list; env:
+  `<PROVIDER>_PASSTHROUGH_USER_HEADERS`). Kimi defaults passthrough to `true`,
+  every other provider to `false`; the two fields are mutually exclusive. See
+  the [Provider Header Passthrough feature page](/features/provider-header-passthrough)
+  for the full schema, skip list, and examples.
 - **Multiple instances of one provider type** — without `config.yaml`, use
   suffixed env vars such as `OPENAI_EAST_API_KEY` and `OPENAI_EAST_BASE_URL`;
   add `OPENAI_EAST_MODELS` to configure that instance's model list. This

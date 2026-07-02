@@ -54,6 +54,7 @@
                             "features/virtual-models",
                             "features/user-path",
                             "features/passthrough-api",
+                            "features/provider-header-passthrough",
                             "features/budgets",
                             "features/cost-tracking",
                             "features/cache",

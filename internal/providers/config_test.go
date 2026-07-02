@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +43,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	},
 	"zai": {
 		DefaultBaseURL: "https://api.z.ai/api/paas/v4",
+	},
+	"kimi": {
+		DefaultBaseURL: "https://api.kimi.com/coding/v1",
 	},
 	"vllm": {
 		DefaultBaseURL:  "http://localhost:8000/v1",
@@ -1516,6 +1520,160 @@ func TestResolveProviders_SingleCustomNamedProviderDoesNotDuplicateTypeKey(t *te
 	}
 }
 
+func boolPtr(b bool) *bool { return &b }
+
+func TestBuildProviderConfig_KimiPassthroughDefaultTrue(t *testing.T) {
+	raw := config.RawProviderConfig{Type: "kimi", APIKey: "sk-kimi"}
+	got := buildProviderConfig(raw, globalResilience)
+
+	if !got.PassthroughUserHeaders {
+		t.Errorf("kimi default PassthroughUserHeaders = false, want true")
+	}
+}
+
+func TestBuildProviderConfig_NonKimiPassthroughDefaultFalse(t *testing.T) {
+	cases := []struct {
+		name string
+		typ  string
+	}{
+		{"openai", "openai"},
+		{"anthropic", "anthropic"},
+		{"gemini", "gemini"},
+		{"vertex", "vertex"},
+		{"custom", "custom-provider"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := config.RawProviderConfig{Type: tc.typ, APIKey: "sk"}
+			got := buildProviderConfig(raw, globalResilience)
+
+			if got.PassthroughUserHeaders {
+				t.Errorf("%s default PassthroughUserHeaders = true, want false", tc.typ)
+			}
+		})
+	}
+}
+
+func TestBuildProviderConfig_PassthroughYAMLOverride(t *testing.T) {
+	t.Run("kimi_false", func(t *testing.T) {
+		raw := config.RawProviderConfig{
+			Type:                   "kimi",
+			APIKey:                 "sk-kimi",
+			PassthroughUserHeaders: boolPtr(false),
+		}
+		got := buildProviderConfig(raw, globalResilience)
+		if got.PassthroughUserHeaders {
+			t.Errorf("kimi with explicit PassthroughUserHeaders=false got true, want false")
+		}
+	})
+	t.Run("openai_true", func(t *testing.T) {
+		raw := config.RawProviderConfig{
+			Type:                   "openai",
+			APIKey:                 "sk",
+			PassthroughUserHeaders: boolPtr(true),
+		}
+		got := buildProviderConfig(raw, globalResilience)
+		if !got.PassthroughUserHeaders {
+			t.Errorf("openai with explicit PassthroughUserHeaders=true got false, want true")
+		}
+	})
+}
+
+func TestBuildProviderConfig_PassthroughEnvOverride(t *testing.T) {
+	t.Setenv("KIMI_PASSTHROUGH_USER_HEADERS", "false")
+
+	discovery := map[string]DiscoveryConfig{
+		"kimi": {DefaultBaseURL: "https://api.kimi.com/v1"},
+	}
+	raw := map[string]config.RawProviderConfig{
+		"kimi": {Type: "kimi", APIKey: "sk-kimi"},
+	}
+
+	merged := applyProviderEnvVars(raw, discovery)
+	got := buildProviderConfig(merged["kimi"], globalResilience)
+
+	if got.PassthroughUserHeaders {
+		t.Errorf("KIMI_PASSTHROUGH_USER_HEADERS=false should override kimi default true, got true")
+	}
+}
+
+func TestBuildProviderConfig_PassthroughUserHeadersSkipRoundTrip(t *testing.T) {
+	skip := []string{"X-MyOrg-Trace", "X-Internal-Id"}
+	raw := config.RawProviderConfig{
+		Type:                       "kimi",
+		APIKey:                     "sk-kimi",
+		PassthroughUserHeadersSkip: skip,
+	}
+	got := buildProviderConfig(raw, globalResilience)
+
+	if len(got.PassthroughUserHeadersSkip) != len(skip) {
+		t.Fatalf("PassthroughUserHeadersSkip length = %d, want %d", len(got.PassthroughUserHeadersSkip), len(skip))
+	}
+	for _, k := range skip {
+		found := false
+		for _, got := range got.PassthroughUserHeadersSkip {
+			if got == k {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("PassthroughUserHeadersSkip missing %q", k)
+		}
+	}
+}
+
+func TestBuildProviderConfig_PassthroughSkipEnvOverride(t *testing.T) {
+	t.Setenv("KIMI_PASSTHROUGH_USER_HEADERS_SKIP", "X-A, X-B , X-C")
+
+	discovery := map[string]DiscoveryConfig{
+		"kimi": {DefaultBaseURL: "https://api.kimi.com/v1"},
+	}
+	raw := map[string]config.RawProviderConfig{
+		"kimi": {
+			Type:                       "kimi",
+			APIKey:                     "sk-kimi",
+			PassthroughUserHeadersSkip: []string{"old"},
+		},
+	}
+
+	merged := applyProviderEnvVars(raw, discovery)
+	got := buildProviderConfig(merged["kimi"], globalResilience)
+
+	want := []string{"X-A", "X-B", "X-C"}
+	if len(got.PassthroughUserHeadersSkip) != len(want) {
+		t.Fatalf("PassthroughUserHeadersSkip = %v, want %v", got.PassthroughUserHeadersSkip, want)
+	}
+	for i, k := range want {
+		if got.PassthroughUserHeadersSkip[i] != k {
+			t.Errorf("PassthroughUserHeadersSkip[%d] = %q, want %q", i, got.PassthroughUserHeadersSkip[i], k)
+		}
+	}
+}
+
+func TestBuildProviderConfig_CustomUpstreamHeadersRoundTrip(t *testing.T) {
+	headers := map[string]string{
+		"X-Org-Id": "acme",
+		"X-Tenant": "primary",
+		"X-Trace":  "yes",
+	}
+	raw := config.RawProviderConfig{
+		Type:                  "openai",
+		APIKey:                "sk",
+		CustomUpstreamHeaders: headers,
+	}
+	got := buildProviderConfig(raw, globalResilience)
+
+	if len(got.CustomUpstreamHeaders) != len(headers) {
+		t.Fatalf("CustomUpstreamHeaders length = %d, want %d", len(got.CustomUpstreamHeaders), len(headers))
+	}
+	for k, v := range headers {
+		if got.CustomUpstreamHeaders[k] != v {
+			t.Errorf("CustomUpstreamHeaders[%q] = %q, want %q", k, got.CustomUpstreamHeaders[k], v)
+		}
+	}
+}
+
 func TestResolveProviders_NoProvidersNoEnvVars(t *testing.T) {
 	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
 	if len(got) != 0 {
@@ -1524,4 +1682,66 @@ func TestResolveProviders_NoProvidersNoEnvVars(t *testing.T) {
 	if len(filteredRaw) != 0 {
 		t.Errorf("expected empty filtered raw, got %d entries", len(filteredRaw))
 	}
+}
+
+func TestValidateMutuallyExclusiveHeaders_RejectsBoth(t *testing.T) {
+	t.Run("passthrough_true_with_custom_headers", func(t *testing.T) {
+		providers := map[string]ProviderConfig{
+			"kimi": {
+				Type:                   "kimi",
+				PassthroughUserHeaders: true,
+				CustomUpstreamHeaders:  map[string]string{"X-Trace-Source": "gomodel"},
+			},
+		}
+		err := validateMutuallyExclusiveHeaders(providers)
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "kimi") {
+			t.Errorf("expected error to name the provider, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "both") {
+			t.Errorf("expected error to explain the conflict, got %v", err)
+		}
+	})
+
+	t.Run("default_passthrough_with_custom_headers", func(t *testing.T) {
+		// Default for non-kimi is false; only true should trigger.
+		providers := map[string]ProviderConfig{
+			"openai": {
+				Type:                   "openai",
+				PassthroughUserHeaders: false,
+				CustomUpstreamHeaders:  map[string]string{"X-Trace-Source": "gomodel"},
+			},
+		}
+		if err := validateMutuallyExclusiveHeaders(providers); err != nil {
+			t.Errorf("passthrough=false with custom must be allowed, got %v", err)
+		}
+	})
+}
+
+func TestValidateMutuallyExclusiveHeaders_AllowsEachAlone(t *testing.T) {
+	t.Run("neither_set", func(t *testing.T) {
+		if err := validateMutuallyExclusiveHeaders(map[string]ProviderConfig{
+			"openai": {Type: "openai"},
+		}); err != nil {
+			t.Errorf("neither set must be allowed, got %v", err)
+		}
+	})
+
+	t.Run("only_passthrough", func(t *testing.T) {
+		if err := validateMutuallyExclusiveHeaders(map[string]ProviderConfig{
+			"kimi": {Type: "kimi", PassthroughUserHeaders: true},
+		}); err != nil {
+			t.Errorf("only passthrough must be allowed, got %v", err)
+		}
+	})
+
+	t.Run("only_custom", func(t *testing.T) {
+		if err := validateMutuallyExclusiveHeaders(map[string]ProviderConfig{
+			"openai": {Type: "openai", CustomUpstreamHeaders: map[string]string{"X-Trace": "v"}},
+		}); err != nil {
+			t.Errorf("only custom must be allowed, got %v", err)
+		}
+	})
 }

@@ -38,9 +38,12 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	rootBaseURL := passthroughBaseURL(baseURL)
 	return &Provider{
 		compatible: openai.NewCompatibleProvider(cfg.APIKey, opts, openai.CompatibleProviderConfig{
-			ProviderName: "vllm",
-			BaseURL:      baseURL,
-			SetHeaders:   setHeaders,
+			ProviderName:               "vllm",
+			BaseURL:                    baseURL,
+			SetHeaders:                 setHeaders,
+			CustomUpstreamHeaders:      cfg.CustomUpstreamHeaders,
+			PassthroughUserHeaders:     cfg.PassthroughUserHeaders,
+			PassthroughUserHeadersSkip: cfg.PassthroughUserHeadersSkip,
 		}),
 		rootClient: llmclient.New(llmclient.Config{
 			ProviderName:   "vllm",

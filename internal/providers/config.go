@@ -1,9 +1,11 @@
 package providers
 
 import (
+	"fmt"
 	"maps"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -32,8 +34,11 @@ type ProviderConfig struct {
 	// ID (as it appears in the provider's /models response). The registry merges
 	// these onto remote-registry metadata after enrichment; non-zero fields here
 	// win. Empty/nil when no per-model metadata is declared in YAML.
-	ModelMetadataOverrides map[string]*core.ModelMetadata
-	Resilience             config.ResilienceConfig
+	ModelMetadataOverrides     map[string]*core.ModelMetadata
+	CustomUpstreamHeaders      map[string]string
+	PassthroughUserHeaders     bool
+	PassthroughUserHeadersSkip []string
+	Resilience                 config.ResilienceConfig
 }
 
 // resolveProviders applies env var overrides to the raw YAML provider map, filters
@@ -45,6 +50,18 @@ func resolveProviders(raw map[string]config.RawProviderConfig, global config.Res
 	merged := applyProviderEnvVars(raw, discovery)
 	filtered := filterEmptyProviders(merged, discovery)
 	return buildProviderConfigs(filtered, global), filtered
+}
+
+func validateMutuallyExclusiveHeaders(providers map[string]ProviderConfig) error {
+	for name, cfg := range providers {
+		if cfg.PassthroughUserHeaders && len(cfg.CustomUpstreamHeaders) > 0 {
+			return fmt.Errorf(
+				"provider %q sets both passthrough_user_headers and custom_upstream_headers; pick one (passthrough forwards inbound headers; custom writes a static bundle)",
+				name,
+			)
+		}
+	}
+	return nil
 }
 
 // applyProviderEnvVars overlays well-known provider env vars onto the raw YAML map.
@@ -91,6 +108,8 @@ const (
 	providerEnvFieldServiceAccountJSON
 	providerEnvFieldServiceAccountJSONBase64
 	providerEnvFieldGCPScope
+	providerEnvFieldPassthroughUserHeaders
+	providerEnvFieldPassthroughUserHeadersSkip
 )
 
 type providerEnvSource struct {
@@ -114,6 +133,10 @@ type providerEnvValues struct {
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
 	Models                   []string
+	// *bool so "unset" is distinguishable from "explicitly false".
+	PassthroughUserHeaders *bool
+	// Comma-separated header names from <PROVIDER>_PASSTHROUGH_USER_HEADERS_SKIP.
+	PassthroughUserHeadersSkip []string
 }
 
 func (v providerEnvValues) empty() bool {
@@ -129,7 +152,9 @@ func (v providerEnvValues) empty() bool {
 		strings.TrimSpace(v.ServiceAccountJSON) == "" &&
 		strings.TrimSpace(v.ServiceAccountJSONBase64) == "" &&
 		strings.TrimSpace(v.GCPScope) == "" &&
-		len(v.Models) == 0
+		len(v.Models) == 0 &&
+		v.PassthroughUserHeaders == nil &&
+		len(v.PassthroughUserHeadersSkip) == 0
 }
 
 func providerEnvSources(providerType string, spec DiscoveryConfig) []providerEnvSource {
@@ -188,6 +213,14 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 			values.ServiceAccountJSONBase64 = value
 		case providerEnvFieldGCPScope:
 			values.GCPScope = value
+		case providerEnvFieldPassthroughUserHeaders:
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				continue
+			}
+			values.PassthroughUserHeaders = &parsed
+		case providerEnvFieldPassthroughUserHeadersSkip:
+			values.PassthroughUserHeadersSkip = parseCSVEnvList(value)
 		}
 		groups[suffix] = values
 	}
@@ -214,6 +247,8 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		name  string
 		field providerEnvField
 	}{
+		{name: "PASSTHROUGH_USER_HEADERS_SKIP", field: providerEnvFieldPassthroughUserHeadersSkip},
+		{name: "PASSTHROUGH_USER_HEADERS", field: providerEnvFieldPassthroughUserHeaders},
 		{name: "API_VERSION", field: providerEnvFieldAPIVersion},
 		{name: "BASE_URL", field: providerEnvFieldBaseURL},
 		{name: "AUTH_TYPE", field: providerEnvFieldAuthType},
@@ -333,20 +368,22 @@ func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, pr
 func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) config.RawProviderConfig {
 	backend := v.Backend
 	return config.RawProviderConfig{
-		Type:                     providerType,
-		APIKey:                   v.APIKey,
-		BaseURL:                  v.resolvedBaseURL(spec),
-		APIVersion:               v.APIVersion,
-		Backend:                  backend,
-		AuthType:                 v.AuthType,
-		APIMode:                  v.APIMode,
-		VertexProject:            v.VertexProject,
-		VertexLocation:           v.VertexLocation,
-		ServiceAccountFile:       v.ServiceAccountFile,
-		ServiceAccountJSON:       v.ServiceAccountJSON,
-		ServiceAccountJSONBase64: v.ServiceAccountJSONBase64,
-		GCPScope:                 v.GCPScope,
-		Models:                   rawProviderModelsFromIDs(v.Models),
+		Type:                       providerType,
+		APIKey:                     v.APIKey,
+		BaseURL:                    v.resolvedBaseURL(spec),
+		APIVersion:                 v.APIVersion,
+		Backend:                    backend,
+		AuthType:                   v.AuthType,
+		APIMode:                    v.APIMode,
+		VertexProject:              v.VertexProject,
+		VertexLocation:             v.VertexLocation,
+		ServiceAccountFile:         v.ServiceAccountFile,
+		ServiceAccountJSON:         v.ServiceAccountJSON,
+		ServiceAccountJSONBase64:   v.ServiceAccountJSONBase64,
+		GCPScope:                   v.GCPScope,
+		Models:                     rawProviderModelsFromIDs(v.Models),
+		PassthroughUserHeaders:     v.PassthroughUserHeaders,
+		PassthroughUserHeadersSkip: v.PassthroughUserHeadersSkip,
 	}
 }
 
@@ -399,6 +436,12 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	}
 	if len(values.Models) > 0 {
 		existing.Models = rawProviderModelsFromIDs(values.Models)
+	}
+	if values.PassthroughUserHeaders != nil {
+		existing.PassthroughUserHeaders = values.PassthroughUserHeaders
+	}
+	if len(values.PassthroughUserHeadersSkip) > 0 {
+		existing.PassthroughUserHeadersSkip = values.PassthroughUserHeadersSkip
 	}
 	return existing
 }
@@ -622,22 +665,25 @@ func buildProviderConfigs(raw map[string]config.RawProviderConfig, global config
 // Non-nil fields in the raw config override the global defaults.
 func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceConfig) ProviderConfig {
 	resolved := ProviderConfig{
-		Type:                     normalizeProviderType(raw),
-		APIKey:                   raw.APIKey,
-		BaseURL:                  raw.BaseURL,
-		APIVersion:               raw.APIVersion,
-		Backend:                  raw.Backend,
-		AuthType:                 raw.AuthType,
-		APIMode:                  raw.APIMode,
-		VertexProject:            raw.VertexProject,
-		VertexLocation:           raw.VertexLocation,
-		ServiceAccountFile:       raw.ServiceAccountFile,
-		ServiceAccountJSON:       raw.ServiceAccountJSON,
-		ServiceAccountJSONBase64: raw.ServiceAccountJSONBase64,
-		GCPScope:                 raw.GCPScope,
-		Models:                   config.ProviderModelIDs(raw.Models),
-		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
-		Resilience:               global,
+		Type:                       normalizeProviderType(raw),
+		APIKey:                     raw.APIKey,
+		BaseURL:                    raw.BaseURL,
+		APIVersion:                 raw.APIVersion,
+		Backend:                    raw.Backend,
+		AuthType:                   raw.AuthType,
+		APIMode:                    raw.APIMode,
+		VertexProject:              raw.VertexProject,
+		VertexLocation:             raw.VertexLocation,
+		ServiceAccountFile:         raw.ServiceAccountFile,
+		ServiceAccountJSON:         raw.ServiceAccountJSON,
+		ServiceAccountJSONBase64:   raw.ServiceAccountJSONBase64,
+		GCPScope:                   raw.GCPScope,
+		Models:                     config.ProviderModelIDs(raw.Models),
+		ModelMetadataOverrides:     config.ProviderModelMetadataOverrides(raw.Models),
+		CustomUpstreamHeaders:      raw.CustomUpstreamHeaders,
+		PassthroughUserHeaders:     resolvePassthroughUserHeaders(raw),
+		PassthroughUserHeadersSkip: raw.PassthroughUserHeadersSkip,
+		Resilience:                 global,
 	}
 
 	if raw.Resilience == nil {
@@ -675,6 +721,13 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 	}
 
 	return resolved
+}
+
+func resolvePassthroughUserHeaders(raw config.RawProviderConfig) bool {
+	if raw.PassthroughUserHeaders != nil {
+		return *raw.PassthroughUserHeaders
+	}
+	return strings.EqualFold(normalizeProviderType(raw), "kimi")
 }
 
 func normalizeProviderType(raw config.RawProviderConfig) string {

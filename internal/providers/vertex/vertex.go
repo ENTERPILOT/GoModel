@@ -40,6 +40,10 @@ type Provider struct {
 	nativeClient *llmclient.Client
 	authType     string
 	configErr    error
+
+	customHeaders   map[string]string
+	passthrough     bool
+	passthroughSkip []string
 }
 
 // New creates a new Vertex AI provider.
@@ -50,7 +54,10 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOptions, baseHTTPClient *http.Client) *Provider {
 	providerCfg.Backend = "vertex"
 	p := &Provider{
-		authType: normalizeAuthType(providerCfg),
+		authType:        normalizeAuthType(providerCfg),
+		customHeaders:   providerCfg.CustomUpstreamHeaders,
+		passthrough:     providerCfg.PassthroughUserHeaders,
+		passthroughSkip: providerCfg.PassthroughUserHeadersSkip,
 	}
 	p.validateConfig(providerCfg)
 
@@ -153,6 +160,8 @@ func (p *Provider) setHeaders(req *http.Request) {
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {
 		req.Header.Set("X-Request-Id", requestID)
 	}
+
+	providers.ApplyRequestHeaderOverrides(req.Context(), req.Header, p.customHeaders, p.passthrough, p.passthroughSkip...)
 }
 
 // ChatCompletion sends a chat completion request to Vertex AI Gemini.

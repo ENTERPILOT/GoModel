@@ -218,6 +218,8 @@ Set these to automatically register providers. No YAML configuration required.
 
 Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). DeepSeek defaults to `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only for a compatible proxy or alternate DeepSeek endpoint. OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. vLLM defaults to `http://localhost:8000/v1` when `VLLM_API_KEY` is set, but keyless deployments should set `VLLM_BASE_URL` explicitly to register the provider. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
 
+YAML provider blocks also accept `custom_upstream_headers` and `passthrough_user_headers` for tuning outbound headers; see the [Provider Header Passthrough feature page](/features/provider-header-passthrough) for the schema, defaults, env-var pattern, and worked examples.
+
 Every provider type also accepts a comma-separated configured model list via
 `<PROVIDER>_MODELS`, for example `OPENROUTER_MODELS`, `ORACLE_MODELS`,
 `AZURE_MODELS`, or `VLLM_MODELS`. By default,

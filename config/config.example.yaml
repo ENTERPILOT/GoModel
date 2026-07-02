@@ -230,6 +230,10 @@ providers:
   openai:
     type: openai
     api_key: "sk-..."
+    # Optional per-provider header fields (same for every provider):
+    # passthrough_user_headers: false # false default (kimi defaults true); true forwards inbound headers
+    # passthrough_user_headers_skip: {} # optional list of header names to exclude from passthrough
+    # custom_upstream_headers: {}     # static header map, sent on every request; mutually exclusive with passthrough
     # Per-provider resilience overrides (optional).
     # Only specified fields override the global defaults above.
     # resilience:
@@ -282,6 +286,29 @@ providers:
     api_key: "..."
     # Optional: use GLM Coding Plan endpoint instead of the general endpoint.
     # base_url: "https://api.z.ai/api/coding/paas/v4"
+
+  kimi:
+    type: kimi
+    # base_url: "https://api.kimi.com/coding/v1" # default
+    api_key: "${KIMI_API_KEY}"
+    # Kimi defaults passthrough_user_headers to true: inbound headers (minus a
+    # skip list) are forwarded automatically. custom_upstream_headers and
+    # passthrough_user_headers are mutually exclusive. See docs/features/provider-header-passthrough.mdx.
+    #
+    # The Kimi coding endpoint expects a recognizable client identity. With
+    # passthrough on, a caller sending those headers is forwarded as-is.
+    # Alternatively, disable passthrough and ship a static identity bundle.
+    # Use values truthful for your client and compliant with Kimi's terms.
+    # passthrough_user_headers: false
+    # passthrough_user_headers_skip:
+    #   - X-MyOrg-Trace
+    # custom_upstream_headers:
+    #   Http-Referer: "https://github.com/Zoo-Code-Org/Zoo-Code"
+    #   User-Agent: "ZooCode/3.62.0"
+    #   X-Stainless-Lang: "js"
+    #   X-Stainless-Os: "Linux"
+    #   X-Stainless-Runtime: "node"
+    #   X-Title: "Zoo Code"
 
   xiaomi:
     type: xiaomi
