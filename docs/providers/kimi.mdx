@@ -1,0 +1,113 @@
+---
+title: "Kimi"
+description: "Configure Kimi (Moonshot AI) in GoModel as a plain OpenAI-compatible provider — no header injection, just standard Bearer auth."
+icon: "sparkles"
+---
+
+[Kimi](https://www.kimi.com/) (Moonshot AI) exposes an OpenAI-compatible API.
+GoModel ships a native `kimi` provider that is a thin wrapper over the shared
+OpenAI-compatible transport — no provider-specific headers, no request
+mutators, and no auth scheme overrides. Authentication uses the standard
+`Authorization: Bearer <api_key>` header.
+
+## Configure
+
+```bash
+KIMI_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  kimi:
+    type: kimi
+    base_url: "https://api.kimi.com/coding/v1"
+    api_key: "${KIMI_API_KEY}"
+```
+
+The default base URL is `https://api.kimi.com/coding/v1`. Override it with
+`KIMI_BASE_URL` or the YAML `base_url` field when you need to point at a
+compatible proxy or alternate Kimi endpoint.
+
+## Authentication
+
+Kimi uses standard Bearer auth. GoModel sets one header on every outbound
+request:
+
+| Header | Value |
+| ------ | ----- |
+| `Authorization` | `Bearer <KIMI_API_KEY>` |
+
+GoModel itself adds no other static headers — but note the [Header
+customization](#header-customization) default below, which forwards inbound
+headers onto the outbound request.
+
+## Model IDs
+
+Kimi's `/v1/models` endpoint advertises the model family exposed through the
+configured base URL. Common identifiers include the `kimi-k2` series. Pin the
+advertised set with a configured list when you only want a subset:
+
+```bash
+KIMI_MODELS=kimi-for-coding
+```
+
+By default, `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses the configured
+list only when the upstream `/models` response is unavailable or empty. Set
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models
+and skip the upstream `/models` call.
+
+## Endpoints
+
+Kimi is served through the standard OpenAI-compatible surface. All of these
+work out of the box:
+
+| Endpoint | Notes |
+| -------- | ----- |
+| `/v1/chat/completions` | Chat completions, including streaming. |
+| `/v1/responses` | Translated to chat completions. |
+| `/v1/embeddings` | Embeddings. |
+| `/v1/models` | Model listing (see [Model IDs](#model-ids)). |
+| `/v1/files` | File uploads and retrieval. |
+| `/v1/batches` | Batch jobs. |
+| `/v1/audio/speech` | Text-to-speech. |
+| `/v1/audio/transcriptions` | Audio transcription. |
+| `/p/kimi/...` | Provider-native passthrough (unchanged). |
+
+## Header customization
+
+Kimi is the only provider where GoModel **defaults `passthrough_user_headers`
+to `true`**: inbound request headers (minus a small skip list of credential
+and transport headers) are forwarded onto the outbound Kimi request
+automatically.
+
+The Kimi coding endpoint also expects a recognizable client identity — a
+`User-Agent` plus the `X-Stainless-*`/`X-Title` headers most OpenAI SDKs send.
+With passthrough on, a caller that sends those headers (e.g. an OpenAI SDK or
+a configured proxy) is enough. Alternatively, set a static bundle and turn
+passthrough off:
+
+```yaml
+providers:
+  kimi:
+    type: kimi
+    api_key: "${KIMI_API_KEY}"
+    passthrough_user_headers: false
+    custom_upstream_headers:
+      User-Agent: "ZooCode/3.62.0"
+      X-Title: "Zoo Code"
+      Http-Referer: "https://github.com/Zoo-Code-Org/Zoo-Code"
+      X-Stainless-Lang: "js"
+      X-Stainless-Os: "Linux"
+```
+
+```bash
+KIMI_PASSTHROUGH_USER_HEADERS=false
+```
+
+Header identity is forwarded as supplied. Make sure the values you send are
+truthful for your client, and that their use complies with Kimi's terms.
+
+See the [Provider Header Passthrough feature page](/features/provider-header-passthrough)
+for the full skip list, env-var overrides, and the per-provider schema.

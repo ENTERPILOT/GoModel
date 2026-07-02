@@ -22,6 +22,7 @@ import (
 	"gomodel/internal/providers/deepseek"
 	"gomodel/internal/providers/gemini"
 	"gomodel/internal/providers/groq"
+	"gomodel/internal/providers/kimi"
 	"gomodel/internal/providers/minimax"
 	"gomodel/internal/providers/ollama"
 	"gomodel/internal/providers/openai"
@@ -147,6 +148,7 @@ func main() {
 	factory.Add(gemini.Registration)
 	factory.Add(vertex.Registration)
 	factory.Add(groq.Registration)
+	factory.Add(kimi.Registration)
 	factory.Add(minimax.Registration)
 	factory.Add(ollama.Registration)
 	factory.Add(opencodego.Registration)

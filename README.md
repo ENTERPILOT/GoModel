@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  A fast and lightweight AI gateway written in Go, providing unified OpenAI-compatible and Anthropic-compatible APIs for OpenAI, Anthropic, Gemini, DeepSeek, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
+  A fast and lightweight AI gateway written in Go, providing unified OpenAI-compatible and Anthropic-compatible APIs for OpenAI, Anthropic, Gemini, DeepSeek, xAI, Groq, OpenRouter, Z.ai, Kimi, Azure OpenAI, Oracle, Ollama, and more.
 </p>
 
 <a href="docs/dashboard.gif">
@@ -64,9 +64,9 @@ curl http://localhost:8080/v1/chat/completions \
 ### Supported LLM Providers
 
 GoModel supports OpenAI, Anthropic, Google Gemini, Vertex AI, DeepSeek, Groq,
-OpenRouter, Z.ai, xAI (Grok), Alibaba Cloud Model Studio (Bailian), MiniMax,
-Xiaomi MiMo, OpenCode Go, Azure OpenAI, Oracle, Ollama, vLLM, Amazon Bedrock,
-and all OpenAI-compatible providers.
+OpenRouter, Z.ai, xAI (Grok), Alibaba Cloud Model Studio (Bailian), Kimi,
+MiniMax, Xiaomi MiMo, OpenCode Go, Azure OpenAI, Oracle, Ollama, vLLM, Amazon
+Bedrock, and all OpenAI-compatible providers.
 
 See the [Providers Overview](./docs/providers/overview.mdx) for the full
 per-provider feature matrix (chat, `/responses`, embeddings, files, batches,

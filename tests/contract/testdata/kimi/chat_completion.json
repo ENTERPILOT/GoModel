@@ -1,0 +1,26 @@
+{
+  "id": "chatcmpl-dpG5AViIPO76geP1lTj1SuCl",
+  "object": "chat.completion",
+  "created": 1783000332,
+  "model": "kimi-for-coding",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello, World!",
+        "reasoning_content": "We need answer exactly user said: \"Say 'Hello, World!' and nothing else.\" So output Hello, World! and nothing else. Ensure no extra text."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 18,
+    "completion_tokens": 39,
+    "total_tokens": 57,
+    "cached_tokens": 18,
+    "prompt_tokens_details": {
+      "cached_tokens": 18
+    }
+  }
+}

@@ -91,6 +91,15 @@ record-api:
 		-output=tests/contract/testdata/openai/models.json
 	@echo "Done! Golden files saved to tests/contract/testdata/"
 
+record-api-kimi:
+	@echo "Recording Kimi chat completion..."
+	go run ./cmd/recordapi -provider=kimi -endpoint=chat \
+		-output=tests/contract/testdata/kimi/chat_completion.json
+	@echo "Recording Kimi models..."
+	go run ./cmd/recordapi -provider=kimi -endpoint=models \
+		-output=tests/contract/testdata/kimi/models.json
+	@echo "Done! Golden files saved to tests/contract/testdata/"
+
 swagger:
 	go run github.com/swaggo/swag/v2/cmd/swag init --generalInfo main.go \
 		--dir cmd/gomodel,internal \

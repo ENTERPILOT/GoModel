@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "id": "kimi-for-coding",
+      "created": 1761264000,
+      "created_at": "2025-10-24T00:00:00Z",
+      "object": "model",
+      "display_name": "K2.7 Code",
+      "type": "model",
+      "context_length": 262144,
+      "supports_reasoning": true,
+      "supports_image_in": true,
+      "supports_video_in": true,
+      "supports_thinking_type": "only"
+    }
+  ],
+  "object": "list",
+  "first_id": "kimi-for-coding",
+  "last_id": "kimi-for-coding",
+  "has_more": false
+}
