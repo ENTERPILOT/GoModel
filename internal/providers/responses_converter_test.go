@@ -242,10 +242,12 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 // not discard the chunk's remaining deltas or usage.
 func TestOpenAIResponsesStreamConverter_TolerantChunkFallback(t *testing.T) {
 	// content is an off-spec parts array; usage and finish_reason must survive.
-	// The second chunk carries a float tool-call index (Python-style encoders).
+	// The second chunk carries a float tool-call index (Python-style encoders)
+	// alongside junk entries (non-object, index missing) that must be skipped
+	// without discarding the valid call.
 	mockStream := `data: {"choices":[{"delta":{"content":[{"type":"text","text":"ignored"}]},"finish_reason":null}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}
 
-data: {"choices":[{"delta":{"tool_calls":[{"index":0.0,"id":"call_f","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]}
+data: {"choices":[{"delta":{"tool_calls":["junk",{"id":"call_no_index"},{"index":0.0,"id":"call_f","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]}
 
 data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
 
