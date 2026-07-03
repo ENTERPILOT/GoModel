@@ -394,6 +394,10 @@
                 return this._usageRowsBySelectedValue(this.userPathUsage || []);
             },
 
+            labelUsageTableRows() {
+                return this._usageRowsBySelectedValue(this.labelUsage || []);
+            },
+
             userPathUsageChartVisible() {
                 const rows = Array.isArray(this.userPathUsage) ? this.userPathUsage : [];
                 if (rows.length === 0) {
@@ -416,6 +420,32 @@
                 return this._barDataFrom(this.userPathUsage || [], (u) => u.user_path || '/');
             },
 
+            _labelBarData() {
+                return this._barDataFrom(this.labelUsage || [], (l) => l.label);
+            },
+
+            // Deterministic label -> palette color so a label keeps one color
+            // across the bar chart and every chip on the page.
+            labelColor(label) {
+                const palette = this._barColors();
+                let hash = 5381;
+                const text = String(label || '');
+                for (let i = 0; i < text.length; i++) {
+                    hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+                }
+                return palette[Math.abs(hash) % palette.length];
+            },
+
+            labelChipStyle(label) {
+                return { '--label-color': this.labelColor(label) };
+            },
+
+            // The synthetic "Other" bar gets a neutral tone instead of a
+            // hashed identity color.
+            _labelBarPalette(labels) {
+                return labels.map((label) => label === 'Other' ? '#a8a29a' : this.labelColor(label));
+            },
+
             barLegendItems() {
                 const { labels, values } = this._barData();
                 const colors = this._barColors();
@@ -436,6 +466,12 @@
                 if (target === 'userPath') {
                     this.userPathUsageView = view;
                     this.renderUserPathChart();
+                    return;
+                }
+
+                if (target === 'label') {
+                    this.labelUsageView = view;
+                    this.renderLabelChart();
                 }
             },
 
@@ -502,6 +538,39 @@
                     }
 
                     this.usageUserPathChart = new Chart(canvas, config);
+                });
+            },
+
+            renderLabelChart(retries) {
+                if (retries === undefined) retries = 3;
+                this.$nextTick(() => {
+                    if ((this.labelUsage || []).length === 0 || this.page !== 'usage' || (this.labelUsageView || 'chart') !== 'chart') {
+                        if (this.usageLabelChart) {
+                            this.usageLabelChart.destroy();
+                            this.usageLabelChart = null;
+                        }
+                        return;
+                    }
+
+                    const canvas = document.getElementById('usageLabelChart');
+                    if (!canvas || canvas.offsetWidth === 0) {
+                        if (retries > 0) {
+                            setTimeout(() => this.renderLabelChart(retries - 1), 100);
+                        }
+                        return;
+                    }
+
+                    const colors = this.chartColors();
+                    const { labels, values } = this._labelBarData();
+                    const palette = this._labelBarPalette(labels);
+                    const config = this._barChartConfig(colors, labels, values, palette);
+
+                    if (this.usageLabelChart) {
+                        this.usageLabelChart.destroy();
+                        this.usageLabelChart = null;
+                    }
+
+                    this.usageLabelChart = new Chart(canvas, config);
                 });
             }
         };

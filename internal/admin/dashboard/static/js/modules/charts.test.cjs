@@ -263,3 +263,67 @@ test('toggleUsageChartView switches table and chart modes and rerenders chart vi
     assert.notEqual(module.usageUserPathChart, null);
     assert.notStrictEqual(module.usageUserPathChart, userPathChart);
 });
+
+test('labelColor is deterministic and drawn from the shared palette', () => {
+    const { module } = createChartsContext();
+
+    assert.equal(module.labelColor('team-alpha'), module.labelColor('team-alpha'));
+    assert.ok(module._barColors().includes(module.labelColor('team-alpha')));
+    assert.equal(module.labelChipStyle('x')['--label-color'], module.labelColor('x'));
+});
+
+test('renderLabelChart orders bars by selected metric and colors them per label', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'tokens';
+    module.labelUsageView = 'chart';
+    module.labelUsage = [
+        { label: 'alpha', input_tokens: 5, output_tokens: 7, total_tokens: 12, total_cost: 0.01 },
+        { label: 'prod', input_tokens: 11, output_tokens: 13, total_tokens: 24, total_cost: 0.02 }
+    ];
+
+    module.renderLabelChart();
+
+    assert.equal(FakeChart.instances.length, 1);
+    const chart = module.usageLabelChart;
+    assert.equal(JSON.stringify(chart.data.labels), JSON.stringify(['prod', 'alpha']));
+    assert.equal(JSON.stringify(chart.data.datasets[0].data), JSON.stringify([24, 12]));
+    assert.equal(
+        JSON.stringify(chart.data.datasets[0].backgroundColor),
+        JSON.stringify([module.labelColor('prod'), module.labelColor('alpha')])
+    );
+
+    module.labelUsage = [];
+    module.renderLabelChart();
+
+    assert.equal(chart.destroyCalls, 1);
+    assert.equal(module.usageLabelChart, null);
+});
+
+test('toggleUsageChartView label target switches views and rerenders', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'tokens';
+    module.labelUsageView = 'chart';
+    module.labelUsage = [
+        { label: 'alpha', input_tokens: 10, output_tokens: 20, total_tokens: 30, total_cost: 0.01 }
+    ];
+
+    module.renderLabelChart();
+    const labelChart = module.usageLabelChart;
+    assert.notEqual(labelChart, null);
+
+    module.toggleUsageChartView('label', 'table');
+
+    assert.equal(module.labelUsageView, 'table');
+    assert.equal(labelChart.destroyCalls, 1);
+    assert.equal(module.usageLabelChart, null);
+
+    module.toggleUsageChartView('label', 'chart');
+
+    assert.equal(module.labelUsageView, 'chart');
+    assert.notEqual(module.usageLabelChart, null);
+    assert.notStrictEqual(module.usageLabelChart, labelChart);
+});

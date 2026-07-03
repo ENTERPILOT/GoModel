@@ -16,12 +16,49 @@
     <!-- Auth Error Banner -->
     {{template "auth-banner" .}}
 
-    <div class="cards" x-show="cacheAnalyticsEnabled()">
+    <!-- Page-level data filters: every widget below follows them -->
+    <div class="usage-page-filters" role="group" aria-label="Usage data filters">
+        <select x-model="usageFilterModel" @change="onUsageFilterChanged()" class="usage-log-select" aria-label="Filter by model">
+            <option value="">All Models</option>
+            <template x-for="m in usageFilterModelOptions()" :key="m">
+                <option :value="m" x-text="m"></option>
+            </template>
+        </select>
+        <select x-model="usageFilterProvider" @change="onUsageFilterChanged()" class="usage-log-select" aria-label="Filter by provider">
+            <option value="">All Providers</option>
+            <template x-for="p in usageFilterProviderOptions()" :key="p">
+                <option :value="p" x-text="p"></option>
+            </template>
+        </select>
+        <template x-if="usageFilterLabelOptions().length > 0">
+            <select x-model="usageFilterLabel" @change="onUsageFilterChanged()" class="usage-log-select" aria-label="Filter by label">
+                <option value="">All Labels</option>
+                <template x-for="l in usageFilterLabelOptions()" :key="l">
+                    <option :value="l" x-text="l"></option>
+                </template>
+            </select>
+        </template>
+        <div class="filter-input-wrap usage-page-filters-user-path">
+            <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+            <input type="text" placeholder="User path /team/alpha" aria-label="Filter by user path" x-model="usageFilterUserPath" @input.debounce.300ms="onUsageFilterChanged()" class="filter-input">
+        </div>
+    </div>
+
+    <!-- Period totals for the active filters -->
+    <div class="cards">
         <div class="card">
+            <div class="card-label">Total Requests</div>
+            <div class="card-value" x-text="formatNumber(usagePageTotalRequests())" :title="usagePageRequestsTitle()">-</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Estimated Cost</div>
+            <div class="card-value" x-text="formatCost(usageSummary.total_cost)" :title="usagePageCostTitle()">-</div>
+        </div>
+        <div class="card" x-show="cacheAnalyticsEnabled()">
             <div class="card-label">Cache Saved</div>
             <div class="card-value" x-text="formatCost(cacheOverview.summary.total_saved_cost)">-</div>
         </div>
-        <div class="card">
+        <div class="card" x-show="cacheAnalyticsEnabled()">
             <div class="card-label">Cache Hits</div>
             <div class="card-value" x-text="formatNumber(cacheOverview.summary.total_hits)">-</div>
         </div>
@@ -125,6 +162,66 @@
         </template>
     </div>
 
+    <!-- Usage by Label Chart -->
+    <div class="model-chart-section" x-show="labelUsage.length > 0">
+        <div class="model-chart-header">
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'label-usage-help-copy', showLabel: 'Show label usage help', hideLabel: 'Hide label usage help', text: 'One request can have multiple labels. Such a request counts once under each of its labels, so label rows can overlap and add up to more than the period totals.' }">
+                <div class="inline-help-title-row">
+                    <h3 x-text="usageMode === 'costs' ? 'Cost by Label' : 'Usage by Label'"></h3>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+            <div class="chart-view-toggle" role="group" aria-label="Label usage view">
+                <button type="button" class="chart-view-btn" :class="{active: labelUsageView === 'chart'}" :aria-pressed="labelUsageView === 'chart' ? 'true' : 'false'" aria-label="Show label usage chart" title="Chart" @click="toggleUsageChartView('label', 'chart')">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-8"/></svg>
+                </button>
+                <button type="button" class="chart-view-btn" :class="{active: labelUsageView === 'table'}" :aria-pressed="labelUsageView === 'table' ? 'true' : 'false'" aria-label="Show label usage table" title="Table" @click="toggleUsageChartView('label', 'table')">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 6v12M15 6v12"/></svg>
+                </button>
+            </div>
+        </div>
+        <div class="bar-chart-wrap" x-show="labelUsageView === 'chart'">
+            <canvas id="usageLabelChart"></canvas>
+        </div>
+        <template x-if="labelUsageView === 'table'">
+            <div class="table-wrapper usage-chart-table-wrapper">
+                <table class="data-table usage-chart-data-table">
+                    <thead>
+                        <tr>
+                            <th>Label</th>
+                            <th class="col-price">Requests</th>
+                            <th class="col-price">Input Tokens</th>
+                            <th class="col-price">Output Tokens</th>
+                            <th class="col-price">Total Tokens</th>
+                            <th class="col-price">Input Cost</th>
+                            <th class="col-price">Output Cost</th>
+                            <th class="col-price">Total Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="row in labelUsageTableRows()" :key="row.label">
+                            <tr>
+                                <td>
+                                    <button type="button" class="usage-label-chip" :class="{active: usageFilterLabel === row.label}"
+                                            :style="labelChipStyle(row.label)" :title="usageLabelChipTitle(row.label)"
+                                            @click="toggleUsageLabelFilter(row.label)" x-text="row.label"></button>
+                                </td>
+                                <td class="col-price" x-text="formatNumber(row.requests)"></td>
+                                <td class="col-price" x-text="formatNumber(row.input_tokens)"></td>
+                                <td class="col-price" x-text="formatNumber(row.output_tokens)"></td>
+                                <td class="col-price" x-text="formatNumber(usageRowTotalTokens(row))"></td>
+                                <td class="col-price" x-text="formatCost(row.input_cost)"></td>
+                                <td class="col-price" x-text="formatCost(row.output_cost)"></td>
+                                <td class="col-price" x-text="formatCost(row.total_cost)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+    </div>
+
     <!-- Request Log Section -->
     <div class="usage-log-section">
         <h3>Request Log</h3>
@@ -133,24 +230,6 @@
                 <div class="filter-input-wrap">
                     <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
                     <input type="text" placeholder="Search by request ID, model, provider..." aria-label="Search by request ID, model, provider" x-model="usageLogSearch" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
-                </div>
-            </div>
-            <div class="usage-filter-row usage-filter-row-controls">
-                <select x-model="usageLogModel" @change="fetchUsageLog(true)" class="usage-log-select">
-                    <option value="">All Models</option>
-                    <template x-for="m in usageLogModelOptions()" :key="m">
-                        <option :value="m" x-text="m"></option>
-                    </template>
-                </select>
-                <select x-model="usageLogProvider" @change="fetchUsageLog(true)" class="usage-log-select">
-                    <option value="">All Providers</option>
-                    <template x-for="p in usageLogProviderOptions()" :key="p">
-                        <option :value="p" x-text="p"></option>
-                    </template>
-                </select>
-                <div class="filter-input-wrap">
-                    <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
-                    <input type="text" placeholder="User path /team/alpha" aria-label="Filter by user path" x-model="usageLogUserPath" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
                 </div>
             </div>
             <div class="usage-filter-row usage-filter-row-options">
@@ -168,6 +247,7 @@
                         <th>Provider</th>
                         <th>Model</th>
                         <th>User Path</th>
+                        <th x-show="usageLogHasLabels()">Labels</th>
                         <th>Cache</th>
                         <th title="Share of input tokens served from the provider's prompt cache">Provider Cache</th>
                         <th class="col-price" x-text="usageMode === 'costs' ? 'Input Cost' : 'Input'"></th>
@@ -185,6 +265,16 @@
                             </td>
                             <td class="mono font-size-md" x-text="entry.model"></td>
                             <td class="mono font-size-md" x-text="entry.user_path || '-'"></td>
+                            <td class="usage-log-labels-cell" x-show="usageLogHasLabels()">
+                                <div class="usage-label-chips" x-show="entryLabels(entry).length > 0">
+                                    <template x-for="label in entryLabels(entry)" :key="label">
+                                        <button type="button" class="usage-label-chip" :class="{active: usageFilterLabel === label}"
+                                                :style="labelChipStyle(label)" :title="usageLabelChipTitle(label)"
+                                                @click="toggleUsageLabelFilter(label)" x-text="label"></button>
+                                    </template>
+                                </div>
+                                <span x-show="entryLabels(entry).length === 0">-</span>
+                            </td>
                             <td class="usage-log-cache-cell" x-text="usageEntryCacheLabel(entry)"></td>
                             <td class="usage-log-provider-cache-cell" :title="providerCacheTitle(entry)">
                                 <span class="audit-prompt-cache-pill mono" x-show="hasProviderCache(entry)" x-text="providerCacheLabel(entry)"></span>

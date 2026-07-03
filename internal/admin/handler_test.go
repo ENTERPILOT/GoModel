@@ -27,6 +27,7 @@ type mockUsageReader struct {
 	daily                []usage.DailyUsage
 	modelUsage           []usage.ModelUsage
 	userPathUsage        []usage.UserPathUsage
+	labelUsage           []usage.LabelUsage
 	usageLog             *usage.UsageLogResult
 	usageByRequestID     map[string][]usage.UsageLogEntry
 	cacheOverview        *usage.CacheOverview
@@ -41,6 +42,7 @@ type mockUsageReader struct {
 	dailyErr             error
 	modelUsageErr        error
 	userPathUsageErr     error
+	labelUsageErr        error
 	usageLogErr          error
 	usageByRequestErr    error
 	cacheErr             error
@@ -96,6 +98,13 @@ func (m *mockUsageReader) GetUsageByUserPath(_ context.Context, _ usage.UsageQue
 		return nil, m.userPathUsageErr
 	}
 	return m.userPathUsage, nil
+}
+
+func (m *mockUsageReader) GetUsageByLabel(_ context.Context, _ usage.UsageQueryParams) ([]usage.LabelUsage, error) {
+	if m.labelUsageErr != nil {
+		return nil, m.labelUsageErr
+	}
+	return m.labelUsage, nil
 }
 
 func (m *mockUsageReader) GetUsageLog(_ context.Context, params usage.UsageLogParams) (*usage.UsageLogResult, error) {
@@ -673,6 +682,72 @@ func TestUsageByUserPath_Error(t *testing.T) {
 	}
 }
 
+// --- UsageByLabel handler tests ---
+
+func TestUsageByLabel_NilReader(t *testing.T) {
+	h := NewHandler(nil, nil)
+	c, rec := newHandlerContext("/admin/usage/labels")
+
+	if err := h.UsageByLabel(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "[]\n" {
+		t.Errorf("expected empty JSON array, got: %q", rec.Body.String())
+	}
+}
+
+func TestUsageByLabel_Success(t *testing.T) {
+	cost := 1.25
+	reader := &mockUsageReader{
+		labelUsage: []usage.LabelUsage{
+			{Label: "team-alpha", Requests: 4, InputTokens: 100, OutputTokens: 50, TotalTokens: 150, TotalCost: &cost},
+		},
+	}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/usage/labels?days=30")
+
+	if err := h.UsageByLabel(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	var labels []usage.LabelUsage
+	if err := json.Unmarshal(rec.Body.Bytes(), &labels); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(labels) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(labels))
+	}
+	if labels[0].Label != "team-alpha" {
+		t.Errorf("expected label team-alpha, got %s", labels[0].Label)
+	}
+	if labels[0].Requests != 4 {
+		t.Errorf("expected requests 4, got %d", labels[0].Requests)
+	}
+	if labels[0].TotalCost == nil || *labels[0].TotalCost != 1.25 {
+		t.Errorf("expected total_cost 1.25, got %v", labels[0].TotalCost)
+	}
+}
+
+func TestUsageByLabel_Error(t *testing.T) {
+	reader := &mockUsageReader{
+		labelUsageErr: errors.New("db failure"),
+	}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/usage/labels")
+
+	if err := h.UsageByLabel(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", rec.Code)
+	}
+}
+
 // --- UsageLog handler tests ---
 
 func TestUsageLog_NilReader(t *testing.T) {
@@ -821,7 +896,7 @@ func TestUsageLog_WithFilters(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&search=test&limit=10&offset=5")
+	c, rec := newHandlerContext("/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&label=team-alpha&search=test&limit=10&offset=5")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -831,6 +906,9 @@ func TestUsageLog_WithFilters(t *testing.T) {
 	}
 	if reader.lastUsageLog.UserPath != "/team" {
 		t.Errorf("expected user_path /team, got %q", reader.lastUsageLog.UserPath)
+	}
+	if reader.lastUsageLog.Label != "team-alpha" {
+		t.Errorf("expected label team-alpha, got %q", reader.lastUsageLog.Label)
 	}
 }
 

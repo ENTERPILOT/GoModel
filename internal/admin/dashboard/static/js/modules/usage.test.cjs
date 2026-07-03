@@ -179,9 +179,10 @@ function createUsageLogApp(overrides = {}) {
         customEndDate: null,
         usageLog: { entries: [], total: 0, limit: 50, offset: 0 },
         usageLogSearch: '',
-        usageLogModel: '',
-        usageLogProvider: '',
-        usageLogUserPath: '',
+        usageFilterModel: '',
+        usageFilterProvider: '',
+        usageFilterLabel: '',
+        usageFilterUserPath: '',
         usageLogHideCached: false,
         _formatDate(date) {
             return date.toISOString().slice(0, 10);
@@ -301,6 +302,124 @@ test('fetchUsageLog switches to cache_mode=uncached when hide-cached toggle is o
 
     assert.equal(fetchCalls.length, 1);
     assert.match(fetchCalls[0].url, /cache_mode=uncached/);
+});
+
+test('fetchUsageLog includes the label filter when set', async () => {
+    const { app, fetchCalls } = createUsageLogApp({ usageFilterLabel: 'team alpha' });
+
+    await app.fetchUsageLog(true);
+
+    assert.equal(fetchCalls.length, 1);
+    assert.match(fetchCalls[0].url, /label=team%20alpha/);
+});
+
+test('fetchCacheOverview follows page filters on the usage page but not on overview', async () => {
+    const make = (page) => createUsageLogApp({
+        page,
+        usageFilterLabel: 'env:prod',
+        usageFilterProvider: 'openai',
+        workflowRuntimeBooleanFlag: () => true
+    });
+
+    const usage = make('usage');
+    await usage.app.fetchCacheOverview();
+    assert.equal(usage.fetchCalls.length, 1);
+    assert.match(usage.fetchCalls[0].url, /label=env%3Aprod/);
+    assert.match(usage.fetchCalls[0].url, /provider=openai/);
+
+    const overview = make('overview');
+    overview.app.renderChart = () => {};
+    await overview.app.fetchCacheOverview();
+    assert.equal(overview.fetchCalls.length, 1);
+    assert.doesNotMatch(overview.fetchCalls[0].url, /label=/);
+    assert.doesNotMatch(overview.fetchCalls[0].url, /provider=/);
+});
+
+test('page filters flow into every usage-page fetch', async () => {
+    const { app, fetchCalls } = createUsageLogApp({
+        usageFilterModel: 'gpt-5',
+        usageFilterProvider: 'openai',
+        usageFilterLabel: 'env:prod',
+        usageFilterUserPath: '/team'
+    });
+
+    await app.fetchUsagePageSummary();
+    await app.fetchModelUsage();
+    await app.fetchLabelUsage();
+    await app.fetchUsageLog(true);
+
+    assert.equal(fetchCalls.length, 4);
+    for (const call of fetchCalls) {
+        assert.match(call.url, /model=gpt-5/);
+        assert.match(call.url, /provider=openai/);
+        assert.match(call.url, /label=env%3Aprod/);
+        assert.match(call.url, /user_path=%2Fteam/);
+    }
+    assert.match(fetchCalls[0].url, /\/admin\/usage\/summary\?/);
+});
+
+test('usage page stat cards fold filtered cache hits into the request count', () => {
+    const module = createUsageModule();
+    module.formatNumber = (n) => String(n);
+    module.formatCost = (v) => (v === null || v === undefined ? '---' : '$' + Number(v).toFixed(2));
+    module.usageSummary = { total_requests: 90, total_cost: 1.5, total_input_cost: 1.0, total_output_cost: 0.5 };
+    module.cacheOverview = { summary: { total_hits: 10 } };
+
+    module.workflowRuntimeBooleanFlag = () => true;
+    assert.equal(module.usagePageTotalRequests(), 100);
+    assert.equal(module.usagePageRequestsTitle(), '90 to providers + 10 from cache');
+    assert.equal(module.usagePageCostTitle(), '$1.00 input + $0.50 output');
+
+    module.workflowRuntimeBooleanFlag = () => false;
+    assert.equal(module.usagePageTotalRequests(), 90);
+    assert.equal(module.usagePageRequestsTitle(), '');
+
+    module.usageSummary = {};
+    assert.equal(module.usagePageCostTitle(), '');
+});
+
+test('usageFilterLabelOptions sorts labels and keeps a stale selection listed', () => {
+    const module = createUsageModule();
+    module.labelUsage = [{ label: 'prod' }, { label: 'alpha' }];
+    module.usageFilterLabel = '';
+
+    assert.equal(JSON.stringify(module.usageFilterLabelOptions()), JSON.stringify(['alpha', 'prod']));
+
+    module.usageFilterLabel = 'removed';
+    assert.equal(JSON.stringify(module.usageFilterLabelOptions()), JSON.stringify(['alpha', 'prod', 'removed']));
+});
+
+test('toggleUsageLabelFilter sets and clears the page label filter, refetching the page', () => {
+    const module = createUsageModule();
+    let pageFetches = 0;
+    module.fetchUsagePage = () => { pageFetches++; };
+    module.usageFilterLabel = '';
+
+    module.toggleUsageLabelFilter('prod');
+    assert.equal(module.usageFilterLabel, 'prod');
+
+    module.toggleUsageLabelFilter('prod');
+    assert.equal(module.usageFilterLabel, '');
+    assert.equal(pageFetches, 2);
+});
+
+test('usageLogHasLabels reflects aggregates, active filter, or labelled entries', () => {
+    const module = createUsageModule();
+    module.labelUsage = [];
+    module.usageFilterLabel = '';
+    module.usageLog = { entries: [{ labels: null }, {}] };
+    assert.equal(module.usageLogHasLabels(), false);
+
+    module.usageLog = { entries: [{ labels: ['alpha'] }] };
+    assert.equal(module.usageLogHasLabels(), true);
+
+    module.usageLog = { entries: [] };
+    module.usageFilterLabel = 'alpha';
+    assert.equal(module.usageLogHasLabels(), true);
+
+    module.usageFilterLabel = '';
+    module.labelUsage = [{ label: 'alpha' }];
+    assert.equal(module.usageLogHasLabels(), true);
 });
 
 function createCacheMeterModule({ summary = {}, cacheOverview = null, cacheEnabled = false } = {}) {

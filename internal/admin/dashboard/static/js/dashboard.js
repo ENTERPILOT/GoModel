@@ -156,16 +156,25 @@ function dashboard() {
     usageMode: "tokens",
     modelUsageView: "chart",
     userPathUsageView: "chart",
+    labelUsageView: "chart",
     modelUsage: [],
     userPathUsage: [],
+    labelUsage: [],
     usageLog: { entries: [], total: 0, limit: 50, offset: 0 },
+    // Filtered summary for the usage-page stat cards (the overview page keeps
+    // its own unfiltered `summary`).
+    usageSummary: {},
+    // Page-level data filters: drive every usage-page widget.
+    usageFilterModel: "",
+    usageFilterProvider: "",
+    usageFilterLabel: "",
+    usageFilterUserPath: "",
+    // Log-only view options.
     usageLogSearch: "",
-    usageLogModel: "",
-    usageLogProvider: "",
-    usageLogUserPath: "",
     usageLogHideCached: false,
     usageBarChart: null,
     usageUserPathChart: null,
+    usageLabelChart: null,
 
     // Audit page state
     auditLog: { entries: [], total: 0, limit: 25, offset: 0 },
@@ -370,6 +379,7 @@ function dashboard() {
       this.renderChart();
       this.renderBarChart();
       this.renderUserPathChart();
+      this.renderLabelChart();
       if (typeof this.redrawLiveTokensChart === "function") {
         // Force a rebuild so the bars pick up the new theme's colors.
         this.redrawLiveTokensChart();

@@ -39,6 +39,52 @@ func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 	}
 }
 
+func TestMongoUsageLogMatchFiltersLabel(t *testing.T) {
+	got, err := mongoUsageLogMatchFilters(UsageLogParams{
+		UsageQueryParams: UsageQueryParams{
+			CacheMode: CacheModeAll,
+			Label:     "team-alpha",
+		},
+	})
+	if err != nil {
+		t.Fatalf("mongoUsageLogMatchFilters() error = %v", err)
+	}
+
+	want := bson.D{{Key: "labels", Value: "team-alpha"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mongoUsageLogMatchFilters() = %#v, want %#v", got, want)
+	}
+}
+
+func TestMongoUsageMatchFiltersDataFilters(t *testing.T) {
+	got, err := mongoUsageMatchFilters(UsageQueryParams{
+		CacheMode: CacheModeAll,
+		Model:     "gpt-5",
+		Provider:  "openai",
+		Label:     "team-alpha",
+	})
+	if err != nil {
+		t.Fatalf("mongoUsageMatchFilters() error = %v", err)
+	}
+
+	// The provider clause matches provider or provider_name, so it is ANDed
+	// with the scalar filters.
+	want := bson.D{{Key: "$and", Value: bson.A{
+		bson.D{
+			{Key: "model", Value: "gpt-5"},
+			{Key: "labels", Value: "team-alpha"},
+		},
+		bson.D{{Key: "$or", Value: bson.A{
+			bson.D{{Key: "provider", Value: "openai"}},
+			bson.D{{Key: "provider_name", Value: "openai"}},
+		}}},
+	}}}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mongoUsageMatchFilters() = %#v, want %#v", got, want)
+	}
+}
+
 func TestMongoUsageLogMatchFiltersEscapesSearchRegex(t *testing.T) {
 	got, err := mongoUsageLogMatchFilters(UsageLogParams{
 		UsageQueryParams: UsageQueryParams{

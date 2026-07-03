@@ -351,6 +351,9 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 		params.Interval = "daily"
 	}
 	params.CacheMode = c.QueryParam("cache_mode")
+	params.Model = strings.TrimSpace(c.QueryParam("model"))
+	params.Provider = strings.TrimSpace(c.QueryParam("provider"))
+	params.Label = strings.TrimSpace(c.QueryParam("label"))
 
 	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
 	if err != nil {

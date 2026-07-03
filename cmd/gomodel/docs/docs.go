@@ -629,6 +629,24 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by exact model name",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
                         "in": "query"
@@ -1218,6 +1236,96 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/tagging/settings": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get header tagging rules",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.taggingSettingsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Replace operator header tagging rules",
+                "parameters": [
+                    {
+                        "description": "Operator tagging rules",
+                        "name": "settings",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.updateTaggingSettingsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.taggingSettingsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/usage/daily": {
             "get": {
                 "produces": [
@@ -1254,6 +1362,24 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by exact model name",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
                         "in": "query"
@@ -1272,6 +1398,96 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/usage.DailyUsage"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/usage/labels": {
+            "get": {
+                "description": "Returns per-label token and cost aggregates. Requests carrying\nseveral labels count once per label, so rows overlap and do\nnot sum to the period totals. Unlabelled requests are omitted.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get usage breakdown by request label",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact model name",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by tracked user path subtree",
+                        "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cache mode filter: uncached, cached, all (default uncached)",
+                        "name": "cache_mode",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/usage.LabelUsage"
                             }
                         }
                     },
@@ -1325,7 +1541,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by model name",
+                        "description": "Filter by exact model name",
                         "name": "model",
                         "in": "query"
                     },
@@ -1333,6 +1549,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by provider name or provider type",
                         "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
                         "in": "query"
                     },
                     {
@@ -1419,6 +1641,24 @@ const docTemplate = `{
                         "type": "string",
                         "description": "End date (YYYY-MM-DD)",
                         "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact model name",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
                         "in": "query"
                     },
                     {
@@ -1556,6 +1796,24 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by exact model name",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
                         "in": "query"
@@ -1666,6 +1924,24 @@ const docTemplate = `{
                         "type": "string",
                         "description": "End date (YYYY-MM-DD)",
                         "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact model name",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
                         "in": "query"
                     },
                     {
@@ -4750,6 +5026,22 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.taggingSettingsResponse": {
+            "type": "object",
+            "properties": {
+                "editable": {
+                    "description": "Editable reports whether operator rules can be saved (false when no\nsettings storage is available).",
+                    "type": "boolean"
+                },
+                "headers": {
+                    "description": "Headers is the effective rule set: config/env-managed rules (read-only,\nmanaged=true) followed by operator rules persisted in the admin store.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/tagging.Rule"
+                    }
+                }
+            }
+        },
         "admin.updateBudgetSettingsRequest": {
             "type": "object",
             "properties": {
@@ -4776,6 +5068,17 @@ const docTemplate = `{
                 },
                 "weekly_reset_weekday": {
                     "type": "integer"
+                }
+            }
+        },
+        "admin.updateTaggingSettingsRequest": {
+            "type": "object",
+            "properties": {
+                "headers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/tagging.Rule"
+                    }
                 }
             }
         },
@@ -5212,6 +5515,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/auditlog.FailoverSnapshot"
                         }
                     ]
+                },
+                "labels": {
+                    "description": "Labels are request labels extracted from configured tagging headers.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "max_tokens": {
                     "type": "integer"
@@ -7097,6 +7407,31 @@ const docTemplate = `{
                 }
             }
         },
+        "tagging.Rule": {
+            "type": "object",
+            "properties": {
+                "delimiter": {
+                    "description": "Delimiter splits one header value into multiple labels. Default: \",\".",
+                    "type": "string"
+                },
+                "do_not_pass": {
+                    "description": "DoNotPass strips the header before forwarding the request upstream.\nDefault: false (headers are passed through as-is).",
+                    "type": "boolean"
+                },
+                "header": {
+                    "description": "Header is the canonical HTTP header name to read labels from.",
+                    "type": "string"
+                },
+                "managed": {
+                    "description": "Managed marks a rule declared in config/env; such rules are read-only in\nthe dashboard. Never persisted.",
+                    "type": "boolean"
+                },
+                "prefix": {
+                    "description": "Prefix is optionally trimmed from the front of each label. Trimming only\naffects the extracted label, never the forwarded header value.",
+                    "type": "string"
+                }
+            }
+        },
         "usage.CacheOverview": {
             "type": "object",
             "properties": {
@@ -7201,6 +7536,38 @@ const docTemplate = `{
                 },
                 "uncached_input_tokens": {
                     "description": "Provider prompt-cache split of the period's input, folded per row from\nraw_data (same source as the summary). Zero when the storage layer does\nnot populate them.",
+                    "type": "integer"
+                }
+            }
+        },
+        "usage.LabelUsage": {
+            "type": "object",
+            "properties": {
+                "input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "output_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "total_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "total_tokens": {
                     "type": "integer"
                 }
             }
@@ -7355,6 +7722,12 @@ const docTemplate = `{
                 },
                 "input_tokens": {
                     "type": "integer"
+                },
+                "labels": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "model": {
                     "type": "string"

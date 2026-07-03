@@ -138,6 +138,43 @@ func (r *SQLiteReader) GetUsageByUserPath(ctx context.Context, params UsageQuery
 	return result, nil
 }
 
+// GetUsageByLabel returns token and cost totals grouped by request label.
+// json_each expands each row's labels JSON array, so a row with several
+// labels contributes its totals to each of them; unlabelled rows are omitted.
+func (r *SQLiteReader) GetUsageByLabel(ctx context.Context, params UsageQueryParams) ([]LabelUsage, error) {
+	conditions, args, err := sqliteUsageConditions(params)
+	if err != nil {
+		return nil, err
+	}
+	conditions = append(conditions, "labels IS NOT NULL")
+	where := sqlutil.BuildWhereClause(conditions)
+
+	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
+	query := `SELECT labels_each.value AS label, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
+			FROM usage, json_each(usage.labels) AS labels_each` + where + ` GROUP BY labels_each.value ORDER BY label`
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage by label: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]LabelUsage, 0)
+	for rows.Next() {
+		var l LabelUsage
+		if err := rows.Scan(&l.Label, &l.Requests, &l.InputTokens, &l.OutputTokens, &l.TotalTokens, &l.InputCost, &l.OutputCost, &l.TotalCost); err != nil {
+			return nil, fmt.Errorf("failed to scan usage by label row: %w", err)
+		}
+		result = append(result, l)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage by label rows: %w", err)
+	}
+
+	return result, nil
+}
+
 // GetUsageLog returns a paginated list of individual usage log entries.
 func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
@@ -147,14 +184,6 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 		return nil, err
 	}
 
-	if params.Model != "" {
-		conditions = append(conditions, "model = ?")
-		args = append(args, params.Model)
-	}
-	if params.Provider != "" {
-		conditions = append(conditions, "(provider = ? OR provider_name = ?)")
-		args = append(args, params.Provider, params.Provider)
-	}
 	if params.Search != "" {
 		conditions = append(conditions, "(model LIKE ? ESCAPE '\\' OR provider LIKE ? ESCAPE '\\' OR provider_name LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR provider_id LIKE ? ESCAPE '\\')")
 		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
@@ -511,22 +540,16 @@ func sqliteOffsetModifier(offsetMinutes int) string {
 }
 
 func sqliteUsageConditions(params UsageQueryParams) ([]string, []any, error) {
-	conditions, args := sqliteDateRangeConditions(params)
-	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	if userPath != "" {
-		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
-		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
-	}
-	if condition := sqliteCacheModeCondition(params.CacheMode); condition != "" {
-		conditions = append(conditions, condition)
-	}
-	return conditions, args, nil
+	return sqliteUsageConditionsWithUserPathExpr(params, "user_path")
 }
 
+// sqliteUsageByUserPathConditions filters like sqliteUsageConditions but
+// matches the user path against the grouped (root-normalized) expression.
 func sqliteUsageByUserPathConditions(params UsageQueryParams, userPathExpr string) ([]string, []any, error) {
+	return sqliteUsageConditionsWithUserPathExpr(params, userPathExpr)
+}
+
+func sqliteUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr string) ([]string, []any, error) {
 	conditions, args := sqliteDateRangeConditions(params)
 	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
 	if err != nil {
@@ -535,6 +558,18 @@ func sqliteUsageByUserPathConditions(params UsageQueryParams, userPathExpr strin
 	if userPath != "" {
 		conditions = append(conditions, "("+userPathExpr+" = ? OR "+userPathExpr+" LIKE ? ESCAPE '\\')")
 		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+	}
+	if params.Model != "" {
+		conditions = append(conditions, "model = ?")
+		args = append(args, params.Model)
+	}
+	if params.Provider != "" {
+		conditions = append(conditions, "(provider = ? OR provider_name = ?)")
+		args = append(args, params.Provider, params.Provider)
+	}
+	if params.Label != "" {
+		conditions = append(conditions, "(labels IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(usage.labels) WHERE json_each.value = ?))")
+		args = append(args, params.Label)
 	}
 	if condition := sqliteCacheModeCondition(params.CacheMode); condition != "" {
 		conditions = append(conditions, condition)

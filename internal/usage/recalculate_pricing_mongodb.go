@@ -182,20 +182,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 }
 
 func mongoRecalculationFilter(params RecalculatePricingParams) (bson.D, error) {
-	filter, err := mongoUsageMatchFilters(params.UsageQueryParams)
-	if err != nil {
-		return nil, err
-	}
-	if params.Model != "" {
-		filter = append(filter, bson.E{Key: "model", Value: params.Model})
-	}
-	if params.Provider != "" {
-		filter = mongoAndFilters(filter, bson.D{{Key: "$or", Value: bson.A{
-			bson.D{{Key: "provider", Value: params.Provider}},
-			bson.D{{Key: "provider_name", Value: params.Provider}},
-		}}})
-	}
-	return filter, nil
+	return mongoUsageMatchFilters(params.UsageQueryParams)
 }
 
 func mongoRecalculationUpdate(update recalculationUpdate) bson.D {

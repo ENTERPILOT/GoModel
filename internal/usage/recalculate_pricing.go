@@ -12,11 +12,11 @@ import (
 )
 
 // RecalculatePricingParams identifies the stored usage rows whose costs should
-// be recalculated from the latest model pricing metadata.
+// be recalculated from the latest model pricing metadata. Row selection
+// (date range, model, provider, user path) rides on the embedded
+// UsageQueryParams, sharing the readers' filter semantics.
 type RecalculatePricingParams struct {
 	UsageQueryParams
-	Model    string
-	Provider string
 }
 
 // RecalculatePricingResult summarizes a pricing recalculation run.

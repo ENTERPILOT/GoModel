@@ -201,6 +201,22 @@
                 return 'days=' + this.days;
             },
 
+            // Page-level data filters, applied to every usage-page request so
+            // charts, cache cards, and the request log describe the same
+            // filtered slice of traffic.
+            _usageFilterQueryStr() {
+                let qs = '';
+                if (this.usageFilterModel) qs += '&model=' + encodeURIComponent(this.usageFilterModel);
+                if (this.usageFilterProvider) qs += '&provider=' + encodeURIComponent(this.usageFilterProvider);
+                if (this.usageFilterLabel) qs += '&label=' + encodeURIComponent(this.usageFilterLabel);
+                if (this.usageFilterUserPath) qs += '&user_path=' + encodeURIComponent(this.usageFilterUserPath);
+                return qs;
+            },
+
+            onUsageFilterChanged() {
+                this.fetchUsagePage();
+            },
+
             async fetchCacheOverview() {
                 if (!this.cacheOverviewVisible()) {
                     return;
@@ -220,14 +236,12 @@
                     if (controller) {
                         options.signal = controller.signal;
                     }
-                    let queryStr;
-                    if (this.customStartDate && this.customEndDate) {
-                        queryStr = 'start_date=' + this._formatDate(this.customStartDate) +
-                            '&end_date=' + this._formatDate(this.customEndDate);
-                    } else {
-                        queryStr = 'days=' + this.days;
+                    let queryStr = this._usageQueryStr() + '&interval=' + this.interval;
+                    // The usage page filters its cache cards along with the
+                    // rest of the page; the overview page stays unfiltered.
+                    if (this.page === 'usage') {
+                        queryStr += this._usageFilterQueryStr();
                     }
-                    queryStr += '&interval=' + this.interval;
 
                     const res = await fetch('/admin/cache/overview?' + queryStr, options);
                     const handled = this.handleFetchResponse(res, 'cache overview', options);
@@ -344,13 +358,81 @@
             },
 
             async fetchUsagePage() {
-                const requests = [this.fetchModelUsage(), this.fetchUserPathUsage(), this.fetchUsageLog(true)];
+                const requests = [this.fetchUsagePageSummary(), this.fetchModelUsage(), this.fetchUserPathUsage(), this.fetchLabelUsage(), this.fetchUsageLog(true)];
                 if (this.cacheAnalyticsEnabled()) {
                     requests.push(this.fetchCacheOverview());
                 }
                 await Promise.all(requests);
                 this.renderBarChart();
                 this.renderUserPathChart();
+                this.renderLabelChart();
+            },
+
+            // Filtered summary backing the usage-page stat cards. Kept separate
+            // from the overview page's unfiltered `summary` state.
+            async fetchUsagePageSummary() {
+                let controller = null;
+                try {
+                    controller = typeof this._startAbortableRequest === 'function'
+                        ? this._startAbortableRequest('_usagePageSummaryFetchController')
+                        : null;
+                    const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    if (controller) {
+                        options.signal = controller.signal;
+                    }
+                    const res = await fetch('/admin/usage/summary?' + this._usageQueryStr() + this._usageFilterQueryStr(), options);
+                    const handled = this.handleFetchResponse(res, 'usage page summary', options);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
+                        this.usageSummary = this.emptyUsageSummary();
+                        return;
+                    }
+                    const payload = await res.json();
+                    if (controller && controller.signal.aborted) {
+                        return;
+                    }
+                    this.usageSummary = payload && typeof payload === 'object' ? payload : this.emptyUsageSummary();
+                } catch (e) {
+                    if (typeof this._isAbortError === 'function' && this._isAbortError(e)) {
+                        return;
+                    }
+                    console.error('Failed to fetch usage page summary:', e);
+                    this.usageSummary = this.emptyUsageSummary();
+                } finally {
+                    if (typeof this._clearAbortableRequest === 'function') {
+                        this._clearAbortableRequest('_usagePageSummaryFetchController', controller);
+                    }
+                }
+            },
+
+            // Requests over the period and filters, including local cache hits
+            // (the cache overview follows the same filters on this page), so
+            // the count matches the log's default all-mode view.
+            usagePageCacheHits() {
+                if (!this.cacheAnalyticsEnabled()) return 0;
+                const summary = (this.cacheOverview && this.cacheOverview.summary) || {};
+                const hits = Number(summary.total_hits || 0);
+                return Number.isFinite(hits) && hits > 0 ? hits : 0;
+            },
+
+            usagePageTotalRequests() {
+                const requests = Number((this.usageSummary && this.usageSummary.total_requests) || 0);
+                return (Number.isFinite(requests) ? requests : 0) + this.usagePageCacheHits();
+            },
+
+            usagePageRequestsTitle() {
+                const hits = this.usagePageCacheHits();
+                if (hits <= 0) return '';
+                const provider = this.usagePageTotalRequests() - hits;
+                return this.formatNumber(provider) + ' to providers + ' + this.formatNumber(hits) + ' from cache';
+            },
+
+            usagePageCostTitle() {
+                const summary = this.usageSummary || {};
+                if (summary.total_input_cost === null || summary.total_input_cost === undefined) return '';
+                return this.formatCost(summary.total_input_cost) + ' input + ' + this.formatCost(summary.total_output_cost) + ' output';
             },
 
             async fetchModelUsage() {
@@ -363,7 +445,7 @@
                     if (controller) {
                         options.signal = controller.signal;
                     }
-                    const res = await fetch('/admin/usage/models?' + this._usageQueryStr(), options);
+                    const res = await fetch('/admin/usage/models?' + this._usageQueryStr() + this._usageFilterQueryStr(), options);
                     const handled = this.handleFetchResponse(res, 'usage models', options);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
@@ -400,7 +482,7 @@
                     if (controller) {
                         options.signal = controller.signal;
                     }
-                    const res = await fetch('/admin/usage/user-paths?' + this._usageQueryStr(), options);
+                    const res = await fetch('/admin/usage/user-paths?' + this._usageQueryStr() + this._usageFilterQueryStr(), options);
                     const handled = this.handleFetchResponse(res, 'usage user paths', options);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
@@ -427,6 +509,43 @@
                 }
             },
 
+            async fetchLabelUsage() {
+                let controller = null;
+                try {
+                    controller = typeof this._startAbortableRequest === 'function'
+                        ? this._startAbortableRequest('_labelUsageFetchController')
+                        : null;
+                    const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    if (controller) {
+                        options.signal = controller.signal;
+                    }
+                    const res = await fetch('/admin/usage/labels?' + this._usageQueryStr() + this._usageFilterQueryStr(), options);
+                    const handled = this.handleFetchResponse(res, 'usage labels', options);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
+                        this.labelUsage = [];
+                        return;
+                    }
+                    const payload = await res.json();
+                    if (controller && controller.signal.aborted) {
+                        return;
+                    }
+                    this.labelUsage = Array.isArray(payload) ? payload : [];
+                } catch (e) {
+                    if (typeof this._isAbortError === 'function' && this._isAbortError(e)) {
+                        return;
+                    }
+                    console.error('Failed to fetch usage by label:', e);
+                    this.labelUsage = [];
+                } finally {
+                    if (typeof this._clearAbortableRequest === 'function') {
+                        this._clearAbortableRequest('_labelUsageFetchController', controller);
+                    }
+                }
+            },
+
             async fetchUsageLog(resetOffset) {
                 let controller = null;
                 try {
@@ -438,13 +557,10 @@
                         options.signal = controller.signal;
                     }
                     if (resetOffset) this.usageLog.offset = 0;
-                    let qs = this._usageQueryStr();
+                    let qs = this._usageQueryStr() + this._usageFilterQueryStr();
                     qs += '&limit=' + this.usageLog.limit + '&offset=' + this.usageLog.offset;
                     qs += '&cache_mode=' + (this.usageLogHideCached ? 'uncached' : 'all');
                     if (this.usageLogSearch) qs += '&search=' + encodeURIComponent(this.usageLogSearch);
-                    if (this.usageLogModel) qs += '&model=' + encodeURIComponent(this.usageLogModel);
-                    if (this.usageLogProvider) qs += '&provider=' + encodeURIComponent(this.usageLogProvider);
-                    if (this.usageLogUserPath) qs += '&user_path=' + encodeURIComponent(this.usageLogUserPath);
 
                     const res = await fetch('/admin/usage/log?' + qs, options);
                     const handled = this.handleFetchResponse(res, 'usage log', options);
@@ -483,6 +599,7 @@
                 history.pushState(null, '', dashboardModulePath(url));
                 this.renderBarChart();
                 this.renderUserPathChart();
+                this.renderLabelChart();
             },
 
             usageLogNextPage() {
@@ -499,13 +616,17 @@
                 }
             },
 
-            usageLogModelOptions() {
+            // Filter options derive from the currently filtered aggregates
+            // (faceted drill-down); the active selection stays listed so the
+            // select never silently shows "All" while a filter is applied.
+            usageFilterModelOptions() {
                 const set = new Set();
                 this.modelUsage.forEach((m) => { set.add(m.model); });
+                if (this.usageFilterModel) set.add(this.usageFilterModel);
                 return [...set].sort();
             },
 
-            usageLogProviderOptions() {
+            usageFilterProviderOptions() {
                 const set = new Set();
                 this.modelUsage.forEach((m) => {
                     const provider = typeof this.providerDisplayValue === 'function'
@@ -515,7 +636,43 @@
                         set.add(provider);
                     }
                 });
+                if (this.usageFilterProvider) set.add(this.usageFilterProvider);
                 return [...set].sort();
+            },
+
+            usageFilterLabelOptions() {
+                const set = new Set();
+                (this.labelUsage || []).forEach((l) => {
+                    if (l && l.label) set.add(l.label);
+                });
+                if (this.usageFilterLabel) set.add(this.usageFilterLabel);
+                return [...set].sort();
+            },
+
+            entryLabels(entry) {
+                return Array.isArray(entry && entry.labels) ? entry.labels : [];
+            },
+
+            // The Labels column only appears when labels are in play: the
+            // period has by-label aggregates, a label filter is active, or the
+            // current log page carries labelled entries (e.g. cached-only
+            // labelled traffic, which the uncached-mode aggregates omit).
+            usageLogHasLabels() {
+                if ((this.labelUsage || []).length > 0 || this.usageFilterLabel) return true;
+                const entries = (this.usageLog && this.usageLog.entries) || [];
+                return entries.some((entry) => this.entryLabels(entry).length > 0);
+            },
+
+            // Chip click: filter the whole page by the label, or clear the
+            // filter when the chip's label is already active.
+            toggleUsageLabelFilter(label) {
+                this.usageFilterLabel = this.usageFilterLabel === label ? '' : label;
+                this.onUsageFilterChanged();
+            },
+
+            usageLabelChipTitle(label) {
+                if (this.usageFilterLabel === label) return 'Clear label filter';
+                return 'Filter usage by "' + label + '"';
             },
 
             usageEntryCacheType(entry) {

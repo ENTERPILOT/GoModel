@@ -84,14 +84,6 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 		conditions = append(conditions, "id > ?")
 		args = append(args, lastID)
 	}
-	if params.Model != "" {
-		conditions = append(conditions, "model = ?")
-		args = append(args, params.Model)
-	}
-	if params.Provider != "" {
-		conditions = append(conditions, "(provider = ? OR provider_name = ?)")
-		args = append(args, params.Provider, params.Provider)
-	}
 	args = append(args, limit)
 
 	rows, err := tx.QueryContext(ctx, `

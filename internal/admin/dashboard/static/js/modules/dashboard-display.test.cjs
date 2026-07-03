@@ -184,6 +184,7 @@ test('system theme media changes rerender all dashboard charts', () => {
     let overviewCalls = 0;
     let modelCalls = 0;
     let userPathCalls = 0;
+    let labelCalls = 0;
 
     app.fetchAll = () => {};
     app.renderChart = () => {
@@ -195,6 +196,9 @@ test('system theme media changes rerender all dashboard charts', () => {
     app.renderUserPathChart = () => {
         userPathCalls++;
     };
+    app.renderLabelChart = () => {
+        labelCalls++;
+    };
 
     app.init();
     assert.equal(typeof mediaChangeHandler, 'function');
@@ -202,11 +206,13 @@ test('system theme media changes rerender all dashboard charts', () => {
     overviewCalls = 0;
     modelCalls = 0;
     userPathCalls = 0;
+    labelCalls = 0;
     mediaChangeHandler();
 
     assert.equal(overviewCalls, 1);
     assert.equal(modelCalls, 1);
     assert.equal(userPathCalls, 1);
+    assert.equal(labelCalls, 1);
 
     app.theme = 'dark';
     mediaChangeHandler();
@@ -214,6 +220,7 @@ test('system theme media changes rerender all dashboard charts', () => {
     assert.equal(overviewCalls, 1);
     assert.equal(modelCalls, 1);
     assert.equal(userPathCalls, 1);
+    assert.equal(labelCalls, 1);
 });
 
 test('unauthorized dashboard responses open the auth dialog', () => {

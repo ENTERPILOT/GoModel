@@ -83,6 +83,10 @@ mkdir -p "$(dirname "$db_path")"
 
 sqlite3 "$db_path" "PRAGMA journal_mode = WAL;" >/dev/null
 
+# Databases created before the labelling feature lack the labels column; add
+# it when missing (the error on fresh or already-migrated databases is benign).
+sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN labels JSON;" 2>/dev/null || true
+
 sqlite3 "$db_path" <<SQL
 .bail on
 .timeout 10000
@@ -99,6 +103,7 @@ CREATE TABLE IF NOT EXISTS usage (
   endpoint TEXT NOT NULL,
   user_path TEXT,
   cache_type TEXT,
+  labels JSON,
   input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
   total_tokens INTEGER NOT NULL DEFAULT 0,
@@ -256,6 +261,7 @@ SELECT
   abs(random()) % 10000 AS template_bucket,
   abs(random()) % 10000 AS cache_bucket,
   abs(random()) % 10000 AS prompt_bucket,
+  abs(random()) % 10000 AS label_bucket,
   abs(random()) % 86400 AS second_of_day,
   abs(random()) AS token_noise
 FROM demo_days d
@@ -333,7 +339,7 @@ FROM prompt_parts;
 
 INSERT INTO usage (
   id, request_id, provider_id, timestamp, model, provider, provider_name,
-  endpoint, user_path, cache_type, input_tokens, output_tokens, total_tokens,
+  endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens,
   raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat
 )
 SELECT
@@ -347,6 +353,16 @@ SELECT
   endpoint,
   user_path,
   cache_type,
+  -- Request labels as extracted from tagging headers: roughly two thirds of
+  -- traffic is labelled, some with two labels, the rest unlabelled (NULL).
+  CASE
+    WHEN label_bucket < 2500 THEN json_array('env:prod')
+    WHEN label_bucket < 4000 THEN json_array('env:staging')
+    WHEN label_bucket < 5200 THEN json_array('env:prod', 'batch')
+    WHEN label_bucket < 6000 THEN json_array('experiment:rag-v2')
+    WHEN label_bucket < 6600 THEN json_array('env:prod', 'priority:high')
+    ELSE NULL
+  END AS labels,
   input_tokens,
   output_tokens,
   total_tokens,

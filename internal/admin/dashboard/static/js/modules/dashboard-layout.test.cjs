@@ -817,22 +817,26 @@ test("budget row record actions stack reset under edit", () => {
   assert.match(readCSSRule(css, ".budget-bar-fill-period-custom"), /background:\s*#bfa584/);
 });
 
-test("usage request log toolbar puts search above the remaining filters", () => {
+test("usage page puts data filters below the header and keeps only search plus view options in the log toolbar", () => {
   const indexTemplate = readDashboardTemplateSource();
   const css = readFixture("../../css/dashboard.css");
 
+  // The page-level filter bar (model/provider/label/user-path) renders above
+  // the cache cards; the request log toolbar keeps search and the hide-cached
+  // toggle only.
   assert.match(
     indexTemplate,
-    /<div class="usage-log-toolbar">\s*<div class="usage-filter-row usage-filter-row-search">[\s\S]*aria-label="Search by request ID, model, provider"[\s\S]*x-model="usageLogSearch"[\s\S]*<\/div>\s*<\/div>\s*<div class="usage-filter-row usage-filter-row-controls">[\s\S]*x-model="usageLogModel"[\s\S]*x-model="usageLogProvider"[\s\S]*x-model="usageLogUserPath"/,
+    /<div class="usage-page-filters"[\s\S]*x-model="usageFilterModel"[\s\S]*x-model="usageFilterProvider"[\s\S]*x-model="usageFilterLabel"[\s\S]*x-model="usageFilterUserPath"[\s\S]*<div class="cards"/,
   );
   assert.match(
     indexTemplate,
-    /class="usage-filter-row usage-filter-row-search"[\s\S]*placeholder="Search by request ID, model, provider\.\.\."/,
+    /class="usage-page-filters"[\s\S]*placeholder="User path \/team\/alpha"/,
   );
   assert.match(
     indexTemplate,
-    /class="usage-filter-row usage-filter-row-controls"[\s\S]*placeholder="User path \/team\/alpha"/,
+    /<div class="usage-log-toolbar">\s*<div class="usage-filter-row usage-filter-row-search">[\s\S]*aria-label="Search by request ID, model, provider"[\s\S]*x-model="usageLogSearch"[\s\S]*<\/div>\s*<\/div>\s*<div class="usage-filter-row usage-filter-row-options">[\s\S]*x-model="usageLogHideCached"/,
   );
+  assert.doesNotMatch(indexTemplate, /usage-filter-row-controls/);
 
   const toolbarRule = readCSSRule(css, ".usage-log-toolbar");
   assert.match(toolbarRule, /display:\s*grid/);
@@ -843,17 +847,9 @@ test("usage request log toolbar puts search above the remaining filters", () => 
   );
   assert.match(searchRule, /grid-column:\s*1\s*\/\s*-1/);
 
-  const selectRule = readCSSRule(
-    css,
-    ".usage-filter-row-controls .usage-log-select",
-  );
-  assert.match(selectRule, /grid-column:\s*span 3/);
-
-  const userPathRule = readCSSRule(
-    css,
-    ".usage-filter-row-controls .filter-input-wrap",
-  );
-  assert.match(userPathRule, /grid-column:\s*span 6/);
+  const filterBarRule = readCSSRule(css, ".usage-page-filters");
+  assert.match(filterBarRule, /display:\s*flex/);
+  assert.match(filterBarRule, /flex-wrap:\s*wrap/);
 });
 
 test("audit toolbar uses a full-width search row above the select row with a right-aligned clear button", () => {

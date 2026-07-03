@@ -144,6 +144,44 @@ func (r *PostgreSQLReader) GetUsageByUserPath(ctx context.Context, params UsageQ
 	return result, nil
 }
 
+// GetUsageByLabel returns token and cost totals grouped by request label.
+// jsonb_array_elements_text expands each row's labels JSONB array, so a row
+// with several labels contributes its totals to each of them; rows with NULL
+// or non-array labels are omitted by the jsonb_typeof guard.
+func (r *PostgreSQLReader) GetUsageByLabel(ctx context.Context, params UsageQueryParams) ([]LabelUsage, error) {
+	conditions, args, _, err := pgUsageConditions(params, 1)
+	if err != nil {
+		return nil, err
+	}
+	conditions = append(conditions, "jsonb_typeof(labels) = 'array'")
+	where := sqlutil.BuildWhereClause(conditions)
+
+	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
+	query := `SELECT label, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
+			FROM "usage", jsonb_array_elements_text(labels) AS label` + where + ` GROUP BY label ORDER BY label`
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage by label: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]LabelUsage, 0)
+	for rows.Next() {
+		var l LabelUsage
+		if err := rows.Scan(&l.Label, &l.Requests, &l.InputTokens, &l.OutputTokens, &l.TotalTokens, &l.InputCost, &l.OutputCost, &l.TotalCost); err != nil {
+			return nil, fmt.Errorf("failed to scan usage by label row: %w", err)
+		}
+		result = append(result, l)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage by label rows: %w", err)
+	}
+
+	return result, nil
+}
+
 // GetUsageLog returns a paginated list of individual usage log entries.
 func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
@@ -153,16 +191,6 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 		return nil, err
 	}
 
-	if params.Model != "" {
-		conditions = append(conditions, fmt.Sprintf("model = $%d", argIdx))
-		args = append(args, params.Model)
-		argIdx++
-	}
-	if params.Provider != "" {
-		conditions = append(conditions, fmt.Sprintf("(provider = $%d OR provider_name = $%d)", argIdx, argIdx+1))
-		args = append(args, params.Provider, params.Provider)
-		argIdx += 2
-	}
 	if params.Search != "" {
 		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
 		conditions = append(conditions, fmt.Sprintf("(model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\' OR request_id ILIKE $%d ESCAPE '\\' OR provider_id ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx, argIdx))
@@ -474,23 +502,16 @@ func pgQuoteLiteral(value string) string {
 }
 
 func pgUsageConditions(params UsageQueryParams, argIdx int) (conditions []string, args []any, nextIdx int, err error) {
-	conditions, args, nextIdx = pgDateRangeConditions(params, argIdx)
-	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
-	if err != nil {
-		return nil, nil, 0, err
-	}
-	if userPath != "" {
-		conditions = append(conditions, fmt.Sprintf("(user_path = $%d OR user_path LIKE $%d ESCAPE '\\')", nextIdx, nextIdx+1))
-		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
-		nextIdx += 2
-	}
-	if condition := pgCacheModeCondition(params.CacheMode); condition != "" {
-		conditions = append(conditions, condition)
-	}
-	return conditions, args, nextIdx, nil
+	return pgUsageConditionsWithUserPathExpr(params, "user_path", argIdx)
 }
 
+// pgUsageByUserPathConditions filters like pgUsageConditions but matches the
+// user path against the grouped (root-normalized) expression.
 func pgUsageByUserPathConditions(params UsageQueryParams, userPathExpr string, argIdx int) (conditions []string, args []any, nextIdx int, err error) {
+	return pgUsageConditionsWithUserPathExpr(params, userPathExpr, argIdx)
+}
+
+func pgUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr string, argIdx int) (conditions []string, args []any, nextIdx int, err error) {
 	conditions, args, nextIdx = pgDateRangeConditions(params, argIdx)
 	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
 	if err != nil {
@@ -500,6 +521,23 @@ func pgUsageByUserPathConditions(params UsageQueryParams, userPathExpr string, a
 		conditions = append(conditions, fmt.Sprintf("(%s = $%d OR %s LIKE $%d ESCAPE '\\')", userPathExpr, nextIdx, userPathExpr, nextIdx+1))
 		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
 		nextIdx += 2
+	}
+	if params.Model != "" {
+		conditions = append(conditions, fmt.Sprintf("model = $%d", nextIdx))
+		args = append(args, params.Model)
+		nextIdx++
+	}
+	if params.Provider != "" {
+		conditions = append(conditions, fmt.Sprintf("(provider = $%d OR provider_name = $%d)", nextIdx, nextIdx+1))
+		args = append(args, params.Provider, params.Provider)
+		nextIdx += 2
+	}
+	if params.Label != "" {
+		// jsonb_exists matches a top-level array element; NULL labels yield
+		// NULL which the WHERE clause treats as no match.
+		conditions = append(conditions, fmt.Sprintf("jsonb_exists(labels, $%d)", nextIdx))
+		args = append(args, params.Label)
+		nextIdx++
 	}
 	if condition := pgCacheModeCondition(params.CacheMode); condition != "" {
 		conditions = append(conditions, condition)

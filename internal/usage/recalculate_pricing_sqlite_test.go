@@ -73,9 +73,9 @@ func TestSQLiteStoreRecalculatePricingUpdatesFilteredUsageCosts(t *testing.T) {
 			StartDate: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
 			EndDate:   time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
 			UserPath:  "/team",
+			Provider:  "primary-openai",
+			Model:     "gpt-4o",
 		},
-		Provider: "primary-openai",
-		Model:    "gpt-4o",
 	}, staticTestPricingResolver{
 		"primary-openai/gpt-4o": {
 			InputPerMtok:  &inputRate,
@@ -148,7 +148,7 @@ func TestSQLiteStoreRecalculatePricingProcessesBatches(t *testing.T) {
 
 	inputRate := 2.0
 	result, err := store.RecalculatePricing(ctx, RecalculatePricingParams{
-		Model: "gpt-4o",
+		UsageQueryParams: UsageQueryParams{Model: "gpt-4o"},
 	}, staticTestPricingResolver{
 		"openai/gpt-4o": {
 			InputPerMtok: &inputRate,

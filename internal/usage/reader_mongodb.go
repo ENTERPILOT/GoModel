@@ -354,6 +354,92 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 	return result, nil
 }
 
+// mongoGroupedUsageRow decodes a $group document keyed by a string _id with
+// the shared per-group token totals and nullable cost aggregates.
+type mongoGroupedUsageRow struct {
+	Key           string  `bson:"_id"`
+	Requests      int     `bson:"requests"`
+	InputTokens   int64   `bson:"input_tokens"`
+	OutputTokens  int64   `bson:"output_tokens"`
+	TotalTokens   int64   `bson:"total_tokens"`
+	InputCost     float64 `bson:"input_cost"`
+	OutputCost    float64 `bson:"output_cost"`
+	TotalCost     float64 `bson:"total_cost"`
+	HasInputCost  int     `bson:"has_input_cost"`
+	HasOutputCost int     `bson:"has_output_cost"`
+	HasTotalCost  int     `bson:"has_total_cost"`
+}
+
+// decodeGroupedUsageRows drains an aggregation cursor of grouped usage
+// documents, converting each decoded row via build. what names the query in
+// error messages.
+func decodeGroupedUsageRows[T any](ctx context.Context, cursor *mongo.Cursor, what string, build func(mongoGroupedUsageRow) T) ([]T, error) {
+	result := make([]T, 0)
+	for cursor.Next(ctx) {
+		var row mongoGroupedUsageRow
+		if err := cursor.Decode(&row); err != nil {
+			return nil, fmt.Errorf("failed to decode %s row: %w", what, err)
+		}
+		result = append(result, build(row))
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating %s cursor: %w", what, err)
+	}
+	return result, nil
+}
+
+// GetUsageByLabel returns token and cost totals grouped by request label.
+// $unwind expands each document's labels array, so a document with several
+// labels contributes its totals to each of them; documents without labels are
+// dropped by $unwind.
+func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryParams) ([]LabelUsage, error) {
+	pipeline := bson.A{}
+	matchFilters, err := mongoUsageMatchFilters(params)
+	if err != nil {
+		return nil, err
+	}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+
+	pipeline = append(pipeline,
+		bson.D{{Key: "$unwind", Value: "$labels"}},
+		bson.D{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$labels"},
+			{Key: "requests", Value: bson.D{{Key: "$sum", Value: 1}}},
+			{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
+			{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
+			{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},
+			{Key: "input_cost", Value: mongoCostSum("$input_cost")},
+			{Key: "output_cost", Value: mongoCostSum("$output_cost")},
+			{Key: "total_cost", Value: mongoCostSum("$total_cost")},
+			{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
+			{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
+			{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+		}}},
+		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
+	)
+
+	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate usage by label: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	return decodeGroupedUsageRows(ctx, cursor, "usage by label", func(row mongoGroupedUsageRow) LabelUsage {
+		return LabelUsage{
+			Label:        row.Key,
+			Requests:     row.Requests,
+			InputTokens:  row.InputTokens,
+			OutputTokens: row.OutputTokens,
+			TotalTokens:  row.TotalTokens,
+			InputCost:    costPtr(row.HasInputCost, row.InputCost),
+			OutputCost:   costPtr(row.HasOutputCost, row.OutputCost),
+			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
+		}
+	})
+}
+
 func mongoUsageGroupedProviderNameExpr() bson.D {
 	trimmedProviderName := bson.D{{Key: "$trim", Value: bson.D{
 		{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$provider_name", ""}}}},
@@ -548,39 +634,20 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 	}
 	defer cursor.Close(ctx)
 
-	result := make([]DailyUsage, 0)
-	for cursor.Next(ctx) {
-		var row struct {
-			Date          string  `bson:"_id"`
-			Requests      int     `bson:"requests"`
-			InputTokens   int64   `bson:"input_tokens"`
-			OutputTokens  int64   `bson:"output_tokens"`
-			TotalTokens   int64   `bson:"total_tokens"`
-			InputCost     float64 `bson:"input_cost"`
-			OutputCost    float64 `bson:"output_cost"`
-			TotalCost     float64 `bson:"total_cost"`
-			HasInputCost  int     `bson:"has_input_cost"`
-			HasOutputCost int     `bson:"has_output_cost"`
-			HasTotalCost  int     `bson:"has_total_cost"`
-		}
-		if err := cursor.Decode(&row); err != nil {
-			return nil, fmt.Errorf("failed to decode daily usage row: %w", err)
-		}
-		d := DailyUsage{
-			Date:         row.Date,
+	result, err := decodeGroupedUsageRows(ctx, cursor, "daily usage", func(row mongoGroupedUsageRow) DailyUsage {
+		return DailyUsage{
+			Date:         row.Key,
 			Requests:     row.Requests,
 			InputTokens:  row.InputTokens,
 			OutputTokens: row.OutputTokens,
 			TotalTokens:  row.TotalTokens,
+			InputCost:    costPtr(row.HasInputCost, row.InputCost),
+			OutputCost:   costPtr(row.HasOutputCost, row.OutputCost),
+			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
 		}
-		d.InputCost = costPtr(row.HasInputCost, row.InputCost)
-		d.OutputCost = costPtr(row.HasOutputCost, row.OutputCost)
-		d.TotalCost = costPtr(row.HasTotalCost, row.TotalCost)
-		result = append(result, d)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating daily usage cursor: %w", err)
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// Second pass: project the same period key onto each document and fold the
@@ -825,8 +892,22 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 			},
 		})
 	}
+	if params.Model != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "model", Value: params.Model})
+	}
+	if params.Label != "" {
+		// Matching a scalar against an array field matches documents whose
+		// labels array contains the value.
+		matchFilters = append(matchFilters, bson.E{Key: "labels", Value: params.Label})
+	}
+	if params.Provider != "" {
+		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "$or", Value: bson.A{
+			bson.D{{Key: "provider", Value: params.Provider}},
+			bson.D{{Key: "provider_name", Value: params.Provider}},
+		}}})
+	}
 	if filter := mongoCacheModeFilter(params.CacheMode); len(filter) > 0 {
-		matchFilters = append(matchFilters, filter...)
+		matchFilters = mongoAndFilters(matchFilters, filter)
 	}
 	return matchFilters, nil
 }
@@ -837,15 +918,6 @@ func mongoUsageLogMatchFilters(params UsageLogParams) (bson.D, error) {
 		return nil, err
 	}
 
-	if params.Model != "" {
-		matchFilters = append(matchFilters, bson.E{Key: "model", Value: params.Model})
-	}
-	if params.Provider != "" {
-		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "$or", Value: bson.A{
-			bson.D{{Key: "provider", Value: params.Provider}},
-			bson.D{{Key: "provider_name", Value: params.Provider}},
-		}}})
-	}
 	if params.Search != "" {
 		regex := bson.D{{Key: "$regex", Value: regexp.QuoteMeta(params.Search)}, {Key: "$options", Value: "i"}}
 		searchFilter := bson.D{{Key: "$or", Value: bson.A{

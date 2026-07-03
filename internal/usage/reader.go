@@ -11,12 +11,18 @@ import (
 )
 
 // UsageQueryParams specifies the query parameters for usage data retrieval.
+// The optional filters (UserPath, Model, Provider, Label) apply uniformly to
+// every reader method, so summaries, breakdowns, and the request log all
+// describe the same filtered slice of traffic.
 type UsageQueryParams struct {
 	StartDate time.Time // Inclusive start (day precision)
 	EndDate   time.Time // Inclusive end (day precision)
 	Interval  string    // "daily", "weekly", "monthly", "yearly"
 	TimeZone  string    // IANA timezone used for day-boundary interpretation and grouping
 	UserPath  string    // subtree filter on tracked user path
+	Model     string    // filter by exact model name (optional)
+	Provider  string    // filter by provider name or provider type (optional)
+	Label     string    // filter by request label, exact match (optional)
 	CacheMode string    // "uncached" (default), "cached", or "all"
 }
 
@@ -107,6 +113,20 @@ type ModelUsage struct {
 // UserPathUsage holds per-user-path token usage aggregates.
 type UserPathUsage struct {
 	UserPath     string   `json:"user_path"`
+	InputTokens  int64    `json:"input_tokens"`
+	OutputTokens int64    `json:"output_tokens"`
+	TotalTokens  int64    `json:"total_tokens"`
+	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
+	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
+	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+}
+
+// LabelUsage holds per-label token usage aggregates. A request carrying
+// several labels contributes its full totals to each of them, so label rows
+// overlap and do not sum to the period totals.
+type LabelUsage struct {
+	Label        string   `json:"label"`
+	Requests     int      `json:"requests"`
 	InputTokens  int64    `json:"input_tokens"`
 	OutputTokens int64    `json:"output_tokens"`
 	TotalTokens  int64    `json:"total_tokens"`
@@ -211,10 +231,10 @@ func applyDailyInputSplit(daily []DailyUsage, splits map[string]periodInputSplit
 }
 
 // UsageLogParams specifies query parameters for paginated usage log retrieval.
+// Data filters (model, provider, label, user path) live on the embedded
+// UsageQueryParams; only the log-specific view options are declared here.
 type UsageLogParams struct {
-	UsageQueryParams        // embed date range
-	Model            string // filter by model (optional)
-	Provider         string // filter by provider name or provider type (optional)
+	UsageQueryParams        // embed date range and data filters
 	Search           string // free-text search on model/provider/request_id
 	Limit            int    // page size (default 50, max 200)
 	Offset           int    // pagination offset
@@ -339,6 +359,11 @@ type UsageReader interface {
 
 	// GetUsageByUserPath returns per-user-path token usage aggregates for the given date range.
 	GetUsageByUserPath(ctx context.Context, params UsageQueryParams) ([]UserPathUsage, error)
+
+	// GetUsageByLabel returns per-label token usage aggregates for the given
+	// date range. Unlabelled entries are omitted; entries with several labels
+	// count once per label.
+	GetUsageByLabel(ctx context.Context, params UsageQueryParams) ([]LabelUsage, error)
 
 	// GetUsageLog returns a paginated list of individual usage entries with optional filtering.
 	GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error)

@@ -59,18 +59,9 @@ func (s *PostgreSQLStore) RecalculatePricing(ctx context.Context, params Recalcu
 }
 
 func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params RecalculatePricingParams) ([]recalculationEntry, error) {
-	conditions, args, nextIdx, err := pgUsageConditions(params.UsageQueryParams, 1)
+	conditions, args, _, err := pgUsageConditions(params.UsageQueryParams, 1)
 	if err != nil {
 		return nil, err
-	}
-	if params.Provider != "" {
-		conditions = append(conditions, fmt.Sprintf("(provider = $%d OR provider_name = $%d)", nextIdx, nextIdx+1))
-		args = append(args, params.Provider, params.Provider)
-		nextIdx += 2
-	}
-	if params.Model != "" {
-		conditions = append(conditions, fmt.Sprintf("model = $%d", nextIdx))
-		args = append(args, params.Model)
 	}
 
 	rows, err := tx.Query(ctx, `

@@ -168,7 +168,8 @@
 
             usageLiveInsertAllowed() {
                 return this.usageLog && this.usageLog.offset === 0 &&
-                    !this.usageLogSearch && !this.usageLogModel && !this.usageLogProvider && !this.usageLogUserPath;
+                    !this.usageLogSearch && !this.usageFilterModel && !this.usageFilterProvider &&
+                    !this.usageFilterLabel && !this.usageFilterUserPath;
             },
 
             mergeLiveAuditEntry(incoming, eventType) {

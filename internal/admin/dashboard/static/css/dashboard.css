@@ -2866,6 +2866,12 @@ textarea:focus {
   margin-bottom: 16px;
 }
 
+/* The request log carries many columns (labels included); scroll sideways on
+   narrow windows instead of clipping the trailing cost columns. */
+.usage-log-section .table-wrapper {
+  overflow-x: auto;
+}
+
 .usage-log-toolbar {
   display: grid;
   gap: 12px;
@@ -2923,15 +2929,23 @@ textarea:focus {
   min-width: 0;
 }
 
-.usage-filter-row-controls .usage-log-select {
-  grid-column: span 3;
-  min-width: 0;
-  width: 100%;
+/* Page-level filter bar under the Usage Analytics header. Every widget on the
+   page (cards, charts, request log) follows these filters. */
+.usage-page-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
 }
 
-.usage-filter-row-controls .filter-input-wrap {
-  grid-column: span 6;
-  min-width: 0;
+.usage-page-filters .usage-log-select {
+  flex: 0 1 auto;
+}
+
+.usage-page-filters-user-path {
+  flex: 1 1 220px;
+  min-width: 180px;
+  max-width: 360px;
 }
 
 .usage-filter-row-options {
@@ -2966,6 +2980,44 @@ textarea:focus {
 
 .usage-log-row-cached .usage-log-cache-cell {
   font-weight: 700;
+}
+
+/* Request labels — one deterministic accent per label, shared with the
+   by-label chart. labelChipStyle() sets --label-color inline per chip. */
+.usage-label-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 280px;
+}
+
+.usage-label-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 9px;
+  border: 1px solid color-mix(in srgb, var(--label-color, var(--accent)) 45%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--label-color, var(--accent)) 14%, var(--bg));
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  font-style: normal;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.usage-label-chip:hover {
+  background: color-mix(in srgb, var(--label-color, var(--accent)) 26%, var(--bg));
+}
+
+.usage-label-chip.active {
+  background: color-mix(in srgb, var(--label-color, var(--accent)) 32%, var(--bg));
+  border-color: var(--label-color, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--label-color, var(--accent)) 55%, transparent);
 }
 
 /* Audit Log Section */
@@ -5186,10 +5238,13 @@ body.conversation-drawer-open {
   .usage-log-select {
     min-width: 0;
   }
-  .usage-filter-row-search .filter-input-wrap,
-  .usage-filter-row-controls .usage-log-select,
-  .usage-filter-row-controls .filter-input-wrap {
+  .usage-filter-row-search .filter-input-wrap {
     grid-column: 1;
+  }
+  .usage-page-filters .usage-log-select,
+  .usage-page-filters-user-path {
+    flex: 1 1 100%;
+    max-width: none;
   }
   .usage-log-table {
     display: block;

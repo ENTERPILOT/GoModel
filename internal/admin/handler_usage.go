@@ -32,6 +32,9 @@ const defaultUsageLogLimit = 50
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
+// @Param        model       query     string  false  "Filter by exact model name"
+// @Param        provider    query     string  false  "Filter by provider name or provider type"
+// @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {object}  usage.UsageSummary
@@ -97,6 +100,9 @@ func usageSliceResponse[T any](
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
 // @Param        interval    query     string  false  "Grouping interval: daily, weekly, monthly, yearly (default daily)"
+// @Param        model       query     string  false  "Filter by exact model name"
+// @Param        provider    query     string  false  "Filter by provider name or provider type"
+// @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.DailyUsage
@@ -118,6 +124,9 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
+// @Param        model       query     string  false  "Filter by exact model name"
+// @Param        provider    query     string  false  "Filter by provider name or provider type"
+// @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.ModelUsage
@@ -139,6 +148,9 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
+// @Param        model       query     string  false  "Filter by exact model name"
+// @Param        provider    query     string  false  "Filter by provider name or provider type"
+// @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.UserPathUsage
@@ -151,6 +163,33 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 	})
 }
 
+// UsageByLabel handles GET /admin/usage/labels
+//
+// @Summary      Get usage breakdown by request label
+// @Description  Returns per-label token and cost aggregates. Requests carrying
+// @Description  several labels count once per label, so rows overlap and do
+// @Description  not sum to the period totals. Unlabelled requests are omitted.
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Param        days        query     int     false  "Number of days (default 30)"
+// @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
+// @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
+// @Param        model       query     string  false  "Filter by exact model name"
+// @Param        provider    query     string  false  "Filter by provider name or provider type"
+// @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
+// @Success      200  {array}   usage.LabelUsage
+// @Failure      400  {object}  core.GatewayError
+// @Failure      401  {object}  core.GatewayError
+// @Router       /admin/usage/labels [get]
+func (h *Handler) UsageByLabel(c *echo.Context) error {
+	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.LabelUsage, error) {
+		return h.usageReader.GetUsageByLabel(ctx, params)
+	})
+}
+
 // UsageLog handles GET /admin/usage/log
 //
 // @Summary      Get paginated usage log entries
@@ -160,8 +199,9 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
-// @Param        model       query     string  false  "Filter by model name"
+// @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
+// @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Param        search      query     string  false  "Search across model, provider, request_id, provider_id"
@@ -181,8 +221,6 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 
 	params := usage.UsageLogParams{
 		UsageQueryParams: baseParams,
-		Model:            c.QueryParam("model"),
-		Provider:         c.QueryParam("provider"),
 		Search:           c.QueryParam("search"),
 	}
 
@@ -297,6 +335,9 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
 // @Param        interval    query     string  false  "Grouping interval: daily, weekly, monthly, yearly (default daily)"
+// @Param        model       query     string  false  "Filter by exact model name"
+// @Param        provider    query     string  false  "Filter by provider name or provider type"
+// @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (cache overview always uses cached mode)"
 // @Success      200  {object}  usage.CacheOverview
@@ -418,12 +459,10 @@ func (h *Handler) recalculatePricingParams(c *echo.Context, req recalculatePrici
 	if err != nil {
 		return usage.RecalculatePricingParams{}, err
 	}
+	baseParams.Provider = provider
+	baseParams.Model = model
 
-	return usage.RecalculatePricingParams{
-		UsageQueryParams: baseParams,
-		Provider:         provider,
-		Model:            model,
-	}, nil
+	return usage.RecalculatePricingParams{UsageQueryParams: baseParams}, nil
 }
 
 func recalculatePricingDateParams(c *echo.Context, req recalculatePricingRequest) (usage.UsageQueryParams, error) {
