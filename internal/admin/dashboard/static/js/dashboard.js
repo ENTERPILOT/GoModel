@@ -171,6 +171,8 @@ function dashboard() {
     usageFilterProvider: "",
     usageFilterLabel: "",
     usageFilterUserPath: "",
+    // Facet dropdown choices, each honoring every filter except its own.
+    usageFacetOptions: { models: [], providers: [], labels: [] },
     // Log-only view options.
     usageLogSearch: "",
     usageLogHideCached: false,

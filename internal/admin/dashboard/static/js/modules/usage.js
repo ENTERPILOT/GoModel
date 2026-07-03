@@ -203,13 +203,21 @@
 
             // Page-level data filters, applied to every usage-page request so
             // charts, cache cards, and the request log describe the same
-            // filtered slice of traffic.
-            _usageFilterQueryStr() {
+            // filtered slice of traffic. excludeFacet omits that one filter —
+            // used to build facet dropdown options that honor every filter
+            // except their own.
+            _usageFilterQueryStr(excludeFacet) {
+                const filters = [
+                    ['model', this.usageFilterModel],
+                    ['provider', this.usageFilterProvider],
+                    ['label', this.usageFilterLabel],
+                    ['user_path', this.usageFilterUserPath]
+                ];
                 let qs = '';
-                if (this.usageFilterModel) qs += '&model=' + encodeURIComponent(this.usageFilterModel);
-                if (this.usageFilterProvider) qs += '&provider=' + encodeURIComponent(this.usageFilterProvider);
-                if (this.usageFilterLabel) qs += '&label=' + encodeURIComponent(this.usageFilterLabel);
-                if (this.usageFilterUserPath) qs += '&user_path=' + encodeURIComponent(this.usageFilterUserPath);
+                for (const [facet, value] of filters) {
+                    if (!value || facet === excludeFacet) continue;
+                    qs += '&' + facet + '=' + encodeURIComponent(value);
+                }
                 return qs;
             },
 
@@ -358,7 +366,7 @@
             },
 
             async fetchUsagePage() {
-                const requests = [this.fetchUsagePageSummary(), this.fetchModelUsage(), this.fetchUserPathUsage(), this.fetchLabelUsage(), this.fetchUsageLog(true)];
+                const requests = [this.fetchUsagePageSummary(), this.fetchUsageFacetOptions(), this.fetchModelUsage(), this.fetchUserPathUsage(), this.fetchLabelUsage(), this.fetchUsageLog(true)];
                 if (this.cacheAnalyticsEnabled()) {
                     requests.push(this.fetchCacheOverview());
                 }
@@ -366,6 +374,62 @@
                 this.renderBarChart();
                 this.renderUserPathChart();
                 this.renderLabelChart();
+            },
+
+            // Facet dropdown options follow the faceted-search rule: each
+            // facet's choices honor every active filter except its own, so a
+            // selected value never erases its alternatives.
+            async fetchUsageFacetOptions() {
+                let controller = null;
+                try {
+                    controller = typeof this._startAbortableRequest === 'function'
+                        ? this._startAbortableRequest('_usageFacetOptionsFetchController')
+                        : null;
+                    const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    if (controller) {
+                        options.signal = controller.signal;
+                    }
+                    const fetchRows = async (endpoint, excludeFacet) => {
+                        const res = await fetch(endpoint + '?' + this._usageQueryStr() + this._usageFilterQueryStr(excludeFacet), options);
+                        const handled = this.handleFetchResponse(res, 'usage facet options', options);
+                        if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                            return null;
+                        }
+                        if (!handled) return [];
+                        const payload = await res.json();
+                        return Array.isArray(payload) ? payload : [];
+                    };
+                    // Without a model or provider filter, the two by-model
+                    // queries are identical; fetch once and reuse.
+                    const modelRowsPromise = fetchRows('/admin/usage/models', 'model');
+                    const sharedByModel = !this.usageFilterModel && !this.usageFilterProvider;
+                    const [modelRows, providerRows, labelRows] = await Promise.all([
+                        modelRowsPromise,
+                        sharedByModel ? modelRowsPromise : fetchRows('/admin/usage/models', 'provider'),
+                        fetchRows('/admin/usage/labels', 'label')
+                    ]);
+                    if ((controller && controller.signal.aborted) || modelRows === null || providerRows === null || labelRows === null) {
+                        return;
+                    }
+                    const providerOf = (row) => typeof this.providerDisplayValue === 'function'
+                        ? this.providerDisplayValue(row)
+                        : String((row && (row.provider_name || row.provider)) || '').trim();
+                    this.usageFacetOptions = {
+                        models: modelRows.map((row) => row && row.model).filter(Boolean),
+                        providers: providerRows.map(providerOf).filter(Boolean),
+                        labels: labelRows.map((row) => row && row.label).filter(Boolean)
+                    };
+                } catch (e) {
+                    if (typeof this._isAbortError === 'function' && this._isAbortError(e)) {
+                        return;
+                    }
+                    console.error('Failed to fetch usage facet options:', e);
+                    this.usageFacetOptions = { models: [], providers: [], labels: [] };
+                } finally {
+                    if (typeof this._clearAbortableRequest === 'function') {
+                        this._clearAbortableRequest('_usageFacetOptionsFetchController', controller);
+                    }
+                }
             },
 
             // Filtered summaries backing the usage-page stat cards, fetched in
@@ -636,37 +700,25 @@
                 }
             },
 
-            // Filter options derive from the currently filtered aggregates
-            // (faceted drill-down); the active selection stays listed so the
-            // select never silently shows "All" while a filter is applied.
-            usageFilterModelOptions() {
-                const set = new Set();
-                this.modelUsage.forEach((m) => { set.add(m.model); });
-                if (this.usageFilterModel) set.add(this.usageFilterModel);
+            // Sorted, deduplicated choices for one facet dropdown. The active
+            // selection stays listed so the select never silently shows "All"
+            // while a filter is applied.
+            _usageFacetOptionList(kind, activeValue) {
+                const set = new Set((this.usageFacetOptions && this.usageFacetOptions[kind]) || []);
+                if (activeValue) set.add(activeValue);
                 return [...set].sort();
+            },
+
+            usageFilterModelOptions() {
+                return this._usageFacetOptionList('models', this.usageFilterModel);
             },
 
             usageFilterProviderOptions() {
-                const set = new Set();
-                this.modelUsage.forEach((m) => {
-                    const provider = typeof this.providerDisplayValue === 'function'
-                        ? this.providerDisplayValue(m)
-                        : String((m && (m.provider_name || m.provider)) || '').trim();
-                    if (provider) {
-                        set.add(provider);
-                    }
-                });
-                if (this.usageFilterProvider) set.add(this.usageFilterProvider);
-                return [...set].sort();
+                return this._usageFacetOptionList('providers', this.usageFilterProvider);
             },
 
             usageFilterLabelOptions() {
-                const set = new Set();
-                (this.labelUsage || []).forEach((l) => {
-                    if (l && l.label) set.add(l.label);
-                });
-                if (this.usageFilterLabel) set.add(this.usageFilterLabel);
-                return [...set].sort();
+                return this._usageFacetOptionList('labels', this.usageFilterLabel);
             },
 
             entryLabels(entry) {

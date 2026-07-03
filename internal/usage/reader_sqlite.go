@@ -105,8 +105,10 @@ func (r *SQLiteReader) GetUsageByModel(ctx context.Context, params UsageQueryPar
 
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
 func (r *SQLiteReader) GetUsageByUserPath(ctx context.Context, params UsageQueryParams) ([]UserPathUsage, error) {
+	// Match the user-path filter against the same grouped (root-normalized)
+	// expression the rows are grouped by.
 	userPathExpr := usageGroupedUserPathSQL("user_path")
-	conditions, args, err := sqliteUsageByUserPathConditions(params, userPathExpr)
+	conditions, args, err := sqliteUsageConditionsWithUserPathExpr(params, userPathExpr)
 	if err != nil {
 		return nil, err
 	}
@@ -541,12 +543,6 @@ func sqliteOffsetModifier(offsetMinutes int) string {
 
 func sqliteUsageConditions(params UsageQueryParams) ([]string, []any, error) {
 	return sqliteUsageConditionsWithUserPathExpr(params, "user_path")
-}
-
-// sqliteUsageByUserPathConditions filters like sqliteUsageConditions but
-// matches the user path against the grouped (root-normalized) expression.
-func sqliteUsageByUserPathConditions(params UsageQueryParams, userPathExpr string) ([]string, []any, error) {
-	return sqliteUsageConditionsWithUserPathExpr(params, userPathExpr)
 }
 
 func sqliteUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr string) ([]string, []any, error) {

@@ -111,8 +111,10 @@ func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, params UsageQuer
 
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
 func (r *PostgreSQLReader) GetUsageByUserPath(ctx context.Context, params UsageQueryParams) ([]UserPathUsage, error) {
+	// Match the user-path filter against the same grouped (root-normalized)
+	// expression the rows are grouped by.
 	userPathExpr := usageGroupedUserPathSQL("user_path")
-	conditions, args, _, err := pgUsageByUserPathConditions(params, userPathExpr, 1)
+	conditions, args, _, err := pgUsageConditionsWithUserPathExpr(params, userPathExpr, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -503,12 +505,6 @@ func pgQuoteLiteral(value string) string {
 
 func pgUsageConditions(params UsageQueryParams, argIdx int) (conditions []string, args []any, nextIdx int, err error) {
 	return pgUsageConditionsWithUserPathExpr(params, "user_path", argIdx)
-}
-
-// pgUsageByUserPathConditions filters like pgUsageConditions but matches the
-// user path against the grouped (root-normalized) expression.
-func pgUsageByUserPathConditions(params UsageQueryParams, userPathExpr string, argIdx int) (conditions []string, args []any, nextIdx int, err error) {
-	return pgUsageConditionsWithUserPathExpr(params, userPathExpr, argIdx)
 }
 
 func pgUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr string, argIdx int) (conditions []string, args []any, nextIdx int, err error) {

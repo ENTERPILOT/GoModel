@@ -400,15 +400,51 @@ test('fetchUsagePageSummary loads uncached and all cache modes with the page fil
     assert.ok(urls.some((u) => u.includes('cache_mode=all')), urls.join(' '));
 });
 
-test('usageFilterLabelOptions sorts labels and keeps a stale selection listed', () => {
+test('facet option getters sort choices and keep a stale selection listed', () => {
     const module = createUsageModule();
-    module.labelUsage = [{ label: 'prod' }, { label: 'alpha' }];
+    module.usageFacetOptions = { models: ['gpt-5'], providers: ['openai'], labels: ['prod', 'alpha'] };
+    module.usageFilterModel = '';
+    module.usageFilterProvider = '';
     module.usageFilterLabel = '';
 
     assert.equal(JSON.stringify(module.usageFilterLabelOptions()), JSON.stringify(['alpha', 'prod']));
+    assert.equal(JSON.stringify(module.usageFilterModelOptions()), JSON.stringify(['gpt-5']));
 
     module.usageFilterLabel = 'removed';
     assert.equal(JSON.stringify(module.usageFilterLabelOptions()), JSON.stringify(['alpha', 'prod', 'removed']));
+});
+
+test('facet options honor every filter except their own', async () => {
+    const { app, fetchCalls } = createUsageLogApp({
+        usageFilterModel: 'gpt-5',
+        usageFilterProvider: 'openai',
+        usageFilterLabel: 'env:prod',
+        usageFilterUserPath: '/team'
+    });
+
+    await app.fetchUsageFacetOptions();
+
+    assert.equal(fetchCalls.length, 3);
+    const byEndpoint = (endpoint, without, withs) => {
+        const matches = fetchCalls.filter((c) => c.url.includes(endpoint) && !c.url.includes(without + '='));
+        assert.equal(matches.length, 1, `expected one ${endpoint} call without ${without}: ${fetchCalls.map((c) => c.url).join(' ')}`);
+        for (const param of withs) {
+            assert.ok(matches[0].url.includes(param), `${matches[0].url} should include ${param}`);
+        }
+    };
+    byEndpoint('/admin/usage/models', 'model', ['provider=openai', 'label=env%3Aprod', 'user_path=%2Fteam']);
+    byEndpoint('/admin/usage/models', 'provider', ['model=gpt-5', 'label=env%3Aprod', 'user_path=%2Fteam']);
+    byEndpoint('/admin/usage/labels', 'label', ['model=gpt-5', 'provider=openai', 'user_path=%2Fteam']);
+});
+
+test('facet options share one by-model query when neither model nor provider filters', async () => {
+    const { app, fetchCalls } = createUsageLogApp({ usageFilterLabel: 'env:prod' });
+
+    await app.fetchUsageFacetOptions();
+
+    assert.equal(fetchCalls.length, 2);
+    assert.equal(fetchCalls.filter((c) => c.url.includes('/admin/usage/models')).length, 1);
+    assert.equal(fetchCalls.filter((c) => c.url.includes('/admin/usage/labels')).length, 1);
 });
 
 test('toggleUsageLabelFilter sets and clears the page label filter, refetching the page', () => {
