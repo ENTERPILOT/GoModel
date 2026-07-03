@@ -348,7 +348,8 @@ test('page filters flow into every usage-page fetch', async () => {
     await app.fetchLabelUsage();
     await app.fetchUsageLog(true);
 
-    assert.equal(fetchCalls.length, 4);
+    // The summary fetch issues one request per cache mode.
+    assert.equal(fetchCalls.length, 5);
     for (const call of fetchCalls) {
         assert.match(call.url, /model=gpt-5/);
         assert.match(call.url, /provider=openai/);
@@ -358,24 +359,45 @@ test('page filters flow into every usage-page fetch', async () => {
     assert.match(fetchCalls[0].url, /\/admin\/usage\/summary\?/);
 });
 
-test('usage page stat cards fold filtered cache hits into the request count', () => {
+test('usage page stat cards follow the log cache scope and derive hits from the two summaries', () => {
     const module = createUsageModule();
     module.formatNumber = (n) => String(n);
     module.formatCost = (v) => (v === null || v === undefined ? '---' : '$' + Number(v).toFixed(2));
     module.usageSummary = { total_requests: 90, total_cost: 1.5, total_input_cost: 1.0, total_output_cost: 0.5 };
-    module.cacheOverview = { summary: { total_hits: 10 } };
+    module.usageSummaryAll = { total_requests: 100 };
+    module.usageLogHideCached = false;
 
-    module.workflowRuntimeBooleanFlag = () => true;
+    // Default log view shows cached rows, so the card counts all rows —
+    // independent of the cache-analytics flag.
     assert.equal(module.usagePageTotalRequests(), 100);
     assert.equal(module.usagePageRequestsTitle(), '90 to providers + 10 from cache');
     assert.equal(module.usagePageCostTitle(), '$1.00 input + $0.50 output');
 
-    module.workflowRuntimeBooleanFlag = () => false;
+    // Hiding cached rows narrows the card to provider requests, like the log.
+    module.usageLogHideCached = true;
+    assert.equal(module.usagePageTotalRequests(), 90);
+    assert.equal(module.usagePageRequestsTitle(), '10 cached requests hidden');
+
+    // No cached traffic: plain count, no tooltip.
+    module.usageLogHideCached = false;
+    module.usageSummaryAll = { total_requests: 90 };
     assert.equal(module.usagePageTotalRequests(), 90);
     assert.equal(module.usagePageRequestsTitle(), '');
 
     module.usageSummary = {};
     assert.equal(module.usagePageCostTitle(), '');
+});
+
+test('fetchUsagePageSummary loads uncached and all cache modes with the page filters', async () => {
+    const { app, fetchCalls } = createUsageLogApp({ usageFilterLabel: 'env:prod' });
+
+    await app.fetchUsagePageSummary();
+
+    assert.equal(fetchCalls.length, 2);
+    const urls = fetchCalls.map((c) => c.url);
+    assert.ok(urls.every((u) => u.includes('/admin/usage/summary?') && u.includes('label=env%3Aprod')), urls.join(' '));
+    assert.ok(urls.some((u) => u.includes('cache_mode=uncached')), urls.join(' '));
+    assert.ok(urls.some((u) => u.includes('cache_mode=all')), urls.join(' '));
 });
 
 test('usageFilterLabelOptions sorts labels and keeps a stale selection listed', () => {

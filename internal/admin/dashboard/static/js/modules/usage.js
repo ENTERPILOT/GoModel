@@ -368,8 +368,12 @@
                 this.renderLabelChart();
             },
 
-            // Filtered summary backing the usage-page stat cards. Kept separate
-            // from the overview page's unfiltered `summary` state.
+            // Filtered summaries backing the usage-page stat cards, fetched in
+            // both cache modes: uncached carries real provider spend (cached
+            // rows store the avoided cost, which must not inflate the cost
+            // card), all carries the row count matching the log's default
+            // view. Kept separate from the overview page's unfiltered
+            // `summary` state.
             async fetchUsagePageSummary() {
                 let controller = null;
                 try {
@@ -380,26 +384,35 @@
                     if (controller) {
                         options.signal = controller.signal;
                     }
-                    const res = await fetch('/admin/usage/summary?' + this._usageQueryStr() + this._usageFilterQueryStr(), options);
-                    const handled = this.handleFetchResponse(res, 'usage page summary', options);
-                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                    const baseQs = this._usageQueryStr() + this._usageFilterQueryStr();
+                    const [uncachedRes, allRes] = await Promise.all([
+                        fetch('/admin/usage/summary?' + baseQs + '&cache_mode=uncached', options),
+                        fetch('/admin/usage/summary?' + baseQs + '&cache_mode=all', options)
+                    ]);
+                    const uncachedHandled = this.handleFetchResponse(uncachedRes, 'usage page summary', options);
+                    const allHandled = this.handleFetchResponse(allRes, 'usage page summary (all)', options);
+                    if (typeof this.isStaleAuthFetchResult === 'function' &&
+                        (this.isStaleAuthFetchResult(uncachedHandled) || this.isStaleAuthFetchResult(allHandled))) {
                         return;
                     }
-                    if (!handled) {
+                    if (!uncachedHandled || !allHandled) {
                         this.usageSummary = this.emptyUsageSummary();
+                        this.usageSummaryAll = this.emptyUsageSummary();
                         return;
                     }
-                    const payload = await res.json();
+                    const [uncached, all] = await Promise.all([uncachedRes.json(), allRes.json()]);
                     if (controller && controller.signal.aborted) {
                         return;
                     }
-                    this.usageSummary = payload && typeof payload === 'object' ? payload : this.emptyUsageSummary();
+                    this.usageSummary = uncached && typeof uncached === 'object' ? uncached : this.emptyUsageSummary();
+                    this.usageSummaryAll = all && typeof all === 'object' ? all : this.emptyUsageSummary();
                 } catch (e) {
                     if (typeof this._isAbortError === 'function' && this._isAbortError(e)) {
                         return;
                     }
                     console.error('Failed to fetch usage page summary:', e);
                     this.usageSummary = this.emptyUsageSummary();
+                    this.usageSummaryAll = this.emptyUsageSummary();
                 } finally {
                     if (typeof this._clearAbortableRequest === 'function') {
                         this._clearAbortableRequest('_usagePageSummaryFetchController', controller);
@@ -407,25 +420,32 @@
                 }
             },
 
-            // Requests over the period and filters, including local cache hits
-            // (the cache overview follows the same filters on this page), so
-            // the count matches the log's default all-mode view.
+            // Locally-cached requests over the period and filters, derived as
+            // the difference between the two summaries so the number stays
+            // correct even when cache analytics is disabled.
             usagePageCacheHits() {
-                if (!this.cacheAnalyticsEnabled()) return 0;
-                const summary = (this.cacheOverview && this.cacheOverview.summary) || {};
-                const hits = Number(summary.total_hits || 0);
+                const all = Number((this.usageSummaryAll && this.usageSummaryAll.total_requests) || 0);
+                const uncached = Number((this.usageSummary && this.usageSummary.total_requests) || 0);
+                const hits = all - uncached;
                 return Number.isFinite(hits) && hits > 0 ? hits : 0;
             },
 
+            // Requests over the period and filters, scoped exactly like the
+            // request log below: cached rows count unless "Hide cached
+            // requests" is on.
             usagePageTotalRequests() {
-                const requests = Number((this.usageSummary && this.usageSummary.total_requests) || 0);
-                return (Number.isFinite(requests) ? requests : 0) + this.usagePageCacheHits();
+                const summary = this.usageLogHideCached ? this.usageSummary : this.usageSummaryAll;
+                const requests = Number((summary && summary.total_requests) || 0);
+                return Number.isFinite(requests) ? requests : 0;
             },
 
             usagePageRequestsTitle() {
                 const hits = this.usagePageCacheHits();
                 if (hits <= 0) return '';
-                const provider = this.usagePageTotalRequests() - hits;
+                if (this.usageLogHideCached) {
+                    return this.formatNumber(hits) + ' cached requests hidden';
+                }
+                const provider = Number((this.usageSummary && this.usageSummary.total_requests) || 0);
                 return this.formatNumber(provider) + ' to providers + ' + this.formatNumber(hits) + ' from cache';
             },
 

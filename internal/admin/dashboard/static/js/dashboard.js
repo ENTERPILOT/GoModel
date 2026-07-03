@@ -161,9 +161,11 @@ function dashboard() {
     userPathUsage: [],
     labelUsage: [],
     usageLog: { entries: [], total: 0, limit: 50, offset: 0 },
-    // Filtered summary for the usage-page stat cards (the overview page keeps
-    // its own unfiltered `summary`).
+    // Filtered summaries for the usage-page stat cards (the overview page
+    // keeps its own unfiltered `summary`): uncached mode for costs, all mode
+    // for the request count shown next to the log.
     usageSummary: {},
+    usageSummaryAll: {},
     // Page-level data filters: drive every usage-page widget.
     usageFilterModel: "",
     usageFilterProvider: "",
