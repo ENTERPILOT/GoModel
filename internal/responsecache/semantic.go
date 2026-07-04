@@ -645,16 +645,5 @@ func shouldSkipAllCacheHeaders(header func(string) string) bool {
 	if strings.EqualFold(header("X-Cache-Control"), "no-store") {
 		return true
 	}
-	cc := header("Cache-Control")
-	if cc == "" {
-		return false
-	}
-	directives := strings.Split(strings.ToLower(cc), ",")
-	for _, d := range directives {
-		d = strings.TrimSpace(d)
-		if d == "no-cache" || d == "no-store" {
-			return true
-		}
-	}
-	return false
+	return shouldSkipCacheControl(header("Cache-Control"))
 }
