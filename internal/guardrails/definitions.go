@@ -11,7 +11,6 @@ import (
 	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
-	"gomodel/internal/responsecache"
 )
 
 // Definition is one persisted reusable guardrail instance.
@@ -249,19 +248,19 @@ func llmBasedAlteringRuntimeConfig(cfg llmBasedAlteringDefinitionConfig, userPat
 	})
 }
 
-func buildDefinition(def Definition, executor ChatCompletionExecutor) (Guardrail, responsecache.GuardrailRuleDescriptor, error) {
+func buildDefinition(def Definition, executor ChatCompletionExecutor) (Guardrail, RuleDescriptor, error) {
 	switch def.Type {
 	case "system_prompt":
 		cfg, err := decodeSystemPromptDefinitionConfig(def.Config)
 		if err != nil {
-			return nil, responsecache.GuardrailRuleDescriptor{}, err
+			return nil, RuleDescriptor{}, err
 		}
 		mode := SystemPromptMode(cfg.Mode)
 		instance, err := NewSystemPromptGuardrail(def.Name, mode, cfg.Content)
 		if err != nil {
-			return nil, responsecache.GuardrailRuleDescriptor{}, newValidationError("build system_prompt guardrail: "+err.Error(), err)
+			return nil, RuleDescriptor{}, newValidationError("build system_prompt guardrail: "+err.Error(), err)
 		}
-		return instance, responsecache.GuardrailRuleDescriptor{
+		return instance, RuleDescriptor{
 			Name:    def.Name,
 			Type:    def.Type,
 			Mode:    string(mode),
@@ -270,11 +269,11 @@ func buildDefinition(def Definition, executor ChatCompletionExecutor) (Guardrail
 	case "llm_based_altering":
 		cfg, err := decodeLLMBasedAlteringDefinitionConfig(def.Config)
 		if err != nil {
-			return nil, responsecache.GuardrailRuleDescriptor{}, err
+			return nil, RuleDescriptor{}, err
 		}
 		runtimeCfg, err := llmBasedAlteringRuntimeConfig(cfg, def.UserPath)
 		if err != nil {
-			return nil, responsecache.GuardrailRuleDescriptor{}, newValidationError("build llm_based_altering guardrail: "+err.Error(), err)
+			return nil, RuleDescriptor{}, newValidationError("build llm_based_altering guardrail: "+err.Error(), err)
 		}
 		if executor == nil {
 			return &unavailableGuardrail{
@@ -289,11 +288,11 @@ func buildDefinition(def Definition, executor ChatCompletionExecutor) (Guardrail
 		}
 		instance, err := NewLLMBasedAlteringGuardrail(def.Name, runtimeCfg, executor)
 		if err != nil {
-			return nil, responsecache.GuardrailRuleDescriptor{}, newValidationError("build llm_based_altering guardrail: "+err.Error(), err)
+			return nil, RuleDescriptor{}, newValidationError("build llm_based_altering guardrail: "+err.Error(), err)
 		}
 		return instance, llmBasedAlteringDescriptor(def.Name, runtimeCfg), nil
 	default:
-		return nil, responsecache.GuardrailRuleDescriptor{}, newValidationError(`unknown guardrail type: "`+def.Type+`"`, nil)
+		return nil, RuleDescriptor{}, newValidationError(`unknown guardrail type: "`+def.Type+`"`, nil)
 	}
 }
 
@@ -432,8 +431,8 @@ func TypeDefinitions() []TypeDefinition {
 	})
 }
 
-func llmBasedAlteringDescriptor(name string, cfg LLMBasedAlteringConfig) responsecache.GuardrailRuleDescriptor {
-	return responsecache.GuardrailRuleDescriptor{
+func llmBasedAlteringDescriptor(name string, cfg LLMBasedAlteringConfig) RuleDescriptor {
+	return RuleDescriptor{
 		Name: name,
 		Type: "llm_based_altering",
 		Mode: strings.Join(cfg.Roles, ","),

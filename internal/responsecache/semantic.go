@@ -590,35 +590,6 @@ func sha256HexOf(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// ComputeGuardrailsHash computes the guardrails_hash for a set of rule identifiers.
-// Each rule is represented as "name:type:order:mode:content_hash". The combined seed is
-// sorted for stability, then passed through SHA-256.
-// Uses xxhash64 per-component and SHA-256 for the final hash to balance speed and
-// collision resistance.
-func ComputeGuardrailsHash(rules []GuardrailRuleDescriptor) string {
-	if len(rules) == 0 {
-		return ""
-	}
-	seeds := make([]string, len(rules))
-	for i, r := range rules {
-		contentXX := xxhash.Sum64String(r.Content)
-		seeds[i] = fmt.Sprintf("%s:%s:%d:%s:%016x", r.Name, r.Type, r.Order, r.Mode, contentXX)
-	}
-	sort.Strings(seeds)
-	combined := strings.Join(seeds, "|")
-	h := sha256.Sum256([]byte(combined))
-	return hex.EncodeToString(h[:])
-}
-
-// GuardrailRuleDescriptor describes a single active guardrail rule for hashing.
-type GuardrailRuleDescriptor struct {
-	Name    string
-	Type    string
-	Order   int
-	Mode    string
-	Content string
-}
-
 // GuardrailsHashFromContext retrieves the guardrails hash from the context,
 // using the core package's storage key.
 func GuardrailsHashFromContext(ctx context.Context) string {

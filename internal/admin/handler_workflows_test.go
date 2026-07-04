@@ -15,7 +15,6 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/providers"
-	"gomodel/internal/responsecache"
 	"gomodel/internal/workflows"
 )
 
@@ -148,7 +147,7 @@ func newWorkflowRegistry(t *testing.T) *guardrails.Registry {
 	if err != nil {
 		t.Fatalf("NewSystemPromptGuardrail() error = %v", err)
 	}
-	if err := registry.Register(rule, responsecache.GuardrailRuleDescriptor{
+	if err := registry.Register(rule, guardrails.RuleDescriptor{
 		Type:    "system_prompt",
 		Mode:    string(guardrails.SystemPromptInject),
 		Content: "be precise",
