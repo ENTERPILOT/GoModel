@@ -11,14 +11,14 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/config"
-	"gomodel/ext"
-	"gomodel/internal/admin"
-	"gomodel/internal/core"
-	"gomodel/internal/guardrails"
-	"gomodel/internal/live"
-	"gomodel/internal/providers"
-	"gomodel/internal/server"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/ext"
+	"github.com/ENTERPILOT/GoModel/internal/admin"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/guardrails"
+	"github.com/ENTERPILOT/GoModel/internal/live"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/server"
 )
 
 type runtimeRefreshMockProvider struct {

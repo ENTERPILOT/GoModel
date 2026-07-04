@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 type deleteCall struct {

@@ -20,10 +20,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
-	"gomodel/config"
-	"gomodel/internal/app"
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/app"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
 )
 
 // TestServerConfig configures how the test server is set up.

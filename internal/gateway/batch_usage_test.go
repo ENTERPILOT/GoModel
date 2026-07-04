@@ -4,9 +4,9 @@ import (
 	"math"
 	"testing"
 
-	batchstore "gomodel/internal/batch"
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	batchstore "github.com/ENTERPILOT/GoModel/internal/batch"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 type batchUsageCaptureLogger struct {

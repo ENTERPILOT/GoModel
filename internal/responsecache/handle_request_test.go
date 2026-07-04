@@ -12,11 +12,11 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/config"
-	"gomodel/internal/auditlog"
-	"gomodel/internal/cache"
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/cache"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 type recordingUsageLogger struct {

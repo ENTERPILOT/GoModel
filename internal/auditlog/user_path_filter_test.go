@@ -3,7 +3,7 @@ package auditlog
 import (
 	"testing"
 
-	"gomodel/internal/storage/sqlutil"
+	"github.com/ENTERPILOT/GoModel/internal/storage/sqlutil"
 )
 
 func TestAuditUserPathSubtreePattern(t *testing.T) {

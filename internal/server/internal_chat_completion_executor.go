@@ -12,11 +12,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
-	"gomodel/internal/gateway"
-	"gomodel/internal/responsecache"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/gateway"
+	"github.com/ENTERPILOT/GoModel/internal/responsecache"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 // InternalChatCompletionExecutorConfig configures the transport-free translated

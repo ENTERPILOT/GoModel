@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func TestBuildPassthroughHeadersSkipsConfiguredUserPathHeader(t *testing.T) {

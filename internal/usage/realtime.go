@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 const endpointRealtime = "/v1/realtime"

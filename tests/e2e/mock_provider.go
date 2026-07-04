@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // MockLLMServer simulates an upstream LLM provider (like OpenAI).

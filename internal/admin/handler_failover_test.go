@@ -10,10 +10,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	failoverrules "gomodel/internal/failover"
-	"gomodel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	failoverrules "github.com/ENTERPILOT/GoModel/internal/failover"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
 )
 
 type failoverHandlerTestStore struct {

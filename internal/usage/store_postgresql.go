@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gomodel/internal/storage/sqlutil"
+	"github.com/ENTERPILOT/GoModel/internal/storage/sqlutil"
 )
 
 const (

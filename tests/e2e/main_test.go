@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
-	"gomodel/internal/server"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/server"
 )
 
 var (

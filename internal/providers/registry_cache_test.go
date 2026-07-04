@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/config"
-	"gomodel/internal/cache/modelcache"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/cache/modelcache"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func TestCacheFile(t *testing.T) {

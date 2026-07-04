@@ -3,7 +3,7 @@ package deepseek
 import (
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func TestPassthroughSemanticEnricher_ProviderType(t *testing.T) {

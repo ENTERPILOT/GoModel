@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gomodel/tests/integration/dbassert"
+	"github.com/ENTERPILOT/GoModel/tests/integration/dbassert"
 )
 
 func TestUsage_CapturesAllFields_PostgreSQL(t *testing.T) {

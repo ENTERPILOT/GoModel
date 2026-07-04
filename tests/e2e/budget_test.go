@@ -16,10 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
-	"gomodel/internal/admin"
-	"gomodel/internal/budget"
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/admin"
+	"github.com/ENTERPILOT/GoModel/internal/budget"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 const sqliteBudgetAmount = 0.01

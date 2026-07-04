@@ -3,7 +3,7 @@ package providers
 import (
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // AdaptReasoningEffortRequest rewrites GoModel's common nested reasoning shape

@@ -7,11 +7,11 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	batchstore "gomodel/internal/batch"
-	"gomodel/internal/core"
-	"gomodel/internal/gateway"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	batchstore "github.com/ENTERPILOT/GoModel/internal/batch"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/gateway"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 // nativeBatchService adapts Echo requests to the transport-independent native

@@ -8,7 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 type staticTestPricingResolver map[string]*core.ModelPricing

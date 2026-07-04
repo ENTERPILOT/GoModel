@@ -3,7 +3,7 @@ package failover
 import (
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func TestGenerateSuggestions_NilRegistryReturnsEmpty(t *testing.T) {

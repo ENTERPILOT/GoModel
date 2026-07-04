@@ -1,4 +1,4 @@
-module gomodel
+module github.com/ENTERPILOT/GoModel
 
 go 1.26.4
 

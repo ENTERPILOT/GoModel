@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"gomodel/internal/batchrewrite"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/batchrewrite"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // GuardedProvider is a test harness that exercises the live guardrail

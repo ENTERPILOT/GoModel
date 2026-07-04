@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/cache"
-	"gomodel/internal/core"
-	"gomodel/internal/responsecache"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/cache"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/responsecache"
 )
 
 type contextCapturingProvider struct {

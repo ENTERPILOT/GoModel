@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 const (

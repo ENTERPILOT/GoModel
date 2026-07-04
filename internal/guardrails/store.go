@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"gomodel/internal/validation"
+	"github.com/ENTERPILOT/GoModel/internal/validation"
 )
 
 // ErrNotFound indicates a requested guardrail was not found.

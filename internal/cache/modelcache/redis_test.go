@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/cache"
+	"github.com/ENTERPILOT/GoModel/internal/cache"
 )
 
 func TestRedisModelCache_GetSet(t *testing.T) {

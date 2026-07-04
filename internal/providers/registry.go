@@ -11,10 +11,10 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/config"
-	"gomodel/internal/cache/modelcache"
-	"gomodel/internal/core"
-	"gomodel/internal/modeldata"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/cache/modelcache"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/modeldata"
 )
 
 // ModelInfo holds information about a model and its provider

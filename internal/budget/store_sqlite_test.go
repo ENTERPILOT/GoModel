@@ -8,7 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 func TestSQLiteStoreReplaceConfigBudgetsRemovesStaleConfigRowsOnly(t *testing.T) {

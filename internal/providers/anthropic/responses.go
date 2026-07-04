@@ -13,10 +13,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
-	"gomodel/internal/providers"
-	"gomodel/internal/streaming"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/llmclient"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/streaming"
 )
 
 // convertAnthropicResponseToResponses converts an Anthropic response to ResponsesResponse

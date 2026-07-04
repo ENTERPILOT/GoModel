@@ -5,7 +5,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // ConvertResponsesContentToChatContent maps Responses input content to Chat content.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"gomodel/config"
+	"github.com/ENTERPILOT/GoModel/config"
 )
 
 // VecResult holds a single semantic cache lookup result.

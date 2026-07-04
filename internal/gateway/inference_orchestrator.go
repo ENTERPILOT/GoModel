@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 // InferenceConfig configures translated inference orchestration.

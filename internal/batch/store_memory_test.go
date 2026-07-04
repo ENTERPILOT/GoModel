@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func TestMemoryStoreLifecycle(t *testing.T) {

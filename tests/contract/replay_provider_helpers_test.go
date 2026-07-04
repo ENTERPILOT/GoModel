@@ -5,9 +5,9 @@ package contract
 import (
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
-	"gomodel/internal/providers/gemini"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/llmclient"
+	"github.com/ENTERPILOT/GoModel/internal/providers/gemini"
 )
 
 func newGeminiReplayProvider(t *testing.T, routes map[string]replayRoute) core.Provider {

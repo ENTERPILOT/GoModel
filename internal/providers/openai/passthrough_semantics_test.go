@@ -3,7 +3,7 @@ package openai
 import (
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {

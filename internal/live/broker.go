@@ -9,8 +9,8 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 const (

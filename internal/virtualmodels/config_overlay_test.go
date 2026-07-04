@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"gomodel/config"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func TestConfigModels_Conversion(t *testing.T) {

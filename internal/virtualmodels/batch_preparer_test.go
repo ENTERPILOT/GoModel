@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // decodedChatItem builds a decoded chat batch request for per-item rewrite tests.

@@ -5,7 +5,7 @@ package modelselectors
 import (
 	"strings"
 
-	"gomodel/internal/validation"
+	"github.com/ENTERPILOT/GoModel/internal/validation"
 )
 
 // Catalog is the minimal configured-provider surface needed for selector validation.

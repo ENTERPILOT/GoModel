@@ -10,8 +10,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/authkeys"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/authkeys"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 type createAuthKeyRequest struct {

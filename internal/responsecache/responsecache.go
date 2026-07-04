@@ -10,11 +10,11 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/config"
-	"gomodel/internal/cache"
-	"gomodel/internal/core"
-	"gomodel/internal/embedding"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/cache"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/embedding"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 const responseCachePrefix = "gomodel:response:"

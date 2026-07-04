@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
 )
 
 // RealtimeTarget implements core.RealtimeProvider for xAI's Voice Agent API

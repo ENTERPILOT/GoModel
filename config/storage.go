@@ -1,6 +1,6 @@
 package config
 
-import "gomodel/internal/storage"
+import "github.com/ENTERPILOT/GoModel/internal/storage"
 
 // StorageConfig holds database storage configuration (used by audit logging, usage tracking, future IAM, etc.)
 type StorageConfig struct {

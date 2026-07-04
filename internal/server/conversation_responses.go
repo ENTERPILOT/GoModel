@@ -8,8 +8,8 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/conversationstore"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/conversationstore"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // Gateway-managed conversations live in the local conversation store; upstream

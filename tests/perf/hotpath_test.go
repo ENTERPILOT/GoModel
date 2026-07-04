@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
-	"gomodel/internal/server"
-	"gomodel/internal/streaming"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/server"
+	"github.com/ENTERPILOT/GoModel/internal/streaming"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 const (

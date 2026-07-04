@@ -5,9 +5,9 @@ import (
 	"io"
 	"net/http"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
-	"gomodel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/llmclient"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
 )
 
 // ChatCompatible is an embeddable adapter for providers that expose the

@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"gomodel/internal/storage"
+	"github.com/ENTERPILOT/GoModel/internal/storage"
 )
 
 // Config holds the application configuration.

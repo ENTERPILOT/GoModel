@@ -2,7 +2,7 @@
 
 package main
 
-import swaggerdocs "gomodel/cmd/gomodel/docs"
+import swaggerdocs "github.com/ENTERPILOT/GoModel/cmd/gomodel/docs"
 
 func configureSwaggerDocs(basePath string) {
 	swaggerdocs.SwaggerInfo.BasePath = basePath

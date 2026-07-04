@@ -12,9 +12,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/ext"
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/ext"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 type stubRewriter struct {

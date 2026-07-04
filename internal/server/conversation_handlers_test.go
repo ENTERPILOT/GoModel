@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func createConversation(t *testing.T, srv *Server, body string) core.Conversation {

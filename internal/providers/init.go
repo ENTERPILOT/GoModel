@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"gomodel/config"
-	"gomodel/internal/cache"
-	"gomodel/internal/cache/modelcache"
-	"gomodel/internal/core"
-	"gomodel/internal/modeldata"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/cache"
+	"github.com/ENTERPILOT/GoModel/internal/cache/modelcache"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/modeldata"
 )
 
 // InitResult holds the initialized provider infrastructure and cleanup functions.

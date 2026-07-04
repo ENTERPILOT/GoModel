@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/cache"
+	"github.com/ENTERPILOT/GoModel/internal/cache"
 )
 
 // pingableStore is a cache.Store that also implements cache.Pinger.

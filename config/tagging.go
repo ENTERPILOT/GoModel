@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // DefaultTaggingDelimiter separates multiple labels inside one header value.

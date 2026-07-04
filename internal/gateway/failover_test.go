@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // stubFailoverResolver returns a fixed selector list regardless of input.

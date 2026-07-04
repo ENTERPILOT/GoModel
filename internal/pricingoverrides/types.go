@@ -3,7 +3,7 @@ package pricingoverrides
 import (
 	"time"
 
-	"gomodel/internal/modelselectors"
+	"github.com/ENTERPILOT/GoModel/internal/modelselectors"
 )
 
 const CurrencyUSD = "USD"

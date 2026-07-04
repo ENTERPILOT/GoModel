@@ -3,7 +3,7 @@ package virtualmodels
 import (
 	"strings"
 
-	"gomodel/config"
+	"github.com/ENTERPILOT/GoModel/config"
 )
 
 // ConfigModels converts declarative config.yaml / VIRTUAL_MODELS entries into

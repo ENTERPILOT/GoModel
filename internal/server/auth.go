@@ -8,9 +8,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/authkeys"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/authkeys"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // BearerTokenAuthenticator authenticates managed bearer tokens and returns

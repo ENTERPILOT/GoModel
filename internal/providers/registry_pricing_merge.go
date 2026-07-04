@@ -1,6 +1,6 @@
 package providers
 
-import "gomodel/internal/core"
+import "github.com/ENTERPILOT/GoModel/internal/core"
 
 func metadataPricing(metadata *core.ModelMetadata) *core.ModelPricing {
 	if metadata == nil {

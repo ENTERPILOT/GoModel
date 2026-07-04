@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"strings"
 
-	"gomodel/config"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 
 	"github.com/labstack/echo/v5"
 )
