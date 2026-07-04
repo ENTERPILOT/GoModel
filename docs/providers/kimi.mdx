@@ -1,0 +1,215 @@
+---
+title: "Kimi"
+description: "Configure Moonshot Kimi in GoModel with the default api.kimi.com coding endpoint, OpenAI-compatible chat and embeddings, and ZooCode identity headers."
+icon: "moon"
+---
+
+[Kimi](https://www.kimi.com/) is Moonshot AI's coding-focused API. GoModel
+ships a native `kimi` provider that wraps the OpenAI-compatible adapter, so
+chat completions, streaming, `/v1/responses` (translated to chat), and
+`/v1/embeddings` all work out of the box.
+
+## Configure
+
+```bash
+KIMI_API_KEY=sk-...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  kimi:
+    type: kimi
+    api_key: "${KIMI_API_KEY}"
+    # Optional: override the default endpoint.
+    # base_url: "https://api.kimi.com/coding/v1"
+```
+
+The default base URL is `https://api.kimi.com/coding/v1` (see
+[`internal/providers/kimi/kimi.go:13`](../../internal/providers/kimi/kimi.go:13)).
+Authentication uses `Authorization: Bearer <api_key>`. Set `KIMI_BASE_URL`
+only when pointing GoModel at a Kimi-compatible proxy or a private deployment.
+
+<CodeGroup>
+
+```bash Docker (.env file)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e KIMI_API_KEY="sk-..." \
+  -e KIMI_BASE_URL="https://api.kimi.com/coding/v1" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+KIMI_API_KEY=sk-... ./bin/gomodel
+```
+
+</CodeGroup>
+
+## Model allowlist
+
+Instead of using `KIMI_MODELS` environment variable, you can configure model
+allowlists directly in [`config.yaml`](../../config.yaml):
+
+```yaml
+models:
+  configured_provider_models_mode: allowlist
+
+providers:
+  kimi:
+    type: kimi
+    api_key: "${KIMI_API_KEY}"
+    models:
+      - kimi-for-coding
+      - bge_m3_embed
+```
+
+The `models` section under each provider explicitly lists the model IDs that
+GoModel should expose. When `configured_provider_models_mode` is set to
+`allowlist`, only these models are available — all others from the upstream
+provider are ignored. This is useful for:
+- Restricting access to specific models only
+- Explicitly registering embedding models that aren't advertised upstream
+- Creating minimal configurations with known model sets
+
+<Note>
+  `configured_provider_models_mode` is a global setting. In `allowlist` mode,
+  only providers that explicitly define a `models` list are restricted to
+  those models. Providers without a `models` list continue to fetch and expose
+  their full upstream catalog. This means you can restrict Kimi to a small set
+  of models while leaving other providers unchanged.
+</Note>
+
+<Note>
+  Model IDs in the YAML `models` list should match the exact IDs returned by
+  the upstream provider (without provider prefix). For Kimi, use
+  `kimi-for-coding` not `kimi/kimi-for-coding` — GoModel adds the provider
+  prefix automatically for client-facing model IDs.
+</Note>
+
+## Verify
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kimi/kimi-for-coding",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+`GET /v1/models` proxies Kimi's upstream model list, exposing IDs prefixed by
+provider name, e.g. `kimi/kimi-for-coding`.
+
+## Embedding model registration
+
+Kimi's `/v1/embeddings` works through the same OpenAI-compatible adapter as
+chat, but embedding model IDs are usually not advertised by the upstream
+`/v1/models` endpoint. Register the IDs you want to expose with
+`KIMI_MODELS`:
+
+```bash
+KIMI_MODELS=kimi-for-coding,kimi-embedding
+```
+
+`KIMI_MODELS` is a comma-separated allowlist. Whitespace around entries is
+ignored. By default, `CONFIGURED_PROVIDER_MODELS_MODE=fallback` keeps the
+upstream `/v1/models` catalog and only fills in models that are missing — set
+it to `allowlist` to expose only the IDs listed in `KIMI_MODELS` and skip the
+upstream call.
+
+```bash
+curl -s http://localhost:8080/v1/embeddings \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "kimi/kimi-embedding", "input": "hello"}'
+```
+
+<Note>
+  Embedding models must be listed in `KIMI_MODELS` to be routable through
+  GoModel. Without the configured list, requests that target an embedding
+  ID will get a `model_not_found` from the upstream Kimi catalog even though
+  the `/v1/embeddings` endpoint itself is available.
+</Note>
+
+## ZooCode identity headers
+
+Kimi's coding endpoint accepts [ZooCode](https://www.kimi.com/) identity
+headers (for example `X-ZooCode-User`, `X-ZooCode-Plan`, or
+`X-ZooCode-Team`) so requests are attributed to a ZooCode workspace. Attach
+them to every outbound Kimi call with
+`custom_upstream_headers`, and forward client-supplied variants with
+`passthrough_user_headers`. See
+[Custom Headers](/features/custom-headers) for the
+full configuration reference.
+
+Static headers only (no passthrough):
+
+```yaml
+providers:
+  kimi:
+    type: kimi
+    api_key: "${KIMI_API_KEY}"
+    custom_upstream_headers:
+      X-ZooCode-User: ops@gomodel.example
+      X-ZooCode-Plan: enterprise
+      X-Source-System: gomodel
+```
+
+Each `custom_upstream_headers` entry is attached verbatim to every Kimi
+request. `Authorization` and other credential headers are stripped before
+overrides run, so this map cannot leak secrets from one tenant to another.
+
+Forward client-supplied headers (allowlist mode keeps the surface small):
+
+```yaml
+providers:
+  kimi:
+    type: kimi
+    api_key: "${KIMI_API_KEY}"
+    passthrough_user_headers: true
+    passthrough_user_headers_skip:
+      - X-ZooCode-User
+      - X-ZooCode-Plan
+      - X-ZooCode-Team
+    passthrough_user_headers_skip_mode: allow
+```
+
+With `skip_mode: allow`, only the listed ZooCode headers reach the
+upstream — every other client header is dropped, so the ZooCode identity is
+the only thing the client can influence. Use `skip_mode: skip` (the default)
+to forward all client headers except the ones in the list.
+
+## Multiple Kimi instances
+
+Use suffixed env vars to register more than one Kimi endpoint without
+`config.yaml`:
+
+```bash
+KIMI_BASE_URL=https://api.kimi.com/coding/v1
+KIMI_CN_BASE_URL=https://api.kimi.cn/coding/v1
+```
+
+`KIMI_BASE_URL` registers `kimi`. `KIMI_CN_BASE_URL` registers `kimi-cn`
+(suffix is lowercased, underscores become hyphens). Add `KIMI_CN_API_KEY`
+and `KIMI_CN_MODELS` to scope a configured model list to that instance.
+
+<Note>
+  Provider type stays `kimi` for every instance — only the public provider ID
+  changes. The alias is the only way clients can disambiguate them: route
+  `kimi/...` to the default instance and `kimi-cn/...` to the second one via
+  the standard provider-qualified model ID syntax.
+</Note>
+
+## Not yet integrated
+
+- Native batch APIs.
+- OpenAI-compatible files lifecycle.
+- Responses lifecycle utility endpoints.

@@ -13,7 +13,7 @@ server:
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
-  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "zai", "vllm", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
+  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "zai", "vllm", "deepseek", "bailian", "kimi"] # providers enabled on /p/{provider}/...
   realtime_enabled: true # env: REALTIME_ENABLED; expose /v1/realtime websocket and /p/{provider}/v1/realtime upgrades (OpenAI only)
 
 models:
@@ -306,6 +306,27 @@ providers:
     base_url: "http://localhost:8000/v1"
     # Optional: set this only when vllm serve was started with --api-key.
     # api_key: "token-abc123"
+
+  kimi:
+    type: kimi
+    api_key: "${KIMI_API_KEY}"
+    # Kimi requires a set of non-standard "ZooCode" headers on every request.
+    # Uncomment and tailor the block below for your client identity.
+    # custom_upstream_headers:
+    #   User-Agent: "MyApp/1.0"
+    #   X-Title: "MyApp"
+    #   X-Stainless-Os: "Linux"
+    #   X-Stainless-Arch: "x64"
+    #   X-Stainless-Runtime: "node"
+    #   X-Stainless-Runtime-Version: "20.0.0"
+    #   X-Stainless-Package-Version: "1.0.0"
+    #   X-Stainless-Lang: "js"
+    #   Http-Referer: "https://myapp.example.com"
+    #   Accept: "application/json"
+    #   Accept-Encoding: "gzip, deflate, br"
+    #   Accept-Language: "en-US"
+    #   Content-Type: "application/json"
+    #   Sec-Fetch-Mode: "cors"
 
   # Custom OpenAI-compatible provider
   # my-provider:

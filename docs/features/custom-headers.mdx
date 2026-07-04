@@ -1,0 +1,245 @@
+---
+title: "Custom Headers"
+description: "Forward and customize HTTP headers between clients and upstream providers, with a security skip floor and skip/allow list modes."
+icon: "filter"
+tag: "Stable"
+---
+
+## Overview
+
+`HeaderOverridesConfig` controls how GoModel handles HTTP headers on requests
+to upstream providers. Three independent capabilities are exposed per
+provider:
+
+- **Custom upstream headers**: Static headers GoModel attaches to every
+  outbound request to a specific provider.
+- **Passthrough user headers**: Forward a curated set of client-supplied
+  request headers to the upstream provider.
+- **Skip / allow list**: Constrain passthrough by header name, in either
+  `skip` (default) or `allow` mode.
+
+All three are governed by a **security skip floor**: a non-configurable set of
+header names that is always stripped before any other rule runs.
+
+## Configuration fields
+
+`ProviderConfig` (see [`internal/providers/config.go`](../../internal/providers/config.go:30)) exposes four header-related fields per provider:
+
+```yaml
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    custom_upstream_headers:
+      X-Request-Source: gomodel
+    passthrough_user_headers: true
+    passthrough_user_headers_skip:
+      - X-Org-Id
+      - X-Trace-Id
+    passthrough_user_headers_skip_mode: skip
+```
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `custom_upstream_headers` | `map[string]string` | Static headers GoModel attaches to every request. |
+| `passthrough_user_headers` | `bool` | Enable forwarding of client headers. |
+| `passthrough_user_headers_skip` | `[]string` | Header names that drive skip/allow matching. |
+| `passthrough_user_headers_skip_mode` | `string` | `"skip"` (default) or `"allow"`. |
+
+When **no** header field is set, the factory returns `nil` for
+`HeaderOverrides` (see [`internal/providers/factory.go`](../../internal/providers/factory.go:123)) and the provider behaves like a plain proxy.
+
+## Security skip floor
+
+Before any user-defined rule is evaluated, GoModel strips a fixed set of
+headers from every request that flows through header overrides. The floor is
+implemented in [`IsHeaderBlocked`](../../internal/providers/headers.go:45) and
+applies to **both** passthrough and custom upstream headers:
+
+1. **Credential headers** via `core.IsCredentialHeader` — any header
+   recognized as carrying credentials is dropped. This includes
+   `Authorization` and `X-Api-Key`, plus anything else in the internal
+   credential list (`internal/core/credential_headers.go`).
+2. **`X-GoModel-User-Path`** — the internal hop-to-hop routing header.
+3. **Configured `userPathAlias`** — if the gateway was started with a custom
+   user-path header name, that alias is also blocked.
+
+The floor is a hard rule. A header in the skip list, allow list, or
+`custom_upstream_headers` map cannot override it. Matching is
+case-insensitive and trims surrounding whitespace so client casing does not
+matter.
+
+## Skip / allow modes
+
+When `passthrough_user_headers` is `true`, `passthrough_user_headers_skip`
+constrains which client headers are forwarded. The
+`passthrough_user_headers_skip_mode` field chooses how the list is interpreted
+(see [`shouldForward`](../../internal/providers/headers.go:130)):
+
+### `skip` (default)
+
+Forward every client header **except** the names in
+`passthrough_user_headers_skip`. Unknown modes fall through to `skip`.
+
+```yaml
+providers:
+  openai:
+    passthrough_user_headers: true
+    passthrough_user_headers_skip:
+      - X-Org-Id
+      - X-Trace-Id
+    passthrough_user_headers_skip_mode: skip
+```
+
+Result: `X-Org-Id` and `X-Trace-Id` are dropped, every other client header
+is forwarded (subject to the security skip floor).
+
+### `allow`
+
+Forward **only** the names in `passthrough_user_headers_skip` and drop
+everything else passthrough would forward.
+
+```yaml
+providers:
+  anthropic:
+    passthrough_user_headers: true
+    passthrough_user_headers_skip:
+      - X-Request-Id
+      - X-Tenant
+    passthrough_user_headers_skip_mode: allow
+```
+
+Result: only `X-Request-Id` and `X-Tenant` are forwarded; every other client
+header (besides those blocked by the security floor) is dropped.
+
+<Note>
+  In `allow` mode the list names the headers you keep, not the headers you
+  block. Choosing the wrong mode for the same list inverts the outcome.
+</Note>
+
+Matching against the skip / allow list is **case-insensitive** and trims
+whitespace around each entry, so `"X-Org-Id"`, `"x-org-id"`, and
+`"  X-Org-Id  "` are all equivalent.
+
+## Interaction rules
+
+The three header sources compose in a defined order. The rules below come
+from [`ApplyHeaderOverrides`](../../internal/providers/headers.go:82) and
+[`applyPassthroughHeaders`](../../internal/providers/headers.go:100):
+
+1. **No header config = no override**. If both `passthrough_user_headers`
+   is `false` **and** `custom_upstream_headers` is empty, header overrides
+   are a no-op.
+2. **Passthrough takes precedence over custom upstream headers**. When
+   `passthrough_user_headers` is `true`, the contents of
+   `custom_upstream_headers` are ignored (a debug log records this) and only
+   passthrough logic runs.
+3. **Static headers run alone when passthrough is off**. If
+   `custom_upstream_headers` is populated and `passthrough_user_headers` is
+   `false`, those static headers are attached after the security skip floor
+   is applied.
+4. **Floor first, list second**. In passthrough mode the security skip floor
+   is evaluated before the skip / allow list, so blocked names never leak
+   through regardless of mode or list contents.
+5. **Forwarded values overwrite provider defaults**. For each header that
+   passes the floor and the skip / allow list, GoModel deletes any existing
+   value on the outgoing request and appends each client value, preserving
+   multi-value headers.
+6. **Empty `skip_mode` defaults to `skip`**. An unknown mode string is
+   treated as `skip` (conservative default).
+
+### Decision walkthrough
+
+For each client header, the request proceeds upstream only if every step
+lets it through:
+
+```text
+client header
+  └─ security skip floor (credential? x-gomodel-user-path? alias match?)
+       └─ no  → drop
+       └─ yes → apply skip / allow list
+                 ├─ skip mode + in list  → drop
+                 ├─ skip mode + not in list → forward
+                 ├─ allow mode + in list  → forward
+                 └─ allow mode + not in list → drop
+```
+
+## Examples
+
+### Forward everything except internal trace headers
+
+```yaml
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    passthrough_user_headers: true
+    passthrough_user_headers_skip:
+      - X-Internal-Span-Id
+    passthrough_user_headers_skip_mode: skip
+```
+
+A client request with the headers below forwards only the public ones:
+
+```http
+Authorization: Bearer change-me       # stripped by floor
+X-Internal-Span-Id: abc123             # stripped by skip mode
+X-Tenant: acme                         # forwarded
+User-Agent: my-app/1.4.2               # forwarded
+```
+
+### Allowlist a small set of vetted headers
+
+```yaml
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    passthrough_user_headers: true
+    passthrough_user_headers_skip:
+      - X-Request-Id
+      - X-Tenant
+    passthrough_user_headers_skip_mode: allow
+```
+
+A client request forwards only the listed headers plus provider defaults:
+
+```http
+X-Request-Id: req-9f2c                   # forwarded (allowlisted)
+X-Tenant: acme                           # forwarded (allowlisted)
+X-Anything-Else: ignored                 # dropped (not allowlisted)
+Authorization: Bearer change-me          # stripped by floor
+```
+
+### Attach static identity headers without passthrough
+
+```yaml
+providers:
+  groq:
+    api_key: ${GROQ_API_KEY}
+    custom_upstream_headers:
+      X-Source-System: gomodel
+      X-Region: eu-west-1
+```
+
+Both static headers are attached to every Groq request. `Authorization`,
+`X-Api-Key`, `X-GoModel-User-Path`, and the configured user-path alias are
+stripped if a client tries to set them anyway.
+
+## Limitations
+
+`custom_upstream_headers` and `passthrough_user_headers` are not yet implemented for:
+
+- **OpenRouter**
+- **Native SDK providers**: Anthropic, Gemini, Vertex, Bedrock, and other providers that use vendor-specific SDKs
+
+For these providers, header configuration is ignored and requests are forwarded without custom headers or passthrough.
+
+## Related source
+
+- [`internal/providers/headers.go`](../../internal/providers/headers.go:1)
+  — `HeaderOverridesConfig`, `IsHeaderBlocked`, `shouldForward`,
+  `ApplyHeaderOverrides`.
+- [`internal/providers/config.go`](../../internal/providers/config.go:30)
+  — `ProviderConfig` header fields.
+- [`internal/providers/factory.go`](../../internal/providers/factory.go:123)
+  — `buildHeaderOverrides` (returns `nil` when no header config is present).
+- [`internal/core/credential_headers.go`](../../internal/core/credential_headers.go:22)
+  — the canonical credential header list.
