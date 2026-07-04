@@ -78,6 +78,49 @@ func TestRequestMetrics_Success(t *testing.T) {
 	}
 }
 
+func TestRequestMetrics_CircuitBreakerStateGauge(t *testing.T) {
+	ResetMetrics()
+
+	hooks := NewPrometheusHooks()
+	ctx := context.Background()
+
+	endRequest := func(circuitState string) {
+		ctx := hooks.OnRequestStart(ctx, llmclient.RequestInfo{Provider: "openai", Endpoint: "/chat/completions"})
+		hooks.OnRequestEnd(ctx, llmclient.ResponseInfo{
+			Provider:     "openai",
+			Model:        "gpt-4",
+			Endpoint:     "/chat/completions",
+			StatusCode:   http.StatusServiceUnavailable,
+			CircuitState: circuitState,
+		})
+	}
+
+	for _, tc := range []struct {
+		state string
+		want  float64
+	}{
+		{state: "closed", want: 0},
+		{state: "half-open", want: 1},
+		{state: "open", want: 2},
+	} {
+		endRequest(tc.state)
+		gauge, err := CircuitBreakerState.GetMetricWithLabelValues("openai")
+		if err != nil {
+			t.Fatalf("Failed to get gauge metric: %v", err)
+		}
+		if value := testutil.ToFloat64(gauge); value != tc.want {
+			t.Errorf("gauge after state %q = %f, want %f", tc.state, value, tc.want)
+		}
+	}
+
+	// A client without a breaker reports no state and must not create a series.
+	ResetMetrics()
+	endRequest("")
+	if count := testutil.CollectAndCount(CircuitBreakerState); count != 0 {
+		t.Errorf("gauge series count = %d after empty state, want 0", count)
+	}
+}
+
 func TestRequestMetrics_Error(t *testing.T) {
 	// Reset metrics before test
 	ResetMetrics()

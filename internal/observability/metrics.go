@@ -51,7 +51,32 @@ var (
 		},
 		[]string{"provider", "provider_name", "operation"},
 	)
+
+	// CircuitBreakerState reports each provider's circuit breaker state as of
+	// its most recent request (0=closed, 1=half-open, 2=open). The value is
+	// updated per request, so an idle provider keeps its last observed state.
+	CircuitBreakerState = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gomodel_circuit_breaker_state",
+			Help: "Circuit breaker state per provider (0=closed, 1=half-open, 2=open)",
+		},
+		[]string{"provider"},
+	)
 )
+
+// circuitStateValue maps llmclient circuit state names to gauge values.
+func circuitStateValue(state string) (float64, bool) {
+	switch state {
+	case "closed":
+		return 0, true
+	case "half-open":
+		return 1, true
+	case "open":
+		return 2, true
+	default:
+		return 0, false
+	}
+}
 
 // NewPrometheusHooks returns hooks that instrument LLM requests with Prometheus metrics.
 // These hooks can be injected into llmclient.Config to enable observability without
@@ -110,6 +135,11 @@ func NewPrometheusHooks() llmclient.Hooks {
 				info.Endpoint,
 				streamLabel,
 			).Observe(info.Duration.Seconds())
+
+			// Record circuit breaker state (empty when the breaker is disabled)
+			if value, ok := circuitStateValue(info.CircuitState); ok {
+				CircuitBreakerState.WithLabelValues(info.Provider).Set(value)
+			}
 		},
 	}
 }
@@ -151,6 +181,7 @@ type PrometheusMetrics struct {
 	RequestDuration               *prometheus.HistogramVec
 	InFlightRequests              *prometheus.GaugeVec
 	ResponseSnapshotStoreFailures *prometheus.CounterVec
+	CircuitBreakerState           *prometheus.GaugeVec
 }
 
 // GetMetrics returns the prometheus metrics for testing and introspection
@@ -160,6 +191,7 @@ func GetMetrics() *PrometheusMetrics {
 		RequestDuration:               RequestDuration,
 		InFlightRequests:              InFlightRequests,
 		ResponseSnapshotStoreFailures: ResponseSnapshotStoreFailures,
+		CircuitBreakerState:           CircuitBreakerState,
 	}
 }
 
@@ -169,6 +201,7 @@ func ResetMetrics() {
 	RequestDuration.Reset()
 	InFlightRequests.Reset()
 	ResponseSnapshotStoreFailures.Reset()
+	CircuitBreakerState.Reset()
 }
 
 // HealthCheck verifies that metrics are being collected

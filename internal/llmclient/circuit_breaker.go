@@ -68,6 +68,20 @@ func (cb *circuitBreaker) acquire() (bool, bool) {
 	return true, false
 }
 
+// releaseProbe returns the half-open probe slot without recording an outcome.
+// Called when the probe request never produced a provider verdict (local
+// request-build error or caller-side cancellation). Without it the breaker
+// would stay half-open with the slot consumed and reject every request until
+// process restart, because the timeout-based transition only runs from the
+// open state.
+func (cb *circuitBreaker) releaseProbe() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	if cb.state == circuitHalfOpen {
+		cb.halfOpenAllowed = true
+	}
+}
+
 // RecordSuccess records a successful request
 func (cb *circuitBreaker) RecordSuccess() {
 	cb.mu.Lock()
