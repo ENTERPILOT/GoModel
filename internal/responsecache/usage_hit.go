@@ -4,23 +4,21 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/labstack/echo/v5"
-
 	"gomodel/internal/core"
 	"gomodel/internal/usage"
 )
 
-func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.PricingResolver) func(*echo.Context, []byte, string) {
+func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.PricingResolver) func(exchange, []byte, string) {
 	if logger == nil || !logger.Config().Enabled {
 		return nil
 	}
 
-	return func(c *echo.Context, body []byte, cacheType string) {
-		if c == nil {
+	return func(ex exchange, body []byte, cacheType string) {
+		if ex == nil {
 			return
 		}
 
-		ctx := c.Request().Context()
+		ctx := ex.Context()
 		plan := core.GetWorkflow(ctx)
 		if plan != nil && !plan.UsageEnabled() {
 			return
@@ -41,10 +39,10 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 			return
 		}
 
-		endpoint := c.Request().URL.Path
+		endpoint := ex.Path()
 		requestID := core.GetRequestID(ctx)
 		if requestID == "" {
-			requestID = c.Request().Header.Get("X-Request-ID")
+			requestID = ex.RequestHeader("X-Request-ID")
 		}
 
 		var pricing *core.ModelPricing

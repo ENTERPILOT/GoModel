@@ -365,14 +365,21 @@ func TestToChatRequestExtraFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToChatRequest: %v", err)
 	}
-	for key, want := range map[string]string{
-		"stop":  `["STOP"]`,
-		"top_p": `0.9`,
-		"user":  `"u-123"`,
-	} {
-		raw := chat.ExtraFields.Lookup(key)
-		if string(raw) != want {
-			t.Errorf("ExtraFields[%q] = %s, want %s", key, raw, want)
+	if raw := chat.ExtraFields.Lookup("stop"); string(raw) != `["STOP"]` {
+		t.Errorf("ExtraFields[stop] = %s, want [\"STOP\"]", raw)
+	}
+	// top_p and user have typed ChatRequest fields; they must land there so
+	// internal consumers of the typed fields (Responses lowering, provider
+	// adapters) see them, and must not also ride in ExtraFields.
+	if chat.TopP == nil || *chat.TopP != 0.9 {
+		t.Errorf("TopP = %v, want 0.9", chat.TopP)
+	}
+	if chat.User != "u-123" {
+		t.Errorf("User = %q, want u-123", chat.User)
+	}
+	for _, key := range []string{"top_p", "user"} {
+		if raw := chat.ExtraFields.Lookup(key); len(raw) > 0 {
+			t.Errorf("ExtraFields[%q] = %s, want typed field only", key, raw)
 		}
 	}
 	// top_k has no portable OpenAI-compatible equivalent and OpenAI-family

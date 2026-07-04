@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"gomodel/internal/core"
@@ -103,6 +104,84 @@ func TestSetAuthHeaders(t *testing.T) {
 				if got := req.Header.Get(tt.reqIDKey); got != tt.wantReqID {
 					t.Errorf("request id header %q = %q, want %q", tt.reqIDKey, got, tt.wantReqID)
 				}
+			}
+		})
+	}
+}
+
+func TestIsValidClientRequestID(t *testing.T) {
+	tests := []struct {
+		name  string
+		id    string
+		valid bool
+	}{
+		{
+			name:  "valid UUID",
+			id:    "123e4567-e89b-12d3-a456-426614174000",
+			valid: true,
+		},
+		{
+			name:  "valid short ID",
+			id:    "req-123",
+			valid: true,
+		},
+		{
+			name:  "valid empty string",
+			id:    "",
+			valid: true,
+		},
+		{
+			name:  "valid 512 chars",
+			id:    strings.Repeat("a", 512),
+			valid: true,
+		},
+		{
+			name:  "invalid - 513 chars (too long)",
+			id:    strings.Repeat("a", 513),
+			valid: false,
+		},
+		{
+			name:  "invalid - non-ASCII character",
+			id:    "req-123-日本語",
+			valid: false,
+		},
+		{
+			name:  "invalid - control character",
+			id:    "req-123\n456",
+			valid: false,
+		},
+		{
+			name:  "invalid - NUL byte",
+			id:    "req-123\x00",
+			valid: false,
+		},
+		{
+			name:  "invalid - tab",
+			id:    "req\t123",
+			valid: false,
+		},
+		{
+			name:  "invalid - DEL",
+			id:    "req-123\x7f",
+			valid: false,
+		},
+		{
+			name:  "invalid - emoji",
+			id:    "req-123-🎉",
+			valid: false,
+		},
+		{
+			name:  "valid - all printable ASCII",
+			id:    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.",
+			valid: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsValidClientRequestID(tt.id)
+			if got != tt.valid {
+				t.Errorf("IsValidClientRequestID(%q) = %v, want %v", tt.id, got, tt.valid)
 			}
 		})
 	}

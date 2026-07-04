@@ -1,12 +1,10 @@
 package responsecache
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"time"
 
@@ -41,7 +39,6 @@ var internalRequestHeaderAllowlist = map[string]struct{}{
 type ResponseCacheMiddleware struct {
 	simple   *simpleCacheMiddleware
 	semantic *semanticCacheMiddleware
-	echo     *echo.Echo
 }
 
 // InternalHandleResult is the buffered result of running the cache middleware
@@ -64,7 +61,6 @@ func NewResponseCacheMiddleware(
 	pricingResolver usage.PricingResolver,
 ) (*ResponseCacheMiddleware, error) {
 	m := &ResponseCacheMiddleware{}
-	m.echo = echo.New()
 	hitRecorder := newUsageHitRecorder(usageLogger, pricingResolver)
 
 	switch {
@@ -148,15 +144,22 @@ func (m *ResponseCacheMiddleware) HandleRequest(c *echo.Context, body []byte, ne
 	if m == nil {
 		return next()
 	}
-	if ShouldSkipAllCache(c.Request()) {
+	return m.handle(&echoExchange{c: c}, body, next)
+}
+
+// handle runs the dual-layer cache check against any transport. It contains
+// the full cache decision logic; HandleRequest and HandleInternalRequest are
+// thin transport adapters over it.
+func (m *ResponseCacheMiddleware) handle(ex exchange, body []byte, next func() error) error {
+	if shouldSkipAllCacheHeaders(ex.RequestHeader) {
 		return next()
 	}
 
-	skipExact := ShouldSkipExactCache(c.Request())
-	skipSemantic := m.semantic == nil || strings.EqualFold(c.Request().Header.Get("X-Cache-Type"), CacheTypeExact)
+	skipExact := strings.EqualFold(ex.RequestHeader("X-Cache-Type"), CacheTypeSemantic)
+	skipSemantic := m.semantic == nil || strings.EqualFold(ex.RequestHeader("X-Cache-Type"), CacheTypeExact)
 
 	if !skipExact && m.simple != nil {
-		hit, err := m.simple.TryHit(c, body)
+		hit, err := m.simple.TryHit(ex, body)
 		if err != nil || hit {
 			return err
 		}
@@ -166,45 +169,36 @@ func (m *ResponseCacheMiddleware) HandleRequest(c *echo.Context, body []byte, ne
 	// wrap next inside StoreAfter so both cache layers write on a full miss.
 	innerNext := next
 	if !skipExact && m.simple != nil {
-		innerNext = func() error { return m.simple.StoreAfter(c, body, next) }
+		innerNext = func() error { return m.simple.StoreAfter(ex, body, next) }
 	}
 
 	if !skipSemantic {
-		return m.semantic.Handle(c, body, innerNext)
+		return m.semantic.Handle(ex, body, innerNext)
 	}
 
 	return innerNext()
 }
 
-// HandleInternalRequest runs the normal cache middleware for a transport-free
-// internal request using a minimal synthetic HTTP/Echo context.
+// HandleInternalRequest runs the cache for a transport-free internal JSON
+// request. Request headers are derived from the originating request snapshot
+// (allowlisted), and next executes the LLM call, returning a buffered
+// response instead of writing to a socket.
 func (m *ResponseCacheMiddleware) HandleInternalRequest(
 	ctx context.Context,
 	method, path string,
 	body []byte,
-	next func(*echo.Context) error,
+	next func(ctx context.Context) (*InternalResponse, error),
 ) (*InternalHandleResult, error) {
 	if ctx == nil {
 		return nil, core.NewInvalidRequestError("context is required", nil)
 	}
-
-	req := httptest.NewRequest(method, path, bytes.NewReader(body))
-	req.Header = internalRequestHeaders(ctx)
-	req = req.WithContext(ctx)
-
 	if m == nil {
 		slog.Error("response cache: HandleInternalRequest called on nil middleware")
 		return nil, core.NewProviderError("", http.StatusInternalServerError, "response cache middleware is not initialized", nil)
 	}
-	if m.echo == nil {
-		slog.Error("response cache: HandleInternalRequest called with uninitialized Echo instance")
-		return nil, core.NewProviderError("", http.StatusInternalServerError, "response cache middleware is not initialized", nil)
-	}
 
-	rec := httptest.NewRecorder()
-	c := m.echo.NewContext(req, rec)
-
-	err := m.HandleRequest(c, body, func() error { return next(c) })
+	ex := newInternalExchange(ctx, method, path, next)
+	err := m.handle(ex, body, ex.runNext)
 	if err != nil {
 		var gatewayErr *core.GatewayError
 		if errors.As(err, &gatewayErr) && gatewayErr != nil {
@@ -213,12 +207,7 @@ func (m *ResponseCacheMiddleware) HandleInternalRequest(
 		return nil, core.NewProviderError("", http.StatusInternalServerError, err.Error(), err)
 	}
 
-	return &InternalHandleResult{
-		StatusCode: rec.Code,
-		Headers:    rec.Header().Clone(),
-		Body:       bytes.Clone(rec.Body.Bytes()),
-		CacheType:  internalCacheType(rec.Header().Get("X-Cache")),
-	}, nil
+	return ex.result(), nil
 }
 
 // UsesRedis reports whether a Redis-backed exact (simple) cache is configured.
@@ -304,6 +293,5 @@ func internalCacheType(headerValue string) string {
 func NewResponseCacheMiddlewareWithStore(store cache.Store, ttl time.Duration) *ResponseCacheMiddleware {
 	return &ResponseCacheMiddleware{
 		simple: newSimpleCacheMiddleware(store, ttl, nil),
-		echo:   echo.New(),
 	}
 }

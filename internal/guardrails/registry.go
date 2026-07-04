@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"gomodel/internal/responsecache"
 )
 
 // StepReference points to one named guardrail and the step it should run at.
@@ -16,7 +14,7 @@ type StepReference struct {
 
 type registryEntry struct {
 	guardrail  Guardrail
-	descriptor responsecache.GuardrailRuleDescriptor
+	descriptor RuleDescriptor
 }
 
 // Registry stores named guardrails so workflows can reference them by id.
@@ -52,7 +50,7 @@ func (r *Registry) Names() []string {
 }
 
 // Register adds one named guardrail and its hashing descriptor.
-func (r *Registry) Register(g Guardrail, descriptor responsecache.GuardrailRuleDescriptor) error {
+func (r *Registry) Register(g Guardrail, descriptor RuleDescriptor) error {
 	if r == nil {
 		return fmt.Errorf("registry is required")
 	}
@@ -84,7 +82,7 @@ func (r *Registry) BuildPipeline(steps []StepReference) (*Pipeline, string, erro
 	}
 
 	pipeline := NewPipeline()
-	descriptors := make([]responsecache.GuardrailRuleDescriptor, 0, len(steps))
+	descriptors := make([]RuleDescriptor, 0, len(steps))
 	for _, step := range steps {
 		name := strings.TrimSpace(step.Ref)
 		if name == "" {
@@ -99,5 +97,5 @@ func (r *Registry) BuildPipeline(steps []StepReference) (*Pipeline, string, erro
 		descriptor.Order = step.Step
 		descriptors = append(descriptors, descriptor)
 	}
-	return pipeline, responsecache.ComputeGuardrailsHash(descriptors), nil
+	return pipeline, ComputeGuardrailsHash(descriptors), nil
 }

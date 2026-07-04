@@ -26,6 +26,21 @@ type AuthHeaderConfig struct {
 	OptionalAPIKey bool
 }
 
+// IsValidClientRequestID reports whether id may be forwarded as a client
+// request-ID header value: upstreams that accept one (OpenAI, OpenRouter,
+// Azure) require printable ASCII and reject oversized values with a 400.
+func IsValidClientRequestID(id string) bool {
+	if len(id) > 512 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		if id[i] < 0x20 || id[i] > 0x7E {
+			return false
+		}
+	}
+	return true
+}
+
 // SetAuthHeaders applies cfg to req for the given API key. It is safe to use
 // directly as an llmclient header hook or as CompatibleProviderConfig.SetHeaders.
 func SetAuthHeaders(req *http.Request, apiKey string, cfg AuthHeaderConfig) {

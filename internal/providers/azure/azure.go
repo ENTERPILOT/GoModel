@@ -165,20 +165,8 @@ func setHeaders(req *http.Request, apiKey string) {
 	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
 		AuthHeader:        "api-key",
 		RequestIDHeader:   "X-Client-Request-Id",
-		ValidateRequestID: isValidClientRequestID,
+		ValidateRequestID: providers.IsValidClientRequestID,
 	})
-}
-
-func isValidClientRequestID(id string) bool {
-	if len(id) > 512 {
-		return false
-	}
-	for i := 0; i < len(id); i++ {
-		if id[i] > 127 {
-			return false
-		}
-	}
-	return true
 }
 
 func resourceRootBaseURL(baseURL string) string {

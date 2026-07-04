@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
-	"io"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -19,10 +18,8 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/cespare/xxhash/v2"
-	"github.com/labstack/echo/v5"
 
 	"gomodel/config"
-	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 	"gomodel/internal/embedding"
 )
@@ -45,7 +42,7 @@ type semanticCacheMiddleware struct {
 	store            VecStore
 	cfg              config.SemanticCacheConfig
 	embedderIdentity string
-	hitRecorder      func(*echo.Context, []byte, string)
+	hitRecorder      func(exchange, []byte, string)
 
 	// Vector-store inserts run on a bounded worker pool so a burst of cache
 	// misses cannot spawn unbounded goroutines against the vector store. wg
@@ -57,7 +54,7 @@ type semanticCacheMiddleware struct {
 	closed  bool
 }
 
-func newSemanticCacheMiddleware(emb embedding.Embedder, store VecStore, cfg config.SemanticCacheConfig, hitRecorder func(*echo.Context, []byte, string)) *semanticCacheMiddleware {
+func newSemanticCacheMiddleware(emb embedding.Embedder, store VecStore, cfg config.SemanticCacheConfig, hitRecorder func(exchange, []byte, string)) *semanticCacheMiddleware {
 	m := &semanticCacheMiddleware{
 		embedder:         emb,
 		store:            store,
@@ -109,21 +106,21 @@ func (m *semanticCacheMiddleware) enqueueWrite(job semanticCacheWriteJob) {
 
 // Handle processes a single request/response cycle for semantic caching.
 // It must be called after guardrail patching so params_hash reflects the final policy.
-func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func() error) error {
+func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() error) error {
 	if m == nil || m.store == nil {
 		return next()
 	}
 
-	path := c.Request().URL.Path
-	if !cacheablePaths[path] || c.Request().Method != http.MethodPost {
+	path := ex.Path()
+	if !cacheablePaths[path] || ex.Method() != http.MethodPost {
 		return next()
 	}
 
-	if shouldSkipSemanticCache(c.Request()) {
+	if shouldSkipSemanticCacheHeaders(ex.RequestHeader) {
 		return next()
 	}
 
-	ctx := c.Request().Context()
+	ctx := ex.Context()
 	plan := core.GetWorkflow(ctx)
 
 	embedText, msgCount := extractEmbedText(body, m.cfg.ExcludeSystemPrompt)
@@ -132,7 +129,7 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 	}
 
 	threshold := m.cfg.SimilarityThreshold
-	if v := headerFloat64(c.Request(), "X-Cache-Semantic-Threshold"); v > 0 {
+	if v := headerFloat64(ex.RequestHeader, "X-Cache-Semantic-Threshold"); v > 0 {
 		threshold = v
 	}
 
@@ -160,28 +157,23 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 	}
 
 	if len(results) > 0 && float64(results[0].Score) >= threshold {
-		replayErr := writeCachedResponse(c, path, body, results[0].Response, CacheTypeSemantic)
+		replayErr := ex.ReplayHit(body, results[0].Response, CacheTypeSemantic)
 		if replayErr == nil {
-			auditlog.EnrichEntryWithCacheType(c, CacheTypeSemantic)
+			ex.MarkHit(CacheTypeSemantic)
 			if m.hitRecorder != nil {
-				m.hitRecorder(c, results[0].Response, CacheTypeSemantic)
+				m.hitRecorder(ex, results[0].Response, CacheTypeSemantic)
 			}
 			slog.Info("semantic cache hit",
 				"path", path,
 				"score", results[0].Score,
-				"request_id", c.Request().Header.Get("X-Request-ID"),
+				"request_id", ex.RequestHeader("X-Request-ID"),
 			)
 			return nil
 		}
 		slog.Warn("semantic cache replay failed", "path", path, "err", replayErr)
 	}
 
-	data, ok, err := captureResponseForCache(
-		c,
-		path,
-		"semantic cache: failed to capture cacheable response body",
-		next,
-	)
+	data, ok, err := ex.Capture("semantic cache: failed to capture cacheable response body", next)
 	if err != nil {
 		return err
 	}
@@ -193,7 +185,7 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 		ttlSec = *m.cfg.TTL
 	}
 	ttl := time.Duration(ttlSec) * time.Second
-	if v := headerDuration(c.Request(), "X-Cache-TTL"); v > 0 {
+	if v := headerDuration(ex.RequestHeader, "X-Cache-TTL"); v > 0 {
 		ttl = v
 	}
 
@@ -553,16 +545,15 @@ func sortedTools(tools []map[string]any) []map[string]any {
 	return sorted
 }
 
-func shouldSkipSemanticCache(req *http.Request) bool {
-	if shouldSkipCache(req) {
+func shouldSkipSemanticCacheHeaders(header func(string) string) bool {
+	if shouldSkipCacheControl(header("Cache-Control")) {
 		return true
 	}
-	ct := req.Header.Get("X-Cache-Type")
-	return strings.EqualFold(ct, "exact")
+	return strings.EqualFold(header("X-Cache-Type"), "exact")
 }
 
-func headerFloat64(req *http.Request, name string) float64 {
-	s := req.Header.Get(name)
+func headerFloat64(header func(string) string, name string) float64 {
+	s := header(name)
 	if s == "" {
 		return 0
 	}
@@ -573,8 +564,8 @@ func headerFloat64(req *http.Request, name string) float64 {
 	return v
 }
 
-func headerDuration(req *http.Request, name string) time.Duration {
-	s := req.Header.Get(name)
+func headerDuration(header func(string) string, name string) time.Duration {
+	s := header(name)
 	if s == "" {
 		return 0
 	}
@@ -588,35 +579,6 @@ func headerDuration(req *http.Request, name string) time.Duration {
 func sha256HexOf(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
-}
-
-// ComputeGuardrailsHash computes the guardrails_hash for a set of rule identifiers.
-// Each rule is represented as "name:type:order:mode:content_hash". The combined seed is
-// sorted for stability, then passed through SHA-256.
-// Uses xxhash64 per-component and SHA-256 for the final hash to balance speed and
-// collision resistance.
-func ComputeGuardrailsHash(rules []GuardrailRuleDescriptor) string {
-	if len(rules) == 0 {
-		return ""
-	}
-	seeds := make([]string, len(rules))
-	for i, r := range rules {
-		contentXX := xxhash.Sum64String(r.Content)
-		seeds[i] = fmt.Sprintf("%s:%s:%d:%s:%016x", r.Name, r.Type, r.Order, r.Mode, contentXX)
-	}
-	sort.Strings(seeds)
-	combined := strings.Join(seeds, "|")
-	h := sha256.Sum256([]byte(combined))
-	return hex.EncodeToString(h[:])
-}
-
-// GuardrailRuleDescriptor describes a single active guardrail rule for hashing.
-type GuardrailRuleDescriptor struct {
-	Name    string
-	Type    string
-	Order   int
-	Mode    string
-	Content string
 }
 
 // GuardrailsHashFromContext retrieves the guardrails hash from the context,
@@ -634,7 +596,6 @@ func WithGuardrailsHash(ctx context.Context, hash string) context.Context {
 const (
 	CacheTypeExact      = "exact"
 	CacheTypeSemantic   = "semantic"
-	CacheTypeBoth       = "both"
 	CacheHeaderExact    = "HIT (exact)"
 	CacheHeaderSemantic = "HIT (semantic)"
 )
@@ -647,30 +608,12 @@ func ShouldSkipExactCache(req *http.Request) bool {
 // ShouldSkipAllCache reports whether caching must be bypassed for this request,
 // matching the exact-cache middleware semantics for no-cache and no-store.
 func ShouldSkipAllCache(req *http.Request) bool {
-	if strings.EqualFold(req.Header.Get("X-Cache-Control"), "no-store") {
-		return true
-	}
-	cc := req.Header.Get("Cache-Control")
-	if cc == "" {
-		return false
-	}
-	directives := strings.Split(strings.ToLower(cc), ",")
-	for _, d := range directives {
-		d = strings.TrimSpace(d)
-		if d == "no-cache" || d == "no-store" {
-			return true
-		}
-	}
-	return false
+	return shouldSkipAllCacheHeaders(req.Header.Get)
 }
 
-// IoReadAllBody reads and restores c.Request().Body, returning the raw bytes.
-// Safe to call multiple times — each call resets the body.
-func IoReadAllBody(c *echo.Context) ([]byte, error) {
-	body, err := io.ReadAll(c.Request().Body)
-	if err != nil {
-		return nil, err
+func shouldSkipAllCacheHeaders(header func(string) string) bool {
+	if strings.EqualFold(header("X-Cache-Control"), "no-store") {
+		return true
 	}
-	c.Request().Body = io.NopCloser(bytes.NewReader(body))
-	return body, nil
+	return shouldSkipCacheControl(header("Cache-Control"))
 }
