@@ -97,11 +97,17 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 }
 
 func (s *MongoDBStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
-	update := bson.D{
-		{Key: "labels", Value: labels},
-		{Key: "updated_at", Value: now.UTC()},
+	set := bson.D{{Key: "updated_at", Value: now.UTC()}}
+	if len(labels) > 0 {
+		set = append(set, bson.E{Key: "labels", Value: labels})
 	}
-	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, bson.D{{Key: "$set", Value: update}})
+	update := bson.D{{Key: "$set", Value: set}}
+	if len(labels) == 0 {
+		// Clearing removes the field entirely, matching the insert path's
+		// omitempty behavior, instead of storing null.
+		update = append(update, bson.E{Key: "$unset", Value: bson.D{{Key: "labels", Value: ""}}})
+	}
+	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, update)
 	if err != nil {
 		return fmt.Errorf("update auth key labels: %w", err)
 	}
