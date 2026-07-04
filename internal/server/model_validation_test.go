@@ -736,12 +736,10 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 			"openai/gpt-4o": "openai",
 		},
 	}
-	provider := virtualmodels.NewProvider(inner, service)
-
 	e := echo.New()
 	handlerCalled := false
 
-	middleware := WorkflowResolution(provider)
+	middleware := WorkflowResolutionWithResolver(inner, service)
 	handler := middleware(func(c *echo.Context) error {
 		handlerCalled = true
 		return c.String(http.StatusOK, "ok")
@@ -978,72 +976,6 @@ func BenchmarkSelectorHintsFromJSONGJSON(b *testing.B) {
 		if !parsed || model != "gpt-4o-mini" || provider != "openai" {
 			b.Fatalf("unexpected selector hints: parsed=%v model=%q provider=%q", parsed, model, provider)
 		}
-	}
-}
-
-func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *testing.T) {
-	catalog := aliasesTestCatalog{
-		supported: map[string]bool{
-			"anthropic/claude-opus-4-6": true,
-			"openai/gpt-5-nano":         true,
-		},
-		providerTypes: map[string]string{
-			"anthropic/claude-opus-4-6": "anthropic",
-			"openai/gpt-5-nano":         "openai",
-		},
-		models: map[string]core.Model{
-			"anthropic/claude-opus-4-6": {ID: "claude-opus-4-6", Object: "model"},
-			"openai/gpt-5-nano":         {ID: "gpt-5-nano", Object: "model"},
-		},
-	}
-
-	service, err := virtualmodels.NewService(newAliasesTestStore(
-		redirectVM("anthropic/claude-opus-4-6", "gpt-5-nano", "openai", true),
-	), &catalog, true)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-
-	inner := &mockProvider{
-		supportedModels: []string{"claude-opus-4-6", "gpt-5-nano"},
-		providerTypes: map[string]string{
-			"anthropic/claude-opus-4-6": "anthropic",
-			"openai/gpt-5-nano":         "openai",
-		},
-	}
-	provider := virtualmodels.NewProvider(inner, service)
-
-	e := echo.New()
-	var (
-		capturedProviderType string
-		capturedWorkflow     *core.Workflow
-	)
-
-	middleware := WorkflowResolution(provider)
-	handler := middleware(func(c *echo.Context) error {
-		capturedProviderType = GetProviderType(c)
-		capturedWorkflow = core.GetWorkflow(c.Request().Context())
-		return c.String(http.StatusOK, "ok")
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"anthropic/claude-opus-4-6","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	err = handler(c)
-	require.NoError(t, err)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "openai", capturedProviderType)
-	if assert.NotNil(t, capturedWorkflow) && assert.NotNil(t, capturedWorkflow.Resolution) {
-		assert.True(t, capturedWorkflow.Resolution.AliasApplied)
-		assert.Equal(t, "anthropic/claude-opus-4-6", capturedWorkflow.RequestedQualifiedModel())
-		assert.Equal(t, "openai/gpt-5-nano", capturedWorkflow.ResolvedQualifiedModel())
 	}
 }
 

@@ -298,7 +298,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	refreshInterval := workflowRefreshInterval(appCfg)
 	var guardrailExecutor guardrails.ChatCompletionExecutor = app.providers.Router
 	if vm != nil {
-		guardrailExecutor = virtualmodels.NewProviderWithOptions(app.providers.Router, vm, virtualmodels.Options{})
+		guardrailExecutor = virtualmodels.NewChatExecutor(app.providers.Router, vm)
 	}
 
 	// Initialize reusable guardrail definitions using shared storage when already available.
