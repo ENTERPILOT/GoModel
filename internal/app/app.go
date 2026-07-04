@@ -177,6 +177,17 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	app.providers = providerResult
 	closers = append(closers, app.providers.Close)
 
+	// Propagate the user-path header to the factory so per-request providers
+	// can read it from options without re-parsing the server config.
+	if cfg.Factory != nil {
+		cfg.Factory.SetUserPathHeader(appCfg.Server.UserPathHeader)
+	}
+
+	// The passthrough header capture middleware must run only when at least one
+	// resolved provider has passthrough_user_headers enabled. Registering it
+	// otherwise would add per-request work for zero functional benefit.
+	passthroughEnabled := anyProviderHasPassthroughUserHeaders(providerResult.ResolvedProviders)
+
 	// Initialize audit logging
 	auditResult, err := auditlog.New(ctx, appCfg)
 	if err != nil {
@@ -448,6 +459,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		RealtimeEnabled:                 appCfg.Server.RealtimeEnabled,
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
 		UserPathHeader:                  appCfg.Server.UserPathHeader,
+		PassthroughUserHeadersEnabled:   passthroughEnabled,
 		SwaggerEnabled:                  swaggerEnabled,
 		Tagging:                         taggingResult.Service,
 	}
@@ -1172,4 +1184,17 @@ func semanticResponseCacheConfiguredFromResponse(cfg config.ResponseCacheConfig)
 
 func failoverFeatureEnabledGlobally(cfg *config.Config) bool {
 	return cfg != nil && cfg.Failover.Enabled
+}
+
+// anyProviderHasPassthroughUserHeaders reports whether any resolved provider
+// opts in to forwarding user-supplied request headers upstream. When true, the
+// server registers the PassthroughHeaderCapture middleware to populate the
+// per-request header context used by the provider layer.
+func anyProviderHasPassthroughUserHeaders(resolved map[string]providers.ProviderConfig) bool {
+	for _, p := range resolved {
+		if p.PassthroughUserHeaders {
+			return true
+		}
+	}
+	return false
 }

@@ -20,6 +20,8 @@ type CompatibleProviderConfig struct {
 	BaseURL        string
 	SetHeaders     func(*http.Request, string)
 	RequestMutator RequestMutator
+	HeaderOverrides *providers.HeaderOverridesConfig
+	UserPathAlias string
 }
 
 type CompatibleProvider struct {
@@ -30,6 +32,15 @@ type CompatibleProvider struct {
 }
 
 func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg CompatibleProviderConfig) *CompatibleProvider {
+	// Auto-inject HeaderOverrides from ProviderOptions
+	if cfg.HeaderOverrides == nil && opts.HeaderOverrides != nil {
+		cfg.HeaderOverrides = opts.HeaderOverrides
+	}
+	// Auto-inject UserPathAlias from ProviderOptions
+	if cfg.UserPathAlias == "" && opts.UserPathHeader != "" {
+		cfg.UserPathAlias = opts.UserPathHeader
+	}
+
 	p := &CompatibleProvider{
 		apiKey:         apiKey,
 		providerName:   cfg.ProviderName,
@@ -45,6 +56,9 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 	p.client = llmclient.New(clientCfg, func(req *http.Request) {
 		if cfg.SetHeaders != nil {
 			cfg.SetHeaders(req, apiKey)
+		}
+		if cfg.HeaderOverrides != nil {
+			providers.ApplyHeaderOverrides(req, *cfg.HeaderOverrides, cfg.UserPathAlias)
 		}
 	})
 	return p
@@ -64,6 +78,9 @@ func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client,
 	p.client = llmclient.NewWithHTTPClient(httpClient, clientCfg, func(req *http.Request) {
 		if cfg.SetHeaders != nil {
 			cfg.SetHeaders(req, apiKey)
+		}
+		if cfg.HeaderOverrides != nil {
+			providers.ApplyHeaderOverrides(req, *cfg.HeaderOverrides, cfg.UserPathAlias)
 		}
 	})
 	return p

@@ -28,8 +28,10 @@ var Registration = providers.Registration{
 
 // Provider implements the core.Provider interface for vLLM.
 type Provider struct {
-	compatible *openai.CompatibleProvider
-	rootClient *llmclient.Client
+	compatible      *openai.CompatibleProvider
+	rootClient      *llmclient.Client
+	headerOverrides *providers.HeaderOverridesConfig
+	userPathAlias   string
 }
 
 // New creates a new vLLM provider.
@@ -42,6 +44,8 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			BaseURL:      baseURL,
 			SetHeaders:   setHeaders,
 		}),
+		headerOverrides: opts.HeaderOverrides,
+		userPathAlias:   opts.UserPathHeader,
 		rootClient: llmclient.New(llmclient.Config{
 			ProviderName:   "vllm",
 			BaseURL:        rootBaseURL,
@@ -49,14 +53,16 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			Hooks:          opts.Hooks,
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
 		}, func(req *http.Request) {
-			setHeaders(req, cfg.APIKey)
+			setRootHeaders(req, cfg.APIKey, opts.HeaderOverrides, opts.UserPathHeader)
 		}),
 	}
 }
 
 // NewWithHTTPClient creates a new vLLM provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
+// If httpClient is nil, http.DefaultClient is used. headerOverrides and
+// userPathAlias are optional; pass nil and "" to disable header overrides on
+// the non-v1 passthrough client.
+func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks, headerOverrides *providers.HeaderOverridesConfig, userPathAlias string) *Provider {
 	resolvedBaseURL := providers.ResolveBaseURL(baseURL, defaultBaseURL)
 	rootClientCfg := llmclient.DefaultConfig("vllm", passthroughBaseURL(resolvedBaseURL))
 	rootClientCfg.Hooks = hooks
@@ -66,8 +72,10 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 			BaseURL:      resolvedBaseURL,
 			SetHeaders:   setHeaders,
 		}),
+		headerOverrides: headerOverrides,
+		userPathAlias:   userPathAlias,
 		rootClient: llmclient.NewWithHTTPClient(httpClient, rootClientCfg, func(req *http.Request) {
-			setHeaders(req, apiKey)
+			setRootHeaders(req, apiKey, headerOverrides, userPathAlias)
 		}),
 	}
 }
@@ -78,12 +86,28 @@ func (p *Provider) SetBaseURL(url string) {
 	p.rootClient.SetBaseURL(passthroughBaseURL(url))
 }
 
+// setHeaders is used for OpenAI-compatible (v1) requests. Header overrides are
+// auto-applied by CompatibleProvider from its config, so we only set auth here.
 func setHeaders(req *http.Request, apiKey string) {
 	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
 		AuthScheme:      "Bearer ",
 		RequestIDHeader: "X-Request-Id",
 		OptionalAPIKey:  true,
 	})
+}
+
+// setRootHeaders is used for non-v1 (root) passthrough requests. Auth is set
+// first so static custom headers can't override it; passthrough user headers
+// are then applied with the same blocked-header floor as elsewhere.
+func setRootHeaders(req *http.Request, apiKey string, headerOverrides *providers.HeaderOverridesConfig, userPathAlias string) {
+	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
+		AuthScheme:      "Bearer ",
+		RequestIDHeader: "X-Request-Id",
+		OptionalAPIKey:  true,
+	})
+	if headerOverrides != nil {
+		providers.ApplyHeaderOverrides(req, *headerOverrides, userPathAlias)
+	}
 }
 
 // ChatCompletion sends a chat completion request to vLLM.

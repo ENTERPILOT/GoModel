@@ -35,14 +35,20 @@ const (
 
 // Provider implements the core.Provider interface for Ollama
 type Provider struct {
-	client       *llmclient.Client
-	nativeClient *llmclient.Client
-	apiKey       string // Accepted but ignored by Ollama
+	client          *llmclient.Client
+	nativeClient    *llmclient.Client
+	apiKey          string // Accepted but ignored by Ollama
+	headerOverrides *providers.HeaderOverridesConfig
+	userPathAlias   string
 }
 
 // New creates a new Ollama provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	p := &Provider{apiKey: providerCfg.APIKey}
+	p := &Provider{
+		apiKey:          providerCfg.APIKey,
+		headerOverrides: opts.HeaderOverrides,
+		userPathAlias:   opts.UserPathHeader,
+	}
 	clientCfg := llmclient.Config{
 		ProviderName:   "ollama",
 		BaseURL:        defaultBaseURL,
@@ -65,12 +71,17 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 }
 
 // NewWithHTTPClient creates a new Ollama provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
+// If httpClient is nil, http.DefaultClient is used. headerOverrides and
+// userPathAlias are optional; pass nil and "" to disable header overrides.
+func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks, headerOverrides *providers.HeaderOverridesConfig, userPathAlias string) *Provider {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	p := &Provider{apiKey: apiKey}
+	p := &Provider{
+		apiKey:          apiKey,
+		headerOverrides: headerOverrides,
+		userPathAlias:   userPathAlias,
+	}
 	cfg := llmclient.DefaultConfig("ollama", defaultBaseURL)
 	cfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
@@ -100,7 +111,9 @@ func (p *Provider) CheckAvailability(ctx context.Context) error {
 	return err
 }
 
-// setHeaders sets the required headers for Ollama API requests
+// setHeaders sets the required headers for Ollama API requests. Applied to
+// both the OpenAI-compatible client and the native /api/embed client because
+// they share provider configuration.
 func (p *Provider) setHeaders(req *http.Request) {
 	// Ollama doesn't require authentication, but accepts a Bearer token if provided.
 	providers.SetAuthHeaders(req, p.apiKey, providers.AuthHeaderConfig{
@@ -108,6 +121,9 @@ func (p *Provider) setHeaders(req *http.Request) {
 		RequestIDHeader: "X-Request-ID",
 		OptionalAPIKey:  true,
 	})
+	if p.headerOverrides != nil {
+		providers.ApplyHeaderOverrides(req, *p.headerOverrides, p.userPathAlias)
+	}
 }
 
 // ChatCompletion sends a chat completion request to Ollama

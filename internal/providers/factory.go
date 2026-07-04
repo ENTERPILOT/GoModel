@@ -13,9 +13,11 @@ import (
 
 // ProviderOptions bundles runtime settings passed from the factory to provider constructors.
 type ProviderOptions struct {
-	Hooks      llmclient.Hooks
-	Models     []string
-	Resilience config.ResilienceConfig
+	Hooks           llmclient.Hooks
+	Models          []string
+	Resilience      config.ResilienceConfig
+	UserPathHeader  string
+	HeaderOverrides *HeaderOverridesConfig
 }
 
 // ProviderConstructor is the constructor signature for providers.
@@ -46,6 +48,7 @@ type ProviderFactory struct {
 	discoveryConfigs     map[string]DiscoveryConfig
 	passthroughEnrichers map[string]core.PassthroughSemanticEnricher
 	hooks                llmclient.Hooks
+	userPathHeader       string
 }
 
 // NewProviderFactory creates a new provider factory instance.
@@ -62,6 +65,13 @@ func (f *ProviderFactory) SetHooks(hooks llmclient.Hooks) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.hooks = hooks
+}
+
+// SetUserPathHeader configures the user path header name for all providers created by this factory.
+func (f *ProviderFactory) SetUserPathHeader(header string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.userPathHeader = header
 }
 
 // Add adds a provider constructor to the factory.
@@ -90,6 +100,7 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 	f.mu.RLock()
 	builder, ok := f.builders[cfg.Type]
 	hooks := f.hooks
+	userPathHeader := f.userPathHeader
 	f.mu.RUnlock()
 
 	if !ok {
@@ -97,12 +108,28 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 	}
 
 	opts := ProviderOptions{
-		Hooks:      hooks,
-		Models:     cfg.Models,
-		Resilience: cfg.Resilience,
+		Hooks:           hooks,
+		Models:          cfg.Models,
+		Resilience:      cfg.Resilience,
+		UserPathHeader:  userPathHeader,
+		HeaderOverrides: buildHeaderOverrides(cfg),
 	}
 
 	return builder(cfg, opts), nil
+}
+
+// buildHeaderOverrides constructs a HeaderOverridesConfig from ProviderConfig header fields.
+// Returns nil when no header configuration is present to preserve the no-operation path.
+func buildHeaderOverrides(cfg ProviderConfig) *HeaderOverridesConfig {
+	if !cfg.PassthroughUserHeaders && len(cfg.CustomUpstreamHeaders) == 0 && len(cfg.PassthroughUserHeadersSkip) == 0 {
+		return nil
+	}
+	return &HeaderOverridesConfig{
+		CustomUpstreamHeaders: cfg.CustomUpstreamHeaders,
+		PassthroughUserHeaders: cfg.PassthroughUserHeaders,
+		SkipHeaders:           cfg.PassthroughUserHeadersSkip,
+		SkipMode:              cfg.PassthroughUserHeadersSkipMode,
+	}
 }
 
 // discoveryConfigsSnapshot returns provider discovery metadata keyed by provider type.

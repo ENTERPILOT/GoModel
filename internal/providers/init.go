@@ -27,6 +27,12 @@ type InitResult struct {
 	// by configured provider name.
 	ConfiguredProviders []SanitizedProviderConfig
 
+	// ResolvedProviders is the fully merged provider configuration map
+	// (env + resilience + credentials) keyed by configured provider name.
+	// Use this to inspect resolved provider flags (e.g. PassthroughUserHeaders)
+	// without re-parsing raw YAML.
+	ResolvedProviders map[string]ProviderConfig
+
 	// CredentialResolvedProviders is the env-merged, credential-filtered providers
 	// map (same keys as Router). Keys match top-level providers YAML names.
 	CredentialResolvedProviders map[string]config.RawProviderConfig
@@ -155,8 +161,13 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		return nil, fmt.Errorf("failed to create router: %w", err)
 	}
 
+	resolved := make(map[string]ProviderConfig, len(providerMap))
+	for name, cfg := range providerMap {
+		resolved[name] = cfg
+	}
 	return &InitResult{
 		ConfiguredProviders:         SanitizeProviderConfigs(providerMap),
+		ResolvedProviders:           resolved,
 		Registry:                    registry,
 		Router:                      router,
 		Cache:                       modelCache,

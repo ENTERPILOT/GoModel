@@ -28,6 +28,19 @@ type ProviderConfig struct {
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
 	Models                   []string
+	// CustomUpstreamHeaders are extra HTTP headers the gateway attaches to every
+	// outbound request to this provider, on top of the auth/transport defaults.
+	CustomUpstreamHeaders map[string]string
+	// PassthroughUserHeaders enables forwarding a curated set of client-supplied
+	// request headers to the upstream provider.
+	PassthroughUserHeaders bool
+	// PassthroughUserHeadersSkip lists header names to exclude from passthrough.
+	// Interpretation depends on PassthroughUserHeadersSkipMode.
+	PassthroughUserHeadersSkip []string
+	// PassthroughUserHeadersSkipMode controls how the skip list is applied:
+	// "skip" (default) removes the listed headers, "only" keeps only the
+	// listed headers and drops everything else passthrough would forward.
+	PassthroughUserHeadersSkipMode string
 	// ModelMetadataOverrides holds operator-supplied metadata keyed by raw model
 	// ID (as it appears in the provider's /models response). The registry merges
 	// these onto remote-registry metadata after enrichment; non-zero fields here
@@ -91,6 +104,7 @@ const (
 	providerEnvFieldServiceAccountJSON
 	providerEnvFieldServiceAccountJSONBase64
 	providerEnvFieldGCPScope
+	providerEnvFieldPassthroughUserHeaders
 )
 
 type providerEnvSource struct {
@@ -114,6 +128,9 @@ type providerEnvValues struct {
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
 	Models                   []string
+	// PassthroughUserHeaders is intentionally NOT included in empty() — a
+	// passthrough env var alone must not trigger provider discovery.
+	PassthroughUserHeaders bool
 }
 
 func (v providerEnvValues) empty() bool {
@@ -188,6 +205,8 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 			values.ServiceAccountJSONBase64 = value
 		case providerEnvFieldGCPScope:
 			values.GCPScope = value
+		case providerEnvFieldPassthroughUserHeaders:
+			values.PassthroughUserHeaders = parseBool(value)
 		}
 		groups[suffix] = values
 	}
@@ -214,6 +233,7 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		name  string
 		field providerEnvField
 	}{
+		{name: "PASSTHROUGH_USER_HEADERS", field: providerEnvFieldPassthroughUserHeaders},
 		{name: "API_VERSION", field: providerEnvFieldAPIVersion},
 		{name: "BASE_URL", field: providerEnvFieldBaseURL},
 		{name: "AUTH_TYPE", field: providerEnvFieldAuthType},
@@ -347,6 +367,7 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		ServiceAccountJSONBase64: v.ServiceAccountJSONBase64,
 		GCPScope:                 v.GCPScope,
 		Models:                   rawProviderModelsFromIDs(v.Models),
+		PassthroughUserHeaders:   v.PassthroughUserHeaders,
 	}
 }
 
@@ -399,6 +420,9 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	}
 	if len(values.Models) > 0 {
 		existing.Models = rawProviderModelsFromIDs(values.Models)
+	}
+	if values.PassthroughUserHeaders {
+		existing.PassthroughUserHeaders = true
 	}
 	return existing
 }
@@ -539,6 +563,19 @@ func parseCSVEnvList(value string) []string {
 	return values
 }
 
+// parseBool interprets a permissive truthy env-var token. It returns true only
+// for case-insensitive matches of "true", "1", "yes", or "on"; any other value
+// (including empty) returns false. Used for boolean env overlays where the
+// presence of the var alone should not flip state.
+func parseBool(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func isUnresolvedEnvPlaceholder(value string) bool {
 	if !strings.HasPrefix(value, "${") || !strings.HasSuffix(value, "}") || len(value) <= 3 {
 		return false
@@ -636,6 +673,10 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		ServiceAccountJSONBase64: raw.ServiceAccountJSONBase64,
 		GCPScope:                 raw.GCPScope,
 		Models:                   config.ProviderModelIDs(raw.Models),
+		CustomUpstreamHeaders:    raw.CustomUpstreamHeaders,
+		PassthroughUserHeaders:   raw.PassthroughUserHeaders,
+		PassthroughUserHeadersSkip: raw.PassthroughUserHeadersSkip,
+		PassthroughUserHeadersSkipMode: defaultPassthroughSkipMode(raw.PassthroughUserHeadersSkipMode),
 		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
 		Resilience:               global,
 	}
@@ -683,6 +724,15 @@ func normalizeProviderType(raw config.RawProviderConfig) string {
 		return "vertex"
 	}
 	return providerType
+}
+
+// defaultPassthroughSkipMode returns "skip" when the raw value is empty, and
+// otherwise passes through the operator-supplied mode unchanged.
+func defaultPassthroughSkipMode(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return "skip"
+	}
+	return raw
 }
 
 // rawProviderModelsFromIDs wraps a plain string slice into RawProviderModel

@@ -26,15 +26,21 @@ var Registration = providers.Registration{
 
 // Provider implements the core.Provider interface for DeepSeek.
 type Provider struct {
-	client *llmclient.Client
-	apiKey string
+	client          *llmclient.Client
+	apiKey          string
+	headerOverrides *providers.HeaderOverridesConfig
+	userPathAlias   string
 }
 
 var _ core.Provider = (*Provider)(nil)
 
 // New creates a new DeepSeek provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	p := &Provider{apiKey: cfg.APIKey}
+	p := &Provider{
+		apiKey:          cfg.APIKey,
+		headerOverrides: opts.HeaderOverrides,
+		userPathAlias:   opts.UserPathHeader,
+	}
 	clientCfg := llmclient.Config{
 		ProviderName:   "deepseek",
 		BaseURL:        providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
@@ -47,12 +53,17 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 }
 
 // NewWithHTTPClient creates a new DeepSeek provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
+// If httpClient is nil, http.DefaultClient is used. headerOverrides and
+// userPathAlias are optional; pass nil and "" to disable header overrides.
+func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks, headerOverrides *providers.HeaderOverridesConfig, userPathAlias string) *Provider {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	p := &Provider{apiKey: apiKey}
+	p := &Provider{
+		apiKey:          apiKey,
+		headerOverrides: headerOverrides,
+		userPathAlias:   userPathAlias,
+	}
 	cfg := llmclient.DefaultConfig("deepseek", providers.ResolveBaseURL(baseURL, defaultBaseURL))
 	cfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
@@ -69,6 +80,9 @@ func (p *Provider) setHeaders(req *http.Request) {
 		AuthScheme:      "Bearer ",
 		RequestIDHeader: "X-Request-Id",
 	})
+	if p.headerOverrides != nil {
+		providers.ApplyHeaderOverrides(req, *p.headerOverrides, p.userPathAlias)
+	}
 }
 
 // adaptChatRequest rewrites GoModel's common reasoning shape into DeepSeek's

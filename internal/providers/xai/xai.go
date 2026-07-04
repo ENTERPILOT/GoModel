@@ -33,13 +33,19 @@ const (
 
 // Provider implements the core.Provider interface for xAI
 type Provider struct {
-	client *llmclient.Client
-	apiKey string
+	client          *llmclient.Client
+	apiKey          string
+	headerOverrides *providers.HeaderOverridesConfig
+	userPathAlias   string
 }
 
 // New creates a new xAI provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	p := &Provider{apiKey: providerCfg.APIKey}
+	p := &Provider{
+		apiKey:          providerCfg.APIKey,
+		headerOverrides: opts.HeaderOverrides,
+		userPathAlias:   opts.UserPathHeader,
+	}
 	clientCfg := llmclient.Config{
 		ProviderName:   "xai",
 		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
@@ -52,12 +58,17 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 }
 
 // NewWithHTTPClient creates a new xAI provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
+// If httpClient is nil, http.DefaultClient is used. headerOverrides and
+// userPathAlias are optional; pass nil and "" to disable header overrides.
+func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks, headerOverrides *providers.HeaderOverridesConfig, userPathAlias string) *Provider {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	p := &Provider{apiKey: apiKey}
+	p := &Provider{
+		apiKey:          apiKey,
+		headerOverrides: headerOverrides,
+		userPathAlias:   userPathAlias,
+	}
 	cfg := llmclient.DefaultConfig("xai", defaultBaseURL)
 	cfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
@@ -75,6 +86,9 @@ func (p *Provider) setHeaders(req *http.Request) {
 		AuthScheme:      "Bearer ",
 		RequestIDHeader: "X-Request-ID",
 	})
+	if p.headerOverrides != nil {
+		providers.ApplyHeaderOverrides(req, *p.headerOverrides, p.userPathAlias)
+	}
 }
 
 type grokConversationAnchor struct {
