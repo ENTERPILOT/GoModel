@@ -116,8 +116,8 @@ func TestHandleInternalRequest_RejectsNilContext(t *testing.T) {
 	m := NewResponseCacheMiddlewareWithStore(cache.NewMapStore(), time.Hour)
 	var nilCtx context.Context
 
-	_, err := m.HandleInternalRequest(nilCtx, http.MethodPost, "/v1/chat/completions", []byte(`{}`), func(c *echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"ok": "1"})
+	_, err := m.HandleInternalRequest(nilCtx, http.MethodPost, "/v1/chat/completions", []byte(`{}`), func(context.Context) (*InternalResponse, error) {
+		return &InternalResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(`{"ok":"1"}`)}, nil
 	})
 	if err == nil {
 		t.Fatal("HandleInternalRequest() error = nil, want invalid request error")
@@ -194,8 +194,8 @@ func TestInternalRequestHeaders_AllowlistsSafeSnapshotHeaders(t *testing.T) {
 func TestHandleInternalRequest_RejectsNilMiddleware(t *testing.T) {
 	var m *ResponseCacheMiddleware
 
-	_, err := m.HandleInternalRequest(context.Background(), http.MethodPost, "/v1/chat/completions", []byte(`{}`), func(c *echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"ok": "1"})
+	_, err := m.HandleInternalRequest(context.Background(), http.MethodPost, "/v1/chat/completions", []byte(`{}`), func(context.Context) (*InternalResponse, error) {
+		return &InternalResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(`{"ok":"1"}`)}, nil
 	})
 	if err == nil {
 		t.Fatal("HandleInternalRequest() error = nil, want provider error")
@@ -217,8 +217,8 @@ func TestHandleInternalRequest_NormalizesNonGatewayErrors(t *testing.T) {
 	m := NewResponseCacheMiddlewareWithStore(cache.NewMapStore(), time.Hour)
 	originalErr := errors.New("cache executor failed")
 
-	_, err := m.HandleInternalRequest(context.Background(), http.MethodPost, "/v1/chat/completions", []byte(`{}`), func(*echo.Context) error {
-		return originalErr
+	_, err := m.HandleInternalRequest(context.Background(), http.MethodPost, "/v1/chat/completions", []byte(`{}`), func(context.Context) (*InternalResponse, error) {
+		return nil, originalErr
 	})
 	if err == nil {
 		t.Fatal("HandleInternalRequest() error = nil, want provider error")
@@ -239,25 +239,91 @@ func TestHandleInternalRequest_NormalizesNonGatewayErrors(t *testing.T) {
 	}
 }
 
-func TestHandleInternalRequest_RejectsUninitializedEcho(t *testing.T) {
+func TestHandleInternalRequest_ZeroValueMiddlewareIsNoOpCache(t *testing.T) {
+	// A zero-value middleware has no cache layers configured; internal
+	// requests must pass straight through to the LLM call.
 	m := &ResponseCacheMiddleware{}
+	calls := 0
 
-	_, err := m.HandleInternalRequest(context.Background(), http.MethodPost, "/v1/chat/completions", []byte(`{}`), func(c *echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"ok": "1"})
+	result, err := m.HandleInternalRequest(context.Background(), http.MethodPost, "/v1/chat/completions", []byte(`{}`), func(context.Context) (*InternalResponse, error) {
+		calls++
+		return &InternalResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(`{"ok":"1"}`)}, nil
 	})
-	if err == nil {
-		t.Fatal("HandleInternalRequest() error = nil, want provider error")
+	if err != nil {
+		t.Fatalf("HandleInternalRequest() error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+	if result.StatusCode != http.StatusOK || string(result.Body) != `{"ok":"1"}` {
+		t.Fatalf("result = %d %s, want 200 {\"ok\":\"1\"}", result.StatusCode, result.Body)
+	}
+	if result.CacheType != "" {
+		t.Fatalf("CacheType = %q, want empty on a cacheless pass-through", result.CacheType)
+	}
+}
+
+func TestHandleInternalRequest_ExactMissThenHit(t *testing.T) {
+	m := NewResponseCacheMiddlewareWithStore(cache.NewMapStore(), time.Hour)
+	body := []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`)
+	response := `{"id":"chatcmpl-1","choices":[]}`
+	calls := 0
+
+	run := func() *InternalHandleResult {
+		t.Helper()
+		result, err := m.HandleInternalRequest(context.Background(), http.MethodPost, "/v1/chat/completions", body, func(context.Context) (*InternalResponse, error) {
+			calls++
+			return &InternalResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(response)}, nil
+		})
+		if err != nil {
+			t.Fatalf("HandleInternalRequest() error = %v", err)
+		}
+		return result
 	}
 
-	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("HandleInternalRequest() error = %T, want *core.GatewayError", err)
+	first := run()
+	if first.CacheType != "" {
+		t.Fatalf("first call CacheType = %q, want miss", first.CacheType)
 	}
-	if gatewayErr.Type != core.ErrorTypeProvider {
-		t.Fatalf("error type = %q, want %q", gatewayErr.Type, core.ErrorTypeProvider)
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
 	}
-	if gatewayErr.HTTPStatusCode() != http.StatusInternalServerError {
-		t.Fatalf("status code = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusInternalServerError)
+	m.simple.wg.Wait()
+
+	second := run()
+	if second.CacheType != CacheTypeExact {
+		t.Fatalf("second call CacheType = %q, want %q", second.CacheType, CacheTypeExact)
+	}
+	if calls != 1 {
+		t.Fatalf("exact hit must not call the handler again, calls = %d", calls)
+	}
+	if string(second.Body) != response {
+		t.Fatalf("cached body = %s, want %s", second.Body, response)
+	}
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("cached status = %d, want 200", second.StatusCode)
+	}
+	if got := second.Headers.Get("X-Cache"); got != CacheHeaderExact {
+		t.Fatalf("X-Cache = %q, want %q", got, CacheHeaderExact)
+	}
+
+	// FailoverUsed responses must never be stored.
+	failoverBody := []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"failover"}]}`)
+	_, err := m.HandleInternalRequest(context.Background(), http.MethodPost, "/v1/chat/completions", failoverBody, func(context.Context) (*InternalResponse, error) {
+		return &InternalResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(response), FailoverUsed: true}, nil
+	})
+	if err != nil {
+		t.Fatalf("HandleInternalRequest() error = %v", err)
+	}
+	m.simple.wg.Wait()
+	followUp, err := m.HandleInternalRequest(context.Background(), http.MethodPost, "/v1/chat/completions", failoverBody, func(context.Context) (*InternalResponse, error) {
+		return &InternalResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(response)}, nil
+	})
+	if err != nil {
+		t.Fatalf("HandleInternalRequest() error = %v", err)
+	}
+	if followUp.CacheType != "" {
+		t.Fatalf("failover response was cached: CacheType = %q, want miss", followUp.CacheType)
 	}
 }
 
