@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"gomodel/internal/core"
@@ -919,5 +920,82 @@ func TestCreateTranscription_UpstreamError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid audio") {
 		t.Errorf("error = %v, want upstream message propagated", err)
+	}
+}
+
+// TestGroq_CustomUpstreamHeaders_AppliedToOutbound proves that
+// HeaderOverrides configured via ProviderOptions flow through the Groq
+// provider and land on the outgoing HTTP request. This exercises the same
+// CompatibleProvider code path that the provider factory uses in production.
+func TestGroq_CustomUpstreamHeaders_AppliedToOutbound(t *testing.T) {
+	var captured atomic.Pointer[http.Header]
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := r.Header.Clone()
+		captured.Store(&h)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"llama-3.3-70b-versatile","object":"model","owned_by":"groq"}]}`))
+	}))
+	defer server.Close()
+
+	opts := providers.ProviderOptions{
+		HeaderOverrides: &providers.HeaderOverridesConfig{
+			CustomUpstreamHeaders: map[string]string{
+				"X-Custom-Header":     "custom-value",
+				"X-Another-Header":    "another-value",
+				"X-Trace-Id":          "abc-123",
+				"Authorization":       "should-be-blocked", // hard-coded credential block
+				"X-GoModel-User-Path": "should-be-blocked", // hard-coded internal block
+			},
+		},
+		UserPathHeader: "X-User-Path",
+	}
+
+	// Use the factory entry point (New) so the test exercises the same
+	// ProviderOptions → CompatibleProvider path the production factory uses.
+	// NewWithHTTPClient does not accept ProviderOptions by design, so we
+	// type-assert to *Provider to call SetBaseURL on the concrete struct.
+	p := New(providers.ProviderConfig{
+		Type:   "groq",
+		APIKey: "gsk-test-key",
+	}, opts)
+	provider, ok := p.(*Provider)
+	if !ok {
+		t.Fatalf("New() returned %T, want *Provider", p)
+	}
+	provider.SetBaseURL(server.URL)
+
+	if _, err := provider.ListModels(context.Background()); err != nil {
+		t.Fatalf("ListModels() error = %v", err)
+	}
+
+	got := captured.Load()
+	if got == nil {
+		t.Fatal("server did not receive a request")
+	}
+	headers := *got
+
+	if v := headers.Get("X-Custom-Header"); v != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", v)
+	}
+	if v := headers.Get("X-Another-Header"); v != "another-value" {
+		t.Errorf("X-Another-Header = %q, want another-value", v)
+	}
+	if v := headers.Get("X-Trace-Id"); v != "abc-123" {
+		t.Errorf("X-Trace-Id = %q, want abc-123", v)
+	}
+	if v := headers.Get("X-User-Path"); v != "" {
+		t.Errorf("X-User-Path = %q, want empty (blocked by alias)", v)
+	}
+	if v := headers.Get("X-GoModel-User-Path"); v != "" {
+		t.Errorf("X-GoModel-User-Path = %q, want empty (hard-coded block)", v)
+	}
+	// Authorization: only the Bearer set by setHeaders should be present.
+	for _, v := range headers.Values("Authorization") {
+		if strings.HasPrefix(v, "should-be-blocked") {
+			t.Errorf("Authorization leaked custom value %q", v)
+		}
+	}
+	if v := headers.Get("Authorization"); !strings.HasPrefix(v, "Bearer ") {
+		t.Errorf("Authorization = %q, want Bearer prefix", v)
 	}
 }

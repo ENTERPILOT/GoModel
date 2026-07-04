@@ -61,6 +61,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 		DefaultBaseURL:  "http://localhost:11434/v1",
 		AllowAPIKeyless: true,
 	},
+	"kimi": {
+		DefaultBaseURL: "https://api.kimi.com/coding/v1",
+	},
 }
 
 // --- buildProviderConfig ---
@@ -83,6 +86,65 @@ func TestBuildProviderConfig_NilResilience(t *testing.T) {
 
 	if got.Resilience.Retry != globalRetry {
 		t.Error("nil Resilience should inherit global")
+	}
+}
+
+func TestBuildProviderConfig_HeaderFields(t *testing.T) {
+	raw := config.RawProviderConfig{
+		Type:                              "openai",
+		APIKey:                            "sk-test",
+		CustomUpstreamHeaders:             map[string]string{"X-Custom": "value"},
+		PassthroughUserHeaders:           true,
+		PassthroughUserHeadersSkip:       []string{"Authorization", "Cookie"},
+		PassthroughUserHeadersSkipMode:   "only",
+	}
+	got := buildProviderConfig(raw, globalResilience)
+
+	// Verify CustomUpstreamHeaders is copied
+	if got.CustomUpstreamHeaders == nil {
+		t.Error("CustomUpstreamHeaders should not be nil")
+	} else {
+		if got, want := len(got.CustomUpstreamHeaders), 1; got != want {
+			t.Errorf("CustomUpstreamHeaders length: got %d, want %d", got, want)
+		}
+		if got, want := got.CustomUpstreamHeaders["X-Custom"], "value"; got != want {
+			t.Errorf("CustomUpstreamHeaders[X-Custom]: got %q, want %q", got, want)
+		}
+	}
+
+	// Verify PassthroughUserHeaders is copied
+	if got, want := got.PassthroughUserHeaders, true; got != want {
+		t.Errorf("PassthroughUserHeaders: got %v, want %v", got, want)
+	}
+
+	// Verify PassthroughUserHeadersSkip is copied
+	if got, want := len(got.PassthroughUserHeadersSkip), 2; got != want {
+		t.Errorf("PassthroughUserHeadersSkip length: got %d, want %d", got, want)
+	}
+	if got, want := got.PassthroughUserHeadersSkip[0], "Authorization"; got != want {
+		t.Errorf("PassthroughUserHeadersSkip[0]: got %q, want %q", got, want)
+	}
+	if got, want := got.PassthroughUserHeadersSkip[1], "Cookie"; got != want {
+		t.Errorf("PassthroughUserHeadersSkip[1]: got %q, want %q", got, want)
+	}
+
+	// Verify PassthroughUserHeadersSkipMode is copied
+	if got, want := got.PassthroughUserHeadersSkipMode, "only"; got != want {
+		t.Errorf("PassthroughUserHeadersSkipMode: got %q, want %q", got, want)
+	}
+}
+
+func TestBuildProviderConfig_HeaderFields_DefaultSkipMode(t *testing.T) {
+	raw := config.RawProviderConfig{
+		Type:                            "openai",
+		APIKey:                          "sk-test",
+		PassthroughUserHeadersSkipMode:  "",
+	}
+	got := buildProviderConfig(raw, globalResilience)
+
+	// Verify PassthroughUserHeadersSkipMode defaults to "skip" when empty
+	if got, want := got.PassthroughUserHeadersSkipMode, "skip"; got != want {
+		t.Errorf("PassthroughUserHeadersSkipMode: got %q, want %q", got, want)
 	}
 }
 
@@ -1523,5 +1585,84 @@ func TestResolveProviders_NoProvidersNoEnvVars(t *testing.T) {
 	}
 	if len(filteredRaw) != 0 {
 		t.Errorf("expected empty filtered raw, got %d entries", len(filteredRaw))
+	}
+}
+
+// --- applyProviderEnvVars: per-provider PASSTHROUGH_USER_HEADERS overlay ---
+
+// TestApplyProviderEnvVars_Passthrough_FromAPIKeyAndFlag covers the discovery
+// path: a Kimi API key plus the passthrough env var must produce a resolved
+// provider with PassthroughUserHeaders enabled.
+func TestApplyProviderEnvVars_Passthrough_FromAPIKeyAndFlag(t *testing.T) {
+	t.Setenv("KIMI_API_KEY", "sk-test")
+	t.Setenv("KIMI_PASSTHROUGH_USER_HEADERS", "true")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["kimi"]
+	if !exists {
+		t.Fatalf("expected kimi provider to be discovered from env vars, got %d entries", len(got))
+	}
+	if p.APIKey != "sk-test" {
+		t.Errorf("kimi APIKey = %q, want sk-test", p.APIKey)
+	}
+	if !p.PassthroughUserHeaders {
+		t.Errorf("kimi PassthroughUserHeaders = false, want true")
+	}
+}
+
+// TestApplyProviderEnvVars_Passthrough_EnvWinsOverYAMLDisabled verifies the
+// overlay semantics: a YAML value of false for passthrough_user_headers must be
+// overridden when the env var is truthy.
+func TestApplyProviderEnvVars_Passthrough_EnvWinsOverYAMLDisabled(t *testing.T) {
+	t.Setenv("KIMI_API_KEY", "sk-yaml-env")
+	t.Setenv("KIMI_PASSTHROUGH_USER_HEADERS", "true")
+
+	raw := map[string]config.RawProviderConfig{
+		"kimi": {
+			Type:                   "kimi",
+			APIKey:                 "sk-yaml",
+			PassthroughUserHeaders: false,
+		},
+	}
+
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+
+	p, exists := got["kimi"]
+	if !exists {
+		t.Fatal("expected kimi provider to remain after env overlay")
+	}
+	if !p.PassthroughUserHeaders {
+		t.Errorf("kimi PassthroughUserHeaders = false, want true (env should win over YAML)")
+	}
+}
+
+// TestApplyProviderEnvVars_Passthrough_AloneDoesNotDiscover guards the
+// contract that a passthrough env var alone is not enough to bootstrap a
+// provider — empty() intentionally omits PassthroughUserHeaders.
+func TestApplyProviderEnvVars_Passthrough_AloneDoesNotDiscover(t *testing.T) {
+	t.Setenv("KIMI_PASSTHROUGH_USER_HEADERS", "true")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	if _, exists := got["kimi"]; exists {
+		t.Errorf("expected no kimi provider discovered from passthrough env var alone, got %+v", got["kimi"])
+	}
+}
+
+// TestApplyProviderEnvVars_Passthrough_FalseDoesNotEnable verifies that an
+// explicit false (or any non-truthy token) leaves PassthroughUserHeaders off.
+func TestApplyProviderEnvVars_Passthrough_FalseDoesNotEnable(t *testing.T) {
+	t.Setenv("KIMI_API_KEY", "sk-test")
+	t.Setenv("KIMI_PASSTHROUGH_USER_HEADERS", "false")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["kimi"]
+	if !exists {
+		t.Fatalf("expected kimi provider to be discovered from API key, got %d entries", len(got))
+	}
+	if p.PassthroughUserHeaders {
+		t.Errorf("kimi PassthroughUserHeaders = true, want false")
 	}
 }

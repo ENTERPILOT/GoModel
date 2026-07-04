@@ -19,7 +19,7 @@ func newXAIReplayProvider(t *testing.T, routes map[string]replayRoute) core.Prov
 	t.Helper()
 
 	client := newReplayHTTPClient(t, routes)
-	provider := xai.NewWithHTTPClient("xai-test", client, llmclient.Hooks{})
+	provider := xai.NewWithHTTPClient("xai-test", client, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL("https://replay.local")
 	return provider
 }

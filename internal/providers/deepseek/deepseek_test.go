@@ -11,6 +11,7 @@ import (
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
+	"gomodel/internal/providers"
 )
 
 func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
@@ -30,7 +31,7 @@ func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, nil, "")
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "deepseek-v4-pro",
@@ -70,7 +71,7 @@ func TestChatCompletion_MapsReasoningToDeepSeekReasoningEffort(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, nil, "")
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:     "deepseek-v4-pro",
@@ -109,7 +110,7 @@ func TestResponses_TranslatesToChatCompletions(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, nil, "")
 	maxOutputTokens := 64
 
 	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
@@ -168,7 +169,7 @@ func TestStreamResponses_TranslatesToChatCompletions(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, nil, "")
 
 	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "deepseek-v4-pro",
@@ -214,7 +215,7 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 }
 
 func TestProvider_DoesNotExposeOptionalNativeInterfaces(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{}, nil, "")
 
 	if _, ok := any(provider).(core.NativeBatchProvider); ok {
 		t.Fatal("deepseek provider should not implement native batch provider")
@@ -241,7 +242,7 @@ func TestPassthrough_ForwardsRequestWithBearerAuth(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, nil, "")
 
 	body := strings.NewReader(`{"model":"deepseek-v4-pro","prompt":"hello "}`)
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
@@ -271,7 +272,7 @@ func TestPassthrough_ForwardsRequestWithBearerAuth(t *testing.T) {
 }
 
 func TestPassthrough_NilRequest_ReturnsError(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{}, nil, "")
 	_, err := provider.Passthrough(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error for nil passthrough request, got nil")
@@ -288,7 +289,7 @@ func TestPassthrough_ForwardsRequestHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, nil, "")
 
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
@@ -312,7 +313,7 @@ func TestPassthrough_PreservesNon2xxStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, nil, "")
 
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
@@ -338,7 +339,7 @@ func TestPassthrough_ForwardsQueryString(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, nil, "")
 
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodGet,
@@ -363,7 +364,7 @@ func TestPassthrough_PreservesResponseBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, nil, "")
 
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
@@ -384,12 +385,12 @@ func TestPassthrough_PreservesResponseBody(t *testing.T) {
 }
 
 func TestProvider_ImplementsPassthroughProvider(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{}, nil, "")
 	var _ core.PassthroughProvider = provider
 }
 
 func TestResponses_NilRequest_ReturnsError(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{}, nil, "")
 	_, err := provider.Responses(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error for nil Responses request, got nil")
@@ -397,7 +398,7 @@ func TestResponses_NilRequest_ReturnsError(t *testing.T) {
 }
 
 func TestStreamResponses_NilRequest_ReturnsError(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{}, nil, "")
 	_, err := provider.StreamResponses(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error for nil StreamResponses request, got nil")
@@ -405,10 +406,274 @@ func TestStreamResponses_NilRequest_ReturnsError(t *testing.T) {
 }
 
 func TestEmbeddings_ReturnsUnsupported(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{}, nil, "")
 
 	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "embedding-model", Input: "hi"})
 	if err == nil {
 		t.Fatal("expected unsupported embeddings error, got nil")
+	}
+}
+
+func TestChatCompletion_AppliesStaticCustomHeaders(t *testing.T) {
+	var gotRegion, gotTrace string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRegion = r.Header.Get("X-Provider-Region")
+		gotTrace = r.Header.Get("X-Trace-Id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-deepseek",
+			"created":1677652288,
+			"model":"deepseek-v4-pro",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		CustomUpstreamHeaders: map[string]string{
+			"X-Provider-Region": "us-east-1",
+			"X-Trace-Id":        "trace-abc",
+		},
+	}
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, cfg, "")
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "deepseek-v4-pro",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotRegion != "us-east-1" {
+		t.Errorf("X-Provider-Region = %q, want us-east-1", gotRegion)
+	}
+	if gotTrace != "trace-abc" {
+		t.Errorf("X-Trace-Id = %q, want trace-abc", gotTrace)
+	}
+}
+
+func TestChatCompletion_StaticHeaders_BlocksCredentialAndInternal(t *testing.T) {
+	var gotAuth, gotAPIKey, gotInternal, gotSafe string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("X-Api-Key")
+		gotInternal = r.Header.Get("X-GoModel-User-Path")
+		gotSafe = r.Header.Get("X-Safe")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-deepseek",
+			"created":1677652288,
+			"model":"deepseek-v4-pro",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		CustomUpstreamHeaders: map[string]string{
+			"Authorization":       "Bearer leaked",
+			"X-Api-Key":           "leaked-key",
+			"X-GoModel-User-Path": "/internal",
+			"X-Safe":              "ok",
+		},
+	}
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, cfg, "")
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "deepseek-v4-pro",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	// Provider-set Authorization is still applied (setHeaders runs first).
+	if gotAuth != "Bearer deepseek-key" {
+		t.Errorf("Authorization = %q, want Bearer deepseek-key", gotAuth)
+	}
+	if gotAPIKey != "" {
+		t.Errorf("X-Api-Key = %q, want empty (blocked)", gotAPIKey)
+	}
+	if gotInternal != "" {
+		t.Errorf("X-GoModel-User-Path = %q, want empty (blocked)", gotInternal)
+	}
+	if gotSafe != "ok" {
+		t.Errorf("X-Safe = %q, want ok", gotSafe)
+	}
+}
+
+func TestChatCompletion_StaticHeaders_RespectsUserPathAlias(t *testing.T) {
+	var gotAlias, gotOther string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAlias = r.Header.Get("X-My-Alias")
+		gotOther = r.Header.Get("X-Other")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-deepseek",
+			"created":1677652288,
+			"model":"deepseek-v4-pro",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		CustomUpstreamHeaders: map[string]string{
+			"X-My-Alias": "secret",
+			"X-Other":    "ok",
+		},
+	}
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, cfg, "X-My-Alias")
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "deepseek-v4-pro",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotAlias != "" {
+		t.Errorf("X-My-Alias = %q, want empty (blocked by alias)", gotAlias)
+	}
+	if gotOther != "ok" {
+		t.Errorf("X-Other = %q, want ok", gotOther)
+	}
+}
+
+func TestChatCompletion_PassthroughUserHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-User-Custom")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-deepseek",
+			"created":1677652288,
+			"model":"deepseek-v4-pro",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		PassthroughUserHeaders: true,
+	}
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, cfg, "X-GoModel-User-Path")
+
+	ctx := providers.WithPassthroughHeaders(context.Background(), http.Header{
+		"X-User-Custom":  {"user-value"},
+		"X-Other-Pass":   {"other-value"},
+		"X-Skip-Me":      {"nope"},
+		"Authorization":  {"Bearer leaked"},
+		"X-GoModel-User-Path": {"/internal"},
+	})
+
+	if _, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "deepseek-v4-pro",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotCustom != "user-value" {
+		t.Errorf("X-User-Custom = %q, want user-value", gotCustom)
+	}
+	// Auth must be the provider's, not the leaked user one.
+	if gotAuth != "Bearer deepseek-key" {
+		t.Errorf("Authorization = %q, want Bearer deepseek-key", gotAuth)
+	}
+}
+
+func TestChatCompletion_PassthroughHeaders_AppliesSkipList(t *testing.T) {
+	var gotKept, gotSkipped string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKept = r.Header.Get("X-Keep-Me")
+		gotSkipped = r.Header.Get("X-Skip-Me")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-deepseek",
+			"created":1677652288,
+			"model":"deepseek-v4-pro",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		PassthroughUserHeaders: true,
+		SkipHeaders:            []string{"X-Skip-Me"},
+		SkipMode:               "skip",
+	}
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{}, cfg, "")
+
+	ctx := providers.WithPassthroughHeaders(context.Background(), http.Header{
+		"X-Keep-Me": {"keep"},
+		"X-Skip-Me": {"drop"},
+	})
+
+	if _, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "deepseek-v4-pro",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotKept != "keep" {
+		t.Errorf("X-Keep-Me = %q, want keep", gotKept)
+	}
+	if gotSkipped != "" {
+		t.Errorf("X-Skip-Me = %q, want empty (skipped)", gotSkipped)
+	}
+}
+
+func TestNew_FactoryWiringPassesHeaderOverridesAndUserPathAlias(t *testing.T) {
+	var gotCustom, gotAlias string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Provider-Custom")
+		gotAlias = r.Header.Get("X-GoModel-User-Path")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-deepseek",
+			"created":1677652288,
+			"model":"deepseek-v4-pro",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := providers.ProviderConfig{
+		Type:    "deepseek",
+		APIKey:  "deepseek-key",
+		BaseURL: server.URL,
+		CustomUpstreamHeaders: map[string]string{
+			"X-Provider-Custom": "factory-value",
+		},
+	}
+	opts := providers.ProviderOptions{
+		UserPathHeader: "X-GoModel-User-Path",
+		HeaderOverrides: &providers.HeaderOverridesConfig{
+			CustomUpstreamHeaders: map[string]string{
+				"X-Provider-Custom": "factory-value",
+			},
+		},
+	}
+
+	provider := New(cfg, opts)
+	ctx := providers.WithPassthroughHeaders(context.Background(), http.Header{
+		"X-GoModel-User-Path": {"/v1/chat/completions"},
+	})
+
+	if _, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "deepseek-v4-pro",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotCustom != "factory-value" {
+		t.Errorf("X-Provider-Custom = %q, want factory-value", gotCustom)
+	}
+	// X-GoModel-User-Path is hard-coded blocked; alias test ensures it doesn't leak.
+	if gotAlias != "" {
+		t.Errorf("X-GoModel-User-Path = %q, want empty (blocked)", gotAlias)
 	}
 }

@@ -413,3 +413,156 @@ func TestProviderFactory_Create_PassesConfiguredModels(t *testing.T) {
 		t.Fatalf("receivedOpts.Models = %v, want [model-a model-b]", receivedOpts.Models)
 	}
 }
+
+func TestProviderFactory_SetUserPathHeader(t *testing.T) {
+	factory := NewProviderFactory()
+	factory.SetUserPathHeader("X-User-Path")
+
+	var receivedOpts ProviderOptions
+	factory.Add(Registration{
+		Type: "test",
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
+			receivedOpts = opts
+			return &factoryMockProvider{}
+		},
+	})
+
+	cfg := ProviderConfig{
+		Type:   "test",
+		APIKey: "test-key",
+	}
+
+	_, err := factory.Create(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedOpts.UserPathHeader != "X-User-Path" {
+		t.Errorf("UserPathHeader = %q, want X-User-Path", receivedOpts.UserPathHeader)
+	}
+}
+
+func TestProviderFactory_Create_PassesHeaderOverrides(t *testing.T) {
+	factory := NewProviderFactory()
+	factory.SetUserPathHeader("X-User-Path")
+
+	var receivedOpts ProviderOptions
+	factory.Add(Registration{
+		Type: "test",
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
+			receivedOpts = opts
+			return &factoryMockProvider{}
+		},
+	})
+
+	tests := []struct {
+		name                    string
+		cfg                     ProviderConfig
+		expectUserPathHeader    string
+		expectHeaderOverrides   *HeaderOverridesConfig
+	}{
+		{
+			name: "with all header config",
+			cfg: ProviderConfig{
+				Type:                        "test",
+				APIKey:                      "test-key",
+				CustomUpstreamHeaders:       map[string]string{"X-Custom": "value"},
+				PassthroughUserHeaders:      true,
+				PassthroughUserHeadersSkip:  []string{"Authorization"},
+				PassthroughUserHeadersSkipMode: "skip",
+			},
+			expectUserPathHeader: "X-User-Path",
+			expectHeaderOverrides: &HeaderOverridesConfig{
+				CustomUpstreamHeaders: map[string]string{"X-Custom": "value"},
+				PassthroughUserHeaders: true,
+				SkipHeaders:           []string{"Authorization"},
+				SkipMode:              "skip",
+			},
+		},
+		{
+			name: "with only custom headers",
+			cfg: ProviderConfig{
+				Type:                  "test",
+				APIKey:                "test-key",
+				CustomUpstreamHeaders: map[string]string{"X-Auth": "token"},
+			},
+			expectUserPathHeader: "X-User-Path",
+			expectHeaderOverrides: &HeaderOverridesConfig{
+				CustomUpstreamHeaders: map[string]string{"X-Auth": "token"},
+			},
+		},
+		{
+			name: "with zero header config",
+			cfg: ProviderConfig{
+				Type:   "test",
+				APIKey: "test-key",
+			},
+			expectUserPathHeader:  "X-User-Path",
+			expectHeaderOverrides: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := factory.Create(tt.cfg)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if receivedOpts.UserPathHeader != tt.expectUserPathHeader {
+				t.Errorf("UserPathHeader = %q, want %q", receivedOpts.UserPathHeader, tt.expectUserPathHeader)
+			}
+
+			if tt.expectHeaderOverrides == nil {
+				if receivedOpts.HeaderOverrides != nil {
+					t.Errorf("HeaderOverrides = %+v, want nil", receivedOpts.HeaderOverrides)
+				}
+				return
+			}
+
+			if receivedOpts.HeaderOverrides == nil {
+				t.Fatal("HeaderOverrides = nil, want non-nil config")
+			}
+
+			if !mapsEqual(receivedOpts.HeaderOverrides.CustomUpstreamHeaders, tt.expectHeaderOverrides.CustomUpstreamHeaders) {
+				t.Errorf("CustomUpstreamHeaders = %v, want %v", receivedOpts.HeaderOverrides.CustomUpstreamHeaders, tt.expectHeaderOverrides.CustomUpstreamHeaders)
+			}
+
+			if receivedOpts.HeaderOverrides.PassthroughUserHeaders != tt.expectHeaderOverrides.PassthroughUserHeaders {
+				t.Errorf("PassthroughUserHeaders = %v, want %v", receivedOpts.HeaderOverrides.PassthroughUserHeaders, tt.expectHeaderOverrides.PassthroughUserHeaders)
+			}
+
+			if !sliceEqual(receivedOpts.HeaderOverrides.SkipHeaders, tt.expectHeaderOverrides.SkipHeaders) {
+				t.Errorf("SkipHeaders = %v, want %v", receivedOpts.HeaderOverrides.SkipHeaders, tt.expectHeaderOverrides.SkipHeaders)
+			}
+
+			if receivedOpts.HeaderOverrides.SkipMode != tt.expectHeaderOverrides.SkipMode {
+				t.Errorf("SkipMode = %q, want %q", receivedOpts.HeaderOverrides.SkipMode, tt.expectHeaderOverrides.SkipMode)
+			}
+		})
+	}
+}
+
+func mapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func sliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

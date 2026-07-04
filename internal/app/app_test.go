@@ -646,4 +646,32 @@ func (r *staticRewriter) Name() string { return r.name }
 
 func (r *staticRewriter) Rewrite(context.Context, ext.Input) (*ext.Result, error) {
 	return nil, nil
+func TestAnyProviderHasPassthroughUserHeaders_True(t *testing.T) {
+	resolved := map[string]providers.ProviderConfig{
+		"openai":    {Type: "openai", PassthroughUserHeaders: false},
+		"anthropic": {Type: "anthropic", PassthroughUserHeaders: true},
+		"groq":      {Type: "groq", PassthroughUserHeaders: false},
+	}
+	if !anyProviderHasPassthroughUserHeaders(resolved) {
+		t.Fatal("expected true when at least one provider has passthrough_user_headers=true")
+	}
+}
+
+func TestAnyProviderHasPassthroughUserHeaders_False(t *testing.T) {
+	resolved := map[string]providers.ProviderConfig{
+		"openai":    {Type: "openai", PassthroughUserHeaders: false},
+		"anthropic": {Type: "anthropic", PassthroughUserHeaders: false},
+	}
+	if anyProviderHasPassthroughUserHeaders(resolved) {
+		t.Fatal("expected false when no provider has passthrough_user_headers=true")
+	}
+}
+
+func TestAnyProviderHasPassthroughUserHeaders_EmptyMap(t *testing.T) {
+	if anyProviderHasPassthroughUserHeaders(nil) {
+		t.Fatal("expected false for nil resolved provider map")
+	}
+	if anyProviderHasPassthroughUserHeaders(map[string]providers.ProviderConfig{}) {
+		t.Fatal("expected false for empty resolved provider map")
+	}
 }

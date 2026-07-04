@@ -18,7 +18,7 @@ import (
 func TestNew(t *testing.T) {
 	apiKey := "test-api-key"
 	// Use NewWithHTTPClient to get concrete type for internal testing
-	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{}, nil, "")
 
 	if provider.apiKey != apiKey {
 		t.Errorf("apiKey = %q, want %q", provider.apiKey, apiKey)
@@ -41,7 +41,7 @@ func TestNew_ReturnsProvider(t *testing.T) {
 
 func TestNew_WithoutAPIKey(t *testing.T) {
 	// Ollama doesn't require an API key
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 
 	if provider.apiKey != "" {
 		t.Errorf("apiKey = %q, want empty", provider.apiKey)
@@ -137,7 +137,7 @@ func TestChatCompletion(t *testing.T) {
 			}))
 			defer server.Close()
 
-			provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+			provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 			provider.SetBaseURL(server.URL)
 
 			req := &core.ChatRequest{
@@ -188,7 +188,7 @@ func TestChatCompletion_WithAPIKey(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	req := &core.ChatRequest{
@@ -222,7 +222,7 @@ func TestChatCompletion_WithoutAPIKey(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	req := &core.ChatRequest{
@@ -288,7 +288,7 @@ data: [DONE]
 			}))
 			defer server.Close()
 
-			provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+			provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 			provider.SetBaseURL(server.URL)
 
 			req := &core.ChatRequest{
@@ -394,7 +394,7 @@ func TestListModels(t *testing.T) {
 			}))
 			defer server.Close()
 
-			provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+			provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 			provider.SetBaseURL(server.URL)
 
 			resp, err := provider.ListModels(context.Background())
@@ -423,7 +423,7 @@ func TestChatCompletionWithContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -472,7 +472,7 @@ func TestResponses(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	req := &core.ResponsesRequest{
@@ -563,7 +563,7 @@ func TestResponsesWithArrayInput(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	req := &core.ResponsesRequest{
@@ -616,7 +616,7 @@ data: [DONE]
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	req := &core.ResponsesRequest{
@@ -658,7 +658,7 @@ func TestResponsesWithContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -720,7 +720,7 @@ func TestNewWithHTTPClient(t *testing.T) {
 	customClient := &http.Client{}
 	apiKey := "test-api-key"
 
-	provider := NewWithHTTPClient(apiKey, customClient, llmclient.Hooks{})
+	provider := NewWithHTTPClient(apiKey, customClient, llmclient.Hooks{}, nil, "")
 
 	if provider.apiKey != apiKey {
 		t.Errorf("apiKey = %q, want %q", provider.apiKey, apiKey)
@@ -734,7 +734,7 @@ func TestNewWithHTTPClient(t *testing.T) {
 }
 
 func TestSetBaseURL(t *testing.T) {
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	customURL := "http://custom.ollama.server:11434/v1"
 
 	provider.SetBaseURL(customURL)
@@ -761,7 +761,7 @@ func TestSetBaseURL_TrailingSlash(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL + "/v1/")
 
 	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
@@ -807,7 +807,7 @@ func TestEmbeddings(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL + "/v1")
 
 	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
@@ -859,7 +859,7 @@ func TestEmbeddings_ModelFallback(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL + "/v1")
 
 	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
@@ -887,7 +887,7 @@ func TestEmbeddings_NoVectorsErrors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL + "/v1")
 
 	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
@@ -924,7 +924,7 @@ func TestEmbeddings_EmptyInputNoError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL + "/v1")
 
 	for _, empty := range []any{[]any{}, []string{}} {
@@ -950,5 +950,301 @@ func TestEmbeddings_EmptyInputNoError(t *testing.T) {
 		}); err == nil {
 			t.Fatalf("input %#v: expected provider error for zero vectors, got nil", scalar)
 		}
+	}
+}
+
+// TestChatCompletion_StaticHeaders verifies that custom upstream headers from
+// HeaderOverridesConfig are applied to the OpenAI-compatible client.
+func TestChatCompletion_StaticHeaders(t *testing.T) {
+	var gotRegion, gotTrace string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRegion = r.Header.Get("X-Provider-Region")
+		gotTrace = r.Header.Get("X-Trace-Id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-ollama",
+			"created":1677652288,
+			"model":"llama3",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		CustomUpstreamHeaders: map[string]string{
+			"X-Provider-Region": "us-east-1",
+			"X-Trace-Id":        "trace-abc",
+		},
+	}
+	provider := NewWithHTTPClient("ollama-key", server.Client(), llmclient.Hooks{}, cfg, "")
+	provider.SetBaseURL(server.URL)
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "llama3",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotRegion != "us-east-1" {
+		t.Errorf("X-Provider-Region = %q, want us-east-1", gotRegion)
+	}
+	if gotTrace != "trace-abc" {
+		t.Errorf("X-Trace-Id = %q, want trace-abc", gotTrace)
+	}
+}
+
+// TestEmbeddings_StaticHeaders verifies that custom upstream headers are
+// applied to the native /api/embed client (separate llmclient instance).
+func TestEmbeddings_StaticHeaders(t *testing.T) {
+	var gotRegion, gotTrace string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/embed" {
+			t.Errorf("Path = %q, want %q", r.URL.Path, "/api/embed")
+		}
+		gotRegion = r.Header.Get("X-Provider-Region")
+		gotTrace = r.Header.Get("X-Trace-Id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"nomic-embed-text",
+			"embeddings":[[0.1,0.2,0.3]],
+			"prompt_eval_count":3
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		CustomUpstreamHeaders: map[string]string{
+			"X-Provider-Region": "eu-west-1",
+			"X-Trace-Id":        "trace-embed",
+		},
+	}
+	provider := NewWithHTTPClient("ollama-key", server.Client(), llmclient.Hooks{}, cfg, "")
+	provider.SetBaseURL(server.URL + "/v1")
+
+	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
+		Model: "nomic-embed-text",
+		Input: "hello",
+	})
+	if err != nil {
+		t.Fatalf("Embeddings() error = %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("len(resp.Data) = %d, want 1", len(resp.Data))
+	}
+	if gotRegion != "eu-west-1" {
+		t.Errorf("X-Provider-Region = %q, want eu-west-1", gotRegion)
+	}
+	if gotTrace != "trace-embed" {
+		t.Errorf("X-Trace-Id = %q, want trace-embed", gotTrace)
+	}
+}
+
+// TestChatCompletion_StaticHeaders_RespectsUserPathAlias verifies that an alias
+// configured via userPathAlias is blocked from forwarding on the OpenAI-compatible client.
+func TestChatCompletion_StaticHeaders_RespectsUserPathAlias(t *testing.T) {
+	var gotAlias, gotOther string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAlias = r.Header.Get("X-My-Alias")
+		gotOther = r.Header.Get("X-Other")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-ollama",
+			"created":1677652288,
+			"model":"llama3",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		CustomUpstreamHeaders: map[string]string{
+			"X-My-Alias": "secret",
+			"X-Other":    "ok",
+		},
+	}
+	provider := NewWithHTTPClient("ollama-key", server.Client(), llmclient.Hooks{}, cfg, "X-My-Alias")
+	provider.SetBaseURL(server.URL)
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "llama3",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotAlias != "" {
+		t.Errorf("X-My-Alias = %q, want empty (blocked by alias)", gotAlias)
+	}
+	if gotOther != "ok" {
+		t.Errorf("X-Other = %q, want ok", gotOther)
+	}
+}
+
+// TestChatCompletion_PassthroughUserHeaders verifies that passthrough mode
+// applies user-supplied headers to the OpenAI-compatible client while still
+// blocking credentials and the X-GoModel-User-Path hard-coded floor.
+func TestChatCompletion_PassthroughUserHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-User-Custom")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-ollama",
+			"created":1677652288,
+			"model":"llama3",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		PassthroughUserHeaders: true,
+	}
+	// Empty apiKey: SetAuthHeaders with OptionalAPIKey=true will not set Authorization,
+	// so the user-supplied Authorization in the context cannot leak.
+	provider := NewWithHTTPClient("", server.Client(), llmclient.Hooks{}, cfg, "X-GoModel-User-Path")
+	provider.SetBaseURL(server.URL)
+
+	ctx := providers.WithPassthroughHeaders(context.Background(), http.Header{
+		"X-User-Custom":       {"user-value"},
+		"X-Other-Pass":        {"other-value"},
+		"Authorization":       {"Bearer leaked"},
+		"X-GoModel-User-Path": {"/internal"},
+	})
+
+	if _, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "llama3",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotCustom != "user-value" {
+		t.Errorf("X-User-Custom = %q, want user-value", gotCustom)
+	}
+	if gotAuth != "" {
+		t.Errorf("Authorization = %q, want empty (blocked hard-coded credential)", gotAuth)
+	}
+}
+
+// TestEmbeddings_PassthroughUserHeaders verifies that passthrough mode applies
+// user-supplied headers to the native /api/embed client as well.
+func TestEmbeddings_PassthroughUserHeaders(t *testing.T) {
+	var gotCustom, gotTrace string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/embed" {
+			t.Errorf("Path = %q, want %q", r.URL.Path, "/api/embed")
+		}
+		gotCustom = r.Header.Get("X-User-Custom")
+		gotTrace = r.Header.Get("X-Trace-Id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"nomic-embed-text",
+			"embeddings":[[0.1,0.2,0.3]],
+			"prompt_eval_count":3
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		PassthroughUserHeaders: true,
+	}
+	provider := NewWithHTTPClient("ollama-key", server.Client(), llmclient.Hooks{}, cfg, "X-GoModel-User-Path")
+	provider.SetBaseURL(server.URL + "/v1")
+
+	ctx := providers.WithPassthroughHeaders(context.Background(), http.Header{
+		"X-User-Custom":       {"user-value"},
+		"X-Trace-Id":          {"trace-pass"},
+		"X-GoModel-User-Path": {"/internal"},
+	})
+
+	if _, err := provider.Embeddings(ctx, &core.EmbeddingRequest{
+		Model: "nomic-embed-text",
+		Input: "hello",
+	}); err != nil {
+		t.Fatalf("Embeddings() error = %v", err)
+	}
+	if gotCustom != "user-value" {
+		t.Errorf("X-User-Custom = %q, want user-value", gotCustom)
+	}
+	if gotTrace != "trace-pass" {
+		t.Errorf("X-Trace-Id = %q, want trace-pass", gotTrace)
+	}
+}
+
+// TestNew_FactoryWiringPassesHeaderOverridesAndUserPathAlias verifies the
+// factory constructor wires HeaderOverrides and UserPathHeader from
+// ProviderOptions into both clients.
+func TestNew_FactoryWiringPassesHeaderOverridesAndUserPathAlias(t *testing.T) {
+	var chatGotCustom, chatGotAuth string
+	var embedGotCustom string
+
+	mux := http.NewServeMux()
+	// The OpenAI-compatible client uses base URL server.URL + "/v1".
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		chatGotCustom = r.Header.Get("X-Provider-Custom")
+		chatGotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-ollama",
+			"created":1677652288,
+			"model":"llama3",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	})
+	// The native client derives base URL by stripping the "/v1" suffix.
+	mux.HandleFunc("/api/embed", func(w http.ResponseWriter, r *http.Request) {
+		embedGotCustom = r.Header.Get("X-Provider-Custom")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"nomic-embed-text",
+			"embeddings":[[0.1]],
+			"prompt_eval_count":1
+		}`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	cfg := providers.ProviderConfig{
+		Type:    "ollama",
+		APIKey:  "ollama-key",
+		BaseURL: server.URL + "/v1",
+	}
+	opts := providers.ProviderOptions{
+		UserPathHeader: "X-GoModel-User-Path",
+		HeaderOverrides: &providers.HeaderOverridesConfig{
+			CustomUpstreamHeaders: map[string]string{
+				"X-Provider-Custom": "factory-value",
+			},
+		},
+	}
+
+	provider := New(cfg, opts)
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "llama3",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if chatGotCustom != "factory-value" {
+		t.Errorf("chat X-Provider-Custom = %q, want factory-value", chatGotCustom)
+	}
+	if chatGotAuth != "Bearer ollama-key" {
+		t.Errorf("chat Authorization = %q, want Bearer ollama-key", chatGotAuth)
+	}
+
+	if _, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
+		Model: "nomic-embed-text",
+		Input: "hello",
+	}); err != nil {
+		t.Fatalf("Embeddings() error = %v", err)
+	}
+	if embedGotCustom != "factory-value" {
+		t.Errorf("embed X-Provider-Custom = %q, want factory-value", embedGotCustom)
 	}
 }

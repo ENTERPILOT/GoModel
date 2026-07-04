@@ -17,7 +17,7 @@ import (
 func TestNew(t *testing.T) {
 	apiKey := "test-api-key"
 	// Use NewWithHTTPClient to get concrete type for internal testing
-	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{}, nil, "")
 
 	if provider.apiKey != apiKey {
 		t.Errorf("apiKey = %q, want %q", provider.apiKey, apiKey)
@@ -83,7 +83,7 @@ func TestNewWithHTTPClient(t *testing.T) {
 	}
 
 	// Create provider with custom HTTP client
-	provider := NewWithHTTPClient("test-api-key", customClient, llmclient.Hooks{})
+	provider := NewWithHTTPClient("test-api-key", customClient, llmclient.Hooks{}, nil, "")
 
 	// Verify provider is non-nil
 	if provider == nil {
@@ -147,7 +147,7 @@ func TestChatCompletion_ForwardsXGrokConvIDFromSnapshot(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	ctx := core.WithRequestSnapshot(context.Background(), core.NewRequestSnapshot(
@@ -196,7 +196,7 @@ func TestChatCompletion_GeneratesStableXGrokConvIDWhenMissing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	initialMessages := []core.Message{
@@ -244,7 +244,7 @@ func TestStreamChatCompletion_ForwardsXGrokConvIDFromSnapshot(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	ctx := core.WithRequestSnapshot(context.Background(), core.NewRequestSnapshot(
@@ -376,7 +376,7 @@ func TestChatCompletion(t *testing.T) {
 			}))
 			defer server.Close()
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{}, nil, "")
 			provider.SetBaseURL(server.URL)
 
 			req := &core.ChatRequest{
@@ -460,7 +460,7 @@ data: [DONE]
 			}))
 			defer server.Close()
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{}, nil, "")
 			provider.SetBaseURL(server.URL)
 
 			req := &core.ChatRequest{
@@ -572,7 +572,7 @@ func TestListModels(t *testing.T) {
 			}))
 			defer server.Close()
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{}, nil, "")
 			provider.SetBaseURL(server.URL)
 
 			resp, err := provider.ListModels(context.Background())
@@ -601,7 +601,7 @@ func TestChatCompletionWithContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -742,7 +742,7 @@ func TestResponses(t *testing.T) {
 			}))
 			defer server.Close()
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{}, nil, "")
 			provider.SetBaseURL(server.URL)
 
 			req := &core.ResponsesRequest{
@@ -865,7 +865,7 @@ data: {"type":"response.completed","response":{"id":"resp_123","object":"respons
 			}))
 			defer server.Close()
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{}, nil, "")
 			provider.SetBaseURL(server.URL)
 
 			req := &core.ResponsesRequest{
@@ -899,7 +899,7 @@ func TestResponsesWithContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{}, nil, "")
 	provider.SetBaseURL(server.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -913,5 +913,274 @@ func TestResponsesWithContext(t *testing.T) {
 	_, err := provider.Responses(ctx, req)
 	if err == nil {
 		t.Error("expected error when context is cancelled, got nil")
+	}
+}
+
+func TestChatCompletion_AppliesStaticCustomHeaders(t *testing.T) {
+	var gotRegion, gotTrace string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRegion = r.Header.Get("X-Provider-Region")
+		gotTrace = r.Header.Get("X-Trace-Id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-xai",
+			"created":1677652288,
+			"model":"grok-2",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		CustomUpstreamHeaders: map[string]string{
+			"X-Provider-Region": "us-east-1",
+			"X-Trace-Id":        "trace-abc",
+		},
+	}
+	provider := NewWithHTTPClient("xai-key", server.Client(), llmclient.Hooks{}, cfg, "")
+	provider.SetBaseURL(server.URL)
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "grok-2",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotRegion != "us-east-1" {
+		t.Errorf("X-Provider-Region = %q, want us-east-1", gotRegion)
+	}
+	if gotTrace != "trace-abc" {
+		t.Errorf("X-Trace-Id = %q, want trace-abc", gotTrace)
+	}
+}
+
+func TestChatCompletion_StaticHeaders_BlocksCredentialAndInternal(t *testing.T) {
+	var gotAuth, gotAPIKey, gotInternal, gotSafe string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("X-Api-Key")
+		gotInternal = r.Header.Get("X-GoModel-User-Path")
+		gotSafe = r.Header.Get("X-Safe")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-xai",
+			"created":1677652288,
+			"model":"grok-2",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		CustomUpstreamHeaders: map[string]string{
+			"Authorization":       "Bearer leaked",
+			"X-Api-Key":           "leaked-key",
+			"X-GoModel-User-Path": "/internal",
+			"X-Safe":              "ok",
+		},
+	}
+	provider := NewWithHTTPClient("xai-key", server.Client(), llmclient.Hooks{}, cfg, "")
+	provider.SetBaseURL(server.URL)
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "grok-2",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	// Provider-set Authorization is still applied (setHeaders runs first).
+	if gotAuth != "Bearer xai-key" {
+		t.Errorf("Authorization = %q, want Bearer xai-key", gotAuth)
+	}
+	if gotAPIKey != "" {
+		t.Errorf("X-Api-Key = %q, want empty (blocked)", gotAPIKey)
+	}
+	if gotInternal != "" {
+		t.Errorf("X-GoModel-User-Path = %q, want empty (blocked)", gotInternal)
+	}
+	if gotSafe != "ok" {
+		t.Errorf("X-Safe = %q, want ok", gotSafe)
+	}
+}
+
+func TestChatCompletion_StaticHeaders_RespectsUserPathAlias(t *testing.T) {
+	var gotAlias, gotOther string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAlias = r.Header.Get("X-My-Alias")
+		gotOther = r.Header.Get("X-Other")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-xai",
+			"created":1677652288,
+			"model":"grok-2",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		CustomUpstreamHeaders: map[string]string{
+			"X-My-Alias": "secret",
+			"X-Other":    "ok",
+		},
+	}
+	provider := NewWithHTTPClient("xai-key", server.Client(), llmclient.Hooks{}, cfg, "X-My-Alias")
+	provider.SetBaseURL(server.URL)
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "grok-2",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotAlias != "" {
+		t.Errorf("X-My-Alias = %q, want empty (blocked by alias)", gotAlias)
+	}
+	if gotOther != "ok" {
+		t.Errorf("X-Other = %q, want ok", gotOther)
+	}
+}
+
+func TestChatCompletion_PassthroughUserHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-User-Custom")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-xai",
+			"created":1677652288,
+			"model":"grok-2",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		PassthroughUserHeaders: true,
+	}
+	provider := NewWithHTTPClient("xai-key", server.Client(), llmclient.Hooks{}, cfg, "X-GoModel-User-Path")
+	provider.SetBaseURL(server.URL)
+
+	ctx := providers.WithPassthroughHeaders(context.Background(), http.Header{
+		"X-User-Custom":       {"user-value"},
+		"X-Other-Pass":        {"other-value"},
+		"X-Skip-Me":           {"nope"},
+		"Authorization":       {"Bearer leaked"},
+		"X-GoModel-User-Path": {"/internal"},
+	})
+
+	if _, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "grok-2",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotCustom != "user-value" {
+		t.Errorf("X-User-Custom = %q, want user-value", gotCustom)
+	}
+	// Auth must be the provider's, not the leaked user one.
+	if gotAuth != "Bearer xai-key" {
+		t.Errorf("Authorization = %q, want Bearer xai-key", gotAuth)
+	}
+}
+
+func TestChatCompletion_PassthroughHeaders_AppliesSkipList(t *testing.T) {
+	var gotKept, gotSkipped string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKept = r.Header.Get("X-Keep-Me")
+		gotSkipped = r.Header.Get("X-Skip-Me")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-xai",
+			"created":1677652288,
+			"model":"grok-2",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &providers.HeaderOverridesConfig{
+		PassthroughUserHeaders: true,
+		SkipHeaders:            []string{"X-Skip-Me"},
+		SkipMode:               "skip",
+	}
+	provider := NewWithHTTPClient("xai-key", server.Client(), llmclient.Hooks{}, cfg, "")
+	provider.SetBaseURL(server.URL)
+
+	ctx := providers.WithPassthroughHeaders(context.Background(), http.Header{
+		"X-Keep-Me": {"keep"},
+		"X-Skip-Me": {"drop"},
+	})
+
+	if _, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "grok-2",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotKept != "keep" {
+		t.Errorf("X-Keep-Me = %q, want keep", gotKept)
+	}
+	if gotSkipped != "" {
+		t.Errorf("X-Skip-Me = %q, want empty (skipped)", gotSkipped)
+	}
+}
+
+func TestNew_FactoryWiringPassesHeaderOverridesAndUserPathAlias(t *testing.T) {
+	var gotCustom, gotAlias string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Provider-Custom")
+		gotAlias = r.Header.Get("X-GoModel-User-Path")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-xai",
+			"created":1677652288,
+			"model":"grok-2",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := providers.ProviderConfig{
+		Type:    "xai",
+		APIKey:  "xai-key",
+		BaseURL: server.URL,
+		CustomUpstreamHeaders: map[string]string{
+			"X-Provider-Custom": "factory-value",
+		},
+	}
+	opts := providers.ProviderOptions{
+		UserPathHeader: "X-GoModel-User-Path",
+		HeaderOverrides: &providers.HeaderOverridesConfig{
+			CustomUpstreamHeaders: map[string]string{
+				"X-Provider-Custom": "factory-value",
+			},
+		},
+	}
+
+	provider := New(cfg, opts)
+	ctx := providers.WithPassthroughHeaders(context.Background(), http.Header{
+		"X-GoModel-User-Path": {"/v1/chat/completions"},
+	})
+
+	if _, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "grok-2",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotCustom != "factory-value" {
+		t.Errorf("X-Provider-Custom = %q, want factory-value", gotCustom)
+	}
+	// X-GoModel-User-Path is hard-coded blocked; alias test ensures it doesn't leak.
+	if gotAlias != "" {
+		t.Errorf("X-GoModel-User-Path = %q, want empty (blocked)", gotAlias)
 	}
 }

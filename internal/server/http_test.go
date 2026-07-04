@@ -6,12 +6,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"gomodel/internal/admin"
 	"gomodel/internal/admin/dashboard"
+	"gomodel/internal/authkeys"
 	"gomodel/internal/core"
 	"gomodel/internal/providers"
 	"gomodel/internal/usage"
@@ -1152,5 +1154,128 @@ func TestProviderPassthroughRoute_DisabledRequiresAuthBefore404(t *testing.T) {
 	}
 	if mock.lastPassthroughProvider != "" || mock.lastPassthroughReq != nil {
 		t.Fatal("passthrough handler should not be invoked when provider passthrough is disabled")
+	}
+}
+
+// passthroughProbe returns the filtered headers attached to the request context
+// by PassthroughHeaderCapture. A nil result means the middleware never ran.
+func passthroughProbe(c *echo.Context) error {
+	headers := providers.PassthroughHeadersFromContext(c.Request().Context())
+	if headers == nil {
+		return c.String(http.StatusNoContent, "")
+	}
+	// Encode the captured headers as a deterministic probe string so tests can
+	// assert against the exact set without exposing internals.
+	keys := make([]string, 0, len(headers))
+	for k := range headers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(headers.Get(k))
+		b.WriteByte('\n')
+	}
+	return c.String(http.StatusOK, b.String())
+}
+
+func TestNewServer_RegistersPassthroughMiddleware(t *testing.T) {
+	mock := &mockProvider{}
+	srv := New(mock, &Config{PassthroughUserHeadersEnabled: true})
+	srv.echo.GET("/__passthrough_probe", passthroughProbe)
+
+	req := httptest.NewRequest(http.MethodGet, "/__passthrough_probe", nil)
+	req.Header.Set("X-Tenant-Id", "acme")
+	req.Header.Set("Authorization", "Bearer should-be-blocked")
+	req.Header.Set("X-Custom", "hello")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%q", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "X-Tenant-Id=acme") {
+		t.Errorf("expected X-Tenant-Id captured; got body=%q", body)
+	}
+	if !strings.Contains(body, "X-Custom=hello") {
+		t.Errorf("expected X-Custom captured; got body=%q", body)
+	}
+	// Credential header must never reach the context.
+	for _, blocked := range []string{"Authorization"} {
+		if strings.Contains(body, blocked+"=") {
+			t.Errorf("credential header %q leaked into passthrough context: %q", blocked, body)
+		}
+	}
+}
+
+func TestNewServer_SkipsPassthroughMiddleware_WhenDisabled(t *testing.T) {
+	mock := &mockProvider{}
+	srv := New(mock, nil) // PassthroughUserHeadersEnabled left at zero value (false)
+	srv.echo.GET("/__passthrough_probe", passthroughProbe)
+
+	req := httptest.NewRequest(http.MethodGet, "/__passthrough_probe", nil)
+	req.Header.Set("X-Tenant-Id", "acme")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	// 204 signals the probe saw no captured headers — middleware never ran.
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (no captured headers); body=%q", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("expected empty body, got %q", rec.Body.String())
+	}
+}
+
+// passthroughOrderingAuthenticator captures the passthrough headers that
+// PassthroughHeaderCapture stored on the request context before AuthMiddleware
+// ran. The capture happens inside Authenticate, which the middleware invokes
+// only after RequestSnapshotCapture and PassthroughHeaderCapture have already
+// populated the context.
+type passthroughOrderingAuthenticator struct {
+	enabled         bool
+	capturedHeaders http.Header
+}
+
+func (a *passthroughOrderingAuthenticator) Enabled() bool { return a.enabled }
+
+func (a *passthroughOrderingAuthenticator) Authenticate(ctx context.Context, _ string) (authkeys.AuthenticationResult, error) {
+	a.capturedHeaders = providers.PassthroughHeadersFromContext(ctx)
+	return authkeys.AuthenticationResult{ID: "ok"}, nil
+}
+
+func TestNewServer_PassthroughMiddlewareRunsBeforeAuth(t *testing.T) {
+	mock := &mockProvider{
+		modelsResponse: &core.ModelsResponse{Object: "list"},
+	}
+	auth := &passthroughOrderingAuthenticator{enabled: true}
+	srv := New(mock, &Config{
+		PassthroughUserHeadersEnabled: true,
+		Authenticator:                 auth,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("X-Tenant-Id", "acme")
+	req.Header.Set("Authorization", "Bearer managed-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%q", rec.Code, rec.Body.String())
+	}
+	if auth.capturedHeaders == nil {
+		t.Fatal("expected passthrough headers to be visible to AuthMiddleware")
+	}
+	if got := auth.capturedHeaders.Get("X-Tenant-Id"); got != "acme" {
+		t.Errorf("captured X-Tenant-Id = %q, want %q", got, "acme")
+	}
+	if auth.capturedHeaders.Get("Authorization") != "" {
+		t.Errorf("Authorization must be filtered before AuthMiddleware sees it; got %q", auth.capturedHeaders.Get("Authorization"))
 	}
 }
