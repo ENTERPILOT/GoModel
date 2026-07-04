@@ -1,7 +1,6 @@
-package main
+package run
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"testing"
@@ -9,7 +8,7 @@ import (
 
 func TestParseCLI_AcceptsSingleAndDoubleDashVersion(t *testing.T) {
 	for _, args := range [][]string{{"-version"}, {"--version"}} {
-		opts, err := parseCLI(args, io.Discard)
+		opts, err := parseCLI("gomodel", args, io.Discard)
 		if err != nil {
 			t.Fatalf("parseCLI(%v) error = %v", args, err)
 		}
@@ -21,7 +20,7 @@ func TestParseCLI_AcceptsSingleAndDoubleDashVersion(t *testing.T) {
 
 func TestParseCLI_AcceptsSingleAndDoubleDashHealth(t *testing.T) {
 	for _, args := range [][]string{{"-health"}, {"--health"}} {
-		opts, err := parseCLI(args, io.Discard)
+		opts, err := parseCLI("gomodel", args, io.Discard)
 		if err != nil {
 			t.Fatalf("parseCLI(%v) error = %v", args, err)
 		}
@@ -32,22 +31,25 @@ func TestParseCLI_AcceptsSingleAndDoubleDashHealth(t *testing.T) {
 }
 
 func TestParseCLI_RejectsUnknownFlags(t *testing.T) {
-	if _, err := parseCLI([]string{"--helath"}, io.Discard); err == nil {
+	if _, err := parseCLI("gomodel", []string{"--helath"}, io.Discard); err == nil {
 		t.Fatal("parseCLI(--helath) error = nil, want error")
 	}
 }
 
 func TestParseCLI_RejectsPositionalArgs(t *testing.T) {
-	if _, err := parseCLI([]string{"--health", "extra"}, io.Discard); err == nil {
+	if _, err := parseCLI("gomodel", []string{"--health", "extra"}, io.Discard); err == nil {
 		t.Fatal("parseCLI(--health extra) error = nil, want error")
 	}
 }
 
-func TestCLIParseExitCode(t *testing.T) {
-	if got := cliParseExitCode(flag.ErrHelp); got != 0 {
-		t.Fatalf("cliParseExitCode(flag.ErrHelp) = %d, want 0", got)
+func TestExitCode(t *testing.T) {
+	if got := ExitCode(nil); got != 0 {
+		t.Fatalf("ExitCode(nil) = %d, want 0", got)
 	}
-	if got := cliParseExitCode(fmt.Errorf("parse flags: %w", flag.ErrHelp)); got != 0 {
-		t.Fatalf("cliParseExitCode(wrapped help) = %d, want 0", got)
+	if got := ExitCode(&usageError{err: fmt.Errorf("unexpected arguments")}); got != 2 {
+		t.Fatalf("ExitCode(usage error) = %d, want 2", got)
+	}
+	if got := ExitCode(fmt.Errorf("boom")); got != 1 {
+		t.Fatalf("ExitCode(generic error) = %d, want 1", got)
 	}
 }

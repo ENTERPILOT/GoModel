@@ -1,7 +1,6 @@
-package main
+package run
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -24,9 +23,9 @@ type cliOptions struct {
 	ReadyTimeout  time.Duration
 }
 
-func parseCLI(args []string, output io.Writer) (cliOptions, error) {
+func parseCLI(productName string, args []string, output io.Writer) (cliOptions, error) {
 	var opts cliOptions
-	flags := flag.NewFlagSet("gomodel", flag.ContinueOnError)
+	flags := flag.NewFlagSet(productName, flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.BoolVar(&opts.Version, "version", false, "Print version information")
 	flags.BoolVar(&opts.Health, "health", false, "Check the local GoModel health (liveness) endpoint and exit")
@@ -40,11 +39,4 @@ func parseCLI(args []string, output io.Writer) (cliOptions, error) {
 		return opts, fmt.Errorf("unexpected arguments: %v", flags.Args())
 	}
 	return opts, nil
-}
-
-func cliParseExitCode(err error) int {
-	if errors.Is(err, flag.ErrHelp) {
-		return 0
-	}
-	return 2
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gomodel/config"
+	"gomodel/ext"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
@@ -87,6 +88,10 @@ type Config struct {
 	IPExtractor                     echo.IPExtractor                       // Optional: trusted client IP extraction strategy for proxied deployments
 	StorageProbe                    ReadinessProbe                         // Optional: primary storage connectivity check; failure makes /health/ready report not_ready (503)
 	CacheProbe                      ReadinessProbe                         // Optional: Redis cache connectivity check; failure makes /health/ready report degraded (200, non-blocking)
+	RequestRewriters                []ext.RequestRewriter                  // Optional: raw-body rewriters invoked on inference ingress (post-auth, pre-workflow-resolution)
+	ExtraMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware registered after audit, before gateway auth
+	ExtraRoutes                     []func(*echo.Echo)                     // Optional: extension route registration callbacks invoked after core routes
+	ExtraAuthSkipPaths              []string                               // Optional: extension paths appended to the auth skip list ("/*" suffix matches a prefix)
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
 }
 
@@ -208,6 +213,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.PprofEnabled {
 		authSkipPaths = append(authSkipPaths, "/debug/pprof", "/debug/pprof/*")
 	}
+	if cfg != nil {
+		authSkipPaths = append(authSkipPaths, cfg.ExtraAuthSkipPaths...)
+	}
 
 	// Global middleware stack (order matters)
 	// Request logger with optional filtering for model-only interactions
@@ -291,9 +299,25 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.Use(auditlog.Middleware(cfg.AuditLogger))
 	}
 
+	// Extension middleware runs after audit capture and before gateway auth so
+	// extensions (e.g. SSO sessions) can normalize credentials for the auth check.
+	if cfg != nil {
+		for _, m := range cfg.ExtraMiddleware {
+			e.Use(m)
+		}
+	}
+
 	// Authentication (skips public paths)
 	if cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil) {
 		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths, userPathHeaderName))
+	}
+
+	// Request rewriters run post-auth (rewriters only see authenticated
+	// traffic) and pre-workflow-resolution (body rewrites, including "model",
+	// affect routing, failover, guardrails, budgets, and caching). Not
+	// registered when no rewriters exist, so the default build pays nothing.
+	if cfg != nil && len(cfg.RequestRewriters) > 0 {
+		e.Use(RequestRewriteMiddleware(cfg.RequestRewriters, auditLogger))
 	}
 
 	// Workflow resolution resolves the request-scoped workflow after auth so
@@ -382,6 +406,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.GET("/admin/dashboard", cfg.DashboardHandler.Index)
 		e.GET("/admin/dashboard/*", cfg.DashboardHandler.Index)
 		e.GET("/admin/static/*", cfg.DashboardHandler.Static)
+	}
+
+	// Extension routes register after all core routes.
+	if cfg != nil {
+		for _, register := range cfg.ExtraRoutes {
+			register(e)
+		}
 	}
 
 	var rcm *responsecache.ResponseCacheMiddleware

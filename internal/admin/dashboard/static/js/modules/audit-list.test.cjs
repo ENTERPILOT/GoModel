@@ -866,3 +866,51 @@ test('auditTabKeydown roves the tablist with arrow and home/end keys', () => {
     assert.deepEqual(press('Tab', 'request'), { result: null, prevented: false });
     assert.deepEqual(press('a', 'request'), { result: null, prevented: false });
 });
+
+test('auditPanes inserts request revision tabs between request and response', () => {
+    const module = createAuditListModule();
+    const revision = {
+        seq: 1,
+        rewriter: 'pro-token-compression',
+        bytes_before: 1572,
+        bytes_after: 1249,
+        body: { model: 'gpt-5', compressed: true },
+        detail: { tokens_saved_estimate: 89, blocks_replaced: 1 }
+    };
+    const entry = {
+        data: {
+            request_body: { model: 'gpt-5' },
+            response_body: { ok: true },
+            request_revisions: [revision]
+        }
+    };
+
+    assert.equal(module.auditPanes(entry).map((p) => p.id).join(','), 'request,revision-1,response');
+
+    const pane = module.auditRequestRevisionPane(entry, revision);
+    assert.equal(pane.title, 'Rewritten');
+    assert.equal(pane.kind, 'pro-token-compression');
+    assert.equal(pane.seq, 0); // a single revision hides the #seq chip
+    assert.equal(pane.headersTitle, 'What changed');
+    assert.equal(pane.headers.bytes, '1572 → 1249');
+    assert.equal(pane.headers.detail.tokens_saved_estimate, 89);
+    assert.equal(pane.showBody, true);
+    assert.equal(pane.showTooLarge, false);
+
+    // Without a captured body the pane explains why instead of showing JSON.
+    const bare = module.auditRequestRevisionPane(entry, { seq: 2, rewriter: 'x', bytes_before: 10, bytes_after: 8 });
+    assert.equal(bare.showBody, false);
+    assert.equal(bare.showTooLarge, true);
+
+    // Multiple revisions keep their sequence chips and stable tab ids.
+    entry.data.request_revisions = [revision, { ...revision, seq: 2 }];
+    assert.equal(module.auditPanes(entry).map((p) => p.id).join(','), 'request,revision-1,revision-2,response');
+    assert.equal(module.auditRequestRevisionPane(entry, revision).seq, 1);
+});
+
+test('entries without revisions render no revision tabs', () => {
+    const module = createAuditListModule();
+    const entry = { data: { request_body: { model: 'gpt-5' }, response_body: { ok: true } } };
+    assert.equal(module.auditPanes(entry).map((p) => p.id).join(','), 'request,response');
+    assert.equal(module.auditRequestRevisions(entry).length, 0);
+});

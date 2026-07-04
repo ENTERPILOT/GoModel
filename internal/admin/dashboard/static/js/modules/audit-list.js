@@ -529,12 +529,66 @@
                 };
             },
 
+            // auditRequestRevisions returns the ingress rewrite chain recorded for
+            // the entry (one item per rewriter that changed the request body).
+            auditRequestRevisions(entry) {
+                return entry && entry.data && Array.isArray(entry.data.request_revisions)
+                    ? entry.data.request_revisions
+                    : [];
+            },
+
+            // auditRequestRevisionPane renders one ingress rewrite: a structured
+            // summary of what the rewriter changed plus the rewritten body when
+            // it was captured. The original client request stays on the Request
+            // tab; the last revision is what the provider actually received.
+            auditRequestRevisionPane(entry, revision) {
+                const body = revision && revision.body;
+                const hasBody = body != null && body !== '';
+                const single = this.auditRequestRevisions(entry).length <= 1;
+                const summary = {
+                    rewriter: (revision && revision.rewriter) || '',
+                    bytes: Number(revision && revision.bytes_before || 0) + ' \u2192 ' + Number(revision && revision.bytes_after || 0)
+                };
+                if (revision && revision.detail != null) {
+                    summary.detail = revision.detail;
+                }
+
+                return {
+                    title: 'Rewritten',
+                    direction: 'request',
+                    seq: single ? 0 : Number(revision && revision.seq || 0),
+                    kind: (revision && revision.rewriter) ? String(revision.rewriter) : '',
+                    layout: 'split',
+                    entry,
+                    copyHeaders: summary,
+                    copyBody: body,
+                    showErrorMessage: false,
+                    errorMessage: null,
+                    showHeaders: true,
+                    headers: summary,
+                    headersTitle: 'What changed',
+                    showBody: hasBody,
+                    body,
+                    showEmpty: false,
+                    emptyMessage: '',
+                    showTooLarge: !hasBody,
+                    tooLargeMessage: 'Rewritten body not captured (body logging disabled or body too large).'
+                };
+            },
+
             // auditPanes returns the ordered Request/Response panes that back the
-            // tab strip: the request, then either the single response or one pane
-            // per provider attempt (failover/failed). Each entry pairs a stable
-            // tab id with the pane object the audit-pane template renders.
+            // tab strip: the original request, one pane per ingress rewrite
+            // revision, then either the single response or one pane per provider
+            // attempt (failover/failed). Each entry pairs a stable tab id with
+            // the pane object the audit-pane template renders.
             auditPanes(entry) {
                 const panes = [{ id: 'request', pane: this.auditRequestPane(entry) }];
+                this.auditRequestRevisions(entry).forEach((revision) => {
+                    panes.push({
+                        id: 'revision-' + Number(revision && revision.seq || 0),
+                        pane: this.auditRequestRevisionPane(entry, revision)
+                    });
+                });
                 if (this.auditUsesPerAttemptResponses(entry)) {
                     this.auditAttempts(entry).forEach((attempt) => {
                         panes.push({

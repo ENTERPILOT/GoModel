@@ -1,4 +1,4 @@
-package main
+package run
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/config"
+	"github.com/ENTERPILOT/GoModel/config"
 )
 
 func TestHealthProbeURL(t *testing.T) {

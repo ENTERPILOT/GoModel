@@ -11,7 +11,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // LogStore defines the interface for audit log storage backends.
@@ -128,6 +128,12 @@ type LogData struct {
 	// stores split this into audit_log_attempts; Mongo stores it embedded.
 	Attempts []AttemptSnapshot `json:"attempts,omitempty" bson:"attempts,omitempty"`
 
+	// RequestRevisions captures the ingress request-rewrite chain: one entry
+	// per registered rewriter that changed the body, in application order.
+	// RequestBody always remains the original client request; the last
+	// revision is what was forwarded downstream.
+	RequestRevisions []RequestRevisionSnapshot `json:"request_revisions,omitempty" bson:"request_revisions,omitempty"`
+
 	// Request parameters
 	Temperature *float64 `json:"temperature,omitempty" bson:"temperature,omitempty"`
 	MaxTokens   *int     `json:"max_tokens,omitempty" bson:"max_tokens,omitempty"`
@@ -169,6 +175,24 @@ type WorkflowFeaturesSnapshot struct {
 // the provider response body.
 type FailoverSnapshot struct {
 	TargetModel string `json:"target_model,omitempty" bson:"target_model,omitempty"`
+}
+
+// RequestRevisionSnapshot records one ingress rewrite of the request body,
+// so operators can trace how a request changed on its way to the provider.
+type RequestRevisionSnapshot struct {
+	Seq         int    `json:"seq" bson:"seq"`
+	Rewriter    string `json:"rewriter" bson:"rewriter"`
+	BytesBefore int    `json:"bytes_before" bson:"bytes_before"`
+	BytesAfter  int    `json:"bytes_after" bson:"bytes_after"`
+
+	// Body is the request body after this revision (parsed JSON, or a string
+	// when not valid JSON). Populated only when body logging is enabled and
+	// the body is within the capture limit.
+	Body any `json:"body,omitempty" bson:"body,omitempty"`
+
+	// Detail is an optional rewriter-provided structured summary of what
+	// changed (for example a compression block report).
+	Detail any `json:"detail,omitempty" bson:"detail,omitempty"`
 }
 
 // AttemptSnapshot stores one external provider attempt made for a logical
