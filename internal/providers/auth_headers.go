@@ -34,7 +34,7 @@ func IsValidClientRequestID(id string) bool {
 		return false
 	}
 	for i := 0; i < len(id); i++ {
-		if id[i] > 127 {
+		if id[i] < 0x20 || id[i] > 0x7E {
 			return false
 		}
 	}

@@ -146,6 +146,26 @@ func TestIsValidClientRequestID(t *testing.T) {
 			valid: false,
 		},
 		{
+			name:  "invalid - control character",
+			id:    "req-123\n456",
+			valid: false,
+		},
+		{
+			name:  "invalid - NUL byte",
+			id:    "req-123\x00",
+			valid: false,
+		},
+		{
+			name:  "invalid - tab",
+			id:    "req\t123",
+			valid: false,
+		},
+		{
+			name:  "invalid - DEL",
+			id:    "req-123\x7f",
+			valid: false,
+		},
+		{
 			name:  "invalid - emoji",
 			id:    "req-123-🎉",
 			valid: false,
