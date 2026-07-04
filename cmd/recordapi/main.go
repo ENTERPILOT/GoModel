@@ -22,14 +22,16 @@ import (
 )
 
 const oracleDefaultModel = "openai.gpt-oss-120b"
+const kimiDefaultModel = "kimi-for-coding"
 
 // Provider configurations
 var providerConfigs = map[string]struct {
-	baseURL     string
-	baseURLEnv  string
-	envKey      string
-	authHeader  string
-	contentType string
+	baseURL       string
+	baseURLEnv    string
+	envKey        string
+	authHeader    string
+	contentType   string
+	customHeaders map[string]string
 }{
 	"openai": {
 		baseURL:     "https://api.openai.com",
@@ -60,6 +62,23 @@ var providerConfigs = map[string]struct {
 		envKey:      "XAI_API_KEY",
 		authHeader:  "Authorization",
 		contentType: "application/json",
+	},
+	"kimi": {
+		baseURL:     "https://api.kimi.com/coding",
+		envKey:      "KIMI_API_KEY",
+		authHeader:  "Authorization",
+		contentType: "application/json",
+		customHeaders: map[string]string{
+			"User-Agent":                   "KimiCLI/0.76 (linux; x86_64)",
+			"X-Title":                      "Kimi CLI",
+			"Http-Referer":                 "https://www.kimi.com",
+			"Accept":                       "application/json, text/event-stream",
+			"Accept-Encoding":              "gzip, deflate, br",
+			"Accept-Language":              "en-US,en;q=0.9",
+			"Sec-Fetch-Mode":               "cors",
+			"X-Stainless-Lang":             "go",
+			"X-Stainless-Package-Version":  "0.1.0",
+		},
 	},
 	"oracle": {
 		baseURLEnv:  "ORACLE_BASE_URL",
@@ -119,6 +138,14 @@ var endpointConfigs = map[string]struct {
 			"stream": true,
 		},
 	},
+	"embeddings": {
+		path:   "/v1/embeddings",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			"model": "text-embedding-3-small",
+			"input": "hello world",
+		},
+	},
 }
 
 var providerCapabilities = map[string]map[string]bool{
@@ -136,6 +163,9 @@ var providerCapabilities = map[string]map[string]bool{
 	},
 	"xai": {
 		"responses": true,
+	},
+	"kimi": {
+		"responses": false,
 	},
 	"oracle": {
 		"responses": true,
@@ -155,8 +185,8 @@ func providerSupportsResponses(provider string) bool {
 }
 
 func main() {
-	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, groq, xai, oracle)")
-	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream)")
+	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, groq, xai, kimi, oracle)")
+	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream, embeddings)")
 	output := flag.String("output", "", "Output file path (required)")
 	model := flag.String("model", "", "Override model in request")
 	flag.Parse()
@@ -209,6 +239,8 @@ func main() {
 			reqBody["model"] = *model
 		} else if *provider == "oracle" {
 			reqBody["model"] = oracleDefaultModel
+		} else if *provider == "kimi" {
+			reqBody["model"] = kimiDefaultModel
 		}
 
 		// Adjust request for different providers
@@ -248,6 +280,11 @@ func main() {
 	// Add Anthropic-specific headers
 	if *provider == "anthropic" {
 		req.Header.Set("anthropic-version", "2023-06-01")
+	}
+
+	// Add provider-specific custom headers (e.g., Kimi ZooCode headers)
+	for key, value := range pConfig.customHeaders {
+		req.Header.Set(key, value)
 	}
 
 	// Send request

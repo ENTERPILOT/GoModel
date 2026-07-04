@@ -1,0 +1,22 @@
+{
+  "id": "chatcmpl-Ke2LzM9U97NUbz9QkHonLfXT",
+  "object": "chat.completion",
+  "created": 1783125602,
+  "model": "kimi-for-coding",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello, World!",
+        "reasoning_content": "The user wants me to say \"Hello, World!\" and nothing else. I should respond with exactly that, no extra text."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 18,
+    "completion_tokens": 32,
+    "total_tokens": 50
+  }
+}

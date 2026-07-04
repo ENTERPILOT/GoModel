@@ -6,6 +6,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"gomodel/internal/providers"
+	"gomodel/internal/providers/kimi"
 )
 
 type stubLifecycleApp struct {
@@ -140,5 +143,81 @@ func TestStartApplication_StopsWaitingWhenShutdownTimesOut(t *testing.T) {
 	}
 	if calls := app.shutdownCallCount(); calls != 1 {
 		t.Fatalf("shutdownCalls = %d, want 1", calls)
+	}
+}
+
+func TestMain_SetUserPathHeaderWiring(t *testing.T) {
+	// Verify SetUserPathHeader exists and can be called without panic
+	factory := providers.NewProviderFactory()
+	
+	// Test that SetUserPathHeader can be called with various valid headers
+	headers := []string{
+		"X-GoModel-User-Path",
+		"X-Tenant-Path",
+		"X-Custom-Header",
+		"", // empty string should not panic
+	}
+	
+	for _, header := range headers {
+		didPanic := false
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					didPanic = true
+					t.Errorf("SetUserPathHeader(%q) panicked: %v", header, r)
+				}
+			}()
+			factory.SetUserPathHeader(header)
+		}()
+		if didPanic {
+			continue
+		}
+	}
+}
+
+func TestMain_KimiProviderRegistration(t *testing.T) {
+	// Mirrors the wiring done in main.go: registering kimi.Registration with a
+	// provider factory must succeed at startup without panicking. This is the
+	// unit-level equivalent of the runtime path that emits
+	// "provider registered" name=kimi type=kimi via initializeProviders.
+	factory := providers.NewProviderFactory()
+
+	didPanic := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				didPanic = true
+				t.Errorf("factory.Add(kimi.Registration) panicked: %v", r)
+			}
+		}()
+		factory.Add(kimi.Registration)
+	}()
+	if didPanic {
+		return
+	}
+
+	// The factory must report kimi among its registered types.
+	registered := false
+	for _, t2 := range factory.RegisteredTypes() {
+		if t2 == "kimi" {
+			registered = true
+			break
+		}
+	}
+	if !registered {
+		t.Fatalf("RegisteredTypes() = %v, want contains \"kimi\"", factory.RegisteredTypes())
+	}
+
+	// The factory must also be able to instantiate a Kimi provider using the
+	// same shape that initializeProviders uses (factory.Create with type=kimi).
+	provider, err := factory.Create(providers.ProviderConfig{
+		Type:   "kimi",
+		APIKey: "kimi-test-key",
+	})
+	if err != nil {
+		t.Fatalf("factory.Create() error = %v", err)
+	}
+	if provider == nil {
+		t.Fatal("factory.Create() returned nil provider")
 	}
 }
