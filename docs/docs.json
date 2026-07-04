@@ -25,6 +25,14 @@
             "destination": "/features/virtual-models"
         }
     ],
+    "navbar": {
+        "links": [
+            {
+                "type": "github",
+                "href": "https://github.com/ENTERPILOT/GoModel"
+            }
+        ]
+    },
     "navigation": {
         "global": {
             "anchors": [
