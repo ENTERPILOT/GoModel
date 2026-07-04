@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"gomodel/internal/storage/sqlutil"
 )
 
 const (
@@ -216,7 +218,7 @@ func buildUsageInsert(entries []*UsageEntry) (string, []any) {
 			entry.Endpoint,
 			entry.UserPath,
 			cacheTypeValue(entry.CacheType),
-			marshalLabels(entry.Labels, entry.ID),
+			sqlutil.NullableJSONStrings(entry.Labels, entry.ID),
 			entry.InputTokens,
 			entry.OutputTokens,
 			entry.TotalTokens,

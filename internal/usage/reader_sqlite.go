@@ -283,10 +283,8 @@ func scanSQLiteUsageLogEntries(rows *sql.Rows) ([]UsageLogEntry, error) {
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &rawDataJSON, &caveat); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
 		}
-		if labelsJSON != nil && *labelsJSON != "" {
-			if err := json.Unmarshal([]byte(*labelsJSON), &e.Labels); err != nil {
-				slog.Warn("failed to unmarshal labels JSON", "request_id", e.RequestID, "error", err)
-			}
+		if labelsJSON != nil {
+			e.Labels = sqlutil.StringsFromJSON(*labelsJSON, e.RequestID)
 		}
 		if t, ok := sqlutil.ParseSQLiteTimestamp(ts); ok {
 			e.Timestamp = t

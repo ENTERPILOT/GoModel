@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+
+	"gomodel/internal/storage/sqlutil"
 )
 
 // SQLite has a default limit of 999 bindable parameters per query (SQLITE_MAX_VARIABLE_NUMBER).
@@ -154,7 +156,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 				e.Endpoint,
 				e.UserPath,
 				cacheTypeValue(e.CacheType),
-				marshalLabels(e.Labels, e.ID),
+				sqlutil.NullableJSONStrings(e.Labels, e.ID),
 				e.InputTokens,
 				e.OutputTokens,
 				e.TotalTokens,
@@ -215,20 +217,6 @@ func (s *SQLiteStore) cleanup() {
 	if rowsAffected, err := result.RowsAffected(); err == nil && rowsAffected > 0 {
 		slog.Info("cleaned up old usage entries", "deleted", rowsAffected)
 	}
-}
-
-// marshalLabels marshals labels to a JSON array for SQL storage.
-// Returns nil (SQL NULL) when there are no labels or marshaling fails.
-func marshalLabels(labels []string, entryID string) any {
-	if len(labels) == 0 {
-		return nil
-	}
-	labelsJSON, err := json.Marshal(labels)
-	if err != nil {
-		slog.Warn("failed to marshal usage labels", "error", err, "id", entryID)
-		return nil
-	}
-	return string(labelsJSON)
 }
 
 // marshalRawData marshals raw_data to JSON for SQL storage.
