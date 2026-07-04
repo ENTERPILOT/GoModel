@@ -53,6 +53,8 @@ Suggested action:
 
 ## 4. Remove the legacy `ResponseCacheMiddleware.Middleware()` path
 
+Status: done (2026-07-04)
+
 Effort: medium
 Risk: medium
 

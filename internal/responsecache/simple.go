@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -59,40 +58,6 @@ func newSimpleCacheMiddleware(store cache.Store, ttl time.Duration, hitRecorder 
 	}
 	m.startWorkers()
 	return m
-}
-
-func (m *simpleCacheMiddleware) Middleware() echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c *echo.Context) error {
-			if m.store == nil {
-				return next(c)
-			}
-			path := c.Request().URL.Path
-			if !cacheablePaths[path] || c.Request().Method != http.MethodPost {
-				return next(c)
-			}
-			if shouldSkipCache(c.Request()) {
-				return next(c)
-			}
-			body, cacheable, err := requestBodyForCache(c.Request())
-			if err != nil {
-				return core.NewInvalidRequestError(err.Error(), err)
-			}
-			if !cacheable {
-				return next(c)
-			}
-			plan := core.GetWorkflow(c.Request().Context())
-			if shouldSkipCacheForWorkflow(plan) {
-				return next(c)
-			}
-			ex := &echoExchange{c: c}
-			hit, err := m.TryHit(ex, body)
-			if err != nil || hit {
-				return err
-			}
-			return m.StoreAfter(ex, body, func() error { return next(c) })
-		}
-	}
 }
 
 // TryHit checks the exact-match cache. Returns (true, nil) and replays the
@@ -194,44 +159,6 @@ func (m *simpleCacheMiddleware) enqueueWrite(job cacheWriteJob) {
 		m.mu.RUnlock()
 		slog.Warn("response cache write queue full", "key", job.key)
 	}
-}
-
-func shouldSkipCacheForWorkflow(plan *core.Workflow) bool {
-	if plan == nil {
-		return true
-	}
-	if !plan.CacheEnabled() {
-		return true
-	}
-	return plan.Mode == core.ExecutionModeTranslated && plan.Resolution == nil
-}
-
-func requestBodyForCache(req *http.Request) ([]byte, bool, error) {
-	if snapshot := core.GetRequestSnapshot(req.Context()); snapshot != nil {
-		if snapshot.BodyNotCaptured {
-			return nil, false, nil
-		}
-		if body := snapshot.CapturedBodyView(); body != nil {
-			return body, true, nil
-		}
-	}
-	if req.Body == nil {
-		return []byte{}, true, nil
-	}
-
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil, false, err
-	}
-	if body == nil {
-		body = []byte{}
-	}
-	req.Body = io.NopCloser(bytes.NewReader(body))
-	return body, true, nil
-}
-
-func shouldSkipCache(req *http.Request) bool {
-	return shouldSkipCacheControl(req.Header.Get("Cache-Control"))
 }
 
 func shouldSkipCacheControl(cc string) bool {

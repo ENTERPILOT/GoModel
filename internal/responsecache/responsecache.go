@@ -123,18 +123,6 @@ func NewResponseCacheMiddleware(
 	return m, nil
 }
 
-// Middleware returns the Echo middleware function for the exact-match (simple) cache.
-// This is kept for backward compatibility but cache checks are now primarily done
-// via Handle() inside the translated inference handlers, after guardrail patching.
-func (m *ResponseCacheMiddleware) Middleware() echo.MiddlewareFunc {
-	if m.simple != nil {
-		return m.simple.Middleware()
-	}
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c *echo.Context) error { return next(c) }
-	}
-}
-
 // HandleRequest runs the full dual-layer cache check (exact then semantic) for a
 // translated inference request that has already been guardrail-patched.
 // body is the final patched request bytes; next is the real LLM call.
