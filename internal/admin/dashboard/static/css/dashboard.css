@@ -16,8 +16,8 @@
   --info: #3b82f6;
   --warning: #f59e0b;
   --danger: #ef4444;
-  --prompt-cache-color: #40a811;
-  --prompt-cache-color-bg: color-mix(in srgb, var(--prompt-cache-color) 14%, var(--bg-surface));
+  --prompt-cache-color: color-mix(in srgb, var(--info) 72%, #ffffff);
+  --prompt-cache-color-bg: color-mix(in srgb, var(--token-prompt) 24%, var(--bg-surface));
   /* Cache meter segments share the live token-throughput palette (defined
      below) so the meter and the chart read consistently: Regular is the paid
      brown (input); local and prompt caches are the translucent blues, cheaper
@@ -87,8 +87,8 @@
   --info: #2563eb;
   --warning: #d97706;
   --danger: #dc2626;
-  --prompt-cache-color: #40a811;
-  --prompt-cache-color-bg: color-mix(in srgb, var(--prompt-cache-color) 9%, var(--bg-surface));
+  --prompt-cache-color: color-mix(in srgb, var(--info) 84%, #0f172a);
+  --prompt-cache-color-bg: color-mix(in srgb, var(--token-prompt) 18%, var(--bg-surface));
   --chart-grid: #e8e0d6;
   --chart-text: #7a7068;
   --chart-day-marker: var(--text);
@@ -136,8 +136,8 @@
     --info: #2563eb;
     --warning: #d97706;
     --danger: #dc2626;
-    --prompt-cache-color: #40a811;
-    --prompt-cache-color-bg: color-mix(in srgb, var(--prompt-cache-color) 9%, var(--bg-surface));
+    --prompt-cache-color: color-mix(in srgb, var(--info) 84%, #0f172a);
+    --prompt-cache-color-bg: color-mix(in srgb, var(--token-prompt) 18%, var(--bg-surface));
     --chart-grid: #e8e0d6;
     --chart-text: #7a7068;
     --chart-day-marker: var(--text);
