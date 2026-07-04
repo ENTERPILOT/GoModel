@@ -68,12 +68,6 @@ func (cb *circuitBreaker) acquire() (bool, bool) {
 	return true, false
 }
 
-// Allow reports whether any request may proceed.
-func (cb *circuitBreaker) Allow() bool {
-	allowed, _ := cb.acquire()
-	return allowed
-}
-
 // RecordSuccess records a successful request
 func (cb *circuitBreaker) RecordSuccess() {
 	cb.mu.Lock()

@@ -64,27 +64,14 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 
 // setHeaders sets the required headers for OpenAI API requests.
 // OpenAI requires the request ID to be ASCII-only and at most 512 bytes,
-// otherwise it returns 400, so forwarding is gated by isValidClientRequestID.
+// otherwise it returns 400, so forwarding is gated by
+// providers.IsValidClientRequestID.
 func setHeaders(req *http.Request, apiKey string) {
 	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
 		AuthScheme:        "Bearer ",
 		RequestIDHeader:   "X-Client-Request-Id",
-		ValidateRequestID: isValidClientRequestID,
+		ValidateRequestID: providers.IsValidClientRequestID,
 	})
-}
-
-// isValidClientRequestID checks if the request ID is valid for OpenAI's X-Client-Request-Id header.
-// OpenAI requires: ASCII characters only, max 512 characters.
-func isValidClientRequestID(id string) bool {
-	if len(id) > 512 {
-		return false
-	}
-	for i := 0; i < len(id); i++ {
-		if id[i] > 127 {
-			return false
-		}
-	}
-	return true
 }
 
 // isOSeriesModel reports whether the model is an OpenAI o-series model

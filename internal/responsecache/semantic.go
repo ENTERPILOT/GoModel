@@ -634,7 +634,6 @@ func WithGuardrailsHash(ctx context.Context, hash string) context.Context {
 const (
 	CacheTypeExact      = "exact"
 	CacheTypeSemantic   = "semantic"
-	CacheTypeBoth       = "both"
 	CacheHeaderExact    = "HIT (exact)"
 	CacheHeaderSemantic = "HIT (semantic)"
 )

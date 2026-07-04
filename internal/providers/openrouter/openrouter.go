@@ -79,7 +79,7 @@ func setHeaders(req *http.Request, apiKey string) {
 	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
 		AuthScheme:        "Bearer ",
 		RequestIDHeader:   "X-Client-Request-Id",
-		ValidateRequestID: isValidClientRequestID,
+		ValidateRequestID: providers.IsValidClientRequestID,
 	})
 }
 
@@ -98,16 +98,4 @@ func headerValue(headers http.Header, key string) string {
 		return values[0]
 	}
 	return ""
-}
-
-func isValidClientRequestID(id string) bool {
-	if len(id) > 512 {
-		return false
-	}
-	for i := 0; i < len(id); i++ {
-		if id[i] > 127 {
-			return false
-		}
-	}
-	return true
 }
