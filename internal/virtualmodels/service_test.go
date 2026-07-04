@@ -493,3 +493,31 @@ func TestService_DeleteMissingReturnsErrNotFound(t *testing.T) {
 		t.Fatalf("Delete(missing) error = %v, want ErrNotFound", err)
 	}
 }
+
+func TestService_ResolveUpsertEnabled(t *testing.T) {
+	t.Parallel()
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	if err := svc.Upsert(ctx, VirtualModel{
+		Source:  "fast",
+		Targets: []Target{{Provider: "openai", Model: "gpt-4o"}},
+		Enabled: false,
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+
+	enabled := true
+	if got := svc.ResolveUpsertEnabled("fast", "", &enabled); !got {
+		t.Fatal("explicit request value must win over the stored flag")
+	}
+	if got := svc.ResolveUpsertEnabled("fast", "", nil); got {
+		t.Fatal("omitted flag must preserve the stored (disabled) value")
+	}
+	if got := svc.ResolveUpsertEnabled("renamed", "fast", nil); got {
+		t.Fatal("rename must preserve the flag of the row being renamed")
+	}
+	if got := svc.ResolveUpsertEnabled("brand-new", "", nil); !got {
+		t.Fatal("new rows must default to enabled")
+	}
+}

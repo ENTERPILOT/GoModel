@@ -541,6 +541,25 @@ func priorRow(row VirtualModel, existed bool) *VirtualModel {
 	return &row
 }
 
+// ResolveUpsertEnabled returns the enabled flag an upsert should persist when
+// the request may omit it: the requested value when present; otherwise the
+// stored value for source (or, on a rename, for oldSource, since the new
+// source does not exist yet); defaulting to true for new rows.
+func (s *Service) ResolveUpsertEnabled(source, oldSource string, requested *bool) bool {
+	if requested != nil {
+		return *requested
+	}
+	if existing, ok := s.Get(source); ok && existing != nil {
+		return existing.Enabled
+	}
+	if old := strings.TrimSpace(oldSource); old != "" {
+		if existing, ok := s.Get(old); ok && existing != nil {
+			return existing.Enabled
+		}
+	}
+	return true
+}
+
 // Compile-time check that *Service satisfies the resolver, user-path resolver,
 // refresh-target, exposed-model lister, and authorizer seams its consumers
 // (gateway, server, batch) depend on, so a signature drift fails to compile here.

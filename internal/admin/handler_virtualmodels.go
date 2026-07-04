@@ -152,26 +152,12 @@ func (h *Handler) DeleteVirtualModel(c *echo.Context) error {
 // target_model makes a redirect; otherwise it is an access policy. Enabled
 // defaults to true, preserving the existing value when omitted.
 func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelRequest) (virtualmodels.VirtualModel, error) {
-	enabled := true
-	// Preserve the stored enable flag when the request omits it. On a rename the
-	// new source does not exist yet, so fall back to the row being renamed.
-	if existing, ok := h.virtualModels.Get(source); ok && existing != nil {
-		enabled = existing.Enabled
-	} else if old := strings.TrimSpace(req.OldSource); old != "" {
-		if existing, ok := h.virtualModels.Get(old); ok && existing != nil {
-			enabled = existing.Enabled
-		}
-	}
-	if req.Enabled != nil {
-		enabled = *req.Enabled
-	}
-
 	vm := virtualmodels.VirtualModel{
 		Source:      source,
 		Strategy:    strings.TrimSpace(req.Strategy),
 		UserPaths:   req.UserPaths,
 		Description: strings.TrimSpace(req.Description),
-		Enabled:     enabled,
+		Enabled:     h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),
 	}
 
 	targets, err := buildVirtualModelTargets(req)

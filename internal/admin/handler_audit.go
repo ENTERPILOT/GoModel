@@ -161,22 +161,16 @@ func (h *Handler) auditLogResponse(ctx context.Context, result *auditlog.LogList
 		response.Entries[i].LogEntry = result.Entries[i]
 	}
 
-	if h.usageReader == nil || len(result.Entries) == 0 {
-		return response, nil
-	}
-
 	requestIDs := make([]string, 0, len(result.Entries))
 	for _, entry := range result.Entries {
 		requestIDs = append(requestIDs, entry.RequestID)
 	}
 
-	entriesByRequestID, err := h.usageReader.GetUsageByRequestIDs(ctx, requestIDs)
+	summaries, err := usage.SummarizeUsageForRequestIDs(ctx, h.usageReader, requestIDs)
 	if err != nil {
 		slog.Warn("failed to enrich audit log entries with usage", "error", err, "request_count", len(requestIDs))
 		return response, nil
 	}
-
-	summaries := usage.SummarizeUsageByRequestID(entriesByRequestID)
 	for i := range response.Entries {
 		requestID := response.Entries[i].RequestID
 		if summary, ok := summaries[requestID]; ok {

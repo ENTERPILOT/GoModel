@@ -8,10 +8,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/config"
 	"gomodel/internal/core"
 	"gomodel/internal/failover"
-	"gomodel/internal/providers"
 )
 
 type upsertFailoverRuleRequest struct {
@@ -188,47 +186,7 @@ func (h *Handler) GenerateFailoverRules(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	resolver := failover.NewResolverWithRuleProvider(config.FailoverConfig{Enabled: true}, h.registry, h.failoverRules)
-	if resolver == nil {
-		return c.JSON(http.StatusOK, []failover.View{})
-	}
-	suggestions := make([]failover.View, 0)
-	for _, model := range h.registry.ListModelsWithProvider() {
-		if !modelSupportsCategory(model.Model.Metadata, core.CategoryTextGeneration) {
-			continue
-		}
-		source := strings.TrimSpace(model.Selector)
-		if source == "" {
-			continue
-		}
-		if primaryModel != "" && !failoverSourceMatchesModel(primaryModel, source, model) {
-			continue
-		}
-		resolution := &core.RequestModelResolution{
-			Requested: core.NewRequestedModelSelector(model.Model.ID, model.ProviderName),
-			ResolvedSelector: core.ModelSelector{
-				Provider: model.ProviderName,
-				Model:    model.Model.ID,
-			},
-			ProviderName: model.ProviderName,
-			ProviderType: model.ProviderType,
-		}
-		candidates := resolver.SuggestFailovers(resolution, core.OperationChatCompletions)
-		if len(candidates) == 0 {
-			continue
-		}
-		targets := make([]string, 0, len(candidates))
-		for _, candidate := range candidates {
-			targets = append(targets, candidate.QualifiedModel())
-		}
-		suggestions = append(suggestions, failover.View{
-			Source:        source,
-			Targets:       targets,
-			Enabled:       true,
-			ManagedSource: failover.ManagedSourceDashboard,
-		})
-	}
-	return c.JSON(http.StatusOK, suggestions)
+	return c.JSON(http.StatusOK, failover.GenerateSuggestions(h.registry, h.failoverRules, primaryModel))
 }
 
 func failoverGenerateSource(c *echo.Context) (string, error) {
@@ -251,32 +209,6 @@ func failoverGenerateSource(c *echo.Context) (string, error) {
 		source = strings.TrimSpace(req.Model)
 	}
 	return source, nil
-}
-
-func failoverSourceMatchesModel(filter string, source string, model providers.ModelWithProvider) bool {
-	filter = strings.TrimSpace(filter)
-	if filter == "" {
-		return true
-	}
-	if filter == source || filter == strings.TrimSpace(model.Model.ID) {
-		return true
-	}
-	if model.ProviderName != "" && filter == model.ProviderName+"/"+model.Model.ID {
-		return true
-	}
-	return false
-}
-
-func modelSupportsCategory(meta *core.ModelMetadata, category core.ModelCategory) bool {
-	if meta == nil || len(meta.Categories) == 0 {
-		return true
-	}
-	for _, candidate := range meta.Categories {
-		if candidate == category {
-			return true
-		}
-	}
-	return false
 }
 
 func (h *Handler) findFailoverView(source string) (failover.View, bool) {

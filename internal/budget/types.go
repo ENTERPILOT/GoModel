@@ -59,6 +59,33 @@ type CheckResult struct {
 	Remaining   float64   `json:"remaining"`
 }
 
+// UsageRatio returns spent/amount for the period, or 0 when the budget amount
+// is not positive. It is deliberately not clamped: values above 1 indicate an
+// exceeded budget.
+func (r CheckResult) UsageRatio() float64 {
+	if r.Budget.Amount <= 0 {
+		return 0
+	}
+	return r.Spent / r.Budget.Amount
+}
+
+// PeriodRatio returns the elapsed fraction of the budget period at now,
+// clamped to [0, 1].
+func (r CheckResult) PeriodRatio(now time.Time) float64 {
+	duration := r.PeriodEnd.Sub(r.PeriodStart).Seconds()
+	if duration <= 0 {
+		return 0
+	}
+	ratio := now.Sub(r.PeriodStart).Seconds() / duration
+	if ratio < 0 {
+		return 0
+	}
+	if ratio > 1 {
+		return 1
+	}
+	return ratio
+}
+
 // ExceededError indicates a budget has already been exhausted.
 type ExceededError struct {
 	Result CheckResult

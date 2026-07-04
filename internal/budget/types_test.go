@@ -155,3 +155,35 @@ func TestPeriodBoundsUsesConfiguredAnchors(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckResultUsageRatio(t *testing.T) {
+	if got := (CheckResult{Budget: Budget{Amount: 100}, Spent: 25}).UsageRatio(); got != 0.25 {
+		t.Fatalf("UsageRatio() = %v, want 0.25", got)
+	}
+	if got := (CheckResult{Budget: Budget{Amount: 0}, Spent: 25}).UsageRatio(); got != 0 {
+		t.Fatalf("UsageRatio() with zero amount = %v, want 0", got)
+	}
+	// Deliberately unclamped: >1 signals an exceeded budget to the dashboard.
+	if got := (CheckResult{Budget: Budget{Amount: 100}, Spent: 150}).UsageRatio(); got != 1.5 {
+		t.Fatalf("UsageRatio() exceeded = %v, want 1.5", got)
+	}
+}
+
+func TestCheckResultPeriodRatio(t *testing.T) {
+	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(10 * time.Hour)
+	result := CheckResult{PeriodStart: start, PeriodEnd: end}
+
+	if got := result.PeriodRatio(start.Add(5 * time.Hour)); got != 0.5 {
+		t.Fatalf("PeriodRatio(midpoint) = %v, want 0.5", got)
+	}
+	if got := result.PeriodRatio(start.Add(-time.Hour)); got != 0 {
+		t.Fatalf("PeriodRatio(before start) = %v, want 0 (clamped)", got)
+	}
+	if got := result.PeriodRatio(end.Add(time.Hour)); got != 1 {
+		t.Fatalf("PeriodRatio(after end) = %v, want 1 (clamped)", got)
+	}
+	if got := (CheckResult{PeriodStart: start, PeriodEnd: start}).PeriodRatio(start); got != 0 {
+		t.Fatalf("PeriodRatio(zero-length period) = %v, want 0", got)
+	}
+}

@@ -324,15 +324,6 @@ func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budge
 	responses := make([]budgetStatusResponse, 0, len(statuses))
 	for _, status := range statuses {
 		item := status.Budget
-		usageRatio := 0.0
-		if item.Amount > 0 {
-			usageRatio = status.Spent / item.Amount
-		}
-		periodRatio := 0.0
-		periodDuration := status.PeriodEnd.Sub(status.PeriodStart).Seconds()
-		if periodDuration > 0 {
-			periodRatio = now.Sub(status.PeriodStart).Seconds() / periodDuration
-		}
 		responses = append(responses, budgetStatusResponse{
 			UserPath:      item.UserPath,
 			PeriodSeconds: item.PeriodSeconds,
@@ -347,8 +338,8 @@ func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budge
 			Spent:         status.Spent,
 			HasUsage:      status.HasUsage,
 			Remaining:     status.Remaining,
-			UsageRatio:    usageRatio,
-			PeriodRatio:   clampBudgetRatio(periodRatio),
+			UsageRatio:    status.UsageRatio(),
+			PeriodRatio:   status.PeriodRatio(now),
 		})
 	}
 	return responses
@@ -400,14 +391,4 @@ func budgetRequestPeriodSeconds(period string, periodSeconds int64) (int64, erro
 		return parsed, nil
 	}
 	return 0, errors.New("period must be one of hourly, daily, weekly, monthly or period_seconds must be set")
-}
-
-func clampBudgetRatio(value float64) float64 {
-	if value < 0 {
-		return 0
-	}
-	if value > 1 {
-		return 1
-	}
-	return value
 }
