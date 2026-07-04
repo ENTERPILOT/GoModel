@@ -277,6 +277,12 @@ providers:
     type: groq
     api_key: "gsk_..."
 
+  fireworks:
+    type: fireworks
+    api_key: "fw_..."
+    # models:
+    #   - id: "accounts/fireworks/models/gpt-oss-120b"
+
   zai:
     type: zai
     api_key: "..."
