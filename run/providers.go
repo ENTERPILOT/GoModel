@@ -12,6 +12,7 @@ import (
 	"gomodel/internal/providers/fireworks"
 	"gomodel/internal/providers/gemini"
 	"gomodel/internal/providers/groq"
+	"gomodel/internal/providers/kimi"
 	"gomodel/internal/providers/minimax"
 	"gomodel/internal/providers/ollama"
 	"gomodel/internal/providers/openai"
@@ -53,6 +54,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(xai.Registration)
 	factory.Add(xiaomi.Registration)
 	factory.Add(zai.Registration)
+	factory.Add(kimi.Registration)
 
 	return factory
 }
