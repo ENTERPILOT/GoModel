@@ -5,7 +5,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/ENTERPILOT/GoModel/run"
+	"gomodel/run"
 )
 
 // @title          GoModel API
