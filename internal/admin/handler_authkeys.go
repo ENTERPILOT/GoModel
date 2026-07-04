@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -17,6 +18,7 @@ type createAuthKeyRequest struct {
 	Name        string     `json:"name"`
 	Description string     `json:"description,omitempty"`
 	UserPath    string     `json:"user_path,omitempty"`
+	Labels      []string   `json:"labels,omitempty"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 }
 
@@ -51,6 +53,7 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		Name:        req.Name,
 		Description: req.Description,
 		UserPath:    userPath,
+		Labels:      req.Labels,
 		ExpiresAt:   req.ExpiresAt,
 	})
 	if err != nil {
@@ -66,6 +69,37 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		}).WithCode("auth_key_issue_failed").ToJSON())
 	}
 	return c.JSON(http.StatusCreated, issued)
+}
+
+type updateAuthKeyLabelsRequest struct {
+	Labels []string `json:"labels"`
+}
+
+// UpdateAuthKeyLabels handles PUT /admin/auth-keys/:id/labels. The request
+// labels replace the key's labels; an empty list clears them.
+func (h *Handler) UpdateAuthKeyLabels(c *echo.Context) error {
+	if h.authKeys == nil {
+		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return handleError(c, core.NewInvalidRequestError("auth key id is required", nil))
+	}
+
+	var req updateAuthKeyLabelsRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+
+	view, err := h.authKeys.UpdateLabels(c.Request().Context(), id, req.Labels)
+	if err != nil {
+		if errors.Is(err, authkeys.ErrNotFound) {
+			return handleError(c, core.NewNotFoundError("auth key not found: "+id))
+		}
+		return handleError(c, authKeyWriteError(err))
+	}
+	return c.JSON(http.StatusOK, view)
 }
 
 // DeactivateAuthKey handles POST /admin/auth-keys/:id/deactivate

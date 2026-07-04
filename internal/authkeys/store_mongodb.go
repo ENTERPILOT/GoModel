@@ -15,6 +15,7 @@ type mongoAuthKeyDocument struct {
 	Name          string     `bson:"name"`
 	Description   string     `bson:"description,omitempty"`
 	UserPath      string     `bson:"user_path,omitempty"`
+	Labels        []string   `bson:"labels,omitempty"`
 	RedactedValue string     `bson:"redacted_value"`
 	SecretHash    string     `bson:"secret_hash"`
 	Enabled       bool       `bson:"enabled"`
@@ -80,6 +81,7 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 		Name:          key.Name,
 		Description:   key.Description,
 		UserPath:      key.UserPath,
+		Labels:        key.Labels,
 		RedactedValue: key.RedactedValue,
 		SecretHash:    key.SecretHash,
 		Enabled:       key.Enabled,
@@ -90,6 +92,21 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 	})
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
+	}
+	return nil
+}
+
+func (s *MongoDBStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
+	update := bson.D{
+		{Key: "labels", Value: labels},
+		{Key: "updated_at", Value: now.UTC()},
+	}
+	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, bson.D{{Key: "$set", Value: update}})
+	if err != nil {
+		return fmt.Errorf("update auth key labels: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -125,6 +142,7 @@ func authKeyFromMongo(doc mongoAuthKeyDocument) AuthKey {
 		Name:          doc.Name,
 		Description:   doc.Description,
 		UserPath:      doc.UserPath,
+		Labels:        doc.Labels,
 		RedactedValue: doc.RedactedValue,
 		SecretHash:    doc.SecretHash,
 		Enabled:       doc.Enabled,

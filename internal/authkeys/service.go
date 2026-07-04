@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -14,6 +15,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"gomodel/internal/core"
 )
 
 const defaultRefreshInterval = time.Minute
@@ -29,6 +32,7 @@ type snapshot struct {
 type AuthenticationResult struct {
 	ID       string
 	UserPath string
+	Labels   []string
 }
 
 // Service keeps managed auth keys cached in memory for request authentication.
@@ -174,6 +178,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 		Name:          normalized.Name,
 		Description:   normalized.Description,
 		UserPath:      normalized.UserPath,
+		Labels:        normalized.Labels,
 		RedactedValue: redactedValue,
 		SecretHash:    secretHash,
 		Enabled:       true,
@@ -194,6 +199,41 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 			Active:  key.Active(now),
 		},
 		Value: value,
+	}, nil
+}
+
+// UpdateLabels replaces a managed auth key's labels, updates the in-memory
+// snapshot immediately, best-effort reconciles from storage, and returns the
+// updated admin-facing view. Passing no labels clears them.
+func (s *Service) UpdateLabels(ctx context.Context, id string, labels []string) (*View, error) {
+	if s == nil {
+		return nil, fmt.Errorf("auth key service is required")
+	}
+	id = normalizeID(id)
+	if id == "" {
+		return nil, newValidationError("auth key id is required", nil)
+	}
+	labels = core.MergeLabels(labels)
+
+	now := time.Now().UTC()
+	if err := s.store.UpdateLabels(ctx, id, labels, now); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update auth key labels: %w", err)
+	}
+	s.applyLabelsUpdate(id, labels, now)
+	s.refreshBestEffort(ctx, "update-labels")
+
+	s.mu.RLock()
+	key, exists := s.snapshot.byID[id]
+	s.mu.RUnlock()
+	if !exists {
+		return nil, ErrNotFound
+	}
+	return &View{
+		AuthKey: key,
+		Active:  key.Active(time.Now().UTC()),
 	}, nil
 }
 
@@ -292,6 +332,7 @@ func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 	return AuthenticationResult{
 		ID:       key.ID,
 		UserPath: strings.TrimSpace(key.UserPath),
+		Labels:   key.Labels,
 	}, nil
 }
 
@@ -324,6 +365,29 @@ func (s *Service) applyUpsert(key AuthKey, now time.Time) {
 		delete(next.activeByHash, key.SecretHash)
 	}
 	sortSnapshotOrder(&next)
+	s.snapshot = next
+}
+
+func (s *Service) applyLabelsUpdate(id string, labels []string, now time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := cloneSnapshot(s.snapshot)
+	key, exists := next.byID[id]
+	if !exists {
+		s.snapshot = next
+		return
+	}
+	key.Labels = labels
+	key.UpdatedAt = now.UTC()
+	next.byID[id] = key
+	next.bySecretHash[key.SecretHash] = key
+	if _, active := next.activeByHash[key.SecretHash]; active {
+		next.activeByHash[key.SecretHash] = key
+	}
 	s.snapshot = next
 }
 

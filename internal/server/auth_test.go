@@ -18,10 +18,11 @@ import (
 )
 
 type mockAuthenticator struct {
-	enabled   bool
-	tokenToID map[string]string
-	tokenPath map[string]string
-	err       error
+	enabled     bool
+	tokenToID   map[string]string
+	tokenPath   map[string]string
+	tokenLabels map[string][]string
+	err         error
 }
 
 func (m mockAuthenticator) Enabled() bool {
@@ -39,6 +40,7 @@ func (m mockAuthenticator) Authenticate(_ context.Context, token string) (authke
 	return authkeys.AuthenticationResult{
 		ID:       id,
 		UserPath: m.tokenPath[token],
+		Labels:   m.tokenLabels[token],
 	}, nil
 }
 
@@ -215,6 +217,56 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *te
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "ok", rec.Body.String())
+}
+
+func TestAuthMiddlewareWithAuthenticator_ManagedKeyLabelsMergeWithHeaderLabels(t *testing.T) {
+	e := echo.New()
+	testHandler := func(c *echo.Context) error {
+		got := core.RequestLabelsFromContext(c.Request().Context())
+		assert.Equal(t, []string{"from-header", "team-a", "batch"}, got)
+		return c.String(http.StatusOK, "ok")
+	}
+
+	handler := AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+		enabled:     true,
+		tokenToID:   map[string]string{"sk_gom_token": "key-123"},
+		tokenLabels: map[string][]string{"sk_gom_token": {"team-a", "batch", "from-header"}},
+	}, nil)(testHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	// Simulate the tagging middleware having already extracted header labels.
+	req = req.WithContext(core.WithRequestLabels(req.Context(), []string{"from-header"}))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestAuthMiddlewareWithAuthenticator_ManagedKeyWithoutLabelsKeepsHeaderLabels(t *testing.T) {
+	e := echo.New()
+	testHandler := func(c *echo.Context) error {
+		got := core.RequestLabelsFromContext(c.Request().Context())
+		assert.Equal(t, []string{"from-header"}, got)
+		return c.String(http.StatusOK, "ok")
+	}
+
+	handler := AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+		enabled:   true,
+		tokenToID: map[string]string{"sk_gom_token": "key-123"},
+	}, nil)(testHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	req = req.WithContext(core.WithRequestLabels(req.Context(), []string{"from-header"}))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathOverridesHeader(t *testing.T) {

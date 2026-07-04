@@ -28,6 +28,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
 			user_path TEXT,
+			labels JSON,
 			redacted_value TEXT NOT NULL,
 			secret_hash TEXT NOT NULL UNIQUE,
 			enabled INTEGER NOT NULL DEFAULT 1,
@@ -43,6 +44,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 
 	migrations := []string{
 		`ALTER TABLE auth_keys ADD COLUMN user_path TEXT`,
+		`ALTER TABLE auth_keys ADD COLUMN labels JSON`,
 	}
 	for _, migration := range migrations {
 		if _, err := db.Exec(migration); err != nil && !isSQLiteDuplicateColumnError(err) {
@@ -63,7 +65,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 
 func (s *SQLiteStore) List(ctx context.Context) ([]AuthKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, description, user_path, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
+		SELECT id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
 		FROM auth_keys
 		ORDER BY created_at DESC, id ASC
 	`)
@@ -80,11 +82,31 @@ func (s *SQLiteStore) List(ctx context.Context) ([]AuthKey, error) {
 
 func (s *SQLiteStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO auth_keys (id, name, description, user_path, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, key.ID, key.Name, key.Description, sqlutil.NullableString(key.UserPath), key.RedactedValue, key.SecretHash, boolToSQLite(key.Enabled), sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
+		INSERT INTO auth_keys (id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, key.ID, key.Name, key.Description, sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID), key.RedactedValue, key.SecretHash, boolToSQLite(key.Enabled), sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE auth_keys
+		SET labels = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, sqlutil.NullableJSONStrings(labels, id), now.Unix(), normalizeID(id))
+	if err != nil {
+		return fmt.Errorf("update auth key labels: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read update labels rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -117,6 +139,7 @@ func (s *SQLiteStore) Close() error {
 func scanSQLiteAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	var key AuthKey
 	var userPath sql.NullString
+	var labelsJSON sql.NullString
 	var enabled int
 	var expiresAt sql.NullInt64
 	var deactivatedAt sql.NullInt64
@@ -127,6 +150,7 @@ func scanSQLiteAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&key.Name,
 		&key.Description,
 		&userPath,
+		&labelsJSON,
 		&key.RedactedValue,
 		&key.SecretHash,
 		&enabled,
@@ -141,6 +165,7 @@ func scanSQLiteAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		return AuthKey{}, err
 	}
 	key.UserPath = sqlutil.StringFromNullable(userPath)
+	key.Labels = sqlutil.StringsFromJSON(labelsJSON.String, key.ID)
 	key.Enabled = enabled != 0
 	key.ExpiresAt = sqlutil.TimeFromUnix(expiresAt)
 	key.DeactivatedAt = sqlutil.TimeFromUnix(deactivatedAt)

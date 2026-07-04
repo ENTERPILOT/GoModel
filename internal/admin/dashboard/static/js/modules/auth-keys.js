@@ -33,11 +33,31 @@
                 name: '',
                 description: '',
                 user_path: '',
+                labels: '',
                 expires_at: ''
+            },
+            authKeyLabelsEditor: {
+                open: false,
+                id: '',
+                name: '',
+                value: '',
+                submitting: false,
+                error: ''
             },
 
             defaultAuthKeyForm() {
-                return { name: '', description: '', user_path: '', expires_at: '' };
+                return { name: '', description: '', user_path: '', labels: '', expires_at: '' };
+            },
+
+            parseAuthKeyLabels(value) {
+                const labels = [];
+                for (const piece of String(value || '').split(',')) {
+                    const label = piece.trim();
+                    if (label && !labels.includes(label)) {
+                        labels.push(label);
+                    }
+                }
+                return labels;
             },
 
             authKeyUserPathValidationError(value) {
@@ -192,10 +212,12 @@
                 this.authKeyFormSubmitting = true;
                 const userPath = this.normalizeAuthKeyUserPath(this.authKeyForm.user_path);
 
+                const labels = this.parseAuthKeyLabels(this.authKeyForm.labels);
                 const payload = {
                     name,
                     description: String(this.authKeyForm.description || '').trim() || undefined,
-                    user_path: userPath || undefined
+                    user_path: userPath || undefined,
+                    labels: labels.length ? labels : undefined
                 };
                 if (this.authKeyForm.expires_at) {
                     payload.expires_at = this.authKeyForm.expires_at + 'T23:59:59Z';
@@ -253,6 +275,97 @@
                     this.authKeyError = 'Failed to create API key.';
                 } finally {
                     this.authKeyFormSubmitting = false;
+                }
+            },
+
+            openAuthKeyLabelsEditor(key) {
+                if (!key || this.authKeyLabelsEditor.submitting) {
+                    return;
+                }
+                this.authKeyLabelsEditor = {
+                    open: true,
+                    id: key.id,
+                    name: key.name || '',
+                    value: (key.labels || []).join(', '),
+                    submitting: false,
+                    error: ''
+                };
+            },
+
+            closeAuthKeyLabelsEditor() {
+                if (!this.authKeyLabelsEditor.open || this.authKeyLabelsEditor.submitting) {
+                    return;
+                }
+                this.authKeyLabelsEditor = {
+                    open: false,
+                    id: '',
+                    name: '',
+                    value: '',
+                    submitting: false,
+                    error: ''
+                };
+            },
+
+            async submitAuthKeyLabelsEditor() {
+                const editor = this.authKeyLabelsEditor;
+                if (!editor.open || editor.submitting || !editor.id) {
+                    return;
+                }
+                editor.submitting = true;
+                editor.error = '';
+                this.authKeyNotice = '';
+                const payload = { labels: this.parseAuthKeyLabels(editor.value) };
+
+                try {
+                    const request = typeof this.requestOptions === 'function'
+                        ? this.requestOptions({
+                            method: 'PUT',
+                            body: JSON.stringify(payload)
+                        })
+                        : {
+                            method: 'PUT',
+                            headers: this.headers(),
+                            body: JSON.stringify(payload)
+                        };
+                    const res = await fetch('/admin/auth-keys/' + encodeURIComponent(editor.id) + '/labels', request);
+                    if (res.status === 503) {
+                        this.authKeysAvailable = false;
+                        editor.error = 'Auth keys feature is unavailable.';
+                        return;
+                    }
+                    if (typeof this.handleFetchResponse === 'function') {
+                        const handled = this.handleFetchResponse(res, 'update API key labels', request);
+                        if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                            return;
+                        }
+                        if (!handled) {
+                            if (res.status === 401) {
+                                editor.error = 'Authentication required.';
+                                return;
+                            }
+                            editor.error = await this._authKeyResponseMessage(res, 'Failed to update labels.');
+                            console.error('Failed to update auth key labels:', res.status, res.statusText, editor.error);
+                            return;
+                        }
+                    } else if (res.status === 401) {
+                        this.authError = true;
+                        this.needsAuth = true;
+                        editor.error = 'Authentication required.';
+                        return;
+                    } else if (res.status !== 200) {
+                        editor.error = await this._authKeyResponseMessage(res, 'Failed to update labels.');
+                        console.error('Failed to update auth key labels:', res.status, res.statusText, editor.error);
+                        return;
+                    }
+                    await this.fetchAuthKeys();
+                    this.authKeyNotice = 'Labels updated for key "' + editor.name + '".';
+                    editor.submitting = false;
+                    this.closeAuthKeyLabelsEditor();
+                } catch (e) {
+                    console.error('Failed to update auth key labels:', e);
+                    editor.error = 'Failed to update labels.';
+                } finally {
+                    editor.submitting = false;
                 }
             },
 

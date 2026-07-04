@@ -4,8 +4,11 @@ package sqlutil
 
 import (
 	"database/sql"
+	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 )
 
 // EscapeLikeWildcards escapes SQL LIKE/ILIKE wildcard characters in user input
@@ -88,6 +91,39 @@ func NullableString(value string) any {
 		return nil
 	}
 	return value
+}
+
+// NullableJSONStrings marshals values to a JSON array for binding to a JSON
+// column. Returns nil (SQL NULL) when values is empty or marshaling fails;
+// failures are logged with ref identifying the row.
+func NullableJSONStrings(values []string, ref string) any {
+	if len(values) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(values)
+	if err != nil {
+		slog.Warn("failed to marshal JSON string array column", "ref", ref, "error", err)
+		return nil
+	}
+	return string(data)
+}
+
+// StringsFromJSON parses a JSON array column into a string slice, tolerating
+// NULL, empty, and malformed values so one bad row cannot break listing;
+// malformed values are logged with ref identifying the row.
+func StringsFromJSON(raw string, ref string) []string {
+	if raw == "" {
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		slog.Warn("failed to unmarshal JSON string array column", "ref", ref, "error", err)
+		return nil
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
 }
 
 // StringFromNullable converts a nullable text column to a trimmed string.

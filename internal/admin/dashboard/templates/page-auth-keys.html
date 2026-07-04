@@ -101,6 +101,17 @@
                             x-model="authKeyForm.user_path" aria-describedby="auth-key-user-path-help-copy">
                     </div>
                     <div class="form-field">
+                        <div class="inline-help-section" x-data="{ open: false, copyId: 'auth-key-labels-help-copy', showLabel: 'Show API key labels help', hideLabel: 'Hide API key labels help', text: 'Every request authenticated with this key gets these labels, in addition to any labels from tagging headers. Labels show up in usage analytics, the request log, and audit logs.' }">
+                            <div class="inline-help-title-row">
+                                <label class="form-field-label" for="auth-key-labels">Labels (optional, comma-separated)</label>
+                                {{template "inline-help-toggle" .}}
+                            </div>
+                            <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+                        </div>
+                        <input id="auth-key-labels" type="text" placeholder="ex. team-a, batch-jobs"
+                            x-model="authKeyForm.labels" aria-describedby="auth-key-labels-help-copy">
+                    </div>
+                    <div class="form-field">
                         <label class="form-field-label" for="auth-key-description">Description (optional)</label>
                         <textarea id="auth-key-description" rows="2"
                             placeholder="What is this key used for?"
@@ -121,6 +132,45 @@
         </div>
     </div>
 
+    <div class="editor-modal-backdrop"
+         x-cloak
+         x-show="authKeyLabelsEditor.open"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="editor-modal-shell"
+         x-cloak
+         x-show="authKeyLabelsEditor.open"
+         x-transition.opacity.duration.160ms
+         @click="closeAuthKeyLabelsEditor()"
+         @keydown.escape.window="authKeyLabelsEditor.open && closeAuthKeyLabelsEditor()">
+        <div class="model-editor auth-key-editor" x-show="authKeyLabelsEditor.open" role="dialog" aria-modal="true" aria-label="API key labels editor" @click.stop>
+            <form class="form" @submit.prevent="submitAuthKeyLabelsEditor()">
+                <div class="editor-header">
+                    <div>
+                        <h3>Edit Labels</h3>
+                        <p class="form-hint" x-text="authKeyLabelsEditor.name"></p>
+                    </div>
+                    <button type="button" class="dialog-close-btn"
+                        aria-label="Close" @click="closeAuthKeyLabelsEditor()">
+                        {{template "x-icon"}}
+                    </button>
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="auth-key-labels-edit">Labels (comma-separated)</label>
+                    <input id="auth-key-labels-edit" type="text" placeholder="ex. team-a, batch-jobs"
+                        x-model="authKeyLabelsEditor.value" autocomplete="off" data-modal-autofocus>
+                    <p class="form-hint">Applies to new requests made with this key. Leave empty to remove all labels.</p>
+                </div>
+                <p class="form-error" x-show="authKeyLabelsEditor.error" x-text="authKeyLabelsEditor.error" role="alert" aria-live="assertive"></p>
+                <div class="form-actions">
+                    <button type="submit" class="pagination-btn pagination-btn-primary"
+                        :disabled="authKeyLabelsEditor.submitting"
+                        x-text="authKeyLabelsEditor.submitting ? 'Saving...' : 'Save Labels'"></button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div class="table-wrapper" x-show="authKeys.length > 0 && authKeysAvailable">
         <table class="data-table">
             <thead>
@@ -128,6 +178,7 @@
                     <th>Name</th>
                     <th>Description</th>
                     <th>User Path</th>
+                    <th>Labels</th>
                     <th>Token</th>
                     <th>Status</th>
                     <th>Expires</th>
@@ -141,6 +192,15 @@
                         <td x-text="key.name"></td>
                         <td class="auth-key-description" x-text="key.description || '\u2014'"></td>
                         <td x-text="key.user_path || '\u2014'"></td>
+                        <td>
+                            <div class="usage-label-chips" x-show="(key.labels || []).length > 0">
+                                <template x-for="label in key.labels || []" :key="label">
+                                    <span class="usage-label-chip usage-label-chip-static"
+                                          :style="labelChipStyle(label)" x-text="label"></span>
+                                </template>
+                            </div>
+                            <span x-show="(key.labels || []).length === 0">&mdash;</span>
+                        </td>
                         <td><code class="auth-key-redacted" x-text="key.redacted_value"></code></td>
                         <td>
                             <span class="auth-key-status-badge"
@@ -151,6 +211,9 @@
                             x-text="key.expires_at ? formatDateUTC(key.expires_at) : '\u2014'"></td>
                         <td x-text="formatTimestamp(key.created_at)"></td>
                         <td>
+                            <button type="button" class="table-action-btn"
+                                x-show="key.active"
+                                @click="openAuthKeyLabelsEditor(key)">Edit Labels</button>
                             <button type="button" class="table-action-btn table-action-btn-danger"
                                 x-show="key.active"
                                 :disabled="authKeyDeactivatingID === key.id"

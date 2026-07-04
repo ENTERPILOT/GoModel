@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -36,6 +37,17 @@ func (s *authKeyTestStore) List(_ context.Context) ([]authkeys.AuthKey, error) {
 
 func (s *authKeyTestStore) Create(_ context.Context, key authkeys.AuthKey) error {
 	s.keys[key.ID] = key
+	return nil
+}
+
+func (s *authKeyTestStore) UpdateLabels(_ context.Context, id string, labels []string, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return authkeys.ErrNotFound
+	}
+	key.Labels = labels
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
 	return nil
 }
 
@@ -101,13 +113,25 @@ func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	if deactivateRec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("DeactivateAuthKey() status = %d, want 503", deactivateRec.Code)
 	}
+
+	labelsReq := httptest.NewRequest(http.MethodPut, "/admin/auth-keys/test-key/labels", bytes.NewBufferString(`{"labels":["a"]}`))
+	labelsReq.Header.Set("Content-Type", "application/json")
+	labelsRec := httptest.NewRecorder()
+	labelsCtx := e.NewContext(labelsReq, labelsRec)
+	labelsCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-key"}})
+	if err := h.UpdateAuthKeyLabels(labelsCtx); err != nil {
+		t.Fatalf("UpdateAuthKeyLabels() error = %v", err)
+	}
+	if labelsRec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("UpdateAuthKeyLabels() status = %d, want 503", labelsRec.Code)
+	}
 }
 
 func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
 	e := echo.New()
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","description":"prod key","user_path":" team//alpha/service/ "}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","description":"prod key","user_path":" team//alpha/service/ ","labels":[" team-a ","batch","team-a"]}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	createCtx := e.NewContext(createReq, createRec)
@@ -129,6 +153,9 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	if issued.UserPath != "/team/alpha/service" {
 		t.Fatalf("issued.UserPath = %q, want /team/alpha/service", issued.UserPath)
 	}
+	if !reflect.DeepEqual(issued.Labels, []string{"team-a", "batch"}) {
+		t.Fatalf("issued.Labels = %v, want [team-a batch]", issued.Labels)
+	}
 
 	listCtx, listRec := newHandlerContext("/admin/auth-keys")
 	if err := h.ListAuthKeys(listCtx); err != nil {
@@ -147,6 +174,9 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	}
 	if views[0].UserPath != "/team/alpha/service" {
 		t.Fatalf("views[0].UserPath = %q, want /team/alpha/service", views[0].UserPath)
+	}
+	if !reflect.DeepEqual(views[0].Labels, []string{"team-a", "batch"}) {
+		t.Fatalf("views[0].Labels = %v, want [team-a batch]", views[0].Labels)
 	}
 
 	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys/"+issued.ID+"/deactivate", nil)
@@ -170,6 +200,69 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	}
 	if len(views) != 1 || views[0].Active {
 		t.Fatalf("list response after deactivate = %#v, want one inactive key", views)
+	}
+}
+
+func TestUpdateAuthKeyLabels(t *testing.T) {
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	e := echo.New()
+
+	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","labels":["old"]}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	if err := h.CreateAuthKey(e.NewContext(createReq, createRec)); err != nil {
+		t.Fatalf("CreateAuthKey() error = %v", err)
+	}
+	var issued authkeys.IssuedKey
+	if err := json.Unmarshal(createRec.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("unmarshal create response: %v", err)
+	}
+
+	updateLabels := func(id, body string) (*httptest.ResponseRecorder, error) {
+		req := httptest.NewRequest(http.MethodPut, "/admin/auth-keys/"+id+"/labels", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		ctx := e.NewContext(req, rec)
+		ctx.SetPathValues(echo.PathValues{{Name: "id", Value: id}})
+		return rec, h.UpdateAuthKeyLabels(ctx)
+	}
+
+	rec, err := updateLabels(issued.ID, `{"labels":[" prod ","batch","prod"]}`)
+	if err != nil {
+		t.Fatalf("UpdateAuthKeyLabels() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("UpdateAuthKeyLabels() status = %d, want 200", rec.Code)
+	}
+	var view authkeys.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("unmarshal update response: %v", err)
+	}
+	if !reflect.DeepEqual(view.Labels, []string{"prod", "batch"}) {
+		t.Fatalf("view.Labels = %v, want [prod batch]", view.Labels)
+	}
+
+	rec, err = updateLabels(issued.ID, `{"labels":[]}`)
+	if err != nil {
+		t.Fatalf("UpdateAuthKeyLabels(clear) error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("UpdateAuthKeyLabels(clear) status = %d, want 200", rec.Code)
+	}
+	var clearedView authkeys.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &clearedView); err != nil {
+		t.Fatalf("unmarshal clear response: %v", err)
+	}
+	if clearedView.Labels != nil {
+		t.Fatalf("view.Labels after clear = %v, want nil", clearedView.Labels)
+	}
+
+	rec, err = updateLabels("missing-id", `{"labels":["x"]}`)
+	if err != nil {
+		t.Fatalf("UpdateAuthKeyLabels(missing) error = %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("UpdateAuthKeyLabels(missing) status = %d, want 404", rec.Code)
 	}
 }
 

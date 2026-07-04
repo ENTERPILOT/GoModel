@@ -37,6 +37,7 @@ func IsValidationError(err error) bool {
 type Store interface {
 	List(ctx context.Context) ([]AuthKey, error)
 	Create(ctx context.Context, key AuthKey) error
+	UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error
 	Deactivate(ctx context.Context, id string, now time.Time) error
 	Close() error
 }
@@ -62,6 +63,7 @@ func normalizeCreateInput(input CreateInput) (CreateInput, error) {
 		return CreateInput{}, newValidationError("invalid user_path", err)
 	}
 	input.UserPath = userPath
+	input.Labels = core.MergeLabels(input.Labels)
 	if input.ExpiresAt != nil {
 		expiresAt := input.ExpiresAt.UTC()
 		now := time.Now().UTC()

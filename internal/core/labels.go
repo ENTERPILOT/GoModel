@@ -1,6 +1,33 @@
 package core
 
-import "context"
+import (
+	"context"
+	"strings"
+)
+
+// MergeLabels combines label sets in order into one list, trimming whitespace
+// and dropping empty values and duplicates. Returns nil when nothing remains.
+func MergeLabels(sets ...[]string) []string {
+	var merged []string
+	var seen map[string]struct{}
+	for _, set := range sets {
+		for _, label := range set {
+			label = strings.TrimSpace(label)
+			if label == "" {
+				continue
+			}
+			if seen == nil {
+				seen = make(map[string]struct{})
+			}
+			if _, dup := seen[label]; dup {
+				continue
+			}
+			seen[label] = struct{}{}
+			merged = append(merged, label)
+		}
+	}
+	return merged
+}
 
 // WithRequestLabels returns a new context with the request labels attached.
 // Labels are extracted at ingress from configured tagging headers.

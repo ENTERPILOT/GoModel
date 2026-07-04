@@ -113,6 +113,118 @@ test('submitAuthKeyForm normalizes user paths before sending them', async () => 
     );
 });
 
+test('submitAuthKeyForm parses comma-separated labels and omits them when empty', async () => {
+    const requests = [];
+    const module = createAuthKeysModule({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return {
+                status: 201,
+                async json() {
+                    return { value: 'sk_gom_test' };
+                }
+            };
+        }
+    });
+
+    module.headers = () => ({ 'Content-Type': 'application/json' });
+    module.fetchAuthKeys = async () => {};
+    module.authKeyForm = {
+        name: 'ci-deploy',
+        description: '',
+        user_path: '',
+        labels: ' team-a , batch,, team-a ',
+        expires_at: ''
+    };
+
+    await module.submitAuthKeyForm();
+
+    module.authKeyIssuedValue = '';
+    module.authKeyForm = {
+        name: 'ci-deploy',
+        description: '',
+        user_path: '',
+        labels: ' , ',
+        expires_at: ''
+    };
+
+    await module.submitAuthKeyForm();
+
+    assert.equal(requests.length, 2);
+    assert.deepEqual(
+        JSON.parse(requests[0].options.body).labels,
+        ['team-a', 'batch']
+    );
+    assert.equal(JSON.parse(requests[1].options.body).labels, undefined);
+});
+
+test('submitAuthKeyLabelsEditor PUTs parsed labels and closes the editor on success', async () => {
+    const requests = [];
+    const module = createAuthKeysModule({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return {
+                status: 200,
+                async json() {
+                    return { id: 'key_123', labels: ['team-a', 'batch'] };
+                }
+            };
+        }
+    });
+
+    module.headers = () => ({ 'Content-Type': 'application/json' });
+    module.fetchAuthKeys = async () => {};
+    module.openAuthKeyLabelsEditor({ id: 'key_123', name: 'ci-deploy', labels: ['old'] });
+    assert.equal(module.authKeyLabelsEditor.value, 'old');
+
+    module.authKeyLabelsEditor.value = ' team-a , batch,, team-a ';
+    await module.submitAuthKeyLabelsEditor();
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/auth-keys/key_123/labels');
+    assert.equal(requests[0].options.method, 'PUT');
+    assert.deepEqual(JSON.parse(requests[0].options.body).labels, ['team-a', 'batch']);
+    assert.equal(module.authKeyLabelsEditor.open, false);
+    assert.equal(module.authKeyNotice, 'Labels updated for key "ci-deploy".');
+});
+
+test('submitAuthKeyLabelsEditor sends an empty list to clear labels and surfaces HTTP errors', async () => {
+    const requests = [];
+    let status = 200;
+    const module = createAuthKeysModule({
+        console: {
+            error() {}
+        },
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return {
+                status,
+                statusText: 'status',
+                async json() {
+                    return status === 200
+                        ? { id: 'key_123' }
+                        : { error: { message: 'key vanished' } };
+                }
+            };
+        }
+    });
+
+    module.headers = () => ({ 'Content-Type': 'application/json' });
+    module.fetchAuthKeys = async () => {};
+
+    module.openAuthKeyLabelsEditor({ id: 'key_123', name: 'ci-deploy', labels: ['old'] });
+    module.authKeyLabelsEditor.value = ' , ';
+    await module.submitAuthKeyLabelsEditor();
+    assert.deepEqual(JSON.parse(requests[0].options.body).labels, []);
+    assert.equal(module.authKeyLabelsEditor.open, false);
+
+    status = 404;
+    module.openAuthKeyLabelsEditor({ id: 'key_123', name: 'ci-deploy', labels: [] });
+    await module.submitAuthKeyLabelsEditor();
+    assert.equal(module.authKeyLabelsEditor.open, true);
+    assert.equal(module.authKeyLabelsEditor.error, 'key vanished');
+});
+
 test('submitAuthKeyForm rejects invalid user paths before sending the request', async () => {
     let called = false;
     const module = createAuthKeysModule({

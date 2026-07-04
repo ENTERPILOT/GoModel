@@ -3,6 +3,7 @@ package authkeys
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -38,6 +39,17 @@ func (s *testStore) Create(_ context.Context, key AuthKey) error {
 		return s.createErr
 	}
 	s.keys[key.ID] = key
+	return nil
+}
+
+func (s *testStore) UpdateLabels(_ context.Context, id string, labels []string, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return ErrNotFound
+	}
+	key.Labels = labels
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
 	return nil
 }
 
@@ -236,6 +248,91 @@ func TestServiceCreateNormalizesUserPathAndReturnsItOnAuthenticate(t *testing.T)
 	}
 	if authenticated.UserPath != "/team/alpha/service" {
 		t.Fatalf("Authenticate().UserPath = %q, want /team/alpha/service", authenticated.UserPath)
+	}
+}
+
+func TestServiceCreateNormalizesLabelsAndReturnsThemOnAuthenticate(t *testing.T) {
+	service, err := NewService(newTestStore())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	issued, err := service.Create(context.Background(), CreateInput{
+		Name:   "labelled",
+		Labels: []string{" team-a ", "batch", "team-a", ""},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	want := []string{"team-a", "batch"}
+	if !reflect.DeepEqual(issued.Labels, want) {
+		t.Fatalf("issued.Labels = %v, want %v", issued.Labels, want)
+	}
+
+	authenticated, err := service.Authenticate(context.Background(), issued.Value)
+	if err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
+	}
+	if !reflect.DeepEqual(authenticated.Labels, want) {
+		t.Fatalf("Authenticate().Labels = %v, want %v", authenticated.Labels, want)
+	}
+}
+
+func TestServiceUpdateLabelsAppliesImmediatelyToAuthenticate(t *testing.T) {
+	service, err := NewService(newTestStore())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	issued, err := service.Create(context.Background(), CreateInput{
+		Name:   "labelled",
+		Labels: []string{"old"},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	view, err := service.UpdateLabels(context.Background(), issued.ID, []string{" new-a ", "new-b", "new-a", ""})
+	if err != nil {
+		t.Fatalf("UpdateLabels() error = %v", err)
+	}
+	want := []string{"new-a", "new-b"}
+	if !reflect.DeepEqual(view.Labels, want) {
+		t.Fatalf("UpdateLabels().Labels = %v, want %v", view.Labels, want)
+	}
+
+	authenticated, err := service.Authenticate(context.Background(), issued.Value)
+	if err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
+	}
+	if !reflect.DeepEqual(authenticated.Labels, want) {
+		t.Fatalf("Authenticate().Labels = %v, want %v", authenticated.Labels, want)
+	}
+
+	cleared, err := service.UpdateLabels(context.Background(), issued.ID, nil)
+	if err != nil {
+		t.Fatalf("UpdateLabels(clear) error = %v", err)
+	}
+	if cleared.Labels != nil {
+		t.Fatalf("UpdateLabels(clear).Labels = %v, want nil", cleared.Labels)
+	}
+	authenticated, err = service.Authenticate(context.Background(), issued.Value)
+	if err != nil {
+		t.Fatalf("Authenticate() after clear error = %v", err)
+	}
+	if authenticated.Labels != nil {
+		t.Fatalf("Authenticate().Labels after clear = %v, want nil", authenticated.Labels)
+	}
+}
+
+func TestServiceUpdateLabelsUnknownKeyReturnsNotFound(t *testing.T) {
+	service, err := NewService(newTestStore())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	if _, err := service.UpdateLabels(context.Background(), "missing", []string{"x"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateLabels() error = %v, want %v", err, ErrNotFound)
 	}
 }
 

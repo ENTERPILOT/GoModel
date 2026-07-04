@@ -199,6 +199,13 @@ func applyAuthentication(entry *LogEntry, ctx context.Context) {
 	if userPath := strings.TrimSpace(core.UserPathFromContext(ctx)); userPath != "" {
 		entry.UserPath = userPath
 	}
+	// The entry snapshots labels before authentication runs, so auth-key
+	// labels merged into the context during auth are re-read here.
+	if entry.Data != nil {
+		if labels := core.RequestLabelsFromContext(ctx); len(labels) > 0 {
+			entry.Data.Labels = labels
+		}
+	}
 }
 
 func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {

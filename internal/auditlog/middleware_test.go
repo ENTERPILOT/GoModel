@@ -11,6 +11,27 @@ import (
 	"gomodel/internal/core"
 )
 
+func TestApplyAuthenticationRefreshesLabelsFromContext(t *testing.T) {
+	entry := &LogEntry{Data: &LogData{Labels: []string{"from-header"}}}
+	ctx := core.WithRequestLabels(t.Context(), []string{"from-header", "from-key"})
+
+	applyAuthentication(entry, ctx)
+
+	if got, want := strings.Join(entry.Data.Labels, ","), "from-header,from-key"; got != want {
+		t.Fatalf("entry.Data.Labels = %q, want %q", got, want)
+	}
+}
+
+func TestApplyAuthenticationKeepsLabelsWhenContextHasNone(t *testing.T) {
+	entry := &LogEntry{Data: &LogData{Labels: []string{"from-header"}}}
+
+	applyAuthentication(entry, t.Context())
+
+	if got, want := strings.Join(entry.Data.Labels, ","), "from-header"; got != want {
+		t.Fatalf("entry.Data.Labels = %q, want %q", got, want)
+	}
+}
+
 func TestEnrichEntryWithWorkflow_PrefersProviderNameForResolvedModel(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

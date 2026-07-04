@@ -79,18 +79,7 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodAPIKey)
 				authResult, err := authenticator.Authenticate(c.Request().Context(), token)
 				if err == nil {
-					ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
-					if userPath := strings.TrimSpace(authResult.UserPath); userPath != "" {
-						ctx = core.WithEffectiveUserPath(ctx, userPath)
-						ctx = core.WithUserPathHeaderName(ctx, userPathHeaderName)
-						if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
-							ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPathHeader(userPath, userPathHeaderName))
-						}
-						c.Request().Header.Set(userPathHeaderName, userPath)
-						auditlog.EnrichEntryWithUserPath(c, userPath)
-					}
-					c.SetRequest(c.Request().WithContext(ctx))
-					auditlog.EnrichEntryWithAuthKeyID(c, authResult.ID)
+					applyAuthKeyResult(c, authResult, userPathHeaderName)
 					return next(c)
 				}
 
@@ -102,6 +91,28 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 			return writeGatewayError(c, authErr)
 		}
 	}
+}
+
+// applyAuthKeyResult enriches the request context and audit entry with the
+// authenticated managed key's identity, labels, and bound user path.
+func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResult, userPathHeaderName string) {
+	ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
+	if len(authResult.Labels) > 0 {
+		// Key labels join any labels the tagging middleware already
+		// extracted from request headers; duplicates collapse.
+		ctx = core.WithRequestLabels(ctx, core.MergeLabels(core.RequestLabelsFromContext(ctx), authResult.Labels))
+	}
+	if userPath := strings.TrimSpace(authResult.UserPath); userPath != "" {
+		ctx = core.WithEffectiveUserPath(ctx, userPath)
+		ctx = core.WithUserPathHeaderName(ctx, userPathHeaderName)
+		if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
+			ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPathHeader(userPath, userPathHeaderName))
+		}
+		c.Request().Header.Set(userPathHeaderName, userPath)
+		auditlog.EnrichEntryWithUserPath(c, userPath)
+	}
+	c.SetRequest(c.Request().WithContext(ctx))
+	auditlog.EnrichEntryWithAuthKeyID(c, authResult.ID)
 }
 
 func authFailureMessage(err error) string {

@@ -3020,6 +3020,13 @@ textarea:focus {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--label-color, var(--accent)) 55%, transparent);
 }
 
+/* Read-only chip variant (e.g. API key labels) — same look, no affordance. */
+.usage-label-chip-static,
+.usage-label-chip-static:hover {
+  cursor: default;
+  background: color-mix(in srgb, var(--label-color, var(--accent)) 14%, var(--bg));
+}
+
 /* Audit Log Section */
 .audit-log-section {
   background: var(--bg-surface);

@@ -14,6 +14,7 @@ type AuthKey struct {
 	Name          string     `json:"name" bson:"name"`
 	Description   string     `json:"description,omitempty" bson:"description,omitempty"`
 	UserPath      string     `json:"user_path,omitempty" bson:"user_path,omitempty"`
+	Labels        []string   `json:"labels,omitempty" bson:"labels,omitempty"`
 	RedactedValue string     `json:"redacted_value" bson:"redacted_value"`
 	SecretHash    string     `json:"-" bson:"secret_hash"`
 	Enabled       bool       `json:"enabled" bson:"enabled"`
@@ -40,6 +41,7 @@ type CreateInput struct {
 	Name        string
 	Description string
 	UserPath    string
+	Labels      []string
 	ExpiresAt   *time.Time
 }
 
