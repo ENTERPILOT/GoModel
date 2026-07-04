@@ -11,7 +11,9 @@
         "dark": "/logo.svg"
     },
     "colors": {
-        "primary": "#755c3d"
+        "primary": "#2563eb",
+        "light": "#60a5fa",
+        "dark": "#1d4ed8"
     },
     "icons": {
         "library": "lucide"
