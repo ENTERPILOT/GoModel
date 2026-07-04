@@ -383,6 +383,34 @@ func (r *ModelRegistry) Supports(model string) bool {
 	return ok
 }
 
+// ModelAvailable reports whether the model is registered AND its provider's
+// inventory is fresh (latest refresh succeeded). Virtual-model load balancing
+// uses this to skip providers whose upstream is failing, while Supports keeps
+// resolving stale models so direct requests still reach the provider and fail
+// with an honest 502/503 instead of "model not found".
+func (r *ModelRegistry) ModelAvailable(model string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	providerName, modelID := splitModelSelector(model)
+	if providerName != "" {
+		if providerModels, ok := r.modelsByProvider[providerName]; ok {
+			if _, exists := providerModelInfo(providerModels, modelID, model); exists {
+				return !r.providerRuntime[providerName].inventoryStale
+			}
+		}
+		if r.hasConfiguredProviderNameLocked(providerName) {
+			return false
+		}
+		// Fall through: the slash may be part of the model ID
+	}
+
+	if info, ok := r.models[model]; ok {
+		return !r.providerRuntime[info.ProviderName].inventoryStale
+	}
+	return false
+}
+
 // ListModels returns all models in the registry, sorted by model ID for consistent ordering.
 // The sorted slice is cached and rebuilt only when the underlying models change.
 // Returns a defensive copy so callers cannot mutate the internal cache.
@@ -905,6 +933,27 @@ func (r *ModelRegistry) RecordAvailabilityCheck(providerName string, err error) 
 	r.providerRuntime[providerName] = state
 }
 
+// FailedProviderNames returns configured provider names whose latest model
+// refresh attempt failed. The background recheck loop uses this to re-probe
+// only the providers that are currently down.
+func (r *ModelRegistry) FailedProviderNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	names := make([]string, 0)
+	for _, provider := range r.providers {
+		providerName := strings.TrimSpace(r.providerNames[provider])
+		if providerName == "" {
+			continue
+		}
+		if strings.TrimSpace(r.providerRuntime[providerName].lastModelFetchError) == "" {
+			continue
+		}
+		names = append(names, providerName)
+	}
+	return names
+}
+
 // ProviderRuntimeSnapshots returns runtime diagnostics for configured providers
 // keyed by configured provider name.
 func (r *ModelRegistry) ProviderRuntimeSnapshots() []ProviderRuntimeSnapshot {
@@ -927,6 +976,7 @@ func (r *ModelRegistry) ProviderRuntimeSnapshots() []ProviderRuntimeSnapshot {
 			LastAvailabilityCheckAt: timePtrUTC(state.lastAvailabilityCheckAt),
 			LastAvailabilityOKAt:    timePtrUTC(state.lastAvailabilityOKAt),
 			LastAvailabilityError:   strings.TrimSpace(state.lastAvailabilityError),
+			InventoryStale:          state.inventoryStale,
 		})
 	}
 	r.mu.RUnlock()

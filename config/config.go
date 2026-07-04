@@ -71,6 +71,7 @@ func buildDefaultConfig() *Config {
 		Cache: CacheConfig{
 			Model: ModelCacheConfig{
 				RefreshInterval: 3600,
+				RecheckInterval: 60,
 				ModelList: ModelListConfig{
 					URL: "https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.min.json",
 				},

@@ -158,6 +158,10 @@ type EffectiveState struct {
 // Catalog is the combined catalog surface the native engine needs.
 type Catalog interface {
 	Supports(model string) bool
+	// ModelAvailable is Supports narrowed to providers whose inventory is
+	// fresh: target selection uses it so load balancing routes around a
+	// provider whose latest model refresh failed.
+	ModelAvailable(model string) bool
 	GetProviderType(model string) string
 	LookupModel(model string) (*core.Model, bool)
 	ProviderNames() []string

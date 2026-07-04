@@ -67,6 +67,35 @@ func countByModel(models []string) map[string]int {
 	return counts
 }
 
+// A target whose provider inventory is stale (latest refresh failed) is still
+// catalog-supported but must be skipped by load balancing.
+func TestBalancer_SkipsStaleProviderTargets(t *testing.T) {
+	t.Parallel()
+	catalog := balancingCatalog()
+	catalog.stale = map[string]bool{"openai/gpt-4o": true}
+	svc, err := NewService(newSQLiteVMStore(t), catalog, true)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := svc.Upsert(context.Background(), VirtualModel{
+		Source:   "smart",
+		Strategy: StrategyRoundRobin,
+		Targets: []Target{
+			{Provider: "openai", Model: "gpt-4o"},
+			{Provider: "anthropic", Model: "claude"},
+		},
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+
+	for i, got := range resolvedModels(t, svc, "smart", 4) {
+		if got != "anthropic/claude" {
+			t.Fatalf("resolution[%d] = %q, want stale openai target skipped (anthropic/claude)", i, got)
+		}
+	}
+}
+
 func TestBalancer_RoundRobinRotates(t *testing.T) {
 	t.Parallel()
 	svc := newBalancingService(t)

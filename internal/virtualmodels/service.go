@@ -223,7 +223,7 @@ func (s *Service) ListViews() []View {
 }
 
 // redirectViewResolution summarizes a redirect for the admin view: a
-// representative resolved model (the first catalog-supported target, else the
+// representative resolved model (the first available target, else the
 // first declared one), its provider type, and whether any target is available.
 func (s *Service) redirectViewResolution(vm VirtualModel) (resolved, providerType string, valid bool) {
 	for _, target := range vm.Targets {
@@ -232,7 +232,7 @@ func (s *Service) redirectViewResolution(vm VirtualModel) (resolved, providerTyp
 			continue
 		}
 		qualified := selector.QualifiedModel()
-		if s.catalog.Supports(qualified) {
+		if s.catalog.ModelAvailable(qualified) {
 			return qualified, strings.TrimSpace(s.catalog.GetProviderType(qualified)), true
 		}
 		if resolved == "" {

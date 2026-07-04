@@ -28,11 +28,18 @@ func newSQLiteVMStore(t *testing.T) *SQLiteStore {
 type fakeCatalog struct {
 	providers []string
 	supported map[string]core.Model
+	// stale marks models whose provider inventory is stale: still supported,
+	// but not available for target selection.
+	stale map[string]bool
 }
 
 func (c fakeCatalog) Supports(model string) bool {
 	_, ok := c.supported[model]
 	return ok
+}
+
+func (c fakeCatalog) ModelAvailable(model string) bool {
+	return c.Supports(model) && !c.stale[model]
 }
 
 func (c fakeCatalog) GetProviderType(model string) string {

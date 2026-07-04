@@ -174,9 +174,13 @@ func (r *ModelRegistry) applyFetchedProviderInventory(providerTypes map[core.Pro
 	r.mu.Lock()
 	for providerName, providerModels := range fetched.modelsByProvider {
 		r.modelsByProvider[providerName] = providerModels
+		// A refresh that produced inventory is authoritative again.
+		state := r.providerRuntime[providerName]
+		state.inventoryStale = false
+		r.providerRuntime[providerName] = state
 	}
 	r.applyProviderRuntimeUpdatesLocked(fetched.runtimeUpdates)
-	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.providerOrderNamesLocked())
+	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
 	r.invalidateSortedCaches()
 	r.mu.Unlock()
 
@@ -203,4 +207,22 @@ func (r *ModelRegistry) providerOrderNamesLocked() []string {
 		names = append(names, providerName)
 	}
 	return names
+}
+
+// freshFirstProviderOrderLocked returns provider names in registration order
+// with stale-inventory providers moved to the back, so a bare model ID served
+// by several providers resolves to a healthy one — matching where the old
+// inventory wipe would have sent the request.
+func (r *ModelRegistry) freshFirstProviderOrderLocked() []string {
+	names := r.providerOrderNamesLocked()
+	fresh := make([]string, 0, len(names))
+	var staleNames []string
+	for _, name := range names {
+		if r.providerRuntime[name].inventoryStale {
+			staleNames = append(staleNames, name)
+			continue
+		}
+		fresh = append(fresh, name)
+	}
+	return append(fresh, staleNames...)
 }
