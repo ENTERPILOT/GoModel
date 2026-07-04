@@ -11,7 +11,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/ENTERPILOT/GoModel/internal/core"
+	"gomodel/internal/core"
 )
 
 // LogStore defines the interface for audit log storage backends.
