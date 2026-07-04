@@ -74,9 +74,12 @@ func postJSON(t *testing.T, srv *Server, path, body string) *httptest.ResponseRe
 
 func TestRequestRewriteMiddlewareRewritesChatCompletions(t *testing.T) {
 	provider := newRewriteTestProvider()
+	var seenAuth, seenPlain string
 	annotating := &stubRewriter{
 		name: "annotate",
 		rewrite: func(in ext.Input) (*ext.Result, error) {
+			seenAuth = in.Header.Get("Authorization")
+			seenPlain = in.Header.Get("X-Custom-Trace")
 			header := http.Header{}
 			header.Set("X-Test-Rewritten", "yes")
 			return &ext.Result{
@@ -87,8 +90,13 @@ func TestRequestRewriteMiddlewareRewritesChatCompletions(t *testing.T) {
 	}
 	srv := New(provider, &Config{RequestRewriters: []ext.RequestRewriter{annotating}})
 
-	rec := postJSON(t, srv, "/v1/chat/completions",
-		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"PING"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"PING"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-secret")
+	req.Header.Set("X-Custom-Trace", "trace-1")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
@@ -102,6 +110,12 @@ func TestRequestRewriteMiddlewareRewritesChatCompletions(t *testing.T) {
 	}
 	if got := rec.Header().Get("X-Test-Rewritten"); got != "yes" {
 		t.Errorf("expected annotation header, got %q", got)
+	}
+	if seenAuth != "[REDACTED]" {
+		t.Errorf("rewriter saw Authorization %q, want it redacted", seenAuth)
+	}
+	if seenPlain != "trace-1" {
+		t.Errorf("rewriter saw X-Custom-Trace %q, want original value", seenPlain)
 	}
 }
 

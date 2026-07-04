@@ -33,7 +33,9 @@ type Input struct {
 	// Body is the raw JSON request body, already bounded by the server's
 	// body-size limit.
 	Body []byte
-	// Header is a clone of the inbound request headers.
+	// Header is a clone of the inbound request headers with credential
+	// values (Authorization, cookies, API keys, ...) redacted. Rewriters
+	// run post-auth; use UserPath for identity.
 	Header http.Header
 	// UserPath is the canonical authenticated user path, when present.
 	UserPath string
@@ -50,7 +52,8 @@ type Result struct {
 	ResponseHeader http.Header
 	// Detail optionally carries a JSON-serializable summary of what the
 	// rewriter changed. It is recorded in the audit trail's request-revision
-	// chain and never sent upstream.
+	// chain and never sent upstream; it must never contain secrets or
+	// request credentials.
 	Detail any
 }
 

@@ -39,7 +39,7 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 			in := ext.Input{
 				Endpoint:  endpoint,
 				Body:      body,
-				Header:    c.Request().Header.Clone(),
+				Header:    redactCredentialHeaders(c.Request().Header),
 				UserPath:  core.UserPathFromContext(c.Request().Context()),
 				RequestID: core.GetRequestID(c.Request().Context()),
 			}
@@ -68,6 +68,20 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 			return next(c)
 		}
 	}
+}
+
+// redactCredentialHeaders clones the request headers with credential values
+// (Authorization, cookies, API keys, ...) masked. Rewriters run post-auth and
+// get UserPath for identity, so they never need raw credentials — and this
+// keeps secrets out of anything a rewriter might echo into its audit detail.
+func redactCredentialHeaders(header http.Header) http.Header {
+	out := header.Clone()
+	for key := range out {
+		if core.IsCredentialHeader(key) {
+			out[key] = []string{"[REDACTED]"}
+		}
+	}
+	return out
 }
 
 // rewriteEndpoint reports whether the request targets an endpoint eligible
