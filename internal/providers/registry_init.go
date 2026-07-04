@@ -44,6 +44,14 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 	)
 
 	if fetched.totalModels == 0 {
+		// Deliberately keep the previous inventory fresh (no swap, no stale
+		// marking): when the whole sweep failed there is no healthy provider
+		// left to route to, so marking everything stale would only turn
+		// per-request 502/503s at the providers into 404s from an emptied
+		// virtual-model resolution. It also covers control-plane-only
+		// outages where /models is unreachable but inference still works.
+		// Individual providers are still marked stale by the per-provider
+		// recheck path as soon as a healthy alternative reappears.
 		r.applyProviderRuntimeUpdates(fetched.runtimeUpdates)
 		if fetched.failedProviders == len(providers) {
 			return fmt.Errorf("failed to fetch models from any provider")

@@ -933,6 +933,51 @@ func (r *ModelRegistry) RecordAvailabilityCheck(providerName string, err error) 
 	r.providerRuntime[providerName] = state
 }
 
+// markProviderInventoryStale flags providerName's carried inventory as stale
+// after a failed live probe, but only while at least one other registered
+// provider is healthy. Without a healthy alternative, skipping the provider
+// would leave virtual-model resolution with no target at all (a 404 for the
+// alias) — routing to it and failing with the provider's 502/503 is the more
+// honest degradation, and it keeps single-provider deployments and
+// control-plane-only outages routable.
+func (r *ModelRegistry) markProviderInventoryStale(providerName string) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.modelsByProvider[providerName]) == 0 || r.providerRuntime[providerName].inventoryStale {
+		return
+	}
+
+	healthyAlternative := false
+	for _, provider := range r.providers {
+		name := strings.TrimSpace(r.providerNames[provider])
+		if name == "" || name == providerName {
+			continue
+		}
+		state := r.providerRuntime[name]
+		if state.registered && !state.inventoryStale &&
+			strings.TrimSpace(state.lastModelFetchError) == "" &&
+			len(r.modelsByProvider[name]) > 0 {
+			healthyAlternative = true
+			break
+		}
+	}
+	if !healthyAlternative {
+		return
+	}
+
+	state := r.providerRuntime[providerName]
+	state.inventoryStale = true
+	r.providerRuntime[providerName] = state
+	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
+	r.invalidateSortedCaches()
+}
+
 // FailedProviderNames returns configured provider names whose latest model
 // refresh attempt failed. The background recheck loop uses this to re-probe
 // only the providers that are currently down.

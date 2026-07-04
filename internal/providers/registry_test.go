@@ -1237,6 +1237,150 @@ func TestStartBackgroundRefresh_RechecksFailedProviders(t *testing.T) {
 	}
 }
 
+// registerTwoProviderRegistry seeds a registry with two healthy providers and
+// runs the initial discovery sweep.
+func registerTwoProviderRegistry(t *testing.T) (*ModelRegistry, *registryMockProvider, *registryMockProvider) {
+	t.Helper()
+	registry := NewModelRegistry()
+	singleModel := func(owner string) *core.ModelsResponse {
+		return &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: owner + "-model", Object: "model", OwnedBy: owner}},
+		}
+	}
+	alpha := &registryMockProvider{name: "alpha", modelsResponse: singleModel("alpha")}
+	beta := &registryMockProvider{name: "beta", modelsResponse: singleModel("beta")}
+	registry.RegisterProviderWithNameAndType(alpha, "alpha", "alpha")
+	registry.RegisterProviderWithNameAndType(beta, "beta", "beta")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("initial Initialize() error = %v", err)
+	}
+	return registry, alpha, beta
+}
+
+// A sweep in which every provider fails must keep the previous inventory
+// routable: with no healthy alternative, marking everything stale would only
+// turn provider-level 502/503s into alias 404s (and would break aliased
+// traffic on control-plane-only outages).
+func TestInitialize_TotalRefreshFailureKeepsRouting(t *testing.T) {
+	registry, alpha, beta := registerTwoProviderRegistry(t)
+
+	alpha.err = errors.New("connection refused")
+	beta.err = errors.New("connection refused")
+	if err := registry.Initialize(context.Background()); err == nil {
+		t.Fatal("Initialize() error = nil, want total-failure error")
+	}
+
+	for _, model := range []string{"alpha/alpha-model", "beta/beta-model"} {
+		if !registry.ModelAvailable(model) {
+			t.Fatalf("ModelAvailable(%q) = false after total refresh failure, want true (no healthy alternative to route to)", model)
+		}
+	}
+}
+
+// A failed per-provider probe (the recheck loop, request-time refresh) marks
+// the provider stale as soon as a healthy alternative exists, instead of
+// waiting for the next full sweep.
+func TestRefreshProviderModels_FailureMarksStaleWhenAlternativeHealthy(t *testing.T) {
+	registry, _, beta := registerTwoProviderRegistry(t)
+
+	beta.err = errors.New("connection refused")
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
+		t.Fatal("RefreshProviderModels() error = nil, want failure")
+	}
+
+	if registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = true after failed probe with healthy alternative, want false")
+	}
+	if !registry.Supports("beta/beta-model") {
+		t.Fatal("Supports(beta) = false, want carried inventory still resolvable")
+	}
+	if !registry.ModelAvailable("alpha/alpha-model") {
+		t.Fatal("ModelAvailable(alpha) = false, want healthy provider unaffected")
+	}
+}
+
+// After a total outage, a recovering provider must retire its still-down peer
+// from load balancing at the next probe — not at the next full sweep.
+func TestRefreshProviderModels_TotalOutageRecoveryRetiresStillDownPeer(t *testing.T) {
+	registry, alpha, beta := registerTwoProviderRegistry(t)
+
+	alpha.err = errors.New("connection refused")
+	beta.err = errors.New("connection refused")
+	if err := registry.Initialize(context.Background()); err == nil {
+		t.Fatal("Initialize() error = nil, want total-failure error")
+	}
+
+	// While nothing is healthy, a failed probe must not retire the provider.
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
+		t.Fatal("RefreshProviderModels(beta) error = nil, want failure")
+	}
+	if !registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = false with no healthy alternative, want true")
+	}
+
+	// Alpha recovers; the next failed probe of beta retires it.
+	alpha.err = nil
+	if _, err := registry.RefreshProviderModels(context.Background(), "alpha"); err != nil {
+		t.Fatalf("RefreshProviderModels(alpha) error = %v, want recovery", err)
+	}
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
+		t.Fatal("RefreshProviderModels(beta) error = nil, want failure")
+	}
+	if registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = true after alpha recovered, want stale (healthy alternative exists)")
+	}
+	if !registry.ModelAvailable("alpha/alpha-model") {
+		t.Fatal("ModelAvailable(alpha) = false after recovery, want true")
+	}
+}
+
+// availabilityFailingProvider wraps the registry mock with a failing
+// CheckAvailability so the availability-gate path can be exercised.
+type availabilityFailingProvider struct {
+	*registryMockProvider
+	availabilityErr error
+}
+
+func (p *availabilityFailingProvider) CheckAvailability(context.Context) error {
+	return p.availabilityErr
+}
+
+// A failed availability check during a per-provider refresh marks the
+// provider stale just like a failed model fetch.
+func TestRefreshProviderModels_AvailabilityFailureMarksStale(t *testing.T) {
+	registry := NewModelRegistry()
+	alpha := &registryMockProvider{
+		name: "alpha",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "alpha-model", Object: "model", OwnedBy: "alpha"}},
+		},
+	}
+	beta := &availabilityFailingProvider{
+		registryMockProvider: &registryMockProvider{
+			name: "beta",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data:   []core.Model{{ID: "beta-model", Object: "model", OwnedBy: "beta"}},
+			},
+		},
+	}
+	registry.RegisterProviderWithNameAndType(alpha, "alpha", "alpha")
+	registry.RegisterProviderWithNameAndType(beta, "beta", "beta")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("initial Initialize() error = %v", err)
+	}
+
+	beta.availabilityErr = errors.New("connection refused")
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
+		t.Fatal("RefreshProviderModels(beta) error = nil, want availability failure")
+	}
+	if registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = true after failed availability check, want false")
+	}
+}
+
 // The refresh sweep shares one context budget across all providers; a slow
 // upstream must not starve the providers registered after it out of that
 // budget (a starved provider is recorded as failed and its inventory goes
