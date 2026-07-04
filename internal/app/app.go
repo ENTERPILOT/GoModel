@@ -83,6 +83,18 @@ type Config struct {
 	Extensions *ext.Registry
 }
 
+// applyExtensions snapshots a registered extension set into the server
+// configuration. A nil registry leaves the config untouched.
+func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
+	if extensions == nil {
+		return
+	}
+	serverCfg.RequestRewriters = extensions.Rewriters()
+	serverCfg.ExtraMiddleware = extensions.Middleware()
+	serverCfg.ExtraRoutes = extensions.Routes()
+	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
+}
+
 // New creates a new App with all dependencies initialized.
 // The caller must call Shutdown to release resources.
 func New(ctx context.Context, cfg Config) (*App, error) {
@@ -436,12 +448,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		Tagging:                         taggingResult.Service,
 	}
 
-	if cfg.Extensions != nil {
-		serverCfg.RequestRewriters = cfg.Extensions.Rewriters()
-		serverCfg.ExtraMiddleware = cfg.Extensions.Middleware()
-		serverCfg.ExtraRoutes = cfg.Extensions.Routes()
-		serverCfg.ExtraAuthSkipPaths = cfg.Extensions.PublicPaths()
-	}
+	applyExtensions(serverCfg, cfg.Extensions)
 
 	// Wire the readiness storage probe. Storage is a required dependency, so a
 	// failed ping makes /health/ready report not_ready (503). When no storage

@@ -9,12 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v5"
+
 	"gomodel/config"
+	"gomodel/ext"
 	"gomodel/internal/admin"
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/live"
 	"gomodel/internal/providers"
+	"gomodel/internal/server"
 )
 
 type runtimeRefreshMockProvider struct {
@@ -603,4 +607,43 @@ func TestUsagePricingRecalculationConfigured(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
+	reg := &ext.Registry{}
+	reg.RegisterRewriter(&staticRewriter{name: "r1"})
+	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
+	reg.RegisterRoutes(func(_ *echo.Echo) {})
+	reg.AddPublicPaths("/sso/callback", "/sso/*")
+
+	serverCfg := &server.Config{}
+	applyExtensions(serverCfg, reg)
+
+	if len(serverCfg.RequestRewriters) != 1 || serverCfg.RequestRewriters[0].Name() != "r1" {
+		t.Errorf("RequestRewriters not copied: %+v", serverCfg.RequestRewriters)
+	}
+	if len(serverCfg.ExtraMiddleware) != 1 {
+		t.Errorf("ExtraMiddleware not copied: %d entries", len(serverCfg.ExtraMiddleware))
+	}
+	if len(serverCfg.ExtraRoutes) != 1 {
+		t.Errorf("ExtraRoutes not copied: %d entries", len(serverCfg.ExtraRoutes))
+	}
+	if len(serverCfg.ExtraAuthSkipPaths) != 2 {
+		t.Errorf("ExtraAuthSkipPaths not copied: %v", serverCfg.ExtraAuthSkipPaths)
+	}
+
+	// A nil registry must leave the config untouched.
+	empty := &server.Config{}
+	applyExtensions(empty, nil)
+	if empty.RequestRewriters != nil || empty.ExtraMiddleware != nil || empty.ExtraRoutes != nil || empty.ExtraAuthSkipPaths != nil {
+		t.Error("nil registry must not modify server config")
+	}
+}
+
+type staticRewriter struct{ name string }
+
+func (r *staticRewriter) Name() string { return r.name }
+
+func (r *staticRewriter) Rewrite(context.Context, ext.Input) (*ext.Result, error) {
+	return nil, nil
 }
