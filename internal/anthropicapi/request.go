@@ -60,8 +60,12 @@ func ToChatRequest(req *MessagesRequest) (*core.ChatRequest, error) {
 		Messages:    messages,
 		MaxTokens:   &maxTokens,
 		Temperature: req.Temperature,
+		TopP:        req.TopP,
 		Stream:      req.Stream,
 		Reasoning:   thinkingToReasoning(req.Thinking),
+	}
+	if req.Metadata != nil && strings.TrimSpace(req.Metadata.UserID) != "" {
+		chat.User = req.Metadata.UserID
 	}
 	if req.Stream {
 		chat.StreamOptions = &core.StreamOptions{IncludeUsage: true}
@@ -433,28 +437,20 @@ func thinkingToReasoning(thinking *Thinking) *core.Reasoning {
 }
 
 // buildExtraFields carries Anthropic request fields that have a portable
-// OpenAI-compatible equivalent through as extra fields.
+// OpenAI-compatible equivalent but no typed core.ChatRequest field. Fields
+// with typed equivalents (top_p, user) are set directly on the ChatRequest in
+// ToChatRequest so internal consumers of the typed fields see them too.
 //
 // top_k is deliberately not carried: it is not a valid OpenAI Chat Completions
 // parameter, and the OpenAI-family providers forward request fields verbatim
 // and reject unknown ones with a 400. Carrying it would make any request with
 // top_k fail when routed to those providers, so it is dropped (see ADR-0007).
-// stop, top_p, and user are all portable across OpenAI-compatible providers.
 func buildExtraFields(req *MessagesRequest) core.UnknownJSONFields {
 	fields := map[string]json.RawMessage{}
-	add := func(key string, value any) {
-		if raw, err := json.Marshal(value); err == nil {
-			fields[key] = raw
-		}
-	}
 	if len(req.StopSequences) > 0 {
-		add("stop", req.StopSequences)
-	}
-	if req.TopP != nil {
-		add("top_p", *req.TopP)
-	}
-	if req.Metadata != nil && strings.TrimSpace(req.Metadata.UserID) != "" {
-		add("user", req.Metadata.UserID)
+		if raw, err := json.Marshal(req.StopSequences); err == nil {
+			fields["stop"] = raw
+		}
 	}
 	return core.UnknownJSONFieldsFromMap(fields)
 }
