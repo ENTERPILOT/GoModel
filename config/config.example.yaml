@@ -158,6 +158,26 @@ rate_limits:
           max_requests: 10000
         - period: "concurrent" # max_requests caps in-flight requests
           max_requests: 10
+  # Provider rules cap one configured provider across all consumers and
+  # models. Virtual-model load balancing and failover skip a saturated
+  # provider while another target has capacity; when no target can take the
+  # request it gets 429. Env equivalent: SET_PROVIDER_RATE_LIMIT_OPENAI="rpm=500"
+  providers:
+    - name: "openai"
+      limits:
+        - period: "minute"
+          max_requests: 500
+          max_tokens: 200000
+        - period: "concurrent"
+          max_requests: 50
+  # Model rules cap one model: "openai/gpt-4o" pins one provider's model,
+  # a bare id like "gpt-4o" caps the model across every provider. No env
+  # form; use YAML or the admin API/dashboard.
+  models:
+    - model: "openai/gpt-4o"
+      limits:
+        - period: "minute"
+          max_tokens: 90000
 
 metrics:
   enabled: false

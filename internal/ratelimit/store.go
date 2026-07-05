@@ -14,7 +14,7 @@ var ErrNotFound = errors.New("rate limit rule not found")
 type Store interface {
 	ListRules(ctx context.Context) ([]Rule, error)
 	UpsertRules(ctx context.Context, rules []Rule) error
-	DeleteRule(ctx context.Context, userPath string, periodSeconds int64) error
+	DeleteRule(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
 	ReplaceConfigRules(ctx context.Context, rules []Rule) error
 	Close() error
 }
@@ -39,7 +39,7 @@ func normalizeRulesForUpsert(rules []Rule) ([]Rule, error) {
 		if err != nil {
 			return nil, err
 		}
-		key := ruleStoreKey(item.UserPath, item.PeriodSeconds)
+		key := ruleStoreKey(item.Scope, item.Subject, item.PeriodSeconds)
 		if existing, ok := seen[key]; ok {
 			normalized[existing] = item
 			continue
@@ -50,6 +50,6 @@ func normalizeRulesForUpsert(rules []Rule) ([]Rule, error) {
 	return normalized, nil
 }
 
-func ruleStoreKey(userPath string, periodSeconds int64) string {
-	return strings.TrimSpace(userPath) + ":" + fmt.Sprint(periodSeconds)
+func ruleStoreKey(scope RuleScope, subject string, periodSeconds int64) string {
+	return string(scope) + ":" + strings.TrimSpace(subject) + ":" + fmt.Sprint(periodSeconds)
 }

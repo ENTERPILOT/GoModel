@@ -108,29 +108,46 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 		return nil
 	}
 	rules := make([]Rule, 0)
-	for _, entry := range cfg.UserPaths {
-		userPath, err := NormalizeUserPath(entry.Path)
+	appendRules := func(scope RuleScope, subject string, limits []config.RateLimitRuleConfig) error {
+		normalized, err := NormalizeSubject(scope, subject)
 		if err != nil {
-			return fmt.Errorf("invalid rate limit user path %q: %w", entry.Path, err)
+			return fmt.Errorf("invalid rate limit %s subject %q: %w", scope, subject, err)
 		}
-		for limitIdx, limit := range entry.Limits {
+		for limitIdx, limit := range limits {
 			var seconds int64
 			if limit.PeriodSeconds != nil {
 				seconds = *limit.PeriodSeconds
 			} else {
 				parsed, ok := PeriodSecondsFromName(limit.Period)
 				if !ok {
-					return fmt.Errorf("invalid rate limit period for user path %q limit %d: %q", userPath, limitIdx, limit.Period)
+					return fmt.Errorf("invalid rate limit period for %s %q limit %d: %q", scope, normalized, limitIdx, limit.Period)
 				}
 				seconds = parsed
 			}
 			rules = append(rules, Rule{
-				UserPath:      userPath,
+				Scope:         scope,
+				Subject:       normalized,
 				PeriodSeconds: seconds,
 				MaxRequests:   limit.MaxRequests,
 				MaxTokens:     limit.MaxTokens,
 				Source:        SourceConfig,
 			})
+		}
+		return nil
+	}
+	for _, entry := range cfg.UserPaths {
+		if err := appendRules(ScopeUserPath, entry.Path, entry.Limits); err != nil {
+			return err
+		}
+	}
+	for _, entry := range cfg.Providers {
+		if err := appendRules(ScopeProvider, entry.Name, entry.Limits); err != nil {
+			return err
+		}
+	}
+	for _, entry := range cfg.Models {
+		if err := appendRules(ScopeModel, entry.Model, entry.Limits); err != nil {
+			return err
 		}
 	}
 	return service.ReplaceConfigRules(ctx, rules)

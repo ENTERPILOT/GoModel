@@ -51,11 +51,34 @@ test('period helpers map names and seconds both ways', () => {
     assert.equal(module.rateLimitPeriodFromSeconds(7200), 'custom');
 });
 
+test('syncRateLimitPeriodSeconds maps the period and clears hidden token limits', () => {
+    const module = createRateLimitsModule();
+
+    module.rateLimitForm = { scope: 'user_path', subject: '/', period: 'hour', period_seconds: 60, max_requests: '5', max_tokens: '1000' };
+    module.syncRateLimitPeriodSeconds();
+    assert.equal(module.rateLimitForm.period_seconds, 3600);
+    assert.equal(module.rateLimitForm.max_tokens, '1000');
+
+    // Switching to concurrent must zero the period and drop the now-hidden
+    // token limit so it cannot invisibly block the save.
+    module.rateLimitForm.period = 'concurrent';
+    module.syncRateLimitPeriodSeconds();
+    assert.equal(module.rateLimitForm.period_seconds, 0);
+    assert.equal(module.rateLimitForm.max_tokens, '');
+
+    // Custom keeps whatever seconds are already set for the user to edit.
+    module.rateLimitForm.period = 'custom';
+    module.rateLimitForm.period_seconds = 300;
+    module.syncRateLimitPeriodSeconds();
+    assert.equal(module.rateLimitForm.period_seconds, 300);
+});
+
 test('rateLimitFormPayload validates and builds the upsert payload', () => {
     const module = createRateLimitsModule();
 
     module.rateLimitForm = {
-        user_path: ' /team/alpha ',
+        scope: 'user_path',
+        subject: ' /team/alpha ',
         period: 'minute',
         period_seconds: 60,
         max_requests: '100',
@@ -64,55 +87,104 @@ test('rateLimitFormPayload validates and builds the upsert payload', () => {
     const { payload, error } = module.rateLimitFormPayload();
     assert.equal(error, undefined);
     assert.equal(JSON.stringify(payload), JSON.stringify({
-        user_path: '/team/alpha',
+        scope: 'user_path',
+        subject: '/team/alpha',
         limit_key: { period_seconds: 60 },
         max_requests: 100,
         max_tokens: 5000
     }));
 
-    module.rateLimitForm = { user_path: '/', period: 'minute', period_seconds: 60, max_requests: '', max_tokens: '' };
+    module.rateLimitForm = { scope: 'user_path', subject: '/', period: 'minute', period_seconds: 60, max_requests: '', max_tokens: '' };
     assert.match(module.rateLimitFormPayload().error, /max requests, max tokens/i);
 
-    module.rateLimitForm = { user_path: '/', period: 'concurrent', period_seconds: 0, max_requests: '5', max_tokens: '10' };
+    module.rateLimitForm = { scope: 'user_path', subject: '/', period: 'concurrent', period_seconds: 0, max_requests: '5', max_tokens: '10' };
     assert.match(module.rateLimitFormPayload().error, /concurrent/i);
 
-    module.rateLimitForm = { user_path: '/', period: 'minute', period_seconds: 60, max_requests: '-3', max_tokens: '' };
+    module.rateLimitForm = { scope: 'user_path', subject: '/', period: 'minute', period_seconds: 60, max_requests: '-3', max_tokens: '' };
     assert.match(module.rateLimitFormPayload().error, /positive integer/i);
 
-    module.rateLimitForm = { user_path: '/', period: 'custom', period_seconds: -5, max_requests: '5', max_tokens: '' };
+    module.rateLimitForm = { scope: 'user_path', subject: '/', period: 'custom', period_seconds: -5, max_requests: '5', max_tokens: '' };
     assert.match(module.rateLimitFormPayload().error, /period seconds/i);
 
     // Blank custom seconds must not coerce to 0 and submit a concurrent rule.
-    module.rateLimitForm = { user_path: '/', period: 'custom', period_seconds: '', max_requests: '5', max_tokens: '' };
+    module.rateLimitForm = { scope: 'user_path', subject: '/', period: 'custom', period_seconds: '', max_requests: '5', max_tokens: '' };
     assert.match(module.rateLimitFormPayload().error, /period seconds is required/i);
 
     // Explicit 0 is only valid for the concurrent period.
-    module.rateLimitForm = { user_path: '/', period: 'custom', period_seconds: 0, max_requests: '5', max_tokens: '' };
+    module.rateLimitForm = { scope: 'user_path', subject: '/', period: 'custom', period_seconds: 0, max_requests: '5', max_tokens: '' };
     assert.match(module.rateLimitFormPayload().error, /concurrent/i);
 
-    module.rateLimitForm = { user_path: '/', period: 'concurrent', period_seconds: 0, max_requests: '5', max_tokens: '' };
+    module.rateLimitForm = { scope: 'user_path', subject: '/', period: 'concurrent', period_seconds: 0, max_requests: '5', max_tokens: '' };
     const concurrent = module.rateLimitFormPayload();
     assert.equal(concurrent.error, undefined);
     assert.equal(concurrent.payload.limit_key.period_seconds, 0);
 });
 
-test('filteredRateLimits sorts by path then period and filters', () => {
+test('rateLimitFormPayload handles provider and model scopes', () => {
+    const module = createRateLimitsModule();
+
+    module.rateLimitForm = { scope: 'provider', subject: 'openai', period: 'minute', period_seconds: 60, max_requests: '500', max_tokens: '' };
+    const provider = module.rateLimitFormPayload();
+    assert.equal(provider.error, undefined);
+    assert.equal(provider.payload.scope, 'provider');
+    assert.equal(provider.payload.subject, 'openai');
+
+    // A provider or model rule cannot be saved without its subject.
+    module.rateLimitForm = { scope: 'provider', subject: '  ', period: 'minute', period_seconds: 60, max_requests: '5', max_tokens: '' };
+    assert.match(module.rateLimitFormPayload().error, /provider name is required/i);
+
+    module.rateLimitForm = { scope: 'model', subject: 'openai/gpt-4o', period: 'minute', period_seconds: 60, max_requests: '', max_tokens: '100000' };
+    const model = module.rateLimitFormPayload();
+    assert.equal(model.error, undefined);
+    assert.equal(model.payload.scope, 'model');
+    assert.equal(model.payload.subject, 'openai/gpt-4o');
+    assert.equal(model.payload.max_tokens, 100000);
+});
+
+test('syncRateLimitScope resets the subject per scope', () => {
+    const module = createRateLimitsModule();
+    module.rateLimitForm = module.defaultRateLimitForm();
+
+    module.rateLimitForm.scope = 'provider';
+    module.syncRateLimitScope();
+    assert.equal(module.rateLimitForm.subject, '');
+    assert.equal(module.rateLimitSubjectFieldLabel(), 'Provider Name');
+    assert.equal(module.rateLimitSubjectPlaceholder(), 'openai');
+
+    module.rateLimitForm.scope = 'user_path';
+    module.syncRateLimitScope();
+    assert.equal(module.rateLimitForm.subject, '/');
+    assert.equal(module.rateLimitSubjectFieldLabel(), 'User Path');
+});
+
+test('filteredRateLimits sorts by scope, subject, period and filters', () => {
     const module = createRateLimitsModule();
     module.rateLimits = [
-        { user_path: '/team', period_seconds: 86400, period_label: 'day' },
-        { user_path: '/alpha', period_seconds: 60, period_label: 'minute' },
-        { user_path: '/team', period_seconds: 0, period_label: 'concurrent' }
+        { scope: 'user_path', subject: '/team', user_path: '/team', period_seconds: 86400, period_label: 'day' },
+        { scope: 'model', subject: 'openai/gpt-4o', period_seconds: 60, period_label: 'minute' },
+        { scope: 'user_path', subject: '/alpha', user_path: '/alpha', period_seconds: 60, period_label: 'minute' },
+        { scope: 'provider', subject: 'openai', period_seconds: 0, period_label: 'concurrent' },
+        { scope: 'user_path', subject: '/team', user_path: '/team', period_seconds: 0, period_label: 'concurrent' }
     ];
     const sorted = module.filteredRateLimits();
     assert.deepEqual(
         sorted.map((item) => module.rateLimitKey(item)),
-        ['/alpha:60', '/team:0', '/team:86400']
+        [
+            'user_path:/alpha:60',
+            'user_path:/team:0',
+            'user_path:/team:86400',
+            'provider:openai:0',
+            'model:openai/gpt-4o:60'
+        ]
     );
 
-    module.rateLimitFilter = 'concurrent';
+    module.rateLimitFilter = 'provider';
     const filtered = module.filteredRateLimits();
     assert.equal(filtered.length, 1);
-    assert.equal(filtered[0].period_seconds, 0);
+    assert.equal(filtered[0].subject, 'openai');
+
+    // Items from a pre-scope server still key off user_path.
+    assert.equal(module.rateLimitKey({ user_path: '/legacy', period_seconds: 60 }), 'user_path:/legacy:60');
 });
 
 test('usage percent clamps to 0..100', () => {

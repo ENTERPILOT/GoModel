@@ -72,7 +72,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	}
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
-		if strings.HasPrefix(key, "SET_BUDGET_") || strings.HasPrefix(key, "SET_RATE_LIMIT_") || strings.HasPrefix(key, "TAGGING_HEADER_") {
+		if strings.HasPrefix(key, "SET_BUDGET_") || strings.HasPrefix(key, "SET_RATE_LIMIT_") || strings.HasPrefix(key, "SET_PROVIDER_RATE_LIMIT_") || strings.HasPrefix(key, "TAGGING_HEADER_") {
 			t.Setenv(key, "")
 			os.Unsetenv(key)
 		}

@@ -15,21 +15,46 @@ import (
 )
 
 // RateLimiter admits or rejects requests against configured rate limit rules.
+// RouteAvailable additionally satisfies gateway.RouteGate so failover can skip
+// saturated provider/model targets.
 type RateLimiter interface {
-	Acquire(userPath string, now time.Time) (*ratelimit.Reservation, error)
+	Acquire(subjects ratelimit.Subjects, now time.Time) (*ratelimit.Reservation, error)
+	RouteAvailable(providerName, model string) bool
 }
 
 func noopRelease() {}
+
+// rateLimitRoute names the resolved provider/model a request is about to use,
+// so provider- and model-scoped rules can be checked at admission. The zero
+// value means the route is unknown (batch submissions) and only user-path
+// rules apply.
+type rateLimitRoute struct {
+	provider string
+	model    string
+}
+
+// rateLimitRouteFromWorkflow extracts the resolved route for translated
+// endpoints. Failover may still execute elsewhere; the failover sweep
+// re-checks candidates through the route gate.
+func rateLimitRouteFromWorkflow(workflow *core.Workflow) rateLimitRoute {
+	if workflow == nil || workflow.Resolution == nil {
+		return rateLimitRoute{}
+	}
+	return rateLimitRoute{
+		provider: workflow.Resolution.ProviderName,
+		model:    workflow.Resolution.ResolvedQualifiedModel(),
+	}
+}
 
 // enforceRateLimit admits the request against matching rate limit rules. On
 // success it sets x-ratelimit-* response headers and returns a release
 // function that must run when the request finishes (it returns concurrency
 // slots). On breach it returns a 429 gateway error.
-func enforceRateLimit(c *echo.Context, limiter RateLimiter) (func(), error) {
+func enforceRateLimit(c *echo.Context, limiter RateLimiter, route rateLimitRoute) (func(), error) {
 	if limiter == nil || c == nil || c.Request() == nil {
 		return noopRelease, nil
 	}
-	reservation, err := acquireRateLimitForContext(c.Request().Context(), limiter)
+	reservation, err := acquireRateLimitForContext(c.Request().Context(), limiter, route)
 	if err != nil {
 		return noopRelease, err
 	}
@@ -40,7 +65,7 @@ func enforceRateLimit(c *echo.Context, limiter RateLimiter) (func(), error) {
 	return reservation.Release, nil
 }
 
-func acquireRateLimitForContext(ctx context.Context, limiter RateLimiter) (*ratelimit.Reservation, error) {
+func acquireRateLimitForContext(ctx context.Context, limiter RateLimiter, route rateLimitRoute) (*ratelimit.Reservation, error) {
 	if limiter == nil || ctx == nil {
 		return nil, nil
 	}
@@ -48,7 +73,11 @@ func acquireRateLimitForContext(ctx context.Context, limiter RateLimiter) (*rate
 	if userPath == "" {
 		userPath = "/"
 	}
-	reservation, err := limiter.Acquire(userPath, time.Now().UTC())
+	reservation, err := limiter.Acquire(ratelimit.Subjects{
+		UserPath: userPath,
+		Provider: route.provider,
+		Model:    route.model,
+	}, time.Now().UTC())
 	if err != nil {
 		return nil, rateLimitCheckError(err)
 	}
@@ -113,10 +142,11 @@ func retryAfterSeconds(d time.Duration) int64 {
 
 // batchRateLimitEnforcer counts a batch submission toward request windows.
 // The reservation is released immediately: an asynchronous batch job must not
-// pin a concurrency slot for its lifetime.
+// pin a concurrency slot for its lifetime. The route is unknown at submission
+// (batch files can mix models), so only user-path rules apply.
 func batchRateLimitEnforcer(limiter RateLimiter) func(context.Context) error {
 	return func(ctx context.Context) error {
-		reservation, err := acquireRateLimitForContext(ctx, limiter)
+		reservation, err := acquireRateLimitForContext(ctx, limiter, rateLimitRoute{})
 		if err != nil {
 			return err
 		}

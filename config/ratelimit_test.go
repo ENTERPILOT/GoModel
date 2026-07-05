@@ -122,6 +122,72 @@ rate_limits:
 	})
 }
 
+func TestLoadProviderRateLimitEnv(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yamlConfig := `
+rate_limits:
+  providers:
+    - name: openai
+      limits:
+        - period: minute
+          max_requests: 1
+    - name: anthropic
+      limits:
+        - period: minute
+          max_requests: 2
+  models:
+    - model: openai/gpt-4o
+      limits:
+        - period: minute
+          max_tokens: 90000
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+		// The env entry replaces the whole YAML entry with the same provider,
+		// and the distinct prefix keeps it out of the user-path suffix space.
+		t.Setenv("SET_PROVIDER_RATE_LIMIT_OPENAI", "rpm=500,tpm=100000,concurrent=20")
+		// Underscores map to hyphens like provider-instance env vars.
+		t.Setenv("SET_PROVIDER_RATE_LIMIT_OPENAI_EAST", "rpm=100")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+
+		providers := result.Config.RateLimits.Providers
+		if len(providers) != 3 {
+			t.Fatalf("providers = %d, want 3: %+v", len(providers), providers)
+		}
+		byName := map[string]RateLimitProviderConfig{}
+		for _, entry := range providers {
+			byName[entry.Name] = entry
+		}
+		if entry := byName["anthropic"]; *entry.Limits[0].MaxRequests != 2 {
+			t.Fatalf("unrelated YAML provider changed: %+v", entry)
+		}
+		if entry := byName["openai"]; len(entry.Limits) != 2 {
+			t.Fatalf("env provider entry = %+v, want openai with minute+concurrent limits", entry)
+		}
+		if entry, ok := byName["openai-east"]; !ok || *entry.Limits[0].MaxRequests != 100 {
+			t.Fatalf("providers = %+v, want openai-east from underscore suffix", providers)
+		}
+		if result.Config.RateLimits.UserPaths != nil {
+			t.Fatalf("user paths = %+v, want none (provider env must not leak into paths)", result.Config.RateLimits.UserPaths)
+		}
+
+		models := result.Config.RateLimits.Models
+		if len(models) != 1 || models[0].Model != "openai/gpt-4o" {
+			t.Fatalf("models = %+v, want openai/gpt-4o", models)
+		}
+		if models[0].Limits[0].PeriodSeconds == nil || *models[0].Limits[0].PeriodSeconds != 60 || *models[0].Limits[0].MaxTokens != 90000 {
+			t.Fatalf("model limit = %+v, want minute/90000 tokens", models[0].Limits[0])
+		}
+	})
+}
+
 func TestLoadRateLimitEnvRejectsUnknownName(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
@@ -215,6 +281,72 @@ rate_limits:
           max_requests: -1
 `,
 			wantErr: "max_requests must be greater than 0",
+		},
+		{
+			name: "valid provider and model rules",
+			yaml: `
+rate_limits:
+  providers:
+    - name: OpenAI
+      limits:
+        - period: minute
+          max_requests: 500
+  models:
+    - model: openai/gpt-4o
+      limits:
+        - period: minute
+          max_tokens: 90000
+`,
+		},
+		{
+			name: "provider name required",
+			yaml: `
+rate_limits:
+  providers:
+    - name: "  "
+      limits:
+        - period: minute
+          max_requests: 5
+`,
+			wantErr: "providers[0].name is required",
+		},
+		{
+			name: "provider name rejects slashes",
+			yaml: `
+rate_limits:
+  providers:
+    - name: open/ai
+      limits:
+        - period: minute
+          max_requests: 5
+`,
+			wantErr: "without slashes or spaces",
+		},
+		{
+			name: "model subject required",
+			yaml: `
+rate_limits:
+  models:
+    - model: ""
+      limits:
+        - period: minute
+          max_requests: 5
+`,
+			wantErr: "models[0].model is required",
+		},
+		{
+			name: "duplicate provider period",
+			yaml: `
+rate_limits:
+  providers:
+    - name: openai
+      limits:
+        - period: minute
+          max_requests: 5
+        - period_seconds: 60
+          max_tokens: 100
+`,
+			wantErr: "duplicate rate limit",
 		},
 		{
 			name: "disabled config skips validation",

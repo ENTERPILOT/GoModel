@@ -14,10 +14,10 @@ func TestNormalizeRule(t *testing.T) {
 	}{
 		{
 			name: "normalizes path and keeps limits",
-			rule: Rule{UserPath: "team/alpha/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(10)},
+			rule: Rule{Subject: "team/alpha/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(10)},
 			check: func(t *testing.T, rule Rule) {
-				if rule.UserPath != "/team/alpha" {
-					t.Fatalf("user path = %q, want /team/alpha", rule.UserPath)
+				if rule.Subject != "/team/alpha" {
+					t.Fatalf("user path = %q, want /team/alpha", rule.Subject)
 				}
 				if rule.CreatedAt.IsZero() || rule.UpdatedAt.IsZero() {
 					t.Fatal("timestamps not set")
@@ -26,46 +26,46 @@ func TestNormalizeRule(t *testing.T) {
 		},
 		{
 			name: "empty path becomes root",
-			rule: Rule{UserPath: "", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(100)},
+			rule: Rule{Subject: "", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(100)},
 			check: func(t *testing.T, rule Rule) {
-				if rule.UserPath != "/" {
-					t.Fatalf("user path = %q, want /", rule.UserPath)
+				if rule.Subject != "/" {
+					t.Fatalf("user path = %q, want /", rule.Subject)
 				}
 			},
 		},
 		{
 			name:    "negative period rejected",
-			rule:    Rule{UserPath: "/", PeriodSeconds: -1, MaxRequests: int64Ptr(1)},
+			rule:    Rule{Subject: "/", PeriodSeconds: -1, MaxRequests: int64Ptr(1)},
 			wantErr: "period_seconds",
 		},
 		{
 			name:    "windowed rule requires a limit",
-			rule:    Rule{UserPath: "/", PeriodSeconds: PeriodMinuteSeconds},
+			rule:    Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds},
 			wantErr: "at least one of max_requests or max_tokens",
 		},
 		{
 			name:    "zero max_requests rejected",
-			rule:    Rule{UserPath: "/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(0)},
+			rule:    Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(0)},
 			wantErr: "max_requests must be greater than 0",
 		},
 		{
 			name:    "zero max_tokens rejected",
-			rule:    Rule{UserPath: "/", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(0)},
+			rule:    Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(0)},
 			wantErr: "max_tokens must be greater than 0",
 		},
 		{
 			name:    "concurrent rule rejects max_tokens",
-			rule:    Rule{UserPath: "/", PeriodSeconds: PeriodConcurrent, MaxRequests: int64Ptr(1), MaxTokens: int64Ptr(10)},
+			rule:    Rule{Subject: "/", PeriodSeconds: PeriodConcurrent, MaxRequests: int64Ptr(1), MaxTokens: int64Ptr(10)},
 			wantErr: "max_tokens is not valid",
 		},
 		{
 			name:    "concurrent rule requires max_requests",
-			rule:    Rule{UserPath: "/", PeriodSeconds: PeriodConcurrent},
+			rule:    Rule{Subject: "/", PeriodSeconds: PeriodConcurrent},
 			wantErr: "max_requests is required",
 		},
 		{
 			name:    "invalid path rejected",
-			rule:    Rule{UserPath: "/a/../b", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(1)},
+			rule:    Rule{Subject: "/a/../b", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(1)},
 			wantErr: "user path",
 		},
 	}
@@ -121,7 +121,7 @@ func TestPeriodHelpers(t *testing.T) {
 }
 
 func TestExceededErrorMessages(t *testing.T) {
-	rule := Rule{UserPath: "/team", PeriodSeconds: PeriodMinuteSeconds}
+	rule := Rule{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds}
 	tests := []struct {
 		scope LimitScope
 		want  string

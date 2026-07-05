@@ -4,7 +4,7 @@
 <div>
     <div class="page-header">
         <div>
-            <div class="inline-help-section" x-data="{ open: false, copyId: 'rate-limits-help-copy', showLabel: 'Show rate limits help', hideLabel: 'Hide rate limits help', text: 'Rate limits cap requests, tokens, and in-flight concurrency for a user path subtree. Requests over a limit receive 429 responses with Retry-After and x-ratelimit-* headers. Counters are per gateway instance and reset on restart; token limits need usage tracking.' }">
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'rate-limits-help-copy', showLabel: 'Show rate limits help', hideLabel: 'Hide rate limits help', text: 'Rate limits cap requests, tokens, and in-flight concurrency for a user path subtree, a provider, or a model. Consumer (user path) breaches return 429 with Retry-After and x-ratelimit-* headers; saturated providers and models are skipped by load balancing and failover while capacity exists elsewhere. Counters are per gateway instance and reset on restart; token limits need usage tracking.' }">
                 <div class="inline-help-title-row">
                     <h2>Rate Limits</h2>
                     {{template "inline-help-toggle" .}}
@@ -43,8 +43,8 @@
                 <input type="text"
                        id="rate-limit-filter"
                        class="filter-input"
-                       placeholder="Filter by user path or period..."
-                       aria-label="Filter rate limits by user path or period"
+                       placeholder="Filter by subject, scope, or period..."
+                       aria-label="Filter rate limits by subject, scope, or period"
                        x-model="rateLimitFilter">
             </div>
         </div>
@@ -62,7 +62,10 @@
          @click="closeRateLimitForm()"
          @keydown.escape.window="rateLimitFormOpen && !authDialogOpen && closeRateLimitForm()">
         <div class="model-editor budget-editor" x-show="rateLimitFormOpen" role="dialog" aria-modal="true" aria-label="Rate limit editor" @click.stop>
-            <form class="form" @submit.prevent="submitRateLimitForm()">
+            <!-- novalidate: the concurrent period keeps 0 in the hidden period-seconds
+                 input (min=1), and native validation silently blocks submit on hidden
+                 invalid controls. Validation lives in rateLimitFormPayload(). -->
+            <form class="form" novalidate @submit.prevent="submitRateLimitForm()">
                 <div class="editor-header">
                     <div>
                         <h3 x-text="rateLimitEditing ? 'Edit Rate Limit' : 'Create Rate Limit'">Create Rate Limit</h3>
@@ -74,14 +77,26 @@
 
                 <div class="form-grid">
                     <div class="form-field">
-                        <label class="form-field-label" for="rate-limit-user-path">User Path</label>
-                        <input id="rate-limit-user-path"
+                        <label class="form-field-label" for="rate-limit-scope">Scope</label>
+                        <select id="rate-limit-scope"
+                                class="form-select settings-select"
+                                x-model="rateLimitForm.scope"
+                                :disabled="rateLimitEditing"
+                                @change="syncRateLimitScope()">
+                            <template x-for="option in rateLimitScopeOptions()" :key="option.value">
+                                <option :value="option.value" x-text="option.label"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="rate-limit-subject" x-text="rateLimitSubjectFieldLabel()">User Path</label>
+                        <input id="rate-limit-subject"
                                class="form-input"
                                type="text"
-                               placeholder="/team/alpha"
-                               x-ref="rateLimitUserPathInput"
-                               :value="rateLimitForm.user_path"
-                               @input="setRateLimitFormUserPath($event.target.value)"
+                               :placeholder="rateLimitSubjectPlaceholder()"
+                               x-ref="rateLimitSubjectInput"
+                               :value="rateLimitForm.subject"
+                               @input="setRateLimitFormSubject($event.target.value)"
                                :disabled="rateLimitEditing">
                     </div>
                     <div class="form-field">
@@ -129,7 +144,7 @@
                     </div>
                 </div>
                 <p class="form-hint">
-                    A rule limits the whole user path subtree with one shared counter. Leave a field empty to skip that limit. Token limits require usage tracking.
+                    A user path rule limits the whole subtree; provider and model rules cap all traffic routed there and make load balancing skip the target while it is saturated. One shared counter per rule. Leave a field empty to skip that limit. Token limits require usage tracking.
                 </p>
 
                 <p class="form-error" x-show="rateLimitFormError" x-text="rateLimitFormError" role="alert" aria-live="assertive"></p>
@@ -149,8 +164,14 @@
             <section class="budget-row">
                 <div class="budget-row-main">
                     <div class="budget-row-head">
-                        <code class="budget-user-path" :title="'User Path: ' + item.user_path" x-text="item.user_path"></code>
+                        <code class="budget-user-path" :title="rateLimitScopeLabel(item) + ': ' + rateLimitSubject(item)" x-text="rateLimitSubject(item)"></code>
                         <div class="budget-row-period">
+                            <span class="budget-period-label"
+                                  x-show="rateLimitScope(item) !== 'user_path'"
+                                  :title="'Rule scope: ' + rateLimitScopeLabel(item)">
+                                <i :data-lucide="rateLimitScope(item) === 'provider' ? 'server' : 'box'" class="budget-period-icon" aria-hidden="true"></i>
+                                <span x-text="rateLimitScopeLabel(item)"></span>
+                            </span>
                             <span class="budget-period-label">
                                 <i :data-lucide="rateLimitIsConcurrent(item) ? 'activity' : 'timer'" class="budget-period-icon" aria-hidden="true"></i>
                                 <span x-text="rateLimitPeriodLabel(item)"></span>

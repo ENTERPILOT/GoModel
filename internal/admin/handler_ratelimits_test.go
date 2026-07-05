@@ -30,7 +30,7 @@ func (s *adminRateLimitStore) UpsertRules(_ context.Context, rules []ratelimit.R
 		}
 		replaced := false
 		for i, existing := range s.rules {
-			if existing.UserPath == normalized.UserPath && existing.PeriodSeconds == normalized.PeriodSeconds {
+			if existing.Scope == normalized.Scope && existing.Subject == normalized.Subject && existing.PeriodSeconds == normalized.PeriodSeconds {
 				s.rules[i] = normalized
 				replaced = true
 				break
@@ -43,9 +43,9 @@ func (s *adminRateLimitStore) UpsertRules(_ context.Context, rules []ratelimit.R
 	return nil
 }
 
-func (s *adminRateLimitStore) DeleteRule(_ context.Context, userPath string, periodSeconds int64) error {
+func (s *adminRateLimitStore) DeleteRule(_ context.Context, scope ratelimit.RuleScope, subject string, periodSeconds int64) error {
 	for i, existing := range s.rules {
-		if existing.UserPath == userPath && existing.PeriodSeconds == periodSeconds {
+		if existing.Scope == scope && existing.Subject == subject && existing.PeriodSeconds == periodSeconds {
 			s.rules = append(s.rules[:i], s.rules[i+1:]...)
 			return nil
 		}
@@ -130,7 +130,7 @@ func TestRateLimitEndpointsUpsertListDelete(t *testing.T) {
 	}
 
 	// The service enforces the freshly persisted rule immediately.
-	if _, err := service.Acquire("/team/beta/app", time.Now().UTC()); err != nil {
+	if _, err := service.Acquire(ratelimit.Subjects{UserPath: "/team/beta/app"}, time.Now().UTC()); err != nil {
 		t.Fatalf("Acquire() failed: %v", err)
 	}
 
@@ -201,7 +201,7 @@ func TestRateLimitEndpointsResetCounters(t *testing.T) {
 	store := &adminRateLimitStore{}
 	h, service := newRateLimitHandler(t, store)
 	if err := service.UpsertRules(context.Background(), []ratelimit.Rule{{
-		UserPath:      "/team",
+		Subject:       "/team",
 		PeriodSeconds: ratelimit.PeriodMinuteSeconds,
 		MaxRequests:   func() *int64 { v := int64(1); return &v }(),
 		Source:        ratelimit.SourceManual,
@@ -209,10 +209,10 @@ func TestRateLimitEndpointsResetCounters(t *testing.T) {
 		t.Fatalf("UpsertRules() failed: %v", err)
 	}
 
-	if _, err := service.Acquire("/team", rateLimitTestNow); err != nil {
+	if _, err := service.Acquire(ratelimit.Subjects{UserPath: "/team"}, rateLimitTestNow); err != nil {
 		t.Fatalf("Acquire() failed: %v", err)
 	}
-	if _, err := service.Acquire("/team", rateLimitTestNow); err == nil {
+	if _, err := service.Acquire(ratelimit.Subjects{UserPath: "/team"}, rateLimitTestNow); err == nil {
 		t.Fatal("Acquire() over limit succeeded")
 	}
 
@@ -223,7 +223,7 @@ func TestRateLimitEndpointsResetCounters(t *testing.T) {
 	if resetRec.Code != http.StatusOK {
 		t.Fatalf("reset status = %d, want 200 body=%s", resetRec.Code, resetRec.Body.String())
 	}
-	if _, err := service.Acquire("/team", rateLimitTestNow); err != nil {
+	if _, err := service.Acquire(ratelimit.Subjects{UserPath: "/team"}, rateLimitTestNow); err != nil {
 		t.Fatalf("Acquire() after reset failed: %v", err)
 	}
 
@@ -243,7 +243,86 @@ func TestRateLimitEndpointsResetCounters(t *testing.T) {
 	if allRec.Code != http.StatusOK {
 		t.Fatalf("reset-all status = %d, want 200 body=%s", allRec.Code, allRec.Body.String())
 	}
-	if _, err := service.Acquire("/team", rateLimitTestNow); err != nil {
+	if _, err := service.Acquire(ratelimit.Subjects{UserPath: "/team"}, rateLimitTestNow); err != nil {
 		t.Fatalf("Acquire() after reset-all failed: %v", err)
+	}
+}
+
+func TestRateLimitEndpointsProviderAndModelScopes(t *testing.T) {
+	store := &adminRateLimitStore{}
+	h, service := newRateLimitHandler(t, store)
+
+	c, rec := adminRateLimitRequest(
+		http.MethodPut,
+		`{"scope":"provider","subject":"OpenAI","limit_key":{"period":"minute"},"max_requests":500}`,
+	)
+	if err := h.UpsertRateLimit(c); err != nil {
+		t.Fatalf("UpsertRateLimit() failed: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var body rateLimitListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.RateLimits) != 1 {
+		t.Fatalf("rate limits = %d, want 1", len(body.RateLimits))
+	}
+	item := body.RateLimits[0]
+	if item.Scope != "provider" || item.Subject != "openai" {
+		t.Fatalf("item = %+v, want provider openai (normalized lowercase)", item)
+	}
+	if item.UserPath != "" {
+		t.Fatalf("user_path = %q, want empty for provider rules", item.UserPath)
+	}
+
+	// The rule gates routes immediately.
+	if _, err := service.Acquire(ratelimit.Subjects{UserPath: "/", Provider: "openai", Model: "openai/gpt-4o"}, rateLimitTestNow); err != nil {
+		t.Fatalf("Acquire() failed: %v", err)
+	}
+
+	// A model rule for the same period coexists.
+	modelCtx, modelRec := adminRateLimitRequest(
+		http.MethodPut,
+		`{"scope":"model","subject":"openai/gpt-4o","limit_key":{"period":"minute"},"max_tokens":90000}`,
+	)
+	if err := h.UpsertRateLimit(modelCtx); err != nil {
+		t.Fatalf("UpsertRateLimit() model failed: %v", err)
+	}
+	if modelRec.Code != http.StatusOK {
+		t.Fatalf("model status = %d, want 200 body=%s", modelRec.Code, modelRec.Body.String())
+	}
+
+	// A provider/model rule without a subject is rejected, and user_path must
+	// not double as the subject.
+	badCtx, badRec := adminRateLimitRequest(
+		http.MethodPut,
+		`{"scope":"provider","user_path":"/team","limit_key":{"period":"minute"},"max_requests":5}`,
+	)
+	if err := h.UpsertRateLimit(badCtx); err != nil {
+		t.Fatalf("UpsertRateLimit() failed: %v", err)
+	}
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("subjectless provider rule status = %d, want 400 body=%s", badRec.Code, badRec.Body.String())
+	}
+
+	// Delete by scope+subject.
+	deleteCtx, deleteRec := adminRateLimitRequest(
+		http.MethodDelete,
+		`{"scope":"provider","subject":"openai","limit_key":{"period":"minute"}}`,
+	)
+	if err := h.DeleteRateLimit(deleteCtx); err != nil {
+		t.Fatalf("DeleteRateLimit() failed: %v", err)
+	}
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200 body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	var afterDelete rateLimitListResponse
+	if err := json.Unmarshal(deleteRec.Body.Bytes(), &afterDelete); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if len(afterDelete.RateLimits) != 1 || afterDelete.RateLimits[0].Scope != "model" {
+		t.Fatalf("after delete = %+v, want only the model rule", afterDelete.RateLimits)
 	}
 }

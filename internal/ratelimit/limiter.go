@@ -77,16 +77,17 @@ func (w *windowCounter) retryAfter(now time.Time, periodSeconds, limit int64) ti
 }
 
 type ruleKey struct {
-	userPath      string
+	scope         RuleScope
+	subject       string
 	periodSeconds int64
 }
 
 func keyForRule(rule Rule) ruleKey {
-	return ruleKey{userPath: rule.UserPath, periodSeconds: rule.PeriodSeconds}
+	return ruleKey{scope: rule.Scope, subject: rule.Subject, periodSeconds: rule.PeriodSeconds}
 }
 
 // limiter holds all live counters. Counters exist per rule (one shared
-// counter for the rule's whole subtree), so cardinality equals the number of
+// counter for the rule's whole subject), so cardinality equals the number of
 // configured rules and a single mutex is sufficient.
 type limiter struct {
 	mu       sync.Mutex
@@ -199,6 +200,38 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 		}
 	}
 	return headers, held, nil
+}
+
+// available reports whether every rule would currently admit one more
+// request. It is a read-only probe for routing decisions (load balancing and
+// failover skip saturated targets); admission stays the authoritative check.
+func (l *limiter) available(rules []Rule, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, rule := range rules {
+		key := keyForRule(rule)
+		if rule.PeriodSeconds == PeriodConcurrent {
+			if l.inFlight[key] >= *rule.MaxRequests {
+				return false
+			}
+			continue
+		}
+		if rule.MaxRequests != nil {
+			counter := l.counter(l.requests, key)
+			counter.advance(now, rule.PeriodSeconds)
+			if counter.estimate(now, rule.PeriodSeconds) >= *rule.MaxRequests {
+				return false
+			}
+		}
+		if rule.MaxTokens != nil {
+			counter := l.counter(l.tokens, key)
+			counter.advance(now, rule.PeriodSeconds)
+			if counter.estimate(now, rule.PeriodSeconds) >= *rule.MaxTokens {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // release returns previously held concurrency slots.

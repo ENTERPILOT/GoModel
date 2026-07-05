@@ -54,12 +54,13 @@ func (h *Handler) UpsertRateLimit(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	userPath, periodSeconds, err := rateLimitRequestKey(req.UserPath, req.LimitKey)
+	scope, subject, periodSeconds, err := rateLimitRequestKey(req.Scope, req.Subject, req.UserPath, req.LimitKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
 	item, err := ratelimit.NormalizeRule(ratelimit.Rule{
-		UserPath:      userPath,
+		Scope:         scope,
+		Subject:       subject,
 		PeriodSeconds: periodSeconds,
 		MaxRequests:   req.MaxRequests,
 		MaxTokens:     req.MaxTokens,
@@ -96,11 +97,11 @@ func (h *Handler) DeleteRateLimit(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	userPath, periodSeconds, err := rateLimitRequestKey(req.UserPath, req.LimitKey)
+	scope, subject, periodSeconds, err := rateLimitRequestKey(req.Scope, req.Subject, req.UserPath, req.LimitKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
-	if err := h.rateLimits.DeleteRule(c.Request().Context(), userPath, periodSeconds); err != nil {
+	if err := h.rateLimits.DeleteRule(c.Request().Context(), scope, subject, periodSeconds); err != nil {
 		return handleError(c, rateLimitServiceError("failed to delete rate limit rule", err))
 	}
 	return h.ListRateLimits(c)
@@ -126,11 +127,11 @@ func (h *Handler) ResetRateLimit(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	userPath, periodSeconds, err := rateLimitRequestKey(req.UserPath, &rateLimitKeyRequest{Period: req.Period, PeriodSeconds: req.PeriodSeconds})
+	scope, subject, periodSeconds, err := rateLimitRequestKey(req.Scope, req.Subject, req.UserPath, &rateLimitKeyRequest{Period: req.Period, PeriodSeconds: req.PeriodSeconds})
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
-	if err := h.rateLimits.ResetRule(userPath, periodSeconds); err != nil {
+	if err := h.rateLimits.ResetRule(scope, subject, periodSeconds); err != nil {
 		return handleError(c, rateLimitServiceError("failed to reset rate limit rule", err))
 	}
 	return h.ListRateLimits(c)
@@ -171,7 +172,9 @@ type rateLimitListResponse struct {
 }
 
 type rateLimitStatusResponse struct {
-	UserPath          string     `json:"user_path"`
+	Scope             string     `json:"scope"`
+	Subject           string     `json:"subject"`
+	UserPath          string     `json:"user_path,omitempty"`
 	PeriodSeconds     int64      `json:"period_seconds"`
 	PeriodLabel       string     `json:"period_label"`
 	MaxRequests       *int64     `json:"max_requests,omitempty"`
@@ -189,6 +192,8 @@ type rateLimitStatusResponse struct {
 }
 
 type upsertRateLimitRequest struct {
+	Scope       string               `json:"scope"`
+	Subject     string               `json:"subject"`
 	UserPath    string               `json:"user_path"`
 	LimitKey    *rateLimitKeyRequest `json:"limit_key"`
 	MaxRequests *int64               `json:"max_requests"`
@@ -196,6 +201,8 @@ type upsertRateLimitRequest struct {
 }
 
 type deleteRateLimitRequest struct {
+	Scope    string               `json:"scope"`
+	Subject  string               `json:"subject"`
 	UserPath string               `json:"user_path"`
 	LimitKey *rateLimitKeyRequest `json:"limit_key"`
 }
@@ -206,6 +213,8 @@ type rateLimitKeyRequest struct {
 }
 
 type resetRateLimitRequest struct {
+	Scope         string `json:"scope"`
+	Subject       string `json:"subject"`
 	UserPath      string `json:"user_path"`
 	Period        string `json:"period,omitempty"`
 	PeriodSeconds *int64 `json:"period_seconds,omitempty"`
@@ -224,7 +233,8 @@ func rateLimitStatusResponses(statuses []ratelimit.Status) []rateLimitStatusResp
 	for _, status := range statuses {
 		rule := status.Rule
 		item := rateLimitStatusResponse{
-			UserPath:          rule.UserPath,
+			Scope:             string(rule.Scope),
+			Subject:           rule.Subject,
 			PeriodSeconds:     rule.PeriodSeconds,
 			PeriodLabel:       ratelimit.PeriodLabel(rule.PeriodSeconds),
 			MaxRequests:       rule.MaxRequests,
@@ -238,6 +248,10 @@ func rateLimitStatusResponses(statuses []ratelimit.Status) []rateLimitStatusResp
 			TokensRemaining:   status.TokensRemaining,
 			InFlight:          status.InFlight,
 		}
+		// Convenience duplicate: user-path rules keep the natural spelling.
+		if rule.Scope == ratelimit.ScopeUserPath {
+			item.UserPath = rule.Subject
+		}
 		if !status.WindowStart.IsZero() {
 			start := status.WindowStart
 			end := status.WindowEnd
@@ -249,19 +263,33 @@ func rateLimitStatusResponses(statuses []ratelimit.Status) []rateLimitStatusResp
 	return responses
 }
 
-func rateLimitRequestKey(rawUserPath string, key *rateLimitKeyRequest) (string, int64, error) {
-	userPath, err := ratelimit.NormalizeUserPath(rawUserPath)
+// rateLimitRequestKey resolves the rule identity from a request. The subject
+// may arrive as `subject` (any scope) or as `user_path` (the natural spelling
+// for user-path rules); scope defaults to user_path.
+func rateLimitRequestKey(rawScope, rawSubject, rawUserPath string, key *rateLimitKeyRequest) (ratelimit.RuleScope, string, int64, error) {
+	scope, err := ratelimit.NormalizeScope(rawScope)
 	if err != nil {
-		return "", 0, err
+		return "", "", 0, err
+	}
+	rawSubject = strings.TrimSpace(rawSubject)
+	if rawSubject == "" {
+		if scope != ratelimit.ScopeUserPath && strings.TrimSpace(rawUserPath) != "" {
+			return "", "", 0, errors.New("subject is required for provider and model rules; user_path only names user-path rules")
+		}
+		rawSubject = rawUserPath
+	}
+	subject, err := ratelimit.NormalizeSubject(scope, rawSubject)
+	if err != nil {
+		return "", "", 0, err
 	}
 	if key == nil {
-		return "", 0, errors.New("limit_key is required")
+		return "", "", 0, errors.New("limit_key is required")
 	}
 	periodSeconds, err := rateLimitRequestPeriodSeconds(key.Period, key.PeriodSeconds)
 	if err != nil {
-		return "", 0, err
+		return "", "", 0, err
 	}
-	return userPath, periodSeconds, nil
+	return scope, subject, periodSeconds, nil
 }
 
 func rateLimitRequestPeriodSeconds(period string, periodSeconds *int64) (int64, error) {

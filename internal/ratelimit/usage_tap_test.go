@@ -18,7 +18,7 @@ func (l *recordingLogger) Close() error                  { l.closed = true; retu
 
 func TestUsageTapFeedsTokenWindowsAndDelegates(t *testing.T) {
 	service := newTestService(t, Rule{
-		UserPath:      "/team",
+		Subject:       "/team",
 		PeriodSeconds: PeriodMinuteSeconds,
 		MaxTokens:     int64Ptr(1000),
 	})
@@ -42,6 +42,29 @@ func TestUsageTapFeedsTokenWindowsAndDelegates(t *testing.T) {
 	}
 	if err := tap.Close(); err != nil || !inner.closed {
 		t.Fatalf("Close() not delegated: err=%v closed=%v", err, inner.closed)
+	}
+}
+
+func TestUsageTapChargesExecutedProviderAndModel(t *testing.T) {
+	service := newTestService(t,
+		Rule{Scope: ScopeProvider, Subject: "openai-eu", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(1000)},
+		Rule{Scope: ScopeModel, Subject: "gpt-4o", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(1000)},
+	)
+	tap := NewUsageTap(&recordingLogger{}, service)
+
+	// Entries record the executed instance name (falls back to type when absent).
+	tap.Write(&usage.UsageEntry{UserPath: "/team", Provider: "openai", ProviderName: "openai-eu", Model: "gpt-4o", TotalTokens: 30})
+	tap.Write(&usage.UsageEntry{UserPath: "/team", Provider: "openai-eu", Model: "gpt-4o-mini", TotalTokens: 20})
+
+	byScope := map[RuleScope]Status{}
+	for _, status := range service.Statuses(time.Now().UTC()) {
+		byScope[status.Rule.Scope] = status
+	}
+	if byScope[ScopeProvider].TokensUsed != 50 {
+		t.Fatalf("provider tokens used = %d, want 50", byScope[ScopeProvider].TokensUsed)
+	}
+	if byScope[ScopeModel].TokensUsed != 30 {
+		t.Fatalf("model tokens used = %d, want 30", byScope[ScopeModel].TokensUsed)
 	}
 }
 

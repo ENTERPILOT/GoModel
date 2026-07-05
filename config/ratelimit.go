@@ -9,7 +9,8 @@ import (
 	"gomodel/internal/core"
 )
 
-// RateLimitsConfig holds per-user-path request, token, and concurrency limits.
+// RateLimitsConfig holds request, token, and concurrency limits scoped to
+// user paths (consumers), providers, and models.
 type RateLimitsConfig struct {
 	// Enabled controls whether rate limit checks are active.
 	// Default: true. With no rules configured the check is a no-op.
@@ -17,11 +18,34 @@ type RateLimitsConfig struct {
 
 	// UserPaths declares rate limit rules by tracked user path.
 	UserPaths []RateLimitUserPathConfig `yaml:"user_paths"`
+
+	// Providers declares rate limit rules by configured provider name.
+	// Provider rules cap all traffic routed to that provider instance; load
+	// balancing and failover skip a saturated provider while capacity exists
+	// elsewhere.
+	Providers []RateLimitProviderConfig `yaml:"providers"`
+
+	// Models declares rate limit rules by model. A provider-qualified subject
+	// ("openai/gpt-4o") caps one provider's model; a bare id ("gpt-4o") caps
+	// the model across every provider.
+	Models []RateLimitModelConfig `yaml:"models"`
 }
 
 // RateLimitUserPathConfig declares one or more rate limit rules for a user path.
 type RateLimitUserPathConfig struct {
 	Path   string                `yaml:"path"`
+	Limits []RateLimitRuleConfig `yaml:"limits"`
+}
+
+// RateLimitProviderConfig declares one or more rate limit rules for a provider.
+type RateLimitProviderConfig struct {
+	Name   string                `yaml:"name"`
+	Limits []RateLimitRuleConfig `yaml:"limits"`
+}
+
+// RateLimitModelConfig declares one or more rate limit rules for a model.
+type RateLimitModelConfig struct {
+	Model  string                `yaml:"model"`
 	Limits []RateLimitRuleConfig `yaml:"limits"`
 }
 
@@ -65,7 +89,42 @@ func applyRateLimitEnv(cfg *Config) error {
 		return err
 	}
 	cfg.RateLimits.UserPaths = entries
+
+	// SET_PROVIDER_RATE_LIMIT_<NAME> uses its own prefix so provider names
+	// never collide with the SET_RATE_LIMIT_* user-path suffix space. Model
+	// rules have no env form (model ids are not env-name safe); declare them
+	// in YAML or the admin API.
+	providers, err := applyKeyedLimitEnv(
+		cfg.RateLimits.Providers,
+		"SET_PROVIDER_RATE_LIMIT_",
+		rateLimitProviderNameFromEnvSuffix,
+		normalizeRateLimitProviderName,
+		func(entry RateLimitProviderConfig) string { return entry.Name },
+		parseRateLimitEnvLimits,
+		func(name string, limits []RateLimitRuleConfig) RateLimitProviderConfig {
+			return RateLimitProviderConfig{Name: name, Limits: limits}
+		},
+	)
+	if err != nil {
+		return err
+	}
+	cfg.RateLimits.Providers = providers
 	return nil
+}
+
+// rateLimitProviderNameFromEnvSuffix follows the provider-instance env
+// convention: underscores in the suffix become hyphens in the provider name
+// (OPENAI_EAST -> openai-east).
+func rateLimitProviderNameFromEnvSuffix(suffix string) (string, error) {
+	return normalizeRateLimitProviderName(strings.ReplaceAll(suffix, "_", "-"))
+}
+
+func normalizeRateLimitProviderName(raw string) (string, error) {
+	name := strings.ToLower(strings.TrimSpace(raw))
+	if name == "" {
+		return "", fmt.Errorf("provider name is required")
+	}
+	return name, nil
 }
 
 // parseRateLimitEnvLimits parses either a JSON array of rule objects or the
@@ -180,34 +239,69 @@ func validateRateLimitConfig(cfg *RateLimitsConfig) error {
 			return fmt.Errorf("rate_limits.user_paths[%d].path is required", pathIdx)
 		}
 		cfg.UserPaths[pathIdx].Path = normalizedPath
-		for limitIdx, limit := range entry.Limits {
-			seconds, err := rateLimitConfigPeriodSeconds(limit)
-			if err != nil {
-				return fmt.Errorf("rate_limits.user_paths[%d].limits[%d]: %w", pathIdx, limitIdx, err)
-			}
-			cfg.UserPaths[pathIdx].Limits[limitIdx].PeriodSeconds = &seconds
-			if limit.MaxRequests != nil && *limit.MaxRequests <= 0 {
-				return fmt.Errorf("rate_limits.user_paths[%d].limits[%d].max_requests must be greater than 0", pathIdx, limitIdx)
-			}
-			if limit.MaxTokens != nil && *limit.MaxTokens <= 0 {
-				return fmt.Errorf("rate_limits.user_paths[%d].limits[%d].max_tokens must be greater than 0", pathIdx, limitIdx)
-			}
-			if seconds == 0 {
-				if limit.MaxTokens != nil {
-					return fmt.Errorf("rate_limits.user_paths[%d].limits[%d].max_tokens is not valid for the concurrent period", pathIdx, limitIdx)
-				}
-				if limit.MaxRequests == nil {
-					return fmt.Errorf("rate_limits.user_paths[%d].limits[%d].max_requests is required for the concurrent period", pathIdx, limitIdx)
-				}
-			} else if limit.MaxRequests == nil && limit.MaxTokens == nil {
-				return fmt.Errorf("rate_limits.user_paths[%d].limits[%d] requires max_requests or max_tokens", pathIdx, limitIdx)
-			}
-			key := normalizedPath + ":" + strconv.FormatInt(seconds, 10)
-			if _, ok := seen[key]; ok {
-				return fmt.Errorf("duplicate rate limit for path %s period %d", normalizedPath, seconds)
-			}
-			seen[key] = struct{}{}
+		context := fmt.Sprintf("rate_limits.user_paths[%d]", pathIdx)
+		if err := validateRateLimitLimits(context, "user_path:"+normalizedPath, cfg.UserPaths[pathIdx].Limits, seen); err != nil {
+			return err
 		}
+	}
+	for providerIdx, entry := range cfg.Providers {
+		name, err := normalizeRateLimitProviderName(entry.Name)
+		if err != nil {
+			return fmt.Errorf("rate_limits.providers[%d].name is required", providerIdx)
+		}
+		if strings.ContainsAny(name, "/ \t") {
+			return fmt.Errorf("rate_limits.providers[%d].name must be a provider name without slashes or spaces", providerIdx)
+		}
+		cfg.Providers[providerIdx].Name = name
+		context := fmt.Sprintf("rate_limits.providers[%d]", providerIdx)
+		if err := validateRateLimitLimits(context, "provider:"+name, cfg.Providers[providerIdx].Limits, seen); err != nil {
+			return err
+		}
+	}
+	for modelIdx, entry := range cfg.Models {
+		model := strings.TrimSpace(entry.Model)
+		if model == "" {
+			return fmt.Errorf("rate_limits.models[%d].model is required", modelIdx)
+		}
+		cfg.Models[modelIdx].Model = model
+		context := fmt.Sprintf("rate_limits.models[%d]", modelIdx)
+		if err := validateRateLimitLimits(context, "model:"+strings.ToLower(model), cfg.Models[modelIdx].Limits, seen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateRateLimitLimits validates one entry's limit list in place (resolving
+// named periods to seconds) and rejects duplicate (subject, period) keys.
+func validateRateLimitLimits(context, subjectKey string, limits []RateLimitRuleConfig, seen map[string]struct{}) error {
+	for limitIdx, limit := range limits {
+		seconds, err := rateLimitConfigPeriodSeconds(limit)
+		if err != nil {
+			return fmt.Errorf("%s.limits[%d]: %w", context, limitIdx, err)
+		}
+		limits[limitIdx].PeriodSeconds = &seconds
+		if limit.MaxRequests != nil && *limit.MaxRequests <= 0 {
+			return fmt.Errorf("%s.limits[%d].max_requests must be greater than 0", context, limitIdx)
+		}
+		if limit.MaxTokens != nil && *limit.MaxTokens <= 0 {
+			return fmt.Errorf("%s.limits[%d].max_tokens must be greater than 0", context, limitIdx)
+		}
+		if seconds == 0 {
+			if limit.MaxTokens != nil {
+				return fmt.Errorf("%s.limits[%d].max_tokens is not valid for the concurrent period", context, limitIdx)
+			}
+			if limit.MaxRequests == nil {
+				return fmt.Errorf("%s.limits[%d].max_requests is required for the concurrent period", context, limitIdx)
+			}
+		} else if limit.MaxRequests == nil && limit.MaxTokens == nil {
+			return fmt.Errorf("%s.limits[%d] requires max_requests or max_tokens", context, limitIdx)
+		}
+		key := subjectKey + ":" + strconv.FormatInt(seconds, 10)
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("duplicate rate limit for %s period %d", subjectKey, seconds)
+		}
+		seen[key] = struct{}{}
 	}
 	return nil
 }

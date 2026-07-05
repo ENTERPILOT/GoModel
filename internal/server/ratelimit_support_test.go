@@ -23,8 +23,10 @@ type staticRuleStore struct {
 func (s *staticRuleStore) ListRules(context.Context) ([]ratelimit.Rule, error) {
 	return append([]ratelimit.Rule(nil), s.rules...), nil
 }
-func (s *staticRuleStore) UpsertRules(context.Context, []ratelimit.Rule) error        { return nil }
-func (s *staticRuleStore) DeleteRule(context.Context, string, int64) error            { return nil }
+func (s *staticRuleStore) UpsertRules(context.Context, []ratelimit.Rule) error { return nil }
+func (s *staticRuleStore) DeleteRule(context.Context, ratelimit.RuleScope, string, int64) error {
+	return nil
+}
 func (s *staticRuleStore) ReplaceConfigRules(context.Context, []ratelimit.Rule) error { return nil }
 func (s *staticRuleStore) Close() error                                               { return nil }
 
@@ -56,12 +58,12 @@ func newRateLimitTestContext(userPath string) (*echo.Context, *httptest.Response
 }
 
 func rateLimitRuleWithRequests(path string, maxRequests int64) ratelimit.Rule {
-	return ratelimit.Rule{UserPath: path, PeriodSeconds: ratelimit.PeriodMinuteSeconds, MaxRequests: &maxRequests}
+	return ratelimit.Rule{Subject: path, PeriodSeconds: ratelimit.PeriodMinuteSeconds, MaxRequests: &maxRequests}
 }
 
 func TestEnforceRateLimitNilLimiterIsNoop(t *testing.T) {
 	c, rec := newRateLimitTestContext("/team")
-	release, err := enforceRateLimit(c, nil)
+	release, err := enforceRateLimit(c, nil, rateLimitRoute{})
 	if err != nil {
 		t.Fatalf("enforceRateLimit() error = %v", err)
 	}
@@ -75,7 +77,7 @@ func TestEnforceRateLimitSetsSuccessHeaders(t *testing.T) {
 	service := newTestRateLimitService(t, rateLimitRuleWithRequests("/team", 5))
 	c, rec := newRateLimitTestContext("/team/alice")
 
-	release, err := enforceRateLimit(c, service)
+	release, err := enforceRateLimit(c, service, rateLimitRoute{})
 	if err != nil {
 		t.Fatalf("enforceRateLimit() error = %v", err)
 	}
@@ -100,12 +102,12 @@ func TestEnforceRateLimitBreachReturns429WithHeaders(t *testing.T) {
 	service := newTestRateLimitService(t, rateLimitRuleWithRequests("/team", 1))
 
 	c, _ := newRateLimitTestContext("/team/alice")
-	if _, err := enforceRateLimit(c, service); err != nil {
+	if _, err := enforceRateLimit(c, service, rateLimitRoute{}); err != nil {
 		t.Fatalf("first enforceRateLimit() error = %v", err)
 	}
 
 	c2, _ := newRateLimitTestContext("/team/alice")
-	_, err := enforceRateLimit(c2, service)
+	_, err := enforceRateLimit(c2, service, rateLimitRoute{})
 	if err == nil {
 		t.Fatal("second enforceRateLimit() succeeded, want breach")
 	}
@@ -145,11 +147,11 @@ func TestEnforceRateLimitDefaultsToRootPath(t *testing.T) {
 	service := newTestRateLimitService(t, rateLimitRuleWithRequests("/", 1))
 
 	c, _ := newRateLimitTestContext("")
-	if _, err := enforceRateLimit(c, service); err != nil {
+	if _, err := enforceRateLimit(c, service, rateLimitRoute{}); err != nil {
 		t.Fatalf("enforceRateLimit() error = %v", err)
 	}
 	c2, _ := newRateLimitTestContext("")
-	if _, err := enforceRateLimit(c2, service); err == nil {
+	if _, err := enforceRateLimit(c2, service, rateLimitRoute{}); err == nil {
 		t.Fatal("root rule did not apply to requests without a user path")
 	}
 }
@@ -157,23 +159,23 @@ func TestEnforceRateLimitDefaultsToRootPath(t *testing.T) {
 func TestEnforceRateLimitReleaseReturnsConcurrencySlot(t *testing.T) {
 	maxInFlight := int64(1)
 	service := newTestRateLimitService(t, ratelimit.Rule{
-		UserPath:      "/team",
+		Subject:       "/team",
 		PeriodSeconds: ratelimit.PeriodConcurrent,
 		MaxRequests:   &maxInFlight,
 	})
 
 	c, _ := newRateLimitTestContext("/team")
-	release, err := enforceRateLimit(c, service)
+	release, err := enforceRateLimit(c, service, rateLimitRoute{})
 	if err != nil {
 		t.Fatalf("enforceRateLimit() error = %v", err)
 	}
 	c2, _ := newRateLimitTestContext("/team")
-	if _, err := enforceRateLimit(c2, service); err == nil {
+	if _, err := enforceRateLimit(c2, service, rateLimitRoute{}); err == nil {
 		t.Fatal("second in-flight request admitted over the concurrency cap")
 	}
 	release()
 	c3, _ := newRateLimitTestContext("/team")
-	release3, err := enforceRateLimit(c3, service)
+	release3, err := enforceRateLimit(c3, service, rateLimitRoute{})
 	if err != nil {
 		t.Fatalf("enforceRateLimit() after release error = %v", err)
 	}
@@ -184,8 +186,8 @@ func TestBatchRateLimitEnforcerCountsAndReleases(t *testing.T) {
 	maxInFlight := int64(1)
 	requestLimit := int64(2)
 	service := newTestRateLimitService(t,
-		ratelimit.Rule{UserPath: "/", PeriodSeconds: ratelimit.PeriodConcurrent, MaxRequests: &maxInFlight},
-		ratelimit.Rule{UserPath: "/", PeriodSeconds: ratelimit.PeriodMinuteSeconds, MaxRequests: &requestLimit},
+		ratelimit.Rule{Subject: "/", PeriodSeconds: ratelimit.PeriodConcurrent, MaxRequests: &maxInFlight},
+		ratelimit.Rule{Subject: "/", PeriodSeconds: ratelimit.PeriodMinuteSeconds, MaxRequests: &requestLimit},
 	)
 	enforcer := batchRateLimitEnforcer(service)
 

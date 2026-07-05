@@ -71,7 +71,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	release, err := enforceRateLimit(c, s.rateLimiter)
+	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{provider: route.providerName, model: route.model})
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -130,7 +130,7 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	release, err := enforceRateLimit(c, s.rateLimiter)
+	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{provider: route.providerName, model: route.model})
 	if err != nil {
 		return handleError(c, err)
 	}

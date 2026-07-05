@@ -23,14 +23,39 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 	store := &MongoDBStore{
 		rules: database.Collection("rate_limits"),
 	}
+	if err := store.migratePreScopeDocuments(ctx); err != nil {
+		return nil, err
+	}
 	_, err := store.rules.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}},
+		Keys:    bson.D{{Key: "scope", Value: 1}, {Key: "subject", Value: 1}, {Key: "period_seconds", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create rate limit indexes: %w", err)
 	}
 	return store, nil
+}
+
+// migratePreScopeDocuments rewrites rules stored before rule scopes existed
+// (keyed by user_path only) into the scoped shape, and drops the old unique
+// index so it cannot reject scoped documents.
+func (s *MongoDBStore) migratePreScopeDocuments(ctx context.Context) error {
+	_, err := s.rules.UpdateMany(ctx,
+		bson.D{{Key: "subject", Value: bson.D{{Key: "$exists", Value: false}}}},
+		mongo.Pipeline{
+			bson.D{{Key: "$set", Value: bson.D{
+				{Key: "scope", Value: string(ScopeUserPath)},
+				{Key: "subject", Value: "$user_path"},
+			}}},
+			bson.D{{Key: "$unset", Value: "user_path"}},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("migrate rate limit rules to scoped schema: %w", err)
+	}
+	// Best-effort: the index may not exist on fresh databases.
+	_ = s.rules.Indexes().DropOne(ctx, "user_path_1_period_seconds_1")
+	return nil
 }
 
 func (s *MongoDBStore) ListRules(ctx context.Context) ([]Rule, error) {
@@ -68,7 +93,7 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 	}
 	models := make([]mongo.WriteModel, 0, len(rules))
 	for _, rule := range rules {
-		filter := bson.D{{Key: "user_path", Value: rule.UserPath}, {Key: "period_seconds", Value: rule.PeriodSeconds}}
+		filter := bson.D{{Key: "scope", Value: rule.Scope}, {Key: "subject", Value: rule.Subject}, {Key: "period_seconds", Value: rule.PeriodSeconds}}
 		// Mirror the SQL stores' source precedence: a config-sourced write may
 		// only update rows that are themselves config-sourced. When a manual
 		// row holds the key, the source-scoped filter misses it and the upsert
@@ -78,7 +103,8 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 			filter = append(filter, bson.E{Key: "source", Value: SourceConfig})
 		}
 		update := bson.D{{Key: "$set", Value: bson.D{
-			{Key: "user_path", Value: rule.UserPath},
+			{Key: "scope", Value: rule.Scope},
+			{Key: "subject", Value: rule.Subject},
 			{Key: "period_seconds", Value: rule.PeriodSeconds},
 			{Key: "max_requests", Value: rule.MaxRequests},
 			{Key: "max_tokens", Value: rule.MaxTokens},
@@ -122,20 +148,17 @@ func isOnlyDuplicateKeyErrors(err error) bool {
 	return true
 }
 
-func (s *MongoDBStore) DeleteRule(ctx context.Context, userPath string, periodSeconds int64) error {
-	userPath, err := NormalizeUserPath(userPath)
+func (s *MongoDBStore) DeleteRule(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	scope, subject, err := normalizeRuleKey(scope, subject, periodSeconds)
 	if err != nil {
 		return err
 	}
-	if err := validatePeriodSeconds(periodSeconds); err != nil {
-		return err
-	}
-	result, err := s.rules.DeleteOne(ctx, bson.D{{Key: "user_path", Value: userPath}, {Key: "period_seconds", Value: periodSeconds}})
+	result, err := s.rules.DeleteOne(ctx, bson.D{{Key: "scope", Value: scope}, {Key: "subject", Value: subject}, {Key: "period_seconds", Value: periodSeconds}})
 	if err != nil {
-		return fmt.Errorf("delete rate limit rule %s/%d: %w", userPath, periodSeconds, err)
+		return fmt.Errorf("delete rate limit rule %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	if result.DeletedCount == 0 {
-		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
+		return fmt.Errorf("%w: %s %s/%d", ErrNotFound, scope, subject, periodSeconds)
 	}
 	return nil
 }
@@ -186,7 +209,8 @@ func (s *MongoDBStore) replaceConfigRules(ctx context.Context, rules []Rule) err
 		keep := make(bson.A, 0, len(rules))
 		for _, rule := range rules {
 			keep = append(keep, bson.D{
-				{Key: "user_path", Value: rule.UserPath},
+				{Key: "scope", Value: rule.Scope},
+				{Key: "subject", Value: rule.Subject},
 				{Key: "period_seconds", Value: rule.PeriodSeconds},
 			})
 		}
@@ -211,7 +235,8 @@ func (s *MongoDBStore) configRulesWithoutManualCollisions(ctx context.Context, r
 	keys := make(bson.A, 0, len(rules))
 	for _, rule := range rules {
 		keys = append(keys, bson.D{
-			{Key: "user_path", Value: rule.UserPath},
+			{Key: "scope", Value: rule.Scope},
+			{Key: "subject", Value: rule.Subject},
 			{Key: "period_seconds", Value: rule.PeriodSeconds},
 		})
 	}
@@ -227,7 +252,7 @@ func (s *MongoDBStore) configRulesWithoutManualCollisions(ctx context.Context, r
 		if err := cursor.Decode(&existing); err != nil {
 			return nil, fmt.Errorf("decode existing rate limit collision: %w", err)
 		}
-		existingSources[ruleStoreKey(existing.UserPath, existing.PeriodSeconds)] = existing.Source
+		existingSources[ruleStoreKey(existing.Scope, existing.Subject, existing.PeriodSeconds)] = existing.Source
 	}
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("iterate existing rate limit collisions: %w", err)
@@ -235,7 +260,7 @@ func (s *MongoDBStore) configRulesWithoutManualCollisions(ctx context.Context, r
 
 	filtered := make([]Rule, 0, len(rules))
 	for _, rule := range rules {
-		if source, ok := existingSources[ruleStoreKey(rule.UserPath, rule.PeriodSeconds)]; ok && source != "" && source != SourceConfig {
+		if source, ok := existingSources[ruleStoreKey(rule.Scope, rule.Subject, rule.PeriodSeconds)]; ok && source != "" && source != SourceConfig {
 			continue
 		}
 		filtered = append(filtered, rule)

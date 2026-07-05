@@ -15,7 +15,8 @@
             rateLimitResettingKey: '',
             rateLimitDeletingKey: '',
             rateLimitForm: {
-                user_path: '/',
+                scope: 'user_path',
+                subject: '/',
                 period: 'minute',
                 period_seconds: 60,
                 max_requests: '',
@@ -31,13 +32,72 @@
 
             defaultRateLimitForm() {
                 return {
-                    user_path: '/',
+                    scope: 'user_path',
+                    subject: '/',
                     period: 'minute',
                     period_seconds: 60,
                     max_requests: '',
                     max_tokens: '',
                     source: 'manual'
                 };
+            },
+
+            rateLimitScopeOptions() {
+                return [
+                    { value: 'user_path', label: 'User path' },
+                    { value: 'provider', label: 'Provider' },
+                    { value: 'model', label: 'Model' }
+                ];
+            },
+
+            rateLimitScope(item) {
+                const scope = String(item && item.scope || '').trim();
+                return scope || 'user_path';
+            },
+
+            rateLimitSubject(item) {
+                const subject = String(item && item.subject || '').trim();
+                return subject || String(item && item.user_path || '');
+            },
+
+            rateLimitScopeLabel(item) {
+                switch (this.rateLimitScope(item)) {
+                case 'provider':
+                    return 'provider';
+                case 'model':
+                    return 'model';
+                default:
+                    return 'user path';
+                }
+            },
+
+            rateLimitSubjectFieldLabel() {
+                switch (String(this.rateLimitForm && this.rateLimitForm.scope || '')) {
+                case 'provider':
+                    return 'Provider Name';
+                case 'model':
+                    return 'Model';
+                default:
+                    return 'User Path';
+                }
+            },
+
+            rateLimitSubjectPlaceholder() {
+                switch (String(this.rateLimitForm && this.rateLimitForm.scope || '')) {
+                case 'provider':
+                    return 'openai';
+                case 'model':
+                    return 'openai/gpt-4o';
+                default:
+                    return '/team/alpha';
+                }
+            },
+
+            // Changing scope resets the subject: a user path never carries
+            // over to a provider or model rule.
+            syncRateLimitScope() {
+                const scope = String(this.rateLimitForm && this.rateLimitForm.scope || '');
+                this.rateLimitForm.subject = scope === 'user_path' ? '/' : '';
             },
 
             rateLimitPeriodOptions() {
@@ -86,10 +146,15 @@
                 if (seconds >= 0) {
                     this.rateLimitForm.period_seconds = seconds;
                 }
+                // The tokens field is hidden for the concurrent period; drop any
+                // value typed earlier so it cannot block the save invisibly.
+                if (period === 'concurrent') {
+                    this.rateLimitForm.max_tokens = '';
+                }
             },
 
             rateLimitKey(item) {
-                return String(item && item.user_path || '') + ':' + String(item && item.period_seconds || '0');
+                return this.rateLimitScope(item) + ':' + this.rateLimitSubject(item) + ':' + String(item && item.period_seconds || '0');
             },
 
             rateLimitIsConcurrent(item) {
@@ -133,10 +198,15 @@
             filteredRateLimits() {
                 const filter = String(this.rateLimitFilter || '').trim().toLowerCase();
                 const items = Array.isArray(this.rateLimits) ? this.rateLimits.slice() : [];
+                const scopeOrder = { user_path: 0, provider: 1, model: 2 };
                 items.sort((a, b) => {
-                    const pathCompare = String(a.user_path || '').localeCompare(String(b.user_path || ''));
-                    if (pathCompare !== 0) {
-                        return pathCompare;
+                    const scopeCompare = (scopeOrder[this.rateLimitScope(a)] || 0) - (scopeOrder[this.rateLimitScope(b)] || 0);
+                    if (scopeCompare !== 0) {
+                        return scopeCompare;
+                    }
+                    const subjectCompare = this.rateLimitSubject(a).localeCompare(this.rateLimitSubject(b));
+                    if (subjectCompare !== 0) {
+                        return subjectCompare;
                     }
                     return Number(a.period_seconds || 0) - Number(b.period_seconds || 0);
                 });
@@ -144,9 +214,10 @@
                     return items;
                 }
                 return items.filter((item) => {
-                    const path = String(item.user_path || '').toLowerCase();
+                    const subject = this.rateLimitSubject(item).toLowerCase();
+                    const scope = this.rateLimitScopeLabel(item).toLowerCase();
                     const period = this.rateLimitPeriodLabel(item).toLowerCase();
-                    return path.includes(filter) || period.includes(filter);
+                    return subject.includes(filter) || scope.includes(filter) || period.includes(filter);
                 });
             },
 
@@ -214,7 +285,8 @@
                 if (item) {
                     const periodSeconds = Number(item.period_seconds || 0);
                     this.rateLimitForm = {
-                        user_path: String(item.user_path || ''),
+                        scope: this.rateLimitScope(item),
+                        subject: this.rateLimitSubject(item),
                         period: this.rateLimitPeriodFromSeconds(periodSeconds),
                         period_seconds: periodSeconds,
                         max_requests: item.max_requests === null || item.max_requests === undefined ? '' : String(item.max_requests),
@@ -231,7 +303,7 @@
                 if (typeof this.$nextTick === 'function') {
                     this.$nextTick(() => {
                         const refs = this.$refs || {};
-                        const input = this.rateLimitEditing ? refs.rateLimitMaxRequestsInput : refs.rateLimitUserPathInput;
+                        const input = this.rateLimitEditing ? refs.rateLimitMaxRequestsInput : refs.rateLimitSubjectInput;
                         if (input && typeof input.focus === 'function') {
                             input.focus({ preventScroll: true });
                         }
@@ -247,12 +319,17 @@
                 this.rateLimitForm = this.defaultRateLimitForm();
             },
 
-            setRateLimitFormUserPath(value) {
-                this.rateLimitForm.user_path = String(value || '');
+            setRateLimitFormSubject(value) {
+                this.rateLimitForm.subject = String(value || '');
             },
 
             rateLimitFormPayload() {
                 const form = this.rateLimitForm || {};
+                const scope = String(form.scope || 'user_path');
+                const subject = String(form.subject || '').trim();
+                if (scope !== 'user_path' && !subject) {
+                    return { error: this.rateLimitSubjectFieldLabel() + ' is required.' };
+                }
                 const isConcurrent = String(form.period || '') === 'concurrent';
                 // Reject blank custom seconds before Number(): Number('') is 0,
                 // which would silently submit a concurrent rule.
@@ -273,7 +350,8 @@
                     return { error: 'Token limits are not valid for the concurrent period.' };
                 }
                 const payload = {
-                    user_path: String(form.user_path || '').trim() || '/',
+                    scope: scope,
+                    subject: subject || '/',
                     limit_key: { period_seconds: periodSeconds }
                 };
                 if (maxRequests) {
@@ -344,7 +422,8 @@
                     const request = this.requestOptions({
                         method: 'DELETE',
                         body: JSON.stringify({
-                            user_path: item.user_path,
+                            scope: this.rateLimitScope(item),
+                            subject: this.rateLimitSubject(item),
                             limit_key: { period_seconds: Number(item.period_seconds || 0) }
                         })
                     });
@@ -382,7 +461,8 @@
                     const request = this.requestOptions({
                         method: 'POST',
                         body: JSON.stringify({
-                            user_path: item.user_path,
+                            scope: this.rateLimitScope(item),
+                            subject: this.rateLimitSubject(item),
                             period_seconds: Number(item.period_seconds || 0)
                         })
                     });

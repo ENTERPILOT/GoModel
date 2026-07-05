@@ -46,7 +46,7 @@ func rateLimitInt64(v int64) *int64 { return &v }
 func TestRateLimitRequestEnforcement_E2E(t *testing.T) {
 	mockServer.ResetRequests()
 	service := setupRateLimitService(t, []ratelimit.Rule{{
-		UserPath:      "/team/rl",
+		Subject:       "/team/rl",
 		PeriodSeconds: ratelimit.PeriodMinuteSeconds,
 		MaxRequests:   rateLimitInt64(2),
 		Source:        ratelimit.SourceManual,
@@ -88,7 +88,7 @@ func TestRateLimitRequestEnforcement_E2E(t *testing.T) {
 func TestRateLimitTokenEnforcement_E2E(t *testing.T) {
 	mockServer.ResetRequests()
 	service := setupRateLimitService(t, []ratelimit.Rule{{
-		UserPath:      "/team/tokens",
+		Subject:       "/team/tokens",
 		PeriodSeconds: ratelimit.PeriodMinuteSeconds,
 		MaxTokens:     rateLimitInt64(5),
 		Source:        ratelimit.SourceManual,
@@ -140,7 +140,7 @@ func TestRateLimitTokenEnforcement_E2E(t *testing.T) {
 func TestRateLimitConcurrencyEnforcement_E2E(t *testing.T) {
 	mockServer.ResetRequests()
 	service := setupRateLimitService(t, []ratelimit.Rule{{
-		UserPath:      "/team/cc",
+		Subject:       "/team/cc",
 		PeriodSeconds: ratelimit.PeriodConcurrent,
 		MaxRequests:   rateLimitInt64(1),
 		Source:        ratelimit.SourceManual,
@@ -205,6 +205,40 @@ func TestRateLimitConcurrencyEnforcement_E2E(t *testing.T) {
 	after := sendBudgetChatRequest(t, ts.URL, "concurrency after", "rl-cc-after", "/team/cc/app")
 	defer closeBody(after)
 	require.Equal(t, http.StatusOK, after.StatusCode)
+}
+
+func TestRateLimitProviderScopeEnforcement_E2E(t *testing.T) {
+	mockServer.ResetRequests()
+	// The e2e fixture registers the mock as provider type/name "test"; the
+	// rule caps that provider across all consumers and models.
+	service := setupRateLimitService(t, []ratelimit.Rule{{
+		Scope:         ratelimit.ScopeProvider,
+		Subject:       "test",
+		PeriodSeconds: ratelimit.PeriodMinuteSeconds,
+		MaxRequests:   rateLimitInt64(1),
+		Source:        ratelimit.SourceManual,
+	}})
+
+	ts := httptest.NewServer(setupE2EServer(t, e2eServerOptions{rateLimiter: service}))
+	defer ts.Close()
+
+	first := sendBudgetChatRequest(t, ts.URL, "provider limit ok", "rl-prov-ok", "/team/a")
+	require.Equal(t, http.StatusOK, first.StatusCode)
+	require.Equal(t, "1", first.Header.Get("x-ratelimit-limit-requests"))
+	closeBody(first)
+
+	// A different consumer path shares the provider counter.
+	blocked := sendBudgetChatRequest(t, ts.URL, "provider limit blocked", "rl-prov-blocked", "/team/b")
+	defer closeBody(blocked)
+	require.Equal(t, http.StatusTooManyRequests, blocked.StatusCode)
+	require.NotEmpty(t, blocked.Header.Get("Retry-After"))
+
+	var envelope core.OpenAIErrorEnvelope
+	require.NoError(t, json.NewDecoder(blocked.Body).Decode(&envelope))
+	require.NotNil(t, envelope.Error.Code)
+	require.Equal(t, "rate_limit_exceeded", *envelope.Error.Code)
+	require.Contains(t, envelope.Error.Message, "provider test")
+	require.Len(t, mockServer.Requests(), 1, "blocked request must not reach upstream provider")
 }
 
 func TestRateLimitAdminEndpoints_E2E(t *testing.T) {

@@ -276,12 +276,15 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	claimSharedStorage(fileStoreResult.Storage)
 
 	// Initialize virtual models (unified aliases + access overrides) using
-	// shared storage when already available.
+	// shared storage when already available. The catalog is rate-limit aware
+	// so load balancing skips saturated providers/models while capacity
+	// exists elsewhere (RouteAvailable is nil-safe when rate limits are off).
+	virtualModelCatalog := newRateLimitAwareCatalog(providerResult.Registry, rateLimitResult.Service)
 	var virtualModelsResult *virtualmodels.Result
 	if sharedStorage != nil {
-		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry)
+		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, virtualModelCatalog)
 	} else {
-		virtualModelsResult, err = virtualmodels.New(ctx, appCfg, providerResult.Registry)
+		virtualModelsResult, err = virtualmodels.New(ctx, appCfg, virtualModelCatalog)
 	}
 	if err != nil {
 		return fail("failed to initialize virtual models", err)

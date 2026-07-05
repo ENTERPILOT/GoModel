@@ -27,7 +27,19 @@ func (t *UsageTap) Write(entry *usage.UsageEntry) {
 	// Cache hits consume no provider tokens and must not count toward token
 	// windows, mirroring the budget cost query's cache exclusion.
 	if entry != nil && entry.CacheType == "" && entry.TotalTokens > 0 {
-		t.service.RecordTokens(entry.UserPath, int64(entry.TotalTokens), time.Now().UTC())
+		// The entry records what actually executed, so provider- and
+		// model-scoped token windows are charged unambiguously even after
+		// aliasing or failover. ProviderName is the configured instance;
+		// Provider (the type) covers entries logged without an instance name.
+		provider := entry.ProviderName
+		if provider == "" {
+			provider = entry.Provider
+		}
+		t.service.RecordTokens(Subjects{
+			UserPath: entry.UserPath,
+			Provider: provider,
+			Model:    entry.Model,
+		}, int64(entry.TotalTokens), time.Now().UTC())
 	}
 	t.inner.Write(entry)
 }

@@ -75,6 +75,14 @@ func tryFailoverResponse[T any](
 		qualified := selector.QualifiedModel()
 		providerType := o.ProviderTypeForSelector(selector, ProviderTypeFromWorkflow(workflow))
 		providerName := ResolvedProviderName(o.provider, selector, ProviderNameFromWorkflow(workflow))
+		if o.routeGate != nil && !o.routeGate.RouteAvailable(providerName, qualified) {
+			slog.Info("skipping rate-limited failover target",
+				"request_id", requestID,
+				"to", qualified,
+				"provider", providerName,
+			)
+			continue
+		}
 		slog.Warn("primary model attempt failed, trying failover",
 			"request_id", requestID,
 			"from", primaryModel,
@@ -181,6 +189,14 @@ func tryFailoverStream(
 		qualified := selector.QualifiedModel()
 		providerType := o.ProviderTypeForSelector(selector, ProviderTypeFromWorkflow(workflow))
 		providerName := ResolvedProviderName(o.provider, selector, ProviderNameFromWorkflow(workflow))
+		if o.routeGate != nil && !o.routeGate.RouteAvailable(providerName, qualified) {
+			slog.Info("skipping rate-limited failover target",
+				"request_id", requestID,
+				"to", qualified,
+				"provider", providerName,
+			)
+			continue
+		}
 		slog.Warn("primary model attempt failed, trying failover stream",
 			"request_id", requestID,
 			"from", primaryModel,

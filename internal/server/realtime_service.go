@@ -78,7 +78,7 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 	}
 	// The proxy call blocks for the whole websocket session, so the released
 	// concurrency slot spans the session lifetime.
-	release, err := enforceRateLimit(c, s.rateLimiter)
+	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{provider: route.providerName, model: route.model})
 	if err != nil {
 		return handleError(c, err)
 	}

@@ -8,24 +8,25 @@ import (
 	"gomodel/internal/core"
 )
 
-// applyUserPathLimitEnv merges SET_<prefix>* env entries into per-user-path
-// config entries. The env var suffix becomes the user path (see
-// userPathEnvSuffixPath); an env entry replaces the whole existing entry with
-// the same canonical path, even when YAML uses non-canonical paths like
-// "alice" or "/alice/".
-func applyUserPathLimitEnv[Entry any, Limit any](
+// applyKeyedLimitEnv merges <prefix>* env entries into keyed config entries.
+// The env var suffix resolves to the entry key via keyFromSuffix; an env
+// entry replaces the whole existing entry with the same canonical key, even
+// when YAML spells the key non-canonically.
+func applyKeyedLimitEnv[Entry any, Limit any](
 	entries []Entry,
 	prefix string,
-	entryPath func(Entry) string,
+	keyFromSuffix func(string) (string, error),
+	canonicalKey func(string) (string, error),
+	entryKey func(Entry) string,
 	parseLimits func(string) ([]Limit, error),
-	newEntry func(path string, limits []Limit) Entry,
+	newEntry func(key string, limits []Limit) Entry,
 ) ([]Entry, error) {
 	for _, item := range os.Environ() {
 		key, value, ok := strings.Cut(item, "=")
 		if !ok || !strings.HasPrefix(key, prefix) || strings.TrimSpace(value) == "" {
 			continue
 		}
-		path, err := core.NormalizeUserPath(userPathEnvSuffixPath(key[len(prefix):]))
+		entryKeyValue, err := keyFromSuffix(key[len(prefix):])
 		if err != nil {
 			return nil, fmt.Errorf("invalid value for %s: %w", key, err)
 		}
@@ -38,14 +39,37 @@ func applyUserPathLimitEnv[Entry any, Limit any](
 		}
 		replaced := entries[:0]
 		for _, existing := range entries {
-			existingNorm, normErr := core.NormalizeUserPath(entryPath(existing))
-			if normErr != nil || existingNorm != path {
+			existingKey, keyErr := canonicalKey(entryKey(existing))
+			if keyErr != nil || existingKey != entryKeyValue {
 				replaced = append(replaced, existing)
 			}
 		}
-		entries = append(replaced, newEntry(path, limits))
+		entries = append(replaced, newEntry(entryKeyValue, limits))
 	}
 	return entries, nil
+}
+
+// applyUserPathLimitEnv merges SET_<prefix>* env entries into per-user-path
+// config entries. The env var suffix becomes the user path (see
+// userPathEnvSuffixPath).
+func applyUserPathLimitEnv[Entry any, Limit any](
+	entries []Entry,
+	prefix string,
+	entryPath func(Entry) string,
+	parseLimits func(string) ([]Limit, error),
+	newEntry func(path string, limits []Limit) Entry,
+) ([]Entry, error) {
+	return applyKeyedLimitEnv(
+		entries,
+		prefix,
+		func(suffix string) (string, error) {
+			return core.NormalizeUserPath(userPathEnvSuffixPath(suffix))
+		},
+		core.NormalizeUserPath,
+		entryPath,
+		parseLimits,
+		newEntry,
+	)
 }
 
 // userPathEnvSuffixPath converts an env var suffix into a user path: double

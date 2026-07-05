@@ -1,22 +1,34 @@
 ---
 title: "Rate Limits"
-description: "Cap requests per minute, tokens per minute, and in-flight concurrency per user path."
+description: "Cap requests per minute, tokens per minute, and in-flight concurrency per user path, provider, or model."
 icon: "gauge"
-keywords: ["rate limits", "rpm", "tpm", "429", "concurrency", "throttling", "user path"]
+keywords: ["rate limits", "rpm", "tpm", "429", "concurrency", "throttling", "user path", "provider", "model"]
 ---
 
 ## Overview
 
-Rate limits cap how fast a `user_path` subtree can consume the gateway:
+Rate limits cap request rate, token rate, and in-flight concurrency. Every
+rule has a **scope** that decides what it protects:
 
-- **Request limits** — e.g. `/team/alpha` can send `100` requests per minute
-- **Token limits** — e.g. `/team/alpha` can consume `50,000` tokens per minute
-- **Concurrency limits** — e.g. `/team/alpha` can have `10` requests in flight
+- **User path** (consumer control) — e.g. `/team/alpha` can send `100`
+  requests per minute, consume `50,000` tokens per minute, and hold `10`
+  requests in flight, across everything under that path.
+- **Provider** (upstream protection) — e.g. send provider `openai` at most
+  `500` requests per minute across all consumers and models, so the gateway
+  never blows through your provider quota.
+- **Model** — e.g. `openai/gpt-4o` may consume `90,000` tokens per minute; a
+  bare id like `gpt-4o` caps the model across every provider.
+
+The scopes behave differently on breach. A **user path** over its limit gets
+`429` with an OpenAI-shaped error, an accurate `Retry-After` header, and
+`x-ratelimit-*` headers — switching models would not help, the consumer is the
+subject. A saturated **provider or model** is instead treated like an
+unavailable target: virtual-model load balancing and failover route around it
+while another target has capacity, and only when no viable target remains does
+the client get `429`.
 
 Limits apply to every model endpoint: chat completions, responses, messages,
 embeddings, audio, passthrough, realtime sessions, and batch submission.
-Requests over a limit receive `429` with an OpenAI-shaped error, an accurate
-`Retry-After` header, and `x-ratelimit-*` headers.
 
 Use rate limits for traffic control and budgets for spend control: budgets cap
 dollars over hours-to-months from durable usage records, rate limits cap
@@ -49,7 +61,8 @@ In the dashboard:
 Rate Limits -> Create Rate Limit
 ```
 
-Dashboard-created rules are marked `manual`. Rules loaded from YAML or
+Pick the scope (user path, provider, or model), the subject, a period, and the
+caps. Dashboard-created rules are marked `manual`. Rules loaded from YAML or
 environment variables are marked `config` and are read-only in the dashboard.
 
 Seed rules from YAML:
@@ -67,14 +80,29 @@ rate_limits:
           max_requests: 10000
         - period: "concurrent"
           max_requests: 10
+  providers:
+    - name: "openai"
+      limits:
+        - period: "minute"
+          max_requests: 500
+        - period: "concurrent"
+          max_requests: 50
+  models:
+    - model: "openai/gpt-4o"
+      limits:
+        - period: "minute"
+          max_tokens: 90000
 ```
 
-Or use environment variables (the suffix maps to a user path exactly like
-`SET_BUDGET_*`; `__` separates path segments):
+Or use environment variables. User-path rules use `SET_RATE_LIMIT_<PATH>`
+(the suffix maps to a user path exactly like `SET_BUDGET_*`; `__` separates
+path segments); provider rules use `SET_PROVIDER_RATE_LIMIT_<NAME>`
+(underscores become hyphens, like provider-instance env vars):
 
 ```env
 SET_RATE_LIMIT_TEAM__ALPHA="rpm=100,tpm=50000,rpd=10000,concurrent=10"
 SET_RATE_LIMIT_="rpm=1000"
+SET_PROVIDER_RATE_LIMIT_OPENAI="rpm=500,concurrent=50"
 ```
 
 Compact names map to periods: `rpm`/`tpm` per minute, `rph`/`tph` per hour,
@@ -84,6 +112,9 @@ rule objects is also accepted for custom windows:
 ```env
 SET_RATE_LIMIT_TEAM__ALPHA='[{"period_seconds":300,"max_requests":50}]'
 ```
+
+Model rules have no env form (model ids are not env-name safe); declare them
+in YAML or through the admin API and dashboard.
 
 Supported named periods:
 
@@ -102,12 +133,34 @@ Rule paths apply to the configured path and its descendants, exactly like
 budgets: a rule on `/team` matches `/team/app` but not `/team-alpha`. A rule
 on `/` applies to all traffic.
 
-**A rule owns one shared counter for its whole subtree.** A `100 rpm` rule on
+Provider rules match the resolved provider instance by name. Model rules
+match the executed model: a provider-qualified subject (`openai/gpt-4o`)
+covers one provider's model, a bare subject (`gpt-4o`) covers that model on
+any provider. Matching is case-insensitive.
+
+**A rule owns one shared counter for its whole subject.** A `100 rpm` rule on
 `/team` allows 100 requests per minute across everything under `/team`
-combined. For per-key limits, bind each managed API key to its own user path
-and define rules there.
+combined; a `500 rpm` rule on provider `openai` is shared by every consumer
+and model routed there. For per-key limits, bind each managed API key to its
+own user path and define rules there.
 
 All matching rules are checked; the first exhausted limit rejects the request.
+
+## Provider and model limits route around saturation
+
+A saturated provider or model behaves like one with stale inventory:
+
+- **Virtual-model load balancing** skips the saturated target and picks the
+  next available one, so an alias with several targets keeps serving.
+- **Failover** skips rate-saturated candidates during its sweep.
+- **Direct requests** to the capped provider or model receive `429` with an
+  honest `Retry-After` — the same answer the provider itself would eventually
+  give, minus the wasted upstream call.
+
+Token accounting charges the provider and model that actually executed the
+request (recorded on the usage entry), so the windows stay correct under
+aliasing and failover. Batch submissions skip provider/model rules — the
+batch file can mix models, so only user-path rules apply at submission.
 
 Details worth knowing:
 
@@ -163,7 +216,8 @@ curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   http://localhost:8080/admin/rate-limits
 ```
 
-Create or update a rule:
+Create or update a rule (`user_path` is shorthand for
+`"scope": "user_path", "subject": ...`):
 
 ```bash
 curl -X PUT http://localhost:8080/admin/rate-limits \
@@ -177,17 +231,31 @@ curl -X PUT http://localhost:8080/admin/rate-limits \
   }'
 ```
 
+Provider and model rules name their subject explicitly:
+
+```bash
+curl -X PUT http://localhost:8080/admin/rate-limits \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "provider",
+    "subject": "openai",
+    "limit_key": {"period": "minute"},
+    "max_requests": 500
+  }'
+```
+
 Delete a rule:
 
 ```bash
 curl -X DELETE http://localhost:8080/admin/rate-limits \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"user_path": "/team/alpha", "limit_key": {"period": "minute"}}'
+  -d '{"scope": "provider", "subject": "openai", "limit_key": {"period": "minute"}}'
 ```
 
 Reset live counters for one rule (`POST /admin/rate-limits/reset-one` with
-`{"user_path": ..., "period": ...}`) or for all rules
+`{"scope": ..., "subject": ..., "period": ...}`) or for all rules
 (`POST /admin/rate-limits/reset` with `{"confirmation": "reset"}`). Editing a
 rule never resets its counters; deleting one does.
 

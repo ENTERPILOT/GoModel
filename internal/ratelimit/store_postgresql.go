@@ -18,16 +18,20 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	if pool == nil {
 		return nil, fmt.Errorf("connection pool is required")
 	}
+	if err := migratePostgreSQLPreScopeTable(ctx, pool); err != nil {
+		return nil, err
+	}
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS rate_limits (
-			user_path TEXT NOT NULL,
+			scope TEXT NOT NULL DEFAULT 'user_path',
+			subject TEXT NOT NULL,
 			period_seconds BIGINT NOT NULL,
 			max_requests BIGINT,
 			max_tokens BIGINT,
 			source TEXT NOT NULL DEFAULT '',
 			created_at BIGINT NOT NULL,
 			updated_at BIGINT NOT NULL,
-			PRIMARY KEY (user_path, period_seconds)
+			PRIMARY KEY (scope, subject, period_seconds)
 		)
 	`); err != nil {
 		return nil, fmt.Errorf("failed to create rate_limits table: %w", err)
@@ -35,11 +39,66 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	return &PostgreSQLStore{pool: pool}, nil
 }
 
+// migratePostgreSQLPreScopeTable rebuilds a rate_limits table created before
+// rule scopes existed (keyed by user_path only) into the scoped shape.
+func migratePostgreSQLPreScopeTable(ctx context.Context, pool *pgxpool.Pool) error {
+	var hasSubject, hasUserPath bool
+	rows, err := pool.Query(ctx, `
+		SELECT column_name FROM information_schema.columns
+		WHERE table_name = 'rate_limits' AND table_schema = current_schema()
+	`)
+	if err != nil {
+		return fmt.Errorf("inspect rate_limits schema: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("inspect rate_limits schema: %w", err)
+		}
+		switch name {
+		case "subject":
+			hasSubject = true
+		case "user_path":
+			hasUserPath = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect rate_limits schema: %w", err)
+	}
+	if hasSubject || !hasUserPath {
+		return nil // already scoped, or table does not exist yet
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE rate_limits RENAME TO rate_limits_pre_scope`,
+		`CREATE TABLE rate_limits (
+			scope TEXT NOT NULL DEFAULT 'user_path',
+			subject TEXT NOT NULL,
+			period_seconds BIGINT NOT NULL,
+			max_requests BIGINT,
+			max_tokens BIGINT,
+			source TEXT NOT NULL DEFAULT '',
+			created_at BIGINT NOT NULL,
+			updated_at BIGINT NOT NULL,
+			PRIMARY KEY (scope, subject, period_seconds)
+		)`,
+		`INSERT INTO rate_limits (scope, subject, period_seconds, max_requests, max_tokens, source, created_at, updated_at)
+			SELECT 'user_path', user_path, period_seconds, max_requests, max_tokens, source, created_at, updated_at
+			FROM rate_limits_pre_scope`,
+		`DROP TABLE rate_limits_pre_scope`,
+	} {
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("migrate rate_limits to scoped schema: %w", err)
+		}
+	}
+	return nil
+}
+
 func (s *PostgreSQLStore) ListRules(ctx context.Context) ([]Rule, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT user_path, period_seconds, max_requests, max_tokens, source, created_at, updated_at
+		SELECT scope, subject, period_seconds, max_requests, max_tokens, source, created_at, updated_at
 		FROM rate_limits
-		ORDER BY user_path ASC, period_seconds ASC
+		ORDER BY scope ASC, subject ASC, period_seconds ASC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list rate limit rules: %w", err)
@@ -83,23 +142,20 @@ func (s *PostgreSQLStore) UpsertRules(ctx context.Context, rules []Rule) error {
 	return nil
 }
 
-func (s *PostgreSQLStore) DeleteRule(ctx context.Context, userPath string, periodSeconds int64) error {
-	userPath, err := NormalizeUserPath(userPath)
+func (s *PostgreSQLStore) DeleteRule(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	scope, subject, err := normalizeRuleKey(scope, subject, periodSeconds)
 	if err != nil {
-		return err
-	}
-	if err := validatePeriodSeconds(periodSeconds); err != nil {
 		return err
 	}
 	tag, err := s.pool.Exec(ctx, `
 		DELETE FROM rate_limits
-		WHERE user_path = $1 AND period_seconds = $2
-	`, userPath, periodSeconds)
+		WHERE scope = $1 AND subject = $2 AND period_seconds = $3
+	`, string(scope), subject, periodSeconds)
 	if err != nil {
-		return fmt.Errorf("delete rate limit rule %s/%d: %w", userPath, periodSeconds, err)
+		return fmt.Errorf("delete rate limit rule %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
+		return fmt.Errorf("%w: %s %s/%d", ErrNotFound, scope, subject, periodSeconds)
 	}
 	return nil
 }
@@ -125,12 +181,12 @@ func (s *PostgreSQLStore) ReplaceConfigRules(ctx context.Context, rules []Rule) 
 		}
 	} else {
 		conditions := make([]string, 0, len(rules))
-		args := make([]any, 0, 1+len(rules)*2)
+		args := make([]any, 0, 1+len(rules)*3)
 		args = append(args, SourceConfig)
 		for _, rule := range rules {
 			base := len(args) + 1
-			conditions = append(conditions, fmt.Sprintf(`(user_path = $%d AND period_seconds = $%d)`, base, base+1))
-			args = append(args, rule.UserPath, rule.PeriodSeconds)
+			conditions = append(conditions, fmt.Sprintf(`(scope = $%d AND subject = $%d AND period_seconds = $%d)`, base, base+1, base+2))
+			args = append(args, string(rule.Scope), rule.Subject, rule.PeriodSeconds)
 		}
 		query := `DELETE FROM rate_limits WHERE source = $1 AND NOT (` + strings.Join(conditions, " OR ") + `)`
 		if _, err := tx.Exec(ctx, query, args...); err != nil {
@@ -153,15 +209,16 @@ func (s *PostgreSQLStore) Close() error {
 func upsertPostgreSQLRules(ctx context.Context, tx pgx.Tx, rules []Rule) error {
 	for _, rule := range rules {
 		_, err := tx.Exec(ctx, `
-			INSERT INTO rate_limits (user_path, period_seconds, max_requests, max_tokens, source, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (user_path, period_seconds) DO UPDATE SET
-				max_requests = CASE WHEN excluded.source = $8 OR rate_limits.source = $9 THEN excluded.max_requests ELSE rate_limits.max_requests END,
-				max_tokens = CASE WHEN excluded.source = $8 OR rate_limits.source = $9 THEN excluded.max_tokens ELSE rate_limits.max_tokens END,
-				source = CASE WHEN excluded.source = $8 OR rate_limits.source = $9 THEN excluded.source ELSE rate_limits.source END,
-				updated_at = CASE WHEN excluded.source = $8 OR rate_limits.source = $9 THEN excluded.updated_at ELSE rate_limits.updated_at END
+			INSERT INTO rate_limits (scope, subject, period_seconds, max_requests, max_tokens, source, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (scope, subject, period_seconds) DO UPDATE SET
+				max_requests = CASE WHEN excluded.source = $9 OR rate_limits.source = $10 THEN excluded.max_requests ELSE rate_limits.max_requests END,
+				max_tokens = CASE WHEN excluded.source = $9 OR rate_limits.source = $10 THEN excluded.max_tokens ELSE rate_limits.max_tokens END,
+				source = CASE WHEN excluded.source = $9 OR rate_limits.source = $10 THEN excluded.source ELSE rate_limits.source END,
+				updated_at = CASE WHEN excluded.source = $9 OR rate_limits.source = $10 THEN excluded.updated_at ELSE rate_limits.updated_at END
 		`,
-			rule.UserPath,
+			string(rule.Scope),
+			rule.Subject,
 			rule.PeriodSeconds,
 			rule.MaxRequests,
 			rule.MaxTokens,
@@ -172,7 +229,7 @@ func upsertPostgreSQLRules(ctx context.Context, tx pgx.Tx, rules []Rule) error {
 			SourceConfig,
 		)
 		if err != nil {
-			return fmt.Errorf("upsert rate limit rule %s/%d: %w", rule.UserPath, rule.PeriodSeconds, err)
+			return fmt.Errorf("upsert rate limit rule %s %s/%d: %w", rule.Scope, rule.Subject, rule.PeriodSeconds, err)
 		}
 	}
 	return nil
@@ -180,12 +237,14 @@ func upsertPostgreSQLRules(ctx context.Context, tx pgx.Tx, rules []Rule) error {
 
 func scanPostgreSQLRule(row pgx.Row) (Rule, error) {
 	var rule Rule
+	var scope string
 	var maxRequests *int64
 	var maxTokens *int64
 	var createdAt int64
 	var updatedAt int64
 	if err := row.Scan(
-		&rule.UserPath,
+		&scope,
+		&rule.Subject,
 		&rule.PeriodSeconds,
 		&maxRequests,
 		&maxTokens,
@@ -195,6 +254,7 @@ func scanPostgreSQLRule(row pgx.Row) (Rule, error) {
 	); err != nil {
 		return Rule{}, fmt.Errorf("scan rate limit rule: %w", err)
 	}
+	rule.Scope = RuleScope(scope)
 	rule.MaxRequests = maxRequests
 	rule.MaxTokens = maxTokens
 	rule.CreatedAt = time.Unix(createdAt, 0).UTC()

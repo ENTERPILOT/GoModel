@@ -63,7 +63,7 @@ func (s *translatedInferenceService) inference() *gateway.InferenceOrchestrator 
 }
 
 func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.InferenceOrchestrator {
-	return gateway.NewInferenceOrchestrator(gateway.InferenceConfig{
+	cfg := gateway.InferenceConfig{
 		Provider:                 s.provider,
 		ModelResolver:            s.modelResolver,
 		ModelAuthorizer:          s.modelAuthorizer,
@@ -73,7 +73,14 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		UsageLogger:              s.usageLogger,
 		PricingResolver:          s.pricingResolver,
 		GuardrailsHash:           s.guardrailsHash,
-	})
+	}
+	// Guarded assignment keeps the gate nil when rate limits are off (a nil
+	// RateLimiter assigned unconditionally would arrive as a typed non-nil
+	// RouteGate).
+	if s.rateLimiter != nil {
+		cfg.RouteGate = s.rateLimiter
+	}
+	return gateway.NewInferenceOrchestrator(cfg)
 }
 
 func (s *translatedInferenceService) ChatCompletion(c *echo.Context) error {
@@ -89,7 +96,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	release, err := enforceRateLimit(c, s.rateLimiter)
+	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRouteFromWorkflow(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -258,7 +265,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	release, err := enforceRateLimit(c, s.rateLimiter)
+	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRouteFromWorkflow(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -448,7 +455,7 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	}
 	attachPreparedWorkflow(c, prepared.Context, prepared.Workflow)
 
-	release, err := enforceRateLimit(c, s.rateLimiter)
+	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRouteFromWorkflow(prepared.Workflow))
 	if err != nil {
 		return handleError(c, err)
 	}

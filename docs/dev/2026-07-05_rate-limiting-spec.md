@@ -276,13 +276,50 @@ sits behind a small interface so a Redis backend (INCR + Lua, LiteLLM-v3
 style) can be added without touching enforcement call sites. Budgets remain
 the cross-instance-consistent control since they read the shared DB.
 
-## 10. Future work
+## 10. Scoped rules addendum (2026-07-05, second round)
 
-1. **Per-model rules** (`{user_path, model, ...}`): match on the requested
-   model selector at admission; requires carrying the admitted rule set (or
-   requested model) to the accounting hook, since `UsageEntry.Model` is the
-   *executed* model and diverges under aliasing/failover. Design decision
-   deferred until demanded.
+Rules gained a scope discriminator: `(scope, subject, period_seconds)` is the
+rule identity, where scope is `user_path` (the original consumer control),
+`provider` (a configured provider instance by name), or `model` (subject
+`openai/gpt-4o` pins one provider's model; bare `gpt-4o` matches the model on
+any provider; matching is case-insensitive). One engine, one table, one
+dashboard page serve all three.
+
+The scopes differ in *enforcement posture*, not machinery:
+
+- **user_path** stays admission control: breach -> 429 at ingress. Switching
+  targets cannot relieve a consumer limit, so routing never consults it.
+- **provider/model** are *routing constraints*. Admission checks them for the
+  resolved primary route (429 with honest Retry-After when the client asked
+  for that route directly), but the virtual-model balancer skips saturated
+  targets via a rate-limit-aware `Catalog.ModelAvailable` decorator (same
+  skip semantics as stale inventory), and the failover sweep skips saturated
+  candidates via a `RouteGate` on the orchestrator. The client only sees 429
+  when no viable target remains.
+
+Token accounting for provider/model scopes charges the *executed* route from
+the usage entry (`ProviderName`/`Model`), which is exactly why these scopes
+dodge the requested-vs-executed ambiguity that deferred per-model consumer
+rules in round one: the provider's window must be charged for what actually
+ran, and the entry records precisely that. Failed failover attempts are not
+counted toward request windows (known undercount, documented); tokens are
+always attributed correctly.
+
+Read-model notes: `RouteAvailable` is a lock-held read-only probe (advance +
+estimate without commit), so balancer polling consumes nothing. Batch
+submission skips provider/model rules -- a batch file can mix models. Config
+adds `rate_limits.providers`/`rate_limits.models` blocks and
+`SET_PROVIDER_RATE_LIMIT_<NAME>` (distinct prefix to avoid the
+`SET_RATE_LIMIT_*` suffix space; underscores -> hyphens like provider env
+vars; model rules are YAML/admin-only since model ids are not env-safe).
+Pre-scope tables/documents migrate in place at store init on all three
+backends.
+
+## 11. Future work
+
+1. **Per-(user_path x model) matrix rules**: consumer-scoped model limits
+   still carry the requested-vs-executed attribution question plus rule
+   cardinality/precedence design; deferred until demanded.
 2. **Redis counter backend** for exact multi-replica enforcement.
 3. **Pre-call token reservation** (estimate + post-call reconciliation,
    LiteLLM v3 style) to close the one-request TPM overshoot.
@@ -291,8 +328,12 @@ the cross-instance-consistent control since they read the shared DB.
 5. Upstream `x-ratelimit-*` passthrough when GoModel itself imposes no limit.
 6. Workflow `features.rate_limit` gating, if a use case appears.
 7. Counter persistence across restarts (periodic flush) for day windows.
+8. Attempt-level request counting for failover targets (today only the
+   resolved primary route is charged a request; tokens are always correct).
+9. Virtual-model (alias) subjects for model rules -- needs the requested
+   alias carried onto usage entries for token attribution.
 
-## 11. Testing
+## 12. Testing
 
 - `config`: YAML + `SET_RATE_LIMIT_*` parsing, replacement semantics,
   validation errors, usage-dependency warning.
