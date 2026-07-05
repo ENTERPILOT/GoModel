@@ -42,12 +42,22 @@
                 };
             },
 
+            // One scope metadata table drives the select options, list chips,
+            // and the subject field's label/placeholder.
+            rateLimitScopeMeta(scope) {
+                const meta = {
+                    user_path: { label: 'User path', chip: 'user path', fieldLabel: 'User Path', placeholder: '/team/alpha' },
+                    provider: { label: 'Provider', chip: 'provider', fieldLabel: 'Provider Name', placeholder: 'openai' },
+                    model: { label: 'Model', chip: 'model', fieldLabel: 'Model', placeholder: 'openai/gpt-4o' }
+                };
+                return meta[scope] || meta.user_path;
+            },
+
             rateLimitScopeOptions() {
-                return [
-                    { value: 'user_path', label: 'User path' },
-                    { value: 'provider', label: 'Provider' },
-                    { value: 'model', label: 'Model' }
-                ];
+                return ['user_path', 'provider', 'model'].map((scope) => ({
+                    value: scope,
+                    label: this.rateLimitScopeMeta(scope).label
+                }));
             },
 
             rateLimitScope(item) {
@@ -61,36 +71,15 @@
             },
 
             rateLimitScopeLabel(item) {
-                switch (this.rateLimitScope(item)) {
-                case 'provider':
-                    return 'provider';
-                case 'model':
-                    return 'model';
-                default:
-                    return 'user path';
-                }
+                return this.rateLimitScopeMeta(this.rateLimitScope(item)).chip;
             },
 
             rateLimitSubjectFieldLabel() {
-                switch (String(this.rateLimitForm && this.rateLimitForm.scope || '')) {
-                case 'provider':
-                    return 'Provider Name';
-                case 'model':
-                    return 'Model';
-                default:
-                    return 'User Path';
-                }
+                return this.rateLimitScopeMeta(String(this.rateLimitForm && this.rateLimitForm.scope || '')).fieldLabel;
             },
 
             rateLimitSubjectPlaceholder() {
-                switch (String(this.rateLimitForm && this.rateLimitForm.scope || '')) {
-                case 'provider':
-                    return 'openai';
-                case 'model':
-                    return 'openai/gpt-4o';
-                default:
-                    return '/team/alpha';
-                }
+                return this.rateLimitScopeMeta(String(this.rateLimitForm && this.rateLimitForm.scope || '')).placeholder;
             },
 
             // Changing scope resets the subject: a user path never carries

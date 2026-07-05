@@ -10,6 +10,21 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// postgresRateLimitsSchema is the one source of the table shape, shared by
+// fresh installs and the pre-scope migration rebuild.
+const postgresRateLimitsSchema = `
+	CREATE TABLE IF NOT EXISTS rate_limits (
+		scope TEXT NOT NULL DEFAULT 'user_path',
+		subject TEXT NOT NULL,
+		period_seconds BIGINT NOT NULL,
+		max_requests BIGINT,
+		max_tokens BIGINT,
+		source TEXT NOT NULL DEFAULT '',
+		created_at BIGINT NOT NULL,
+		updated_at BIGINT NOT NULL,
+		PRIMARY KEY (scope, subject, period_seconds)
+	)`
+
 type PostgreSQLStore struct {
 	pool *pgxpool.Pool
 }
@@ -21,19 +36,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	if err := migratePostgreSQLPreScopeTable(ctx, pool); err != nil {
 		return nil, err
 	}
-	if _, err := pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS rate_limits (
-			scope TEXT NOT NULL DEFAULT 'user_path',
-			subject TEXT NOT NULL,
-			period_seconds BIGINT NOT NULL,
-			max_requests BIGINT,
-			max_tokens BIGINT,
-			source TEXT NOT NULL DEFAULT '',
-			created_at BIGINT NOT NULL,
-			updated_at BIGINT NOT NULL,
-			PRIMARY KEY (scope, subject, period_seconds)
-		)
-	`); err != nil {
+	if _, err := pool.Exec(ctx, postgresRateLimitsSchema); err != nil {
 		return nil, fmt.Errorf("failed to create rate_limits table: %w", err)
 	}
 	return &PostgreSQLStore{pool: pool}, nil
@@ -69,27 +72,30 @@ func migratePostgreSQLPreScopeTable(ctx context.Context, pool *pgxpool.Pool) err
 	if hasSubject || !hasUserPath {
 		return nil // already scoped, or table does not exist yet
 	}
+	// One transaction (PostgreSQL DDL is transactional): a crash mid-rebuild
+	// must not leave the table renamed away, or the next startup would create
+	// a fresh empty rate_limits and orphan every rule. If concurrent replicas
+	// race here, one commits and the others fail-fast and see the migrated
+	// schema on restart.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin rate_limits scoped migration: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
 	for _, stmt := range []string{
 		`ALTER TABLE rate_limits RENAME TO rate_limits_pre_scope`,
-		`CREATE TABLE rate_limits (
-			scope TEXT NOT NULL DEFAULT 'user_path',
-			subject TEXT NOT NULL,
-			period_seconds BIGINT NOT NULL,
-			max_requests BIGINT,
-			max_tokens BIGINT,
-			source TEXT NOT NULL DEFAULT '',
-			created_at BIGINT NOT NULL,
-			updated_at BIGINT NOT NULL,
-			PRIMARY KEY (scope, subject, period_seconds)
-		)`,
+		postgresRateLimitsSchema,
 		`INSERT INTO rate_limits (scope, subject, period_seconds, max_requests, max_tokens, source, created_at, updated_at)
 			SELECT 'user_path', user_path, period_seconds, max_requests, max_tokens, source, created_at, updated_at
 			FROM rate_limits_pre_scope`,
 		`DROP TABLE rate_limits_pre_scope`,
 	} {
-		if _, err := pool.Exec(ctx, stmt); err != nil {
+		if _, err := tx.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("migrate rate_limits to scoped schema: %w", err)
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit rate_limits scoped migration: %w", err)
 	}
 	return nil
 }

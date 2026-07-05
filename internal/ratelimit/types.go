@@ -211,7 +211,10 @@ func NormalizeSubject(scope RuleScope, subject string) (string, error) {
 		}
 		return subject, nil
 	case ScopeModel:
-		subject = strings.TrimSpace(subject)
+		// Lowercased so storage matches the case-insensitive matching: without
+		// this, "OpenAI/GPT-4o" and "openai/gpt-4o" would persist as two rules
+		// that both match the same requests.
+		subject = strings.ToLower(strings.TrimSpace(subject))
 		if subject == "" {
 			return "", fmt.Errorf("model rule subject is required")
 		}

@@ -282,16 +282,50 @@ func TestRateLimitEndpointsProviderAndModelScopes(t *testing.T) {
 		t.Fatalf("Acquire() failed: %v", err)
 	}
 
-	// A model rule for the same period coexists.
+	// A model rule for the same period coexists; mixed-case subjects are
+	// stored lowercase and match lowercase live routes.
 	modelCtx, modelRec := adminRateLimitRequest(
 		http.MethodPut,
-		`{"scope":"model","subject":"openai/gpt-4o","limit_key":{"period":"minute"},"max_tokens":90000}`,
+		`{"scope":"model","subject":"OpenAI/GPT-4o","limit_key":{"period":"minute"},"max_tokens":90000}`,
 	)
 	if err := h.UpsertRateLimit(modelCtx); err != nil {
 		t.Fatalf("UpsertRateLimit() model failed: %v", err)
 	}
 	if modelRec.Code != http.StatusOK {
 		t.Fatalf("model status = %d, want 200 body=%s", modelRec.Code, modelRec.Body.String())
+	}
+	var modelBody rateLimitListResponse
+	if err := json.Unmarshal(modelRec.Body.Bytes(), &modelBody); err != nil {
+		t.Fatalf("decode model response: %v", err)
+	}
+	foundModel := false
+	for _, item := range modelBody.RateLimits {
+		if item.Scope == "model" {
+			foundModel = true
+			if item.Subject != "openai/gpt-4o" {
+				t.Fatalf("model subject = %q, want lowercase openai/gpt-4o", item.Subject)
+			}
+		}
+	}
+	if !foundModel {
+		t.Fatal("model rule missing from response")
+	}
+	service.RecordTokens(ratelimit.Subjects{UserPath: "/", Provider: "openai", Model: "gpt-4o"}, 90000, rateLimitTestNow)
+	if _, err := service.Acquire(ratelimit.Subjects{UserPath: "/", Provider: "openai", Model: "gpt-4o"}, rateLimitTestNow); err == nil {
+		t.Fatal("Acquire() succeeded, want mixed-case rule to limit the lowercase route")
+	}
+
+	// Conflicting subject + user_path on a provider rule is rejected, not
+	// silently resolved.
+	conflictCtx, conflictRec := adminRateLimitRequest(
+		http.MethodPut,
+		`{"scope":"provider","subject":"openai","user_path":"/team","limit_key":{"period":"minute"},"max_requests":5}`,
+	)
+	if err := h.UpsertRateLimit(conflictCtx); err != nil {
+		t.Fatalf("UpsertRateLimit() failed: %v", err)
+	}
+	if conflictRec.Code != http.StatusBadRequest {
+		t.Fatalf("conflicting subject+user_path status = %d, want 400 body=%s", conflictRec.Code, conflictRec.Body.String())
 	}
 
 	// A provider/model rule without a subject is rejected, and user_path must

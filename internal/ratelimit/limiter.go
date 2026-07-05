@@ -115,51 +115,23 @@ func (l *limiter) counter(counters map[ruleKey]*windowCounter, key ruleKey) *win
 
 // admit checks every matching rule and, only when all pass, commits the
 // request counters and concurrency slots. It returns the header snapshot for
-// the most-constrained matching limits.
+// the most-constrained matching limits. On breach it reports the exceeded
+// rule with the longest recovery, so Retry-After stays honest when several
+// windows (e.g. minute and day) are exhausted at once.
 func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey, *ExceededError) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	var exceeded *ExceededError
 	for _, rule := range rules {
-		key := keyForRule(rule)
-		if rule.PeriodSeconds == PeriodConcurrent {
-			if l.inFlight[key] >= *rule.MaxRequests {
-				return HeaderSnapshot{}, nil, &ExceededError{
-					Rule:       rule,
-					Scope:      ScopeConcurrency,
-					Observed:   l.inFlight[key],
-					Limit:      *rule.MaxRequests,
-					RetryAfter: time.Second,
-				}
-			}
-			continue
-		}
-		if rule.MaxRequests != nil {
-			counter := l.counter(l.requests, key)
-			counter.advance(now, rule.PeriodSeconds)
-			if used := counter.estimate(now, rule.PeriodSeconds); used >= *rule.MaxRequests {
-				return HeaderSnapshot{}, nil, &ExceededError{
-					Rule:       rule,
-					Scope:      ScopeRequests,
-					Observed:   used,
-					Limit:      *rule.MaxRequests,
-					RetryAfter: counter.retryAfter(now, rule.PeriodSeconds, *rule.MaxRequests),
-				}
+		if candidate := l.breach(rule, now); candidate != nil {
+			if exceeded == nil || candidate.RetryAfter > exceeded.RetryAfter {
+				exceeded = candidate
 			}
 		}
-		if rule.MaxTokens != nil {
-			counter := l.counter(l.tokens, key)
-			counter.advance(now, rule.PeriodSeconds)
-			if used := counter.estimate(now, rule.PeriodSeconds); used >= *rule.MaxTokens {
-				return HeaderSnapshot{}, nil, &ExceededError{
-					Rule:       rule,
-					Scope:      ScopeTokens,
-					Observed:   used,
-					Limit:      *rule.MaxTokens,
-					RetryAfter: counter.retryAfter(now, rule.PeriodSeconds, *rule.MaxTokens),
-				}
-			}
-		}
+	}
+	if exceeded != nil {
+		return HeaderSnapshot{}, nil, exceeded
 	}
 
 	var headers HeaderSnapshot
@@ -202,6 +174,51 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 	return headers, held, nil
 }
 
+// breach reports whether one rule currently rejects one more request, without
+// consuming anything. The caller must hold l.mu.
+func (l *limiter) breach(rule Rule, now time.Time) *ExceededError {
+	key := keyForRule(rule)
+	if rule.PeriodSeconds == PeriodConcurrent {
+		if l.inFlight[key] >= *rule.MaxRequests {
+			return &ExceededError{
+				Rule:       rule,
+				Scope:      ScopeConcurrency,
+				Observed:   l.inFlight[key],
+				Limit:      *rule.MaxRequests,
+				RetryAfter: time.Second,
+			}
+		}
+		return nil
+	}
+	if rule.MaxRequests != nil {
+		counter := l.counter(l.requests, key)
+		counter.advance(now, rule.PeriodSeconds)
+		if used := counter.estimate(now, rule.PeriodSeconds); used >= *rule.MaxRequests {
+			return &ExceededError{
+				Rule:       rule,
+				Scope:      ScopeRequests,
+				Observed:   used,
+				Limit:      *rule.MaxRequests,
+				RetryAfter: counter.retryAfter(now, rule.PeriodSeconds, *rule.MaxRequests),
+			}
+		}
+	}
+	if rule.MaxTokens != nil {
+		counter := l.counter(l.tokens, key)
+		counter.advance(now, rule.PeriodSeconds)
+		if used := counter.estimate(now, rule.PeriodSeconds); used >= *rule.MaxTokens {
+			return &ExceededError{
+				Rule:       rule,
+				Scope:      ScopeTokens,
+				Observed:   used,
+				Limit:      *rule.MaxTokens,
+				RetryAfter: counter.retryAfter(now, rule.PeriodSeconds, *rule.MaxTokens),
+			}
+		}
+	}
+	return nil
+}
+
 // available reports whether every rule would currently admit one more
 // request. It is a read-only probe for routing decisions (load balancing and
 // failover skip saturated targets); admission stays the authoritative check.
@@ -209,26 +226,8 @@ func (l *limiter) available(rules []Rule, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, rule := range rules {
-		key := keyForRule(rule)
-		if rule.PeriodSeconds == PeriodConcurrent {
-			if l.inFlight[key] >= *rule.MaxRequests {
-				return false
-			}
-			continue
-		}
-		if rule.MaxRequests != nil {
-			counter := l.counter(l.requests, key)
-			counter.advance(now, rule.PeriodSeconds)
-			if counter.estimate(now, rule.PeriodSeconds) >= *rule.MaxRequests {
-				return false
-			}
-		}
-		if rule.MaxTokens != nil {
-			counter := l.counter(l.tokens, key)
-			counter.advance(now, rule.PeriodSeconds)
-			if counter.estimate(now, rule.PeriodSeconds) >= *rule.MaxTokens {
-				return false
-			}
+		if l.breach(rule, now) != nil {
+			return false
 		}
 	}
 	return true

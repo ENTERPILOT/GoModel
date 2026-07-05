@@ -71,3 +71,68 @@ func TestIsOnlyDuplicateKeyErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestDuplicateKeyErrorsOnConfigRulesOnly(t *testing.T) {
+	configRule := Rule{Scope: ScopeUserPath, Subject: "/seed", PeriodSeconds: PeriodMinuteSeconds, Source: SourceConfig}
+	manualRule := Rule{Scope: ScopeUserPath, Subject: "/manual", PeriodSeconds: PeriodMinuteSeconds, Source: SourceManual}
+	dupAt := func(indexes ...int) mongo.BulkWriteException {
+		exc := mongo.BulkWriteException{}
+		for _, index := range indexes {
+			exc.WriteErrors = append(exc.WriteErrors, mongo.BulkWriteError{
+				WriteError: mongo.WriteError{Index: index, Code: 11000},
+			})
+		}
+		return exc
+	}
+
+	tests := []struct {
+		name  string
+		err   error
+		rules []Rule
+		want  bool
+	}{
+		{
+			name:  "duplicate on config rule is the intended shadowing",
+			err:   dupAt(0),
+			rules: []Rule{configRule},
+			want:  true,
+		},
+		{
+			name:  "duplicate on manual rule is a real insert race",
+			err:   dupAt(1),
+			rules: []Rule{configRule, manualRule},
+			want:  false,
+		},
+		{
+			name:  "mixed batch with only config duplicates passes",
+			err:   dupAt(0),
+			rules: []Rule{configRule, manualRule},
+			want:  true,
+		},
+		{
+			name:  "index out of range keeps failing",
+			err:   dupAt(5),
+			rules: []Rule{configRule},
+			want:  false,
+		},
+		{
+			name:  "non duplicate-key code keeps failing",
+			err:   mongo.BulkWriteException{WriteErrors: []mongo.BulkWriteError{{WriteError: mongo.WriteError{Index: 0, Code: 121}}}},
+			rules: []Rule{configRule},
+			want:  false,
+		},
+		{
+			name:  "unrelated error keeps failing",
+			err:   errors.New("network down"),
+			rules: []Rule{configRule},
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := duplicateKeyErrorsOnConfigRulesOnly(tt.err, tt.rules); got != tt.want {
+				t.Fatalf("duplicateKeyErrorsOnConfigRulesOnly() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

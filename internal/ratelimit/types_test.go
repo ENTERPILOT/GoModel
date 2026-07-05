@@ -64,6 +64,15 @@ func TestNormalizeRule(t *testing.T) {
 			wantErr: "max_requests is required",
 		},
 		{
+			name: "model subject lowercased to match case-insensitive matching",
+			rule: Rule{Scope: ScopeModel, Subject: "OpenAI/GPT-4o", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(1)},
+			check: func(t *testing.T, rule Rule) {
+				if rule.Subject != "openai/gpt-4o" {
+					t.Fatalf("subject = %q, want openai/gpt-4o", rule.Subject)
+				}
+			},
+		},
+		{
 			name:    "invalid path rejected",
 			rule:    Rule{Subject: "/a/../b", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(1)},
 			wantErr: "user path",

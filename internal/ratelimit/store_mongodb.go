@@ -119,19 +119,51 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 			SetUpsert(true))
 	}
 	opts := options.BulkWrite().SetOrdered(false)
-	if _, err := s.rules.BulkWrite(ctx, models, opts); err != nil {
-		if isOnlyDuplicateKeyErrors(err) {
+	_, err := s.rules.BulkWrite(ctx, models, opts)
+	if err == nil {
+		return nil
+	}
+	if duplicateKeyErrorsOnConfigRulesOnly(err, rules) {
+		// Manual rows shadow config seeds: the intended precedence.
+		return nil
+	}
+	if isOnlyDuplicateKeyErrors(err) {
+		// A manual write lost an insert race to a concurrent writer. The
+		// documents exist now, so one retry applies the values as plain
+		// updates (last write wins, matching the SQL stores).
+		if _, retryErr := s.rules.BulkWrite(ctx, models, opts); retryErr == nil || duplicateKeyErrorsOnConfigRulesOnly(retryErr, rules) {
 			return nil
 		}
-		return fmt.Errorf("upsert %d rate limit rules: %w", len(rules), err)
 	}
-	return nil
+	return fmt.Errorf("upsert %d rate limit rules: %w", len(rules), err)
+}
+
+// duplicateKeyErrorsOnConfigRulesOnly reports whether every write error is a
+// duplicate-key violation on a config-sourced rule. With the source-scoped
+// config filter above, those are exactly the manual rows shadowing config
+// seeds — the intended precedence, not a failure. Duplicate keys on manual
+// rules are real insert races and must not be swallowed.
+func duplicateKeyErrorsOnConfigRulesOnly(err error, rules []Rule) bool {
+	var bulkErr mongo.BulkWriteException
+	if !errors.As(err, &bulkErr) {
+		return false
+	}
+	if bulkErr.WriteConcernError != nil || len(bulkErr.WriteErrors) == 0 {
+		return false
+	}
+	for _, writeErr := range bulkErr.WriteErrors {
+		if !writeErr.HasErrorCode(11000) {
+			return false
+		}
+		if writeErr.Index < 0 || writeErr.Index >= len(rules) || rules[writeErr.Index].Source != SourceConfig {
+			return false
+		}
+	}
+	return true
 }
 
 // isOnlyDuplicateKeyErrors reports whether every write error in a bulk write
-// failure is a duplicate-key violation. With the source-scoped config filter
-// above, those are exactly the manual rows shadowing config seeds — the
-// intended precedence, not a failure.
+// failure is a duplicate-key violation.
 func isOnlyDuplicateKeyErrors(err error) bool {
 	var bulkErr mongo.BulkWriteException
 	if !errors.As(err, &bulkErr) {

@@ -15,6 +15,9 @@ func newSQLiteTestStore(t *testing.T) *SQLiteStore {
 	if err != nil {
 		t.Fatalf("sql.Open() failed: %v", err)
 	}
+	// ":memory:" is connection-local; without pinning, a second pooled
+	// connection would see a different empty database.
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 	store, err := NewSQLiteStore(db)
 	if err != nil {
@@ -183,6 +186,7 @@ func TestSQLiteStoreMigratesPreScopeTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sql.Open() failed: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 
 	// The pre-scope shape: keyed by user_path only.

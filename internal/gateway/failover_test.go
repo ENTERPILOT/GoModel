@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"gomodel/internal/core"
@@ -115,6 +116,33 @@ func TestTryFailoverResponseSkipsRateLimitedTargets(t *testing.T) {
 	if !didFailover || err != nil || resp != "ok" || failoverModel != "anthropic/claude" {
 		t.Fatalf("failover result = (resp:%q model:%q didFailover:%v err:%v), want anthropic success", resp, failoverModel, didFailover, err)
 	}
+}
+
+// The stream sweep shares the route-gate skip with the response sweep.
+func TestTryFailoverStreamSkipsRateLimitedTargets(t *testing.T) {
+	o, workflow := failoverTestFixture()
+	o.failoverResolver = stubFailoverResolver{selectors: []core.ModelSelector{
+		{Provider: "openai", Model: "gpt-5"},
+		{Provider: "anthropic", Model: "claude"},
+	}}
+	o.routeGate = blockingRouteGate{blocked: map[string]bool{"openai/gpt-5": true}}
+
+	primaryErr := core.NewProviderError("openai", http.StatusInternalServerError, "primary boom", nil)
+	var attempted []string
+	call := func(selector core.ModelSelector, _, _ string) (io.ReadCloser, string, string, error) {
+		attempted = append(attempted, selector.QualifiedModel())
+		return io.NopCloser(strings.NewReader("data")), "anthropic", "claude", nil
+	}
+
+	stream, _, _, _, failoverModel, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+
+	if len(attempted) != 1 || attempted[0] != "anthropic/claude" {
+		t.Fatalf("attempted = %v, want only anthropic/claude (rate-limited target skipped)", attempted)
+	}
+	if err != nil || stream == nil || failoverModel != "anthropic/claude" {
+		t.Fatalf("failover result = (stream:%v model:%q err:%v), want anthropic success", stream != nil, failoverModel, err)
+	}
+	stream.Close()
 }
 
 func TestTryFailoverStreamSkipsWhenContextCanceled(t *testing.T) {

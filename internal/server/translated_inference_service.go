@@ -96,14 +96,11 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRouteFromWorkflow(workflow))
+	release, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
 	defer release()
-	if err := enforceBudget(c, s.budgetChecker); err != nil {
-		return handleError(c, err)
-	}
 
 	if req.Stream {
 		if len(s.inference().FailoverSelectors(workflow)) == 0 {
@@ -265,14 +262,11 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRouteFromWorkflow(workflow))
+	release, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
 	defer release()
-	if err := enforceBudget(c, s.budgetChecker); err != nil {
-		return handleError(c, err)
-	}
 
 	if req.Stream {
 		result, err := s.inference().StreamResponses(ctx, workflow, req)
@@ -455,14 +449,11 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	}
 	attachPreparedWorkflow(c, prepared.Context, prepared.Workflow)
 
-	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRouteFromWorkflow(prepared.Workflow))
+	release, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(prepared.Workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
 	defer release()
-	if err := enforceBudget(c, s.budgetChecker); err != nil {
-		return handleError(c, err)
-	}
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), prepared.Workflow, prepared.Request, requestID, "/v1/embeddings")

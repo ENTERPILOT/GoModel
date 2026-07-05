@@ -175,6 +175,31 @@ func TestRetryAfterReflectsSlidingWindowRecovery(t *testing.T) {
 	})
 }
 
+// TestAcquireReportsLongestBlockingRule pins the breach report to the rule
+// that blocks longest: with minute and day windows both exhausted, honoring
+// the minute rule's Retry-After would just earn a second 429.
+func TestAcquireReportsLongestBlockingRule(t *testing.T) {
+	service := newTestService(t,
+		Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(1)},
+		Rule{Subject: "/", PeriodSeconds: PeriodDaySeconds, MaxRequests: int64Ptr(1)},
+	)
+
+	if _, err := service.Acquire(onPath("/"), windowBase); err != nil {
+		t.Fatalf("Acquire() failed: %v", err)
+	}
+	_, err := service.Acquire(onPath("/"), windowBase)
+	var exceeded *ExceededError
+	if !errors.As(err, &exceeded) {
+		t.Fatalf("Acquire() error = %v, want ExceededError", err)
+	}
+	if exceeded.Rule.PeriodSeconds != PeriodDaySeconds {
+		t.Fatalf("exceeded rule period = %d, want day (longest recovery)", exceeded.Rule.PeriodSeconds)
+	}
+	if exceeded.RetryAfter <= time.Minute {
+		t.Fatalf("retry after = %s, want the day window's recovery", exceeded.RetryAfter)
+	}
+}
+
 func TestAcquireRequestsShareSubtreeCounter(t *testing.T) {
 	service := newTestService(t, Rule{
 		Subject:       "/team",

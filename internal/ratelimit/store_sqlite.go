@@ -8,6 +8,21 @@ import (
 	"time"
 )
 
+// sqliteRateLimitsSchema is the one source of the table shape, shared by
+// fresh installs and the pre-scope migration rebuild.
+const sqliteRateLimitsSchema = `
+	CREATE TABLE IF NOT EXISTS rate_limits (
+		scope TEXT NOT NULL DEFAULT 'user_path',
+		subject TEXT NOT NULL,
+		period_seconds INTEGER NOT NULL,
+		max_requests INTEGER,
+		max_tokens INTEGER,
+		source TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (scope, subject, period_seconds)
+	)`
+
 type SQLiteStore struct {
 	db *sql.DB
 }
@@ -19,19 +34,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	if err := migrateSQLitePreScopeTable(db); err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS rate_limits (
-			scope TEXT NOT NULL DEFAULT 'user_path',
-			subject TEXT NOT NULL,
-			period_seconds INTEGER NOT NULL,
-			max_requests INTEGER,
-			max_tokens INTEGER,
-			source TEXT NOT NULL DEFAULT '',
-			created_at INTEGER NOT NULL,
-			updated_at INTEGER NOT NULL,
-			PRIMARY KEY (scope, subject, period_seconds)
-		)
-	`); err != nil {
+	if _, err := db.Exec(sqliteRateLimitsSchema); err != nil {
 		return nil, fmt.Errorf("failed to create rate_limits table: %w", err)
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_rate_limits_subject ON rate_limits(scope, subject)`); err != nil {
@@ -70,28 +73,29 @@ func migrateSQLitePreScopeTable(db *sql.DB) error {
 	if !hasUserPath {
 		return nil // table does not exist yet
 	}
+	// One transaction: a crash mid-rebuild must not leave the table renamed
+	// away, or the next startup would create a fresh empty rate_limits and
+	// orphan every rule.
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin rate_limits scoped migration: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
 	for _, stmt := range []string{
 		`ALTER TABLE rate_limits RENAME TO rate_limits_pre_scope`,
-		`CREATE TABLE rate_limits (
-			scope TEXT NOT NULL DEFAULT 'user_path',
-			subject TEXT NOT NULL,
-			period_seconds INTEGER NOT NULL,
-			max_requests INTEGER,
-			max_tokens INTEGER,
-			source TEXT NOT NULL DEFAULT '',
-			created_at INTEGER NOT NULL,
-			updated_at INTEGER NOT NULL,
-			PRIMARY KEY (scope, subject, period_seconds)
-		)`,
+		sqliteRateLimitsSchema,
 		`INSERT INTO rate_limits (scope, subject, period_seconds, max_requests, max_tokens, source, created_at, updated_at)
 			SELECT 'user_path', user_path, period_seconds, max_requests, max_tokens, source, created_at, updated_at
 			FROM rate_limits_pre_scope`,
 		`DROP TABLE rate_limits_pre_scope`,
 		`DROP INDEX IF EXISTS idx_rate_limits_user_path`,
 	} {
-		if _, err := db.Exec(stmt); err != nil {
+		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("migrate rate_limits to scoped schema: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit rate_limits scoped migration: %w", err)
 	}
 	return nil
 }

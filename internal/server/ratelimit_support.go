@@ -65,6 +65,22 @@ func enforceRateLimit(c *echo.Context, limiter RateLimiter, route rateLimitRoute
 	return reservation.Release, nil
 }
 
+// enforceAdmission runs the shared admission sequence — rate limits first,
+// then budget — and returns the rate-limit release to defer. On a budget
+// rejection the reservation is released here, so callers never hold a
+// concurrency slot for a refused request.
+func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecker, route rateLimitRoute) (func(), error) {
+	release, err := enforceRateLimit(c, limiter, route)
+	if err != nil {
+		return noopRelease, err
+	}
+	if err := enforceBudget(c, checker); err != nil {
+		release()
+		return noopRelease, err
+	}
+	return release, nil
+}
+
 func acquireRateLimitForContext(ctx context.Context, limiter RateLimiter, route rateLimitRoute) (*ratelimit.Reservation, error) {
 	if limiter == nil || ctx == nil {
 		return nil, nil

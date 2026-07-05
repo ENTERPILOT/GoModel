@@ -277,6 +277,10 @@ func rateLimitRequestKey(rawScope, rawSubject, rawUserPath string, key *rateLimi
 			return "", "", 0, errors.New("subject is required for provider and model rules; user_path only names user-path rules")
 		}
 		rawSubject = rawUserPath
+	} else if scope != ratelimit.ScopeUserPath && strings.TrimSpace(rawUserPath) != "" {
+		// Silently dropping the conflicting field would mask rule-authoring
+		// mistakes.
+		return "", "", 0, errors.New("user_path must not be set alongside subject for provider and model rules")
 	}
 	subject, err := ratelimit.NormalizeSubject(scope, rawSubject)
 	if err != nil {

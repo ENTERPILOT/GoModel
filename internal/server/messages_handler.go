@@ -94,14 +94,11 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRouteFromWorkflow(workflow))
+	release, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
 	defer release()
-	if err := enforceBudget(c, s.budgetChecker); err != nil {
-		return handleError(c, err)
-	}
 
 	if req.Stream {
 		result, err := s.inference().StreamChatCompletion(ctx, workflow, req)
