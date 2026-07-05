@@ -28,6 +28,7 @@ type nativeBatchService struct {
 	cleanupStoredBatchRewrittenInputFile func(context.Context, *batchstore.StoredBatch) bool
 	usageLogger                          usage.LoggerInterface
 	budgetChecker                        BudgetChecker
+	rateLimiter                          RateLimiter
 	pricingResolver                      usage.PricingResolver
 
 	orchestrator *gateway.BatchOrchestrator
@@ -49,7 +50,7 @@ func (s *nativeBatchService) batch() *gateway.BatchOrchestrator {
 		CleanupStoredBatchRewrittenInputFile: s.cleanupStoredBatchRewrittenInputFile,
 		UsageLogger:                          s.usageLogger,
 		PricingResolver:                      s.pricingResolver,
-		BudgetEnforcer:                       batchBudgetEnforcer(s.budgetChecker),
+		BudgetEnforcer:                       batchAdmissionEnforcer(s.rateLimiter, s.budgetChecker),
 	})
 	return s.orchestrator
 }
@@ -169,12 +170,24 @@ func batchIDFromRequest(c *echo.Context) (string, error) {
 	return id, nil
 }
 
-func batchBudgetEnforcer(checker BudgetChecker) func(context.Context) error {
-	if checker == nil {
+// batchAdmissionEnforcer gates batch submission on rate limits and budgets.
+// A submission counts toward request windows; the rate limit reservation is
+// released immediately so an asynchronous batch never pins a concurrency slot.
+func batchAdmissionEnforcer(limiter RateLimiter, checker BudgetChecker) func(context.Context) error {
+	if limiter == nil && checker == nil {
 		return nil
 	}
+	rateLimitEnforcer := batchRateLimitEnforcer(limiter)
 	return func(ctx context.Context) error {
-		return enforceBudgetForContext(ctx, checker)
+		if limiter != nil {
+			if err := rateLimitEnforcer(ctx); err != nil {
+				return err
+			}
+		}
+		if checker != nil {
+			return enforceBudgetForContext(ctx, checker)
+		}
+		return nil
 	}
 }
 

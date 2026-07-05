@@ -144,6 +144,21 @@ budgets:
         - period: "weekly"
           amount: 50.00
 
+rate_limits:
+  enabled: true # env: RATE_LIMITS_ENABLED; with no configured rules this has no effect
+  user_paths:
+    # Env equivalent:
+    # SET_RATE_LIMIT_USER__PATH__EXAMPLE="rpm=100,tpm=50000,rpd=10000,concurrent=10"
+    - path: "/user/path/example"
+      limits:
+        - period: "minute" # minute, hour, day, concurrent; stored in DB as period_seconds
+          max_requests: 100
+          max_tokens: 50000 # requires usage tracking (USAGE_ENABLED=true)
+        - period: "day"
+          max_requests: 10000
+        - period: "concurrent" # max_requests caps in-flight requests
+          max_requests: 10
+
 metrics:
   enabled: false
   endpoint: "/metrics"

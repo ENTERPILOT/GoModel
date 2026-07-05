@@ -21,6 +21,7 @@ type audioService struct {
 	provider        core.RoutableProvider
 	modelAuthorizer RequestModelAuthorizer
 	budgetChecker   BudgetChecker
+	rateLimiter     RateLimiter
 	// logBodies and logAudioBodies mirror the audit logger config. Audio
 	// endpoints are not ingress-managed, so the audit middleware cannot capture
 	// their (binary/multipart) bodies; the service captures them here instead.
@@ -70,6 +71,11 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	release, err := enforceRateLimit(c, s.rateLimiter)
+	if err != nil {
+		return handleError(c, err)
+	}
+	defer release()
 	resp, err := router.CreateSpeech(ctx, req)
 	if err != nil {
 		return handleError(c, err)
@@ -124,6 +130,11 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	release, err := enforceRateLimit(c, s.rateLimiter)
+	if err != nil {
+		return handleError(c, err)
+	}
+	defer release()
 	resp, err := router.CreateTranscription(ctx, req)
 	if err != nil {
 		return handleError(c, err)

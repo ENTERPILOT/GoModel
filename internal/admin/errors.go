@@ -13,6 +13,7 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/pricingoverrides"
+	"gomodel/internal/ratelimit"
 	"gomodel/internal/virtualmodels"
 	"gomodel/internal/workflows"
 )
@@ -22,6 +23,13 @@ func budgetServiceError(message string, err error) error {
 		return core.NewNotFoundError("budget not found").WithCode("budget_not_found")
 	}
 	return core.NewProviderError("budgets", http.StatusServiceUnavailable, message, err)
+}
+
+func rateLimitServiceError(message string, err error) error {
+	if errors.Is(err, ratelimit.ErrNotFound) {
+		return core.NewNotFoundError("rate limit rule not found").WithCode("rate_limit_not_found")
+	}
+	return core.NewProviderError("ratelimits", http.StatusServiceUnavailable, message, err)
 }
 
 func featureUnavailableError(message string) error {

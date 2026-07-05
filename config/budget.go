@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,58 +50,20 @@ func applyBudgetEnv(cfg *Config) error {
 	if !cfg.Budgets.Enabled {
 		return nil
 	}
-
-	const prefix = "SET_BUDGET_"
-	for _, item := range os.Environ() {
-		key, value, ok := strings.Cut(item, "=")
-		if !ok || !strings.HasPrefix(key, prefix) || strings.TrimSpace(value) == "" {
-			continue
-		}
-		path, err := core.NormalizeUserPath(budgetEnvPath(key[len(prefix):]))
-		if err != nil {
-			return fmt.Errorf("invalid value for %s: %w", key, err)
-		}
-		limits, err := parseBudgetEnvLimits(value)
-		if err != nil {
-			return fmt.Errorf("invalid value for %s: %w", key, err)
-		}
-		if len(limits) == 0 {
-			continue
-		}
-		entry := BudgetUserPathConfig{
-			Path:   path,
-			Limits: limits,
-		}
-		// Compare against the canonical form so env entries replace YAML entries
-		// even when YAML uses non-canonical paths like "alice" or "/alice/".
-		replaced := cfg.Budgets.UserPaths[:0]
-		for _, existing := range cfg.Budgets.UserPaths {
-			existingNorm, normErr := core.NormalizeUserPath(existing.Path)
-			if normErr != nil || existingNorm != entry.Path {
-				replaced = append(replaced, existing)
-			}
-		}
-		cfg.Budgets.UserPaths = append(replaced, entry)
+	entries, err := applyUserPathLimitEnv(
+		cfg.Budgets.UserPaths,
+		"SET_BUDGET_",
+		func(entry BudgetUserPathConfig) string { return entry.Path },
+		parseBudgetEnvLimits,
+		func(path string, limits []BudgetLimitConfig) BudgetUserPathConfig {
+			return BudgetUserPathConfig{Path: path, Limits: limits}
+		},
+	)
+	if err != nil {
+		return err
 	}
+	cfg.Budgets.UserPaths = entries
 	return nil
-}
-
-func budgetEnvPath(suffix string) string {
-	suffix = strings.ToLower(strings.TrimSpace(suffix))
-	if suffix == "" {
-		return "/"
-	}
-	segments := make([]string, 0)
-	for _, part := range strings.Split(suffix, "__") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			segments = append(segments, part)
-		}
-	}
-	if len(segments) == 0 {
-		return "/"
-	}
-	return "/" + strings.Join(segments, "/")
 }
 
 func parseBudgetEnvLimits(raw string) ([]BudgetLimitConfig, error) {

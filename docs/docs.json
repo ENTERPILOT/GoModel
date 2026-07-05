@@ -65,6 +65,7 @@
                             "features/user-path",
                             "features/passthrough-api",
                             "features/budgets",
+                            "features/rate-limits",
                             "features/cost-tracking",
                             "features/labelling",
                             "features/cache",

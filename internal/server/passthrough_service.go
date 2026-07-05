@@ -14,6 +14,7 @@ type passthroughService struct {
 	logger                       auditlog.LoggerInterface
 	usageLogger                  usage.LoggerInterface
 	budgetChecker                BudgetChecker
+	rateLimiter                  RateLimiter
 	pricingResolver              usage.PricingResolver
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
@@ -39,6 +40,11 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 			}
 		}
 	}
+	release, err := enforceRateLimit(c, s.rateLimiter)
+	if err != nil {
+		return handleError(c, err)
+	}
+	defer release()
 	if err := enforceBudget(c, s.budgetChecker); err != nil {
 		return handleError(c, err)
 	}

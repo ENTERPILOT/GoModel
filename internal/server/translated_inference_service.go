@@ -37,6 +37,7 @@ type translatedInferenceService struct {
 	logger                   auditlog.LoggerInterface
 	usageLogger              usage.LoggerInterface
 	budgetChecker            BudgetChecker
+	rateLimiter              RateLimiter
 	pricingResolver          usage.PricingResolver
 	responseCache            *responsecache.ResponseCacheMiddleware
 	guardrailsHash           string
@@ -88,6 +89,11 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
+	release, err := enforceRateLimit(c, s.rateLimiter)
+	if err != nil {
+		return handleError(c, err)
+	}
+	defer release()
 	if err := enforceBudget(c, s.budgetChecker); err != nil {
 		return handleError(c, err)
 	}
@@ -252,6 +258,11 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
+	release, err := enforceRateLimit(c, s.rateLimiter)
+	if err != nil {
+		return handleError(c, err)
+	}
+	defer release()
 	if err := enforceBudget(c, s.budgetChecker); err != nil {
 		return handleError(c, err)
 	}
@@ -437,6 +448,11 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	}
 	attachPreparedWorkflow(c, prepared.Context, prepared.Workflow)
 
+	release, err := enforceRateLimit(c, s.rateLimiter)
+	if err != nil {
+		return handleError(c, err)
+	}
+	defer release()
 	if err := enforceBudget(c, s.budgetChecker); err != nil {
 		return handleError(c, err)
 	}

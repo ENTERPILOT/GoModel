@@ -1,0 +1,192 @@
+---
+title: "Rate Limits"
+description: "Cap requests per minute, tokens per minute, and in-flight concurrency per user path."
+icon: "gauge"
+keywords: ["rate limits", "rpm", "tpm", "429", "concurrency", "throttling", "user path"]
+---
+
+## Overview
+
+Rate limits cap how fast a `user_path` subtree can consume the gateway:
+
+- **Request limits** — e.g. `/team/alpha` can send `100` requests per minute
+- **Token limits** — e.g. `/team/alpha` can consume `50,000` tokens per minute
+- **Concurrency limits** — e.g. `/team/alpha` can have `10` requests in flight
+
+Limits apply to every model endpoint: chat completions, responses, messages,
+embeddings, audio, passthrough, realtime sessions, and batch submission.
+Requests over a limit receive `429` with an OpenAI-shaped error, an accurate
+`Retry-After` header, and `x-ratelimit-*` headers.
+
+Use rate limits for traffic control and budgets for spend control: budgets cap
+dollars over hours-to-months from durable usage records, rate limits cap
+request and token velocity over seconds-to-a-day with fast in-memory counters.
+
+## Enable rate limits
+
+Rate limits are enabled by default and cost nothing until rules exist:
+
+```env
+RATE_LIMITS_ENABLED=true
+```
+
+Token limits (`max_tokens`) are counted from usage records, so they require
+usage tracking:
+
+```env
+USAGE_ENABLED=true
+```
+
+Request and concurrency limits work without usage tracking. If token rules are
+configured while usage tracking is off, GoModel starts and logs a warning; the
+token limits are not enforced.
+
+## Create rate limits
+
+In the dashboard:
+
+```text
+Rate Limits -> Create Rate Limit
+```
+
+Dashboard-created rules are marked `manual`. Rules loaded from YAML or
+environment variables are marked `config` and are read-only in the dashboard.
+
+Seed rules from YAML:
+
+```yaml
+rate_limits:
+  enabled: true
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period: "minute"
+          max_requests: 100
+          max_tokens: 50000
+        - period: "day"
+          max_requests: 10000
+        - period: "concurrent"
+          max_requests: 10
+```
+
+Or use environment variables (the suffix maps to a user path exactly like
+`SET_BUDGET_*`; `__` separates path segments):
+
+```env
+SET_RATE_LIMIT_TEAM__ALPHA="rpm=100,tpm=50000,rpd=10000,concurrent=10"
+SET_RATE_LIMIT_="rpm=1000"
+```
+
+Compact names map to periods: `rpm`/`tpm` per minute, `rph`/`tph` per hour,
+`rpd`/`tpd` per day, and `concurrent` for the in-flight cap. A JSON array of
+rule objects is also accepted for custom windows:
+
+```env
+SET_RATE_LIMIT_TEAM__ALPHA='[{"period_seconds":300,"max_requests":50}]'
+```
+
+Supported named periods:
+
+| Period       | Seconds | Meaning                          |
+| ------------ | ------- | -------------------------------- |
+| `minute`     | `60`    | requests/tokens per minute       |
+| `hour`       | `3600`  | requests/tokens per hour         |
+| `day`        | `86400` | requests/tokens per day          |
+| `concurrent` | `0`     | max in-flight requests right now |
+
+Custom windows use `period_seconds` directly.
+
+## How matching and counting work
+
+Rule paths apply to the configured path and its descendants, exactly like
+budgets: a rule on `/team` matches `/team/app` but not `/team-alpha`. A rule
+on `/` applies to all traffic.
+
+**A rule owns one shared counter for its whole subtree.** A `100 rpm` rule on
+`/team` allows 100 requests per minute across everything under `/team`
+combined. For per-key limits, bind each managed API key to its own user path
+and define rules there.
+
+All matching rules are checked; the first exhausted limit rejects the request.
+
+Details worth knowing:
+
+- Request windows use a sliding-window estimate, so bursts cannot double up at
+  window boundaries.
+- Token usage is counted after each response completes (streams included).
+  One request can overshoot a token window before the counter catches up —
+  the same behavior as other gateways that count tokens from responses.
+- Response-cache hits are served before enforcement and count nothing.
+- A realtime session counts as one request and holds one concurrency slot for
+  the whole session. A batch submission counts as one request and holds no
+  concurrency slot.
+- Counters live in memory, per gateway instance: with N replicas the
+  effective limit is about N times the configured value, and counters reset
+  on restart. Use budgets for durable, cross-instance control.
+
+## Client behavior
+
+Requests over a limit receive:
+
+```json
+{
+  "error": {
+    "type": "rate_limit_error",
+    "message": "rate limit exceeded for /team/alpha: minute request limit of 100 reached",
+    "code": "rate_limit_exceeded",
+    "param": null
+  }
+}
+```
+
+with status `429` and a `Retry-After` header holding the seconds until the
+window rolls. OpenAI SDKs back off automatically on this shape.
+
+Successful responses on limited paths carry OpenAI-style headers from the
+most-constrained matching rule:
+
+```text
+x-ratelimit-limit-requests: 100
+x-ratelimit-remaining-requests: 97
+x-ratelimit-reset-requests: 42
+x-ratelimit-limit-tokens: 50000
+x-ratelimit-remaining-tokens: 31200
+x-ratelimit-reset-tokens: 42
+```
+
+## Admin API
+
+```bash
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  http://localhost:8080/admin/rate-limits
+```
+
+Create or update a rule:
+
+```bash
+curl -X PUT http://localhost:8080/admin/rate-limits \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_path": "/team/alpha",
+    "limit_key": {"period": "minute"},
+    "max_requests": 100,
+    "max_tokens": 50000
+  }'
+```
+
+Delete a rule:
+
+```bash
+curl -X DELETE http://localhost:8080/admin/rate-limits \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"user_path": "/team/alpha", "limit_key": {"period": "minute"}}'
+```
+
+Reset live counters for one rule (`POST /admin/rate-limits/reset-one` with
+`{"user_path": ..., "period": ...}`) or for all rules
+(`POST /admin/rate-limits/reset` with `{"confirmation": "reset"}`). Editing a
+rule never resets its counters; deleting one does.
+
+See [Admin Endpoints](/advanced/admin-endpoints) for the endpoint list.

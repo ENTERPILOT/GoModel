@@ -58,6 +58,7 @@ type Config struct {
 	AuditLogger                     auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
 	UsageLogger                     usage.LoggerInterface                  // Optional: Usage logger for token tracking
 	BudgetChecker                   BudgetChecker                          // Optional: per-user-path budget checker
+	RateLimiter                     RateLimiter                            // Optional: per-user-path rate limiter
 	PricingResolver                 usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
 	ModelResolver                   RequestModelResolver                   // Optional: explicit model resolver used during workflow resolution
 	ModelAuthorizer                 RequestModelAuthorizer                 // Optional: request-scoped concrete model access controller
@@ -146,6 +147,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, workflowPolicyResolver, failoverResolver, translatedRequestPatcher)
 	handler.budgetChecker = budgetChecker
+	if cfg != nil {
+		handler.rateLimiter = cfg.RateLimiter
+	}
 	if cfg != nil {
 		handler.batchRequestPreparer = cfg.BatchRequestPreparer
 		handler.exposedModelLister = cfg.ExposedModelLister

@@ -44,6 +44,12 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.POST("/budgets/reset-one", h.ResetBudget)
 	g.POST("/budgets/reset", h.ResetBudgets)
 
+	g.GET("/rate-limits", h.ListRateLimits)
+	g.PUT("/rate-limits", h.UpsertRateLimit)
+	g.DELETE("/rate-limits", h.DeleteRateLimit)
+	g.POST("/rate-limits/reset-one", h.ResetRateLimit)
+	g.POST("/rate-limits/reset", h.ResetRateLimits)
+
 	g.GET("/tagging/settings", h.TaggingSettings)
 	g.PUT("/tagging/settings", h.UpdateTaggingSettings)
 

@@ -20,6 +20,7 @@ type Config struct {
 	Logging    LogConfig        `yaml:"logging"`
 	Usage      UsageConfig      `yaml:"usage"`
 	Budgets    BudgetsConfig    `yaml:"budgets"`
+	RateLimits RateLimitsConfig `yaml:"rate_limits"`
 	Metrics    MetricsConfig    `yaml:"metrics"`
 	HTTP       HTTPConfig       `yaml:"http"`
 	Admin      AdminConfig      `yaml:"admin"`
@@ -107,6 +108,9 @@ func buildDefaultConfig() *Config {
 		Budgets: BudgetsConfig{
 			Enabled: true,
 		},
+		RateLimits: RateLimitsConfig{
+			Enabled: true,
+		},
 		Metrics: MetricsConfig{
 			Endpoint: "/metrics",
 		},
@@ -177,6 +181,12 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := validateBudgetConfig(&cfg.Budgets); err != nil {
+		return nil, err
+	}
+	if err := applyRateLimitEnv(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateRateLimitConfig(&cfg.RateLimits); err != nil {
 		return nil, err
 	}
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)

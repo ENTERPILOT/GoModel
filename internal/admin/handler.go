@@ -22,6 +22,7 @@ import (
 	"gomodel/internal/live"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
+	"gomodel/internal/ratelimit"
 	"gomodel/internal/tagging"
 	"gomodel/internal/usage"
 	"gomodel/internal/virtualmodels"
@@ -41,6 +42,7 @@ type Handler struct {
 	pricingOverrides    *pricingoverrides.Service
 	workflows           *workflows.Service
 	budgets             *budget.Service
+	rateLimits          *ratelimit.Service
 	tagging             *tagging.Service
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
@@ -61,6 +63,7 @@ const (
 	DashboardConfigLoggingEnabled       = "LOGGING_ENABLED"
 	DashboardConfigUsageEnabled         = "USAGE_ENABLED"
 	DashboardConfigBudgetsEnabled       = "BUDGETS_ENABLED"
+	DashboardConfigRateLimitsEnabled    = "RATE_LIMITS_ENABLED"
 	DashboardConfigGuardrailsEnabled    = "GUARDRAILS_ENABLED"
 	DashboardConfigCacheEnabled         = "CACHE_ENABLED"
 	DashboardConfigRedisURL             = "REDIS_URL"
@@ -78,6 +81,7 @@ type DashboardConfigResponse struct {
 	LoggingEnabled       string `json:"LOGGING_ENABLED,omitempty"`
 	UsageEnabled         string `json:"USAGE_ENABLED,omitempty"`
 	BudgetsEnabled       string `json:"BUDGETS_ENABLED,omitempty"`
+	RateLimitsEnabled    string `json:"RATE_LIMITS_ENABLED,omitempty"`
 	GuardrailsEnabled    string `json:"GUARDRAILS_ENABLED,omitempty"`
 	CacheEnabled         string `json:"CACHE_ENABLED,omitempty"`
 	RedisURL             string `json:"REDIS_URL,omitempty"`
@@ -217,6 +221,13 @@ func WithBudgets(service *budget.Service) Option {
 	}
 }
 
+// WithRateLimits enables rate limit administration endpoints.
+func WithRateLimits(service *ratelimit.Service) Option {
+	return func(h *Handler) {
+		h.rateLimits = service
+	}
+}
+
 // WithTagging wires the header tagging service for label rule management.
 func WithTagging(service *tagging.Service) Option {
 	return func(h *Handler) {
@@ -294,6 +305,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
 		UsageEnabled:         strings.TrimSpace(values.UsageEnabled),
 		BudgetsEnabled:       strings.TrimSpace(values.BudgetsEnabled),
+		RateLimitsEnabled:    strings.TrimSpace(values.RateLimitsEnabled),
 		GuardrailsEnabled:    strings.TrimSpace(values.GuardrailsEnabled),
 		CacheEnabled:         strings.TrimSpace(values.CacheEnabled),
 		RedisURL:             strings.TrimSpace(values.RedisURL),

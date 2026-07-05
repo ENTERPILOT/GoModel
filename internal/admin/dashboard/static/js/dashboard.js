@@ -219,6 +219,7 @@ function dashboard() {
         "overview",
         "usage",
         "budgets",
+        "rate-limits",
         "models",
         "workflows",
         "audit-logs",
@@ -259,6 +260,12 @@ function dashboard() {
       }
       if (page === "budgets" && typeof this.fetchBudgetsPage === "function") {
         this.fetchBudgetsPage();
+      }
+      if (
+        page === "rate-limits" &&
+        typeof this.fetchRateLimitsPage === "function"
+      ) {
+        this.fetchRateLimitsPage();
       }
       if (page === "settings") {
         if (typeof this.ensureTimezoneOptions === "function") {
@@ -449,6 +456,7 @@ function dashboard() {
         (this.page === "guardrails" && this.guardrailFormOpen) ||
         (this.page === "auth-keys" && this.authKeyFormOpen) ||
         (this.page === "budgets" && this.budgetFormOpen) ||
+        (this.page === "rate-limits" && this.rateLimitFormOpen) ||
         this.budgetResetDialogOpen ||
         this.pricingRecalculateDialogOpen ||
         (this.typedConfirmationDialog && this.typedConfirmationDialog.open)
@@ -649,6 +657,12 @@ function dashboard() {
         typeof this.fetchBudgetsPage === "function"
       ) {
         requests.push(this.fetchBudgetsPage());
+      }
+      if (
+        this.page === "rate-limits" &&
+        typeof this.fetchRateLimitsPage === "function"
+      ) {
+        requests.push(this.fetchRateLimitsPage());
       }
       if (
         this.hasCalendarModule &&
@@ -1193,6 +1207,12 @@ function dashboard() {
         ? dashboardBudgetsModule
         : null,
       "dashboardBudgetsModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardRateLimitsModule === "function"
+        ? dashboardRateLimitsModule
+        : null,
+      "dashboardRateLimitsModule",
     ),
     resolveModuleFactory(
       typeof dashboardTaggingModule === "function"

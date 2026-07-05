@@ -58,6 +58,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"USAGE_PRICING_RECALCULATION_ENABLED",
 		"USAGE_BUFFER_SIZE", "USAGE_FLUSH_INTERVAL", "USAGE_RETENTION_DAYS",
 		"BUDGETS_ENABLED",
+		"RATE_LIMITS_ENABLED",
 		"DASHBOARD_LIVE_LOGS_ENABLED", "DASHBOARD_LIVE_LOGS_BUFFER_SIZE",
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
@@ -71,7 +72,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	}
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
-		if strings.HasPrefix(key, "SET_BUDGET_") || strings.HasPrefix(key, "TAGGING_HEADER_") {
+		if strings.HasPrefix(key, "SET_BUDGET_") || strings.HasPrefix(key, "SET_RATE_LIMIT_") || strings.HasPrefix(key, "TAGGING_HEADER_") {
 			t.Setenv(key, "")
 			os.Unsetenv(key)
 		}
@@ -300,8 +301,8 @@ func TestBudgetEnvPathUsesDoubleUnderscoreSeparator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := budgetEnvPath(tt.suffix); got != tt.want {
-				t.Fatalf("budgetEnvPath(%q) = %q, want %q", tt.suffix, got, tt.want)
+			if got := userPathEnvSuffixPath(tt.suffix); got != tt.want {
+				t.Fatalf("userPathEnvSuffixPath(%q) = %q, want %q", tt.suffix, got, tt.want)
 			}
 		})
 	}

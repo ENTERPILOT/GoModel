@@ -30,6 +30,7 @@ type realtimeService struct {
 	provider        core.RoutableProvider
 	modelAuthorizer RequestModelAuthorizer
 	budgetChecker   BudgetChecker
+	rateLimiter     RateLimiter
 	usageLogger     usage.LoggerInterface
 	pricingResolver usage.PricingResolver
 	enabled         bool
@@ -75,6 +76,13 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 	if err != nil {
 		return handleError(c, err)
 	}
+	// The proxy call blocks for the whole websocket session, so the released
+	// concurrency slot spans the session lifetime.
+	release, err := enforceRateLimit(c, s.rateLimiter)
+	if err != nil {
+		return handleError(c, err)
+	}
+	defer release()
 	target, err := router.RealtimeTarget(ctx, &core.RealtimeRequest{Model: model, Provider: providerHint})
 	if err != nil {
 		return handleError(c, err)

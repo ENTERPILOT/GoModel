@@ -28,6 +28,7 @@ type e2eServerOptions struct {
 	adminOptions          []admin.Option
 	usageLogger           usage.LoggerInterface
 	budgetChecker         server.BudgetChecker
+	rateLimiter           server.RateLimiter
 	pricingResolver       usage.PricingResolver
 	providerType          string
 }
@@ -81,6 +82,7 @@ func setupE2EServer(t *testing.T, opts e2eServerOptions) *server.Server {
 		MasterKey:             opts.masterKey,
 		UsageLogger:           opts.usageLogger,
 		BudgetChecker:         opts.budgetChecker,
+		RateLimiter:           opts.rateLimiter,
 		PricingResolver:       opts.pricingResolver,
 		AdminEndpointsEnabled: opts.adminEndpointsEnabled,
 	}

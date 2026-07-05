@@ -32,6 +32,10 @@
             <i data-lucide="wallet" class="nav-icon" aria-hidden="true"></i>
             <span>Budgets</span>
         </a>
+        <a href="{{appURL "/admin/dashboard/rate-limits"}}" class="nav-item" :class="{ active: page === 'rate-limits' }" title="Rate Limits" x-show="rateLimitsEnabled()" @click.prevent="navigate('rate-limits')">
+            <i data-lucide="gauge" class="nav-icon" aria-hidden="true"></i>
+            <span>Rate Limits</span>
+        </a>
         <a href="{{appURL "/admin/dashboard/auth-keys"}}" class="nav-item" :class="{ active: page === 'auth-keys' }" title="API Keys" @click.prevent="navigate('auth-keys')">
             <i data-lucide="key-round" class="nav-icon" aria-hidden="true"></i>
             <span>API Keys</span>

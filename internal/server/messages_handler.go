@@ -94,6 +94,11 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
+	release, err := enforceRateLimit(c, s.rateLimiter)
+	if err != nil {
+		return handleError(c, err)
+	}
+	defer release()
 	if err := enforceBudget(c, s.budgetChecker); err != nil {
 		return handleError(c, err)
 	}

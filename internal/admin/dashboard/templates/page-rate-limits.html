@@ -1,0 +1,276 @@
+{{define "dashboard-page-rate-limits"}}
+<!-- Rate Limits Page -->
+<template x-if="page==='rate-limits'">
+<div>
+    <div class="page-header">
+        <div>
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'rate-limits-help-copy', showLabel: 'Show rate limits help', hideLabel: 'Hide rate limits help', text: 'Rate limits cap requests, tokens, and in-flight concurrency for a user path subtree. Requests over a limit receive 429 responses with Retry-After and x-ratelimit-* headers. Counters are per gateway instance and reset on restart; token limits need usage tracking.' }">
+                <div class="inline-help-title-row">
+                    <h2>Rate Limits</h2>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+        </div>
+        <div class="page-header-controls">
+            <button type="button"
+                    class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                    x-show="rateLimitsEnabled() && rateLimitsAvailable && !authError"
+                    :disabled="rateLimitFormSubmitting"
+                    @click="openRateLimitForm()">
+                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                <span>Create Rate Limit</span>
+            </button>
+        </div>
+    </div>
+
+    {{template "auth-banner" .}}
+
+    <div class="alert alert-warning" x-show="(!rateLimitsEnabled() || !rateLimitsAvailable) && !authError">
+        Rate limit management is unavailable.
+    </div>
+    <p class="form-error" x-show="rateLimitError && !authError && !rateLimitFormOpen" x-text="rateLimitError" role="alert" aria-live="assertive"></p>
+    <div class="alert alert-success" x-show="rateLimitNotice && !rateLimitFormOpen" x-text="rateLimitNotice" role="status" aria-live="polite"></div>
+    <div class="loading-state" x-show="rateLimitsLoading && !authError">
+        <div class="loading-spinner"></div>
+        <span>Loading rate limits...</span>
+    </div>
+
+    <div class="table-toolbar" x-show="(rateLimits.length > 0 || rateLimitFilter) && rateLimitsAvailable && !authError && !rateLimitFormOpen">
+        <div class="table-toolbar-main">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text"
+                       id="rate-limit-filter"
+                       class="filter-input"
+                       placeholder="Filter by user path or period..."
+                       aria-label="Filter rate limits by user path or period"
+                       x-model="rateLimitFilter">
+            </div>
+        </div>
+    </div>
+
+    <div class="editor-modal-backdrop"
+         x-cloak
+         x-show="rateLimitFormOpen"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="editor-modal-shell"
+         x-cloak
+         x-show="rateLimitFormOpen"
+         x-transition.opacity.duration.160ms
+         @click="closeRateLimitForm()"
+         @keydown.escape.window="rateLimitFormOpen && !authDialogOpen && closeRateLimitForm()">
+        <div class="model-editor budget-editor" x-show="rateLimitFormOpen" role="dialog" aria-modal="true" aria-label="Rate limit editor" @click.stop>
+            <form class="form" @submit.prevent="submitRateLimitForm()">
+                <div class="editor-header">
+                    <div>
+                        <h3 x-text="rateLimitEditing ? 'Edit Rate Limit' : 'Create Rate Limit'">Create Rate Limit</h3>
+                    </div>
+                    <button type="button" class="dialog-close-btn" aria-label="Close rate limit editor" @click="closeRateLimitForm()">
+                        {{template "x-icon"}}
+                    </button>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="form-field-label" for="rate-limit-user-path">User Path</label>
+                        <input id="rate-limit-user-path"
+                               class="form-input"
+                               type="text"
+                               placeholder="/team/alpha"
+                               x-ref="rateLimitUserPathInput"
+                               :value="rateLimitForm.user_path"
+                               @input="setRateLimitFormUserPath($event.target.value)"
+                               :disabled="rateLimitEditing">
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="rate-limit-period">Period</label>
+                        <select id="rate-limit-period"
+                                class="form-select settings-select"
+                                x-model="rateLimitForm.period"
+                                :disabled="rateLimitEditing"
+                                @change="syncRateLimitPeriodSeconds()">
+                            <template x-for="option in rateLimitPeriodOptions()" :key="option.value">
+                                <option :value="option.value" x-text="option.label"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="form-field" x-show="rateLimitForm.period === 'custom'">
+                        <label class="form-field-label" for="rate-limit-period-seconds">Period Seconds</label>
+                        <input id="rate-limit-period-seconds"
+                               class="form-input"
+                               type="number"
+                               min="1"
+                               step="1"
+                               x-model.number="rateLimitForm.period_seconds"
+                               :disabled="rateLimitEditing">
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="rate-limit-max-requests" x-text="rateLimitForm.period === 'concurrent' ? 'Max In-Flight Requests' : 'Max Requests'">Max Requests</label>
+                        <input id="rate-limit-max-requests"
+                               class="form-input"
+                               type="number"
+                               min="1"
+                               step="1"
+                               placeholder="100"
+                               x-ref="rateLimitMaxRequestsInput"
+                               x-model="rateLimitForm.max_requests">
+                    </div>
+                    <div class="form-field" x-show="rateLimitForm.period !== 'concurrent'">
+                        <label class="form-field-label" for="rate-limit-max-tokens">Max Tokens</label>
+                        <input id="rate-limit-max-tokens"
+                               class="form-input"
+                               type="number"
+                               min="1"
+                               step="1"
+                               placeholder="50000"
+                               x-model="rateLimitForm.max_tokens">
+                    </div>
+                </div>
+                <p class="form-hint">
+                    A rule limits the whole user path subtree with one shared counter. Leave a field empty to skip that limit. Token limits require usage tracking.
+                </p>
+
+                <p class="form-error" x-show="rateLimitFormError" x-text="rateLimitFormError" role="alert" aria-live="assertive"></p>
+                <div class="form-actions">
+                    <button type="button" class="pagination-btn" @click="closeRateLimitForm()">Cancel</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" :disabled="rateLimitFormSubmitting">
+                        <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="rateLimitFormSubmitting ? 'Saving...' : 'Save Rate Limit'">Save Rate Limit</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="budget-list" x-show="filteredRateLimits().length > 0 && rateLimitsAvailable && !authError">
+        <template x-for="item in filteredRateLimits()" :key="rateLimitKey(item)">
+            <section class="budget-row">
+                <div class="budget-row-main">
+                    <div class="budget-row-head">
+                        <code class="budget-user-path" :title="'User Path: ' + item.user_path" x-text="item.user_path"></code>
+                        <div class="budget-row-period">
+                            <span class="budget-period-label">
+                                <i :data-lucide="rateLimitIsConcurrent(item) ? 'activity' : 'timer'" class="budget-period-icon" aria-hidden="true"></i>
+                                <span x-text="rateLimitPeriodLabel(item)"></span>
+                            </span>
+                        </div>
+                        <div class="budget-row-controls">
+                            <div class="budget-row-meta">
+                                <span class="budget-source"
+                                      x-text="rateLimitSourceLabel(item)"
+                                      :title="rateLimitIsReadOnly(item) ? 'Declared in configuration; read-only in the dashboard' : 'Managed via dashboard or admin API'"></span>
+                            </div>
+                            <div class="budget-row-actions">
+                                <button type="button"
+                                        class="table-action-btn budget-action-btn"
+                                        x-show="!rateLimitIsReadOnly(item)"
+                                        title="Edit rate limit"
+                                        aria-label="Edit rate limit"
+                                        @click="openRateLimitForm(item)">
+                                    <i data-lucide="pencil" class="budget-action-icon" aria-hidden="true"></i>
+                                    <span class="budget-action-label">Edit</span>
+                                </button>
+                                <button type="button"
+                                        class="table-action-btn budget-action-btn budget-action-btn-warning"
+                                        :title="rateLimitResettingKey === rateLimitKey(item) ? 'Resetting counters' : 'Reset counters'"
+                                        :aria-label="rateLimitResettingKey === rateLimitKey(item) ? 'Resetting counters' : 'Reset counters'"
+                                        :disabled="rateLimitResettingKey === rateLimitKey(item)"
+                                        @click="resetRateLimit(item)">
+                                    <i data-lucide="rotate-ccw" class="budget-action-icon" aria-hidden="true"></i>
+                                    <span class="budget-action-label" x-text="rateLimitResettingKey === rateLimitKey(item) ? 'Resetting' : 'Reset'">Reset</span>
+                                </button>
+                                <button type="button"
+                                        class="table-action-btn table-action-btn-danger budget-action-btn"
+                                        x-show="!rateLimitIsReadOnly(item)"
+                                        :title="rateLimitDeletingKey === rateLimitKey(item) ? 'Deleting rate limit' : 'Delete rate limit'"
+                                        :aria-label="rateLimitDeletingKey === rateLimitKey(item) ? 'Deleting rate limit' : 'Delete rate limit'"
+                                        :disabled="rateLimitDeletingKey === rateLimitKey(item)"
+                                        @click="deleteRateLimit(item)">
+                                    <i data-lucide="trash-2" class="budget-action-icon" aria-hidden="true"></i>
+                                    <span class="budget-action-label" x-text="rateLimitDeletingKey === rateLimitKey(item) ? 'Deleting' : 'Delete'">Delete</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="budget-bars">
+                        <div class="budget-bar-line" x-show="rateLimitIsConcurrent(item)">
+                            <div class="budget-bar-label">
+                                <span>In-flight</span>
+                                <span class="budget-bar-percent" x-text="rateLimitUsagePercent(item.in_flight, item.max_requests) + '%'"></span>
+                            </div>
+                            <div class="budget-bar-track"
+                                 role="progressbar"
+                                 aria-valuemin="0"
+                                 aria-valuemax="100"
+                                 :aria-valuenow="rateLimitUsagePercent(item.in_flight, item.max_requests)"
+                                 :aria-label="'In-flight requests: ' + formatRateLimitNumber(item.in_flight) + ' of ' + formatRateLimitNumber(item.max_requests)"
+                                 :style="'--budget-progress: ' + rateLimitUsagePercent(item.in_flight, item.max_requests) + '%'">
+                                <div class="budget-bar-fill budget-bar-fill-usage"
+                                     :class="{ 'budget-bar-fill-danger': rateLimitUsagePercent(item.in_flight, item.max_requests) >= 100 }"
+                                     style="width: var(--budget-progress)"></div>
+                                <span class="budget-bar-text-row">
+                                    <span class="budget-bar-text budget-bar-text-center" x-text="formatRateLimitNumber(item.in_flight) + ' of ' + formatRateLimitNumber(item.max_requests) + ' in flight'"></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="budget-bar-line" x-show="!rateLimitIsConcurrent(item) && item.max_requests">
+                            <div class="budget-bar-label">
+                                <span>Requests</span>
+                                <span class="budget-bar-percent" x-text="rateLimitUsagePercent(item.requests_used, item.max_requests) + '%'"></span>
+                            </div>
+                            <div class="budget-bar-track"
+                                 role="progressbar"
+                                 aria-valuemin="0"
+                                 aria-valuemax="100"
+                                 :aria-valuenow="rateLimitUsagePercent(item.requests_used, item.max_requests)"
+                                 :aria-label="'Requests used: ' + formatRateLimitNumber(item.requests_used) + ' of ' + formatRateLimitNumber(item.max_requests)"
+                                 :style="'--budget-progress: ' + rateLimitUsagePercent(item.requests_used, item.max_requests) + '%'">
+                                <div class="budget-bar-fill budget-bar-fill-usage"
+                                     :class="{ 'budget-bar-fill-danger': rateLimitUsagePercent(item.requests_used, item.max_requests) >= 100 }"
+                                     style="width: var(--budget-progress)"></div>
+                                <span class="budget-bar-text-row">
+                                    <span class="budget-bar-text budget-bar-text-center" x-text="formatRateLimitNumber(item.requests_used) + ' of ' + formatRateLimitNumber(item.max_requests) + ' requests'"></span>
+                                    <span class="budget-bar-text budget-bar-text-end" x-text="formatRateLimitNumber(item.requests_remaining) + ' left'"></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="budget-bar-line" x-show="!rateLimitIsConcurrent(item) && item.max_tokens">
+                            <div class="budget-bar-label">
+                                <span>Tokens</span>
+                                <span class="budget-bar-percent" x-text="rateLimitUsagePercent(item.tokens_used, item.max_tokens) + '%'"></span>
+                            </div>
+                            <div class="budget-bar-track"
+                                 role="progressbar"
+                                 aria-valuemin="0"
+                                 aria-valuemax="100"
+                                 :aria-valuenow="rateLimitUsagePercent(item.tokens_used, item.max_tokens)"
+                                 :aria-label="'Tokens used: ' + formatRateLimitNumber(item.tokens_used) + ' of ' + formatRateLimitNumber(item.max_tokens)"
+                                 :style="'--budget-progress: ' + rateLimitUsagePercent(item.tokens_used, item.max_tokens) + '%'">
+                                <div class="budget-bar-fill budget-bar-fill-usage"
+                                     :class="{ 'budget-bar-fill-danger': rateLimitUsagePercent(item.tokens_used, item.max_tokens) >= 100 }"
+                                     style="width: var(--budget-progress)"></div>
+                                <span class="budget-bar-text-row">
+                                    <span class="budget-bar-text budget-bar-text-center" x-text="formatRateLimitNumber(item.tokens_used) + ' of ' + formatRateLimitNumber(item.max_tokens) + ' tokens'"></span>
+                                    <span class="budget-bar-text budget-bar-text-end" x-text="formatRateLimitNumber(item.tokens_remaining) + ' left'"></span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </template>
+    </div>
+
+    <p class="empty-state"
+       x-show="rateLimits.length === 0 && !rateLimitFilter && !rateLimitsLoading && !authError && !rateLimitError && rateLimitsAvailable && rateLimitsEnabled()">
+        No rate limits configured yet.
+    </p>
+    <p class="empty-state"
+       x-show="rateLimits.length > 0 && filteredRateLimits().length === 0 && rateLimitFilter && !rateLimitsLoading && !authError && !rateLimitError && rateLimitsAvailable && rateLimitsEnabled()">
+        No rate limits match your filter.
+    </p>
+</div>
+</template>
+{{end}}

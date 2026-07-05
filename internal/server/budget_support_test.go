@@ -68,9 +68,9 @@ func TestEnforceBudgetDefaultsEnabledWithoutWorkflow(t *testing.T) {
 
 func TestBatchBudgetEnforcerUsesResolvedWorkflow(t *testing.T) {
 	checker := &countingBudgetChecker{}
-	enforcer := batchBudgetEnforcer(checker)
+	enforcer := batchAdmissionEnforcer(nil, checker)
 	if enforcer == nil {
-		t.Fatal("batchBudgetEnforcer() = nil, want function")
+		t.Fatal("batchAdmissionEnforcer() = nil, want function")
 	}
 
 	ctx := core.WithWorkflow(context.Background(), &core.Workflow{
@@ -93,9 +93,9 @@ func TestBatchBudgetEnforcerUsesResolvedWorkflow(t *testing.T) {
 
 func TestBatchBudgetEnforcerInvokesCheckerWhenEnabled(t *testing.T) {
 	checker := &countingBudgetChecker{}
-	enforcer := batchBudgetEnforcer(checker)
+	enforcer := batchAdmissionEnforcer(nil, checker)
 	if enforcer == nil {
-		t.Fatal("batchBudgetEnforcer() = nil, want function")
+		t.Fatal("batchAdmissionEnforcer() = nil, want function")
 	}
 
 	ctx := core.WithWorkflow(context.Background(), &core.Workflow{

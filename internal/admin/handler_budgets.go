@@ -89,6 +89,8 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 // @Failure      401        {object}  core.GatewayError
 // @Failure      503        {object}  core.GatewayError
 // @Router       /admin/budgets [delete]
+//
+//nolint:dupl // structurally similar to DeleteRateLimit but operates on different types and services.
 func (h *Handler) DeleteBudget(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))

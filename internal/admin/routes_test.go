@@ -59,6 +59,12 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"POST /admin/budgets/reset-one",
 		"POST /admin/budgets/reset",
 
+		"GET /admin/rate-limits",
+		"PUT /admin/rate-limits",
+		"DELETE /admin/rate-limits",
+		"POST /admin/rate-limits/reset-one",
+		"POST /admin/rate-limits/reset",
+
 		"GET /admin/tagging/settings",
 		"PUT /admin/tagging/settings",
 
