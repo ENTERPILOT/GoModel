@@ -7,113 +7,50 @@ import (
 	"github.com/goccy/go-json"
 )
 
-// responsesUtilityRequestFields lists the JSON fields recognized on responses
-// utility requests; any other field is preserved as an unknown extra field.
-var responsesUtilityRequestFields = []string{
-	"model",
-	"provider",
-	"input",
-	"instructions",
-	"tools",
-	"tool_choice",
-	"parallel_tool_calls",
-	"temperature",
-	"top_p",
-	"top_logprobs",
-	"max_output_tokens",
-	"metadata",
-	"reasoning",
-	"text",
-	"include",
-	"truncation",
-	"store",
-	"previous_response_id",
-	"conversation",
-	"prompt",
-	"prompt_cache_retention",
-	"context_management",
-	"user",
-	"service_tier",
-	"safety_identifier",
-}
+// Known-field lists are derived from the struct definitions (json tags) at
+// package init, so adding a typed field automatically stops it from being
+// captured as an unknown extra field. ContentSchema swagger phantoms share
+// tags with real fields, which is harmless here (duplicates in the list).
+var (
+	responsesRequestFields        = jsonFieldNames(ResponsesRequest{})
+	responsesUtilityRequestFields = jsonFieldNames(ResponseInputTokensRequest{})
+)
 
-// responsesRequestFields additionally recognizes the streaming controls that
-// only apply to full responses requests.
-var responsesRequestFields = append([]string{"stream", "stream_options"}, responsesUtilityRequestFields...)
+// responsesExtrasAndInput finishes a responses-shaped decode: it captures
+// unknown members and decodes the raw input union.
+func responsesExtrasAndInput(data []byte, rawInput json.RawMessage, knownFields []string) (any, UnknownJSONFields, error) {
+	extraFields, err := extractUnknownJSONFields(data, knownFields...)
+	if err != nil {
+		return nil, UnknownJSONFields{}, err
+	}
+	input, err := decodeResponsesInput(rawInput)
+	if err != nil {
+		return nil, UnknownJSONFields{}, err
+	}
+	return input, extraFields, nil
+}
 
 // UnmarshalJSON preserves dynamic input payloads while supporting Swagger-only schema fields.
 // Array inputs are deserialized as []ResponsesInputElement for type-safe downstream handling.
+// The body decodes through an alias embedding so every typed field (present and
+// future) is populated by the JSON package directly — only Input (a raw union)
+// and ExtraFields need explicit handling.
 func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
+	type alias ResponsesRequest
 	var raw struct {
-		Model                string                    `json:"model"`
-		Provider             string                    `json:"provider,omitempty"`
-		Input                json.RawMessage           `json:"input"`
-		Instructions         string                    `json:"instructions,omitempty"`
-		Tools                []map[string]any          `json:"tools,omitempty"`
-		ToolChoice           any                       `json:"tool_choice,omitempty"`
-		ParallelToolCalls    *bool                     `json:"parallel_tool_calls,omitempty"`
-		Temperature          *float64                  `json:"temperature,omitempty"`
-		TopP                 *float64                  `json:"top_p,omitempty"`
-		TopLogprobs          *int                      `json:"top_logprobs,omitempty"`
-		MaxOutputTokens      *int                      `json:"max_output_tokens,omitempty"`
-		Stream               bool                      `json:"stream,omitempty"`
-		StreamOptions        *StreamOptions            `json:"stream_options,omitempty"`
-		Metadata             map[string]string         `json:"metadata,omitempty"`
-		Reasoning            *Reasoning                `json:"reasoning,omitempty"`
-		Text                 any                       `json:"text,omitempty"`
-		Include              []string                  `json:"include,omitempty"`
-		Truncation           string                    `json:"truncation,omitempty"`
-		Store                *bool                     `json:"store,omitempty"`
-		PreviousResponseID   string                    `json:"previous_response_id,omitempty"`
-		Conversation         *ResponsesConversationRef `json:"conversation,omitempty"`
-		Prompt               any                       `json:"prompt,omitempty"`
-		PromptCacheRetention string                    `json:"prompt_cache_retention,omitempty"`
-		ContextManagement    any                       `json:"context_management,omitempty"`
-		User                 string                    `json:"user,omitempty"`
-		ServiceTier          string                    `json:"service_tier,omitempty"`
-		SafetyIdentifier     string                    `json:"safety_identifier,omitempty"`
+		alias
+		Input json.RawMessage `json:"input"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-
-	extraFields, err := extractUnknownJSONFields(data, responsesRequestFields...)
+	input, extraFields, err := responsesExtrasAndInput(data, raw.Input, responsesRequestFields)
 	if err != nil {
 		return err
 	}
 
-	input, err := decodeResponsesInput(raw.Input)
-	if err != nil {
-		return err
-	}
-
-	r.Model = raw.Model
-	r.Provider = raw.Provider
+	*r = ResponsesRequest(raw.alias)
 	r.Input = input
-	r.Instructions = raw.Instructions
-	r.Tools = raw.Tools
-	r.ToolChoice = raw.ToolChoice
-	r.ParallelToolCalls = raw.ParallelToolCalls
-	r.Temperature = raw.Temperature
-	r.TopP = raw.TopP
-	r.TopLogprobs = raw.TopLogprobs
-	r.MaxOutputTokens = raw.MaxOutputTokens
-	r.Stream = raw.Stream
-	r.StreamOptions = raw.StreamOptions
-	r.Metadata = raw.Metadata
-	r.Reasoning = raw.Reasoning
-	r.Text = raw.Text
-	r.Include = raw.Include
-	r.Truncation = raw.Truncation
-	r.Store = raw.Store
-	r.PreviousResponseID = raw.PreviousResponseID
-	r.Conversation = raw.Conversation
-	r.Prompt = raw.Prompt
-	r.PromptCacheRetention = raw.PromptCacheRetention
-	r.ContextManagement = raw.ContextManagement
-	r.User = raw.User
-	r.ServiceTier = raw.ServiceTier
-	r.SafetyIdentifier = raw.SafetyIdentifier
 	r.ExtraFields = extraFields
 	return nil
 }
@@ -200,190 +137,46 @@ func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
 	return marshalWithUnknownJSONFields(alias(r), r.ExtraFields)
 }
 
-type responseUtilityRequestJSON struct {
-	Model                string
-	Provider             string
-	Input                any
-	Instructions         string
-	Tools                []map[string]any
-	ToolChoice           any
-	ParallelToolCalls    *bool
-	Temperature          *float64
-	TopP                 *float64
-	TopLogprobs          *int
-	MaxOutputTokens      *int
-	Metadata             map[string]string
-	Reasoning            *Reasoning
-	Text                 any
-	Include              []string
-	Truncation           string
-	Store                *bool
-	PreviousResponseID   string
-	Conversation         *ResponsesConversationRef
-	Prompt               any
-	PromptCacheRetention string
-	ContextManagement    any
-	User                 string
-	ServiceTier          string
-	SafetyIdentifier     string
-	ExtraFields          UnknownJSONFields
-}
-
-func decodeResponseUtilityRequestJSON(data []byte) (responseUtilityRequestJSON, error) {
-	var raw struct {
-		Model                string                    `json:"model,omitempty"`
-		Provider             string                    `json:"provider,omitempty"`
-		Input                json.RawMessage           `json:"input,omitempty"`
-		Instructions         string                    `json:"instructions,omitempty"`
-		Tools                []map[string]any          `json:"tools,omitempty"`
-		ToolChoice           any                       `json:"tool_choice,omitempty"`
-		ParallelToolCalls    *bool                     `json:"parallel_tool_calls,omitempty"`
-		Temperature          *float64                  `json:"temperature,omitempty"`
-		TopP                 *float64                  `json:"top_p,omitempty"`
-		TopLogprobs          *int                      `json:"top_logprobs,omitempty"`
-		MaxOutputTokens      *int                      `json:"max_output_tokens,omitempty"`
-		Metadata             map[string]string         `json:"metadata,omitempty"`
-		Reasoning            *Reasoning                `json:"reasoning,omitempty"`
-		Text                 any                       `json:"text,omitempty"`
-		Include              []string                  `json:"include,omitempty"`
-		Truncation           string                    `json:"truncation,omitempty"`
-		Store                *bool                     `json:"store,omitempty"`
-		PreviousResponseID   string                    `json:"previous_response_id,omitempty"`
-		Conversation         *ResponsesConversationRef `json:"conversation,omitempty"`
-		Prompt               any                       `json:"prompt,omitempty"`
-		PromptCacheRetention string                    `json:"prompt_cache_retention,omitempty"`
-		ContextManagement    any                       `json:"context_management,omitempty"`
-		User                 string                    `json:"user,omitempty"`
-		ServiceTier          string                    `json:"service_tier,omitempty"`
-		SafetyIdentifier     string                    `json:"safety_identifier,omitempty"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return responseUtilityRequestJSON{}, err
-	}
-
-	extraFields, err := extractUnknownJSONFields(data, responsesUtilityRequestFields...)
-	if err != nil {
-		return responseUtilityRequestJSON{}, err
-	}
-
-	input, err := decodeResponsesInput(raw.Input)
-	if err != nil {
-		return responseUtilityRequestJSON{}, err
-	}
-	return responseUtilityRequestJSON{
-		Model:                raw.Model,
-		Provider:             raw.Provider,
-		Input:                input,
-		Instructions:         raw.Instructions,
-		Tools:                raw.Tools,
-		ToolChoice:           raw.ToolChoice,
-		ParallelToolCalls:    raw.ParallelToolCalls,
-		Temperature:          raw.Temperature,
-		TopP:                 raw.TopP,
-		TopLogprobs:          raw.TopLogprobs,
-		MaxOutputTokens:      raw.MaxOutputTokens,
-		Metadata:             raw.Metadata,
-		Reasoning:            raw.Reasoning,
-		Text:                 raw.Text,
-		Include:              raw.Include,
-		Truncation:           raw.Truncation,
-		Store:                raw.Store,
-		PreviousResponseID:   raw.PreviousResponseID,
-		Conversation:         raw.Conversation,
-		Prompt:               raw.Prompt,
-		PromptCacheRetention: raw.PromptCacheRetention,
-		ContextManagement:    raw.ContextManagement,
-		User:                 raw.User,
-		ServiceTier:          raw.ServiceTier,
-		SafetyIdentifier:     raw.SafetyIdentifier,
-		ExtraFields:          extraFields,
-	}, nil
-}
-
-func marshalResponseUtilityRequestJSON(raw responseUtilityRequestJSON) ([]byte, error) {
-	return marshalWithUnknownJSONFields(struct {
-		Model                string                    `json:"model,omitempty"`
-		Provider             string                    `json:"provider,omitempty"`
-		Input                any                       `json:"input,omitempty"`
-		Instructions         string                    `json:"instructions,omitempty"`
-		Tools                []map[string]any          `json:"tools,omitempty"`
-		ToolChoice           any                       `json:"tool_choice,omitempty"`
-		ParallelToolCalls    *bool                     `json:"parallel_tool_calls,omitempty"`
-		Temperature          *float64                  `json:"temperature,omitempty"`
-		TopP                 *float64                  `json:"top_p,omitempty"`
-		TopLogprobs          *int                      `json:"top_logprobs,omitempty"`
-		MaxOutputTokens      *int                      `json:"max_output_tokens,omitempty"`
-		Metadata             map[string]string         `json:"metadata,omitempty"`
-		Reasoning            *Reasoning                `json:"reasoning,omitempty"`
-		Text                 any                       `json:"text,omitempty"`
-		Include              []string                  `json:"include,omitempty"`
-		Truncation           string                    `json:"truncation,omitempty"`
-		Store                *bool                     `json:"store,omitempty"`
-		PreviousResponseID   string                    `json:"previous_response_id,omitempty"`
-		Conversation         *ResponsesConversationRef `json:"conversation,omitempty"`
-		Prompt               any                       `json:"prompt,omitempty"`
-		PromptCacheRetention string                    `json:"prompt_cache_retention,omitempty"`
-		ContextManagement    any                       `json:"context_management,omitempty"`
-		User                 string                    `json:"user,omitempty"`
-		ServiceTier          string                    `json:"service_tier,omitempty"`
-		SafetyIdentifier     string                    `json:"safety_identifier,omitempty"`
-	}{
-		Model:                raw.Model,
-		Provider:             raw.Provider,
-		Input:                raw.Input,
-		Instructions:         raw.Instructions,
-		Tools:                raw.Tools,
-		ToolChoice:           raw.ToolChoice,
-		ParallelToolCalls:    raw.ParallelToolCalls,
-		Temperature:          raw.Temperature,
-		TopP:                 raw.TopP,
-		TopLogprobs:          raw.TopLogprobs,
-		MaxOutputTokens:      raw.MaxOutputTokens,
-		Metadata:             raw.Metadata,
-		Reasoning:            raw.Reasoning,
-		Text:                 raw.Text,
-		Include:              raw.Include,
-		Truncation:           raw.Truncation,
-		Store:                raw.Store,
-		PreviousResponseID:   raw.PreviousResponseID,
-		Conversation:         raw.Conversation,
-		Prompt:               raw.Prompt,
-		PromptCacheRetention: raw.PromptCacheRetention,
-		ContextManagement:    raw.ContextManagement,
-		User:                 raw.User,
-		ServiceTier:          raw.ServiceTier,
-		SafetyIdentifier:     raw.SafetyIdentifier,
-	}, raw.ExtraFields)
-}
-
 // UnmarshalJSON preserves the dynamic input payload for gateway utility requests.
 func (r *ResponseInputTokensRequest) UnmarshalJSON(data []byte) error {
-	raw, err := decodeResponseUtilityRequestJSON(data)
+	type alias ResponseInputTokensRequest
+	var raw struct {
+		alias
+		Input json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	input, extraFields, err := responsesExtrasAndInput(data, raw.Input, responsesUtilityRequestFields)
 	if err != nil {
 		return err
 	}
-	*r = ResponseInputTokensRequest(raw)
+
+	*r = ResponseInputTokensRequest(raw.alias)
+	r.Input = input
+	r.ExtraFields = extraFields
 	return nil
 }
 
 // MarshalJSON preserves the dynamic input payload while omitting Swagger-only schema fields.
 func (r ResponseInputTokensRequest) MarshalJSON() ([]byte, error) {
-	return marshalResponseUtilityRequestJSON(responseUtilityRequestJSON(r))
+	type alias ResponseInputTokensRequest
+	return marshalWithUnknownJSONFields(alias(r), r.ExtraFields)
 }
 
 // UnmarshalJSON preserves the dynamic input payload for gateway utility requests.
 func (r *ResponseCompactRequest) UnmarshalJSON(data []byte) error {
-	raw, err := decodeResponseUtilityRequestJSON(data)
-	if err != nil {
+	var utility ResponseInputTokensRequest
+	if err := utility.UnmarshalJSON(data); err != nil {
 		return err
 	}
-	*r = ResponseCompactRequest(raw)
+	*r = ResponseCompactRequest(utility)
 	return nil
 }
 
 // MarshalJSON preserves the dynamic input payload while omitting Swagger-only schema fields.
 func (r ResponseCompactRequest) MarshalJSON() ([]byte, error) {
-	return marshalResponseUtilityRequestJSON(responseUtilityRequestJSON(r))
+	return ResponseInputTokensRequest(r).MarshalJSON()
 }
 
 // UnmarshalJSON deserializes a ResponsesInputElement, switching on the "type"

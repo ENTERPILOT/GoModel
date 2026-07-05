@@ -288,50 +288,20 @@ func (p *CompatibleProvider) CompactResponse(ctx context.Context, req *core.Resp
 }
 
 func responseInputTokensRequestFromResponses(req *core.ResponsesRequest) *core.ResponseInputTokensRequest {
-	if req == nil {
-		return nil
+	utility := req.InputTokensRequest()
+	if utility != nil {
+		// The provider field is a gateway routing hint, never forwarded upstream.
+		utility.Provider = ""
 	}
-	utility := responseUtilityRequestFromResponses(req)
-	return &utility
+	return utility
 }
 
 func responseCompactRequestFromResponses(req *core.ResponsesRequest) *core.ResponseCompactRequest {
-	if req == nil {
-		return nil
+	compact := req.CompactRequest()
+	if compact != nil {
+		compact.Provider = ""
 	}
-	utility := responseUtilityRequestFromResponses(req)
-	compact := core.ResponseCompactRequest(utility)
-	return &compact
-}
-
-func responseUtilityRequestFromResponses(req *core.ResponsesRequest) core.ResponseInputTokensRequest {
-	return core.ResponseInputTokensRequest{
-		Model:                req.Model,
-		Input:                req.Input,
-		Instructions:         req.Instructions,
-		Tools:                req.Tools,
-		ToolChoice:           req.ToolChoice,
-		ParallelToolCalls:    req.ParallelToolCalls,
-		Temperature:          req.Temperature,
-		TopP:                 req.TopP,
-		TopLogprobs:          req.TopLogprobs,
-		MaxOutputTokens:      req.MaxOutputTokens,
-		Metadata:             req.Metadata,
-		Reasoning:            req.Reasoning,
-		Text:                 req.Text,
-		Include:              req.Include,
-		Truncation:           req.Truncation,
-		Store:                req.Store,
-		PreviousResponseID:   req.PreviousResponseID,
-		Conversation:         req.Conversation,
-		Prompt:               req.Prompt,
-		PromptCacheRetention: req.PromptCacheRetention,
-		ContextManagement:    req.ContextManagement,
-		User:                 req.User,
-		ServiceTier:          req.ServiceTier,
-		SafetyIdentifier:     req.SafetyIdentifier,
-		ExtraFields:          core.CloneUnknownJSONFields(req.ExtraFields),
-	}
+	return compact
 }
 
 func (p *CompatibleProvider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
