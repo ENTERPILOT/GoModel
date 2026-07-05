@@ -42,19 +42,26 @@ type Store interface {
 }
 
 func cloneResponse(src *StoredResponse) (*StoredResponse, error) {
+	dst, _, err := cloneResponseWithSize(src)
+	return dst, err
+}
+
+// cloneResponseWithSize deep-copies a snapshot and reports its serialized size,
+// which the memory store uses for byte-budget accounting.
+func cloneResponseWithSize(src *StoredResponse) (*StoredResponse, int64, error) {
 	if src == nil {
-		return nil, fmt.Errorf("response is nil")
+		return nil, 0, fmt.Errorf("response is nil")
 	}
 	normalized := normalizeStoredResponse(src)
 	b, err := json.Marshal(normalized)
 	if err != nil {
-		return nil, fmt.Errorf("marshal response: %w", err)
+		return nil, 0, fmt.Errorf("marshal response: %w", err)
 	}
 	var dst StoredResponse
 	if err := json.Unmarshal(b, &dst); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+		return nil, 0, fmt.Errorf("unmarshal response: %w", err)
 	}
-	return &dst, nil
+	return &dst, int64(len(b)), nil
 }
 
 func normalizeStoredResponse(src *StoredResponse) *StoredResponse {

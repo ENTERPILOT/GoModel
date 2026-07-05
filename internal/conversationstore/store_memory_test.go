@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -239,5 +240,79 @@ func TestMemoryStoreAppendItems_ConcurrentAppendsAllSurvive(t *testing.T) {
 		if seen[i] != 1 {
 			t.Fatalf("writer %d count = %d, want exactly once (no lost or duplicated appends)", i, seen[i])
 		}
+	}
+}
+
+func TestMemoryStoreMaxBytesEvictsOldest(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	item := json.RawMessage(fmt.Sprintf(`{"type":"message","content":%q}`, strings.Repeat("x", 500)))
+	large := func(id string, storedAt time.Time) *StoredConversation {
+		c := storedConversation(id, storedAt)
+		c.Items = []json.RawMessage{item}
+		return c
+	}
+
+	// Size one entry via a probe store, then budget for exactly two.
+	probe := NewMemoryStore(WithTTL(0))
+	if err := probe.Create(ctx, large("probe", now)); err != nil {
+		t.Fatalf("Create(probe) error = %v", err)
+	}
+	budget := 2*probe.totalBytes + 10
+
+	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(budget))
+	for i, conversation := range []*StoredConversation{
+		large("conv_1", now.Add(-3*time.Second)),
+		large("conv_2", now.Add(-2*time.Second)),
+		large("conv_3", now.Add(-1*time.Second)),
+	} {
+		if err := store.Create(ctx, conversation); err != nil {
+			t.Fatalf("Create(%d) error = %v", i, err)
+		}
+	}
+
+	if _, err := store.Get(ctx, "conv_1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get(conv_1) error = %v, want ErrNotFound (oldest evicted)", err)
+	}
+	for _, id := range []string{"conv_2", "conv_3"} {
+		if _, err := store.Get(ctx, id); err != nil {
+			t.Fatalf("Get(%s) error = %v, want kept", id, err)
+		}
+	}
+}
+
+func TestMemoryStoreAppendItemsCountsTowardByteBudget(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2000))
+	if err := store.Create(ctx, storedConversation("conv_old", now.Add(-time.Minute))); err != nil {
+		t.Fatalf("Create(conv_old) error = %v", err)
+	}
+	if err := store.Create(ctx, storedConversation("conv_grow", now)); err != nil {
+		t.Fatalf("Create(conv_grow) error = %v", err)
+	}
+
+	// Growing conv_grow past the budget evicts the older conversation.
+	item := json.RawMessage(fmt.Sprintf(`{"type":"message","content":%q}`, strings.Repeat("x", 900)))
+	if err := store.AppendItems(ctx, "conv_grow", []json.RawMessage{item, item}); err != nil {
+		t.Fatalf("AppendItems() error = %v", err)
+	}
+
+	if _, err := store.Get(ctx, "conv_old"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get(conv_old) error = %v, want ErrNotFound (evicted by append growth)", err)
+	}
+	if store.totalBytes > 2000 {
+		t.Fatalf("totalBytes = %d, want <= 2000", store.totalBytes)
+	}
+}
+
+func TestMemoryStoreRejectsConversationOverByteBudget(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(WithMaxBytes(100))
+	c := storedConversation("conv_big", time.Now().UTC())
+	c.Items = []json.RawMessage{json.RawMessage(fmt.Sprintf(`{"content":%q}`, strings.Repeat("x", 200)))}
+	if err := store.Create(ctx, c); err == nil {
+		t.Fatal("Create() error = nil, want byte budget rejection")
 	}
 }

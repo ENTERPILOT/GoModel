@@ -18,6 +18,10 @@ const (
 	DefaultMemoryStoreTTL = 30 * 24 * time.Hour
 	// DefaultMemoryStoreMaxEntries bounds in-memory conversation retention by count.
 	DefaultMemoryStoreMaxEntries = 10000
+	// DefaultMemoryStoreMaxBytes bounds in-memory conversation retention by
+	// total serialized size. Conversations grow per turn without bound, so
+	// entry counts alone do not bound memory.
+	DefaultMemoryStoreMaxBytes = 64 << 20
 	// DefaultMemoryStoreCleanupInterval limits full expired-entry sweeps.
 	DefaultMemoryStoreCleanupInterval = time.Minute
 )
@@ -27,8 +31,11 @@ const (
 type MemoryStore struct {
 	mu              sync.RWMutex
 	items           map[string]*StoredConversation
+	sizes           map[string]int64
+	totalBytes      int64
 	ttl             time.Duration
 	maxEntries      int
+	maxBytes        int64
 	lastCleanup     time.Time
 	cleanupInterval time.Duration
 }
@@ -50,11 +57,20 @@ func WithMaxEntries(maxEntries int) MemoryStoreOption {
 	}
 }
 
+// WithMaxBytes caps the total serialized size of stored conversations with
+// FIFO eviction. Non-positive values disable the cap.
+func WithMaxBytes(maxBytes int64) MemoryStoreOption {
+	return func(s *MemoryStore) {
+		s.maxBytes = maxBytes
+	}
+}
+
 // WithUnboundedRetention disables default in-memory retention bounds.
 func WithUnboundedRetention() MemoryStoreOption {
 	return func(s *MemoryStore) {
 		s.ttl = 0
 		s.maxEntries = 0
+		s.maxBytes = 0
 	}
 }
 
@@ -63,8 +79,10 @@ func WithUnboundedRetention() MemoryStoreOption {
 func NewMemoryStore(options ...MemoryStoreOption) *MemoryStore {
 	store := &MemoryStore{
 		items:           make(map[string]*StoredConversation),
+		sizes:           make(map[string]int64),
 		ttl:             DefaultMemoryStoreTTL,
 		maxEntries:      DefaultMemoryStoreMaxEntries,
+		maxBytes:        DefaultMemoryStoreMaxBytes,
 		cleanupInterval: DefaultMemoryStoreCleanupInterval,
 	}
 	for _, option := range options {
@@ -81,8 +99,11 @@ func (s *MemoryStore) Create(_ context.Context, conversation *StoredConversation
 		return fmt.Errorf("conversation id is required")
 	}
 
-	c, err := cloneConversation(conversation)
+	c, size, err := cloneConversationWithSize(conversation)
 	if err != nil {
+		return err
+	}
+	if err := s.checkByteBudget(size); err != nil {
 		return err
 	}
 
@@ -99,10 +120,10 @@ func (s *MemoryStore) Create(_ context.Context, conversation *StoredConversation
 		if !conversationExpired(existing, now) {
 			return fmt.Errorf("conversation already exists: %s", c.Conversation.ID)
 		}
-		delete(s.items, c.Conversation.ID)
+		s.removeLocked(c.Conversation.ID)
 	}
-	s.items[c.Conversation.ID] = c
-	s.enforceMaxEntriesLocked()
+	s.putLocked(c.Conversation.ID, c, size)
+	s.enforceBoundsLocked()
 	return nil
 }
 
@@ -117,7 +138,7 @@ func (s *MemoryStore) Get(_ context.Context, id string) (*StoredConversation, er
 		return nil, ErrNotFound
 	}
 	if conversationExpired(conversation, now) {
-		delete(s.items, id)
+		s.removeLocked(id)
 		s.mu.Unlock()
 		return nil, ErrNotFound
 	}
@@ -130,8 +151,11 @@ func (s *MemoryStore) Update(_ context.Context, conversation *StoredConversation
 	if conversation == nil || conversation.Conversation == nil || conversation.Conversation.ID == "" {
 		return fmt.Errorf("conversation id is required")
 	}
-	c, err := cloneConversation(conversation)
+	c, size, err := cloneConversationWithSize(conversation)
 	if err != nil {
+		return err
+	}
+	if err := s.checkByteBudget(size); err != nil {
 		return err
 	}
 
@@ -144,7 +168,7 @@ func (s *MemoryStore) Update(_ context.Context, conversation *StoredConversation
 		return ErrNotFound
 	}
 	if conversationExpired(existing, now) {
-		delete(s.items, c.Conversation.ID)
+		s.removeLocked(c.Conversation.ID)
 		return ErrNotFound
 	}
 	if c.StoredAt.IsZero() {
@@ -155,11 +179,11 @@ func (s *MemoryStore) Update(_ context.Context, conversation *StoredConversation
 	}
 	prepareStoredConversationForMemory(c, now, s.ttl)
 	if conversationExpired(c, now) {
-		delete(s.items, c.Conversation.ID)
+		s.removeLocked(c.Conversation.ID)
 		return ErrNotFound
 	}
-	s.items[c.Conversation.ID] = c
-	s.enforceMaxEntriesLocked()
+	s.putLocked(c.Conversation.ID, c, size)
+	s.enforceBoundsLocked()
 	return nil
 }
 
@@ -177,12 +201,17 @@ func (s *MemoryStore) AppendItems(_ context.Context, id string, items []json.Raw
 		return ErrNotFound
 	}
 	if conversationExpired(conversation, now) {
-		delete(s.items, id)
+		s.removeLocked(id)
 		return ErrNotFound
 	}
+	var added int64
 	for _, item := range items {
 		conversation.Items = append(conversation.Items, core.CloneRawJSON(item))
+		added += int64(len(item))
 	}
+	s.sizes[id] += added
+	s.totalBytes += added
+	s.enforceBoundsLocked()
 	return nil
 }
 
@@ -199,16 +228,41 @@ func (s *MemoryStore) Delete(_ context.Context, id string) error {
 	// Expired entries report as not found, matching Get and Update, even when
 	// the throttled cleanup sweep has not removed them yet.
 	if conversationExpired(conversation, now) {
-		delete(s.items, id)
+		s.removeLocked(id)
 		return ErrNotFound
 	}
-	delete(s.items, id)
+	s.removeLocked(id)
 	return nil
 }
 
 // Close releases resources (no-op for memory store).
 func (s *MemoryStore) Close() error {
 	return nil
+}
+
+// checkByteBudget rejects snapshots that could never fit the byte budget, so
+// callers see an explicit storage failure instead of silent eviction churn.
+func (s *MemoryStore) checkByteBudget(size int64) error {
+	if s.maxBytes > 0 && size > s.maxBytes {
+		return fmt.Errorf("conversation snapshot of %d bytes exceeds the in-memory store budget of %d bytes", size, s.maxBytes)
+	}
+	return nil
+}
+
+func (s *MemoryStore) putLocked(id string, conversation *StoredConversation, size int64) {
+	s.removeLocked(id)
+	s.items[id] = conversation
+	s.sizes[id] = size
+	s.totalBytes += size
+}
+
+func (s *MemoryStore) removeLocked(id string) {
+	if _, ok := s.items[id]; !ok {
+		return
+	}
+	delete(s.items, id)
+	s.totalBytes -= s.sizes[id]
+	delete(s.sizes, id)
 }
 
 func prepareStoredConversationForMemory(conversation *StoredConversation, now time.Time, ttl time.Duration) {
@@ -230,17 +284,17 @@ func (s *MemoryStore) cleanupExpiredLocked(now time.Time) {
 	s.lastCleanup = now
 	for id, conversation := range s.items {
 		if conversationExpired(conversation, now) {
-			delete(s.items, id)
+			s.removeLocked(id)
 		}
 	}
 }
 
-func (s *MemoryStore) enforceMaxEntriesLocked() {
-	if s.maxEntries <= 0 {
-		return
-	}
-	overLimit := len(s.items) - s.maxEntries
-	if overLimit <= 0 {
+// enforceBoundsLocked evicts oldest-first until both the entry-count and
+// byte-budget caps hold.
+func (s *MemoryStore) enforceBoundsLocked() {
+	overEntries := s.maxEntries > 0 && len(s.items) > s.maxEntries
+	overBytes := s.maxBytes > 0 && s.totalBytes > s.maxBytes
+	if !overEntries && !overBytes {
 		return
 	}
 
@@ -257,8 +311,12 @@ func (s *MemoryStore) enforceMaxEntriesLocked() {
 		}
 		return entries[i].storedAt.Before(entries[j].storedAt)
 	})
-	for i := 0; i < overLimit && i < len(entries); i++ {
-		delete(s.items, entries[i].id)
+	for _, entry := range entries {
+		if (s.maxEntries <= 0 || len(s.items) <= s.maxEntries) &&
+			(s.maxBytes <= 0 || s.totalBytes <= s.maxBytes) {
+			return
+		}
+		s.removeLocked(entry.id)
 	}
 }
 

@@ -102,14 +102,10 @@ func newHandlerWithAuthorizer(
 		pricingResolver:          pricingResolver,
 		batchStore:               batchstore.NewMemoryStore(),
 		fileStore:                filestore.NewMemoryStore(),
-		responseStore: responsestore.NewMemoryStore(
-			responsestore.WithTTL(responsestore.DefaultMemoryStoreTTL),
-			responsestore.WithMaxEntries(responsestore.DefaultMemoryStoreMaxEntries),
-		),
-		conversationStore: conversationstore.NewMemoryStore(
-			conversationstore.WithTTL(conversationstore.DefaultMemoryStoreTTL),
-			conversationstore.WithMaxEntries(conversationstore.DefaultMemoryStoreMaxEntries),
-		),
+		// Fallback stores with default bounded retention (TTL plus entry and
+		// byte caps); app wiring replaces them with storage-backed stores.
+		responseStore:                responsestore.NewMemoryStore(),
+		conversationStore:            conversationstore.NewMemoryStore(),
 		normalizePassthroughV1Prefix: true,
 		enabledPassthroughProviders:  normalizeEnabledPassthroughProviders(defaultEnabledPassthroughProviders),
 	}

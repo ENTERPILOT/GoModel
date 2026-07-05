@@ -42,19 +42,26 @@ type Store interface {
 }
 
 func cloneConversation(src *StoredConversation) (*StoredConversation, error) {
+	dst, _, err := cloneConversationWithSize(src)
+	return dst, err
+}
+
+// cloneConversationWithSize deep-copies a snapshot and reports its serialized
+// size, which the memory store uses for byte-budget accounting.
+func cloneConversationWithSize(src *StoredConversation) (*StoredConversation, int64, error) {
 	if src == nil {
-		return nil, fmt.Errorf("conversation is nil")
+		return nil, 0, fmt.Errorf("conversation is nil")
 	}
 	normalized := normalizeStoredConversation(src)
 	b, err := json.Marshal(normalized)
 	if err != nil {
-		return nil, fmt.Errorf("marshal conversation: %w", err)
+		return nil, 0, fmt.Errorf("marshal conversation: %w", err)
 	}
 	var dst StoredConversation
 	if err := json.Unmarshal(b, &dst); err != nil {
-		return nil, fmt.Errorf("unmarshal conversation: %w", err)
+		return nil, 0, fmt.Errorf("unmarshal conversation: %w", err)
 	}
-	return &dst, nil
+	return &dst, int64(len(b)), nil
 }
 
 func normalizeStoredConversation(src *StoredConversation) *StoredConversation {

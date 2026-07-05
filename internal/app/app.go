@@ -23,6 +23,7 @@ import (
 	"gomodel/internal/authkeys"
 	"gomodel/internal/batch"
 	"gomodel/internal/budget"
+	"gomodel/internal/conversationstore"
 	"gomodel/internal/core"
 	"gomodel/internal/failover"
 	"gomodel/internal/filestore"
@@ -32,6 +33,7 @@ import (
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/responsecache"
+	"gomodel/internal/responsestore"
 	"gomodel/internal/server"
 	"gomodel/internal/storage"
 	"gomodel/internal/tagging"
@@ -50,6 +52,8 @@ type App struct {
 	budgets          *budget.Result
 	batch            *batch.Result
 	fileStore        *filestore.Result
+	responseStore    *responsestore.Result
+	conversations    *conversationstore.Result
 	virtualModels    *virtualmodels.Result
 	failover         *failover.Result
 	tagging          *tagging.Result
@@ -254,6 +258,35 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	closers = append(closers, app.fileStore.Close)
 	claimSharedStorage(fileStoreResult.Storage)
 
+	// Initialize Responses/Conversations lifecycle persistence so agentic
+	// response chains and conversation history land in storage instead of
+	// accumulating in process memory.
+	var responseStoreResult *responsestore.Result
+	if sharedStorage != nil {
+		responseStoreResult, err = responsestore.NewWithSharedStorage(ctx, sharedStorage)
+	} else {
+		responseStoreResult, err = responsestore.New(ctx, appCfg)
+	}
+	if err != nil {
+		return fail("failed to initialize response snapshot storage", err)
+	}
+	app.responseStore = responseStoreResult
+	closers = append(closers, app.responseStore.Close)
+	claimSharedStorage(responseStoreResult.Storage)
+
+	var conversationStoreResult *conversationstore.Result
+	if sharedStorage != nil {
+		conversationStoreResult, err = conversationstore.NewWithSharedStorage(ctx, sharedStorage)
+	} else {
+		conversationStoreResult, err = conversationstore.New(ctx, appCfg)
+	}
+	if err != nil {
+		return fail("failed to initialize conversation storage", err)
+	}
+	app.conversations = conversationStoreResult
+	closers = append(closers, app.conversations.Close)
+	claimSharedStorage(conversationStoreResult.Storage)
+
 	// Initialize virtual models (unified aliases + access overrides) using
 	// shared storage when already available.
 	var virtualModelsResult *virtualmodels.Result
@@ -442,6 +475,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		PassthroughSemanticEnrichers:    cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      batchResult.Store,
 		FileStore:                       fileStoreResult.Store,
+		ResponseStore:                   responseStoreResult.Store,
+		ConversationStore:               conversationStoreResult.Store,
 		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,

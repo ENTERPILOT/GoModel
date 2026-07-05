@@ -3,6 +3,7 @@ package responsestore
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,5 +98,79 @@ func TestMemoryStoreAllowsExplicitUnboundedRetention(t *testing.T) {
 
 	if _, err := store.Get(ctx, "resp_old"); err != nil {
 		t.Fatalf("Get() error = %v", err)
+	}
+}
+
+func TestMemoryStoreMaxBytesEvictsOldest(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	large := func(id string, storedAt time.Time) *StoredResponse {
+		return &StoredResponse{
+			Response: &core.ResponsesResponse{ID: id, Object: "response", Model: strings.Repeat("x", 600)},
+			StoredAt: storedAt,
+		}
+	}
+
+	// Size one entry via a probe store, then budget for exactly two.
+	probe := NewMemoryStore(WithTTL(0))
+	if err := probe.Create(ctx, large("probe", now)); err != nil {
+		t.Fatalf("Create(probe) error = %v", err)
+	}
+	budget := 2*probe.totalBytes + 10
+
+	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(budget))
+	for i, response := range []*StoredResponse{
+		large("resp_1", now.Add(-3*time.Second)),
+		large("resp_2", now.Add(-2*time.Second)),
+		large("resp_3", now.Add(-1*time.Second)),
+	} {
+		if err := store.Create(ctx, response); err != nil {
+			t.Fatalf("Create(%d) error = %v", i, err)
+		}
+	}
+
+	if _, err := store.Get(ctx, "resp_1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get(resp_1) error = %v, want ErrNotFound (oldest evicted)", err)
+	}
+	for _, id := range []string{"resp_2", "resp_3"} {
+		if _, err := store.Get(ctx, id); err != nil {
+			t.Fatalf("Get(%s) error = %v, want kept", id, err)
+		}
+	}
+	if store.totalBytes > budget {
+		t.Fatalf("totalBytes = %d, want <= %d", store.totalBytes, budget)
+	}
+}
+
+func TestMemoryStoreRejectsSnapshotOverByteBudget(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(WithMaxBytes(100))
+	err := store.Create(ctx, &StoredResponse{
+		Response: &core.ResponsesResponse{ID: "resp_big", Object: "response", Model: strings.Repeat("x", 200)},
+	})
+	if err == nil {
+		t.Fatal("Create() error = nil, want byte budget rejection")
+	}
+	if _, getErr := store.Get(ctx, "resp_big"); !errors.Is(getErr, ErrNotFound) {
+		t.Fatalf("Get() error = %v, want ErrNotFound", getErr)
+	}
+}
+
+func TestMemoryStoreDeleteReleasesByteAccounting(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	if err := store.Create(ctx, &StoredResponse{
+		Response: &core.ResponsesResponse{ID: "resp_1", Object: "response"},
+	}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if store.totalBytes == 0 {
+		t.Fatal("totalBytes = 0 after create, want > 0")
+	}
+	if err := store.Delete(ctx, "resp_1"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if store.totalBytes != 0 || len(store.sizes) != 0 {
+		t.Fatalf("accounting after delete = %d bytes / %d sizes, want 0/0", store.totalBytes, len(store.sizes))
 	}
 }
