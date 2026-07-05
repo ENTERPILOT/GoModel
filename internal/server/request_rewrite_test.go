@@ -450,6 +450,13 @@ func TestRequestRewriteMiddlewareStoresTokensSavedInContext(t *testing.T) {
 			return &ext.Result{Body: in.Body, TokensSaved: 7}, nil
 		},
 	}
+	// A savings claim without an applied body rewrite must not count.
+	phantom := &stubRewriter{
+		name: "phantom",
+		rewrite: func(in ext.Input) (*ext.Result, error) {
+			return &ext.Result{TokensSaved: 999}, nil
+		},
+	}
 	noop := &stubRewriter{name: "noop"}
 
 	var got int
@@ -463,12 +470,44 @@ func TestRequestRewriteMiddlewareStoresTokensSavedInContext(t *testing.T) {
 		strings.NewReader(`{"model":"gpt-4o-mini","messages":[]}`))
 	c := e.NewContext(req, httptest.NewRecorder())
 
-	mw := RequestRewriteMiddleware([]ext.RequestRewriter{compressor, trimmer, noop}, nil)
+	mw := RequestRewriteMiddleware([]ext.RequestRewriter{compressor, trimmer, phantom, noop}, nil)
 	if err := mw(next)(c); err != nil {
 		t.Fatalf("middleware returned error: %v", err)
 	}
 	if got != 130 {
-		t.Fatalf("context tokens saved = %d, want 130 (sum across applied rewriters)", got)
+		t.Fatalf("context tokens saved = %d, want 130 (sum across applied rewriters only)", got)
+	}
+}
+
+func TestRequestRewriteMiddlewareIgnoresSavingsWithoutAppliedBody(t *testing.T) {
+	// Header-only annotator claiming savings without returning a body: the
+	// request is unchanged, so no savings may be recorded.
+	annotator := &stubRewriter{
+		name: "annotator",
+		rewrite: func(in ext.Input) (*ext.Result, error) {
+			header := http.Header{}
+			header.Set("X-Annotate", "yes")
+			return &ext.Result{ResponseHeader: header, TokensSaved: 55}, nil
+		},
+	}
+
+	var got int
+	next := func(c *echo.Context) error {
+		got = core.RewriteTokensSavedFromContext(c.Request().Context())
+		return c.NoContent(http.StatusOK)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4o-mini","messages":[]}`))
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	mw := RequestRewriteMiddleware([]ext.RequestRewriter{annotator}, nil)
+	if err := mw(next)(c); err != nil {
+		t.Fatalf("middleware returned error: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("context tokens saved = %d, want 0 when no body rewrite was applied", got)
 	}
 }
 
