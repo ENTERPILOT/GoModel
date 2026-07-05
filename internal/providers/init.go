@@ -145,7 +145,8 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	if refreshInterval <= 0 {
 		refreshInterval = time.Hour
 	}
-	stopRefresh := registry.StartBackgroundRefresh(refreshInterval, modelListURL)
+	recheckInterval := time.Duration(result.Config.Cache.Model.RecheckInterval) * time.Second
+	stopRefresh := registry.StartBackgroundRefresh(refreshInterval, recheckInterval, modelListURL)
 
 	router, err := NewRouter(registry)
 	if err != nil {

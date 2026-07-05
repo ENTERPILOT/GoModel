@@ -52,6 +52,7 @@ type ProviderRuntimeSnapshot struct {
 	LastAvailabilityCheckAt *time.Time `json:"last_availability_check_at,omitempty"`
 	LastAvailabilityOKAt    *time.Time `json:"last_availability_ok_at,omitempty"`
 	LastAvailabilityError   string     `json:"last_availability_error,omitempty"`
+	InventoryStale          bool       `json:"inventory_stale,omitempty"`
 }
 
 type providerRuntimeState struct {
@@ -62,6 +63,12 @@ type providerRuntimeState struct {
 	lastAvailabilityCheckAt time.Time
 	lastAvailabilityOKAt    time.Time
 	lastAvailabilityError   string
+	// inventoryStale marks a provider whose latest full refresh failed and
+	// whose models were carried forward from the previous inventory. Stale
+	// models keep resolving for direct requests (which then fail at the
+	// provider with an honest 502/503) but are skipped by ModelAvailable,
+	// which load balancing uses to route around the provider.
+	inventoryStale bool
 }
 
 // SanitizeProviderConfigs converts effective provider configs into a stable,

@@ -71,6 +71,16 @@ test('provider helper methods format configured models and resilience summaries'
     assert.equal(module.providerRetrySummary(provider), '3 retries, 1s initial, 30s max, factor 2, jitter 0.1');
     assert.equal(module.providerCircuitBreakerSummary(provider), '5 fail, 2 success, 30s timeout');
     assert.equal(module.providerLastChecked(provider), '2026-04-10T12:00:00Z');
+    // The most recent of the two check timestamps wins, whichever side it is.
+    assert.equal(module.providerLastChecked({
+        runtime: {
+            last_model_fetch_at: '2026-04-10T12:00:00Z',
+            last_availability_check_at: '2026-04-10T12:30:00Z'
+        }
+    }), '2026-04-10T12:30:00Z');
+    assert.equal(module.providerLastChecked({
+        runtime: { last_availability_check_at: '2026-04-10T11:55:00Z' }
+    }), '2026-04-10T11:55:00Z');
     assert.equal(module.providerTypeLabel({ name: 'openai-primary', type: 'openai' }), 'openai');
     assert.equal(module.providerTypeLabel({ name: 'openai', type: 'openai' }), '');
     assert.equal(module.providerTypeLabel({ name: 'azure-east', config: { type: 'azure' } }), 'azure');

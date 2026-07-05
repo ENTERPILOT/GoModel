@@ -71,14 +71,34 @@ func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelec
 	if fetched.totalModels == 0 {
 		if fetched.failedProviders == len(providers) {
 			r.applyProviderRuntimeUpdates(fetched.runtimeUpdates)
+			r.markFailedRefreshProvidersStale(fetched)
 			return 0, core.NewProviderError(providerSelector, http.StatusServiceUnavailable, "failed to refresh provider models", fetchedProviderRefreshError(fetched))
 		}
 		r.applyFetchedProviderInventory(providerTypes, fetched)
+		r.markFailedRefreshProvidersStale(fetched)
 		return 0, core.NewProviderError(providerSelector, http.StatusServiceUnavailable, "provider returned no models", nil)
 	}
 
 	r.applyFetchedProviderInventory(providerTypes, fetched)
+	r.markFailedRefreshProvidersStale(fetched)
 	return fetched.totalModels, nil
+}
+
+// markFailedRefreshProvidersStale marks the carried inventory of providers
+// whose live probe failed this refresh, so the recheck loop retires a down
+// provider from load balancing as soon as a healthy alternative exists —
+// instead of waiting for the next full sweep. Providers that produced (or
+// fell back to) an authoritative inventory this refresh are left alone.
+func (r *ModelRegistry) markFailedRefreshProvidersStale(fetched fetchedInventory) {
+	for providerName, state := range fetched.runtimeUpdates {
+		if strings.TrimSpace(state.lastModelFetchError) == "" {
+			continue
+		}
+		if _, ok := fetched.modelsByProvider[providerName]; ok {
+			continue
+		}
+		r.markProviderInventoryStale(providerName)
+	}
 }
 
 func (r *ModelRegistry) providerRefreshTargets(providerSelector string) []providerRefreshTarget {
@@ -134,6 +154,7 @@ func (r *ModelRegistry) availableProviderRefreshTargets(ctx context.Context, pro
 		err := checker.CheckAvailability(ctx)
 		r.RecordAvailabilityCheck(target.providerName, err)
 		if err != nil {
+			r.markProviderInventoryStale(target.providerName)
 			availabilityErrs = append(availabilityErrs, fmt.Errorf("%s: %w", target.providerName, err))
 			slog.Warn("provider unavailable during request-time refresh",
 				"provider", target.providerName,
@@ -174,9 +195,13 @@ func (r *ModelRegistry) applyFetchedProviderInventory(providerTypes map[core.Pro
 	r.mu.Lock()
 	for providerName, providerModels := range fetched.modelsByProvider {
 		r.modelsByProvider[providerName] = providerModels
+		// A refresh that produced inventory is authoritative again.
+		state := r.providerRuntime[providerName]
+		state.inventoryStale = false
+		r.providerRuntime[providerName] = state
 	}
 	r.applyProviderRuntimeUpdatesLocked(fetched.runtimeUpdates)
-	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.providerOrderNamesLocked())
+	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
 	r.invalidateSortedCaches()
 	r.mu.Unlock()
 
@@ -203,4 +228,22 @@ func (r *ModelRegistry) providerOrderNamesLocked() []string {
 		names = append(names, providerName)
 	}
 	return names
+}
+
+// freshFirstProviderOrderLocked returns provider names in registration order
+// with stale-inventory providers moved to the back, so a bare model ID served
+// by several providers resolves to a healthy one — matching where the old
+// inventory wipe would have sent the request.
+func (r *ModelRegistry) freshFirstProviderOrderLocked() []string {
+	names := r.providerOrderNamesLocked()
+	fresh := make([]string, 0, len(names))
+	var staleNames []string
+	for _, name := range names {
+		if r.providerRuntime[name].inventoryStale {
+			staleNames = append(staleNames, name)
+			continue
+		}
+		fresh = append(fresh, name)
+	}
+	return append(fresh, staleNames...)
 }

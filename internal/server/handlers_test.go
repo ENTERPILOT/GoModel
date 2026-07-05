@@ -146,6 +146,10 @@ func (c *aliasesTestCatalog) Supports(model string) bool {
 	return c.supported[model]
 }
 
+func (c *aliasesTestCatalog) ModelAvailable(model string) bool {
+	return c.Supports(model)
+}
+
 func (c *aliasesTestCatalog) GetProviderType(model string) string {
 	return c.providerTypes[model]
 }

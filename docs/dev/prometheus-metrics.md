@@ -51,13 +51,14 @@ type RequestInfo struct {
 }
 
 type ResponseInfo struct {
-    Provider   string
-    Model      string
-    Endpoint   string
-    StatusCode int           // 0 if network error
-    Duration   time.Duration
-    Stream     bool
-    Error      error         // nil on success
+    Provider     string
+    Model        string
+    Endpoint     string
+    StatusCode   int           // 0 if network error
+    Duration     time.Duration
+    Stream       bool
+    Error        error         // nil on success
+    CircuitState string        // "closed", "half-open", "open"; "" when the breaker is disabled
 }
 
 type Hooks struct {
@@ -121,6 +122,19 @@ cache / audit pipeline, not the LLM request path itself).
 
 Labels: `provider`, `provider_name`, `operation`.
 
+### `gomodel_circuit_breaker_state`
+
+Gauge. Circuit breaker state per provider: `0` closed, `1` half-open, `2`
+open. Updated on every request completion (including requests the open
+breaker rejects), so an idle provider keeps its last observed state; the
+series is absent for providers whose breaker is disabled
+(`failure_threshold: 0`).
+
+Labels: `provider`.
+
+Alerting example: `gomodel_circuit_breaker_state == 2` for more than a
+minute means a provider is being actively short-circuited.
+
 ## Helpers in `client.go`
 
 - `extractModel(body any) string` — pulls `Model` from `*core.ChatRequest` or
@@ -174,5 +188,4 @@ Not committed; listed so contributors don't redesign the same things:
 - Token usage labels on duration / counter (requires plumbing usage from the
   response into `ResponseInfo`).
 - Cache hit/miss counters for the response and model caches.
-- Circuit-breaker state gauge per provider.
 - Request/response payload size histograms.

@@ -823,6 +823,11 @@ func TestClient_BuildErrorDoesNotRetryOrChargeBreaker(t *testing.T) {
 				if state := client.circuitBreaker.State(); state != st.wantState {
 					t.Errorf("breaker state = %q; want %q (build errors must not advance the breaker)", state, st.wantState)
 				}
+				// A consumed half-open probe slot must be released, or the
+				// breaker rejects every request from here on.
+				if _, err := client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"}); err != nil {
+					t.Errorf("follow-up request after build error failed: %v (probe slot leaked)", err)
+				}
 			})
 		}
 	}
@@ -1350,6 +1355,132 @@ func TestCircuitBreaker_State(t *testing.T) {
 	if state := cb.State(); state != "open" {
 		t.Errorf("expected state 'open' after failures, got '%s'", state)
 	}
+}
+
+// ResponseInfo carries the breaker state to observability hooks — including
+// on requests the breaker rejects.
+func TestCircuitBreaker_StateReportedToHooks(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	var states []string
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 0
+	config.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		FailureThreshold: 1,
+		SuccessThreshold: 1,
+		Timeout:          time.Minute,
+	}
+	config.Hooks = Hooks{
+		OnRequestEnd: func(_ context.Context, info ResponseInfo) {
+			states = append(states, info.CircuitState)
+		},
+	}
+	client := New(config, nil)
+
+	// First request fails (500) and opens the breaker; the second is rejected
+	// by the open breaker. Both completions must report the state.
+	_, _ = client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
+	_, _ = client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
+
+	want := []string{"open", "open"}
+	if len(states) != len(want) {
+		t.Fatalf("hook fired %d times, want %d (states: %v)", len(states), len(want), states)
+	}
+	for i := range want {
+		if states[i] != want[i] {
+			t.Fatalf("CircuitState[%d] = %q, want %q", i, states[i], want[i])
+		}
+	}
+
+	// Without a breaker the field stays empty.
+	states = nil
+	config.CircuitBreaker = goconfig.CircuitBreakerConfig{}
+	plain := New(config, nil)
+	_, _ = plain.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
+	if len(states) != 1 || states[0] != "" {
+		t.Fatalf("CircuitState without breaker = %v, want one empty entry", states)
+	}
+}
+
+// A caller cancellation that consumed the half-open probe slot must release
+// it; otherwise the breaker rejects every request until process restart.
+func TestCircuitBreaker_CanceledHalfOpenProbeReleasesSlot(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		FailureThreshold: 1,
+		SuccessThreshold: 2,
+		Timeout:          time.Minute,
+	}
+	client := New(config, nil)
+
+	cb := client.circuitBreaker
+	cb.mu.Lock()
+	cb.state = circuitHalfOpen
+	cb.halfOpenAllowed = true
+	cb.mu.Unlock()
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := client.DoRaw(canceled, Request{Method: http.MethodGet, Endpoint: "/test"}); err == nil {
+		t.Fatal("expected error from canceled context")
+	}
+
+	if state := cb.State(); state != "half-open" {
+		t.Fatalf("breaker state = %q; want half-open (cancellation is not a provider failure)", state)
+	}
+	// The slot must be free again so the next request can be the probe.
+	if _, err := client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"}); err != nil {
+		t.Fatalf("probe after canceled probe failed: %v (probe slot leaked)", err)
+	}
+}
+
+// Client disconnects while a stream is being established must not be charged
+// to the breaker as provider failures.
+func TestCircuitBreaker_ClientCancellationDoesNotTrip(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {}\n\n"))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		FailureThreshold: 1,
+		SuccessThreshold: 1,
+		Timeout:          time.Minute,
+	}
+	client := New(config, nil)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := client.DoStream(canceled, Request{Method: http.MethodPost, Endpoint: "/test", Body: map[string]string{"k": "v"}}); err == nil {
+		t.Fatal("expected error from canceled context")
+	}
+
+	if state := client.circuitBreaker.State(); state != "closed" {
+		t.Fatalf("breaker state = %q; want closed (client cancellation must not count as a provider failure)", state)
+	}
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/test", Body: map[string]string{"k": "v"}})
+	if err != nil {
+		t.Fatalf("live stream after cancellation failed: %v", err)
+	}
+	_ = stream.Close()
 }
 
 func TestClient_ContextCancellation(t *testing.T) {

@@ -171,6 +171,13 @@ func classifyProviderStatus(cfg providers.SanitizedProviderConfig, runtime provi
 
 	switch {
 	case runtime.DiscoveredModelCount > 0 && modelFetchError == "":
+		if runtime.InventoryStale {
+			// An availability probe failed without a model fetch running, so
+			// the inventory was retired from load balancing while the fetch
+			// error stayed empty. Surfacing "healthy" here would contradict
+			// the routing behavior.
+			return "degraded", "Degraded", "latest availability probe failed; previous inventory is still available", lastError
+		}
 		if usingCachedModels {
 			return "degraded", "Starting", "serving cached model inventory while live refresh finishes", lastError
 		}

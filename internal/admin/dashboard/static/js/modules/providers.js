@@ -227,9 +227,13 @@
 
             providerLastChecked(provider) {
                 if (!provider || !provider.runtime) return '';
-                return provider.runtime.last_model_fetch_at ||
-                    provider.runtime.last_availability_check_at ||
-                    '';
+                const fetchAt = provider.runtime.last_model_fetch_at || '';
+                const availabilityAt = provider.runtime.last_availability_check_at || '';
+                if (!fetchAt) return availabilityAt;
+                if (!availabilityAt) return fetchAt;
+                // Whichever check ran most recently; an unparsable timestamp
+                // falls back to the model fetch side.
+                return Date.parse(availabilityAt) > Date.parse(fetchAt) ? availabilityAt : fetchAt;
             },
 
             providerLastCheckedTime(provider) {

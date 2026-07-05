@@ -100,6 +100,10 @@ func (c *vmTestCatalog) Supports(model string) bool {
 	return ok
 }
 
+func (c *vmTestCatalog) ModelAvailable(model string) bool {
+	return c.Supports(model)
+}
+
 func (c *vmTestCatalog) GetProviderType(model string) string {
 	return c.providerTypes[model]
 }

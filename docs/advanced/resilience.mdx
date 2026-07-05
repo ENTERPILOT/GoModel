@@ -31,6 +31,43 @@ you need.
 | `success_threshold` | `2`     | Consecutive successes to close it again        |
 | `timeout`           | `30s`   | How long the circuit stays open before probing |
 
+To disable a layer, zero out its trigger: `max_retries: 0` gives every
+request exactly one attempt, and `failure_threshold: 0` disables the
+circuit breaker entirely. Both work globally or per provider.
+
+## What counts as a failure
+
+**Retries** fire on transport errors (connection refused, resets, DNS
+failures) and on `429`, `502`, `503`, and `504` responses. Other statuses —
+including `500` — are returned to the caller without retrying. Two paths
+retry less than the table suggests:
+
+- **Streaming** requests are never retried once dispatched, because partial
+  data may already have been sent.
+- **Passthrough** requests are retried only when they are replay-safe:
+  `GET`, `HEAD`, `OPTIONS`, `PUT`, or any request carrying an
+  `Idempotency-Key` header.
+
+**The circuit breaker** counts transport errors and `5xx` responses
+(including non-retried `500`s) as failures. It deliberately ignores:
+
+- `429` rate limits — a rate-limited provider is up, so the backpressure
+  signal is passed through instead of opening the circuit. The one
+  exception is a `429` on a half-open probe, which reopens the circuit.
+- `4xx` responses — the provider answered; the request was at fault.
+- Requests canceled by the client — a disconnect says nothing about
+  provider health. Client-side *timeouts* do count as failures.
+
+While the circuit is open, requests fail fast with a `503` and the message
+`circuit breaker is open - provider temporarily unavailable`. After
+`timeout` elapses, a single probe request is let through while concurrent
+requests keep failing fast; `success_threshold` consecutive successful
+probes close the circuit, and any probe failure reopens it.
+
+The circuit breaker is in-memory and per gateway process: each provider
+gets its own breaker, state resets on restart, and nothing is shared
+between replicas.
+
 ## Environment Variables
 
 These set the global defaults that apply to every provider unless overridden
@@ -110,6 +147,46 @@ Given the YAML above, the effective per-provider settings are:
 | ollama    | 2 (global)       | **10** (override) | **5s** (override) |
 
 `anthropic` and `ollama` inherit every field they did not explicitly override.
+
+## Circuit breaker vs. dashboard provider health
+
+The dashboard's provider status (Healthy / Degraded / Unhealthy and the
+"Last checked" timestamp) is **not** the circuit breaker. Circuit breaker
+state is not shown in the dashboard and recovers on its own within
+`timeout` (default 30s) once the provider is back; when
+[metrics](/advanced/configuration#metrics) are enabled it is exported as
+the `gomodel_circuit_breaker_state` gauge (0 = closed, 1 = half-open,
+2 = open).
+
+Dashboard health reflects **model discovery**: whether the provider's model
+inventory could last be fetched. Providers are re-checked:
+
+- at startup,
+- on every model registry refresh, controlled by `CACHE_REFRESH_INTERVAL`
+  (seconds, default `3600` — hourly),
+- on the fast recheck loop, which re-probes **only** providers whose latest
+  refresh failed, controlled by `PROVIDER_RECHECK_INTERVAL` (seconds,
+  default `60`; `0` disables), and
+- on demand, when a request asks for a provider-qualified model
+  (`provider/model`) that is missing from the registry.
+
+## What happens while a provider is down
+
+When a provider's refresh fails, its previously discovered models are kept
+and marked stale, and the dashboard shows the provider as Degraded
+("previous inventory is still available"):
+
+- **Direct requests** to its models still resolve and are sent to the
+  provider, so callers get an honest `502`/`503` (and manual failover rules
+  can fire) instead of a misleading "model not found".
+- **Virtual-model redirects** skip the provider's targets, so a
+  load-balanced redirect keeps working through its healthy targets.
+
+The fast recheck loop re-probes the provider every
+`PROVIDER_RECHECK_INTERVAL` seconds, updating "Last checked" and restoring
+normal routing typically within a minute of the provider coming back. A
+provider that was already down at startup (nothing discovered yet) shows as
+Unhealthy until its first successful fetch.
 
 ## Failover vs. Resilience
 

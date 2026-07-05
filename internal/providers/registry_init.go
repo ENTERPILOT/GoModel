@@ -44,6 +44,14 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 	)
 
 	if fetched.totalModels == 0 {
+		// Deliberately keep the previous inventory fresh (no swap, no stale
+		// marking): when the whole sweep failed there is no healthy provider
+		// left to route to, so marking everything stale would only turn
+		// per-request 502/503s at the providers into 404s from an emptied
+		// virtual-model resolution. It also covers control-plane-only
+		// outages where /models is unreachable but inference still works.
+		// Individual providers are still marked stale by the per-provider
+		// recheck path as soon as a healthy alternative reappears.
 		r.applyProviderRuntimeUpdates(fetched.runtimeUpdates)
 		if fetched.failedProviders == len(providers) {
 			return fmt.Errorf("failed to fetch models from any provider")
@@ -98,7 +106,8 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		runtimeUpdates:   make(map[string]providerRuntimeState),
 	}
 
-	for _, provider := range providers {
+	names := make([]string, len(providers))
+	for i, provider := range providers {
 		providerName := providerNames[provider]
 		if providerName == "" {
 			providerName = providerTypes[provider]
@@ -106,16 +115,47 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		if providerName == "" {
 			providerName = fmt.Sprintf("%p", provider)
 		}
+		names[i] = providerName
+	}
 
+	// Fetch every provider concurrently: the sweep shares one context budget
+	// (30s on background refresh), so a sequential loop would let a single
+	// slow upstream starve every provider after it — and a starved provider
+	// is recorded as failed, dropping its models from the registry.
+	// Aggregation below stays sequential in registration order so
+	// first-provider-wins dedup remains deterministic.
+	type fetchResult struct {
+		resp             *core.ModelsResponse
+		configuredReason configuredProviderModelsApplyReason
+		fetchAt          time.Time
+		err              error
+	}
+	results := make([]fetchResult, len(providers))
+	var wg sync.WaitGroup
+	for i, provider := range providers {
+		wg.Add(1)
+		go func(i int, provider core.Provider) {
+			defer wg.Done()
+			resp, configuredReason, fetchAt, err := fetchProviderInventory(
+				ctx,
+				provider,
+				names[i],
+				providerTypes[provider],
+				configuredProviderModelsMode,
+				configuredProviderModels[names[i]],
+			)
+			results[i] = fetchResult{resp: resp, configuredReason: configuredReason, fetchAt: fetchAt, err: err}
+		}(i, provider)
+	}
+	wg.Wait()
+
+	for i, provider := range providers {
+		providerName := names[i]
 		configuredModels := configuredProviderModels[providerName]
-		resp, configuredReason, fetchAt, err := fetchProviderInventory(
-			ctx,
-			provider,
-			providerName,
-			providerTypes[provider],
-			configuredProviderModelsMode,
-			configuredModels,
-		)
+		resp := results[i].resp
+		configuredReason := results[i].configuredReason
+		fetchAt := results[i].fetchAt
+		err := results[i].err
 		var configuredUpstreamError string
 		if configuredReason != configuredProviderModelsNotApplied {
 			attrs := []any{
@@ -238,6 +278,12 @@ func (r *ModelRegistry) fetchAllProviderModels(
 // applyFetchedInventory enriches the freshly fetched maps with metadata,
 // atomically swaps them onto the registry, marks initialized, and emits the
 // summary log line.
+//
+// A provider that failed this sweep keeps its previous inventory, marked
+// stale: direct requests still resolve (and fail at the provider with an
+// honest 502/503 instead of "model not found"), while ModelAvailable reports
+// false so virtual-model load balancing skips it — the same routing outcome
+// the old wipe produced, without losing the inventory.
 func (r *ModelRegistry) applyFetchedInventory(
 	providerTypes map[core.Provider]string,
 	fetched fetchedInventory,
@@ -246,9 +292,28 @@ func (r *ModelRegistry) applyFetchedInventory(
 	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
 
 	r.mu.Lock()
-	r.models = fetched.models
+	stale := make(map[string]bool, len(fetched.runtimeUpdates))
+	carriedForward := 0
+	for name := range fetched.runtimeUpdates {
+		if _, ok := fetched.modelsByProvider[name]; ok {
+			continue // this sweep produced authoritative inventory
+		}
+		previous := r.modelsByProvider[name]
+		if len(previous) == 0 {
+			continue // nothing to carry forward
+		}
+		fetched.modelsByProvider[name] = previous
+		stale[name] = true
+		carriedForward++
+	}
 	r.modelsByProvider = fetched.modelsByProvider
 	r.applyProviderRuntimeUpdatesLocked(fetched.runtimeUpdates)
+	for name := range fetched.runtimeUpdates {
+		state := r.providerRuntime[name]
+		state.inventoryStale = stale[name]
+		r.providerRuntime[name] = state
+	}
+	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
 	r.invalidateSortedCaches()
 	r.mu.Unlock()
 
@@ -260,6 +325,9 @@ func (r *ModelRegistry) applyFetchedInventory(
 		"total_models", fetched.totalModels,
 		"providers", totalProviders,
 		"failed_providers", fetched.failedProviders,
+	}
+	if carriedForward > 0 {
+		attrs = append(attrs, "stale_inventory_providers", carriedForward)
 	}
 	attrs = append(attrs, metadataStats.slogAttrs()...)
 	slog.Info("model registry initialized", attrs...)
@@ -441,10 +509,13 @@ func (r *ModelRegistry) IsInitialized() bool {
 
 // StartBackgroundRefresh starts a goroutine that periodically refreshes the model registry.
 // If modelListURL is non-empty, the model list is also re-fetched on each tick.
+// A positive recheckInterval additionally re-probes only the providers whose
+// latest refresh failed, so outages and recoveries are detected without
+// waiting for the next full refresh.
 // The returned stop function is blocking: it cancels the refresh loop and waits
 // for the goroutine to exit before returning, so callers should expect it to
 // block during shutdown until any in-flight refresh work unwinds.
-func (r *ModelRegistry) StartBackgroundRefresh(interval time.Duration, modelListURL string) func() {
+func (r *ModelRegistry) StartBackgroundRefresh(interval, recheckInterval time.Duration, modelListURL string) func() {
 	if interval <= 0 {
 		// time.NewTicker panics on non-positive durations and a refresh loop
 		// with a zero interval would be meaningless. Skip the goroutine and
@@ -460,11 +531,19 @@ func (r *ModelRegistry) StartBackgroundRefresh(interval time.Duration, modelList
 		defer close(done)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+		var recheckCh <-chan time.Time
+		if recheckInterval > 0 {
+			recheckTicker := time.NewTicker(recheckInterval)
+			defer recheckTicker.Stop()
+			recheckCh = recheckTicker.C
+		}
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-recheckCh:
+				r.recheckFailedProviders(ctx)
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
 				err := r.Initialize(refreshCtx)
@@ -498,6 +577,25 @@ func (r *ModelRegistry) StartBackgroundRefresh(interval time.Duration, modelList
 			cancel()
 			<-done
 		})
+	}
+}
+
+// recheckFailedProviders re-fetches only the providers whose latest refresh
+// failed. Failures are logged at debug level — they are expected while a
+// provider stays down; recovery is announced by the "provider models
+// refreshed" log from the apply path.
+func (r *ModelRegistry) recheckFailedProviders(ctx context.Context) {
+	for _, providerName := range r.FailedProviderNames() {
+		recheckCtx, recheckCancel := context.WithTimeout(ctx, 30*time.Second)
+		_, err := r.RefreshProviderModels(recheckCtx, providerName)
+		recheckCancel()
+		if err == nil {
+			continue
+		}
+		if isBenignBackgroundRefreshError(ctx, err) {
+			return
+		}
+		slog.Debug("provider recheck still failing", "provider", providerName, "error", err)
 	}
 }
 

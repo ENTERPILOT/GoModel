@@ -61,6 +61,8 @@ bodies, headers), see [Audit Logging](#audit-logging) below.
 | Variable            | Description                       | Default          |
 | ------------------- | --------------------------------- | ---------------- |
 | `GOMODEL_CACHE_DIR` | Directory for local cache files   | `.cache`         |
+| `CACHE_REFRESH_INTERVAL` | Seconds between provider model re-discovery runs | `3600` (1h) |
+| `PROVIDER_RECHECK_INTERVAL` | Seconds between re-probes of providers whose last refresh failed (`0` disables) | `60` |
 | `REDIS_URL`         | Redis connection URL              | _(empty)_        |
 | `REDIS_KEY_MODELS`     | Redis key for model cache           | `gomodel:models`    |
 | `REDIS_KEY_RESPONSES`  | Redis key for response cache        | `gomodel:response:` |
@@ -72,6 +74,13 @@ bodies, headers), see [Audit Logging](#audit-logging) below.
   analytics endpoints, and the note that `user_path` alone does not partition
   the exact cache.
 </Tip>
+
+<Note>
+  `CACHE_REFRESH_INTERVAL` also sets how often the dashboard re-checks
+  provider health ("Last checked"), and `PROVIDER_RECHECK_INTERVAL` how
+  quickly a failed provider is re-probed for recovery. See
+  [Resilience](/advanced/resilience#circuit-breaker-vs-dashboard-provider-health).
+</Note>
 
 #### Storage
 

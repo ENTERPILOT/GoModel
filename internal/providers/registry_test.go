@@ -1079,6 +1079,385 @@ func TestModelRegistry(t *testing.T) {
 	})
 }
 
+// A provider whose refresh fails keeps serving its previous inventory, marked
+// stale: models stay resolvable for direct requests, ModelAvailable reports
+// false so load balancing skips them, and the next successful refresh clears
+// the flag.
+func TestInitialize_FailedRefreshKeepsPreviousInventoryAsStale(t *testing.T) {
+	registry := NewModelRegistry()
+	flaky := &registryMockProvider{
+		name: "flaky",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "flaky-model", Object: "model", OwnedBy: "flaky"}},
+		},
+	}
+	steady := &registryMockProvider{
+		name: "steady",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "steady-model", Object: "model", OwnedBy: "steady"}},
+		},
+	}
+	registry.RegisterProviderWithNameAndType(flaky, "flaky", "flaky")
+	registry.RegisterProviderWithNameAndType(steady, "steady", "steady")
+
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("initial Initialize() error = %v", err)
+	}
+	if !registry.ModelAvailable("flaky/flaky-model") {
+		t.Fatal("ModelAvailable() = false after successful fetch, want true")
+	}
+
+	flaky.err = errors.New("connection refused")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("refresh Initialize() error = %v", err)
+	}
+
+	if registry.GetProvider("flaky/flaky-model") != flaky {
+		t.Fatal("failed provider's models were wiped, want carried forward")
+	}
+	if !registry.Supports("flaky/flaky-model") {
+		t.Fatal("Supports() = false for carried-forward model, want true")
+	}
+	if registry.ModelAvailable("flaky/flaky-model") {
+		t.Fatal("ModelAvailable() = true for stale inventory, want false")
+	}
+	if !registry.ModelAvailable("steady/steady-model") {
+		t.Fatal("ModelAvailable() = false for healthy provider, want true")
+	}
+
+	var flakySnapshot ProviderRuntimeSnapshot
+	for _, snapshot := range registry.ProviderRuntimeSnapshots() {
+		if snapshot.Name == "flaky" {
+			flakySnapshot = snapshot
+		}
+	}
+	if !flakySnapshot.InventoryStale {
+		t.Fatal("InventoryStale = false, want true after failed refresh")
+	}
+	if flakySnapshot.DiscoveredModelCount == 0 {
+		t.Fatal("DiscoveredModelCount = 0, want carried-forward inventory counted")
+	}
+	if flakySnapshot.LastModelFetchError == "" {
+		t.Fatal("LastModelFetchError empty, want refresh failure recorded")
+	}
+
+	flaky.err = nil
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("recovery Initialize() error = %v", err)
+	}
+	if !registry.ModelAvailable("flaky/flaky-model") {
+		t.Fatal("ModelAvailable() = false after recovery, want true")
+	}
+}
+
+// When several providers serve the same bare model ID, a stale provider loses
+// the unqualified slot to a healthy duplicate — the same routing the old
+// inventory wipe produced — while staying reachable via its qualified name.
+func TestInitialize_StaleProviderLosesBareModelIDToHealthyDuplicate(t *testing.T) {
+	registry := NewModelRegistry()
+	sharedModels := func(owner string) *core.ModelsResponse {
+		return &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "shared-model", Object: "model", OwnedBy: owner}},
+		}
+	}
+	first := &registryMockProvider{name: "first", modelsResponse: sharedModels("first")}
+	second := &registryMockProvider{name: "second", modelsResponse: sharedModels("second")}
+	registry.RegisterProviderWithNameAndType(first, "first", "first")
+	registry.RegisterProviderWithNameAndType(second, "second", "second")
+
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("initial Initialize() error = %v", err)
+	}
+	if registry.GetProvider("shared-model") != first {
+		t.Fatal("bare model ID not owned by first registered provider")
+	}
+
+	first.err = errors.New("connection refused")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("refresh Initialize() error = %v", err)
+	}
+
+	if registry.GetProvider("shared-model") != second {
+		t.Fatal("bare model ID still routed to stale provider, want healthy duplicate")
+	}
+	if registry.GetProvider("first/shared-model") != first {
+		t.Fatal("qualified model on stale provider not resolvable, want carried forward")
+	}
+	if !registry.ModelAvailable("shared-model") {
+		t.Fatal("ModelAvailable() = false for bare ID now owned by healthy provider, want true")
+	}
+}
+
+// The fast recheck loop re-probes only providers whose latest refresh failed,
+// so a recovered provider is picked up within the recheck interval instead of
+// waiting for the next full refresh.
+func TestStartBackgroundRefresh_RechecksFailedProviders(t *testing.T) {
+	registry := NewModelRegistry()
+	flaky := &registryMockProvider{
+		name: "flaky",
+		err:  errors.New("connection refused"),
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "flaky-model", Object: "model", OwnedBy: "flaky"}},
+		},
+	}
+	registry.RegisterProviderWithNameAndType(flaky, "flaky", "flaky")
+
+	// Mark the provider failed while nothing runs concurrently.
+	if err := registry.Initialize(context.Background()); err == nil {
+		t.Fatal("Initialize() error = nil, want failure while provider is down")
+	}
+	if got := registry.FailedProviderNames(); len(got) != 1 || got[0] != "flaky" {
+		t.Fatalf("FailedProviderNames() = %v, want [flaky]", got)
+	}
+
+	// The provider recovers before the loop starts (avoids racing the mock).
+	flaky.err = nil
+
+	// Full refresh is an hour away; only the recheck loop can discover the
+	// recovery.
+	stop := registry.StartBackgroundRefresh(time.Hour, 10*time.Millisecond, "")
+	defer stop()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if registry.ModelAvailable("flaky/flaky-model") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !registry.ModelAvailable("flaky/flaky-model") {
+		t.Fatal("recovered provider not re-discovered by the recheck loop")
+	}
+	if got := registry.FailedProviderNames(); len(got) != 0 {
+		t.Fatalf("FailedProviderNames() = %v after recovery, want empty", got)
+	}
+}
+
+// registerTwoProviderRegistry seeds a registry with two healthy providers and
+// runs the initial discovery sweep.
+func registerTwoProviderRegistry(t *testing.T) (*ModelRegistry, *registryMockProvider, *registryMockProvider) {
+	t.Helper()
+	registry := NewModelRegistry()
+	singleModel := func(owner string) *core.ModelsResponse {
+		return &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: owner + "-model", Object: "model", OwnedBy: owner}},
+		}
+	}
+	alpha := &registryMockProvider{name: "alpha", modelsResponse: singleModel("alpha")}
+	beta := &registryMockProvider{name: "beta", modelsResponse: singleModel("beta")}
+	registry.RegisterProviderWithNameAndType(alpha, "alpha", "alpha")
+	registry.RegisterProviderWithNameAndType(beta, "beta", "beta")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("initial Initialize() error = %v", err)
+	}
+	return registry, alpha, beta
+}
+
+// A sweep in which every provider fails must keep the previous inventory
+// routable: with no healthy alternative, marking everything stale would only
+// turn provider-level 502/503s into alias 404s (and would break aliased
+// traffic on control-plane-only outages).
+func TestInitialize_TotalRefreshFailureKeepsRouting(t *testing.T) {
+	registry, alpha, beta := registerTwoProviderRegistry(t)
+
+	alpha.err = errors.New("connection refused")
+	beta.err = errors.New("connection refused")
+	if err := registry.Initialize(context.Background()); err == nil {
+		t.Fatal("Initialize() error = nil, want total-failure error")
+	}
+
+	for _, model := range []string{"alpha/alpha-model", "beta/beta-model"} {
+		if !registry.ModelAvailable(model) {
+			t.Fatalf("ModelAvailable(%q) = false after total refresh failure, want true (no healthy alternative to route to)", model)
+		}
+	}
+}
+
+// A failed per-provider probe (the recheck loop, request-time refresh) marks
+// the provider stale as soon as a healthy alternative exists, instead of
+// waiting for the next full sweep.
+func TestRefreshProviderModels_FailureMarksStaleWhenAlternativeHealthy(t *testing.T) {
+	registry, _, beta := registerTwoProviderRegistry(t)
+
+	beta.err = errors.New("connection refused")
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
+		t.Fatal("RefreshProviderModels() error = nil, want failure")
+	}
+
+	if registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = true after failed probe with healthy alternative, want false")
+	}
+	if !registry.Supports("beta/beta-model") {
+		t.Fatal("Supports(beta) = false, want carried inventory still resolvable")
+	}
+	if !registry.ModelAvailable("alpha/alpha-model") {
+		t.Fatal("ModelAvailable(alpha) = false, want healthy provider unaffected")
+	}
+}
+
+// After a total outage, a recovering provider must retire its still-down peer
+// from load balancing at the next probe — not at the next full sweep.
+func TestRefreshProviderModels_TotalOutageRecoveryRetiresStillDownPeer(t *testing.T) {
+	registry, alpha, beta := registerTwoProviderRegistry(t)
+
+	alpha.err = errors.New("connection refused")
+	beta.err = errors.New("connection refused")
+	if err := registry.Initialize(context.Background()); err == nil {
+		t.Fatal("Initialize() error = nil, want total-failure error")
+	}
+
+	// While nothing is healthy, a failed probe must not retire the provider.
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
+		t.Fatal("RefreshProviderModels(beta) error = nil, want failure")
+	}
+	if !registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = false with no healthy alternative, want true")
+	}
+
+	// Alpha recovers; the next failed probe of beta retires it.
+	alpha.err = nil
+	if _, err := registry.RefreshProviderModels(context.Background(), "alpha"); err != nil {
+		t.Fatalf("RefreshProviderModels(alpha) error = %v, want recovery", err)
+	}
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
+		t.Fatal("RefreshProviderModels(beta) error = nil, want failure")
+	}
+	if registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = true after alpha recovered, want stale (healthy alternative exists)")
+	}
+	if !registry.ModelAvailable("alpha/alpha-model") {
+		t.Fatal("ModelAvailable(alpha) = false after recovery, want true")
+	}
+}
+
+// availabilityFailingProvider wraps the registry mock with a failing
+// CheckAvailability so the availability-gate path can be exercised.
+type availabilityFailingProvider struct {
+	*registryMockProvider
+	availabilityErr error
+}
+
+func (p *availabilityFailingProvider) CheckAvailability(context.Context) error {
+	return p.availabilityErr
+}
+
+// A failed availability check during a per-provider refresh marks the
+// provider stale just like a failed model fetch.
+func TestRefreshProviderModels_AvailabilityFailureMarksStale(t *testing.T) {
+	registry := NewModelRegistry()
+	alpha := &registryMockProvider{
+		name: "alpha",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "alpha-model", Object: "model", OwnedBy: "alpha"}},
+		},
+	}
+	beta := &availabilityFailingProvider{
+		registryMockProvider: &registryMockProvider{
+			name: "beta",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data:   []core.Model{{ID: "beta-model", Object: "model", OwnedBy: "beta"}},
+			},
+		},
+	}
+	registry.RegisterProviderWithNameAndType(alpha, "alpha", "alpha")
+	registry.RegisterProviderWithNameAndType(beta, "beta", "beta")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("initial Initialize() error = %v", err)
+	}
+
+	beta.availabilityErr = errors.New("connection refused")
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
+		t.Fatal("RefreshProviderModels(beta) error = nil, want availability failure")
+	}
+	if registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = true after failed availability check, want false")
+	}
+
+	// The availability failure never set a model fetch error, but the recheck
+	// loop must still re-probe the provider or it would stay stale until the
+	// next full sweep.
+	if got := registry.FailedProviderNames(); len(got) != 1 || got[0] != "beta" {
+		t.Fatalf("FailedProviderNames() = %v, want [beta] (availability-only failure)", got)
+	}
+
+	// Recovery through the recheck path restores availability.
+	beta.availabilityErr = nil
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err != nil {
+		t.Fatalf("RefreshProviderModels(beta) error = %v, want recovery", err)
+	}
+	if !registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = false after recovery, want true")
+	}
+	if got := registry.FailedProviderNames(); len(got) != 0 {
+		t.Fatalf("FailedProviderNames() = %v after recovery, want empty", got)
+	}
+}
+
+// A provider with a failed availability probe does not count as the healthy
+// alternative that justifies retiring another provider from load balancing.
+func TestRefreshProviderModels_AvailabilityFailingPeerIsNotHealthyAlternative(t *testing.T) {
+	registry, _, beta := registerTwoProviderRegistry(t)
+
+	registry.RecordAvailabilityCheck("alpha", errors.New("connection refused"))
+
+	beta.err = errors.New("connection refused")
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
+		t.Fatal("RefreshProviderModels(beta) error = nil, want failure")
+	}
+	if !registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = false, want true (alpha's availability probe failed, so no healthy alternative)")
+	}
+}
+
+// The refresh sweep shares one context budget across all providers; a slow
+// upstream must not starve the providers registered after it out of that
+// budget (a starved provider is recorded as failed and its inventory goes
+// stale — or, on first fetch, is never discovered at all).
+func TestInitialize_SlowProviderDoesNotStarveOthers(t *testing.T) {
+	registry := NewModelRegistry()
+	slow := &registryMockProvider{
+		name:            "slow",
+		listModelsDelay: 5 * time.Second,
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "slow-model", Object: "model", OwnedBy: "slow"}},
+		},
+	}
+	// A small delay makes the fast mock honor context cancellation the way a
+	// real HTTP call would, so sequential starvation is actually observable.
+	fast := &registryMockProvider{
+		name:            "fast",
+		listModelsDelay: time.Millisecond,
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "fast-model", Object: "model", OwnedBy: "fast"}},
+		},
+	}
+	registry.RegisterProviderWithNameAndType(slow, "slow", "slow")
+	registry.RegisterProviderWithNameAndType(fast, "fast", "fast")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	if err := registry.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize() error = %v, want nil (fast provider succeeded)", err)
+	}
+
+	if provider := registry.GetProvider("fast-model"); provider != fast {
+		t.Fatal("fast provider's model missing: slow provider starved the sweep budget")
+	}
+	if provider := registry.GetProvider("slow-model"); provider != nil {
+		t.Fatal("slow provider's model registered, want fetch aborted by context deadline")
+	}
+}
+
 func TestInitialize_LogsSingleMetadataSummaryPerCycle(t *testing.T) {
 	registry := NewModelRegistry()
 
@@ -1505,7 +1884,7 @@ func TestStartBackgroundRefresh(t *testing.T) {
 		refreshCount.Store(0)
 
 		interval := 50 * time.Millisecond
-		cancel := registry.StartBackgroundRefresh(interval, "")
+		cancel := registry.StartBackgroundRefresh(interval, 0, "")
 		defer cancel()
 
 		time.Sleep(interval*3 + 25*time.Millisecond)
@@ -1540,7 +1919,7 @@ func TestStartBackgroundRefresh(t *testing.T) {
 		refreshCount.Store(0)
 
 		interval := 50 * time.Millisecond
-		cancel := registry.StartBackgroundRefresh(interval, "")
+		cancel := registry.StartBackgroundRefresh(interval, 0, "")
 		cancel()
 
 		time.Sleep(interval * 3)
@@ -1578,7 +1957,7 @@ func TestStartBackgroundRefresh(t *testing.T) {
 			mock.listModelsBlocked = make(chan struct{}, 1)
 			mock.listModelsRelease = make(chan struct{})
 
-			cancel := registry.StartBackgroundRefresh(10*time.Millisecond, "")
+			cancel := registry.StartBackgroundRefresh(10*time.Millisecond, 0, "")
 			select {
 			case <-mock.listModelsStarted:
 			case <-time.After(500 * time.Millisecond):
@@ -1647,7 +2026,7 @@ func TestStartBackgroundRefresh(t *testing.T) {
 			registry.RegisterProvider(countingMock)
 			_ = registry.Initialize(context.Background())
 
-			cancel := registry.StartBackgroundRefresh(10*time.Millisecond, server.URL)
+			cancel := registry.StartBackgroundRefresh(10*time.Millisecond, 0, server.URL)
 			select {
 			case <-fetchStarted:
 			case <-time.After(2 * time.Second):
@@ -1693,7 +2072,7 @@ func TestStartBackgroundRefresh(t *testing.T) {
 		refreshCount.Store(0)
 
 		interval := 50 * time.Millisecond
-		cancel := registry.StartBackgroundRefresh(interval, "")
+		cancel := registry.StartBackgroundRefresh(interval, 0, "")
 		defer cancel()
 
 		time.Sleep(interval*3 + 25*time.Millisecond)
