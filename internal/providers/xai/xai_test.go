@@ -22,8 +22,8 @@ func TestNew(t *testing.T) {
 	if provider.apiKey != apiKey {
 		t.Errorf("apiKey = %q, want %q", provider.apiKey, apiKey)
 	}
-	if provider.client == nil {
-		t.Error("client should not be nil")
+	if provider.compat == nil {
+		t.Error("compat should not be nil")
 	}
 }
 
@@ -90,8 +90,8 @@ func TestNewWithHTTPClient(t *testing.T) {
 		t.Fatal("provider should not be nil")
 		return
 	}
-	if provider.client == nil {
-		t.Fatal("provider.client should not be nil")
+	if provider.compat == nil {
+		t.Fatal("provider.compat should not be nil")
 	}
 	if provider.apiKey != "test-api-key" {
 		t.Errorf("apiKey = %q, want %q", provider.apiKey, "test-api-key")

@@ -23,8 +23,8 @@ func TestNew(t *testing.T) {
 	if provider.apiKey != apiKey {
 		t.Errorf("apiKey = %q, want %q", provider.apiKey, apiKey)
 	}
-	if provider.client == nil {
-		t.Error("client should not be nil")
+	if provider.compat == nil {
+		t.Error("compat should not be nil")
 	}
 	if provider.nativeClient == nil {
 		t.Error("nativeClient should not be nil")
@@ -46,8 +46,8 @@ func TestNew_WithoutAPIKey(t *testing.T) {
 	if provider.apiKey != "" {
 		t.Errorf("apiKey = %q, want empty", provider.apiKey)
 	}
-	if provider.client == nil {
-		t.Error("client should not be nil")
+	if provider.compat == nil {
+		t.Error("compat should not be nil")
 	}
 }
 
@@ -725,8 +725,8 @@ func TestNewWithHTTPClient(t *testing.T) {
 	if provider.apiKey != apiKey {
 		t.Errorf("apiKey = %q, want %q", provider.apiKey, apiKey)
 	}
-	if provider.client == nil {
-		t.Error("client should not be nil")
+	if provider.compat == nil {
+		t.Error("compat should not be nil")
 	}
 	if provider.nativeClient == nil {
 		t.Error("nativeClient should not be nil")

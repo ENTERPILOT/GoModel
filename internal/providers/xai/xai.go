@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -15,6 +14,7 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
 	"gomodel/internal/providers"
+	"gomodel/internal/providers/openai"
 )
 
 // Registration provides factory registration for the xAI provider.
@@ -31,47 +31,52 @@ const (
 	grokConvIDHeader = "X-Grok-Conv-Id"
 )
 
-// Provider implements the core.Provider interface for xAI
+// Provider implements the core.Provider interface for xAI. The API is
+// OpenAI-compatible, so transport goes through the shared compatible
+// provider; xAI's only chat quirk is the conversation affinity header
+// (X-Grok-Conv-Id), injected via the ChatRequestHeaders hook. Methods are
+// delegated explicitly rather than embedded because xAI's upstream lacks
+// parts of the full OpenAI surface (audio, passthrough, response
+// lifecycle management) and embedding cannot subtract methods.
 type Provider struct {
-	client *llmclient.Client
-	apiKey string
+	compat *openai.CompatibleProvider
+	apiKey string // retained to inject auth on the realtime websocket target
 }
 
 // New creates a new xAI provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	p := &Provider{apiKey: providerCfg.APIKey}
-	clientCfg := llmclient.Config{
-		ProviderName:   "xai",
-		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
-		Retry:          opts.Resilience.Retry,
-		Hooks:          opts.Hooks,
-		CircuitBreaker: opts.Resilience.CircuitBreaker,
+	return &Provider{
+		compat: openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL))),
+		apiKey: providerCfg.APIKey,
 	}
-	p.client = llmclient.New(clientCfg, p.setHeaders)
-	return p
 }
 
 // NewWithHTTPClient creates a new xAI provider with a custom HTTP client.
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
+	return &Provider{
+		compat: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL)),
+		apiKey: apiKey,
 	}
-	p := &Provider{apiKey: apiKey}
-	cfg := llmclient.DefaultConfig("xai", defaultBaseURL)
-	cfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
-	return p
+}
+
+func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
+	return openai.CompatibleProviderConfig{
+		ProviderName:       "xai",
+		BaseURL:            baseURL,
+		SetHeaders:         setHeaders,
+		ChatRequestHeaders: xGrokConversationHeaders,
+	}
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
-	p.client.SetBaseURL(url)
+	p.compat.SetBaseURL(url)
 }
 
 // setHeaders sets the required headers for xAI API requests
-func (p *Provider) setHeaders(req *http.Request) {
-	providers.SetAuthHeaders(req, p.apiKey, providers.AuthHeaderConfig{
+func setHeaders(req *http.Request, apiKey string) {
+	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
 		AuthScheme:      "Bearer ",
 		RequestIDHeader: "X-Request-ID",
 	})
@@ -169,63 +174,22 @@ func cleanXGrokConversationID(value string) string {
 
 // ChatCompletion sends a chat completion request to xAI
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	var resp core.ChatResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/chat/completions",
-		Body:     req,
-		Headers:  xGrokConversationHeaders(ctx, req),
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	core.EnsureModel(&resp.Model, req.Model)
-	return &resp, nil
+	return p.compat.ChatCompletion(ctx, req)
 }
 
 // StreamChatCompletion returns a raw response body for streaming (caller must close)
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	if req == nil {
-		return nil, core.NewInvalidRequestError("chat request is required", nil)
-	}
-	stream, err := p.client.DoStream(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/chat/completions",
-		Body:     req.WithStreaming(),
-		Headers:  xGrokConversationHeaders(ctx, req),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return providers.EnsureChatCompletionSSE(stream), nil
+	return p.compat.StreamChatCompletion(ctx, req)
 }
 
 // ListModels retrieves the list of available models from xAI
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	var resp core.ModelsResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodGet,
-		Endpoint: "/models",
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	return &resp, nil
+	return p.compat.ListModels(ctx)
 }
 
-// Responses sends a Responses API request to xAI
+// Responses sends a Responses API request to xAI's native /responses endpoint.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	var resp core.ResponsesResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/responses",
-		Body:     req,
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	core.EnsureModel(&resp.Model, req.Model)
-	return &resp, nil
+	return p.compat.Responses(ctx, req)
 }
 
 // StreamResponses returns a normalized streaming Responses API body.
@@ -234,135 +198,60 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 // synthesize a terminal `data: [DONE]` marker on completed streams. Callers
 // remain responsible for closing the returned stream.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	stream, err := p.client.DoStream(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/responses",
-		Body:     req.WithStreaming(),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return providers.EnsureResponsesDone(stream), nil
+	return p.compat.StreamResponses(ctx, req)
 }
 
 // Embeddings sends an embeddings request to xAI
 func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
-	var resp core.EmbeddingResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/embeddings",
-		Body:     req,
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	core.EnsureModel(&resp.Model, req.Model)
-	return &resp, nil
+	return p.compat.Embeddings(ctx, req)
 }
 
 // CreateBatch creates a native xAI batch job.
 func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
-	var resp core.BatchResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/batches",
-		Body:     req,
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	providers.EnsureProviderBatchID(&resp)
-	return &resp, nil
+	return p.compat.CreateBatch(ctx, req)
 }
 
 // GetBatch retrieves a native xAI batch job.
 func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
-	var resp core.BatchResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodGet,
-		Endpoint: "/batches/" + url.PathEscape(id),
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	providers.EnsureProviderBatchID(&resp)
-	return &resp, nil
+	return p.compat.GetBatch(ctx, id)
 }
 
 // ListBatches lists native xAI batch jobs.
 func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*core.BatchListResponse, error) {
-	endpoint := providers.PaginatedEndpoint("/batches", limit, "after", after)
-
-	var resp core.BatchListResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodGet,
-		Endpoint: endpoint,
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	providers.EnsureProviderBatchIDs(&resp)
-	return &resp, nil
+	return p.compat.ListBatches(ctx, limit, after)
 }
 
 // CancelBatch cancels a native xAI batch job.
 func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
-	var resp core.BatchResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/batches/" + url.PathEscape(id) + "/cancel",
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	providers.EnsureProviderBatchID(&resp)
-	return &resp, nil
+	return p.compat.CancelBatch(ctx, id)
 }
 
 // GetBatchResults fetches xAI batch results via the output file API.
 func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
-	return providers.FetchBatchResultsFromOutputFile(ctx, p.client, "xai", id)
+	return p.compat.GetBatchResults(ctx, id)
 }
 
 // CreateFile uploads a file through xAI's OpenAI-compatible /files API.
 func (p *Provider) CreateFile(ctx context.Context, req *core.FileCreateRequest) (*core.FileObject, error) {
-	resp, err := providers.CreateOpenAICompatibleFile(ctx, p.client, req)
-	if err != nil {
-		return nil, err
-	}
-	resp.Provider = "xai"
-	return resp, nil
+	return p.compat.CreateFile(ctx, req)
 }
 
 // ListFiles lists files through xAI's OpenAI-compatible /files API.
 func (p *Provider) ListFiles(ctx context.Context, purpose string, limit int, after string) (*core.FileListResponse, error) {
-	resp, err := providers.ListOpenAICompatibleFiles(ctx, p.client, purpose, limit, after)
-	if err != nil {
-		return nil, err
-	}
-	for i := range resp.Data {
-		resp.Data[i].Provider = "xai"
-	}
-	return resp, nil
+	return p.compat.ListFiles(ctx, purpose, limit, after)
 }
 
 // GetFile retrieves one file object through xAI's OpenAI-compatible /files API.
 func (p *Provider) GetFile(ctx context.Context, id string) (*core.FileObject, error) {
-	resp, err := providers.GetOpenAICompatibleFile(ctx, p.client, id)
-	if err != nil {
-		return nil, err
-	}
-	resp.Provider = "xai"
-	return resp, nil
+	return p.compat.GetFile(ctx, id)
 }
 
 // DeleteFile deletes a file object through xAI's OpenAI-compatible /files API.
 func (p *Provider) DeleteFile(ctx context.Context, id string) (*core.FileDeleteResponse, error) {
-	return providers.DeleteOpenAICompatibleFile(ctx, p.client, id)
+	return p.compat.DeleteFile(ctx, id)
 }
 
 // GetFileContent fetches raw file bytes through xAI's /files/{id}/content API.
 func (p *Provider) GetFileContent(ctx context.Context, id string) (*core.FileContentResponse, error) {
-	return providers.GetOpenAICompatibleFileContent(ctx, p.client, id)
+	return p.compat.GetFileContent(ctx, id)
 }

@@ -15,6 +15,7 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
 	"gomodel/internal/providers"
+	"gomodel/internal/providers/openai"
 )
 
 // Registration provides factory registration for the Ollama provider.
@@ -33,9 +34,14 @@ const (
 	defaultNativeBaseURL = defaultRootURL
 )
 
-// Provider implements the core.Provider interface for Ollama
+// Provider implements the core.Provider interface for Ollama. The /v1
+// OpenAI-compatible surface goes through the shared compatible provider;
+// embeddings use Ollama's native /api/embed endpoint via a second client
+// rooted at the server root. Methods are delegated explicitly rather than
+// embedded because Ollama's upstream lacks parts of the full OpenAI
+// surface (passthrough, audio) and embedding cannot subtract methods.
 type Provider struct {
-	client       *llmclient.Client
+	compat       *openai.CompatibleProvider
 	nativeClient *llmclient.Client
 	apiKey       string // Accepted but ignored by Ollama
 }
@@ -43,14 +49,7 @@ type Provider struct {
 // New creates a new Ollama provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	p := &Provider{apiKey: providerCfg.APIKey}
-	clientCfg := llmclient.Config{
-		ProviderName:   "ollama",
-		BaseURL:        defaultBaseURL,
-		Retry:          opts.Resilience.Retry,
-		Hooks:          opts.Hooks,
-		CircuitBreaker: opts.Resilience.CircuitBreaker,
-	}
-	p.client = llmclient.New(clientCfg, p.setHeaders)
+	p.compat = openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(defaultBaseURL))
 
 	nativeCfg := llmclient.Config{
 		ProviderName:   "ollama",
@@ -59,7 +58,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
-	p.nativeClient = llmclient.New(nativeCfg, p.setHeaders)
+	p.nativeClient = llmclient.New(nativeCfg, p.setNativeHeaders)
 	p.SetBaseURL(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL))
 	return p
 }
@@ -71,20 +70,26 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 		httpClient = http.DefaultClient
 	}
 	p := &Provider{apiKey: apiKey}
-	cfg := llmclient.DefaultConfig("ollama", defaultBaseURL)
-	cfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
+	p.compat = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL))
 
 	nativeCfg := llmclient.DefaultConfig("ollama", defaultNativeBaseURL)
 	nativeCfg.Hooks = hooks
-	p.nativeClient = llmclient.NewWithHTTPClient(httpClient, nativeCfg, p.setHeaders)
+	p.nativeClient = llmclient.NewWithHTTPClient(httpClient, nativeCfg, p.setNativeHeaders)
 	return p
+}
+
+func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
+	return openai.CompatibleProviderConfig{
+		ProviderName: "ollama",
+		BaseURL:      baseURL,
+		SetHeaders:   setHeaders,
+	}
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider.
 // Also updates the native client by deriving the root URL (stripping /v1 suffix).
 func (p *Provider) SetBaseURL(url string) {
-	p.client.SetBaseURL(url)
+	p.compat.SetBaseURL(url)
 	normalized := strings.TrimRight(url, "/")
 	normalized = strings.TrimSuffix(normalized, "/v1")
 	p.nativeClient.SetBaseURL(normalized)
@@ -100,51 +105,34 @@ func (p *Provider) CheckAvailability(ctx context.Context) error {
 	return err
 }
 
-// setHeaders sets the required headers for Ollama API requests
-func (p *Provider) setHeaders(req *http.Request) {
-	// Ollama doesn't require authentication, but accepts a Bearer token if provided.
-	providers.SetAuthHeaders(req, p.apiKey, providers.AuthHeaderConfig{
+// setHeaders sets the required headers for Ollama API requests.
+// Ollama doesn't require authentication, but accepts a Bearer token if provided.
+func setHeaders(req *http.Request, apiKey string) {
+	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
 		AuthScheme:      "Bearer ",
 		RequestIDHeader: "X-Request-ID",
 		OptionalAPIKey:  true,
 	})
 }
 
+// setNativeHeaders applies the same header policy on the native /api client.
+func (p *Provider) setNativeHeaders(req *http.Request) {
+	setHeaders(req, p.apiKey)
+}
+
 // ChatCompletion sends a chat completion request to Ollama
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	var resp core.ChatResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/chat/completions",
-		Body:     req,
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	core.EnsureModel(&resp.Model, req.Model)
-	return &resp, nil
+	return p.compat.ChatCompletion(ctx, req)
 }
 
 // StreamChatCompletion returns a raw response body for streaming (caller must close)
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	return p.client.DoStream(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/chat/completions",
-		Body:     req.WithStreaming(),
-	})
+	return p.compat.StreamChatCompletion(ctx, req)
 }
 
 // ListModels retrieves the list of available models from Ollama
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	var resp core.ModelsResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodGet,
-		Endpoint: "/models",
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	return &resp, nil
+	return p.compat.ListModels(ctx)
 }
 
 // Responses sends a Responses API request to Ollama (converted to chat format)

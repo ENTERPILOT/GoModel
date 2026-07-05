@@ -20,20 +20,59 @@ type CompatibleProviderConfig struct {
 	BaseURL        string
 	SetHeaders     func(*http.Request, string)
 	RequestMutator RequestMutator
+	// AdaptChatRequest rewrites the typed chat request before provider
+	// dispatch on ChatCompletion and StreamChatCompletion. Providers use it
+	// for parameter quirks (e.g. remapping reasoning effort levels) instead
+	// of overriding the chat methods, so Responses-via-chat translation picks
+	// the adaptation up automatically. It must not mutate its argument;
+	// return a shallow copy when changes are needed.
+	AdaptChatRequest func(*core.ChatRequest) (*core.ChatRequest, error)
+	// ChatRequestHeaders returns extra per-request HTTP headers for
+	// ChatCompletion and StreamChatCompletion, derived from the request
+	// context and body (e.g. conversation affinity headers). Nil results are
+	// ignored.
+	ChatRequestHeaders func(context.Context, *core.ChatRequest) http.Header
 }
 
+// CompatibleProvider is the single transport engine for every
+// OpenAI-compatible upstream. Provider packages must not hand-roll
+// llmclient calls for OpenAI-shaped endpoints; they wrap this type in one
+// of three ways, chosen by how much of the OpenAI surface the upstream
+// actually implements:
+//
+//   - Embed *ChatCompatible for chat-centric upstreams (chat, models,
+//     embeddings, passthrough; Responses translated via chat) — e.g.
+//     xiaomi, zai, fireworks, deepseek.
+//   - Embed *CompatibleProvider only when the upstream implements the
+//     full surface, including audio, files, batches, and native response
+//     lifecycle management — e.g. openrouter, azure.
+//   - Compose an unexported *CompatibleProvider field and delegate the
+//     supported methods explicitly when the upstream implements a partial
+//     surface — e.g. groq (no passthrough), xai (no audio/passthrough),
+//     ollama (native embeddings, no passthrough). Go embedding cannot
+//     subtract methods, and an accidentally inherited method advertises a
+//     capability the upstream lacks (the router discovers capabilities by
+//     interface assertion).
+//
+// Provider quirks belong in CompatibleProviderConfig hooks (SetHeaders,
+// AdaptChatRequest, ChatRequestHeaders, RequestMutator), not in copies of
+// the transport methods.
 type CompatibleProvider struct {
-	client         *llmclient.Client
-	apiKey         string
-	providerName   string
-	requestMutator RequestMutator
+	client             *llmclient.Client
+	apiKey             string
+	providerName       string
+	requestMutator     RequestMutator
+	adaptChatRequest   func(*core.ChatRequest) (*core.ChatRequest, error)
+	chatRequestHeaders func(context.Context, *core.ChatRequest) http.Header
 }
 
 func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg CompatibleProviderConfig) *CompatibleProvider {
 	p := &CompatibleProvider{
-		apiKey:         apiKey,
-		providerName:   cfg.ProviderName,
-		requestMutator: cfg.RequestMutator,
+		apiKey:             apiKey,
+		providerName:       cfg.ProviderName,
+		requestMutator:     cfg.RequestMutator,
+		adaptChatRequest:   cfg.AdaptChatRequest,
+		chatRequestHeaders: cfg.ChatRequestHeaders,
 	}
 	clientCfg := llmclient.Config{
 		ProviderName:   cfg.ProviderName,
@@ -55,9 +94,11 @@ func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client,
 		httpClient = http.DefaultClient
 	}
 	p := &CompatibleProvider{
-		apiKey:         apiKey,
-		providerName:   cfg.ProviderName,
-		requestMutator: cfg.RequestMutator,
+		apiKey:             apiKey,
+		providerName:       cfg.ProviderName,
+		requestMutator:     cfg.RequestMutator,
+		adaptChatRequest:   cfg.AdaptChatRequest,
+		chatRequestHeaders: cfg.ChatRequestHeaders,
 	}
 	clientCfg := llmclient.DefaultConfig(cfg.ProviderName, cfg.BaseURL)
 	clientCfg.Hooks = hooks
@@ -99,8 +140,12 @@ func (p *CompatibleProvider) ChatCompletion(ctx context.Context, req *core.ChatR
 	if req == nil {
 		return nil, core.NewInvalidRequestError("chat request is required", nil)
 	}
+	adapted, err := p.adaptedChatRequest(req)
+	if err != nil {
+		return nil, err
+	}
 	var resp core.ChatResponse
-	body, err := chatRequestBody(req)
+	body, err := chatRequestBody(adapted)
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +153,7 @@ func (p *CompatibleProvider) ChatCompletion(ctx context.Context, req *core.ChatR
 		Method:   http.MethodPost,
 		Endpoint: "/chat/completions",
 		Body:     body,
+		Headers:  p.chatHeaders(ctx, adapted),
 	}, &resp)
 	if err != nil {
 		return nil, err
@@ -120,7 +166,11 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 	if req == nil {
 		return nil, core.NewInvalidRequestError("chat request is required", nil)
 	}
-	streamReq := req.WithStreaming()
+	adapted, err := p.adaptedChatRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	streamReq := adapted.WithStreaming()
 	body, err := chatRequestBody(streamReq)
 	if err != nil {
 		return nil, err
@@ -129,11 +179,26 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 		Method:   http.MethodPost,
 		Endpoint: "/chat/completions",
 		Body:     body,
+		Headers:  p.chatHeaders(ctx, streamReq),
 	}))
 	if err != nil {
 		return nil, err
 	}
 	return providers.EnsureChatCompletionSSE(stream), nil
+}
+
+func (p *CompatibleProvider) adaptedChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	if p.adaptChatRequest == nil {
+		return req, nil
+	}
+	return p.adaptChatRequest(req)
+}
+
+func (p *CompatibleProvider) chatHeaders(ctx context.Context, req *core.ChatRequest) http.Header {
+	if p.chatRequestHeaders == nil {
+		return nil
+	}
+	return p.chatRequestHeaders(ctx, req)
 }
 
 func (p *CompatibleProvider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
