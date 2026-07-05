@@ -1,8 +1,9 @@
 package config
 
-// HTTPConfig holds HTTP client configuration for upstream API requests.
-// These values are also readable via the HTTP_TIMEOUT and HTTP_RESPONSE_HEADER_TIMEOUT
-// environment variables in internal/httpclient/client.go.
+// HTTPConfig holds HTTP client configuration for upstream API requests. App
+// startup installs these values into internal/httpclient before providers are
+// constructed; the HTTP_TIMEOUT and HTTP_RESPONSE_HEADER_TIMEOUT env vars take
+// precedence over the YAML values.
 type HTTPConfig struct {
 	// Timeout is the overall HTTP request timeout in seconds (default: 600)
 	Timeout int `yaml:"timeout" env:"HTTP_TIMEOUT"`

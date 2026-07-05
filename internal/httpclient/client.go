@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -54,26 +55,49 @@ func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
 	return defaultVal
 }
 
+// configuredTimeoutSeconds hold config-file timeout defaults installed by
+// SetConfiguredTimeouts at startup. Zero means "not configured" and falls back
+// to the built-in default.
+var (
+	configuredTimeoutSeconds               atomic.Int64
+	configuredResponseHeaderTimeoutSeconds atomic.Int64
+)
+
+// SetConfiguredTimeouts installs the config-file (`http:` block) timeout
+// defaults, in seconds. App startup calls this once before providers are
+// constructed. The HTTP_TIMEOUT / HTTP_RESPONSE_HEADER_TIMEOUT env vars still
+// take precedence, matching the project-wide env-over-YAML convention.
+// Non-positive values clear the configured default.
+func SetConfiguredTimeouts(timeoutSeconds, responseHeaderTimeoutSeconds int) {
+	configuredTimeoutSeconds.Store(int64(max(timeoutSeconds, 0)))
+	configuredResponseHeaderTimeoutSeconds.Store(int64(max(responseHeaderTimeoutSeconds, 0)))
+}
+
+func configuredOrDefault(configured *atomic.Int64, fallback time.Duration) time.Duration {
+	if secs := configured.Load(); secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return fallback
+}
+
 // DefaultConfig returns a ClientConfig with sensible defaults for API clients.
 // Timeout values match OpenAI/Anthropic SDK defaults (10 minutes).
-// Can be overridden via environment variables (values in seconds, or Go duration format):
-//   - HTTP_TIMEOUT: overall request timeout (default: 600)
-//   - HTTP_RESPONSE_HEADER_TIMEOUT: time to wait for response headers (default: 600)
-//
-// Note: These env vars are also documented in config.HTTPConfig. The env var bridge
-// here works correctly because the gomodel entrypoint loads .env before config and
-// providers are initialized.
+// Precedence for the two request timeouts, highest first:
+//   - HTTP_TIMEOUT / HTTP_RESPONSE_HEADER_TIMEOUT env vars (seconds, or Go
+//     duration format)
+//   - the config-file `http:` block installed via SetConfiguredTimeouts
+//   - the built-in 600s default
 func DefaultConfig() ClientConfig {
 	defaultLongTimeout := 600 * time.Second
 	return ClientConfig{
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   100,
 		IdleConnTimeout:       90 * time.Second,
-		Timeout:               getEnvDuration("HTTP_TIMEOUT", defaultLongTimeout),
+		Timeout:               getEnvDuration("HTTP_TIMEOUT", configuredOrDefault(&configuredTimeoutSeconds, defaultLongTimeout)),
 		DialTimeout:           30 * time.Second,
 		KeepAlive:             30 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: getEnvDuration("HTTP_RESPONSE_HEADER_TIMEOUT", defaultLongTimeout),
+		ResponseHeaderTimeout: getEnvDuration("HTTP_RESPONSE_HEADER_TIMEOUT", configuredOrDefault(&configuredResponseHeaderTimeoutSeconds, defaultLongTimeout)),
 	}
 }
 

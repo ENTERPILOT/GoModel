@@ -27,6 +27,7 @@ import (
 	"gomodel/internal/failover"
 	"gomodel/internal/filestore"
 	"gomodel/internal/guardrails"
+	"gomodel/internal/httpclient"
 	"gomodel/internal/live"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
@@ -111,6 +112,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	appCfg := cfg.AppConfig.Config
+	// Install config-file HTTP timeouts before any provider constructs a
+	// transport; env vars still take precedence inside httpclient.
+	httpclient.SetConfiguredTimeouts(appCfg.HTTP.Timeout, appCfg.HTTP.ResponseHeaderTimeout)
 	if appCfg.Budgets.Enabled && !appCfg.Usage.Enabled {
 		appCfg.Budgets.Enabled = false
 		slog.Warn("budget management disabled because usage tracking is disabled",

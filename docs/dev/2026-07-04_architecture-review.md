@@ -445,15 +445,21 @@ than typical embedded dashboards.
 **[GOOD] Mostly centralized.** 21 files / 5.1k LOC in `config/`, and only **4**
 `os.Getenv` escapes in `internal/`:
 
-- **[SMELL]** `providers/openrouter/openrouter.go:87` — `OPENROUTER_SITE_URL` /
-  `OPENROUTER_APP_NAME`, undocumented hidden config.
-- **[SMELL]** `providers/anthropic/request_translation.go:33` — default-max-tokens
-  env var read at request time.
+- `providers/openrouter/openrouter.go:87` — `OPENROUTER_SITE_URL` /
+  `OPENROUTER_APP_NAME`. *(Correction 2026-07-05: originally flagged as
+  undocumented; both are in `.env.template` and the provider docs. Kept as the
+  established per-provider quirk-knob convention; added to CLAUDE.md.)*
+- `providers/anthropic/request_translation.go:33` — default-max-tokens env var
+  read at request time (warn-once + safe fallback; documented). Plumbing it
+  through provider construction was judged not worth the signature churn.
 - `providers/opencodego/opencodego.go:108` — `OPENCODE_GO_MESSAGES_MODELS`
-  (documented, but bypasses the config layer).
-- `httpclient/client.go:42` — generic env helper (structural second config path).
-
-Route all four through `config` so startup validation and docs stay honest.
+  (documented, construction-time read; same convention).
+- **[BUG — fixed 2026-07-05]** `config.HTTPConfig` (`http:` YAML block) was
+  parsed, defaulted, and documented in `config.example.yaml` but never read by
+  any code — YAML-set timeouts were silently ignored and only the env vars
+  worked via `httpclient`'s direct read. App startup now installs the YAML
+  values into `httpclient` before provider construction; env vars keep
+  precedence.
 
 **[SMELL] Inconsistent env↔YAML merge semantics per feature.** Tagging: env entry
 *replaces* the whole YAML entry, unset companions reset to defaults. Virtual

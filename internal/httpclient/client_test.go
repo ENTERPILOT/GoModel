@@ -257,3 +257,41 @@ func TestClientConfigZeroValues(t *testing.T) {
 		t.Errorf("Expected Timeout to be 0, got %v", client.Timeout)
 	}
 }
+
+func TestDefaultConfigTimeoutPrecedence(t *testing.T) {
+	t.Cleanup(func() { SetConfiguredTimeouts(0, 0) })
+
+	// Built-in default when nothing is configured.
+	SetConfiguredTimeouts(0, 0)
+	if got := DefaultConfig().Timeout; got != 600*time.Second {
+		t.Fatalf("built-in default Timeout = %v, want 600s", got)
+	}
+
+	// Config-file values apply when no env override is present.
+	SetConfiguredTimeouts(30, 40)
+	cfg := DefaultConfig()
+	if cfg.Timeout != 30*time.Second {
+		t.Fatalf("configured Timeout = %v, want 30s", cfg.Timeout)
+	}
+	if cfg.ResponseHeaderTimeout != 40*time.Second {
+		t.Fatalf("configured ResponseHeaderTimeout = %v, want 40s", cfg.ResponseHeaderTimeout)
+	}
+
+	// Env vars win over config-file values.
+	t.Setenv("HTTP_TIMEOUT", "50")
+	t.Setenv("HTTP_RESPONSE_HEADER_TIMEOUT", "60")
+	cfg = DefaultConfig()
+	if cfg.Timeout != 50*time.Second {
+		t.Fatalf("env-overridden Timeout = %v, want 50s", cfg.Timeout)
+	}
+	if cfg.ResponseHeaderTimeout != 60*time.Second {
+		t.Fatalf("env-overridden ResponseHeaderTimeout = %v, want 60s", cfg.ResponseHeaderTimeout)
+	}
+
+	// Non-positive values clear back to the built-in default.
+	t.Setenv("HTTP_TIMEOUT", "")
+	SetConfiguredTimeouts(-1, 0)
+	if got := DefaultConfig().Timeout; got != 600*time.Second {
+		t.Fatalf("cleared Timeout = %v, want 600s", got)
+	}
+}
