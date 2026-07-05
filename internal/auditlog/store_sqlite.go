@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gomodel/internal/storage"
 )
 
 // SQLite has a default limit of 999 bindable parameters per query (SQLITE_MAX_VARIABLE_NUMBER).
@@ -151,7 +153,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 
 	// Start background cleanup if retention is configured
 	if retentionDays > 0 {
-		go RunCleanupLoop(store.stopCleanup, store.cleanup)
+		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
 	}
 
 	return store, nil

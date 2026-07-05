@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"gomodel/internal/storage"
 	"gomodel/internal/storage/sqlutil"
 )
 
@@ -126,7 +127,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 
 	// Start background cleanup if retention is configured
 	if retentionDays > 0 {
-		go RunCleanupLoop(store.stopCleanup, store.cleanup)
+		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
 	}
 
 	return store, nil

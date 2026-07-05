@@ -11,6 +11,7 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"gomodel/internal/storage"
 	"gomodel/internal/storage/sqlutil"
 )
 
@@ -115,7 +116,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 
 	// Start background cleanup if retention is configured
 	if retentionDays > 0 {
-		go RunCleanupLoop(store.stopCleanup, store.cleanup)
+		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
 	}
 
 	return store, nil
