@@ -131,9 +131,11 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 		// A manual write lost an insert race to a concurrent writer. The
 		// documents exist now, so one retry applies the values as plain
 		// updates (last write wins, matching the SQL stores).
-		if _, retryErr := s.rules.BulkWrite(ctx, models, opts); retryErr == nil || duplicateKeyErrorsOnConfigRulesOnly(retryErr, rules) {
+		_, retryErr := s.rules.BulkWrite(ctx, models, opts)
+		if retryErr == nil || duplicateKeyErrorsOnConfigRulesOnly(retryErr, rules) {
 			return nil
 		}
+		return fmt.Errorf("upsert %d rate limit rules (after duplicate-key retry): %w", len(rules), retryErr)
 	}
 	return fmt.Errorf("upsert %d rate limit rules: %w", len(rules), err)
 }
