@@ -26,7 +26,7 @@ func (s *SQLiteStore) RecalculatePricing(ctx context.Context, params Recalculate
 
 	stmt, err := tx.PrepareContext(ctx, `
 		UPDATE usage
-		SET input_cost = ?, output_cost = ?, total_cost = ?, cost_source = ?, costs_calculation_caveat = ?
+		SET input_cost = ?, output_cost = ?, total_cost = ?, rewrite_cost_saved = ?, cost_source = ?, costs_calculation_caveat = ?
 		WHERE id = ?
 	`)
 	if err != nil {
@@ -51,6 +51,7 @@ func (s *SQLiteStore) RecalculatePricing(ctx context.Context, params Recalculate
 				nullableFloat(update.InputCost),
 				nullableFloat(update.OutputCost),
 				nullableFloat(update.TotalCost),
+				nullableFloat(update.RewriteCostSaved),
 				update.CostSource,
 				update.Caveat,
 				update.ID,
@@ -87,7 +88,7 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 	args = append(args, limit)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, model, provider, provider_name, endpoint, input_tokens, output_tokens, raw_data
+		SELECT id, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		ORDER BY id
 		LIMIT ?`, args...)
@@ -109,6 +110,7 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 			&entry.Endpoint,
 			&entry.InputTokens,
 			&entry.OutputTokens,
+			&entry.RewriteTokensSaved,
 			&rawData,
 		); err != nil {
 			return nil, fmt.Errorf("scan sqlite usage cost row: %w", err)

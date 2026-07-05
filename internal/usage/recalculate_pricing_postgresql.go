@@ -37,12 +37,13 @@ func (s *PostgreSQLStore) RecalculatePricing(ctx context.Context, params Recalcu
 		update := recalculateEntryCosts(entry, resolver)
 		if _, err := tx.Exec(ctx, `
 			UPDATE usage
-			SET input_cost = $1, output_cost = $2, total_cost = $3, cost_source = $4, costs_calculation_caveat = $5
-			WHERE id = $6::uuid
+			SET input_cost = $1, output_cost = $2, total_cost = $3, rewrite_cost_saved = $4, cost_source = $5, costs_calculation_caveat = $6
+			WHERE id = $7::uuid
 		`,
 			nullableFloat(update.InputCost),
 			nullableFloat(update.OutputCost),
 			nullableFloat(update.TotalCost),
+			nullableFloat(update.RewriteCostSaved),
 			update.CostSource,
 			update.Caveat,
 			update.ID,
@@ -65,7 +66,7 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, model, provider, provider_name, endpoint, input_tokens, output_tokens, raw_data::text
+		SELECT id::text, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data::text
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		FOR UPDATE`, args...)
 	if err != nil {
@@ -86,6 +87,7 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 			&entry.Endpoint,
 			&entry.InputTokens,
 			&entry.OutputTokens,
+			&entry.RewriteTokensSaved,
 			&rawData,
 		); err != nil {
 			return nil, fmt.Errorf("scan postgres usage cost row: %w", err)

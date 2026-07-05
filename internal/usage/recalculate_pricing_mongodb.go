@@ -146,28 +146,30 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 	result := RecalculatePricingResult{}
 	for cursor.Next(ctx) {
 		var row struct {
-			ID           string         `bson:"_id"`
-			Model        string         `bson:"model"`
-			Provider     string         `bson:"provider"`
-			ProviderName string         `bson:"provider_name"`
-			Endpoint     string         `bson:"endpoint"`
-			InputTokens  int            `bson:"input_tokens"`
-			OutputTokens int            `bson:"output_tokens"`
-			RawData      map[string]any `bson:"raw_data"`
+			ID                 string         `bson:"_id"`
+			Model              string         `bson:"model"`
+			Provider           string         `bson:"provider"`
+			ProviderName       string         `bson:"provider_name"`
+			Endpoint           string         `bson:"endpoint"`
+			InputTokens        int            `bson:"input_tokens"`
+			OutputTokens       int            `bson:"output_tokens"`
+			RewriteTokensSaved int            `bson:"rewrite_tokens_saved"`
+			RawData            map[string]any `bson:"raw_data"`
 		}
 		if err := cursor.Decode(&row); err != nil {
 			return RecalculatePricingResult{}, fmt.Errorf("scan mongodb usage cost row: %w", err)
 		}
 
 		update := recalculateEntryCosts(recalculationEntry{
-			ID:           row.ID,
-			Model:        row.Model,
-			Provider:     row.Provider,
-			ProviderName: row.ProviderName,
-			Endpoint:     row.Endpoint,
-			InputTokens:  row.InputTokens,
-			OutputTokens: row.OutputTokens,
-			RawData:      row.RawData,
+			ID:                 row.ID,
+			Model:              row.Model,
+			Provider:           row.Provider,
+			ProviderName:       row.ProviderName,
+			Endpoint:           row.Endpoint,
+			InputTokens:        row.InputTokens,
+			OutputTokens:       row.OutputTokens,
+			RewriteTokensSaved: row.RewriteTokensSaved,
+			RawData:            row.RawData,
 		}, resolver)
 
 		if _, err := s.collection.UpdateByID(ctx, update.ID, mongoRecalculationUpdate(update)); err != nil {
@@ -203,6 +205,11 @@ func mongoRecalculationUpdate(update recalculationUpdate) bson.D {
 		set = append(set, bson.E{Key: "total_cost", Value: *update.TotalCost})
 	} else {
 		unset = append(unset, bson.E{Key: "total_cost", Value: ""})
+	}
+	if update.RewriteCostSaved != nil {
+		set = append(set, bson.E{Key: "rewrite_cost_saved", Value: *update.RewriteCostSaved})
+	} else {
+		unset = append(unset, bson.E{Key: "rewrite_cost_saved", Value: ""})
 	}
 	if strings.TrimSpace(update.CostSource) != "" {
 		set = append(set, bson.E{Key: "cost_source", Value: strings.TrimSpace(update.CostSource)})

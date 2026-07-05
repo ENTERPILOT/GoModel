@@ -34,24 +34,26 @@ type PricingRecalculator interface {
 }
 
 type recalculationEntry struct {
-	ID           string
-	Model        string
-	Provider     string
-	ProviderName string
-	Endpoint     string
-	InputTokens  int
-	OutputTokens int
-	RawData      map[string]any
+	ID                 string
+	Model              string
+	Provider           string
+	ProviderName       string
+	Endpoint           string
+	InputTokens        int
+	OutputTokens       int
+	RewriteTokensSaved int
+	RawData            map[string]any
 }
 
 type recalculationUpdate struct {
-	ID         string
-	InputCost  *float64
-	OutputCost *float64
-	TotalCost  *float64
-	CostSource string
-	Caveat     string
-	HasPricing bool
+	ID               string
+	InputCost        *float64
+	OutputCost       *float64
+	TotalCost        *float64
+	RewriteCostSaved *float64
+	CostSource       string
+	Caveat           string
+	HasPricing       bool
 }
 
 func normalizedRecalculatePricingParams(params RecalculatePricingParams) RecalculatePricingParams {
@@ -71,13 +73,14 @@ func recalculateEntryCosts(entry recalculationEntry, resolver PricingResolver) r
 	effectivePricing := pricingForEndpoint(pricing, entry.Endpoint)
 	result := CalculateUsageCost(entry.InputTokens, entry.OutputTokens, entry.RawData, entry.Provider, effectivePricing)
 	return recalculationUpdate{
-		ID:         entry.ID,
-		InputCost:  result.InputCost,
-		OutputCost: result.OutputCost,
-		TotalCost:  result.TotalCost,
-		CostSource: result.Source,
-		Caveat:     result.Caveat,
-		HasPricing: result.TotalCost != nil || result.InputCost != nil || result.OutputCost != nil,
+		ID:               entry.ID,
+		InputCost:        result.InputCost,
+		OutputCost:       result.OutputCost,
+		TotalCost:        result.TotalCost,
+		RewriteCostSaved: rewriteCostSaved(entry.InputTokens, entry.OutputTokens, entry.RawData, entry.Provider, effectivePricing, entry.RewriteTokensSaved),
+		CostSource:       result.Source,
+		Caveat:           result.Caveat,
+		HasPricing:       result.TotalCost != nil || result.InputCost != nil || result.OutputCost != nil,
 	}
 }
 

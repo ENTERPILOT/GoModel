@@ -55,6 +55,13 @@ type Result struct {
 	// chain and never sent upstream; it must never contain secrets or
 	// request credentials.
 	Detail any
+	// TokensSaved is the rewriter's estimate of prompt tokens its body
+	// change removed from the request. When positive and the rewritten body
+	// is applied, core adds it to the request's usage record together with
+	// the input cost those tokens would have incurred, and the dashboard
+	// aggregates both as rewrite savings. Leave zero when the rewrite does
+	// not shrink the prompt.
+	TokensSaved int
 }
 
 // RequestRewriter rewrites raw JSON request bodies at ingress, after

@@ -5540,6 +5540,13 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "request_revisions": {
+                    "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that changed the body, in application order.\nRequestBody always remains the original client request; the last\nrevision is what was forwarded downstream.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auditlog.RequestRevisionSnapshot"
+                    }
+                },
                 "response_body": {},
                 "response_body_too_big_to_handle": {
                     "type": "boolean"
@@ -5644,6 +5651,29 @@ const docTemplate = `{
                 },
                 "workflow_version_id": {
                     "type": "string"
+                }
+            }
+        },
+        "auditlog.RequestRevisionSnapshot": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "description": "Body is the request body after this revision (parsed JSON, or a string\nwhen not valid JSON). Populated only when body logging is enabled and\nthe body is within the capture limit."
+                },
+                "bytes_after": {
+                    "type": "integer"
+                },
+                "bytes_before": {
+                    "type": "integer"
+                },
+                "detail": {
+                    "description": "Detail is an optional rewriter-provided structured summary of what\nchanged (for example a compression block report)."
+                },
+                "rewriter": {
+                    "type": "string"
+                },
+                "seq": {
+                    "type": "integer"
                 }
             }
         },
@@ -7798,6 +7828,13 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "rewrite_cost_saved": {
+                    "type": "number"
+                },
+                "rewrite_tokens_saved": {
+                    "description": "Rewrite savings: prompt tokens request rewriters removed before the\nprovider call, and the estimated input cost avoided (nil when no\nmatched row had a priced savings estimate).",
                     "type": "integer"
                 },
                 "total_cost": {

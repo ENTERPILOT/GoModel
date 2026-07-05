@@ -23,7 +23,9 @@
                     cache_write_input_tokens: 0,
                     total_input_cost: null,
                     total_output_cost: null,
-                    total_cost: null
+                    total_cost: null,
+                    rewrite_tokens_saved: 0,
+                    rewrite_cost_saved: null
                 };
             },
 
@@ -517,6 +519,29 @@
                 const summary = this.usageSummary || {};
                 if (summary.total_input_cost === null || summary.total_input_cost === undefined) return '';
                 return this.formatCost(summary.total_input_cost) + ' input + ' + this.formatCost(summary.total_output_cost) + ' output';
+            },
+
+            // --- Rewrite savings (request rewriters, e.g. token compression) ---
+            // Savings ride on provider usage rows, so the uncached summary holds
+            // the full totals. Cards only appear once a rewriter reported savings.
+            usagePageRewriteTokensSaved() {
+                const saved = Number((this.usageSummary && this.usageSummary.rewrite_tokens_saved) || 0);
+                return Number.isFinite(saved) && saved > 0 ? saved : 0;
+            },
+
+            usagePageRewriteSavingsVisible() {
+                return this.usagePageRewriteTokensSaved() > 0;
+            },
+
+            usagePageRewriteCostSaved() {
+                const summary = this.usageSummary || {};
+                return summary.rewrite_cost_saved === undefined ? null : summary.rewrite_cost_saved;
+            },
+
+            usagePageRewriteSavedTitle() {
+                const tokens = this.usagePageRewriteTokensSaved();
+                if (tokens <= 0) return '';
+                return this.formatNumber(tokens) + ' prompt tokens removed by request rewriters before reaching providers';
             },
 
             async fetchModelUsage() {

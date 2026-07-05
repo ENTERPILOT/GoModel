@@ -80,6 +80,17 @@ type UsageEntry struct {
 	// CostsCalculationCaveat describes any incomplete aspects of cost calculation.
 	// Empty means all token types were fully mapped to pricing data.
 	CostsCalculationCaveat string `json:"costs_calculation_caveat,omitempty" bson:"costs_calculation_caveat,omitempty"`
+
+	// RewriteTokensSaved is the prompt tokens that request rewriters (ext
+	// extensions, e.g. token compression) estimate they removed from this
+	// request before it reached the provider. Zero when no rewriter reported
+	// savings.
+	RewriteTokensSaved int `json:"rewrite_tokens_saved,omitempty" bson:"rewrite_tokens_saved,omitempty"`
+
+	// RewriteCostSaved is the estimated input cost those removed tokens
+	// would have added, priced with the same model pricing as the request
+	// (nil = pricing unknown).
+	RewriteCostSaved *float64 `json:"rewrite_cost_saved,omitempty" bson:"rewrite_cost_saved,omitempty"`
 }
 
 // Config holds usage tracking configuration

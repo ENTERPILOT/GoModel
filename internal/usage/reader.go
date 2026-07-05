@@ -46,6 +46,11 @@ type UsageSummary struct {
 	TotalInputCost        *float64 `json:"total_input_cost"`
 	TotalOutputCost       *float64 `json:"total_output_cost"`
 	TotalCost             *float64 `json:"total_cost"`
+	// Rewrite savings: prompt tokens request rewriters removed before the
+	// provider call, and the estimated input cost avoided (nil when no
+	// matched row had a priced savings estimate).
+	RewriteTokensSaved int64    `json:"rewrite_tokens_saved"`
+	RewriteCostSaved   *float64 `json:"rewrite_cost_saved"`
 }
 
 // addInputSegments folds one usage row's provider-cache split into the summary

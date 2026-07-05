@@ -35,6 +35,7 @@ func (o *InferenceOrchestrator) logUsage(
 		entry.ProviderName = strings.TrimSpace(providerName)
 		entry.UserPath = core.UserPathFromContext(ctx)
 		entry.Labels = core.RequestLabelsFromContext(ctx)
+		usage.ApplyRewriteSavings(entry, core.RewriteTokensSavedFromContext(ctx), pricing)
 		o.usageLogger.Write(entry)
 	}
 }

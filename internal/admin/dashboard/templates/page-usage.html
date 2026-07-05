@@ -54,6 +54,14 @@
             <div class="card-label">Estimated Cost</div>
             <div class="card-value" x-text="formatCost(usageSummary.total_cost)" :title="usagePageCostTitle()">-</div>
         </div>
+        <div class="card" x-show="usagePageRewriteSavingsVisible()">
+            <div class="card-label">Rewrite Saved</div>
+            <div class="card-value" x-text="formatCost(usagePageRewriteCostSaved())" :title="usagePageRewriteSavedTitle()">-</div>
+        </div>
+        <div class="card" x-show="usagePageRewriteSavingsVisible()">
+            <div class="card-label">Tokens Saved</div>
+            <div class="card-value" x-text="formatNumber(usagePageRewriteTokensSaved())" :title="usagePageRewriteSavedTitle()">-</div>
+        </div>
         <div class="card" x-show="cacheAnalyticsEnabled()">
             <div class="card-label">Cache Saved</div>
             <div class="card-value" x-text="formatCost(cacheOverview.summary.total_saved_cost)">-</div>

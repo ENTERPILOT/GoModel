@@ -45,6 +45,7 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 			}
 
 			changed := false
+			tokensSaved := 0
 			for _, rw := range rewriters {
 				res, rwErr := rw.Rewrite(c.Request().Context(), in)
 				if rwErr != nil {
@@ -58,12 +59,19 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 					recordRequestRevision(c, auditLogger, rw.Name(), len(in.Body), res)
 					in.Body = res.Body
 					changed = true
+					if res.TokensSaved > 0 {
+						tokensSaved += res.TokensSaved
+					}
 				}
 			}
 
 			if changed {
 				pinOriginalAuditRequestBody(c, auditLogger)
 				applyRewrittenBody(c, in.Body)
+				if tokensSaved > 0 {
+					req := c.Request()
+					c.SetRequest(req.WithContext(core.WithRewriteTokensSaved(req.Context(), tokensSaved)))
+				}
 			}
 			return next(c)
 		}

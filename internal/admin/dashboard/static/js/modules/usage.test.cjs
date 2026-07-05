@@ -388,6 +388,39 @@ test('usage page stat cards follow the log cache scope and derive hits from the 
     assert.equal(module.usagePageCostTitle(), '');
 });
 
+test('usage page rewrite savings cards show only when rewriters saved tokens', () => {
+    const module = createUsageModule();
+    module.formatNumber = (n) => String(n);
+
+    // No savings reported: cards hidden, zero-safe values.
+    module.usageSummary = { total_requests: 10 };
+    assert.equal(module.usagePageRewriteSavingsVisible(), false);
+    assert.equal(module.usagePageRewriteTokensSaved(), 0);
+    assert.equal(module.usagePageRewriteCostSaved(), null);
+    assert.equal(module.usagePageRewriteSavedTitle(), '');
+
+    // Savings with pricing: both cards visible with tokens and cost.
+    module.usageSummary = { rewrite_tokens_saved: 4200, rewrite_cost_saved: 0.0125 };
+    assert.equal(module.usagePageRewriteSavingsVisible(), true);
+    assert.equal(module.usagePageRewriteTokensSaved(), 4200);
+    assert.equal(module.usagePageRewriteCostSaved(), 0.0125);
+    assert.equal(
+        module.usagePageRewriteSavedTitle(),
+        '4200 prompt tokens removed by request rewriters before reaching providers'
+    );
+
+    // Savings without pricing: tokens card carries the value, cost stays null.
+    module.usageSummary = { rewrite_tokens_saved: 100, rewrite_cost_saved: null };
+    assert.equal(module.usagePageRewriteSavingsVisible(), true);
+    assert.equal(module.usagePageRewriteCostSaved(), null);
+
+    // Defensive: negative or garbage totals never surface.
+    module.usageSummary = { rewrite_tokens_saved: -5 };
+    assert.equal(module.usagePageRewriteSavingsVisible(), false);
+    module.usageSummary = { rewrite_tokens_saved: 'NaN?' };
+    assert.equal(module.usagePageRewriteSavingsVisible(), false);
+});
+
 test('fetchUsagePageSummary loads uncached and all cache modes with the page filters', async () => {
     const { app, fetchCalls } = createUsageLogApp({ usageFilterLabel: 'env:prod' });
 

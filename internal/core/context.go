@@ -49,6 +49,11 @@ const (
 	// requestOriginKey stores the logical request origin for internal execution
 	// flows that still reuse the translated request pipeline.
 	requestOriginKey contextKey = "request-origin"
+
+	// rewriteTokensSavedKey stores the total prompt tokens that applied
+	// request rewriters estimate they removed from the request body. Usage
+	// recording folds it into the request's usage entry as rewrite savings.
+	rewriteTokensSavedKey contextKey = "rewrite-tokens-saved"
 )
 
 // RequestOrigin identifies whether a request came from an external caller or an
@@ -224,6 +229,27 @@ func GetFailoverUsed(ctx context.Context) bool {
 		}
 	}
 	return false
+}
+
+// WithRewriteTokensSaved returns a new context carrying the total prompt
+// tokens that applied request rewriters estimate they removed. Non-positive
+// totals leave the context unchanged.
+func WithRewriteTokensSaved(ctx context.Context, tokensSaved int) context.Context {
+	if tokensSaved <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, rewriteTokensSavedKey, tokensSaved)
+}
+
+// RewriteTokensSavedFromContext retrieves the request's rewrite savings
+// estimate, or zero when no rewriter reported savings.
+func RewriteTokensSavedFromContext(ctx context.Context) int {
+	if v := ctx.Value(rewriteTokensSavedKey); v != nil {
+		if saved, ok := v.(int); ok && saved > 0 {
+			return saved
+		}
+	}
+	return 0
 }
 
 // WithRequestOrigin returns a new context with the logical request origin attached.

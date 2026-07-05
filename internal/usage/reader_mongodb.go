@@ -115,6 +115,9 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 		{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 		{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 		{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+		{Key: "rewrite_tokens_saved", Value: bson.D{{Key: "$sum", Value: "$rewrite_tokens_saved"}}},
+		{Key: "rewrite_cost_saved", Value: mongoCostSum("$rewrite_cost_saved")},
+		{Key: "has_rewrite_cost_saved", Value: mongoCostPresenceCount("$rewrite_cost_saved")},
 	}}})
 
 	cursor, err := r.collection.Aggregate(ctx, pipeline)
@@ -136,6 +139,10 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 			HasInputCost    int     `bson:"has_input_cost"`
 			HasOutputCost   int     `bson:"has_output_cost"`
 			HasTotalCost    int     `bson:"has_total_cost"`
+
+			RewriteTokensSaved  int64   `bson:"rewrite_tokens_saved"`
+			RewriteCostSaved    float64 `bson:"rewrite_cost_saved"`
+			HasRewriteCostSaved int     `bson:"has_rewrite_cost_saved"`
 		}
 		if err := cursor.Decode(&result); err != nil {
 			return nil, fmt.Errorf("failed to decode usage summary: %w", err)
@@ -147,6 +154,8 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 		summary.TotalInputCost = costPtr(result.HasInputCost, result.TotalInputCost)
 		summary.TotalOutputCost = costPtr(result.HasOutputCost, result.TotalOutputCost)
 		summary.TotalCost = costPtr(result.HasTotalCost, result.TotalCost)
+		summary.RewriteTokensSaved = result.RewriteTokensSaved
+		summary.RewriteCostSaved = costPtr(result.HasRewriteCostSaved, result.RewriteCostSaved)
 	}
 
 	if err := cursor.Err(); err != nil {

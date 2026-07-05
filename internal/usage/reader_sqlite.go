@@ -35,13 +35,15 @@ func (r *SQLiteReader) GetSummary(ctx context.Context, params UsageQueryParams) 
 	where := sqlutil.BuildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
-	query := `SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
+	savingsCols := `, COALESCE(SUM(rewrite_tokens_saved), 0), SUM(rewrite_cost_saved)`
+	query := `SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + savingsCols + `
 			FROM usage` + where
 
 	summary := &UsageSummary{}
 	err = r.db.QueryRowContext(ctx, query, args...).Scan(
 		&summary.TotalRequests, &summary.TotalInput, &summary.TotalOutput, &summary.TotalTokens,
 		&summary.TotalInputCost, &summary.TotalOutputCost, &summary.TotalCost,
+		&summary.RewriteTokensSaved, &summary.RewriteCostSaved,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage summary: %w", err)

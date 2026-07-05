@@ -20,6 +20,7 @@ type StreamUsageObserver struct {
 	endpoint        string
 	userPath        string
 	labels          []string
+	rewriteSaved    int
 	closed          bool
 }
 
@@ -62,6 +63,16 @@ func (o *StreamUsageObserver) SetLabels(labels []string) {
 		return
 	}
 	o.labels = labels
+}
+
+// SetRewriteTokensSaved attaches the request's rewrite savings estimate so
+// the usage entry extracted from the stream records it (with its cost, when
+// pricing is resolvable).
+func (o *StreamUsageObserver) SetRewriteTokensSaved(tokensSaved int) {
+	if o == nil || tokensSaved <= 0 {
+		return
+	}
+	o.rewriteSaved = tokensSaved
 }
 
 // usageKeyLiteral gates WantsJSONEvent: extractUsageFromEvent can only produce
@@ -176,6 +187,11 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		entry.ProviderName = o.providerName
 		entry.UserPath = o.userPath
 		entry.Labels = o.labels
+		var pricing *core.ModelPricing
+		if len(pricingArgs) > 0 {
+			pricing = pricingArgs[0]
+		}
+		ApplyRewriteSavings(entry, o.rewriteSaved, pricing)
 	}
 	return entry
 }

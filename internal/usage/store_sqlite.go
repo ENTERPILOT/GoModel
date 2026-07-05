@@ -18,8 +18,8 @@ import (
 // maxEntriesPerBatch derives from maxSQLiteParams / columnsPerUsageEntry.
 const (
 	maxSQLiteParams      = 999
-	columnsPerUsageEntry = 20
-	maxEntriesPerBatch   = maxSQLiteParams / columnsPerUsageEntry // 52 entries
+	columnsPerUsageEntry = 22
+	maxEntriesPerBatch   = maxSQLiteParams / columnsPerUsageEntry // 45 entries
 )
 
 // SQLiteStore implements UsageStore for SQLite databases.
@@ -55,6 +55,8 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 			input_tokens INTEGER NOT NULL DEFAULT 0,
 			output_tokens INTEGER NOT NULL DEFAULT 0,
 			total_tokens INTEGER NOT NULL DEFAULT 0,
+			rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0,
+			rewrite_cost_saved REAL,
 			raw_data JSON
 		)
 	`)
@@ -73,6 +75,8 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		"ALTER TABLE usage ADD COLUMN user_path TEXT",
 		"ALTER TABLE usage ADD COLUMN cache_type TEXT",
 		"ALTER TABLE usage ADD COLUMN labels JSON",
+		"ALTER TABLE usage ADD COLUMN rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE usage ADD COLUMN rewrite_cost_saved REAL",
 	}
 	for _, migration := range costMigrations {
 		if _, err := db.Exec(migration); err != nil {
@@ -135,7 +139,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 
 		for j, e := range chunk {
 			e = normalizedUsageEntryForStorage(e)
-			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 			rawDataJSON := marshalRawData(e.RawData, e.ID)
 
@@ -160,6 +164,8 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 				e.InputTokens,
 				e.OutputTokens,
 				e.TotalTokens,
+				e.RewriteTokensSaved,
+				e.RewriteCostSaved,
 				rawDataValue,
 				e.InputCost,
 				e.OutputCost,
@@ -170,7 +176,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 		}
 
 		query := `INSERT OR IGNORE INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name,
-			endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens, raw_data,
+			endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data,
 			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat) VALUES ` +
 			strings.Join(placeholders, ",")
 

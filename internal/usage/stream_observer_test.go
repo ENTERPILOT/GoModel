@@ -645,3 +645,71 @@ data: [DONE]
 		t.Errorf("TotalTokens = %d, want 8", entry.TotalTokens)
 	}
 }
+
+func TestStreamUsageObserverRecordsRewriteSavings(t *testing.T) {
+	streamData := `data: {"id":"chatcmpl-1","model":"gpt-4","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":5,"total_tokens":1005}}
+
+data: [DONE]
+
+`
+	logger := &trackingLogger{enabled: true}
+	resolver := &streamPricingCaptureResolver{pricing: &core.ModelPricing{
+		InputPerMtok:  floatPtr(2.0),
+		OutputPerMtok: floatPtr(8.0),
+	}}
+	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-1", "/v1/chat/completions", resolver)
+	observer.SetRewriteTokensSaved(500_000)
+
+	stream := streaming.NewObservedSSEStream(io.NopCloser(strings.NewReader(streamData)), observer)
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	entries := logger.getEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.RewriteTokensSaved != 500_000 {
+		t.Errorf("RewriteTokensSaved = %d, want 500000", entry.RewriteTokensSaved)
+	}
+	if entry.RewriteCostSaved == nil {
+		t.Fatal("expected RewriteCostSaved with resolvable pricing")
+	}
+	if got, want := *entry.RewriteCostSaved, 1.0; math.Abs(got-want) > 1e-9 {
+		t.Errorf("RewriteCostSaved = %v, want %v (500k tokens at $2/Mtok)", got, want)
+	}
+}
+
+func TestStreamUsageObserverRewriteSavingsWithoutPricing(t *testing.T) {
+	streamData := `data: {"id":"chatcmpl-1","model":"local","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}
+
+data: [DONE]
+
+`
+	logger := &trackingLogger{enabled: true}
+	observer := NewStreamUsageObserver(logger, "local", "ollama", "req-1", "/v1/chat/completions", nil)
+	observer.SetRewriteTokensSaved(40)
+
+	stream := streaming.NewObservedSSEStream(io.NopCloser(strings.NewReader(streamData)), observer)
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	entries := logger.getEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].RewriteTokensSaved != 40 {
+		t.Errorf("RewriteTokensSaved = %d, want 40", entries[0].RewriteTokensSaved)
+	}
+	if entries[0].RewriteCostSaved != nil {
+		t.Errorf("RewriteCostSaved = %v, want nil without pricing", *entries[0].RewriteCostSaved)
+	}
+}
