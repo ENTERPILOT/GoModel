@@ -962,6 +962,7 @@ func (r *ModelRegistry) markProviderInventoryStale(providerName string) {
 		state := r.providerRuntime[name]
 		if state.registered && !state.inventoryStale &&
 			strings.TrimSpace(state.lastModelFetchError) == "" &&
+			strings.TrimSpace(state.lastAvailabilityError) == "" &&
 			len(r.modelsByProvider[name]) > 0 {
 			healthyAlternative = true
 			break
@@ -979,8 +980,11 @@ func (r *ModelRegistry) markProviderInventoryStale(providerName string) {
 }
 
 // FailedProviderNames returns configured provider names whose latest model
-// refresh attempt failed. The background recheck loop uses this to re-probe
-// only the providers that are currently down.
+// refresh attempt or availability probe failed. The background recheck loop
+// uses this to re-probe only the providers that are currently down. The
+// availability side matters: a request-time refresh can fail the availability
+// gate (marking the inventory stale) without ever attempting a model fetch,
+// and such a provider must still be re-probed to detect its recovery.
 func (r *ModelRegistry) FailedProviderNames() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -991,7 +995,9 @@ func (r *ModelRegistry) FailedProviderNames() []string {
 		if providerName == "" {
 			continue
 		}
-		if strings.TrimSpace(r.providerRuntime[providerName].lastModelFetchError) == "" {
+		state := r.providerRuntime[providerName]
+		if strings.TrimSpace(state.lastModelFetchError) == "" &&
+			strings.TrimSpace(state.lastAvailabilityError) == "" {
 			continue
 		}
 		names = append(names, providerName)

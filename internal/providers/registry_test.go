@@ -1379,6 +1379,41 @@ func TestRefreshProviderModels_AvailabilityFailureMarksStale(t *testing.T) {
 	if registry.ModelAvailable("beta/beta-model") {
 		t.Fatal("ModelAvailable(beta) = true after failed availability check, want false")
 	}
+
+	// The availability failure never set a model fetch error, but the recheck
+	// loop must still re-probe the provider or it would stay stale until the
+	// next full sweep.
+	if got := registry.FailedProviderNames(); len(got) != 1 || got[0] != "beta" {
+		t.Fatalf("FailedProviderNames() = %v, want [beta] (availability-only failure)", got)
+	}
+
+	// Recovery through the recheck path restores availability.
+	beta.availabilityErr = nil
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err != nil {
+		t.Fatalf("RefreshProviderModels(beta) error = %v, want recovery", err)
+	}
+	if !registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = false after recovery, want true")
+	}
+	if got := registry.FailedProviderNames(); len(got) != 0 {
+		t.Fatalf("FailedProviderNames() = %v after recovery, want empty", got)
+	}
+}
+
+// A provider with a failed availability probe does not count as the healthy
+// alternative that justifies retiring another provider from load balancing.
+func TestRefreshProviderModels_AvailabilityFailingPeerIsNotHealthyAlternative(t *testing.T) {
+	registry, _, beta := registerTwoProviderRegistry(t)
+
+	registry.RecordAvailabilityCheck("alpha", errors.New("connection refused"))
+
+	beta.err = errors.New("connection refused")
+	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
+		t.Fatal("RefreshProviderModels(beta) error = nil, want failure")
+	}
+	if !registry.ModelAvailable("beta/beta-model") {
+		t.Fatal("ModelAvailable(beta) = false, want true (alpha's availability probe failed, so no healthy alternative)")
+	}
 }
 
 // The refresh sweep shares one context budget across all providers; a slow

@@ -51,13 +51,14 @@ type RequestInfo struct {
 }
 
 type ResponseInfo struct {
-    Provider   string
-    Model      string
-    Endpoint   string
-    StatusCode int           // 0 if network error
-    Duration   time.Duration
-    Stream     bool
-    Error      error         // nil on success
+    Provider     string
+    Model        string
+    Endpoint     string
+    StatusCode   int           // 0 if network error
+    Duration     time.Duration
+    Stream       bool
+    Error        error         // nil on success
+    CircuitState string        // "closed", "half-open", "open"; "" when the breaker is disabled
 }
 
 type Hooks struct {
