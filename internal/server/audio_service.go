@@ -9,9 +9,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 // audioService adapts Echo requests to the model-routed audio provider for the

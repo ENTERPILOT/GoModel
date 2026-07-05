@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	"gomodel/internal/batchrewrite"
-	"gomodel/internal/core"
-	"gomodel/internal/gateway"
+	"github.com/ENTERPILOT/GoModel/internal/batchrewrite"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/gateway"
 )
 
 // BatchRequestPreparer rewrites a native batch request before provider

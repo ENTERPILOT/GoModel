@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/llmclient"
 )
 
 func validatedOpenAICompatibleFileID(client *llmclient.Client, id string) (string, error) {

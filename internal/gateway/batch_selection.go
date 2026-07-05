@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // BatchExecutionSelection captures the provider and workflow selector for a native batch.

@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"gomodel/config"
-	"gomodel/internal/budget"
-	"gomodel/internal/core"
-	"gomodel/tests/integration/dbassert"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/budget"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/tests/integration/dbassert"
 )
 
 const (

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/modeldata"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/modeldata"
 )
 
 func ctxWindow(v int) *int { return &v }

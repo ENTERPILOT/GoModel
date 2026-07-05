@@ -7,7 +7,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/streaming"
+	"github.com/ENTERPILOT/GoModel/internal/streaming"
 )
 
 // chatChunk is the subset of an OpenAI chat.completion.chunk consumed by the

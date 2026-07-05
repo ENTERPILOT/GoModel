@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gomodel/internal/modelselectors"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/modelselectors"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 // Service keeps pricing overrides cached in memory and resolves effective pricing.

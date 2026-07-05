@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func floatPtr(v float64) *float64 { return &v }

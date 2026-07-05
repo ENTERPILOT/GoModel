@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func TestMemoryStoreExpiresResponses(t *testing.T) {

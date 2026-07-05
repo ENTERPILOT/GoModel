@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // ErrRegistryNotInitialized is returned when the router is used before the registry has any models.

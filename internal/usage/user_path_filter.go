@@ -1,12 +1,12 @@
 package usage
 
 import (
-	"gomodel/internal/storage/sqlutil"
+	"github.com/ENTERPILOT/GoModel/internal/storage/sqlutil"
 
 	"fmt"
 	"regexp"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func normalizeUsageUserPathFilter(raw string) (string, error) {

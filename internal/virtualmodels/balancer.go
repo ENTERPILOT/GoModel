@@ -4,7 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // roundRobin holds a monotonic request counter per redirect source. It lives on

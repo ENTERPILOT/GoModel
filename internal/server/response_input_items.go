@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func normalizedResponseInputItems(responseID string, req *core.ResponsesRequest) []json.RawMessage {

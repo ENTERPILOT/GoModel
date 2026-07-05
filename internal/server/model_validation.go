@@ -6,8 +6,8 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/tidwall/gjson"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // WorkflowResolution resolves the request-scoped workflow for model-facing

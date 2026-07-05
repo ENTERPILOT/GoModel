@@ -5,7 +5,7 @@ package modeldata
 import (
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // ModelList represents the top-level structure of models.json.

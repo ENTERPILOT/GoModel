@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/storage"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/storage"
 )
 
 func TestSQLiteStoreLifecycle(t *testing.T) {

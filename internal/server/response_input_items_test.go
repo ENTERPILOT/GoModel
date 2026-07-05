@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func TestNormalizedResponseInputItemsSkipsNilDefaultInput(t *testing.T) {

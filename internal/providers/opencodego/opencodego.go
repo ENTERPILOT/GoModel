@@ -9,11 +9,11 @@ import (
 	"os"
 	"strings"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
-	"gomodel/internal/providers"
-	"gomodel/internal/providers/anthropic"
-	"gomodel/internal/providers/openai"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/llmclient"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/providers/anthropic"
+	"github.com/ENTERPILOT/GoModel/internal/providers/openai"
 )
 
 // defaultBaseURL is the OpenCode Zen "Go" endpoint. Its /chat/completions and

@@ -12,9 +12,9 @@ import (
 
 	"github.com/google/uuid"
 
-	batchstore "gomodel/internal/batch"
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	batchstore "github.com/ENTERPILOT/GoModel/internal/batch"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 // LogBatchUsageFromBatchResults writes per-item usage from batch results once.

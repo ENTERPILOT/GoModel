@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 
-	"gomodel/config"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // ValidationError marks rule failures caused by caller input, so API handlers

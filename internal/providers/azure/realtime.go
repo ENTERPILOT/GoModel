@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // RealtimeTarget implements core.RealtimeProvider for Azure OpenAI's GPT Realtime

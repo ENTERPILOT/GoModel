@@ -3,9 +3,9 @@ package failover
 import (
 	"testing"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
 )
 
 type fakeRegistry struct {

@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 
-	"gomodel/internal/core"
-	"gomodel/internal/gateway"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/gateway"
 )
 
 // RequestWorkflowPolicyResolver matches persisted workflow versions for requests.

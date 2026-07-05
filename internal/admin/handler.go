@@ -13,19 +13,19 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/authkeys"
-	"gomodel/internal/budget"
-	"gomodel/internal/core"
-	"gomodel/internal/failover"
-	"gomodel/internal/guardrails"
-	"gomodel/internal/live"
-	"gomodel/internal/pricingoverrides"
-	"gomodel/internal/providers"
-	"gomodel/internal/tagging"
-	"gomodel/internal/usage"
-	"gomodel/internal/virtualmodels"
-	"gomodel/internal/workflows"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/authkeys"
+	"github.com/ENTERPILOT/GoModel/internal/budget"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/failover"
+	"github.com/ENTERPILOT/GoModel/internal/guardrails"
+	"github.com/ENTERPILOT/GoModel/internal/live"
+	"github.com/ENTERPILOT/GoModel/internal/pricingoverrides"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/tagging"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/virtualmodels"
+	"github.com/ENTERPILOT/GoModel/internal/workflows"
 )
 
 // Handler serves admin API endpoints.

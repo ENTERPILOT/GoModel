@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 // LogUsage writes one non-streaming usage entry when usage is enabled.

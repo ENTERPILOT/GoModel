@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
-	"gomodel/internal/virtualmodels"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/virtualmodels"
 )
 
 func newVMModelRegistry(t *testing.T) *providers.ModelRegistry {

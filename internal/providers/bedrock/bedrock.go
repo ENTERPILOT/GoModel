@@ -27,8 +27,8 @@ import (
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
 )
 
 const providerName = "bedrock"

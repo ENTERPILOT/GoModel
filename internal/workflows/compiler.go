@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"gomodel/internal/core"
-	"gomodel/internal/guardrails"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/guardrails"
 )
 
 type compiler struct {

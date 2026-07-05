@@ -5,7 +5,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // PassthroughSemanticEnrichment applies provider-owned passthrough metadata

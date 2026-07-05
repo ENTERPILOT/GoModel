@@ -3,7 +3,7 @@ package gateway
 import (
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // CloneChatRequestForStreamUsage clones chat stream options before usage mutation.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"gomodel/config"
+	"github.com/ENTERPILOT/GoModel/config"
 )
 
 func TestNewEmbedder_EmptyProvider(t *testing.T) {

@@ -25,17 +25,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gomodel/internal/auditlog"
-	batchstore "gomodel/internal/batch"
-	"gomodel/internal/core"
-	"gomodel/internal/filestore"
-	"gomodel/internal/gateway"
-	"gomodel/internal/guardrails"
-	"gomodel/internal/observability"
-	provideradapter "gomodel/internal/providers"
-	"gomodel/internal/responsestore"
-	"gomodel/internal/usage"
-	"gomodel/internal/virtualmodels"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	batchstore "github.com/ENTERPILOT/GoModel/internal/batch"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/filestore"
+	"github.com/ENTERPILOT/GoModel/internal/gateway"
+	"github.com/ENTERPILOT/GoModel/internal/guardrails"
+	"github.com/ENTERPILOT/GoModel/internal/observability"
+	provideradapter "github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/responsestore"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/virtualmodels"
 )
 
 func withRequestSnapshotAndPrompt(req *http.Request, frame *core.RequestSnapshot) *http.Request {

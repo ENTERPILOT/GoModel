@@ -1,7 +1,7 @@
 package budget
 
 import (
-	"gomodel/internal/storage/sqlutil"
+	"github.com/ENTERPILOT/GoModel/internal/storage/sqlutil"
 
 	"context"
 	"database/sql"

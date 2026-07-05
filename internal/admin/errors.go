@@ -8,13 +8,13 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/authkeys"
-	"gomodel/internal/budget"
-	"gomodel/internal/core"
-	"gomodel/internal/guardrails"
-	"gomodel/internal/pricingoverrides"
-	"gomodel/internal/virtualmodels"
-	"gomodel/internal/workflows"
+	"github.com/ENTERPILOT/GoModel/internal/authkeys"
+	"github.com/ENTERPILOT/GoModel/internal/budget"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/guardrails"
+	"github.com/ENTERPILOT/GoModel/internal/pricingoverrides"
+	"github.com/ENTERPILOT/GoModel/internal/virtualmodels"
+	"github.com/ENTERPILOT/GoModel/internal/workflows"
 )
 
 func budgetServiceError(message string, err error) error {

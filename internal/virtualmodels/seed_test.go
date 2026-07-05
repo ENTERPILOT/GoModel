@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/storage"
+	"github.com/ENTERPILOT/GoModel/internal/storage"
 )
 
 // failingUpsertStore wraps a Store and fails Upsert after failAfter successful

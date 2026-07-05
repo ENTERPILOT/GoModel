@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 type mockChatCompletionExecutor struct {

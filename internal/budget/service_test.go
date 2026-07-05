@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/config"
+	"github.com/ENTERPILOT/GoModel/config"
 )
 
 type fakeStore struct {

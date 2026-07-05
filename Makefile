@@ -11,9 +11,9 @@ LOG_LEVEL ?= debug
 SWAGGER_ENABLED ?= true
 
 # Linker flags to inject version info
-LDFLAGS := -X "gomodel/internal/version.Version=$(VERSION)" \
-           -X "gomodel/internal/version.Commit=$(COMMIT)" \
-           -X "gomodel/internal/version.Date=$(DATE)"
+LDFLAGS := -X "github.com/ENTERPILOT/GoModel/internal/version.Version=$(VERSION)" \
+           -X "github.com/ENTERPILOT/GoModel/internal/version.Commit=$(COMMIT)" \
+           -X "github.com/ENTERPILOT/GoModel/internal/version.Date=$(DATE)"
 
 install-tools:
 	@command -v golangci-lint > /dev/null 2>&1 || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10)

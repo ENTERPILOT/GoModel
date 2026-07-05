@@ -1,7 +1,7 @@
 package modeldata
 
 import (
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // MergeMetadata merges override onto base field-wise. Non-zero override fields

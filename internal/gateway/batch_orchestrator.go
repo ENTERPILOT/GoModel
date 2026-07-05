@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
-	batchstore "gomodel/internal/batch"
-	"gomodel/internal/batchrewrite"
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	batchstore "github.com/ENTERPILOT/GoModel/internal/batch"
+	"github.com/ENTERPILOT/GoModel/internal/batchrewrite"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 // BatchConfig configures native batch orchestration.

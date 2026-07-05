@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"gomodel/internal/core"
-	"gomodel/internal/modelselectors"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/modelselectors"
 )
 
 // resolvedTarget is one redirect destination with its selector parsed at build

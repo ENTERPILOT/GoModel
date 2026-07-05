@@ -14,15 +14,15 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/conversationstore"
-	"gomodel/internal/core"
-	"gomodel/internal/gateway"
-	"gomodel/internal/observability"
-	"gomodel/internal/responsecache"
-	"gomodel/internal/responsestore"
-	"gomodel/internal/streaming"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/conversationstore"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/gateway"
+	"github.com/ENTERPILOT/GoModel/internal/observability"
+	"github.com/ENTERPILOT/GoModel/internal/responsecache"
+	"github.com/ENTERPILOT/GoModel/internal/responsestore"
+	"github.com/ENTERPILOT/GoModel/internal/streaming"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 // translatedInferenceService adapts Echo requests to the transport-independent

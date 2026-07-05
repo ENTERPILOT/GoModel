@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/llmclient"
 )
 
 // newTestProvider builds a provider whose OpenAI-compatible and Anthropic

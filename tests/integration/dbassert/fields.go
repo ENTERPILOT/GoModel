@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gomodel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
 )
 
 // RequiredAuditLogFields are fields that must always be populated in an audit log entry.

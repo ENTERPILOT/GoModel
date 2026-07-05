@@ -6,7 +6,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func newSQLiteVMStore(t *testing.T) *SQLiteStore {

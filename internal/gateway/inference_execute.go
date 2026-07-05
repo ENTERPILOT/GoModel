@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/usage"
 )
 
 // ExecuteChatCompletion executes a non-streaming chat request and records usage on success.

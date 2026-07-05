@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
-	"gomodel/internal/virtualmodels"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/virtualmodels"
 )
 
 type explodingValidationReadCloser struct{}

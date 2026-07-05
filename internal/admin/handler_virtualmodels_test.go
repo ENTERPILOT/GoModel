@@ -11,8 +11,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
-	"gomodel/internal/virtualmodels"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/virtualmodels"
 )
 
 // vmTestStore is an in-memory virtualmodels.Store for admin handler tests.

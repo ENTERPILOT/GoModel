@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/streaming"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/streaming"
 )
 
 // trackingLogger tracks written entries for testing.

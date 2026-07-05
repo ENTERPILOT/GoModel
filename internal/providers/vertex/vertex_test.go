@@ -17,9 +17,9 @@ import (
 	"strings"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
-	"gomodel/internal/providers/googlecommon"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/providers/googlecommon"
 
 	"golang.org/x/oauth2"
 )

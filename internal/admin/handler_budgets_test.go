@@ -11,7 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/budget"
+	"github.com/ENTERPILOT/GoModel/internal/budget"
 )
 
 type adminBudgetStore struct {

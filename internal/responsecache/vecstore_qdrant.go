@@ -13,7 +13,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/config"
+	"github.com/ENTERPILOT/GoModel/config"
 )
 
 type qdrantStore struct {

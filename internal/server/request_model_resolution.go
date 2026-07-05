@@ -5,9 +5,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
-	"gomodel/internal/gateway"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/gateway"
 )
 
 // RequestModelResolver resolves raw request selectors into concrete model

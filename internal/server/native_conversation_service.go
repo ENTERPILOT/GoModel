@@ -13,9 +13,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/conversationstore"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/conversationstore"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // conversationService owns the gateway-managed Conversations lifecycle endpoints.

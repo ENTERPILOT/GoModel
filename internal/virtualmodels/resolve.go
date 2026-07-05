@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // Resolve resolves raw model/provider inputs through the redirect table.

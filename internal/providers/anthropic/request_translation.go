@@ -14,8 +14,8 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
 )
 
 // defaultMaxTokensEnvVar overrides the fallback applied when callers omit

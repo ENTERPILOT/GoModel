@@ -13,10 +13,10 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
-	"gomodel/internal/providers"
-	"gomodel/internal/providers/openai"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/llmclient"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/providers/openai"
 )
 
 const defaultBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"

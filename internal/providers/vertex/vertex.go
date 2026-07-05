@@ -14,12 +14,12 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
-	"gomodel/internal/httpclient"
-	"gomodel/internal/llmclient"
-	"gomodel/internal/providers"
-	"gomodel/internal/providers/gemini"
-	"gomodel/internal/providers/googlecommon"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/httpclient"
+	"github.com/ENTERPILOT/GoModel/internal/llmclient"
+	"github.com/ENTERPILOT/GoModel/internal/providers"
+	"github.com/ENTERPILOT/GoModel/internal/providers/gemini"
+	"github.com/ENTERPILOT/GoModel/internal/providers/googlecommon"
 )
 
 // Registration provides factory registration for the Vertex AI provider.

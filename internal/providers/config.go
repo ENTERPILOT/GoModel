@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode"
 
-	"gomodel/config"
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 // ProviderConfig holds the fully resolved provider configuration after merging

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/config"
+	"github.com/ENTERPILOT/GoModel/config"
 )
 
 func TestRefreshIntervalUsesWorkflowCadence(t *testing.T) {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	batchstore "gomodel/internal/batch"
-	"gomodel/internal/batchrewrite"
-	"gomodel/internal/core"
+	batchstore "github.com/ENTERPILOT/GoModel/internal/batch"
+	"github.com/ENTERPILOT/GoModel/internal/batchrewrite"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func (h *Handler) cleanupPreparedBatchInputFile(ctx context.Context, providerType, fileID string) {

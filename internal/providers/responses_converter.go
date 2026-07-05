@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"gomodel/internal/streaming"
+	"github.com/ENTERPILOT/GoModel/internal/streaming"
 )
 
 // OpenAIResponsesStreamConverter wraps an OpenAI-compatible SSE stream

@@ -11,10 +11,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
-	"gomodel/internal/gateway"
-	"gomodel/internal/responsestore"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/gateway"
+	"github.com/ENTERPILOT/GoModel/internal/responsestore"
 )
 
 // nativeResponseService owns Responses lifecycle and utility endpoints. Create

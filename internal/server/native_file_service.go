@@ -9,9 +9,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
-	"gomodel/internal/filestore"
+	"github.com/ENTERPILOT/GoModel/internal/auditlog"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/filestore"
 )
 
 // nativeFileService owns native file orchestration so HTTP handlers can remain

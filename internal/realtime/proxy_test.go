@@ -12,7 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"gomodel/internal/realtime"
+	"github.com/ENTERPILOT/GoModel/internal/realtime"
 )
 
 func wsURL(httpURL string) string {

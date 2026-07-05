@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/core"
 )
 
 func TestApplyAuthenticationRefreshesLabelsFromContext(t *testing.T) {

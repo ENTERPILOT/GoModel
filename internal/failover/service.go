@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gomodel/config"
+	"github.com/ENTERPILOT/GoModel/config"
 )
 
 // Service merges dashboard-managed mappings with read-only config/env mappings.

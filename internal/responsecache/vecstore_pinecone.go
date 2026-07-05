@@ -12,7 +12,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/config"
+	"github.com/ENTERPILOT/GoModel/config"
 )
 
 // pineconeMetadataValueMax is a conservative limit for a single metadata string (Pinecone ~40KB UTF-8).

@@ -19,9 +19,9 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	"gomodel/internal/embedding"
+	"github.com/ENTERPILOT/GoModel/config"
+	"github.com/ENTERPILOT/GoModel/internal/core"
+	"github.com/ENTERPILOT/GoModel/internal/embedding"
 )
 
 // semanticCacheWriteJob carries one vector-store insert handed to a background
