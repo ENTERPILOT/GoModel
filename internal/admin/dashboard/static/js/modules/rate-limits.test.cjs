@@ -81,6 +81,19 @@ test('rateLimitFormPayload validates and builds the upsert payload', () => {
 
     module.rateLimitForm = { user_path: '/', period: 'custom', period_seconds: -5, max_requests: '5', max_tokens: '' };
     assert.match(module.rateLimitFormPayload().error, /period seconds/i);
+
+    // Blank custom seconds must not coerce to 0 and submit a concurrent rule.
+    module.rateLimitForm = { user_path: '/', period: 'custom', period_seconds: '', max_requests: '5', max_tokens: '' };
+    assert.match(module.rateLimitFormPayload().error, /period seconds is required/i);
+
+    // Explicit 0 is only valid for the concurrent period.
+    module.rateLimitForm = { user_path: '/', period: 'custom', period_seconds: 0, max_requests: '5', max_tokens: '' };
+    assert.match(module.rateLimitFormPayload().error, /concurrent/i);
+
+    module.rateLimitForm = { user_path: '/', period: 'concurrent', period_seconds: 0, max_requests: '5', max_tokens: '' };
+    const concurrent = module.rateLimitFormPayload();
+    assert.equal(concurrent.error, undefined);
+    assert.equal(concurrent.payload.limit_key.period_seconds, 0);
 });
 
 test('filteredRateLimits sorts by path then period and filters', () => {
@@ -120,6 +133,8 @@ test('config-sourced rules are read-only', () => {
 });
 
 test('fetchRateLimits handles 503 as feature unavailable', async () => {
+    // fetchRateLimits resolves fetch lexically from the vm context the module
+    // was loaded into, so the injected override below is the one it calls.
     const module = createRateLimitsModule({
         fetch: async () => ({ status: 503 })
     });
@@ -127,13 +142,7 @@ test('fetchRateLimits handles 503 as feature unavailable', async () => {
     module.handleFetchResponse = () => {
         throw new Error('must not be called for 503');
     };
-    // Bind fetch through the module context: rely on global fetch override.
-    global.fetch = async () => ({ status: 503 });
-    try {
-        await module.fetchRateLimits();
-    } finally {
-        delete global.fetch;
-    }
+    await module.fetchRateLimits();
     assert.equal(module.rateLimitsAvailable, false);
     assert.equal(JSON.stringify(module.rateLimits), '[]');
     assert.equal(module.rateLimitsLoading, false);

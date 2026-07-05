@@ -184,8 +184,10 @@ Breach (any limit):
 }
 ```
 
-- `Retry-After`: integer seconds until the current window rolls (constant `1`
-  for concurrency breaches).
+- `Retry-After`: integer seconds until the sliding-window estimate would
+  actually admit a retry — not just the next bucket boundary, where the
+  previous window can still weigh enough to reject (constant `1` for
+  concurrency breaches).
 - The code stays `rate_limit_exceeded` for every limit kind — OpenAI SDKs and
   retry libraries key off that exact string; the message spells out whether
   requests, tokens, or concurrency tripped (Bifrost-style clarity without

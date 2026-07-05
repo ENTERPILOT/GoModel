@@ -90,8 +90,8 @@ func (s *SQLiteStore) DeleteRule(ctx context.Context, userPath string, periodSec
 	if err != nil {
 		return err
 	}
-	if periodSeconds < 0 {
-		return fmt.Errorf("period_seconds must be 0 (concurrent) or greater")
+	if err := validatePeriodSeconds(periodSeconds); err != nil {
+		return err
 	}
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM rate_limits

@@ -578,9 +578,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		WorkflowPolicyResolver: workflowResult.Service,
 		FailoverResolver:       serverCfg.FailoverResolver,
 		AuditLogger:            auditResult.Logger,
-		UsageLogger:            usageResult.Logger,
-		PricingResolver:        pricingResolver,
-		ResponseCache:          rcm,
+		// The tapped logger, so guardrail LLM calls count toward the
+		// request's rate limit token windows like any other completion.
+		UsageLogger:     serverUsageLogger,
+		PricingResolver: pricingResolver,
+		ResponseCache:   rcm,
 	})
 	if err := guardrailResult.Service.SetExecutor(ctx, internalGuardrailExecutor); err != nil {
 		return fail("failed to wire internal guardrail executor", err)

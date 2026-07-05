@@ -116,6 +116,47 @@ func TestBatchBudgetEnforcerInvokesCheckerWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestBatchAdmissionEnforcerAppliesRateLimits(t *testing.T) {
+	checker := &countingBudgetChecker{}
+	limiter := newTestRateLimitService(t, rateLimitRuleWithRequests("/", 1))
+	enforcer := batchAdmissionEnforcer(limiter, checker)
+	if enforcer == nil {
+		t.Fatal("batchAdmissionEnforcer() = nil, want function")
+	}
+
+	ctx := core.WithWorkflow(context.Background(), &core.Workflow{
+		Policy: &core.ResolvedWorkflowPolicy{
+			VersionID: "workflow-v1",
+			Features: core.WorkflowFeatures{
+				Usage:  true,
+				Budget: true,
+			},
+		},
+	})
+
+	if err := enforcer(ctx); err != nil {
+		t.Fatalf("first batch submission rejected: %v", err)
+	}
+	if checker.calls != 1 {
+		t.Fatalf("budget checker was called %d times, want 1", checker.calls)
+	}
+
+	err := enforcer(ctx)
+	if err == nil {
+		t.Fatal("second batch submission admitted over the request window")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error %T does not unwrap to GatewayError", err)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", gatewayErr.HTTPStatusCode())
+	}
+	if checker.calls != 1 {
+		t.Fatalf("budget checker was called %d times after a rate-limited submission, want 1 (rate limits check first)", checker.calls)
+	}
+}
+
 func TestBudgetExceededResponseIncludesRetryAfter(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)

@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -134,6 +135,76 @@ func TestRateLimitTokenEnforcement_E2E(t *testing.T) {
 	require.Equal(t, "rate_limit_exceeded", *envelope.Error.Code)
 	require.Contains(t, envelope.Error.Message, "token limit")
 	require.Len(t, mockServer.Requests(), 1, "token-limited request must not reach upstream provider")
+}
+
+func TestRateLimitConcurrencyEnforcement_E2E(t *testing.T) {
+	mockServer.ResetRequests()
+	service := setupRateLimitService(t, []ratelimit.Rule{{
+		UserPath:      "/team/cc",
+		PeriodSeconds: ratelimit.PeriodConcurrent,
+		MaxRequests:   rateLimitInt64(1),
+		Source:        ratelimit.SourceManual,
+	}})
+
+	// Hold the first request in flight long enough for the overlap.
+	mockServer.SetResponseDelay(750 * time.Millisecond)
+	t.Cleanup(func() { mockServer.SetResponseDelay(0) })
+
+	ts := httptest.NewServer(setupE2EServer(t, e2eServerOptions{rateLimiter: service}))
+	defer ts.Close()
+
+	// require must stay on the test goroutine, so the held request reports
+	// its outcome through channels.
+	type asyncResult struct {
+		resp *http.Response
+		err  error
+	}
+	firstDone := make(chan asyncResult, 1)
+	go func() {
+		payload, err := json.Marshal(defaultChatReq("concurrency first"))
+		if err != nil {
+			firstDone <- asyncResult{err: err}
+			return
+		}
+		req, err := http.NewRequest(http.MethodPost, ts.URL+chatCompletionsPath, bytes.NewReader(payload))
+		if err != nil {
+			firstDone <- asyncResult{err: err}
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Request-ID", "rl-cc-first")
+		req.Header.Set("X-GoModel-User-Path", "/team/cc/app")
+		resp, err := http.DefaultClient.Do(req)
+		firstDone <- asyncResult{resp: resp, err: err}
+	}()
+
+	// Wait until the first request actually holds the concurrency slot.
+	require.Eventually(t, func() bool {
+		statuses := service.Statuses(time.Now().UTC())
+		return len(statuses) == 1 && statuses[0].InFlight == 1
+	}, 2*time.Second, 10*time.Millisecond)
+
+	blocked := sendBudgetChatRequest(t, ts.URL, "concurrency blocked", "rl-cc-blocked", "/team/cc/app")
+	defer closeBody(blocked)
+	require.Equal(t, http.StatusTooManyRequests, blocked.StatusCode)
+	require.NotEmpty(t, blocked.Header.Get("Retry-After"))
+	var envelope core.OpenAIErrorEnvelope
+	require.NoError(t, json.NewDecoder(blocked.Body).Decode(&envelope))
+	require.NotNil(t, envelope.Error.Code)
+	require.Equal(t, "rate_limit_exceeded", *envelope.Error.Code)
+	require.Contains(t, envelope.Error.Message, "concurrent request limit")
+
+	first := <-firstDone
+	require.NoError(t, first.err)
+	require.Equal(t, http.StatusOK, first.resp.StatusCode)
+	closeBody(first.resp)
+	require.Len(t, mockServer.Requests(), 1, "blocked request must not reach upstream provider")
+
+	// The slot frees once the held request completes.
+	mockServer.SetResponseDelay(0)
+	after := sendBudgetChatRequest(t, ts.URL, "concurrency after", "rl-cc-after", "/team/cc/app")
+	defer closeBody(after)
+	require.Equal(t, http.StatusOK, after.StatusCode)
 }
 
 func TestRateLimitAdminEndpoints_E2E(t *testing.T) {

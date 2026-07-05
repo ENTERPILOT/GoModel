@@ -130,8 +130,8 @@ func TestEnforceRateLimitBreachReturns429WithHeaders(t *testing.T) {
 	}
 	headers := headerErr.ResponseHeaders()
 	retryAfter, convErr := strconv.Atoi(headers.Get("Retry-After"))
-	if convErr != nil || retryAfter < 1 || retryAfter > 60 {
-		t.Fatalf("Retry-After = %q, want 1..60", headers.Get("Retry-After"))
+	if convErr != nil || retryAfter < 1 || retryAfter > 120 {
+		t.Fatalf("Retry-After = %q, want 1..120 (sliding-window recovery can pass the boundary)", headers.Get("Retry-After"))
 	}
 	if got := headers.Get("x-ratelimit-remaining-requests"); got != "0" {
 		t.Fatalf("x-ratelimit-remaining-requests = %q, want 0", got)

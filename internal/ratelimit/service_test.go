@@ -105,9 +105,69 @@ func TestAcquireEnforcesRequestLimit(t *testing.T) {
 	if exceeded.Limit != 2 {
 		t.Fatalf("limit = %d, want 2", exceeded.Limit)
 	}
-	if exceeded.RetryAfter <= 0 || exceeded.RetryAfter > time.Minute {
-		t.Fatalf("retry after = %s, want within (0, 1m]", exceeded.RetryAfter)
+	// Recovery can extend past the next boundary: the burst still weighs in
+	// as the previous window right after the rollover.
+	if exceeded.RetryAfter <= 0 || exceeded.RetryAfter > 2*time.Minute {
+		t.Fatalf("retry after = %s, want within (0, 2m]", exceeded.RetryAfter)
 	}
+}
+
+// TestRetryAfterReflectsSlidingWindowRecovery pins Retry-After to the exact
+// first second a retry would be admitted, not the next bucket boundary.
+func TestRetryAfterReflectsSlidingWindowRecovery(t *testing.T) {
+	t.Run("requests", func(t *testing.T) {
+		service := newTestService(t, Rule{
+			UserPath:      "/",
+			PeriodSeconds: PeriodMinuteSeconds,
+			MaxRequests:   int64Ptr(10),
+		})
+		for i := 0; i < 10; i++ {
+			if _, err := service.Acquire("/", windowBase); err != nil {
+				t.Fatalf("Acquire() %d failed: %v", i, err)
+			}
+		}
+		_, err := service.Acquire("/", windowBase)
+		var exceeded *ExceededError
+		if !errors.As(err, &exceeded) {
+			t.Fatalf("Acquire() error = %v, want ExceededError", err)
+		}
+		// At the boundary (60s) the previous window still weighs 10*(60/60);
+		// one second later it decays to 9 and a request fits.
+		if exceeded.RetryAfter != 61*time.Second {
+			t.Fatalf("retry after = %s, want 61s", exceeded.RetryAfter)
+		}
+		if _, err := service.Acquire("/", windowBase.Add(exceeded.RetryAfter-time.Second)); err == nil {
+			t.Fatal("Acquire() one second before Retry-After succeeded")
+		}
+		if _, err := service.Acquire("/", windowBase.Add(exceeded.RetryAfter)); err != nil {
+			t.Fatalf("Acquire() at Retry-After failed: %v", err)
+		}
+	})
+
+	t.Run("tokens overshoot", func(t *testing.T) {
+		service := newTestService(t, Rule{
+			UserPath:      "/",
+			PeriodSeconds: PeriodMinuteSeconds,
+			MaxTokens:     int64Ptr(10),
+		})
+		// A single response overshoots the token window threefold; recovery
+		// needs the rollover plus enough decay: 30*(60-41)/60 = 9 < 10.
+		service.RecordTokens("/", 30, windowBase)
+		_, err := service.Acquire("/", windowBase)
+		var exceeded *ExceededError
+		if !errors.As(err, &exceeded) {
+			t.Fatalf("Acquire() error = %v, want ExceededError", err)
+		}
+		if exceeded.RetryAfter != 101*time.Second {
+			t.Fatalf("retry after = %s, want 101s", exceeded.RetryAfter)
+		}
+		if _, err := service.Acquire("/", windowBase.Add(exceeded.RetryAfter-time.Second)); err == nil {
+			t.Fatal("Acquire() one second before Retry-After succeeded")
+		}
+		if _, err := service.Acquire("/", windowBase.Add(exceeded.RetryAfter)); err != nil {
+			t.Fatalf("Acquire() at Retry-After failed: %v", err)
+		}
+	})
 }
 
 func TestAcquireRequestsShareSubtreeCounter(t *testing.T) {

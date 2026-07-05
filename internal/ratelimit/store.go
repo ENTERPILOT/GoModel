@@ -19,6 +19,15 @@ type Store interface {
 	Close() error
 }
 
+// validatePeriodSeconds is the single source of the period sanity check used
+// by rule normalization and every DeleteRule path.
+func validatePeriodSeconds(periodSeconds int64) error {
+	if periodSeconds < 0 {
+		return fmt.Errorf("period_seconds must be 0 (concurrent) or greater")
+	}
+	return nil
+}
+
 func normalizeRulesForUpsert(rules []Rule) ([]Rule, error) {
 	if len(rules) == 0 {
 		return nil, nil

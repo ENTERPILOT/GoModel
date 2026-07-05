@@ -53,6 +53,29 @@ func (w *windowCounter) resetAfter(now time.Time, periodSeconds int64) time.Dura
 	return time.Duration(remaining) * time.Second
 }
 
+// retryAfter returns the earliest wait after which the sliding-window
+// estimate drops below limit. The next bucket boundary alone can
+// under-promise: right after a rollover the previous window still weighs in,
+// and a heavily overshot current count keeps blocking well past it. The
+// estimate is non-increasing over time (absent new arrivals) and reaches 0
+// within two periods, so a binary search against the real estimate function
+// finds the exact second without duplicating its truncation math.
+func (w *windowCounter) retryAfter(now time.Time, periodSeconds, limit int64) time.Duration {
+	lo, hi := int64(1), 2*periodSeconds
+	for lo < hi {
+		mid := (lo + hi) / 2
+		probe := *w
+		at := time.Unix(now.Unix()+mid, 0)
+		probe.advance(at, periodSeconds)
+		if probe.estimate(at, periodSeconds) < limit {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	return time.Duration(lo) * time.Second
+}
+
 type ruleKey struct {
 	userPath      string
 	periodSeconds int64
@@ -119,7 +142,7 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 					Scope:      ScopeRequests,
 					Observed:   used,
 					Limit:      *rule.MaxRequests,
-					RetryAfter: counter.resetAfter(now, rule.PeriodSeconds),
+					RetryAfter: counter.retryAfter(now, rule.PeriodSeconds, *rule.MaxRequests),
 				}
 			}
 		}
@@ -132,7 +155,7 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 					Scope:      ScopeTokens,
 					Observed:   used,
 					Limit:      *rule.MaxTokens,
-					RetryAfter: counter.resetAfter(now, rule.PeriodSeconds),
+					RetryAfter: counter.retryAfter(now, rule.PeriodSeconds, *rule.MaxTokens),
 				}
 			}
 		}

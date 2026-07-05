@@ -69,6 +69,14 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 	models := make([]mongo.WriteModel, 0, len(rules))
 	for _, rule := range rules {
 		filter := bson.D{{Key: "user_path", Value: rule.UserPath}, {Key: "period_seconds", Value: rule.PeriodSeconds}}
+		// Mirror the SQL stores' source precedence: a config-sourced write may
+		// only update rows that are themselves config-sourced. When a manual
+		// row holds the key, the source-scoped filter misses it and the upsert
+		// tries to insert a duplicate instead — the unique index rejects that,
+		// and the duplicate-key error is treated as a benign skip below.
+		if rule.Source == SourceConfig {
+			filter = append(filter, bson.E{Key: "source", Value: SourceConfig})
+		}
 		update := bson.D{{Key: "$set", Value: bson.D{
 			{Key: "user_path", Value: rule.UserPath},
 			{Key: "period_seconds", Value: rule.PeriodSeconds},
@@ -84,10 +92,34 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 			SetUpdate(update).
 			SetUpsert(true))
 	}
-	if _, err := s.rules.BulkWrite(ctx, models); err != nil {
+	opts := options.BulkWrite().SetOrdered(false)
+	if _, err := s.rules.BulkWrite(ctx, models, opts); err != nil {
+		if isOnlyDuplicateKeyErrors(err) {
+			return nil
+		}
 		return fmt.Errorf("upsert %d rate limit rules: %w", len(rules), err)
 	}
 	return nil
+}
+
+// isOnlyDuplicateKeyErrors reports whether every write error in a bulk write
+// failure is a duplicate-key violation. With the source-scoped config filter
+// above, those are exactly the manual rows shadowing config seeds — the
+// intended precedence, not a failure.
+func isOnlyDuplicateKeyErrors(err error) bool {
+	var bulkErr mongo.BulkWriteException
+	if !errors.As(err, &bulkErr) {
+		return false
+	}
+	if bulkErr.WriteConcernError != nil || len(bulkErr.WriteErrors) == 0 {
+		return false
+	}
+	for _, writeErr := range bulkErr.WriteErrors {
+		if !writeErr.HasErrorCode(11000) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *MongoDBStore) DeleteRule(ctx context.Context, userPath string, periodSeconds int64) error {
@@ -95,8 +127,8 @@ func (s *MongoDBStore) DeleteRule(ctx context.Context, userPath string, periodSe
 	if err != nil {
 		return err
 	}
-	if periodSeconds < 0 {
-		return fmt.Errorf("period_seconds must be 0 (concurrent) or greater")
+	if err := validatePeriodSeconds(periodSeconds); err != nil {
+		return err
 	}
 	result, err := s.rules.DeleteOne(ctx, bson.D{{Key: "user_path", Value: userPath}, {Key: "period_seconds", Value: periodSeconds}})
 	if err != nil {

@@ -114,8 +114,8 @@ func NormalizeRule(r Rule) (Rule, error) {
 		return Rule{}, err
 	}
 	r.UserPath = path
-	if r.PeriodSeconds < 0 {
-		return Rule{}, fmt.Errorf("period_seconds must be 0 (concurrent) or greater")
+	if err := validatePeriodSeconds(r.PeriodSeconds); err != nil {
+		return Rule{}, err
 	}
 	if r.MaxRequests != nil && *r.MaxRequests <= 0 {
 		return Rule{}, fmt.Errorf("max_requests must be greater than 0")

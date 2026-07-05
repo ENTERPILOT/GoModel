@@ -130,22 +130,31 @@ func parseRateLimitEnvLimits(raw string) ([]RateLimitRuleConfig, error) {
 	return limits, nil
 }
 
+// Rate limit period lengths, mirrored from the internal/ratelimit package
+// (config cannot import it without a cycle).
+const (
+	rateLimitMinuteSeconds     int64 = 60
+	rateLimitHourSeconds       int64 = 3600
+	rateLimitDaySeconds        int64 = 86400
+	rateLimitConcurrentSeconds int64 = 0
+)
+
 func rateLimitEnvName(name string) (periodSeconds int64, isTokens bool, err error) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "rpm":
-		return 60, false, nil
+		return rateLimitMinuteSeconds, false, nil
 	case "tpm":
-		return 60, true, nil
+		return rateLimitMinuteSeconds, true, nil
 	case "rph":
-		return 3600, false, nil
+		return rateLimitHourSeconds, false, nil
 	case "tph":
-		return 3600, true, nil
+		return rateLimitHourSeconds, true, nil
 	case "rpd":
-		return 86400, false, nil
+		return rateLimitDaySeconds, false, nil
 	case "tpd":
-		return 86400, true, nil
+		return rateLimitDaySeconds, true, nil
 	case "concurrent", "concurrency":
-		return 0, false, nil
+		return rateLimitConcurrentSeconds, false, nil
 	default:
 		return 0, false, fmt.Errorf("rate limit name %q must be one of rpm, tpm, rph, tph, rpd, tpd, concurrent", name)
 	}
@@ -212,13 +221,13 @@ func rateLimitConfigPeriodSeconds(limit RateLimitRuleConfig) (int64, error) {
 	}
 	switch strings.ToLower(strings.TrimSpace(limit.Period)) {
 	case "minute", "minutes", "min", "minutely":
-		return 60, nil
+		return rateLimitMinuteSeconds, nil
 	case "hour", "hours", "hourly":
-		return 3600, nil
+		return rateLimitHourSeconds, nil
 	case "day", "days", "daily":
-		return 86400, nil
+		return rateLimitDaySeconds, nil
 	case "concurrent", "concurrency":
-		return 0, nil
+		return rateLimitConcurrentSeconds, nil
 	default:
 		return 0, fmt.Errorf("period must be one of minute, hour, day, concurrent or period_seconds must be set")
 	}

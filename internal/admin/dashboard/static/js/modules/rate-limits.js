@@ -254,9 +254,15 @@
             rateLimitFormPayload() {
                 const form = this.rateLimitForm || {};
                 const isConcurrent = String(form.period || '') === 'concurrent';
-                const periodSeconds = Number(form.period_seconds);
-                if (!Number.isInteger(periodSeconds) || periodSeconds < 0) {
-                    return { error: 'Period seconds must be 0 (concurrent) or a positive integer.' };
+                // Reject blank custom seconds before Number(): Number('') is 0,
+                // which would silently submit a concurrent rule.
+                const rawPeriodSeconds = form.period_seconds;
+                if (rawPeriodSeconds === '' || rawPeriodSeconds === null || rawPeriodSeconds === undefined) {
+                    return { error: 'Period seconds is required.' };
+                }
+                const periodSeconds = Number(rawPeriodSeconds);
+                if (!Number.isInteger(periodSeconds) || periodSeconds < 0 || (periodSeconds === 0 && !isConcurrent)) {
+                    return { error: 'Period seconds must be a positive integer (0 only for the concurrent period).' };
                 }
                 const maxRequests = String(form.max_requests === undefined || form.max_requests === null ? '' : form.max_requests).trim();
                 const maxTokens = String(form.max_tokens === undefined || form.max_tokens === null ? '' : form.max_tokens).trim();

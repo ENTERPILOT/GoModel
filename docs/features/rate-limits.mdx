@@ -139,8 +139,10 @@ Requests over a limit receive:
 }
 ```
 
-with status `429` and a `Retry-After` header holding the seconds until the
-window rolls. OpenAI SDKs back off automatically on this shape.
+with status `429` and a `Retry-After` header holding the seconds until a
+retry would actually be admitted under the sliding window (which can extend
+past the next window boundary). OpenAI SDKs back off automatically on this
+shape.
 
 Successful responses on limited paths carry OpenAI-style headers from the
 most-constrained matching rule:
