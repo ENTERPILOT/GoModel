@@ -34,10 +34,11 @@ var Registration = providers.Registration{
 // Transport goes through the shared compatible provider; Bailian's only chat
 // quirk is the max_tokens -> max_completion_tokens mapping (Bailian
 // deprecated max_tokens in April 2026), applied via the AdaptChatRequest
-// hook so every chat-derived path picks it up. Methods are delegated
-// explicitly rather than embedded because Bailian's upstream lacks parts of
-// the full OpenAI surface (audio, native /responses) and embedding cannot
-// subtract methods.
+// hook so every chat-derived path picks it up. Batch and file capabilities
+// are exposed through the embedded facet surfaces; the remaining methods are
+// delegated explicitly through the compatible provider rather than embedding
+// it whole, because Bailian's upstream lacks parts of the full OpenAI
+// surface (audio, native /responses) and embedding cannot subtract methods.
 type Provider struct {
 	*openai.BatchSurface
 	*openai.FileSurface
