@@ -328,3 +328,32 @@ func TestBalancer_SaturationFallbackSkipsUnavailableTargets(t *testing.T) {
 		}
 	}
 }
+
+// The cost strategy prices only the capacity-filtered pool: a cheaper but
+// rate-saturated target loses to a costlier one that can actually serve.
+func TestBalancer_CostSkipsSaturatedCheapestTarget(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	// groq/llama (0.5/0.8 per Mtok) is the cheapest but saturated; the next
+	// cheapest with capacity is openai/gpt-4o (2.5/10), ahead of
+	// anthropic/claude (3/15).
+	svc.SetTargetCapacity(func(qualified string) bool { return qualified != "groq/llama" })
+	if err := svc.Upsert(context.Background(), VirtualModel{
+		Source:   "cheap",
+		Strategy: StrategyCost,
+		Targets: []Target{
+			{Provider: "groq", Model: "llama"},
+			{Provider: "anthropic", Model: "claude"},
+			{Provider: "openai", Model: "gpt-4o"},
+		},
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+
+	for i, got := range resolvedModels(t, svc, "cheap", 3) {
+		if got != "openai/gpt-4o" {
+			t.Fatalf("resolution[%d] = %q, want cheapest target WITH capacity (openai/gpt-4o)", i, got)
+		}
+	}
+}
