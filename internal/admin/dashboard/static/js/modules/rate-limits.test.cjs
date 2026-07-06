@@ -374,3 +374,54 @@ test('inspector opens the editor prefilled and returns on close', () => {
     assert.equal(module.rateLimitForm.max_requests, '5');
     assert.equal(JSON.stringify(module.rateLimitEditingOriginal), JSON.stringify({ scope: 'provider', subject: 'openai', period_seconds: 60 }));
 });
+
+test('pressure percent, style, and class ramp with usage', () => {
+    const module = createRateLimitsModule();
+
+    const low = { period_seconds: 60, max_requests: 100, requests_used: 10, max_tokens: 1000, tokens_used: 200 };
+    assert.equal(module.rateLimitPressurePercent(low), 20);
+    assert.equal(module.rateLimitPressureStyle(low), '--rate-limit-pressure: 20%');
+    assert.equal(module.rateLimitPressureClass(low), 'rate-limit-pressure-row');
+
+    const high = { period_seconds: 60, max_requests: 100, requests_used: 80 };
+    assert.equal(module.rateLimitPressureClass(high), 'rate-limit-pressure-row rate-limit-pressure-high');
+
+    const full = { period_seconds: 60, max_tokens: 100, tokens_used: 250 };
+    assert.equal(module.rateLimitPressurePercent(full), 100);
+    assert.equal(module.rateLimitPressureClass(full), 'rate-limit-pressure-row rate-limit-pressure-full');
+
+    const concurrent = { period_seconds: 0, max_requests: 4, in_flight: 3 };
+    assert.equal(module.rateLimitPressurePercent(concurrent), 75);
+    assert.equal(module.rateLimitPressureClass(concurrent), 'rate-limit-pressure-row rate-limit-pressure-high');
+});
+
+test('gauge indicator distinguishes direct, inherited, and no limits', () => {
+    const module = createRateLimitsModule();
+    module.rateLimits = [
+        { scope: 'model', subject: 'openai/gpt-4o', period_seconds: 60 },
+        { scope: 'provider', subject: 'openai', period_seconds: 60 }
+    ];
+
+    const gpt4o = { provider_name: 'OpenAI', model: { id: 'gpt-4o' } };
+    const gpt4oMini = { provider_name: 'openai', model: { id: 'gpt-4o-mini' } };
+    const claude = { provider_name: 'anthropic', model: { id: 'claude' } };
+
+    // Direct model rule → fully painted.
+    assert.equal(module.rateLimitGaugeClassForModel(gpt4o), 'table-action-btn-active');
+    // Only the provider rule throttles this model → half painted.
+    assert.equal(module.rateLimitGaugeClassForModel(gpt4oMini), 'rate-limit-gauge-inherited');
+    // Nothing applies.
+    assert.equal(module.rateLimitGaugeClassForModel(claude), '');
+
+    assert.equal(module.rateLimitGaugeClassForProvider({ provider_name: 'openai' }), 'table-action-btn-active');
+    assert.equal(module.rateLimitGaugeClassForProvider({ provider_name: 'anthropic' }), '');
+
+    // A root user-path rule throttles everything → inherited for all.
+    module.rateLimits.push({ scope: 'user_path', subject: '/', user_path: '/', period_seconds: 60 });
+    assert.equal(module.rateLimitGaugeClassForModel(claude), 'rate-limit-gauge-inherited');
+    assert.equal(module.rateLimitGaugeClassForProvider({ provider_name: 'anthropic' }), 'rate-limit-gauge-inherited');
+
+    assert.match(module.rateLimitGaugeTitle('gpt-4o', 'table-action-btn-active'), /direct limits configured/);
+    assert.match(module.rateLimitGaugeTitle('claude', 'rate-limit-gauge-inherited'), /inherited limits apply/);
+    assert.equal(module.rateLimitGaugeTitle('claude', ''), 'Rate limits for claude');
+});

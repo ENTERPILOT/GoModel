@@ -48,7 +48,10 @@
                 <p class="empty-state" x-show="section.items.length === 0">No rules.</p>
                 <div class="budget-list" x-show="section.items.length > 0">
                     <template x-for="item in section.items" :key="rateLimitKey(item)">
-                        <section class="budget-row">
+                        <section class="budget-row"
+                                 :class="rateLimitPressureClass(item)"
+                                 :style="rateLimitPressureStyle(item)"
+                                 :title="rateLimitPressurePercent(item) + '% of the most constrained cap used'">
                             <div class="budget-row-main">
                                 <div class="budget-row-head">
                                     <code class="budget-user-path" x-text="rateLimitSubject(item)"></code>

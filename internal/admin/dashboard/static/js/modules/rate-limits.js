@@ -672,6 +672,74 @@
                 return sections;
             },
 
+            // rateLimitPressurePercent reports how close a rule is to its most
+            // constrained cap (0..100), across requests, tokens, and in-flight.
+            rateLimitPressurePercent(item) {
+                if (this.rateLimitIsConcurrent(item)) {
+                    return this.rateLimitUsagePercent(item.in_flight, item.max_requests);
+                }
+                return Math.max(
+                    this.rateLimitUsagePercent(item.requests_used, item.max_requests),
+                    this.rateLimitUsagePercent(item.tokens_used, item.max_tokens)
+                );
+            },
+
+            rateLimitPressureStyle(item) {
+                return '--rate-limit-pressure: ' + this.rateLimitPressurePercent(item) + '%';
+            },
+
+            rateLimitPressureClass(item) {
+                const percent = this.rateLimitPressurePercent(item);
+                if (percent >= 100) {
+                    return 'rate-limit-pressure-row rate-limit-pressure-full';
+                }
+                if (percent >= 75) {
+                    return 'rate-limit-pressure-row rate-limit-pressure-high';
+                }
+                return 'rate-limit-pressure-row';
+            },
+
+            // Gauge indicator states on the Models page: fully painted when the
+            // subject has its own rules, half painted when only provider or
+            // global rules throttle it, plain otherwise.
+            rateLimitGaugeClassForModel(row) {
+                const model = this.rateLimitInspectorModelID(row);
+                const provider = String(row && row.provider_name || '').trim().toLowerCase();
+                const rules = Array.isArray(this.rateLimits) ? this.rateLimits : [];
+                if (rules.some((rule) => this.rateLimitRuleMatchesModel(rule, provider, model))) {
+                    return 'table-action-btn-active';
+                }
+                if (rules.some((rule) => this.rateLimitRuleMatchesProvider(rule, provider)) || this.hasGlobalRateLimits()) {
+                    return 'rate-limit-gauge-inherited';
+                }
+                return '';
+            },
+
+            rateLimitGaugeClassForProvider(group) {
+                const provider = String(group && group.provider_name || '').trim().toLowerCase();
+                const rules = Array.isArray(this.rateLimits) ? this.rateLimits : [];
+                if (rules.some((rule) => this.rateLimitRuleMatchesProvider(rule, provider))) {
+                    return 'table-action-btn-active';
+                }
+                return this.hasGlobalRateLimits() ? 'rate-limit-gauge-inherited' : '';
+            },
+
+            hasGlobalRateLimits() {
+                const rules = Array.isArray(this.rateLimits) ? this.rateLimits : [];
+                return rules.some((rule) => this.rateLimitScope(rule) === 'user_path' && this.rateLimitSubject(rule) === '/');
+            },
+
+            rateLimitGaugeTitle(subject, gaugeClass) {
+                const base = 'Rate limits for ' + subject;
+                if (gaugeClass === 'table-action-btn-active') {
+                    return base + ' (direct limits configured)';
+                }
+                if (gaugeClass) {
+                    return base + ' (inherited limits apply)';
+                }
+                return base;
+            },
+
             rateLimitInspectorSummary(item) {
                 if (this.rateLimitIsConcurrent(item)) {
                     return this.formatRateLimitNumber(item.in_flight) + ' of ' + this.formatRateLimitNumber(item.max_requests) + ' in flight';

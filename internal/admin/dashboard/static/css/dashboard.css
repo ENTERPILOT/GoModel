@@ -6199,3 +6199,41 @@ body.conversation-drawer-open {
   border-color: color-mix(in srgb, var(--success) 40%, var(--border));
   color: var(--success);
 }
+
+/* Rate limit inspector: the row background doubles as a usage meter. The
+   gradient sits in background-image so the surface color underneath stays. */
+.rate-limit-pressure-row {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--success) 16%, transparent) var(--rate-limit-pressure, 0%),
+    transparent var(--rate-limit-pressure, 0%)
+  );
+}
+
+.rate-limit-pressure-row.rate-limit-pressure-high {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--warning) 20%, transparent) var(--rate-limit-pressure, 0%),
+    transparent var(--rate-limit-pressure, 0%)
+  );
+}
+
+.rate-limit-pressure-row.rate-limit-pressure-full {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--danger) 22%, transparent) var(--rate-limit-pressure, 0%),
+    transparent var(--rate-limit-pressure, 0%)
+  );
+}
+
+/* Models page gauge button: half painted when only provider or global rules
+   throttle the subject (direct rules use table-action-btn-active). */
+.table-icon-btn.rate-limit-gauge-inherited {
+  color: var(--accent-strong, var(--accent));
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--accent) 22%, var(--bg)) 50%,
+    var(--bg) 50%
+  );
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}

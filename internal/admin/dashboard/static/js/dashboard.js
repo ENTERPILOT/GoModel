@@ -261,8 +261,10 @@ function dashboard() {
       if (page === "budgets" && typeof this.fetchBudgetsPage === "function") {
         this.fetchBudgetsPage();
       }
+      // The models page needs rules too: its gauge buttons indicate which
+      // models and providers have direct or inherited rate limits.
       if (
-        page === "rate-limits" &&
+        (page === "rate-limits" || page === "models") &&
         typeof this.fetchRateLimitsPage === "function"
       ) {
         this.fetchRateLimitsPage();
@@ -658,8 +660,10 @@ function dashboard() {
       ) {
         requests.push(this.fetchBudgetsPage());
       }
+      // The models page needs rules too: its gauge buttons indicate which
+      // models and providers have direct or inherited rate limits.
       if (
-        this.page === "rate-limits" &&
+        (this.page === "rate-limits" || this.page === "models") &&
         typeof this.fetchRateLimitsPage === "function"
       ) {
         requests.push(this.fetchRateLimitsPage());
