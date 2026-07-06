@@ -47,6 +47,7 @@ const (
 const (
 	LiveEventAuditStarted   = "audit.started"
 	LiveEventAuditUpdated   = "audit.updated"
+	LiveEventAuditStream    = "audit.stream"
 	LiveEventAuditCompleted = "audit.completed"
 	LiveEventAuditFailed    = "audit.failed"
 	LiveEventAuditFlushed   = "audit.flushed"
@@ -65,6 +66,13 @@ type LiveEventPublisher interface {
 // previews before the entry is persisted.
 type LiveEventEmitter interface {
 	PublishLiveEvent(eventType string, entry *LogEntry)
+}
+
+// LiveSubscriberReporter is optionally implemented by live publishers (and
+// emitters) that can report whether any dashboard subscriber is currently
+// connected. Publishers that cannot tell are treated as always subscribed.
+type LiveSubscriberReporter interface {
+	HasLiveSubscribers() bool
 }
 
 // LogEntry represents a single audit log entry.

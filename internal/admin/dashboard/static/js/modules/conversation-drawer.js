@@ -86,19 +86,80 @@
 
                 const requestToken = ++this.conversationRequestToken;
                 this.conversationOpen = true;
-                this.conversationLoading = true;
                 this.conversationError = '';
                 this.conversationAnchorID = entry.id;
                 this.conversationEntries = [];
                 this.conversationMessages = [];
                 document.body.classList.add('conversation-drawer-open');
                 requestAnimationFrame(() => this._focusConversationDrawer());
+
+                // A live entry has no persisted row to fetch yet — render it
+                // from the live preview data and keep re-rendering as stream
+                // events arrive (see refreshLiveConversation).
+                if (this._conversationEntryLivePending(entry)) {
+                    this.conversationLiveEntryId = String(entry.id).trim();
+                    this.conversationLoading = false;
+                    this.applyLiveConversationEntry(entry);
+                    return;
+                }
+                this.conversationLiveEntryId = '';
+                this.conversationLoading = true;
                 await this.fetchConversation(entry.id, requestToken);
+            },
+
+            _conversationEntryLivePending(entry) {
+                if (!entry || !entry._live) return false;
+                if (typeof this.auditEntryLiveDetailPending === 'function') {
+                    return this.auditEntryLiveDetailPending(entry);
+                }
+                return !!entry._live_pending;
+            },
+
+            applyLiveConversationEntry(entry) {
+                this.conversationEntries = [entry];
+                this.conversationMessages = this.buildConversationMessages([entry], entry.id);
+            },
+
+            // refreshLiveConversation re-renders an open live conversation when
+            // its audit entry merges a new live event. Once the entry is
+            // persisted, the full thread (prior turns, final bodies) is
+            // hydrated from the store instead.
+            refreshLiveConversation(entry) {
+                if (!this.conversationOpen || !this.conversationLiveEntryId || !entry) return;
+                if (String(entry.id || '').trim() !== this.conversationLiveEntryId) return;
+                const state = String(entry._live_state || '').trim();
+                if (state === 'audit.flushed' || state === 'audit.detail') {
+                    this.conversationLiveEntryId = '';
+                    const requestToken = ++this.conversationRequestToken;
+                    this.fetchConversation(entry.id, requestToken);
+                    return;
+                }
+                this.applyLiveConversationEntry(entry);
+            },
+
+            // conversationLiveWaiting reports whether the open live conversation
+            // is still waiting on the in-flight request (drives the drawer's
+            // progress spinner).
+            conversationLiveWaiting() {
+                if (!this.conversationOpen || !this.conversationLiveEntryId) return false;
+                const entry = (this.conversationEntries || [])[0];
+                if (!entry) return true;
+                const rank = typeof this.liveAuditStateRank === 'function'
+                    ? this.liveAuditStateRank(entry._live_state)
+                    : 0;
+                return rank < 30; // below audit.completed: still in flight
+            },
+
+            conversationLiveStatusText() {
+                return (this.conversationMessages || []).length > 0
+                    ? 'Model is responding…'
+                    : 'Waiting for request data…';
             },
 
             closeConversation() {
                 this.conversationOpen = false;
                 this.conversationRequestToken++;
+                this.conversationLiveEntryId = '';
                 document.body.classList.remove('conversation-drawer-open');
                 const returnFocusEl = this.conversationReturnFocusEl;
                 this.conversationReturnFocusEl = null;

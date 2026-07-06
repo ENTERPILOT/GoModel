@@ -111,6 +111,25 @@ func (l *Logger) PublishLiveEvent(eventType string, entry *LogEntry) {
 	publisher.PublishAuditEvent(eventType, entry)
 }
 
+// HasLiveSubscribers reports whether the attached live publisher currently has
+// connected dashboard subscribers. Used to skip building live body previews
+// that nobody would receive; a publisher that cannot tell counts as subscribed.
+func (l *Logger) HasLiveSubscribers() bool {
+	if l == nil {
+		return false
+	}
+	l.liveMu.RLock()
+	publisher := l.livePublisher
+	l.liveMu.RUnlock()
+	if publisher == nil {
+		return false
+	}
+	if reporter, ok := publisher.(LiveSubscriberReporter); ok {
+		return reporter.HasLiveSubscribers()
+	}
+	return true
+}
+
 // Config returns the logger configuration
 func (l *Logger) Config() Config {
 	return l.config

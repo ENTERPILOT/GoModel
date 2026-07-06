@@ -867,6 +867,96 @@ func TestBrokerCompactsOversizedRetainedEvents(t *testing.T) {
 	}
 }
 
+func TestBrokerAuditStreamPreviewCarriesPartialResponseBody(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	sub := b.Subscribe(0)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+
+	b.PublishAuditEvent(EventAuditStream, &auditlog.LogEntry{
+		ID:         "audit-1",
+		RequestID:  "req-1",
+		Timestamp:  time.Now(),
+		StatusCode: 200,
+		Stream:     true,
+		Data: &auditlog.LogData{
+			ResponseBody: map[string]any{
+				"object": "chat.completion",
+				"choices": []any{map[string]any{
+					"index":   0,
+					"message": map[string]any{"role": "assistant", "content": "partial"},
+				}},
+			},
+		},
+	})
+
+	// Connected subscribers receive the partial body, flagged as partial and
+	// still pending.
+	payload := eventPayload(t, <-sub.Events)
+	if payload["_live_state"] != EventAuditStream {
+		t.Fatalf("_live_state = %#v, want %q", payload["_live_state"], EventAuditStream)
+	}
+	if payload["_live_pending"] != true {
+		t.Fatalf("_live_pending = %#v, want true", payload["_live_pending"])
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("preview data = %T, want object", payload["data"])
+	}
+	if _, ok := data["response_body"].(map[string]any); !ok {
+		t.Fatalf("response_body = %#v, want partial body", data["response_body"])
+	}
+	if data["response_body_partial"] != true {
+		t.Fatalf("response_body_partial = %#v, want true", data["response_body_partial"])
+	}
+
+	// The replay ring drops the partial body without claiming it was captured
+	// (it is not in the persisted entry yet) and without the partial flag,
+	// which would go stale in merged active snapshots.
+	retained := eventPayload(t, b.events[0])
+	retainedData, ok := retained["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("retained preview data = %T, want object", retained["data"])
+	}
+	if _, ok := retainedData["response_body"]; ok {
+		t.Fatal("retained preview contains partial response body")
+	}
+	if _, ok := retainedData["response_body_captured"]; ok {
+		t.Fatal("retained preview claims a partial body was captured")
+	}
+	if _, ok := retainedData["response_body_partial"]; ok {
+		t.Fatal("retained preview keeps the partial flag")
+	}
+}
+
+func TestBrokerHasLiveSubscribers(t *testing.T) {
+	var nilBroker *Broker
+	if nilBroker.HasLiveSubscribers() {
+		t.Fatal("nil broker reports subscribers")
+	}
+	if NewBroker(Config{}).HasLiveSubscribers() {
+		t.Fatal("disabled broker reports subscribers")
+	}
+
+	b := NewBroker(Config{Enabled: true})
+	if b.HasLiveSubscribers() {
+		t.Fatal("fresh broker reports subscribers")
+	}
+	sub := b.Subscribe(0)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	if !b.HasLiveSubscribers() {
+		t.Fatal("broker with a subscription reports none")
+	}
+	sub.Close()
+	if b.HasLiveSubscribers() {
+		t.Fatal("broker reports subscribers after unsubscribe")
+	}
+}
+
 func eventPayload(t *testing.T, event Event) map[string]any {
 	t.Helper()
 	var payload map[string]any

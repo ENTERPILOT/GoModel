@@ -198,6 +198,7 @@ function dashboard() {
     conversationMessages: [],
     conversationRequestToken: 0,
     conversationReturnFocusEl: null,
+    conversationLiveEntryId: "",
     bodyPointerStart: null,
 
     _parseRoute(pathname) {

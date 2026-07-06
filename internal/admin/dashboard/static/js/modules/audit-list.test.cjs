@@ -91,6 +91,59 @@ test('auditResponsePane returns the shared response-pane contract', () => {
     assert.equal(pane.tooLargeMessage, 'Response body was too large to capture.');
 });
 
+test('auditEntryLiveInProgress stays true while a partial response body is streaming', () => {
+    const module = createAuditListModule();
+    const streaming = {
+        _live: true,
+        _live_pending: true,
+        _live_state: 'audit.stream',
+        _response_partial: true,
+        status_code: 200,
+        data: { response_body: { choices: [] } }
+    };
+
+    assert.equal(module.auditEntryLiveInProgress(streaming), true);
+    assert.equal(module.auditEntryLiveInProgress({
+        ...streaming,
+        _live_state: 'audit.completed',
+        _response_partial: false,
+        duration_ns: 1000
+    }), false);
+});
+
+test('audit panes surface pending spinners and streaming badges for live rows', () => {
+    const module = createAuditListModule();
+
+    const waiting = { _live: true, _live_pending: true, _live_state: 'audit.updated', data: {} };
+    const waitingResponse = module.auditResponsePane(waiting);
+    assert.equal(waitingResponse.showPending, true);
+    assert.equal(waitingResponse.showEmpty, false);
+    assert.equal(waitingResponse.pendingMessage, 'Response in progress…');
+    const waitingRequest = module.auditRequestPane(waiting);
+    assert.equal(waitingRequest.showPending, true);
+    assert.equal(waitingRequest.showEmpty, false);
+    assert.equal(waitingRequest.pendingMessage, 'Waiting for request data…');
+
+    const streaming = {
+        _live: true,
+        _live_pending: true,
+        _live_state: 'audit.stream',
+        _response_partial: true,
+        status_code: 200,
+        data: { response_body: { choices: [{ index: 0, message: { role: 'assistant', content: 'partial' } }] } }
+    };
+    const streamingPane = module.auditResponsePane(streaming);
+    assert.equal(streamingPane.streaming, true);
+    assert.equal(streamingPane.showBody, true);
+    assert.equal(streamingPane.showPending, false);
+
+    const persisted = { data: {} };
+    const persistedPane = module.auditResponsePane(persisted);
+    assert.equal(persistedPane.showPending, false);
+    assert.equal(persistedPane.showEmpty, true);
+    assert.equal(persistedPane.streaming, false);
+});
+
 test('audit cache helpers summarize cached prompt usage and derive a preview from the request body', () => {
     const module = createAuditListModule({
         window: {

@@ -18,6 +18,11 @@ type responseWriterUnwrapper interface {
 
 const maxResponseWriterUnwrapDepth = 10
 
+// livePreviewInterval throttles partial-response live events published while a
+// stream is still running, bounding the marshal/fan-out cost per stream while
+// keeping the dashboard preview well within a 1-2s freshness target.
+const livePreviewInterval = 500 * time.Millisecond
+
 // StreamLogObserver reconstructs stream metadata and optional response bodies
 // from parsed SSE JSON payloads.
 type StreamLogObserver struct {
@@ -27,6 +32,12 @@ type StreamLogObserver struct {
 	logBodies bool
 	closed    bool
 	startTime time.Time
+
+	// live, when the logger supports it, receives throttled partial-response
+	// previews so connected dashboards can render the stream as it arrives.
+	live           LiveEventEmitter
+	lastPreviewAt  time.Time
+	lastPreviewLen int
 }
 
 func NewStreamLogObserver(logger LoggerInterface, entry *LogEntry, path string) *StreamLogObserver {
@@ -42,12 +53,14 @@ func NewStreamLogObserver(logger LoggerInterface, entry *LogEntry, path string) 
 		}
 	}
 
+	live, _ := logger.(LiveEventEmitter)
 	return &StreamLogObserver{
 		logger:    logger,
 		entry:     entry,
 		builder:   builder,
 		logBodies: logBodies,
 		startTime: entry.Timestamp,
+		live:      live,
 	}
 }
 
@@ -63,6 +76,49 @@ func (o *StreamLogObserver) OnJSONEvent(event map[string]any) {
 		return
 	}
 	observeStreamJSONEvent(o.builder, event)
+	o.maybePublishLivePreview()
+}
+
+// maybePublishLivePreview publishes the partially reconstructed response body
+// as an audit.stream live event. Publishes are skipped until new content
+// accumulated, throttled to livePreviewInterval, and dropped entirely while no
+// dashboard is subscribed (the next connected subscriber catches up on the
+// following tick because each preview carries the full accumulated body).
+func (o *StreamLogObserver) maybePublishLivePreview() {
+	if o.live == nil || o.entry == nil || o.entry.Data == nil {
+		return
+	}
+	if o.builder.contentLen == o.lastPreviewLen {
+		return
+	}
+	if time.Since(o.lastPreviewAt) < livePreviewInterval {
+		return
+	}
+	o.lastPreviewAt = time.Now()
+	if !liveSubscribed(o.live) {
+		return
+	}
+	o.lastPreviewLen = o.builder.contentLen
+	o.applyResponseBody()
+	o.live.PublishLiveEvent(LiveEventAuditStream, o.entry)
+}
+
+func liveSubscribed(live LiveEventEmitter) bool {
+	if reporter, ok := live.(LiveSubscriberReporter); ok {
+		return reporter.HasLiveSubscribers()
+	}
+	return true
+}
+
+// applyResponseBody snapshots the builder's current reconstruction onto the
+// entry. Called for each live preview and once more when the stream closes.
+func (o *StreamLogObserver) applyResponseBody() {
+	if o.builder.IsResponsesAPI {
+		o.entry.Data.ResponseBody = o.builder.buildResponsesAPIResponse()
+	} else {
+		o.entry.Data.ResponseBody = o.builder.buildChatCompletionResponse()
+	}
+	o.entry.Data.ResponseBodyTooBigToHandle = o.builder.truncated
 }
 
 func (o *StreamLogObserver) OnStreamClose() {
@@ -76,12 +132,7 @@ func (o *StreamLogObserver) OnStreamClose() {
 	}
 
 	if o.logBodies && o.builder != nil && o.entry != nil && o.entry.Data != nil {
-		if o.builder.IsResponsesAPI {
-			o.entry.Data.ResponseBody = o.builder.buildResponsesAPIResponse()
-		} else {
-			o.entry.Data.ResponseBody = o.builder.buildChatCompletionResponse()
-		}
-		o.entry.Data.ResponseBodyTooBigToHandle = o.builder.truncated
+		o.applyResponseBody()
 	}
 
 	if o.logger != nil && o.entry != nil {

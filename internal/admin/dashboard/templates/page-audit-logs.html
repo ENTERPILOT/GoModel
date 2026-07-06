@@ -180,7 +180,7 @@
         <div id="interactions-drawer-content">
             <div class="alert alert-warning" x-show="conversationError" x-text="conversationError"></div>
             <p class="empty-state" x-show="conversationLoading">Loading interactions...</p>
-            <p class="empty-state" x-show="!conversationLoading && !conversationError && conversationMessages.length === 0">No interaction data available for this entry.</p>
+            <p class="empty-state" x-show="!conversationLoading && !conversationError && conversationMessages.length === 0 && !conversationLiveWaiting()">No interaction data available for this entry.</p>
 
             <div class="conversation-thread" x-show="conversationMessages.length > 0">
                 <template x-for="msg in conversationMessages" :key="msg.uid">
@@ -206,6 +206,11 @@
                         </footer>
                     </article>
                 </template>
+            </div>
+
+            <div class="conversation-live-status" x-show="conversationLiveWaiting()">
+                <span class="loading-spinner" aria-hidden="true"></span>
+                <span x-text="conversationLiveStatusText()"></span>
             </div>
         </div>
 

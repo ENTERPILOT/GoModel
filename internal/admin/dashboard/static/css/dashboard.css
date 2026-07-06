@@ -3704,6 +3704,23 @@ textarea:focus {
   padding: 8px 0 0;
 }
 
+.audit-pane-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-pane-streaming {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
 .audit-size-warning {
   margin-top: 8px;
   color: var(--warning);
@@ -3779,6 +3796,15 @@ body.conversation-drawer-open {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.conversation-live-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 16px 20px;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 .chat-message {

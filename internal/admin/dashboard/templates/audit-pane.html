@@ -34,6 +34,10 @@
             <div class="audit-pane-block-title">
                 <h5>Body</h5>
                 <span class="audit-prompt-cache-pill mono" x-show="pane.bodyCacheRatioLabel" x-text="pane.bodyCacheRatioLabel"></span>
+                <span class="audit-pane-streaming" x-show="pane.streaming">
+                    <span class="live-dot is-streaming" aria-hidden="true"></span>
+                    <span>streaming</span>
+                </span>
             </div>
             <button type="button" class="copy-feedback-btn audit-copy-btn"
                 :class="{ 'copy-feedback-btn-copied': copyBodyState.copied }"
@@ -53,6 +57,10 @@
              @click="handleBodyConversationClick($event, pane.entry)"></pre>
     </div>
     <p class="empty-state audit-pane-empty" x-show="pane.showEmpty" x-text="pane.emptyMessage"></p>
+    <p class="empty-state audit-pane-empty audit-pane-pending" x-show="pane.showPending">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <span x-text="pane.pendingMessage"></span>
+    </p>
     <p class="audit-size-warning" x-show="pane.showTooLarge" x-text="pane.tooLargeMessage"></p>
 </section>
 {{end}}
