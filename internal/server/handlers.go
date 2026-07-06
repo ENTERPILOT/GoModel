@@ -33,6 +33,8 @@ type Handler struct {
 	usageLogger                     usage.LoggerInterface
 	budgetChecker                   BudgetChecker
 	rateLimiter                     RateLimiter
+	usageSummarizer                 UsageSummarizer
+	userPathHeaderName              string
 	pricingResolver                 usage.PricingResolver
 	batchStore                      batchstore.Store
 	fileStore                       filestore.Store

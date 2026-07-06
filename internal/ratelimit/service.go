@@ -226,6 +226,32 @@ func (s *Service) Statuses(now time.Time) []Status {
 	return statuses
 }
 
+// StatusesForUserPath reports live counter state for every user-path-scoped
+// rule covering userPath (subtree match). Provider- and model-scoped rules are
+// excluded: they describe shared infrastructure capacity, not the consumer.
+func (s *Service) StatusesForUserPath(userPath string, now time.Time) []Status {
+	if s == nil {
+		return nil
+	}
+	userPath, err := NormalizeUserPath(userPath)
+	if err != nil {
+		return nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	now = now.UTC()
+
+	var statuses []Status
+	for _, rule := range s.Rules() {
+		if rule.Scope != ScopeUserPath || !ruleAppliesToPath(rule.Subject, userPath) {
+			continue
+		}
+		statuses = append(statuses, s.limiter.status(rule, now))
+	}
+	return statuses
+}
+
 // ResetRule clears the live window counters for one rule.
 func (s *Service) ResetRule(scope RuleScope, subject string, periodSeconds int64) error {
 	if s == nil {

@@ -336,8 +336,8 @@ var validIntervals = map[string]bool{
 const (
 	dashboardTimeZoneHeader = "X-GoModel-Timezone"
 	defaultDashboardTZ      = "UTC"
-	defaultDateRangeDays    = 30
-	maxDateRangeDays        = 365
+	defaultDateRangeDays    = usage.DefaultDateRangeDays
+	maxDateRangeDays        = usage.MaxDateRangeDays
 )
 
 var timeNow = time.Now
@@ -395,60 +395,13 @@ func parseDateRangeParams(c *echo.Context) (usage.UsageQueryParams, error) {
 		}
 	}
 
-	start, end, err := buildDateRange(strings.TrimSpace(c.QueryParam("start_date")), strings.TrimSpace(c.QueryParam("end_date")), days, location, today)
+	start, end, err := usage.BuildDateRange(strings.TrimSpace(c.QueryParam("start_date")), strings.TrimSpace(c.QueryParam("end_date")), days, location, today)
 	if err != nil {
 		return params, err
 	}
 	params.StartDate = start
 	params.EndDate = end
 	return params, nil
-}
-
-func buildDateRange(startStr, endStr string, days int, location *time.Location, today time.Time) (time.Time, time.Time, error) {
-	var start, end time.Time
-	var startParsed, endParsed bool
-
-	if startStr != "" {
-		t, err := time.ParseInLocation("2006-01-02", startStr, location)
-		if err != nil {
-			return time.Time{}, time.Time{}, core.NewInvalidRequestError("invalid start_date format, expected YYYY-MM-DD", nil)
-		}
-		start = t
-		startParsed = true
-	}
-	if endStr != "" {
-		t, err := time.ParseInLocation("2006-01-02", endStr, location)
-		if err != nil {
-			return time.Time{}, time.Time{}, core.NewInvalidRequestError("invalid end_date format, expected YYYY-MM-DD", nil)
-		}
-		end = t
-		endParsed = true
-	}
-
-	if startParsed || endParsed {
-		if !startParsed {
-			start = end.AddDate(0, 0, -29)
-		}
-		if !endParsed {
-			end = today
-		}
-	} else {
-		days = normalizeDateRangeDays(days)
-		end = today
-		start = today.AddDate(0, 0, -(days - 1))
-	}
-
-	if start.After(end) {
-		return time.Time{}, time.Time{}, core.NewInvalidRequestError("start_date must be on or before end_date", nil)
-	}
-	return start, end, nil
-}
-
-func normalizeDateRangeDays(days int) int {
-	if days <= 0 {
-		return defaultDateRangeDays
-	}
-	return min(days, maxDateRangeDays)
 }
 
 func dashboardTimeZone(c *echo.Context) (string, *time.Location) {

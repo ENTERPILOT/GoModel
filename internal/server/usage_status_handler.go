@@ -1,0 +1,232 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/labstack/echo/v5"
+
+	"gomodel/internal/budget"
+	"gomodel/internal/core"
+	"gomodel/internal/ratelimit"
+	"gomodel/internal/usage"
+)
+
+// UsageSummarizer aggregates recorded usage entries for the self-service
+// usage endpoint. Usage readers satisfy it; the endpoint deliberately needs
+// only the summary slice of the full reader interface.
+type UsageSummarizer interface {
+	GetSummary(ctx context.Context, params usage.UsageQueryParams) (*usage.UsageSummary, error)
+}
+
+// budgetStatusReporter and rateLimitStatusReporter are optional upgrades of
+// the enforcement interfaces already wired into the handler. The concrete
+// budget and rate limit services implement them; enforcement-only fakes keep
+// working and simply yield no status.
+type budgetStatusReporter interface {
+	StatusesForPath(ctx context.Context, userPath string, now time.Time) ([]budget.CheckResult, error)
+}
+
+type rateLimitStatusReporter interface {
+	StatusesForUserPath(userPath string, now time.Time) []ratelimit.Status
+}
+
+// usageStatusResponse is the self-service view of one user path: recorded
+// usage over a date window plus every budget and rate limit rule gating it.
+type usageStatusResponse struct {
+	UserPath   string                 `json:"user_path"`
+	ServerTime time.Time              `json:"server_time"`
+	Usage      *usageStatusSummary    `json:"usage"`
+	Budgets    []usageStatusBudget    `json:"budgets"`
+	RateLimits []usageStatusRateLimit `json:"rate_limits"`
+}
+
+type usageStatusSummary struct {
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
+	usage.UsageSummary
+}
+
+type usageStatusBudget struct {
+	UserPath      string    `json:"user_path"`
+	PeriodSeconds int64     `json:"period_seconds"`
+	PeriodLabel   string    `json:"period_label"`
+	Amount        float64   `json:"amount"`
+	Spent         float64   `json:"spent"`
+	Remaining     float64   `json:"remaining"`
+	PeriodStart   time.Time `json:"period_start"`
+	PeriodEnd     time.Time `json:"period_end"`
+	Exceeded      bool      `json:"exceeded"`
+}
+
+type usageStatusRateLimit struct {
+	UserPath          string     `json:"user_path"`
+	PeriodSeconds     int64      `json:"period_seconds"`
+	PeriodLabel       string     `json:"period_label"`
+	MaxRequests       *int64     `json:"max_requests,omitempty"`
+	MaxTokens         *int64     `json:"max_tokens,omitempty"`
+	RequestsUsed      int64      `json:"requests_used"`
+	RequestsRemaining *int64     `json:"requests_remaining,omitempty"`
+	TokensUsed        int64      `json:"tokens_used"`
+	TokensRemaining   *int64     `json:"tokens_remaining,omitempty"`
+	InFlight          int64      `json:"in_flight"`
+	WindowStart       *time.Time `json:"window_start,omitempty"`
+	WindowEnd         *time.Time `json:"window_end,omitempty"`
+}
+
+// UsageStatus handles GET /v1/usage.
+//
+// @Summary      Self-service usage, budget, and rate limit status
+// @Description  Returns recorded usage, budget statuses, and rate limit statuses for the caller's effective user path (the path bound to the managed API key, or the user-path header for master-key callers).
+// @Tags         usage
+// @Produce      json
+// @Security     BearerAuth
+// @Param        start_date  query  string  false  "Inclusive window start (YYYY-MM-DD, UTC); defaults to 29 days before end_date"
+// @Param        end_date    query  string  false  "Inclusive window end (YYYY-MM-DD, UTC); defaults to today"
+// @Param        days        query  int     false  "Window length ending today when no explicit dates are given (default 30, max 365)"
+// @Success      200  {object}  usageStatusResponse
+// @Failure      400  {object}  core.OpenAIErrorEnvelope
+// @Failure      401  {object}  core.OpenAIErrorEnvelope
+// @Failure      503  {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/usage [get]
+func (h *Handler) UsageStatus(c *echo.Context) error {
+	ctx := c.Request().Context()
+	now := time.Now().UTC()
+
+	userPath, err := h.usageStatusUserPath(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	params, err := usageStatusWindow(c, now)
+	if err != nil {
+		return handleError(c, err)
+	}
+	params.UserPath = userPath
+
+	response := usageStatusResponse{
+		UserPath:   userPath,
+		ServerTime: now,
+		Budgets:    []usageStatusBudget{},
+		RateLimits: []usageStatusRateLimit{},
+	}
+
+	if h.usageSummarizer != nil {
+		summary, err := h.usageSummarizer.GetSummary(ctx, params)
+		if err != nil {
+			return handleError(c, core.NewProviderError("usage", http.StatusServiceUnavailable, "failed to read usage data", err).WithCode("usage_status_failed"))
+		}
+		if summary != nil {
+			response.Usage = &usageStatusSummary{
+				StartDate:    params.StartDate.Format("2006-01-02"),
+				EndDate:      params.EndDate.Format("2006-01-02"),
+				UsageSummary: *summary,
+			}
+		}
+	}
+
+	if reporter, ok := h.budgetChecker.(budgetStatusReporter); ok {
+		results, err := reporter.StatusesForPath(ctx, userPath, now)
+		if err != nil && !errors.Is(err, budget.ErrUnavailable) {
+			return handleError(c, core.NewProviderError("budget", http.StatusServiceUnavailable, "failed to read budget status", err).WithCode("usage_status_failed"))
+		}
+		response.Budgets = usageStatusBudgets(results)
+	}
+
+	if reporter, ok := h.rateLimiter.(rateLimitStatusReporter); ok {
+		response.RateLimits = usageStatusRateLimits(reporter.StatusesForUserPath(userPath, now))
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// usageStatusUserPath resolves the caller's effective user path. Managed keys
+// bind it via context; master-key and unsafe-mode callers may scope the
+// request with the configured user-path header. /v1/usage is not an
+// ingress-managed route, so the header is read here instead of from a request
+// snapshot.
+func (h *Handler) usageStatusUserPath(c *echo.Context) (string, error) {
+	if userPath := core.UserPathFromContext(c.Request().Context()); userPath != "" {
+		return userPath, nil
+	}
+	headerName := h.userPathHeaderName
+	if headerName == "" {
+		headerName = core.UserPathHeader
+	}
+	userPath, err := core.NormalizeUserPath(c.Request().Header.Get(headerName))
+	if err != nil {
+		return "", core.NewInvalidRequestError("invalid "+headerName+" header", err)
+	}
+	if userPath == "" {
+		return "/", nil
+	}
+	return userPath, nil
+}
+
+// usageStatusWindow resolves the summary date window from the same query
+// params as the dashboard usage endpoints, always in UTC.
+func usageStatusWindow(c *echo.Context, now time.Time) (usage.UsageQueryParams, error) {
+	params := usage.UsageQueryParams{TimeZone: "UTC"}
+	days := usage.DefaultDateRangeDays
+	if raw := c.QueryParam("days"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			days = usage.NormalizeDateRangeDays(parsed)
+		}
+	}
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	start, end, err := usage.BuildDateRange(strings.TrimSpace(c.QueryParam("start_date")), strings.TrimSpace(c.QueryParam("end_date")), days, time.UTC, today)
+	if err != nil {
+		return params, err
+	}
+	params.StartDate = start
+	params.EndDate = end
+	return params, nil
+}
+
+func usageStatusBudgets(results []budget.CheckResult) []usageStatusBudget {
+	statuses := make([]usageStatusBudget, 0, len(results))
+	for _, result := range results {
+		statuses = append(statuses, usageStatusBudget{
+			UserPath:      result.Budget.UserPath,
+			PeriodSeconds: result.Budget.PeriodSeconds,
+			PeriodLabel:   budget.PeriodLabel(result.Budget.PeriodSeconds),
+			Amount:        result.Budget.Amount,
+			Spent:         result.Spent,
+			Remaining:     result.Remaining,
+			PeriodStart:   result.PeriodStart,
+			PeriodEnd:     result.PeriodEnd,
+			// Mirrors enforcement: budgets without any usage never block.
+			Exceeded: result.HasUsage && result.Spent >= result.Budget.Amount,
+		})
+	}
+	return statuses
+}
+
+func usageStatusRateLimits(statuses []ratelimit.Status) []usageStatusRateLimit {
+	limits := make([]usageStatusRateLimit, 0, len(statuses))
+	for _, status := range statuses {
+		item := usageStatusRateLimit{
+			UserPath:          status.Rule.Subject,
+			PeriodSeconds:     status.Rule.PeriodSeconds,
+			PeriodLabel:       ratelimit.PeriodLabel(status.Rule.PeriodSeconds),
+			MaxRequests:       status.Rule.MaxRequests,
+			MaxTokens:         status.Rule.MaxTokens,
+			RequestsUsed:      status.RequestsUsed,
+			RequestsRemaining: status.RequestsRemaining,
+			TokensUsed:        status.TokensUsed,
+			TokensRemaining:   status.TokensRemaining,
+			InFlight:          status.InFlight,
+		}
+		if !status.WindowStart.IsZero() {
+			start, end := status.WindowStart, status.WindowEnd
+			item.WindowStart = &start
+			item.WindowEnd = &end
+		}
+		limits = append(limits, item)
+	}
+	return limits
+}

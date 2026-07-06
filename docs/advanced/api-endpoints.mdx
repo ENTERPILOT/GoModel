@@ -52,6 +52,12 @@ For request and response details, see the dedicated guides:
 | `/v1/messages`              | POST   | Anthropic Messages API through translated model routing (streaming supported) |
 | `/v1/messages/count_tokens` | POST   | Heuristic Anthropic Messages input token estimate                             |
 
+## Gateway Extensions
+
+| Endpoint    | Method | Description                                                                                                                              |
+| ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `/v1/usage` | GET    | Self-service usage, budget, and rate limit status for the caller's effective [user path](/features/user-path#self-service-usage-and-limits) |
+
 ## Provider Passthrough
 
 | Endpoint            | Method                                       | Description                                                |

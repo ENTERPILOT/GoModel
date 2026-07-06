@@ -429,6 +429,53 @@ func TestStatusesAndResets(t *testing.T) {
 	}
 }
 
+func TestStatusesForUserPathFiltersByScopeAndSubtree(t *testing.T) {
+	service := newTestService(t,
+		Rule{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(5)},
+		Rule{Subject: "/team/alice", PeriodSeconds: PeriodConcurrent, MaxRequests: int64Ptr(2)},
+		Rule{Subject: "/other", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(5)},
+		Rule{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(100)},
+	)
+
+	if _, err := service.Acquire(onPath("/team/alice"), windowBase); err != nil {
+		t.Fatalf("Acquire() failed: %v", err)
+	}
+
+	statuses := service.StatusesForUserPath("/team/alice", windowBase)
+	if len(statuses) != 2 {
+		t.Fatalf("statuses = %d, want 2 (sibling and provider rules excluded)", len(statuses))
+	}
+	bySubject := map[string]Status{}
+	for _, status := range statuses {
+		if status.Rule.Scope != ScopeUserPath {
+			t.Fatalf("scope = %q, want user_path", status.Rule.Scope)
+		}
+		bySubject[status.Rule.Subject] = status
+	}
+	team, ok := bySubject["/team"]
+	if !ok {
+		t.Fatal("missing ancestor rule /team")
+	}
+	if team.RequestsUsed != 1 || team.RequestsRemaining == nil || *team.RequestsRemaining != 4 {
+		t.Fatalf("/team used/remaining = %d/%v, want 1/4", team.RequestsUsed, team.RequestsRemaining)
+	}
+	alice, ok := bySubject["/team/alice"]
+	if !ok {
+		t.Fatal("missing exact rule /team/alice")
+	}
+	if alice.InFlight != 1 {
+		t.Fatalf("/team/alice in-flight = %d, want 1", alice.InFlight)
+	}
+
+	if got := service.StatusesForUserPath("/unlimited", windowBase); len(got) != 0 {
+		t.Fatalf("statuses for unmatched path = %d, want 0", len(got))
+	}
+	var nilService *Service
+	if got := nilService.StatusesForUserPath("/team", windowBase); got != nil {
+		t.Fatalf("nil service statuses = %v, want nil", got)
+	}
+}
+
 func TestUpsertDeleteAndHasTokenRules(t *testing.T) {
 	service := newTestService(t)
 	if service.HasTokenRules() {

@@ -1206,6 +1206,262 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/rate-limits": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List rate limit rules with live counter status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.rateLimitListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create or update one rate limit rule",
+                "parameters": [
+                    {
+                        "description": "Rate limit key and limits",
+                        "name": "rule",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.upsertRateLimitRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.rateLimitListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete one rate limit rule",
+                "parameters": [
+                    {
+                        "description": "Rate limit key",
+                        "name": "rule",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.deleteRateLimitRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.rateLimitListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/rate-limits/reset": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Reset the live counters of all rate limit rules",
+                "parameters": [
+                    {
+                        "description": "Reset confirmation",
+                        "name": "confirmation",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.resetRateLimitsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.resetRateLimitsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/rate-limits/reset-one": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Reset the live counters of one rate limit rule",
+                "parameters": [
+                    {
+                        "description": "Rate limit key",
+                        "name": "rule",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.resetRateLimitRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.rateLimitListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/runtime/config": {
             "get": {
                 "produces": [
@@ -4660,6 +4916,69 @@ const docTemplate = `{
                     }
                 ]
             }
+        },
+        "/v1/usage": {
+            "get": {
+                "description": "Returns recorded usage, budget statuses, and rate limit statuses for the caller's effective user path (the path bound to the managed API key, or the user-path header for master-key callers).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "usage"
+                ],
+                "summary": "Self-service usage, budget, and rate limit status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Inclusive window start (YYYY-MM-DD, UTC); defaults to 29 days before end_date",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Inclusive window end (YYYY-MM-DD, UTC); defaults to today",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Window length ending today when no explicit dates are given (default 30, max 365)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.usageStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
         }
     },
     "definitions": {
@@ -4682,6 +5001,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "LOGGING_ENABLED": {
+                    "type": "string"
+                },
+                "RATE_LIMITS_ENABLED": {
                     "type": "string"
                 },
                 "REDIS_URL": {
@@ -4902,6 +5224,23 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.deleteRateLimitRequest": {
+            "type": "object",
+            "properties": {
+                "limit_key": {
+                    "$ref": "#/definitions/admin.rateLimitKeyRequest"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "user_path": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.deleteVirtualModelRequest": {
             "type": "object",
             "properties": {
@@ -4967,6 +5306,87 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.rateLimitKeyRequest": {
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "admin.rateLimitListResponse": {
+            "type": "object",
+            "properties": {
+                "rate_limits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.rateLimitStatusResponse"
+                    }
+                },
+                "server_time": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.rateLimitStatusResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "in_flight": {
+                    "type": "integer"
+                },
+                "max_requests": {
+                    "type": "integer"
+                },
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "period_label": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                },
+                "requests_remaining": {
+                    "type": "integer"
+                },
+                "requests_used": {
+                    "type": "integer"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "tokens_remaining": {
+                    "type": "integer"
+                },
+                "tokens_used": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_path": {
+                    "type": "string"
+                },
+                "window_end": {
+                    "type": "string"
+                },
+                "window_start": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.recalculatePricingRequest": {
             "type": "object",
             "properties": {
@@ -5019,6 +5439,42 @@ const docTemplate = `{
             }
         },
         "admin.resetBudgetsResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.resetRateLimitRequest": {
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "user_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.resetRateLimitsRequest": {
+            "type": "object",
+            "properties": {
+                "confirmation": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.resetRateLimitsResponse": {
             "type": "object",
             "properties": {
                 "status": {
@@ -5120,6 +5576,29 @@ const docTemplate = `{
                     "$ref": "#/definitions/pricingoverrides.Pricing"
                 },
                 "selector": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.upsertRateLimitRequest": {
+            "type": "object",
+            "properties": {
+                "limit_key": {
+                    "$ref": "#/definitions/admin.rateLimitKeyRequest"
+                },
+                "max_requests": {
+                    "type": "integer"
+                },
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "user_path": {
                     "type": "string"
                 }
             }
@@ -7434,6 +7913,153 @@ const docTemplate = `{
                 },
                 "display_name": {
                     "type": "string"
+                }
+            }
+        },
+        "server.usageStatusBudget": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "exceeded": {
+                    "type": "boolean"
+                },
+                "period_end": {
+                    "type": "string"
+                },
+                "period_label": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                },
+                "period_start": {
+                    "type": "string"
+                },
+                "remaining": {
+                    "type": "number"
+                },
+                "spent": {
+                    "type": "number"
+                },
+                "user_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.usageStatusRateLimit": {
+            "type": "object",
+            "properties": {
+                "in_flight": {
+                    "type": "integer"
+                },
+                "max_requests": {
+                    "type": "integer"
+                },
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "period_label": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                },
+                "requests_remaining": {
+                    "type": "integer"
+                },
+                "requests_used": {
+                    "type": "integer"
+                },
+                "tokens_remaining": {
+                    "type": "integer"
+                },
+                "tokens_used": {
+                    "type": "integer"
+                },
+                "user_path": {
+                    "type": "string"
+                },
+                "window_end": {
+                    "type": "string"
+                },
+                "window_start": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.usageStatusResponse": {
+            "type": "object",
+            "properties": {
+                "budgets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/server.usageStatusBudget"
+                    }
+                },
+                "rate_limits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/server.usageStatusRateLimit"
+                    }
+                },
+                "server_time": {
+                    "type": "string"
+                },
+                "usage": {
+                    "$ref": "#/definitions/server.usageStatusSummary"
+                },
+                "user_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.usageStatusSummary": {
+            "type": "object",
+            "properties": {
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "rewrite_cost_saved": {
+                    "type": "number"
+                },
+                "rewrite_tokens_saved": {
+                    "description": "Rewrite savings: prompt tokens request rewriters removed before the\nprovider call, and the estimated input cost avoided (nil when no\nmatched row had a priced savings estimate).",
+                    "type": "integer"
+                },
+                "start_date": {
+                    "type": "string"
+                },
+                "total_cost": {
+                    "type": "number"
+                },
+                "total_input_cost": {
+                    "type": "number"
+                },
+                "total_input_tokens": {
+                    "type": "integer"
+                },
+                "total_output_cost": {
+                    "type": "number"
+                },
+                "total_output_tokens": {
+                    "type": "integer"
+                },
+                "total_requests": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                },
+                "uncached_input_tokens": {
+                    "type": "integer"
                 }
             }
         },
