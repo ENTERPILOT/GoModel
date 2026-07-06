@@ -4410,6 +4410,7 @@ body.conversation-drawer-open {
 .budget-list {
   display: grid;
   gap: 10px;
+  padding: 10px 0;
 }
 
 .budget-row {
