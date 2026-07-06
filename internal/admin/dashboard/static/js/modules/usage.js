@@ -348,7 +348,10 @@
                         this.fetchCacheOverview();
                     }
                     if (this.page === 'usage') this.fetchUsagePage();
-                    if (this.page === 'audit-logs') this.fetchAuditLog(true);
+                    if (this.page === 'audit-logs') {
+                        this.fetchAuditLog(true);
+                        if (typeof this.fetchAuditStats === 'function') this.fetchAuditStats();
+                    }
                 } catch (e) {
                     if (typeof this._isAbortError === 'function' && this._isAbortError(e)) {
                         return;

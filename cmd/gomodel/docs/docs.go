@@ -247,6 +247,63 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/audit/stats": {
+            "get": {
+                "description": "Returns request counts grouped into 2xx/4xx/5xx status classes\nper time bucket, an overall success-rate summary, and average\nrequest duration per provider for the dashboard charts.\nRanges up to 3 days use hourly buckets, longer ranges daily.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get time-bucketed request status and latency stats",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auditlog.RequestStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/budgets": {
             "get": {
                 "produces": [
@@ -1194,6 +1251,262 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/rate-limits": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List rate limit rules with live counter status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.rateLimitListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create or update one rate limit rule",
+                "parameters": [
+                    {
+                        "description": "Rate limit key and limits",
+                        "name": "rule",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.upsertRateLimitRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.rateLimitListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete one rate limit rule",
+                "parameters": [
+                    {
+                        "description": "Rate limit key",
+                        "name": "rule",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.deleteRateLimitRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.rateLimitListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/rate-limits/reset": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Reset the live counters of all rate limit rules",
+                "parameters": [
+                    {
+                        "description": "Reset confirmation",
+                        "name": "confirmation",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.resetRateLimitsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.resetRateLimitsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/rate-limits/reset-one": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Reset the live counters of one rate limit rule",
+                "parameters": [
+                    {
+                        "description": "Rate limit key",
+                        "name": "rule",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.resetRateLimitRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.rateLimitListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -4684,6 +4997,9 @@ const docTemplate = `{
                 "LOGGING_ENABLED": {
                     "type": "string"
                 },
+                "RATE_LIMITS_ENABLED": {
+                    "type": "string"
+                },
                 "REDIS_URL": {
                     "type": "string"
                 },
@@ -4902,6 +5218,23 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.deleteRateLimitRequest": {
+            "type": "object",
+            "properties": {
+                "limit_key": {
+                    "$ref": "#/definitions/admin.rateLimitKeyRequest"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "user_path": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.deleteVirtualModelRequest": {
             "type": "object",
             "properties": {
@@ -4967,6 +5300,87 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.rateLimitKeyRequest": {
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "admin.rateLimitListResponse": {
+            "type": "object",
+            "properties": {
+                "rate_limits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.rateLimitStatusResponse"
+                    }
+                },
+                "server_time": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.rateLimitStatusResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "in_flight": {
+                    "type": "integer"
+                },
+                "max_requests": {
+                    "type": "integer"
+                },
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "period_label": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                },
+                "requests_remaining": {
+                    "type": "integer"
+                },
+                "requests_used": {
+                    "type": "integer"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "tokens_remaining": {
+                    "type": "integer"
+                },
+                "tokens_used": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_path": {
+                    "type": "string"
+                },
+                "window_end": {
+                    "type": "string"
+                },
+                "window_start": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.recalculatePricingRequest": {
             "type": "object",
             "properties": {
@@ -5019,6 +5433,42 @@ const docTemplate = `{
             }
         },
         "admin.resetBudgetsResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.resetRateLimitRequest": {
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "user_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.resetRateLimitsRequest": {
+            "type": "object",
+            "properties": {
+                "confirmation": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.resetRateLimitsResponse": {
             "type": "object",
             "properties": {
                 "status": {
@@ -5120,6 +5570,29 @@ const docTemplate = `{
                     "$ref": "#/definitions/pricingoverrides.Pricing"
                 },
                 "selector": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.upsertRateLimitRequest": {
+            "type": "object",
+            "properties": {
+                "limit_key": {
+                    "$ref": "#/definitions/admin.rateLimitKeyRequest"
+                },
+                "max_requests": {
+                    "type": "integer"
+                },
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "user_path": {
                     "type": "string"
                 }
             }
@@ -5654,6 +6127,26 @@ const docTemplate = `{
                 }
             }
         },
+        "auditlog.ProviderLatencySeries": {
+            "type": "object",
+            "properties": {
+                "avg_duration_ms": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "requests": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
         "auditlog.RequestRevisionSnapshot": {
             "type": "object",
             "properties": {
@@ -5674,6 +6167,78 @@ const docTemplate = `{
                 },
                 "seq": {
                     "type": "integer"
+                }
+            }
+        },
+        "auditlog.RequestStats": {
+            "type": "object",
+            "properties": {
+                "buckets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auditlog.RequestStatsBucket"
+                    }
+                },
+                "interval": {
+                    "type": "string"
+                },
+                "provider_latency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auditlog.ProviderLatencySeries"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/auditlog.RequestStatsSummary"
+                }
+            }
+        },
+        "auditlog.RequestStatsBucket": {
+            "type": "object",
+            "properties": {
+                "requests": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "string"
+                },
+                "status_2xx": {
+                    "type": "integer"
+                },
+                "status_4xx": {
+                    "type": "integer"
+                },
+                "status_5xx": {
+                    "type": "integer"
+                },
+                "status_other": {
+                    "type": "integer"
+                }
+            }
+        },
+        "auditlog.RequestStatsSummary": {
+            "type": "object",
+            "properties": {
+                "avg_duration_ms": {
+                    "type": "number"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "status_2xx": {
+                    "type": "integer"
+                },
+                "status_4xx": {
+                    "type": "integer"
+                },
+                "status_5xx": {
+                    "type": "integer"
+                },
+                "status_other": {
+                    "type": "integer"
+                },
+                "success_rate": {
+                    "type": "number"
                 }
             }
         },

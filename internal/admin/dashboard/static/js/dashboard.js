@@ -188,6 +188,15 @@ function dashboard() {
     auditStream: "",
     auditFetchToken: 0,
     auditExpandedEntries: {},
+    auditStats: {
+      interval: "day",
+      buckets: [],
+      summary: { requests: 0 },
+      provider_latency: [],
+    },
+    auditStatsFetchToken: 0,
+    auditStatusChart: null,
+    auditLatencyChart: null,
 
     // Conversation drawer state
     conversationOpen: false,
@@ -244,7 +253,10 @@ function dashboard() {
 
       if (page === "usage" && sub === "costs") this.usageMode = "costs";
       if (page === "usage" && sub !== "costs") this.usageMode = "tokens";
-      if (page === "audit-logs") this.fetchAuditLog(true);
+      if (page === "audit-logs") {
+        this.fetchAuditLog(true);
+        if (typeof this.fetchAuditStats === "function") this.fetchAuditStats();
+      }
       if (page === "auth-keys" && typeof this.fetchAuthKeys === "function")
         this.fetchAuthKeys();
       if (
@@ -394,6 +406,9 @@ function dashboard() {
       this.renderBarChart();
       this.renderUserPathChart();
       this.renderLabelChart();
+      if (typeof this.renderAuditStatsCharts === "function") {
+        this.renderAuditStatsCharts();
+      }
       if (typeof this.redrawLiveTokensChart === "function") {
         // Force a rebuild so the bars pick up the new theme's colors.
         this.redrawLiveTokensChart();
@@ -748,6 +763,9 @@ function dashboard() {
         typeof this.fetchAuditLog === "function"
       ) {
         requests.push(this.fetchAuditLog(true));
+        if (typeof this.fetchAuditStats === "function") {
+          requests.push(this.fetchAuditStats());
+        }
       }
       if (
         this.page === "auth-keys" &&
@@ -1172,6 +1190,12 @@ function dashboard() {
         ? dashboardAuditListModule
         : null,
       "dashboardAuditListModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardAuditStatsModule === "function"
+        ? dashboardAuditStatsModule
+        : null,
+      "dashboardAuditStatsModule",
     ),
     resolveModuleFactory(
       typeof dashboardLiveLogsModule === "function"
