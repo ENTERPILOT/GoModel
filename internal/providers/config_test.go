@@ -61,6 +61,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 		DefaultBaseURL:  "http://localhost:11434/v1",
 		AllowAPIKeyless: true,
 	},
+	"kimicode": {
+		DefaultBaseURL: "https://api.kimi.com/coding/v1",
+	},
 }
 
 // --- buildProviderConfig ---
