@@ -73,7 +73,7 @@ func (s *SQLiteStore) Create(ctx context.Context, conversation *StoredConversati
 			stored_at = excluded.stored_at,
 			expires_at = excluded.expires_at
 		WHERE conversation_snapshots.expires_at > 0 AND conversation_snapshots.expires_at <= ?
-	`, normalized.Conversation.ID, string(data), string(items), unixOrZero(normalized.StoredAt), unixOrZero(normalized.ExpiresAt), now.Unix())
+	`, normalized.Conversation.ID, string(data), string(items), storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt), now.Unix())
 	if err != nil {
 		return fmt.Errorf("create conversation snapshot: %w", err)
 	}
@@ -102,8 +102,8 @@ func (s *SQLiteStore) Update(ctx context.Context, conversation *StoredConversati
 	if err != nil {
 		return err
 	}
-	storedAt := unixOrZero(normalized.StoredAt)
-	expiresAt := unixOrZero(normalized.ExpiresAt)
+	storedAt := storage.UnixOrZero(normalized.StoredAt)
+	expiresAt := storage.UnixOrZero(normalized.ExpiresAt)
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE conversation_snapshots SET
 			data = ?,

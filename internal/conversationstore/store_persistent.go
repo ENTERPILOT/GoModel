@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+
+	"gomodel/internal/storage"
 )
 
 const (
@@ -53,15 +55,10 @@ func prepareStoredConversationForStorage(conversation *StoredConversation, now t
 	return normalized, data, items, nil
 }
 
-// rowScanner is the row shape shared by database/sql and pgx query results.
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
 // scanStoredConversationRow converts one (data, items, stored_at, expires_at)
 // row into a StoredConversation, mapping the backend's no-rows sentinel to
 // ErrNotFound and treating expired rows as absent.
-func scanStoredConversationRow(row rowScanner, noRows error) (*StoredConversation, error) {
+func scanStoredConversationRow(row storage.RowScanner, noRows error) (*StoredConversation, error) {
 	var (
 		data, items         string
 		storedAt, expiresAt int64
@@ -90,8 +87,8 @@ func decodeStoredConversation(data, items []byte, storedAt, expiresAt int64) (*S
 			return nil, fmt.Errorf("unmarshal conversation items: %w", err)
 		}
 	}
-	stored.StoredAt = unixTime(storedAt)
-	stored.ExpiresAt = unixTime(expiresAt)
+	stored.StoredAt = storage.UnixTime(storedAt)
+	stored.ExpiresAt = storage.UnixTime(expiresAt)
 	return &stored, nil
 }
 
@@ -100,18 +97,4 @@ func itemsOrEmpty(items []json.RawMessage) []json.RawMessage {
 		return []json.RawMessage{}
 	}
 	return items
-}
-
-func unixTime(sec int64) time.Time {
-	if sec <= 0 {
-		return time.Time{}
-	}
-	return time.Unix(sec, 0).UTC()
-}
-
-func unixOrZero(t time.Time) int64 {
-	if t.IsZero() {
-		return 0
-	}
-	return t.Unix()
 }

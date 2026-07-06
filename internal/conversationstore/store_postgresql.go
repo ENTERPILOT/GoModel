@@ -76,7 +76,7 @@ func (s *PostgreSQLStore) Create(ctx context.Context, conversation *StoredConver
 			stored_at = excluded.stored_at,
 			expires_at = excluded.expires_at
 		WHERE conversation_snapshots.expires_at > 0 AND conversation_snapshots.expires_at <= $6
-	`, normalized.Conversation.ID, string(data), string(items), unixOrZero(normalized.StoredAt), unixOrZero(normalized.ExpiresAt), now.Unix())
+	`, normalized.Conversation.ID, string(data), string(items), storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt), now.Unix())
 	if err != nil {
 		return fmt.Errorf("create conversation snapshot: %w", err)
 	}
@@ -108,7 +108,7 @@ func (s *PostgreSQLStore) Update(ctx context.Context, conversation *StoredConver
 			stored_at = CASE WHEN $3 = 0 THEN stored_at ELSE $3 END,
 			expires_at = CASE WHEN $4 = 0 THEN expires_at ELSE $4 END
 		WHERE id = $5 AND (expires_at = 0 OR expires_at > $6)
-	`, string(data), string(items), unixOrZero(normalized.StoredAt), unixOrZero(normalized.ExpiresAt), normalized.Conversation.ID, now.Unix())
+	`, string(data), string(items), storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt), normalized.Conversation.ID, now.Unix())
 	if err != nil {
 		return fmt.Errorf("update conversation snapshot: %w", err)
 	}

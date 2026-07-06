@@ -73,7 +73,7 @@ func (s *PostgreSQLStore) Create(ctx context.Context, response *StoredResponse) 
 			stored_at = excluded.stored_at,
 			expires_at = excluded.expires_at
 		WHERE response_snapshots.expires_at > 0 AND response_snapshots.expires_at <= $5
-	`, normalized.Response.ID, string(data), unixOrZero(normalized.StoredAt), unixOrZero(normalized.ExpiresAt), now.Unix())
+	`, normalized.Response.ID, string(data), storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt), now.Unix())
 	if err != nil {
 		return fmt.Errorf("create response snapshot: %w", err)
 	}
@@ -104,7 +104,7 @@ func (s *PostgreSQLStore) Update(ctx context.Context, response *StoredResponse) 
 			stored_at = CASE WHEN $2 = 0 THEN stored_at ELSE $2 END,
 			expires_at = CASE WHEN $3 = 0 THEN expires_at ELSE $3 END
 		WHERE id = $4 AND (expires_at = 0 OR expires_at > $5)
-	`, string(data), unixOrZero(normalized.StoredAt), unixOrZero(normalized.ExpiresAt), normalized.Response.ID, now.Unix())
+	`, string(data), storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt), normalized.Response.ID, now.Unix())
 	if err != nil {
 		return fmt.Errorf("update response snapshot: %w", err)
 	}

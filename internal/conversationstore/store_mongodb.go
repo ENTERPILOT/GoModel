@@ -74,8 +74,8 @@ func (s *MongoDBStore) Create(ctx context.Context, conversation *StoredConversat
 		ID:        normalized.Conversation.ID,
 		Data:      string(data),
 		Items:     itemsToStrings(normalized.Items),
-		StoredAt:  unixOrZero(normalized.StoredAt),
-		ExpiresAt: unixOrZero(normalized.ExpiresAt),
+		StoredAt:  storage.UnixOrZero(normalized.StoredAt),
+		ExpiresAt: storage.UnixOrZero(normalized.ExpiresAt),
 	}
 	// The filter only matches an expired snapshot, so a live one falls through
 	// to the upsert insert and surfaces as a duplicate-key conflict.
@@ -129,7 +129,7 @@ func (s *MongoDBStore) Update(ctx context.Context, conversation *StoredConversat
 	if !normalized.ExpiresAt.IsZero() {
 		set["expires_at"] = normalized.ExpiresAt.Unix()
 	}
-	result, err := s.collection.UpdateOne(ctx, unexpiredFilter(normalized.Conversation.ID, now), bson.M{"$set": set})
+	result, err := s.collection.UpdateOne(ctx, storage.MongoUnexpiredFilter(normalized.Conversation.ID, now), bson.M{"$set": set})
 	if err != nil {
 		return fmt.Errorf("update conversation snapshot: %w", err)
 	}
@@ -147,7 +147,7 @@ func (s *MongoDBStore) AppendItems(ctx context.Context, id string, items []json.
 		return nil
 	}
 	update := bson.M{"$push": bson.M{"items": bson.M{"$each": itemsToStrings(items)}}}
-	result, err := s.collection.UpdateOne(ctx, unexpiredFilter(id, time.Now()), update)
+	result, err := s.collection.UpdateOne(ctx, storage.MongoUnexpiredFilter(id, time.Now()), update)
 	if err != nil {
 		return fmt.Errorf("append conversation items: %w", err)
 	}
@@ -159,7 +159,7 @@ func (s *MongoDBStore) AppendItems(ctx context.Context, id string, items []json.
 
 // Delete removes one unexpired conversation snapshot by id.
 func (s *MongoDBStore) Delete(ctx context.Context, id string) error {
-	result, err := s.collection.DeleteOne(ctx, unexpiredFilter(id, time.Now()))
+	result, err := s.collection.DeleteOne(ctx, storage.MongoUnexpiredFilter(id, time.Now()))
 	if err != nil {
 		return fmt.Errorf("delete conversation snapshot: %w", err)
 	}
@@ -176,16 +176,6 @@ func (s *MongoDBStore) DeleteExpired(ctx context.Context) error {
 		return fmt.Errorf("delete expired conversation snapshots: %w", err)
 	}
 	return nil
-}
-
-func unexpiredFilter(id string, now time.Time) bson.M {
-	return bson.M{
-		"_id": id,
-		"$or": bson.A{
-			bson.M{"expires_at": 0},
-			bson.M{"expires_at": bson.M{"$gt": now.Unix()}},
-		},
-	}
 }
 
 func itemsToStrings(items []json.RawMessage) []string {

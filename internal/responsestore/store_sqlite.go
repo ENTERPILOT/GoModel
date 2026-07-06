@@ -68,7 +68,7 @@ func (s *SQLiteStore) Create(ctx context.Context, response *StoredResponse) erro
 			stored_at = excluded.stored_at,
 			expires_at = excluded.expires_at
 		WHERE response_snapshots.expires_at > 0 AND response_snapshots.expires_at <= ?
-	`, normalized.Response.ID, string(data), unixOrZero(normalized.StoredAt), unixOrZero(normalized.ExpiresAt), now.Unix())
+	`, normalized.Response.ID, string(data), storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt), now.Unix())
 	if err != nil {
 		return fmt.Errorf("create response snapshot: %w", err)
 	}
@@ -97,8 +97,8 @@ func (s *SQLiteStore) Update(ctx context.Context, response *StoredResponse) erro
 	if err != nil {
 		return err
 	}
-	storedAt := unixOrZero(normalized.StoredAt)
-	expiresAt := unixOrZero(normalized.ExpiresAt)
+	storedAt := storage.UnixOrZero(normalized.StoredAt)
+	expiresAt := storage.UnixOrZero(normalized.ExpiresAt)
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE response_snapshots SET
 			data = ?,

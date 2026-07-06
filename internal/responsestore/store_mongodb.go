@@ -69,8 +69,8 @@ func (s *MongoDBStore) Create(ctx context.Context, response *StoredResponse) err
 	doc := mongoResponseDocument{
 		ID:        normalized.Response.ID,
 		Data:      string(data),
-		StoredAt:  unixOrZero(normalized.StoredAt),
-		ExpiresAt: unixOrZero(normalized.ExpiresAt),
+		StoredAt:  storage.UnixOrZero(normalized.StoredAt),
+		ExpiresAt: storage.UnixOrZero(normalized.ExpiresAt),
 	}
 	// The filter only matches an expired snapshot, so a live one falls through
 	// to the upsert insert and surfaces as a duplicate-key conflict.
@@ -116,7 +116,7 @@ func (s *MongoDBStore) Update(ctx context.Context, response *StoredResponse) err
 	if !normalized.ExpiresAt.IsZero() {
 		set["expires_at"] = normalized.ExpiresAt.Unix()
 	}
-	result, err := s.collection.UpdateOne(ctx, unexpiredFilter(normalized.Response.ID, now), bson.M{"$set": set})
+	result, err := s.collection.UpdateOne(ctx, storage.MongoUnexpiredFilter(normalized.Response.ID, now), bson.M{"$set": set})
 	if err != nil {
 		return fmt.Errorf("update response snapshot: %w", err)
 	}
@@ -128,7 +128,7 @@ func (s *MongoDBStore) Update(ctx context.Context, response *StoredResponse) err
 
 // Delete removes one unexpired response snapshot by id.
 func (s *MongoDBStore) Delete(ctx context.Context, id string) error {
-	result, err := s.collection.DeleteOne(ctx, unexpiredFilter(id, time.Now()))
+	result, err := s.collection.DeleteOne(ctx, storage.MongoUnexpiredFilter(id, time.Now()))
 	if err != nil {
 		return fmt.Errorf("delete response snapshot: %w", err)
 	}
@@ -145,16 +145,6 @@ func (s *MongoDBStore) DeleteExpired(ctx context.Context) error {
 		return fmt.Errorf("delete expired response snapshots: %w", err)
 	}
 	return nil
-}
-
-func unexpiredFilter(id string, now time.Time) bson.M {
-	return bson.M{
-		"_id": id,
-		"$or": bson.A{
-			bson.M{"expires_at": 0},
-			bson.M{"expires_at": bson.M{"$gt": now.Unix()}},
-		},
-	}
 }
 
 func (s *MongoDBStore) cleanup() {
