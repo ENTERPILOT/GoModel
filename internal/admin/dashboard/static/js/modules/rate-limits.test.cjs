@@ -416,8 +416,10 @@ test('gauge indicator distinguishes direct, inherited, and no limits', () => {
     assert.equal(module.rateLimitGaugeClassForProvider({ provider_name: 'openai' }), 'table-action-btn-active');
     assert.equal(module.rateLimitGaugeClassForProvider({ provider_name: 'anthropic' }), '');
 
-    // A root user-path rule throttles everything → inherited for all.
-    module.rateLimits.push({ scope: 'user_path', subject: '/', user_path: '/', period_seconds: 60 });
+    // A root user-path rule throttles everything → inherited for all. The
+    // rules list is replaced (never mutated) exactly like after a fetch, which
+    // is what invalidates the per-row gauge memo.
+    module.rateLimits = module.rateLimits.concat([{ scope: 'user_path', subject: '/', user_path: '/', period_seconds: 60 }]);
     assert.equal(module.rateLimitGaugeClassForModel(claude), 'rate-limit-gauge-inherited');
     assert.equal(module.rateLimitGaugeClassForProvider({ provider_name: 'anthropic' }), 'rate-limit-gauge-inherited');
 

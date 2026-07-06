@@ -701,32 +701,53 @@
 
             // Gauge indicator states on the Models page: fully painted when the
             // subject has its own rules, half painted when only provider or
-            // global rules throttle it, plain otherwise.
+            // global rules throttle it, plain otherwise. Alpine evaluates the
+            // class/label bindings several times per row on every render, so
+            // results are memoized until the rules list is replaced.
+            rateLimitGaugeCache: { rules: null, states: {} },
+
+            rateLimitGaugeMemo(key, compute) {
+                if (this.rateLimitGaugeCache.rules !== this.rateLimits) {
+                    this.rateLimitGaugeCache = { rules: this.rateLimits, states: {} };
+                }
+                const states = this.rateLimitGaugeCache.states;
+                if (!(key in states)) {
+                    states[key] = compute();
+                }
+                return states[key];
+            },
+
             rateLimitGaugeClassForModel(row) {
                 const model = this.rateLimitInspectorModelID(row);
                 const provider = String(row && row.provider_name || '').trim().toLowerCase();
-                const rules = Array.isArray(this.rateLimits) ? this.rateLimits : [];
-                if (rules.some((rule) => this.rateLimitRuleMatchesModel(rule, provider, model))) {
-                    return 'table-action-btn-active';
-                }
-                if (rules.some((rule) => this.rateLimitRuleMatchesProvider(rule, provider)) || this.hasGlobalRateLimits()) {
-                    return 'rate-limit-gauge-inherited';
-                }
-                return '';
+                return this.rateLimitGaugeMemo('model:' + provider + '/' + model, () => {
+                    const rules = Array.isArray(this.rateLimits) ? this.rateLimits : [];
+                    if (rules.some((rule) => this.rateLimitRuleMatchesModel(rule, provider, model))) {
+                        return 'table-action-btn-active';
+                    }
+                    if (rules.some((rule) => this.rateLimitRuleMatchesProvider(rule, provider)) || this.hasGlobalRateLimits()) {
+                        return 'rate-limit-gauge-inherited';
+                    }
+                    return '';
+                });
             },
 
             rateLimitGaugeClassForProvider(group) {
                 const provider = String(group && group.provider_name || '').trim().toLowerCase();
-                const rules = Array.isArray(this.rateLimits) ? this.rateLimits : [];
-                if (rules.some((rule) => this.rateLimitRuleMatchesProvider(rule, provider))) {
-                    return 'table-action-btn-active';
-                }
-                return this.hasGlobalRateLimits() ? 'rate-limit-gauge-inherited' : '';
+                return this.rateLimitGaugeMemo('provider:' + provider, () => {
+                    const rules = Array.isArray(this.rateLimits) ? this.rateLimits : [];
+                    if (rules.some((rule) => this.rateLimitRuleMatchesProvider(rule, provider))) {
+                        return 'table-action-btn-active';
+                    }
+                    return this.hasGlobalRateLimits() ? 'rate-limit-gauge-inherited' : '';
+                });
             },
 
             hasGlobalRateLimits() {
-                const rules = Array.isArray(this.rateLimits) ? this.rateLimits : [];
-                return rules.some((rule) => this.rateLimitScope(rule) === 'user_path' && this.rateLimitSubject(rule) === '/');
+                return this.rateLimitGaugeMemo('global', () => {
+                    const rules = Array.isArray(this.rateLimits) ? this.rateLimits : [];
+                    return rules.some((rule) => this.rateLimitScope(rule) === 'user_path' && this.rateLimitSubject(rule) === '/');
+                });
             },
 
             rateLimitGaugeTitle(subject, gaugeClass) {

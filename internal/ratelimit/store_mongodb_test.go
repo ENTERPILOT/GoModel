@@ -136,3 +136,39 @@ func TestDuplicateKeyErrorsOnConfigRulesOnly(t *testing.T) {
 		})
 	}
 }
+
+// TestClassifyBulkWriteError pins the upsert error-handling contract: config
+// duplicates are benign shadowing, manual duplicates earn one retry, and
+// everything else fails. The retry itself lands as a plain update because the
+// conflicting documents exist by then.
+func TestClassifyBulkWriteError(t *testing.T) {
+	configRule := Rule{Scope: ScopeUserPath, Subject: "/seed", PeriodSeconds: PeriodMinuteSeconds, Source: SourceConfig}
+	manualRule := Rule{Scope: ScopeUserPath, Subject: "/manual", PeriodSeconds: PeriodMinuteSeconds, Source: SourceManual}
+	dup := func(index int) mongo.BulkWriteException {
+		return mongo.BulkWriteException{WriteErrors: []mongo.BulkWriteError{
+			{WriteError: mongo.WriteError{Index: index, Code: 11000}},
+		}}
+	}
+
+	tests := []struct {
+		name  string
+		err   error
+		rules []Rule
+		want  bulkWriteOutcome
+	}{
+		{"success", nil, []Rule{manualRule}, bulkWriteOK},
+		{"config duplicate is shadowing", dup(0), []Rule{configRule}, bulkWriteShadowedByManual},
+		{"manual duplicate is a race worth retrying", dup(1), []Rule{configRule, manualRule}, bulkWriteRetryManualRace},
+		{"non-duplicate error fails", mongo.BulkWriteException{WriteErrors: []mongo.BulkWriteError{
+			{WriteError: mongo.WriteError{Index: 0, Code: 121}},
+		}}, []Rule{manualRule}, bulkWriteFailed},
+		{"unrelated error fails", errors.New("network down"), []Rule{manualRule}, bulkWriteFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyBulkWriteError(tt.err, tt.rules); got != tt.want {
+				t.Fatalf("classifyBulkWriteError() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

@@ -458,7 +458,9 @@ function dashboard() {
         (this.page === "guardrails" && this.guardrailFormOpen) ||
         (this.page === "auth-keys" && this.authKeyFormOpen) ||
         (this.page === "budgets" && this.budgetFormOpen) ||
-        (this.page === "rate-limits" && this.rateLimitFormOpen) ||
+        ((this.page === "rate-limits" || this.page === "models") &&
+          this.rateLimitFormOpen) ||
+        (this.page === "models" && this.rateLimitInspectorOpen) ||
         this.budgetResetDialogOpen ||
         this.pricingRecalculateDialogOpen ||
         (this.typedConfirmationDialog && this.typedConfirmationDialog.open)

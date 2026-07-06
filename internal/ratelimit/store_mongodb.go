@@ -120,24 +120,55 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 	}
 	opts := options.BulkWrite().SetOrdered(false)
 	_, err := s.rules.BulkWrite(ctx, models, opts)
-	if err == nil {
+	switch classifyBulkWriteError(err, rules) {
+	case bulkWriteOK, bulkWriteShadowedByManual:
 		return nil
-	}
-	if duplicateKeyErrorsOnConfigRulesOnly(err, rules) {
-		// Manual rows shadow config seeds: the intended precedence.
-		return nil
-	}
-	if isOnlyDuplicateKeyErrors(err) {
+	case bulkWriteRetryManualRace:
 		// A manual write lost an insert race to a concurrent writer. The
 		// documents exist now, so one retry applies the values as plain
 		// updates (last write wins, matching the SQL stores).
-		_, retryErr := s.rules.BulkWrite(ctx, models, opts)
-		if retryErr == nil || duplicateKeyErrorsOnConfigRulesOnly(retryErr, rules) {
+		retryErr := func() error {
+			_, err := s.rules.BulkWrite(ctx, models, opts)
+			return err
+		}()
+		switch classifyBulkWriteError(retryErr, rules) {
+		case bulkWriteOK, bulkWriteShadowedByManual:
 			return nil
+		default:
+			return fmt.Errorf("upsert %d rate limit rules (after duplicate-key retry): %w", len(rules), retryErr)
 		}
-		return fmt.Errorf("upsert %d rate limit rules (after duplicate-key retry): %w", len(rules), retryErr)
+	default:
+		return fmt.Errorf("upsert %d rate limit rules: %w", len(rules), err)
 	}
-	return fmt.Errorf("upsert %d rate limit rules: %w", len(rules), err)
+}
+
+// bulkWriteOutcome names how a bulk upsert error should be handled.
+type bulkWriteOutcome int
+
+const (
+	bulkWriteOK bulkWriteOutcome = iota
+	// bulkWriteShadowedByManual: every failed write is a duplicate key on a
+	// config-sourced rule — manual rows shadowing config seeds, the intended
+	// precedence.
+	bulkWriteShadowedByManual
+	// bulkWriteRetryManualRace: duplicate keys on manual rules — a lost
+	// insert race worth one retry, which lands as a plain update.
+	bulkWriteRetryManualRace
+	// bulkWriteFailed: anything else is a real failure.
+	bulkWriteFailed
+)
+
+func classifyBulkWriteError(err error, rules []Rule) bulkWriteOutcome {
+	if err == nil {
+		return bulkWriteOK
+	}
+	if duplicateKeyErrorsOnConfigRulesOnly(err, rules) {
+		return bulkWriteShadowedByManual
+	}
+	if isOnlyDuplicateKeyErrors(err) {
+		return bulkWriteRetryManualRace
+	}
+	return bulkWriteFailed
 }
 
 // duplicateKeyErrorsOnConfigRulesOnly reports whether every write error is a
