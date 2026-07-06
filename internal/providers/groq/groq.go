@@ -27,32 +27,42 @@ const (
 
 // Provider implements the core.Provider interface for Groq. Groq's API is
 // OpenAI-compatible, so all transport goes through the shared compatible
-// provider; only the Responses API differs (translated via chat) because the
-// gateway does not use Groq's native /responses endpoints.
+// provider; the Responses API is translated via chat because the gateway
+// does not use Groq's native /responses endpoints. Methods are delegated
+// explicitly (and batch/files via facet surfaces) rather than embedding the
+// full compatible provider, because Groq's upstream lacks passthrough and
+// native response lifecycle management and embedding cannot subtract
+// methods.
 type Provider struct {
+	*openai.BatchSurface
+	*openai.FileSurface
 	compat *openai.CompatibleProvider
 }
 
 // New creates a new Groq provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	return &Provider{
-		compat: openai.NewCompatibleProvider(providerCfg.APIKey, opts, openai.CompatibleProviderConfig{
-			ProviderName: "groq",
-			BaseURL:      providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
-			SetHeaders:   setHeaders,
-		}),
-	}
+	return newProvider(openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL))))
 }
 
 // NewWithHTTPClient creates a new Groq provider with a custom HTTP client.
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
+	return newProvider(openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL)))
+}
+
+func newProvider(compat *openai.CompatibleProvider) *Provider {
 	return &Provider{
-		compat: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-			ProviderName: "groq",
-			BaseURL:      defaultBaseURL,
-			SetHeaders:   setHeaders,
-		}),
+		BatchSurface: openai.NewBatchSurface(compat),
+		FileSurface:  openai.NewFileSurface(compat),
+		compat:       compat,
+	}
+}
+
+func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
+	return openai.CompatibleProviderConfig{
+		ProviderName: "groq",
+		BaseURL:      baseURL,
+		SetHeaders:   setHeaders,
 	}
 }
 
@@ -108,54 +118,4 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 // /audio/transcriptions API (whisper models).
 func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
 	return p.compat.CreateTranscription(ctx, req)
-}
-
-// CreateBatch creates a native Groq batch job.
-func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
-	return p.compat.CreateBatch(ctx, req)
-}
-
-// GetBatch retrieves a native Groq batch job.
-func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
-	return p.compat.GetBatch(ctx, id)
-}
-
-// ListBatches lists native Groq batch jobs.
-func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*core.BatchListResponse, error) {
-	return p.compat.ListBatches(ctx, limit, after)
-}
-
-// CancelBatch cancels a native Groq batch job.
-func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
-	return p.compat.CancelBatch(ctx, id)
-}
-
-// GetBatchResults fetches Groq batch results via the output file API.
-func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
-	return p.compat.GetBatchResults(ctx, id)
-}
-
-// CreateFile uploads a file through Groq's OpenAI-compatible /files API.
-func (p *Provider) CreateFile(ctx context.Context, req *core.FileCreateRequest) (*core.FileObject, error) {
-	return p.compat.CreateFile(ctx, req)
-}
-
-// ListFiles lists files through Groq's OpenAI-compatible /files API.
-func (p *Provider) ListFiles(ctx context.Context, purpose string, limit int, after string) (*core.FileListResponse, error) {
-	return p.compat.ListFiles(ctx, purpose, limit, after)
-}
-
-// GetFile retrieves one file object through Groq's OpenAI-compatible /files API.
-func (p *Provider) GetFile(ctx context.Context, id string) (*core.FileObject, error) {
-	return p.compat.GetFile(ctx, id)
-}
-
-// DeleteFile deletes a file object through Groq's OpenAI-compatible /files API.
-func (p *Provider) DeleteFile(ctx context.Context, id string) (*core.FileDeleteResponse, error) {
-	return p.compat.DeleteFile(ctx, id)
-}
-
-// GetFileContent fetches raw file bytes through Groq's /files/{id}/content API.
-func (p *Provider) GetFileContent(ctx context.Context, id string) (*core.FileContentResponse, error) {
-	return p.compat.GetFileContent(ctx, id)
 }

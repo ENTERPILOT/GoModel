@@ -409,14 +409,21 @@ func TestPassthrough_ReadError(t *testing.T) {
 }
 
 func TestAdaptBailianRequest_Nil(t *testing.T) {
-	if r := adaptBailianRequest(nil); r != nil {
+	r, err := adaptChatRequest(nil)
+	if err != nil {
+		t.Fatalf("adaptChatRequest(nil) error = %v", err)
+	}
+	if r != nil {
 		t.Fatal("expected nil")
 	}
 }
 
 func TestAdaptBailianRequest_NoMaxTokens(t *testing.T) {
 	req := &core.ChatRequest{Model: "qwen3-max"}
-	r := adaptBailianRequest(req)
+	r, err := adaptChatRequest(req)
+	if err != nil {
+		t.Fatalf("adaptChatRequest() error = %v", err)
+	}
 	if r.MaxTokens != nil {
 		t.Fatal("should not set max_completion_tokens when request had none")
 	}
@@ -474,7 +481,10 @@ func TestAdaptBailianRequest_PreservesOtherFields(t *testing.T) {
 		Messages:  []core.Message{{Role: "user", Content: "hi"}},
 		MaxTokens: &maxTokens,
 	}
-	r := adaptBailianRequest(req)
+	r, err := adaptChatRequest(req)
+	if err != nil {
+		t.Fatalf("adaptChatRequest() error = %v", err)
+	}
 	if r == req {
 		t.Fatal("should return a clone, not the original")
 	}
@@ -497,7 +507,10 @@ func TestAdaptBailianRequest_RespectsExistingMaxCompletionTokens(t *testing.T) {
 		MaxTokens:   &maxTokens,
 		ExtraFields: extra,
 	}
-	r := adaptBailianRequest(req)
+	r, err := adaptChatRequest(req)
+	if err != nil {
+		t.Fatalf("adaptChatRequest() error = %v", err)
+	}
 	if r == req {
 		t.Fatal("should return a clone")
 	}

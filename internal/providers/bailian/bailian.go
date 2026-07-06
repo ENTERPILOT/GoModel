@@ -31,37 +31,48 @@ var Registration = providers.Registration{
 }
 
 // Provider implements the core.Provider interface for Alibaba Cloud Bailian.
-// It wraps openai.CompatibleProvider and maps max_tokens to
-// max_completion_tokens for every request (Bailian deprecated max_tokens
-// in April 2026).
+// Transport goes through the shared compatible provider; Bailian's only chat
+// quirk is the max_tokens -> max_completion_tokens mapping (Bailian
+// deprecated max_tokens in April 2026), applied via the AdaptChatRequest
+// hook so every chat-derived path picks it up. Methods are delegated
+// explicitly rather than embedded because Bailian's upstream lacks parts of
+// the full OpenAI surface (audio, native /responses) and embedding cannot
+// subtract methods.
 type Provider struct {
+	*openai.BatchSurface
+	*openai.FileSurface
 	compatible *openai.CompatibleProvider
 	apiKey     string // retained to inject auth on the realtime websocket target
 }
 
 // New creates a new Bailian provider from a resolved ProviderConfig.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
-	return &Provider{
-		compatible: openai.NewCompatibleProvider(cfg.APIKey, opts, openai.CompatibleProviderConfig{
-			ProviderName: "bailian",
-			BaseURL:      baseURL,
-			SetHeaders:   setHeaders,
-		}),
-		apiKey: cfg.APIKey,
-	}
+	compat := openai.NewCompatibleProvider(cfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)))
+	return newProvider(compat, cfg.APIKey)
 }
 
 // NewWithHTTPClient creates a new Bailian provider with a custom HTTP client.
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
+	compat := openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL))
+	return newProvider(compat, apiKey)
+}
+
+func newProvider(compat *openai.CompatibleProvider, apiKey string) *Provider {
 	return &Provider{
-		compatible: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-			ProviderName: "bailian",
-			BaseURL:      defaultBaseURL,
-			SetHeaders:   setHeaders,
-		}),
-		apiKey: apiKey,
+		BatchSurface: openai.NewBatchSurface(compat),
+		FileSurface:  openai.NewFileSurface(compat),
+		compatible:   compat,
+		apiKey:       apiKey,
+	}
+}
+
+func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
+	return openai.CompatibleProviderConfig{
+		ProviderName:     "bailian",
+		BaseURL:          baseURL,
+		SetHeaders:       setHeaders,
+		AdaptChatRequest: adaptChatRequest,
 	}
 }
 
@@ -74,15 +85,14 @@ func (p *Provider) SetBaseURL(url string) {
 	p.compatible.SetBaseURL(url)
 }
 
-// ChatCompletion maps max_tokens to max_completion_tokens for Bailian models.
-// Bailian deprecated max_tokens in April 2026; all models now require max_completion_tokens.
+// ChatCompletion sends a chat completion request to Bailian.
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	return p.compatible.ChatCompletion(ctx, adaptBailianRequest(req))
+	return p.compatible.ChatCompletion(ctx, req)
 }
 
-// StreamChatCompletion maps max_tokens to max_completion_tokens for streaming requests.
+// StreamChatCompletion returns a raw response body for streaming.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	return p.compatible.StreamChatCompletion(ctx, adaptBailianRequest(req))
+	return p.compatible.StreamChatCompletion(ctx, req)
 }
 
 // ListModels returns the list of available models from Bailian.
@@ -110,7 +120,7 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 
 // Passthrough routes an opaque provider-native request to Bailian.
 // It also adapts max_tokens -> max_completion_tokens in the raw body,
-// mirroring the adaptation done in ChatCompletion/StreamChatCompletion.
+// mirroring the adaptation done on typed chat requests.
 func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
@@ -127,74 +137,7 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	return p.compatible.Passthrough(ctx, req)
 }
 
-// CreateBatch creates a native Bailian batch job.
-func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
-	return p.compatible.CreateBatch(ctx, req)
-}
-
-// GetBatch retrieves a Bailian batch job by ID.
-func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
-	return p.compatible.GetBatch(ctx, id)
-}
-
-// ListBatches lists Bailian batch jobs with pagination.
-func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*core.BatchListResponse, error) {
-	return p.compatible.ListBatches(ctx, limit, after)
-}
-
-// CancelBatch cancels a pending Bailian batch job.
-func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
-	return p.compatible.CancelBatch(ctx, id)
-}
-
-// GetBatchResults fetches Bailian batch results via the output file API.
-func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
-	return p.compatible.GetBatchResults(ctx, id)
-}
-
-// CreateFile uploads a file through Bailian's OpenAI-compatible /files API.
-func (p *Provider) CreateFile(ctx context.Context, req *core.FileCreateRequest) (*core.FileObject, error) {
-	resp, err := p.compatible.CreateFile(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	resp.Provider = "bailian"
-	return resp, nil
-}
-
-// ListFiles lists files through Bailian's OpenAI-compatible /files API.
-func (p *Provider) ListFiles(ctx context.Context, purpose string, limit int, after string) (*core.FileListResponse, error) {
-	resp, err := p.compatible.ListFiles(ctx, purpose, limit, after)
-	if err != nil {
-		return nil, err
-	}
-	for i := range resp.Data {
-		resp.Data[i].Provider = "bailian"
-	}
-	return resp, nil
-}
-
-// GetFile retrieves a file object through Bailian's OpenAI-compatible /files API.
-func (p *Provider) GetFile(ctx context.Context, id string) (*core.FileObject, error) {
-	resp, err := p.compatible.GetFile(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	resp.Provider = "bailian"
-	return resp, nil
-}
-
-// DeleteFile deletes a file through Bailian's OpenAI-compatible /files API.
-func (p *Provider) DeleteFile(ctx context.Context, id string) (*core.FileDeleteResponse, error) {
-	return p.compatible.DeleteFile(ctx, id)
-}
-
-// GetFileContent fetches raw file bytes through Bailian's /files/{id}/content API.
-func (p *Provider) GetFileContent(ctx context.Context, id string) (*core.FileContentResponse, error) {
-	return p.compatible.GetFileContent(ctx, id)
-}
-
-// adaptBailianRequest maps max_tokens -> max_completion_tokens in the request.
+// adaptChatRequest maps max_tokens -> max_completion_tokens in the request.
 // Bailian deprecated max_tokens in April 2026.
 // It moves MaxTokens into ExtraFields as max_completion_tokens so that when
 // ChatRequest is serialized, max_tokens is omitted and max_completion_tokens
@@ -206,21 +149,21 @@ func (p *Provider) GetFileContent(ctx context.Context, id string) (*core.FileCon
 //
 // If either operation fails, the original request is returned unmodified
 // and a warning is logged so operators can diagnose the issue.
-func adaptBailianRequest(req *core.ChatRequest) *core.ChatRequest {
+func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if req == nil || req.MaxTokens == nil {
-		return req
+		return req, nil
 	}
 	// If the caller already set max_completion_tokens explicitly, respect it.
 	if existing := req.ExtraFields.Lookup("max_completion_tokens"); existing != nil {
 		cloned := *req
 		cloned.MaxTokens = nil
-		return &cloned
+		return &cloned, nil
 	}
 	maxTokensJSON, err := json.Marshal(*req.MaxTokens)
 	if err != nil {
 		slog.Warn("bailian: failed to marshal MaxTokens for adaptation, forwarding original request",
 			"error", err)
-		return req
+		return req, nil
 	}
 	extra, err := core.MergeUnknownJSONFields(req.ExtraFields, map[string]json.RawMessage{
 		"max_completion_tokens": maxTokensJSON,
@@ -228,12 +171,12 @@ func adaptBailianRequest(req *core.ChatRequest) *core.ChatRequest {
 	if err != nil {
 		slog.Warn("bailian: failed to merge ExtraFields for adaptation, forwarding original request",
 			"error", err)
-		return req
+		return req, nil
 	}
 	cloned := *req
 	cloned.ExtraFields = extra
 	cloned.MaxTokens = nil
-	return &cloned
+	return &cloned, nil
 }
 
 // adaptPassthroughBody adapts max_tokens -> max_completion_tokens in a raw

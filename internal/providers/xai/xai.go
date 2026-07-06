@@ -35,28 +35,34 @@ const (
 // OpenAI-compatible, so transport goes through the shared compatible
 // provider; xAI's only chat quirk is the conversation affinity header
 // (X-Grok-Conv-Id), injected via the ChatRequestHeaders hook. Methods are
-// delegated explicitly rather than embedded because xAI's upstream lacks
+// delegated explicitly (and batch/files via facet surfaces) rather than
+// embedding the full compatible provider, because xAI's upstream lacks
 // parts of the full OpenAI surface (audio, passthrough, response
 // lifecycle management) and embedding cannot subtract methods.
 type Provider struct {
+	*openai.BatchSurface
+	*openai.FileSurface
 	compat *openai.CompatibleProvider
 	apiKey string // retained to inject auth on the realtime websocket target
 }
 
 // New creates a new xAI provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	return &Provider{
-		compat: openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL))),
-		apiKey: providerCfg.APIKey,
-	}
+	return newProvider(openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL))), providerCfg.APIKey)
 }
 
 // NewWithHTTPClient creates a new xAI provider with a custom HTTP client.
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
+	return newProvider(openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL)), apiKey)
+}
+
+func newProvider(compat *openai.CompatibleProvider, apiKey string) *Provider {
 	return &Provider{
-		compat: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL)),
-		apiKey: apiKey,
+		BatchSurface: openai.NewBatchSurface(compat),
+		FileSurface:  openai.NewFileSurface(compat),
+		compat:       compat,
+		apiKey:       apiKey,
 	}
 }
 
@@ -204,54 +210,4 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 // Embeddings sends an embeddings request to xAI
 func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	return p.compat.Embeddings(ctx, req)
-}
-
-// CreateBatch creates a native xAI batch job.
-func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
-	return p.compat.CreateBatch(ctx, req)
-}
-
-// GetBatch retrieves a native xAI batch job.
-func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
-	return p.compat.GetBatch(ctx, id)
-}
-
-// ListBatches lists native xAI batch jobs.
-func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*core.BatchListResponse, error) {
-	return p.compat.ListBatches(ctx, limit, after)
-}
-
-// CancelBatch cancels a native xAI batch job.
-func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
-	return p.compat.CancelBatch(ctx, id)
-}
-
-// GetBatchResults fetches xAI batch results via the output file API.
-func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
-	return p.compat.GetBatchResults(ctx, id)
-}
-
-// CreateFile uploads a file through xAI's OpenAI-compatible /files API.
-func (p *Provider) CreateFile(ctx context.Context, req *core.FileCreateRequest) (*core.FileObject, error) {
-	return p.compat.CreateFile(ctx, req)
-}
-
-// ListFiles lists files through xAI's OpenAI-compatible /files API.
-func (p *Provider) ListFiles(ctx context.Context, purpose string, limit int, after string) (*core.FileListResponse, error) {
-	return p.compat.ListFiles(ctx, purpose, limit, after)
-}
-
-// GetFile retrieves one file object through xAI's OpenAI-compatible /files API.
-func (p *Provider) GetFile(ctx context.Context, id string) (*core.FileObject, error) {
-	return p.compat.GetFile(ctx, id)
-}
-
-// DeleteFile deletes a file object through xAI's OpenAI-compatible /files API.
-func (p *Provider) DeleteFile(ctx context.Context, id string) (*core.FileDeleteResponse, error) {
-	return p.compat.DeleteFile(ctx, id)
-}
-
-// GetFileContent fetches raw file bytes through xAI's /files/{id}/content API.
-func (p *Provider) GetFileContent(ctx context.Context, id string) (*core.FileContentResponse, error) {
-	return p.compat.GetFileContent(ctx, id)
 }
