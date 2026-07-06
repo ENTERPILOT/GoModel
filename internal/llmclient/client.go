@@ -490,6 +490,15 @@ func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, erro
 		return nil, providerErr
 	}
 
+	// The stream can outlive the request by minutes while transport internals
+	// keep resp.Request reachable. GetBody closes over the fully marshaled
+	// request payload; redirects and transparent transport retries only
+	// consult it inside Do, so dropping it here releases the payload for the
+	// stream's lifetime without changing behavior.
+	if resp.Request != nil {
+		resp.Request.GetBody = nil
+	}
+
 	c.completeScope(scope, resp.StatusCode, nil, nil)
 	return resp.Body, nil
 }

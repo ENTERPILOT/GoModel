@@ -389,7 +389,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
-			maxAllocs: 110,   // baseline 108
+			maxAllocs: 112,   // baseline 110 (incl. +1 strings.Clone that unpins the body from RouteHints)
 			maxBytes:  14080, // baseline ~13.5 KB (incl. per-attempt response body/header capture fields)
 		},
 		{
@@ -400,7 +400,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// full catalog several times per request) would blow these limits.
 			name:      "gateway_chat_completion_hot_path_routed",
 			bench:     BenchmarkGatewayHotPathChatCompletionRouted,
-			maxAllocs: 128,   // baseline 126
+			maxAllocs: 130,   // baseline 128 (incl. +1 strings.Clone that unpins the body from RouteHints)
 			maxBytes:  14656, // baseline ~14.0 KB
 		},
 		{

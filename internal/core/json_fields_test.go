@@ -3,7 +3,9 @@ package core
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -253,5 +255,25 @@ func TestDecoderLeniencyIsBounded(t *testing.T) {
 func TestMergedJSONObjectCap_Overflow(t *testing.T) {
 	if _, err := mergedJSONObjectCap(math.MaxInt, 2); err == nil {
 		t.Fatal("mergedJSONObjectCap() error = nil, want overflow error")
+	}
+}
+
+func TestExtractUnknownJSONFields_DoesNotRetainBodySizedCapacity(t *testing.T) {
+	// A large request with tiny unknown extras: the retained raw bytes are
+	// kept for the decoded request's whole lifetime, so they must not pin a
+	// body-sized backing array (regression: the buffer was pre-sized to
+	// len(data)).
+	body := fmt.Sprintf(`{"model":"gpt-test","messages":[{"role":"user","content":%q}],"custom_flag":true}`,
+		strings.Repeat("x", 1<<20))
+
+	fields, err := extractUnknownJSONFields([]byte(body), "model", "messages")
+	if err != nil {
+		t.Fatalf("extractUnknownJSONFields() error = %v", err)
+	}
+	if got := string(fields.raw); got != `{"custom_flag":true}` {
+		t.Fatalf("raw = %q, want custom_flag only", got)
+	}
+	if c := cap(fields.raw); c > 4096 {
+		t.Fatalf("retained capacity = %d bytes for %d bytes of extras, want small", c, len(fields.raw))
 	}
 }

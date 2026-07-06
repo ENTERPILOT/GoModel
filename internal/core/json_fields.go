@@ -272,7 +272,12 @@ func extractUnknownJSONFields(data []byte, knownFields ...string) (UnknownJSONFi
 		return UnknownJSONFields{}, fmt.Errorf("expected JSON object")
 	}
 
-	buf := bytes.NewBuffer(make([]byte, 0, len(data)))
+	// Pre-size for typical unknown-field payloads without reserving
+	// request-sized capacity: the result is retained on the decoded request
+	// for its whole lifetime, so a body-sized backing array would pin a full
+	// body copy per decoded object even when the extras are a few bytes.
+	var buf bytes.Buffer
+	buf.Grow(min(len(data), 256))
 	buf.WriteByte('{')
 	wrote := false
 	root.ForEach(func(key, value gjson.Result) bool {
@@ -293,7 +298,13 @@ func extractUnknownJSONFields(data []byte, knownFields ...string) (UnknownJSONFi
 	}
 
 	buf.WriteByte('}')
-	return UnknownJSONFields{raw: buf.Bytes()}, nil
+	raw := buf.Bytes()
+	// Re-copy only when the buffer over-grew, so the retained extras never
+	// pin significantly more capacity than their own length.
+	if cap(raw)-len(raw) > 1024 {
+		raw = bytes.Clone(raw)
+	}
+	return UnknownJSONFields{raw: raw}, nil
 }
 
 func marshalWithUnknownJSONFields(base any, extraFields UnknownJSONFields) ([]byte, error) {

@@ -339,11 +339,15 @@ func deriveSnapshotSelectorHintsGJSON(body []byte) (model, provider string, stre
 		return "", "", false, false
 	}
 
+	// Clone the extracted strings: gjson results alias the full parsed body,
+	// and these values land in RouteHints, which lives on the request context
+	// for the whole (possibly streaming) request — without the clone, two
+	// short selector strings pin a request-sized backing string.
 	if modelResult.Type == gjson.String {
-		model = modelResult.String()
+		model = strings.Clone(modelResult.String())
 	}
 	if providerResult.Type == gjson.String {
-		provider = providerResult.String()
+		provider = strings.Clone(providerResult.String())
 	}
 	if streamResult.Type == gjson.True || streamResult.Type == gjson.False {
 		stream = streamResult.Bool()

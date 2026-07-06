@@ -52,10 +52,12 @@ type streamConverter struct {
 	emittedToolCalls  bool
 }
 
+// streamToolCallState tracks per-tool-call bookkeeping for the chat dialect.
+// Unlike the Responses converter, the chat path relays argument deltas
+// verbatim and never needs the accumulated argument text, so none is kept.
 type streamToolCallState struct {
 	ID                string
 	Name              string
-	Arguments         strings.Builder
 	Index             int
 	Started           bool
 	PlaceholderObject bool
@@ -204,9 +206,6 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 				sc.toolCalls[event.Index] = state
 				return ""
 			}
-			if initialArguments != "" {
-				_, _ = state.Arguments.WriteString(initialArguments)
-			}
 			state.Started = true
 			sc.toolCalls[event.Index] = state
 			sc.emittedToolCalls = true
@@ -257,11 +256,7 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 			if state == nil {
 				return ""
 			}
-			if state.PlaceholderObject {
-				state.Arguments = strings.Builder{}
-				state.PlaceholderObject = false
-			}
-			_, _ = state.Arguments.WriteString(event.Delta.PartialJSON)
+			state.PlaceholderObject = false
 			if !state.Started {
 				state.Started = true
 				sc.emittedToolCalls = true
