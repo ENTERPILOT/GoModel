@@ -9,10 +9,12 @@ import (
 	"gomodel/internal/core"
 )
 
-// realtimeMockProvider is a mockProvider that also implements core.RealtimeProvider.
+// realtimeMockProvider is a mockProvider that also implements core.RealtimeProvider
+// and core.RealtimeCallProvider.
 type realtimeMockProvider struct {
 	mockProvider
-	lastReq *core.RealtimeRequest
+	lastReq     *core.RealtimeRequest
+	lastCallReq *core.RealtimeRequest
 }
 
 func (m *realtimeMockProvider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
@@ -21,6 +23,16 @@ func (m *realtimeMockProvider) RealtimeTarget(_ context.Context, req *core.Realt
 		URL:     "wss://upstream.example/v1/realtime?model=" + req.Model,
 		Headers: http.Header{"Authorization": {"Bearer test"}},
 	}, nil
+}
+
+func (m *realtimeMockProvider) RealtimeCallTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
+	m.lastCallReq = req
+	return &core.RealtimeHTTPTarget{URL: "https://upstream.example/v1/realtime/calls"}, nil
+}
+
+func (m *realtimeMockProvider) RealtimeClientSecretTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
+	m.lastCallReq = req
+	return &core.RealtimeHTTPTarget{URL: "https://upstream.example/v1/realtime/client_secrets"}, nil
 }
 
 func TestRouterRealtimeTargetRoutesByModel(t *testing.T) {
@@ -49,6 +61,65 @@ func TestRouterRealtimeTargetUnsupportedModel(t *testing.T) {
 	_, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "plain"})
 	if err == nil || !strings.Contains(err.Error(), "does not support realtime") {
 		t.Fatalf("err = %v, want does-not-support-realtime", err)
+	}
+}
+
+func TestRouterRealtimeTargetForwardsCallID(t *testing.T) {
+	rt := &realtimeMockProvider{}
+	lookup := newMockLookup()
+	lookup.addModel("gpt-realtime", rt, "openai")
+	router, _ := NewRouter(lookup)
+
+	_, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime", CallID: "rtc_7"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rt.lastReq == nil || rt.lastReq.CallID != "rtc_7" {
+		t.Errorf("provider received %+v, want forwarded call id", rt.lastReq)
+	}
+}
+
+func TestRouterRealtimeCallTargetRoutesByModel(t *testing.T) {
+	rt := &realtimeMockProvider{}
+	lookup := newMockLookup()
+	lookup.addModel("gpt-realtime", rt, "openai")
+	router, _ := NewRouter(lookup)
+
+	target, err := router.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasSuffix(target.URL, "/realtime/calls") {
+		t.Errorf("url = %q, want the calls endpoint", target.URL)
+	}
+	if rt.lastCallReq == nil || rt.lastCallReq.Model != "gpt-realtime" {
+		t.Errorf("provider received %+v, want forwarded model", rt.lastCallReq)
+	}
+}
+
+func TestRouterRealtimeClientSecretTargetRoutesByModel(t *testing.T) {
+	rt := &realtimeMockProvider{}
+	lookup := newMockLookup()
+	lookup.addModel("gpt-realtime", rt, "openai")
+	router, _ := NewRouter(lookup)
+
+	target, err := router.RealtimeClientSecretTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasSuffix(target.URL, "/realtime/client_secrets") {
+		t.Errorf("url = %q, want the client secrets endpoint", target.URL)
+	}
+}
+
+func TestRouterRealtimeCallTargetUnsupportedModel(t *testing.T) {
+	lookup := newMockLookup()
+	lookup.addModel("plain", &mockProvider{}, "openai") // no RealtimeCallProvider
+	router, _ := NewRouter(lookup)
+
+	_, err := router.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: "plain"})
+	if err == nil || !strings.Contains(err.Error(), "does not support realtime calls") {
+		t.Fatalf("err = %v, want does-not-support-realtime-calls", err)
 	}
 }
 

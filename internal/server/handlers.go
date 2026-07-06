@@ -13,6 +13,8 @@ import (
 	"gomodel/internal/conversationstore"
 	"gomodel/internal/core"
 	"gomodel/internal/filestore"
+	"gomodel/internal/httpclient"
+	"gomodel/internal/realtime"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
 	"gomodel/internal/usage"
@@ -43,6 +45,8 @@ type Handler struct {
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
 	realtimeEnabled              bool
+	realtimeCalls                *realtime.CallRegistry
+	realtimeHTTPClient           *http.Client
 	responseCache                *responsecache.ResponseCacheMiddleware
 	guardrailsHash               string
 	storageProbe                 ReadinessProbe
@@ -83,6 +87,8 @@ func newHandlerWithAuthorizer(
 		conversationStore:            conversationstore.NewMemoryStore(),
 		normalizePassthroughV1Prefix: true,
 		enabledPassthroughProviders:  normalizeEnabledPassthroughProviders(defaultEnabledPassthroughProviders),
+		realtimeCalls:                realtime.NewCallRegistry(),
+		realtimeHTTPClient:           httpclient.NewDefaultHTTPClient(),
 	}
 }
 
@@ -235,6 +241,8 @@ func (h *Handler) realtime() *realtimeService {
 		rateLimiter:     h.rateLimiter,
 		usageLogger:     h.usageLogger,
 		pricingResolver: h.pricingResolver,
+		calls:           h.realtimeCalls,
+		httpClient:      h.realtimeHTTPClient,
 		enabled:         h.realtimeEnabled,
 	}
 }
@@ -311,19 +319,60 @@ func (h *Handler) ProviderPassthrough(c *echo.Context) error {
 // Realtime handles GET /v1/realtime.
 //
 // @Summary      Open a realtime session
-// @Description  Upgrades to a websocket and relays an OpenAI-compatible realtime (speech-to-speech) session to the provider that owns the model named in the ?model= query parameter. Provider credentials are injected by the gateway.
+// @Description  Upgrades to a websocket and relays an OpenAI-compatible realtime (speech-to-speech) session to the provider that owns the model named in the ?model= query parameter. Provider credentials are injected by the gateway. Passing ?call_id= instead attaches to an existing WebRTC/SIP call as a sideband channel; calls created through this gateway instance are routed automatically, others need explicit model (and provider) parameters.
 // @Tags         realtime
 // @Security     BearerAuth
-// @Param        model     query     string  true   "Model that owns the realtime session"
+// @Param        model     query     string  false  "Model that owns the realtime session (required unless call_id names a call created through this gateway instance)"
 // @Param        provider  query     string  false  "Optional provider hint"
+// @Param        call_id   query     string  false  "Existing WebRTC/SIP call to attach to as a sideband channel"
 // @Success      101       {string}  string  "Switching Protocols"
 // @Failure      400       {object}  core.OpenAIErrorEnvelope
 // @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
 // @Failure      501       {object}  core.OpenAIErrorEnvelope
 // @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/realtime [get]
 func (h *Handler) Realtime(c *echo.Context) error {
 	return h.realtime().Realtime(c)
+}
+
+// RealtimeCalls handles POST /v1/realtime/calls.
+//
+// @Summary      Create a realtime WebRTC call
+// @Description  OpenAI-compatible WebRTC SDP exchange. Accepts a raw application/sdp offer with the model in the ?model= query parameter, or a multipart form with sdp and session (JSON) fields. The gateway routes by model, injects provider credentials, and relays the SDP answer; the Location header carries the created call id. Media flows directly between the client and the provider, so usage is recorded by a gateway-side sideband observer when usage tracking is enabled.
+// @Tags         realtime
+// @Accept       mpfd
+// @Produce      plain
+// @Security     BearerAuth
+// @Param        model     query     string  false  "Model that owns the call (required for application/sdp offers)"
+// @Param        provider  query     string  false  "Optional provider hint"
+// @Success      201       {string}  string  "SDP answer"
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/realtime/calls [post]
+func (h *Handler) RealtimeCalls(c *echo.Context) error {
+	return h.realtime().RealtimeCalls(c)
+}
+
+// RealtimeClientSecrets handles POST /v1/realtime/client_secrets.
+//
+// @Summary      Mint an ephemeral realtime client secret
+// @Description  OpenAI-compatible ephemeral credential minting for browser and mobile realtime clients. Routes by session.model (or the transcription model for transcription sessions), applies the same model-access, budget, and rate-limit gates as other model endpoints, and relays the provider response verbatim. The minted secret authenticates the client directly against the provider, bypassing the gateway for the session itself.
+// @Tags         realtime
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        provider  query     string  false  "Optional provider hint"
+// @Success      200       {object}  map[string]any  "Provider client secret response"
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/realtime/client_secrets [post]
+func (h *Handler) RealtimeClientSecrets(c *echo.Context) error {
+	return h.realtime().RealtimeClientSecrets(c)
 }
 
 // ChatCompletion handles POST /v1/chat/completions

@@ -33,11 +33,15 @@ type realtimeService struct {
 	rateLimiter     RateLimiter
 	usageLogger     usage.LoggerInterface
 	pricingResolver usage.PricingResolver
+	calls           *realtime.CallRegistry
+	httpClient      *http.Client
 	enabled         bool
 }
 
 // realtimeRoute carries the resolved routing identity for one session, used to
-// label its usage entries and lifecycle logs the same way audio does.
+// label its usage entries and lifecycle logs the same way audio does. endpoint,
+// when set, overrides the usage entry endpoint so WebRTC calls are
+// distinguishable from websocket sessions.
 type realtimeRoute struct {
 	model        string
 	providerType string
@@ -45,6 +49,7 @@ type realtimeRoute struct {
 	requestID    string
 	userPath     string
 	labels       []string
+	endpoint     string
 }
 
 // Realtime handles GET /v1/realtime, routing by the model query parameter.
@@ -60,6 +65,9 @@ func (s *realtimeService) PassthroughRealtime(c *echo.Context, providerType stri
 }
 
 // handle is the single realtime entry point: gate, resolve+authorize, dial, relay.
+// A call_id query parameter attaches to an existing WebRTC/SIP call as a sideband
+// channel; the route is recalled from the call registry, or taken from explicit
+// model/provider parameters when the call was created elsewhere.
 func (s *realtimeService) handle(c *echo.Context, model, providerHint string) error {
 	if !s.enabled {
 		return handleError(c, core.NewInvalidRequestErrorWithStatus(http.StatusNotImplemented, "realtime sessions are disabled", nil))
@@ -68,8 +76,25 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 	if !ok {
 		return handleError(c, core.NewInvalidRequestError("realtime is not supported by the current provider router", nil))
 	}
-	if model == "" {
+	callID := strings.TrimSpace(c.QueryParam("call_id"))
+	if model == "" && callID == "" {
 		return handleError(c, core.NewInvalidRequestError("model query parameter is required", nil))
+	}
+	registered := false
+	if callID != "" {
+		callRoute, ok := s.calls.Lookup(callID)
+		switch {
+		case ok:
+			registered = true
+			if model == "" {
+				model = callRoute.Model
+			}
+			if providerHint == "" {
+				providerHint = callRoute.Provider
+			}
+		case model == "":
+			return handleError(c, core.NewNotFoundError("unknown call_id; pass model (and provider) query parameters to attach to a call created elsewhere"))
+		}
 	}
 
 	ctx, route, err := s.prepare(c, model, providerHint)
@@ -83,11 +108,17 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 		return handleError(c, err)
 	}
 	defer release()
-	target, err := router.RealtimeTarget(ctx, &core.RealtimeRequest{Model: model, Provider: providerHint})
+	target, err := router.RealtimeTarget(ctx, &core.RealtimeRequest{Model: model, Provider: providerHint, CallID: callID})
 	if err != nil {
 		return handleError(c, err)
 	}
-	return s.proxy(c, ctx, target, route)
+	tap := s.usageTap(ctx, route)
+	if registered {
+		// The gateway created this call and its sideband observer already records
+		// usage; tapping the attach session too would double-count every response.
+		tap = nil
+	}
+	return s.proxy(c, ctx, target, route, tap)
 }
 
 // prepare resolves and authorizes the model, enforces budget, and stamps the
@@ -138,7 +169,7 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 // proxy injects credentials, relays frames, and logs the session lifecycle. A
 // pre-upgrade dial failure becomes a normal HTTP error; once upgraded the
 // connection is hijacked and the outcome is logged.
-func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *core.RealtimeTarget, route realtimeRoute) error {
+func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *core.RealtimeTarget, route realtimeRoute, tap func([]byte)) error {
 	if target == nil || strings.TrimSpace(target.URL) == "" {
 		return handleError(c, core.NewProviderError(route.providerType, http.StatusBadGateway, "provider returned no realtime target", nil))
 	}
@@ -150,7 +181,7 @@ func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *co
 	}
 
 	slog.Info("realtime session opened", "request_id", route.requestID, "model", route.model, "provider", route.providerType)
-	err := realtime.Proxy(c.Response(), c.Request(), t, s.usageTap(ctx, route))
+	err := realtime.Proxy(c.Response(), c.Request(), t, tap)
 
 	var de *realtime.DialError
 	if errors.As(err, &de) {
@@ -192,6 +223,9 @@ func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute) fun
 		entry := usage.ExtractFromRealtimeResponseDone(frame, route.requestID, route.model, route.providerType, pricing)
 		if entry == nil {
 			return
+		}
+		if route.endpoint != "" {
+			entry.Endpoint = route.endpoint
 		}
 		entry.ProviderName = strings.TrimSpace(route.providerName)
 		entry.UserPath = route.userPath

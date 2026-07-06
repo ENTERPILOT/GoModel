@@ -131,10 +131,12 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationAudioTranscriptions,
 		}
-	case path == "/v1/realtime":
-		// The realtime endpoint upgrades to a websocket and relays the provider's
-		// event schema verbatim. It is a model interaction (incurs usage, must be
-		// observable) but is not IngressManaged: the handler hijacks the connection
+	case path == "/v1/realtime" || path == "/v1/realtime/calls" || path == "/v1/realtime/client_secrets":
+		// The realtime endpoints relay the provider's schema verbatim: /v1/realtime
+		// upgrades to a websocket, /v1/realtime/calls exchanges WebRTC SDP, and
+		// /v1/realtime/client_secrets mints ephemeral browser credentials. They are
+		// model interactions (incur usage, must be observable) but not
+		// IngressManaged: the handlers parse or hijack the transport themselves
 		// rather than going through the JSON inference pipeline.
 		return EndpointDescriptor{
 			ModelInteraction: true,
@@ -191,6 +193,13 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 	case OperationAudioTranscriptions:
 		return BodyModeMultipart
 	case OperationRealtime:
+		if method == http.MethodPost && path == "/v1/realtime/client_secrets" {
+			return BodyModeJSON
+		}
+		if method == http.MethodPost && path == "/v1/realtime/calls" {
+			// SDP exchange bodies are application/sdp or multipart form data.
+			return BodyModeOpaque
+		}
 		return BodyModeNone
 	case OperationProviderPassthrough:
 		return BodyModeOpaque

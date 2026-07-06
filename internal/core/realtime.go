@@ -7,10 +7,13 @@ import (
 
 // RealtimeRequest carries the resolved parameters for opening a realtime
 // (speech-to-speech) websocket session. The model selects the provider; the
-// optional Provider hint mirrors the audio endpoints.
+// optional Provider hint mirrors the audio endpoints. CallID, when set, attaches
+// to an existing WebRTC/SIP call as a sideband websocket instead of opening a
+// fresh model session.
 type RealtimeRequest struct {
 	Model    string
 	Provider string
+	CallID   string
 }
 
 // RealtimeTarget describes the upstream websocket a provider exposes for realtime
@@ -36,4 +39,29 @@ type RealtimeProvider interface {
 // passthrough upgrade.
 type RealtimeRouter interface {
 	RealtimeTarget(ctx context.Context, req *RealtimeRequest) (*RealtimeTarget, error)
+}
+
+// RealtimeHTTPTarget describes an upstream HTTPS endpoint for realtime call
+// signaling (WebRTC SDP exchange, ephemeral client secrets). Like the websocket
+// target, it carries only the dial URL and the credential headers to inject;
+// headers must never be logged.
+type RealtimeHTTPTarget struct {
+	URL     string
+	Headers http.Header
+}
+
+// RealtimeCallProvider is implemented by providers that expose OpenAI-compatible
+// realtime HTTP signaling endpoints: SDP exchange for WebRTC calls and ephemeral
+// client secrets for browser clients. It is optional, like RealtimeProvider;
+// websocket-only realtime providers simply omit it.
+type RealtimeCallProvider interface {
+	RealtimeCallTarget(ctx context.Context, req *RealtimeRequest) (*RealtimeHTTPTarget, error)
+	RealtimeClientSecretTarget(ctx context.Context, req *RealtimeRequest) (*RealtimeHTTPTarget, error)
+}
+
+// RealtimeCallRouter resolves realtime HTTP signaling targets for a request. The
+// Router implements it by routing on the model, mirroring RealtimeRouter.
+type RealtimeCallRouter interface {
+	RealtimeCallTarget(ctx context.Context, req *RealtimeRequest) (*RealtimeHTTPTarget, error)
+	RealtimeClientSecretTarget(ctx context.Context, req *RealtimeRequest) (*RealtimeHTTPTarget, error)
 }

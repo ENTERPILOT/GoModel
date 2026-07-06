@@ -379,6 +379,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/audio/transcriptions", handler.AudioTranscriptions)
 	if cfg == nil || cfg.RealtimeEnabled {
 		e.GET("/v1/realtime", handler.Realtime)
+		e.POST("/v1/realtime/calls", handler.RealtimeCalls)
+		e.POST("/v1/realtime/client_secrets", handler.RealtimeClientSecrets)
 	}
 	e.POST("/v1/files", handler.CreateFile)
 	e.GET("/v1/files", handler.ListFiles)
