@@ -344,3 +344,38 @@ func (l *captureLiveLogger) PublishLiveEvent(eventType string, entry *LogEntry) 
 		requestBody:    requestBody,
 	})
 }
+
+func TestMiddlewarePublishesRemovalWhenHandlerPanics(t *testing.T) {
+	logger := &captureLiveLogger{cfg: Config{Enabled: true}}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("X-Request-ID", "req-panic")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		panic("handler exploded")
+	})
+
+	// The panic must keep propagating to the outer recover middleware; the
+	// audit middleware only publishes the terminal live event on the way out.
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("panic was swallowed by the audit middleware")
+			}
+		}()
+		_ = handler(c)
+	}()
+
+	if len(logger.events) != 2 {
+		t.Fatalf("live events = %d, want started + removed", len(logger.events))
+	}
+	if logger.events[0].eventType != LiveEventAuditStarted {
+		t.Fatalf("first event = %q, want %q", logger.events[0].eventType, LiveEventAuditStarted)
+	}
+	if logger.events[1].eventType != LiveEventAuditRemoved {
+		t.Fatalf("second event = %q, want %q (terminal event that evicts the live snapshot)", logger.events[1].eventType, LiveEventAuditRemoved)
+	}
+}

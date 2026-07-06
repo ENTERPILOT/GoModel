@@ -164,6 +164,11 @@ type Response struct {
 	Body   []byte
 }
 
+// maxErrorBodyBytes caps how much of an upstream error body is read into
+// memory. It matches core's audit capture cap; a misbehaving upstream that
+// answers an error status with an endless body must not be buffered whole.
+const maxErrorBodyBytes = 64 * 1024
+
 // attachResponseHeaders records the upstream response headers on a provider
 // GatewayError so failed attempts can be audited. It is a no-op for other
 // error types or a nil header set.
@@ -380,6 +385,7 @@ func (c *Client) Do(ctx context.Context, req Request, result any) error {
 func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 	scope, err := c.beginRequest(ctx, req, false)
 	if err != nil {
+		closeRawBodyReader(req)
 		return nil, err
 	}
 	ctx = scope.ctx
@@ -394,6 +400,7 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if err := c.waitForRetryAttempt(ctx, scope, attempt); err != nil {
+			closeRawBodyReader(req)
 			return nil, err
 		}
 
@@ -462,6 +469,7 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, error) {
 	scope, err := c.beginRequest(ctx, req, true)
 	if err != nil {
+		closeRawBodyReader(req)
 		return nil, err
 	}
 
@@ -479,7 +487,7 @@ func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, erro
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, readErr := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		if readErr != nil {
 			respBody = []byte("failed to read error response")
 		}
@@ -538,6 +546,7 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 	stream := strings.Contains(strings.ToLower(strings.Join(req.Headers.Values("Accept"), ",")), "text/event-stream")
 	scope, err := c.beginRequest(ctx, req, stream)
 	if err != nil {
+		closeRawBodyReader(req)
 		return nil, err
 	}
 	ctx = scope.ctx
@@ -549,6 +558,7 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if err := c.waitForRetryAttempt(ctx, scope, attempt); err != nil {
+			closeRawBodyReader(req)
 			return nil, err
 		}
 
@@ -629,6 +639,9 @@ func extractStatusCode(err error) int {
 func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response, error) {
 	httpReq, err := c.buildRequest(ctx, req)
 	if err != nil {
+		// The transport owns closing the body once the request reaches it;
+		// a request that never gets there must release the reader here.
+		closeRawBodyReader(req)
 		return nil, err
 	}
 
@@ -637,6 +650,17 @@ func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response
 		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), "failed to send request: "+err.Error(), err)
 	}
 	return resp, nil
+}
+
+// closeRawBodyReader releases a caller-supplied streaming body when the
+// request fails before reaching the HTTP transport, which otherwise closes it
+// on every path. Pipe-backed uploads (files, audio transcription) rely on
+// this to unblock their producer goroutines instead of leaking them — and the
+// upload buffers they pin — for the process lifetime.
+func closeRawBodyReader(req Request) {
+	if closer, ok := req.RawBodyReader.(io.Closer); ok {
+		_ = closer.Close()
+	}
 }
 
 // doRequest executes a single HTTP request without retries.
@@ -651,7 +675,14 @@ func (c *Client) doRequest(ctx context.Context, req Request) (*Response, error) 
 		_ = resp.Body.Close()
 	}()
 
-	body, err := io.ReadAll(resp.Body)
+	// Successful responses are read whole (large results are legitimate);
+	// error bodies are bounded — they only feed error parsing and audit
+	// capture, both of which cap at the same size.
+	reader := io.Reader(resp.Body)
+	if resp.StatusCode >= http.StatusBadRequest {
+		reader = io.LimitReader(resp.Body, maxErrorBodyBytes)
+	}
+	body, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), "failed to read response: "+err.Error(), err)
 	}
