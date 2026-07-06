@@ -303,6 +303,13 @@
                 return this.liveAuditStateRank(previous) > this.liveAuditStateRank(incoming) ? previous : incoming;
             },
 
+            // liveAuditStateSettled reports whether a live state already
+            // carries its final response (audit.completed or later); below
+            // that the request is still in flight.
+            liveAuditStateSettled(state) {
+                return this.liveAuditStateRank(state) >= this.liveAuditStateRank('audit.completed');
+            },
+
             liveAuditEventFlushed(state) {
                 const normalized = String(state || '').trim();
                 return normalized === 'audit.failed' || normalized === 'audit.flushed' || normalized === 'audit.detail';

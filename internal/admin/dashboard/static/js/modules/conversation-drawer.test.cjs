@@ -4,9 +4,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadConversationDrawerModuleFactory() {
+// Loads the drawer together with the real live-logs module so live-state
+// helpers (auditEntryLiveDetailPending, liveAuditStateSettled, …) behave
+// exactly as in production instead of via drifting stubs.
+function loadDrawerWindow() {
     const context = {
         console,
+        setTimeout,
+        clearTimeout,
         window: {},
         HTMLElement: class HTMLElement {},
         requestAnimationFrame: () => {},
@@ -17,16 +22,17 @@ function loadConversationDrawerModuleFactory() {
         }
     };
     vm.createContext(context);
-    for (const file of ['conversation-helpers.js', 'conversation-drawer.js']) {
+    for (const file of ['conversation-helpers.js', 'live-logs.js', 'conversation-drawer.js']) {
         vm.runInContext(fs.readFileSync(path.join(__dirname, file), 'utf8'), context);
     }
-    return context.window.dashboardConversationDrawerModule;
+    return context.window;
 }
 
 function createDrawerApp() {
-    const factory = loadConversationDrawerModuleFactory();
+    const win = loadDrawerWindow();
     return {
-        ...factory(),
+        ...win.dashboardLiveLogsModule(),
+        ...win.dashboardConversationDrawerModule(),
         conversationOpen: false,
         conversationLoading: false,
         conversationError: '',
@@ -40,21 +46,6 @@ function createDrawerApp() {
         fetchCalls: [],
         fetchConversation(logID, token) {
             this.fetchCalls.push({ logID, token });
-        },
-        auditEntryLiveDetailPending(entry) {
-            return !!(entry && entry._live && !entry._audit_flushed);
-        },
-        liveAuditStateRank(state) {
-            switch (String(state || '').trim()) {
-            case 'audit.started': return 10;
-            case 'audit.updated':
-            case 'audit.stream': return 20;
-            case 'audit.completed': return 30;
-            case 'audit.failed':
-            case 'audit.flushed':
-            case 'audit.detail': return 40;
-            default: return 0;
-            }
         }
     };
 }

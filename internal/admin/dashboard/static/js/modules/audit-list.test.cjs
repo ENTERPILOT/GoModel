@@ -137,6 +137,14 @@ test('audit panes surface pending spinners and streaming badges for live rows', 
     assert.equal(streamingPane.showBody, true);
     assert.equal(streamingPane.showPending, false);
 
+    // A stale partial flag on an already-settled entry must not keep the badge.
+    const settled = {
+        ...streaming,
+        _live_state: 'audit.completed',
+        duration_ns: 1000
+    };
+    assert.equal(module.auditResponsePane(settled).streaming, false);
+
     const persisted = { data: {} };
     const persistedPane = module.auditResponsePane(persisted);
     assert.equal(persistedPane.showPending, false);

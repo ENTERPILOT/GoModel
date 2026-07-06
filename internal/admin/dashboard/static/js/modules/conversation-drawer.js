@@ -107,12 +107,12 @@
                 await this.fetchConversation(entry.id, requestToken);
             },
 
+            // Guarded like every cross-module call: modules mix optionally.
+            // Without the live-logs module no entry is ever marked _live, so
+            // false is the correct degraded answer.
             _conversationEntryLivePending(entry) {
-                if (!entry || !entry._live) return false;
-                if (typeof this.auditEntryLiveDetailPending === 'function') {
-                    return this.auditEntryLiveDetailPending(entry);
-                }
-                return !!entry._live_pending;
+                return typeof this.auditEntryLiveDetailPending === 'function' &&
+                    this.auditEntryLiveDetailPending(entry);
             },
 
             applyLiveConversationEntry(entry) {
@@ -144,10 +144,8 @@
                 if (!this.conversationOpen || !this.conversationLiveEntryId) return false;
                 const entry = (this.conversationEntries || [])[0];
                 if (!entry) return true;
-                const rank = typeof this.liveAuditStateRank === 'function'
-                    ? this.liveAuditStateRank(entry._live_state)
-                    : 0;
-                return rank < 30; // below audit.completed: still in flight
+                return typeof this.liveAuditStateSettled !== 'function' ||
+                    !this.liveAuditStateSettled(entry._live_state);
             },
 
             conversationLiveStatusText() {

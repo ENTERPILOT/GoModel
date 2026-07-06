@@ -742,7 +742,8 @@
                     headers: data && data.response_headers,
                     showBody: !!(data && data.response_body),
                     body: data && data.response_body,
-                    streaming: !!(entry && entry._response_partial && data && data.response_body),
+                    streaming: !!(entry && entry._response_partial && data && data.response_body) &&
+                        this.auditEntryLiveInProgress(entry),
                     showEmpty: empty && !pending,
                     emptyMessage: 'Response details were not captured.',
                     showPending: pending,

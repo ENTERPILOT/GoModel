@@ -291,12 +291,11 @@ func EnrichEntryWithError(c *echo.Context, errorType, errorMessage string, error
 		return
 	}
 	entry.ErrorType = errorType
-	if entry.Data != nil {
-		entry.Data.ErrorMessage = errorMessage
-		if len(errorCode) > 0 {
-			if code := strings.TrimSpace(errorCode[0]); code != "" {
-				entry.Data.ErrorCode = code
-			}
+	data := ensureLogData(entry)
+	data.ErrorMessage = errorMessage
+	if len(errorCode) > 0 {
+		if code := strings.TrimSpace(errorCode[0]); code != "" {
+			data.ErrorCode = code
 		}
 	}
 	publishLiveAuditUpdate(c, entry)

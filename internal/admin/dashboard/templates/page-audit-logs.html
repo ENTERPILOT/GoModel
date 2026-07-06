@@ -208,7 +208,7 @@
                 </template>
             </div>
 
-            <div class="conversation-live-status" x-show="conversationLiveWaiting()">
+            <div class="conversation-live-status" role="status" aria-live="polite" x-show="conversationLiveWaiting()">
                 <span class="loading-spinner" aria-hidden="true"></span>
                 <span x-text="conversationLiveStatusText()"></span>
             </div>
