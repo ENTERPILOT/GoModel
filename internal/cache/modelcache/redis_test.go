@@ -8,6 +8,18 @@ import (
 	"gomodel/internal/cache"
 )
 
+// NewRedisModelCacheWithStore creates a Cache from an existing Store, letting
+// tests exercise redisModelCache without a real Redis connection.
+func NewRedisModelCacheWithStore(store cache.Store, key string, ttl time.Duration) Cache {
+	if key == "" {
+		key = DefaultRedisKey
+	}
+	if ttl == 0 {
+		ttl = cache.DefaultRedisTTL
+	}
+	return &redisModelCache{store: store, key: key, ttl: ttl, owned: false}
+}
+
 func TestRedisModelCache_GetSet(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()

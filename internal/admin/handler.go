@@ -224,13 +224,6 @@ func WithTagging(service *tagging.Service) Option {
 	}
 }
 
-// WithGuardrailsRegistry enables listing valid guardrail references for workflow authoring.
-func WithGuardrailsRegistry(registry guardrails.Catalog) Option {
-	return func(h *Handler) {
-		h.guardrails = registry
-	}
-}
-
 // WithGuardrailService enables full guardrail definition administration endpoints.
 func WithGuardrailService(service *guardrails.Service) Option {
 	return func(h *Handler) {

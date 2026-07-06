@@ -46,9 +46,9 @@ func TestMergeStoredBatchFromUpstreamPreservesGatewayOwnedMetadata(t *testing.T)
 }
 
 func TestDetermineBatchExecutionSelectionRejectsNilRequest(t *testing.T) {
-	_, err := DetermineBatchExecutionSelectionWithAuthorizer(context.Background(), nil, nil, nil, nil)
+	_, err := DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver(context.Background(), nil, nil, nil, nil, nil)
 	if err == nil {
-		t.Fatal("DetermineBatchExecutionSelectionWithAuthorizer() error = nil, want error")
+		t.Fatal("DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver() error = nil, want error")
 	}
 
 	var gatewayErr *core.GatewayError

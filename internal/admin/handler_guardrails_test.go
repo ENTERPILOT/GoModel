@@ -353,7 +353,7 @@ func TestDeleteGuardrailRejectsActiveWorkflowReference(t *testing.T) {
 			},
 		},
 	}
-	planService, err := workflows.NewService(planStore, workflows.NewCompiler(guardrailService))
+	planService, err := workflows.NewService(planStore, workflows.NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("workflows.NewService() error = %v", err)
 	}
@@ -408,7 +408,7 @@ func TestDeleteGuardrailIgnoresDisabledWorkflowGuardrailRefs(t *testing.T) {
 			},
 		},
 	}
-	planService, err := workflows.NewService(planStore, workflows.NewCompiler(guardrailService))
+	planService, err := workflows.NewService(planStore, workflows.NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("workflows.NewService() error = %v", err)
 	}

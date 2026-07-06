@@ -91,9 +91,9 @@ func TestResolveRequestModel_UsesResolvedProviderNameInsteadOfSelectorPrefix(t *
 		},
 	}
 
-	resolution, err := resolveRequestModel(provider, nil, core.NewRequestedModelSelector("openai/gpt-5-nano", ""))
+	resolution, err := resolveRequestModelWithAuthorizer(context.Background(), provider, nil, nil, core.NewRequestedModelSelector("openai/gpt-5-nano", ""))
 	if err != nil {
-		t.Fatalf("resolveRequestModel() error = %v", err)
+		t.Fatalf("resolveRequestModelWithAuthorizer() error = %v", err)
 	}
 
 	if got := resolution.ResolvedSelector.Provider; got != "openai" {
@@ -117,9 +117,9 @@ func TestResolveRequestModel_CanonicalizesProviderTypeSelectorToConcreteProvider
 		},
 	}
 
-	resolution, err := resolveRequestModel(provider, nil, core.NewRequestedModelSelector("openai/gpt-5-nano", ""))
+	resolution, err := resolveRequestModelWithAuthorizer(context.Background(), provider, nil, nil, core.NewRequestedModelSelector("openai/gpt-5-nano", ""))
 	if err != nil {
-		t.Fatalf("resolveRequestModel() error = %v", err)
+		t.Fatalf("resolveRequestModelWithAuthorizer() error = %v", err)
 	}
 
 	if got := resolution.ResolvedQualifiedModel(); got != "openai_test/gpt-5-nano" {
@@ -156,9 +156,9 @@ func TestResolveRequestModel_CanonicalizesAliasOutputThroughProviderResolver(t *
 		},
 	}
 
-	resolution, err := resolveRequestModel(provider, aliasResolverStub{}, core.NewRequestedModelSelector("anthropic/claude-opus-4-6", ""))
+	resolution, err := resolveRequestModelWithAuthorizer(context.Background(), provider, aliasResolverStub{}, nil, core.NewRequestedModelSelector("anthropic/claude-opus-4-6", ""))
 	if err != nil {
-		t.Fatalf("resolveRequestModel() error = %v", err)
+		t.Fatalf("resolveRequestModelWithAuthorizer() error = %v", err)
 	}
 
 	if !resolution.AliasApplied {

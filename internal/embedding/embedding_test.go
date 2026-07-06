@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"context"
 	"testing"
 
 	"gomodel/config"
@@ -145,17 +144,3 @@ func TestAPIEmbedder_UsesProviderCredentials(t *testing.T) {
 		t.Errorf("endpointURL = %q, want %q", a.endpointURL, want)
 	}
 }
-
-// MockEmbedder is an Embedder implementation for testing that returns a fixed vector.
-type MockEmbedder struct {
-	Vector []float32
-	Err    error
-	Calls  int
-}
-
-func (m *MockEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
-	m.Calls++
-	return m.Vector, m.Err
-}
-
-func (m *MockEmbedder) Close() error { return nil }

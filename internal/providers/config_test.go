@@ -1243,6 +1243,25 @@ func TestApplyProviderEnvVars_SuffixedEnvOverlaysMatchingYAMLProvider(t *testing
 	}
 }
 
+// providerEnvNames mirrors the env-var naming convention applied by
+// applyProviderEnvVars, so tests can clear ambient variables per provider.
+type providerEnvNames struct {
+	APIKey     string
+	BaseURL    string
+	APIVersion string
+	Models     string
+}
+
+func derivedEnvNames(providerType string) providerEnvNames {
+	prefix := envPrefix(providerType)
+	return providerEnvNames{
+		APIKey:     prefix + "_API_KEY",
+		BaseURL:    prefix + "_BASE_URL",
+		APIVersion: prefix + "_API_VERSION",
+		Models:     prefix + "_MODELS",
+	}
+}
+
 func TestApplyProviderEnvVars_SkipsWhenNoEnvVars(t *testing.T) {
 	// Ensure no ambient env vars interfere
 	for providerType, spec := range testDiscoveryConfigs {

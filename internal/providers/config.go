@@ -468,23 +468,6 @@ func rawProviderMatchesType(cfg config.RawProviderConfig, providerType string) b
 	return strings.TrimSpace(cfg.Type) == strings.TrimSpace(providerType)
 }
 
-type providerEnvNames struct {
-	APIKey     string
-	BaseURL    string
-	APIVersion string
-	Models     string
-}
-
-func derivedEnvNames(providerType string) providerEnvNames {
-	prefix := envPrefix(providerType)
-	return providerEnvNames{
-		APIKey:     prefix + "_API_KEY",
-		BaseURL:    prefix + "_BASE_URL",
-		APIVersion: prefix + "_API_VERSION",
-		Models:     prefix + "_MODELS",
-	}
-}
-
 func envPrefix(providerType string) string {
 	var b strings.Builder
 	b.Grow(len(providerType))

@@ -8,6 +8,13 @@ import (
 	"gomodel/internal/providers"
 )
 
+// NewResolver builds a failover resolver from config and the current model
+// inventory without a dynamic manual-rule provider. Test-only convenience
+// over NewResolverWithRuleProvider.
+func NewResolver(cfg config.FailoverConfig, registry Registry) *Resolver {
+	return NewResolverWithRuleProvider(cfg, registry, nil)
+}
+
 type fakeRegistry struct {
 	byKey  map[string]*providers.ModelInfo
 	models []providers.ModelWithProvider

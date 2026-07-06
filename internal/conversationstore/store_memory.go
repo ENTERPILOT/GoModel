@@ -65,17 +65,8 @@ func WithMaxBytes(maxBytes int64) MemoryStoreOption {
 	}
 }
 
-// WithUnboundedRetention disables default in-memory retention bounds.
-func WithUnboundedRetention() MemoryStoreOption {
-	return func(s *MemoryStore) {
-		s.ttl = 0
-		s.maxEntries = 0
-		s.maxBytes = 0
-	}
-}
-
 // NewMemoryStore creates an empty in-memory conversation store.
-// By default retention is bounded; pass WithUnboundedRetention to opt out.
+// Retention is bounded by default; options can adjust or disable the bounds.
 func NewMemoryStore(options ...MemoryStoreOption) *MemoryStore {
 	store := &MemoryStore{
 		items:           make(map[string]*StoredConversation),

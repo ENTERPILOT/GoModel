@@ -10,17 +10,6 @@ import (
 	"gomodel/internal/gateway"
 )
 
-func ensureTranslatedRequestWorkflow(
-	c *echo.Context,
-	provider core.RoutableProvider,
-	resolver RequestModelResolver,
-	policyResolver RequestWorkflowPolicyResolver,
-	model,
-	providerHint *string,
-) (*core.Workflow, error) {
-	return ensureTranslatedRequestWorkflowWithAuthorizer(c, provider, resolver, nil, policyResolver, model, providerHint)
-}
-
 func ensureTranslatedRequestWorkflowWithAuthorizer(
 	c *echo.Context,
 	provider core.RoutableProvider,

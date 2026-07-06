@@ -27,20 +27,6 @@ func (d *recordingDeleter) DeleteFile(_ context.Context, providerType, id string
 	return &core.FileDeleteResponse{ID: id, Deleted: true}, nil
 }
 
-func TestRecordPreparation(t *testing.T) {
-	metadata := &core.BatchPreparationMetadata{}
-	ctx := core.WithBatchPreparationMetadata(context.Background(), metadata)
-
-	RecordPreparation(ctx, &core.BatchRequest{InputFileID: " file_original "}, &core.BatchRequest{InputFileID: " file_rewritten "})
-
-	if metadata.OriginalInputFileID != "file_original" {
-		t.Fatalf("OriginalInputFileID = %q, want file_original", metadata.OriginalInputFileID)
-	}
-	if metadata.RewrittenInputFileID != "file_rewritten" {
-		t.Fatalf("RewrittenInputFileID = %q, want file_rewritten", metadata.RewrittenInputFileID)
-	}
-}
-
 func TestRecordResult(t *testing.T) {
 	metadata := &core.BatchPreparationMetadata{}
 	ctx := core.WithBatchPreparationMetadata(context.Background(), metadata)
@@ -76,24 +62,6 @@ func TestCleanupFileReturnsFalseOnDeleteError(t *testing.T) {
 
 	if CleanupFile(context.Background(), deleter, "openai", "file_rewritten", "") {
 		t.Fatal("CleanupFile returned true, want false")
-	}
-}
-
-func TestCleanupSupersededFile(t *testing.T) {
-	metadata := &core.BatchPreparationMetadata{RewrittenInputFileID: "file_current"}
-	ctx := core.WithBatchPreparationMetadata(context.Background(), metadata)
-	deleter := &recordingDeleter{}
-
-	if CleanupSupersededFile(ctx, deleter, "openai", "file_current", "") {
-		t.Fatal("CleanupSupersededFile deleted current file")
-	}
-	if !CleanupSupersededFile(ctx, deleter, "openai", "file_old", "") {
-		t.Fatal("CleanupSupersededFile returned false for superseded file")
-	}
-
-	want := []deleteCall{{providerType: "openai", fileID: "file_old"}}
-	if !reflect.DeepEqual(deleter.calls, want) {
-		t.Fatalf("calls = %#v, want %#v", deleter.calls, want)
 	}
 }
 

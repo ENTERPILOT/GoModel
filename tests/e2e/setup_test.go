@@ -91,7 +91,7 @@ func setupE2EServer(t *testing.T, opts e2eServerOptions) *server.Server {
 
 	if opts.adminUIEnabled {
 		cfg.AdminUIEnabled = true
-		dashHandler, err := dashboard.New()
+		dashHandler, err := dashboard.NewWithBasePath("/")
 		require.NoError(t, err, "failed to create dashboard handler")
 		cfg.DashboardHandler = dashHandler
 	}

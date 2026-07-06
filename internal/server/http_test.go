@@ -580,7 +580,7 @@ func TestServer_ManagedAuthKeyUserPathOverridesHeaderBeforeWorkflowResolution(t 
 
 func newDashboardHandler(t *testing.T) *dashboard.Handler {
 	t.Helper()
-	h, err := dashboard.New()
+	h, err := dashboard.NewWithBasePath("/")
 	if err != nil {
 		t.Fatalf("failed to create dashboard handler: %v", err)
 	}

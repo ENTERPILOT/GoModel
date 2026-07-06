@@ -28,12 +28,8 @@ type Handler struct {
 	basePath  string
 }
 
-// New creates a new dashboard handler with parsed templates and static file server.
-func New() (*Handler, error) {
-	return NewWithBasePath("/")
-}
-
 // NewWithBasePath creates a dashboard handler for an app mounted under basePath.
+// It parses templates and sets up the static file server.
 func NewWithBasePath(basePath string) (*Handler, error) {
 	basePath = config.NormalizeBasePath(basePath)
 	assetVersions, err := buildFrontendAssetVersions()

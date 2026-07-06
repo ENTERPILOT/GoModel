@@ -168,10 +168,10 @@ func TestDoOpenAICompatibleFileIDRequest(t *testing.T) {
 
 			switch tt.method {
 			case http.MethodDelete:
-				resp, err := doOpenAICompatibleFileIDRequest[core.FileDeleteResponse](context.Background(), client, tt.method, tt.id, tt.defaultObject)
+				resp, err := doOpenAICompatibleFileIDRequestWithPreparer[core.FileDeleteResponse](context.Background(), client, tt.method, tt.id, tt.defaultObject, nil)
 				tt.check(t, gotPath, nil, resp, err)
 			default:
-				resp, err := doOpenAICompatibleFileIDRequest[core.FileObject](context.Background(), client, tt.method, tt.id, tt.defaultObject)
+				resp, err := doOpenAICompatibleFileIDRequestWithPreparer[core.FileObject](context.Background(), client, tt.method, tt.id, tt.defaultObject, nil)
 				tt.check(t, gotPath, resp, nil, err)
 			}
 			if gotMethod != tt.method {

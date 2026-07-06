@@ -14,7 +14,7 @@ func TestNormalizeOperationPath(t *testing.T) {
 	}
 }
 
-func TestBatchItemModelSelector(t *testing.T) {
+func TestBatchItemRequestedModelSelector(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -56,26 +56,30 @@ func TestBatchItemModelSelector(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			selector, err := BatchItemModelSelector(tt.defaultEndpoint, tt.item)
+			requested, err := BatchItemRequestedModelSelector(tt.defaultEndpoint, tt.item)
 			if err != nil {
-				t.Fatalf("BatchItemModelSelector() error = %v", err)
+				t.Fatalf("BatchItemRequestedModelSelector() error = %v", err)
+			}
+			selector, err := requested.Normalize()
+			if err != nil {
+				t.Fatalf("Normalize() error = %v", err)
 			}
 			if got := selector.QualifiedModel(); got != tt.want {
-				t.Fatalf("BatchItemModelSelector() = %q, want %q", got, tt.want)
+				t.Fatalf("BatchItemRequestedModelSelector() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestBatchItemModelSelectorRejectsUnsupportedEndpoint(t *testing.T) {
+func TestBatchItemRequestedModelSelectorRejectsUnsupportedEndpoint(t *testing.T) {
 	t.Parallel()
 
-	_, err := BatchItemModelSelector("/v1/files", BatchRequestItem{
+	_, err := BatchItemRequestedModelSelector("/v1/files", BatchRequestItem{
 		URL:  "/v1/files",
 		Body: json.RawMessage(`{"purpose":"batch"}`),
 	})
 	if err == nil {
-		t.Fatal("BatchItemModelSelector() error = nil, want unsupported endpoint error")
+		t.Fatal("BatchItemRequestedModelSelector() error = nil, want unsupported endpoint error")
 	}
 }
 
@@ -95,11 +99,12 @@ func TestDecodeKnownBatchItemRequest_NormalizesFullURLAndDecodesCanonicalRequest
 	if decoded.Operation != OperationResponses {
 		t.Fatalf("Operation = %q, want responses", decoded.Operation)
 	}
-	if decoded.ResponsesRequest() == nil {
-		t.Fatal("ResponsesRequest = nil")
+	req, ok := decoded.Request.(*ResponsesRequest)
+	if !ok || req == nil {
+		t.Fatalf("Request = %T, want *ResponsesRequest", decoded.Request)
 	}
-	if decoded.ResponsesRequest().Model != "gpt-4o-mini" {
-		t.Fatalf("ResponsesRequest.Model = %q, want gpt-4o-mini", decoded.ResponsesRequest().Model)
+	if req.Model != "gpt-4o-mini" {
+		t.Fatalf("ResponsesRequest.Model = %q, want gpt-4o-mini", req.Model)
 	}
 }
 

@@ -172,32 +172,6 @@ func FileRouteMetadata(env *WhiteBoxPrompt, method, path string, routeParams map
 	)
 }
 
-// NormalizeModelSelector canonicalizes model/provider selector inputs and keeps
-// semantic selector hints aligned with the normalized request state.
-//
-// This is the point where RouteHints transition from raw ingress values
-// (which may still contain a qualified model string like "openai/gpt-5-mini")
-// to canonical model/provider fields.
-func NormalizeModelSelector(env *WhiteBoxPrompt, model, provider *string) error {
-	if model == nil || provider == nil {
-		return NewInvalidRequestError("model selector targets are required", nil)
-	}
-
-	selector, err := ParseModelSelector(*model, *provider)
-	if err != nil {
-		return NewInvalidRequestError(err.Error(), err)
-	}
-
-	*model = selector.Model
-	*provider = selector.Provider
-
-	if env != nil {
-		env.RouteHints.Model = selector.Model
-		env.RouteHints.Provider = selector.Provider
-	}
-	return nil
-}
-
 // DecodeCanonicalSelector decodes a canonical request body using the codec
 // resolved by canonicalOperationCodecFor for env, then extracts the model and
 // provider via semanticSelectorFromCanonicalRequest. It returns ok=false for a

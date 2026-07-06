@@ -17,10 +17,11 @@ import (
 // Lifecycle:
 //   - DeriveWhiteBoxPrompt seeds these values directly from transport/body data.
 //   - Canonical JSON decode may refine them from a cached request object.
-//   - NormalizeModelSelector canonicalizes model/provider values in place.
+//   - Selector normalization (ParseModelSelector / RequestedModelSelector.Normalize)
+//     canonicalizes model/provider values in place.
 //
 // Consumers that require canonical selector state should prefer a cached canonical
-// request or call NormalizeModelSelector before relying on these fields.
+// request or normalize the selector before relying on these fields.
 type RouteHints struct {
 	Model    string
 	Provider string
@@ -65,7 +66,7 @@ const (
 //   - transport seeds RouteType/OperationType plus sparse RouteHints
 //   - route-specific metadata may be cached on demand
 //   - canonical request decode may cache a parsed request and refine RouteHints
-//   - NormalizeModelSelector may rewrite selector hints into canonical form
+//   - selector normalization may rewrite selector hints into canonical form
 type WhiteBoxPrompt struct {
 	RouteType     string
 	OperationType string

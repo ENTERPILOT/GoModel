@@ -10,23 +10,13 @@ import (
 	"gomodel/internal/core"
 )
 
-// WorkflowResolution resolves the request-scoped workflow for model-facing
-// routes. The workflow centralizes endpoint capabilities, execution mode, resolved
-// provider type, and any early model routing decision that downstream handlers
-// or middleware need to consume.
-func WorkflowResolution(provider core.RoutableProvider) echo.MiddlewareFunc {
-	return WorkflowResolutionWithResolverAndPolicy(provider, nil, nil)
-}
-
-// WorkflowResolutionWithResolver resolves request-scoped workflows using
-// an explicit selector resolver when provided. This lets workflow resolution own
-// alias policy instead of depending on provider decorators.
-func WorkflowResolutionWithResolver(provider core.RoutableProvider, resolver RequestModelResolver) echo.MiddlewareFunc {
-	return WorkflowResolutionWithResolverAndPolicy(provider, resolver, nil)
-}
-
-// WorkflowResolutionWithResolverAndPolicy resolves request-scoped workflows
-// and matches one persisted workflow policy when configured.
+// WorkflowResolutionWithResolverAndPolicy resolves the request-scoped workflow
+// for model-facing routes and matches one persisted workflow policy when
+// configured. The workflow centralizes endpoint capabilities, execution mode,
+// resolved provider type, and any early model routing decision that downstream
+// handlers or middleware need to consume. An explicit selector resolver lets
+// workflow resolution own alias policy instead of depending on provider
+// decorators.
 func WorkflowResolutionWithResolverAndPolicy(
 	provider core.RoutableProvider,
 	resolver RequestModelResolver,
@@ -276,14 +266,4 @@ func passthroughRouteInfo(c *echo.Context) *core.PassthroughRouteInfo {
 		RawEndpoint: endpoint,
 		AuditPath:   c.Request().URL.Path,
 	}
-}
-
-// GetProviderType returns the provider type captured in the workflow for this request.
-func GetProviderType(c *echo.Context) string {
-	if workflow := core.GetWorkflow(c.Request().Context()); workflow != nil {
-		if providerType := strings.TrimSpace(workflow.ProviderType); providerType != "" {
-			return providerType
-		}
-	}
-	return ""
 }

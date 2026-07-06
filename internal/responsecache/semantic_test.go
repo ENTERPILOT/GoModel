@@ -576,19 +576,19 @@ func TestMapVecStore_DeleteExpiredOnlyRemovesExpired(t *testing.T) {
 	}
 }
 
-func TestShouldSkipAllCache_CacheControlNoStore(t *testing.T) {
+func TestShouldSkipAllCacheHeaders_CacheControlNoStore(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Cache-Control", "private, no-store, max-age=0")
-	if !ShouldSkipAllCache(req) {
-		t.Fatal("expected ShouldSkipAllCache for Cache-Control: no-store")
+	if !shouldSkipAllCacheHeaders(req.Header.Get) {
+		t.Fatal("expected cache skip for Cache-Control: no-store")
 	}
 }
 
-func TestShouldSkipAllCache_CacheControlNoCache(t *testing.T) {
+func TestShouldSkipAllCacheHeaders_CacheControlNoCache(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Cache-Control", "private, no-cache, max-age=0")
-	if !ShouldSkipAllCache(req) {
-		t.Fatal("expected ShouldSkipAllCache for Cache-Control: no-cache")
+	if !shouldSkipAllCacheHeaders(req.Header.Get) {
+		t.Fatal("expected cache skip for Cache-Control: no-cache")
 	}
 }
 

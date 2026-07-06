@@ -386,39 +386,3 @@ func TestRequestDuration(t *testing.T) {
 		t.Fatal("Expected histogram, got nil")
 	}
 }
-
-func TestHealthCheck(t *testing.T) {
-	// Reset metrics before test
-	ResetMetrics()
-
-	// Health check should succeed
-	err := HealthCheck()
-	if err != nil {
-		t.Errorf("HealthCheck failed: %v", err)
-	}
-}
-
-func TestGetMetrics(t *testing.T) {
-	metrics := GetMetrics()
-
-	if metrics == nil {
-		t.Fatal("GetMetrics returned nil")
-		return
-	}
-
-	if metrics.RequestsTotal == nil {
-		t.Error("RequestsTotal metric is nil")
-	}
-
-	if metrics.RequestDuration == nil {
-		t.Error("RequestDuration metric is nil")
-	}
-
-	if metrics.InFlightRequests == nil {
-		t.Error("InFlightRequests metric is nil")
-	}
-
-	if metrics.ResponseSnapshotStoreFailures == nil {
-		t.Error("ResponseSnapshotStoreFailures metric is nil")
-	}
-}

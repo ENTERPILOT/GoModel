@@ -107,13 +107,14 @@ func (g *GuardedProvider) CreateBatch(ctx context.Context, providerType string, 
 	if err != nil {
 		return nil, err
 	}
-	batchrewrite.RecordPreparation(ctx, req, result.Request)
+	batchrewrite.RecordResult(ctx, result)
 	resp, err := bp.CreateBatch(ctx, providerType, result.Request)
 	if err != nil {
-		batchrewrite.CleanupFileFromRouter(ctx, g.nativeFileRouter, providerType, result.RewrittenInputFileID, "")
+		if files, routeErr := g.nativeFileRouter(); routeErr == nil {
+			batchrewrite.CleanupFile(ctx, files, providerType, result.RewrittenInputFileID, "")
+		}
 		return nil, err
 	}
-	batchrewrite.CleanupSupersededFileFromRouter(ctx, g.nativeFileRouter, providerType, result.RewrittenInputFileID, "")
 	return resp, nil
 }
 

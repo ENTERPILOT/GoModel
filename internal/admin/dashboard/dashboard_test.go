@@ -11,19 +11,19 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 	if h == nil {
-		t.Fatal("New() returned nil handler")
+		t.Fatalf("NewWithBasePath() returned nil handler")
 	}
 }
 
 func TestIndex_ReturnsHTML(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -115,9 +115,9 @@ func TestIndex_UsesBasePathForGeneratedURLs(t *testing.T) {
 }
 
 func TestStatic_ServesCSS(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -138,9 +138,9 @@ func TestStatic_ServesCSS(t *testing.T) {
 }
 
 func TestStatic_ServesJS(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -161,9 +161,9 @@ func TestStatic_ServesJS(t *testing.T) {
 }
 
 func TestStatic_ServesModuleJS(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -184,9 +184,9 @@ func TestStatic_ServesModuleJS(t *testing.T) {
 }
 
 func TestStatic_ServesProvidersModuleJS(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -207,9 +207,9 @@ func TestStatic_ServesProvidersModuleJS(t *testing.T) {
 }
 
 func TestStatic_ServesVirtualModelsModuleJS(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -230,9 +230,9 @@ func TestStatic_ServesVirtualModelsModuleJS(t *testing.T) {
 }
 
 func TestStatic_ServesWorkflowsModuleJS(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -253,9 +253,9 @@ func TestStatic_ServesWorkflowsModuleJS(t *testing.T) {
 }
 
 func TestStatic_ServesGuardrailsModuleJS(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -276,9 +276,9 @@ func TestStatic_ServesGuardrailsModuleJS(t *testing.T) {
 }
 
 func TestStatic_ServesFavicon(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -299,9 +299,9 @@ func TestStatic_ServesFavicon(t *testing.T) {
 }
 
 func TestStatic_NotFound(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -322,9 +322,9 @@ func TestStatic_NotFound(t *testing.T) {
 // page must load every script, style, and font from the embedded /admin/static
 // tree, never from a CDN or remote font host.
 func TestIndex_HasNoExternalResources(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	e := echo.New()
@@ -358,9 +358,9 @@ func TestIndex_HasNoExternalResources(t *testing.T) {
 // TestStatic_ServesVendoredAssets confirms the vendored libraries and font
 // files are embedded and served, so the dashboard renders without network access.
 func TestStatic_ServesVendoredAssets(t *testing.T) {
-	h, err := New()
+	h, err := NewWithBasePath("/")
 	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
 	paths := []string{

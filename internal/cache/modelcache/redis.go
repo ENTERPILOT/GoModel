@@ -56,17 +56,6 @@ func NewRedisModelCache(cfg RedisModelCacheConfig) (Cache, error) {
 	return &redisModelCache{store: store, key: key, ttl: ttl, owned: true}, nil
 }
 
-// NewRedisModelCacheWithStore creates a Cache from an existing Store (for testing).
-func NewRedisModelCacheWithStore(store cache.Store, key string, ttl time.Duration) Cache {
-	if key == "" {
-		key = DefaultRedisKey
-	}
-	if ttl == 0 {
-		ttl = cache.DefaultRedisTTL
-	}
-	return &redisModelCache{store: store, key: key, ttl: ttl, owned: false}
-}
-
 type redisModelCache struct {
 	store cache.Store
 	key   string

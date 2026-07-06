@@ -13,11 +13,6 @@ type compiler struct {
 	featureCaps core.WorkflowFeatures
 }
 
-// NewCompiler creates the default workflow compiler for the v1 payload.
-func NewCompiler(registry guardrails.Catalog) Compiler {
-	return NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures())
-}
-
 // NewCompilerWithFeatureCaps creates the default workflow compiler for the
 // v1 payload with process-level feature caps applied at compile time.
 func NewCompilerWithFeatureCaps(registry guardrails.Catalog, featureCaps core.WorkflowFeatures) Compiler {

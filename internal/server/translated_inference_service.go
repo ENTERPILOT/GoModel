@@ -565,19 +565,6 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 	return nil
 }
 
-func (s *translatedInferenceService) handleStreamingResponse(
-	c *echo.Context,
-	workflow *core.Workflow,
-	model, provider, providerName string,
-	streamFn func() (io.ReadCloser, error),
-) error {
-	stream, err := streamFn()
-	if err != nil {
-		return handleStreamingDispatchError(c, err)
-	}
-	return s.handleStreamingReadCloser(c, workflow, model, provider, providerName, "", stream, nil)
-}
-
 // handleStreamingDispatchError records audit context for a streaming request
 // that failed before any chunks could be flushed. It marks the entry as
 // streaming and distinguishes client cancellations from upstream failures so

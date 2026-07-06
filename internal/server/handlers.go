@@ -51,34 +51,8 @@ type Handler struct {
 	translatedSvcOnce sync.Once
 }
 
-// NewHandler creates a new handler with the given routable provider (typically the Router)
-func NewHandler(provider core.RoutableProvider, logger auditlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver) *Handler {
-	return newHandler(provider, logger, usageLogger, pricingResolver, nil, nil, nil, nil)
-}
-
-func newHandler(
-	provider core.RoutableProvider,
-	logger auditlog.LoggerInterface,
-	usageLogger usage.LoggerInterface,
-	pricingResolver usage.PricingResolver,
-	modelResolver RequestModelResolver,
-	workflowPolicyResolver RequestWorkflowPolicyResolver,
-	failoverResolver RequestFailoverResolver,
-	translatedRequestPatcher TranslatedRequestPatcher,
-) *Handler {
-	return newHandlerWithAuthorizer(
-		provider,
-		logger,
-		usageLogger,
-		pricingResolver,
-		modelResolver,
-		nil,
-		workflowPolicyResolver,
-		failoverResolver,
-		translatedRequestPatcher,
-	)
-}
-
+// newHandlerWithAuthorizer creates a new handler with the given routable
+// provider (typically the Router) and optional resolvers.
 func newHandlerWithAuthorizer(
 	provider core.RoutableProvider,
 	logger auditlog.LoggerInterface,

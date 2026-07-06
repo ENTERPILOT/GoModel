@@ -22,7 +22,7 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 		t.Fatalf("Register() error = %v", err)
 	}
 
-	compiled, err := NewCompiler(registry).Compile(Version{
+	compiled, err := NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 3,
@@ -133,7 +133,7 @@ func TestCompilerCompile_DefaultsFailoverEnabledWhenUnset(t *testing.T) {
 }
 
 func TestCompilerCompile_ReturnsGatewayErrorWhenGuardrailsCatalogIsEmpty(t *testing.T) {
-	_, err := NewCompiler(guardrails.NewRegistry()).Compile(Version{
+	_, err := NewCompilerWithFeatureCaps(guardrails.NewRegistry(), core.DefaultWorkflowFeatures()).Compile(Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 1,
@@ -169,7 +169,7 @@ func TestCompilerCompile_WrapsBuildPipelineErrorsAsGatewayErrors(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	_, err = NewCompiler(registry).Compile(Version{
+	_, err = NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 1,

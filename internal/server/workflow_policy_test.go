@@ -74,9 +74,9 @@ func TestDetermineBatchExecutionSelection_UsesSingleResolutionPass(t *testing.T)
 		},
 	}
 
-	selection, err := gateway.DetermineBatchExecutionSelectionWithAuthorizer(context.Background(), provider, resolver, nil, req)
+	selection, err := gateway.DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver(context.Background(), provider, resolver, nil, nil, req)
 	if err != nil {
-		t.Fatalf("DetermineBatchExecutionSelectionWithAuthorizer() error = %v", err)
+		t.Fatalf("DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver() error = %v", err)
 	}
 	if selection.ProviderType != "openai" {
 		t.Fatalf("providerType = %q, want openai", selection.ProviderType)

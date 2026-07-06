@@ -20,26 +20,6 @@ type BatchInputFileProviderResolver interface {
 	ResolveBatchInputFileProvider(ctx context.Context, fileID string) (providerType string, ok bool, err error)
 }
 
-// DetermineBatchExecutionSelection resolves a native batch to one provider.
-func DetermineBatchExecutionSelection(
-	provider core.RoutableProvider,
-	resolver ModelResolver,
-	req *core.BatchRequest,
-) (BatchExecutionSelection, error) {
-	return DetermineBatchExecutionSelectionWithAuthorizer(context.Background(), provider, resolver, nil, req)
-}
-
-// DetermineBatchExecutionSelectionWithAuthorizer resolves and authorizes native batch items.
-func DetermineBatchExecutionSelectionWithAuthorizer(
-	ctx context.Context,
-	provider core.RoutableProvider,
-	resolver ModelResolver,
-	authorizer ModelAuthorizer,
-	req *core.BatchRequest,
-) (BatchExecutionSelection, error) {
-	return DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver(ctx, provider, resolver, authorizer, nil, req)
-}
-
 // DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver resolves
 // and authorizes native batch items, using file ownership metadata for
 // file-backed batches when no explicit provider hint is supplied.

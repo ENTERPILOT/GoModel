@@ -56,11 +56,6 @@ func WorkflowProviderNameForType(provider core.RoutableProvider, providerType st
 	return ""
 }
 
-// ResolveRequestModel resolves a requested selector into a concrete provider/model selector.
-func ResolveRequestModel(provider core.RoutableProvider, resolver ModelResolver, requested core.RequestedModelSelector) (*core.RequestModelResolution, error) {
-	return ResolveRequestModelWithAuthorizer(context.Background(), provider, resolver, nil, requested)
-}
-
 // ResolveRequestModelWithAuthorizer resolves and validates a requested selector.
 func ResolveRequestModelWithAuthorizer(
 	ctx context.Context,

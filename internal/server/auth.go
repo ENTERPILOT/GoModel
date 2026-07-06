@@ -20,15 +20,10 @@ type BearerTokenAuthenticator interface {
 	Authenticate(ctx context.Context, token string) (authkeys.AuthenticationResult, error)
 }
 
-// AuthMiddleware creates an Echo middleware that validates the master key
-// if it's configured. If masterKey is empty, no authentication is required.
-// skipPaths is a list of paths that should bypass authentication.
-func AuthMiddleware(masterKey string, skipPaths []string) echo.MiddlewareFunc {
-	return AuthMiddlewareWithAuthenticator(masterKey, nil, skipPaths)
-}
-
-// AuthMiddlewareWithAuthenticator validates the legacy master key and, when
-// configured, managed auth keys from the auth key service.
+// AuthMiddlewareWithAuthenticator creates an Echo middleware that validates
+// the legacy master key and, when configured, managed auth keys from the auth
+// key service. If no auth mechanism is configured, no authentication is
+// required. skipPaths is a list of paths that should bypass authentication.
 func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerTokenAuthenticator, skipPaths []string, userPathHeader ...string) echo.MiddlewareFunc {
 	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {

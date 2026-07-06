@@ -410,13 +410,3 @@ func TestMessageUnmarshalJSON_MixedTextImageAudio(t *testing.T) {
 		t.Fatalf("unexpected part 2: %+v", parts[2])
 	}
 }
-
-func TestHasNonTextContent_InputAudio(t *testing.T) {
-	result := HasNonTextContent([]ContentPart{{
-		Type:       "input_audio",
-		InputAudio: &InputAudioContent{Data: "abc", Format: "wav"},
-	}})
-	if !result {
-		t.Fatal("HasNonTextContent() = false, want true")
-	}
-}

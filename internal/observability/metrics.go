@@ -3,7 +3,6 @@ package observability
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -175,26 +174,6 @@ func NewPrometheusHooks() llmclient.Hooks {
 // Panel 5: Requests by Model
 // Query: sum(rate(gomodel_requests_total[5m])) by (model)
 
-// PrometheusMetrics provides access to all registered metrics for testing
-type PrometheusMetrics struct {
-	RequestsTotal                 *prometheus.CounterVec
-	RequestDuration               *prometheus.HistogramVec
-	InFlightRequests              *prometheus.GaugeVec
-	ResponseSnapshotStoreFailures *prometheus.CounterVec
-	CircuitBreakerState           *prometheus.GaugeVec
-}
-
-// GetMetrics returns the prometheus metrics for testing and introspection
-func GetMetrics() *PrometheusMetrics {
-	return &PrometheusMetrics{
-		RequestsTotal:                 RequestsTotal,
-		RequestDuration:               RequestDuration,
-		InFlightRequests:              InFlightRequests,
-		ResponseSnapshotStoreFailures: ResponseSnapshotStoreFailures,
-		CircuitBreakerState:           CircuitBreakerState,
-	}
-}
-
 // ResetMetrics resets all metrics to zero (useful for testing)
 func ResetMetrics() {
 	RequestsTotal.Reset()
@@ -202,20 +181,4 @@ func ResetMetrics() {
 	InFlightRequests.Reset()
 	ResponseSnapshotStoreFailures.Reset()
 	CircuitBreakerState.Reset()
-}
-
-// HealthCheck verifies that metrics are being collected
-func HealthCheck() error {
-	// Try to collect metrics
-	mfs, err := prometheus.DefaultGatherer.Gather()
-	if err != nil {
-		return fmt.Errorf("failed to gather metrics: %w", err)
-	}
-
-	// Check that we have some metrics
-	if len(mfs) == 0 {
-		return fmt.Errorf("no metrics registered")
-	}
-
-	return nil
 }

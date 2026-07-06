@@ -35,7 +35,7 @@ func TestEnsureTranslatedRequestWorkflow_CompletesPartialWorkflowFromDecodedSele
 	model := "gpt-4o-mini"
 	providerHint := ""
 
-	workflow, err := ensureTranslatedRequestWorkflow(c, provider, nil, nil, &model, &providerHint)
+	workflow, err := ensureTranslatedRequestWorkflowWithAuthorizer(c, provider, nil, nil, nil, &model, &providerHint)
 	require.NoError(t, err)
 	require.NotNil(t, workflow)
 

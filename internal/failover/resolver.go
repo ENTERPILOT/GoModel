@@ -42,14 +42,9 @@ type Resolver struct {
 	registry     Registry
 }
 
-// NewResolver builds a failover resolver from config and the current model
-// inventory. Returns nil when failover is effectively disabled.
-func NewResolver(cfg config.FailoverConfig, registry Registry) *Resolver {
-	return NewResolverWithRuleProvider(cfg, registry, nil)
-}
-
-// NewResolverWithRuleProvider builds a resolver backed by static config and an
-// optional dynamic manual-rule provider.
+// NewResolverWithRuleProvider builds a failover resolver from config and the
+// current model inventory, backed by an optional dynamic manual-rule provider.
+// Returns nil when failover is effectively disabled.
 func NewResolverWithRuleProvider(cfg config.FailoverConfig, registry Registry, ruleProvider RuleProvider) *Resolver {
 	if registry == nil {
 		return nil

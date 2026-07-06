@@ -35,10 +35,6 @@ func prepareOpenAICompatibleRequest(prepare openAICompatibleRequestPreparer, req
 	return prepare(req)
 }
 
-func doOpenAICompatibleFileIDRequest[T any](ctx context.Context, client *llmclient.Client, method, id string, defaultObject string) (*T, error) {
-	return doOpenAICompatibleFileIDRequestWithPreparer[T](ctx, client, method, id, defaultObject, nil)
-}
-
 func doOpenAICompatibleFileIDRequestWithPreparer[T any](ctx context.Context, client *llmclient.Client, method, id string, defaultObject string, prepare openAICompatibleRequestPreparer) (*T, error) {
 	trimmedID, err := validatedOpenAICompatibleFileID(client, id)
 	if err != nil {

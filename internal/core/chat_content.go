@@ -326,20 +326,6 @@ func HasStructuredContent(content any) bool {
 	}
 }
 
-// HasNonTextContent reports whether the content contains image/audio parts.
-func HasNonTextContent(content any) bool {
-	parts, ok := NormalizeContentParts(content)
-	if !ok {
-		return false
-	}
-	for _, part := range parts {
-		if part.Type != "text" {
-			return true
-		}
-	}
-	return false
-}
-
 // NormalizeContentParts converts dynamic JSON-decoded content into typed parts.
 func NormalizeContentParts(content any) ([]ContentPart, bool) {
 	normalized, err := NormalizeMessageContent(content)

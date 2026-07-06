@@ -916,27 +916,6 @@ func TestModelValidation_DoesNotCacheCanonicalResponsesRequestWhenRouteHintsAlre
 	assert.Equal(t, "gpt-4o-mini", capturedEnv.RouteHints.Model)
 }
 
-func TestGetProviderType_EmptyWhenNotSet(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	assert.Equal(t, "", GetProviderType(c))
-}
-
-func TestGetProviderType_UsesWorkflow(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
-		ProviderType: "openai",
-	}))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	assert.Equal(t, "openai", GetProviderType(c))
-}
-
 func TestSelectorHintsFromJSONGJSON_MatchesStdlibSemantics(t *testing.T) {
 	tests := []struct {
 		name         string

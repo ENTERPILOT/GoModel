@@ -22,10 +22,6 @@ func workflowProviderNameForType(provider core.RoutableProvider, providerType st
 	return gateway.WorkflowProviderNameForType(provider, providerType)
 }
 
-func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelResolver, requested core.RequestedModelSelector) (*core.RequestModelResolution, error) {
-	return gateway.ResolveRequestModel(provider, resolver, requested)
-}
-
 func resolveRequestModelWithAuthorizer(
 	ctx context.Context,
 	provider core.RoutableProvider,

@@ -18,6 +18,15 @@ import (
 	"gomodel/internal/workflows"
 )
 
+// WithGuardrailsRegistry enables listing valid guardrail references for
+// workflow authoring. Test-only seam: production wires the full guardrail
+// service via WithGuardrailService.
+func WithGuardrailsRegistry(registry guardrails.Catalog) Option {
+	return func(h *Handler) {
+		h.guardrails = registry
+	}
+}
+
 type workflowTestStore struct {
 	versions []workflows.Version
 }
@@ -192,7 +201,7 @@ func newWorkflowHandler(t *testing.T, store workflows.Store, registry *guardrail
 func newWorkflowHandlerWithModelRegistry(t *testing.T, store workflows.Store, modelRegistry *providers.ModelRegistry, guardrailRegistry *guardrails.Registry) *Handler {
 	t.Helper()
 
-	service, err := workflows.NewService(store, workflows.NewCompiler(guardrailRegistry))
+	service, err := workflows.NewService(store, workflows.NewCompilerWithFeatureCaps(guardrailRegistry, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}

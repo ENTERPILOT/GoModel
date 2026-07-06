@@ -361,7 +361,7 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 		},
 	}
 
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -393,7 +393,7 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 
 func TestServiceEnsureDefaultGlobal_CreatesWhenMissing(t *testing.T) {
 	store := &staticStore{}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -450,7 +450,7 @@ func TestServiceEnsureDefaultGlobal_ReconcilesManagedDefault(t *testing.T) {
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -506,7 +506,7 @@ func TestServiceEnsureDefaultGlobal_PreservesCustomGlobal(t *testing.T) {
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -553,7 +553,7 @@ func TestServiceEnsureDefaultGlobal_LoadsPreservedCustomGlobalIntoSnapshot(t *te
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -587,7 +587,7 @@ func TestServiceEnsureDefaultGlobal_ValidatesBeforeStoreMutation(t *testing.T) {
 	store := &concurrentStore{
 		createCalled: make(chan struct{}, 1),
 	}
-	service, err := NewService(store, &previewEmptyCompiler{delegate: NewCompiler(nil)})
+	service, err := NewService(store, &previewEmptyCompiler{delegate: NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures())})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -805,7 +805,7 @@ func TestServiceCreate_RefreshesSnapshot(t *testing.T) {
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -930,7 +930,7 @@ func TestServiceListViews_AnnotatesCompileFailuresPerRow(t *testing.T) {
 		},
 	}
 	service, err := NewService(store, &versionFailingCompiler{
-		delegate: NewCompiler(nil),
+		delegate: NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()),
 		version:  "provider-v1",
 		err:      errors.New("compile failed for provider-v1"),
 	})
@@ -1002,7 +1002,7 @@ func TestServiceDeactivate_RefreshesSnapshot(t *testing.T) {
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1043,7 +1043,7 @@ func TestServiceDeactivate_RejectsGlobalWorkflow(t *testing.T) {
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1089,7 +1089,7 @@ func TestServiceDeactivate_AllowsPathScopedWorkflow(t *testing.T) {
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1124,7 +1124,7 @@ func TestServiceCreateWaitsForInFlightRefreshBeforePersisting(t *testing.T) {
 		createCalled: make(chan struct{}, 1),
 	}
 	compiler := &blockingCompiler{
-		delegate:  NewCompiler(nil),
+		delegate:  NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()),
 		blockCall: 2,
 		blocked:   make(chan struct{}),
 		release:   make(chan struct{}),
@@ -1211,7 +1211,7 @@ func TestServiceCreateRejectsEmptyCompiledPreviewBeforePersisting(t *testing.T) 
 		},
 		createCalled: make(chan struct{}, 1),
 	}
-	service, err := NewService(store, &previewEmptyCompiler{delegate: NewCompiler(nil)})
+	service, err := NewService(store, &previewEmptyCompiler{delegate: NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures())})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1266,7 +1266,7 @@ func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *te
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1324,7 +1324,7 @@ func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testin
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1391,7 +1391,7 @@ func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1449,7 +1449,7 @@ func TestServiceDeactivateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *te
 			},
 		},
 	}
-	service, err := NewService(store, NewCompiler(nil))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}

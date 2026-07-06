@@ -369,17 +369,3 @@ type Config struct {
 	// When true, only /v1/chat/completions, /v1/responses, /v1/embeddings, /v1/files, and /v1/batches are logged
 	OnlyModelInteractions bool
 }
-
-// DefaultConfig returns a Config with sensible defaults
-func DefaultConfig() Config {
-	return Config{
-		Enabled:               false,
-		LogBodies:             false,
-		LogAudioBodies:        false,
-		LogHeaders:            false,
-		BufferSize:            1000,
-		FlushInterval:         5 * time.Second,
-		RetentionDays:         30,
-		OnlyModelInteractions: true,
-	}
-}

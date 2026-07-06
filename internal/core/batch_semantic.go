@@ -26,50 +26,6 @@ type DecodedBatchItemHandlers[T any] struct {
 	Default    func(*DecodedBatchItemRequest) (T, error)
 }
 
-// ChatRequest returns the decoded ChatRequest when the receiver is non-nil and
-// the underlying Request is a *ChatRequest. It returns nil for a nil receiver
-// or for non-chat batch items.
-func (decoded *DecodedBatchItemRequest) ChatRequest() *ChatRequest {
-	if decoded == nil {
-		return nil
-	}
-	req, _ := decoded.Request.(*ChatRequest)
-	return req
-}
-
-// ResponsesRequest returns the decoded ResponsesRequest when the receiver is
-// non-nil and the underlying Request is a *ResponsesRequest. It returns nil for
-// a nil receiver or for non-responses batch items.
-func (decoded *DecodedBatchItemRequest) ResponsesRequest() *ResponsesRequest {
-	if decoded == nil {
-		return nil
-	}
-	req, _ := decoded.Request.(*ResponsesRequest)
-	return req
-}
-
-// EmbeddingRequest returns the decoded EmbeddingRequest when the receiver is
-// non-nil and the underlying Request is an *EmbeddingRequest. It returns nil
-// for a nil receiver or for non-embedding batch items.
-func (decoded *DecodedBatchItemRequest) EmbeddingRequest() *EmbeddingRequest {
-	if decoded == nil {
-		return nil
-	}
-	req, _ := decoded.Request.(*EmbeddingRequest)
-	return req
-}
-
-// ModelSelector returns the selected model/provider pair for the decoded batch
-// item. It returns an error when the receiver is nil, when the decoded request
-// type is unsupported, or when the canonical selector cannot be parsed.
-func (decoded *DecodedBatchItemRequest) ModelSelector() (ModelSelector, error) {
-	requested, err := decoded.RequestedModelSelector()
-	if err != nil {
-		return ModelSelector{}, err
-	}
-	return requested.Normalize()
-}
-
 // RequestedModelSelector returns the raw selector requested by the decoded batch
 // item, preserving whether the provider came from the explicit field.
 func (decoded *DecodedBatchItemRequest) RequestedModelSelector() (RequestedModelSelector, error) {
@@ -208,15 +164,6 @@ func DecodeKnownBatchItemRequest(defaultEndpoint string, item BatchRequestItem) 
 	}
 	decoded.Request = req
 	return decoded, nil
-}
-
-// BatchItemModelSelector derives the model selector for a known JSON batch subrequest.
-func BatchItemModelSelector(defaultEndpoint string, item BatchRequestItem) (ModelSelector, error) {
-	decoded, err := DecodeKnownBatchItemRequest(defaultEndpoint, item)
-	if err != nil {
-		return ModelSelector{}, err
-	}
-	return decoded.ModelSelector()
 }
 
 // BatchItemRequestedModelSelector derives the raw requested selector for a

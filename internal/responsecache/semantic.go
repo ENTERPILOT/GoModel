@@ -581,17 +581,6 @@ func sha256HexOf(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// GuardrailsHashFromContext retrieves the guardrails hash from the context,
-// using the core package's storage key.
-func GuardrailsHashFromContext(ctx context.Context) string {
-	return core.GetGuardrailsHash(ctx)
-}
-
-// WithGuardrailsHash stores the guardrails hash into the context.
-func WithGuardrailsHash(ctx context.Context, hash string) context.Context {
-	return core.WithGuardrailsHash(ctx, hash)
-}
-
 // CacheTypeHeader values for X-Cache-Type.
 const (
 	CacheTypeExact      = "exact"
@@ -600,17 +589,8 @@ const (
 	CacheHeaderSemantic = "HIT (semantic)"
 )
 
-// ShouldSkipExactCache reports whether the X-Cache-Type header requests semantic-only mode.
-func ShouldSkipExactCache(req *http.Request) bool {
-	return strings.EqualFold(req.Header.Get("X-Cache-Type"), CacheTypeSemantic)
-}
-
-// ShouldSkipAllCache reports whether caching must be bypassed for this request,
-// matching the exact-cache middleware semantics for no-cache and no-store.
-func ShouldSkipAllCache(req *http.Request) bool {
-	return shouldSkipAllCacheHeaders(req.Header.Get)
-}
-
+// shouldSkipAllCacheHeaders reports whether caching must be bypassed for this
+// request, matching the exact-cache middleware semantics for no-cache and no-store.
 func shouldSkipAllCacheHeaders(header func(string) string) bool {
 	if strings.EqualFold(header("X-Cache-Control"), "no-store") {
 		return true
