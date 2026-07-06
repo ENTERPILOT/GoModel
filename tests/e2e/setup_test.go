@@ -31,6 +31,14 @@ type e2eServerOptions struct {
 	rateLimiter           server.RateLimiter
 	pricingResolver       usage.PricingResolver
 	providerType          string
+	// registry, when set, replaces the fixture's own registry so tests can
+	// share it with collaborators built around the same catalog (virtual
+	// models, rate-limit capacity probes).
+	registry *providers.ModelRegistry
+	// modelResolver and failoverResolver mirror the app wiring for alias
+	// resolution and translated-route failover.
+	modelResolver    server.RequestModelResolver
+	failoverResolver server.RequestFailoverResolver
 }
 
 type e2eUsageFixture struct {
@@ -74,7 +82,10 @@ func setupE2EAdminServer(t *testing.T, opts e2eServerOptions) *httptest.Server {
 func setupE2EServer(t *testing.T, opts e2eServerOptions) *server.Server {
 	t.Helper()
 
-	registry := setupE2ERegistry(t, opts.providerType)
+	registry := opts.registry
+	if registry == nil {
+		registry = setupE2ERegistry(t, opts.providerType)
+	}
 	router, err := providers.NewRouter(registry)
 	require.NoError(t, err, "failed to create router")
 
@@ -84,6 +95,8 @@ func setupE2EServer(t *testing.T, opts e2eServerOptions) *server.Server {
 		BudgetChecker:         opts.budgetChecker,
 		RateLimiter:           opts.rateLimiter,
 		PricingResolver:       opts.pricingResolver,
+		ModelResolver:         opts.modelResolver,
+		FailoverResolver:      opts.failoverResolver,
 		AdminEndpointsEnabled: opts.adminEndpointsEnabled,
 	}
 
