@@ -129,8 +129,19 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 `strategy` (`round_robin` or `cost`), `user_paths`, `description`, and `enabled`.
 Leave the targets empty to declare an access policy on the `source` selector. An
-invalid declaration (unknown strategy, missing or self-referential target) fails
-startup with a clear error.
+invalid declaration (unknown strategy, missing or self-referential target, or a
+target `provider` that matches no configured provider — a typo) fails startup
+with a clear error listing the registered provider names.
+
+Two lenient exceptions keep valid setups booting:
+
+- A target `provider` that is declared under `providers:` but did not register —
+  typically because its credentials are unset in this environment — only logs a
+  warning; the target stays unavailable until the credentials resolve. A
+  `config.yaml` shared across environments still boots everywhere.
+- Whether a target *model* exists is never checked at startup: the model catalog
+  loads asynchronously, so availability is a runtime concern and an unavailable
+  target is simply skipped at resolve time.
 
 ## Expose only redirects
 

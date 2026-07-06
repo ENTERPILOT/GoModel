@@ -343,6 +343,21 @@ func TestFilterEmptyProviders_VLLMAllowsKeylessConfig(t *testing.T) {
 	}
 }
 
+func TestSkippedProviderNames_ListsDeclaredButUnresolved(t *testing.T) {
+	declared := map[string]config.RawProviderConfig{
+		"openai":    {Type: "openai", APIKey: "${OPENAI_API_KEY}"},
+		"anthropic": {Type: "anthropic", APIKey: "sk-real"},
+		"vllm-b":    {Type: "vllm"},
+	}
+	resolved := filterEmptyProviders(declared, testDiscoveryConfigs)
+
+	got := skippedProviderNames(declared, resolved)
+	want := []string{"openai"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("skippedProviderNames() = %v, want %v", got, want)
+	}
+}
+
 func TestFilterEmptyProviders_EmptyMap(t *testing.T) {
 	got := filterEmptyProviders(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 	if len(got) != 0 {

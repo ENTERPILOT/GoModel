@@ -81,6 +81,10 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	}
 
 	providerMap, credentialResolved := resolveProviders(result.RawProviders, result.Config.Resilience, factory.discoveryConfigsSnapshot())
+	if skipped := skippedProviderNames(result.RawProviders, credentialResolved); len(skipped) > 0 {
+		slog.Info("configured providers skipped: credentials or base_url did not resolve",
+			"providers", skipped)
+	}
 
 	modelCache, err := initCache(result.Config)
 	if err != nil {

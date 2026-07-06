@@ -2,6 +2,7 @@ package virtualmodels
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"gomodel/config"
@@ -144,7 +145,7 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 			}
 			// Startup mirrors the factory: Refresh builds the snapshot, then the
 			// managed-config check rejects invalid declarations.
-			err := svc.ValidateManagedConfig()
+			err := svc.ValidateManagedConfig(nil)
 			if err == nil {
 				t.Fatalf("ValidateManagedConfig() error = nil, want validation failure")
 			}
@@ -152,6 +153,100 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 				t.Fatalf("ValidateManagedConfig() error = %v, want validation error", err)
 			}
 		})
+	}
+}
+
+// Target provider names are static configuration known before any model loads,
+// so startup validates them even though catalog availability is deferred: a
+// name that matches no provider anywhere is a typo and aborts (issue #464); a
+// name declared under providers: that did not register (unresolved credentials
+// in this environment) only warns, so a config shared across environments still
+// boots; targets without an explicit provider are never checked because their
+// model may carry a non-provider prefix (a slash-shaped ID like "Qwen/x").
+func TestService_ValidateManagedConfigTargetProviders(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		targets  []config.VirtualModelTargetConfig
+		declared []string
+		wantErr  string
+	}{
+		{
+			name:    "registered provider passes",
+			targets: []config.VirtualModelTargetConfig{{Provider: "openai", Model: "gpt-4o"}},
+		},
+		{
+			name:    "misspelled provider aborts startup",
+			targets: []config.VirtualModelTargetConfig{{Provider: "opnai", Model: "gpt-4o"}},
+			wantErr: `unknown target provider "opnai"`,
+		},
+		{
+			name:     "declared but unregistered provider only warns",
+			targets:  []config.VirtualModelTargetConfig{{Provider: "anthropic", Model: "claude"}},
+			declared: []string{"anthropic"},
+		},
+		{
+			name:    "provider-agnostic slash model is not treated as a provider",
+			targets: []config.VirtualModelTargetConfig{{Model: "Qwen/Qwen3-1.7B"}},
+		},
+		{
+			name: "typo among several targets still aborts",
+			targets: []config.VirtualModelTargetConfig{
+				{Provider: "openai", Model: "gpt-4o"},
+				{Provider: "uraninum", Model: "gemma"},
+			},
+			declared: []string{"uranium"},
+			wantErr:  `unknown target provider "uraninum"`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			svc, err := NewService(newSQLiteVMStore(t), testCatalog(), true)
+			if err != nil {
+				t.Fatalf("NewService() error = %v", err)
+			}
+			svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{
+				Source:  "smart",
+				Targets: tt.targets,
+			}}))
+			if err := svc.Refresh(context.Background()); err != nil {
+				t.Fatalf("Refresh() error = %v", err)
+			}
+			err = svc.ValidateManagedConfig(tt.declared)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateManagedConfig() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !IsValidationError(err) {
+				t.Fatalf("ValidateManagedConfig() error = %v, want validation error", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ValidateManagedConfig() error = %q, want it to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// The admin write path rejects an explicitly-named provider that is not
+// registered, with a message that points at the provider rather than the model.
+func TestService_UpsertRejectsUnknownTargetProvider(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	err := svc.Upsert(context.Background(), VirtualModel{
+		Source:  "smart",
+		Targets: []Target{{Provider: "opnai", Model: "gpt-4o"}},
+		Enabled: true,
+	})
+	if err == nil || !IsValidationError(err) {
+		t.Fatalf("Upsert(unknown provider) error = %v, want validation rejection", err)
+	}
+	if !strings.Contains(err.Error(), `unknown target provider "opnai"`) {
+		t.Fatalf("Upsert(unknown provider) error = %q, want unknown-target-provider message", err)
 	}
 }
 
@@ -176,7 +271,7 @@ func TestService_ManagedRedirectToleratesColdCatalogAtStartup(t *testing.T) {
 	if err := svc.Refresh(ctx); err != nil {
 		t.Fatalf("startup Refresh() error = %v", err)
 	}
-	if err := svc.ValidateManagedConfig(); err != nil {
+	if err := svc.ValidateManagedConfig(nil); err != nil {
 		t.Fatalf("ValidateManagedConfig() on a cold catalog error = %v, want nil", err)
 	}
 	// While the catalog is cold the redirect is simply unavailable, not fatal.
@@ -228,7 +323,7 @@ func TestService_ManagedRedirectToleratesTransientCatalogGapAfterStartup(t *test
 	if err := svc.Refresh(ctx); err != nil {
 		t.Fatalf("startup Refresh() error = %v", err)
 	}
-	if err := svc.ValidateManagedConfig(); err != nil {
+	if err := svc.ValidateManagedConfig(nil); err != nil {
 		t.Fatalf("startup ValidateManagedConfig() error = %v", err)
 	}
 

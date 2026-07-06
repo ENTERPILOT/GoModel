@@ -119,9 +119,13 @@ func (s *Service) isManagedSource(source string) bool {
 }
 
 // ValidateManagedConfig checks that every declarative config redirect satisfies
-// the STRUCTURAL redirect invariants (valid selector, no self- or cross-redirect
-// target), so a malformed IaC entry fails startup loudly. Call it once after the
-// initial Refresh.
+// the catalog-independent redirect invariants (valid selector, no self- or
+// cross-redirect target, no misspelled target provider), so a malformed IaC
+// entry fails startup loudly. declaredProviders lists the names present in the
+// providers configuration even when they did not register — e.g. their
+// credentials are unset in this environment — so a config shared across
+// environments still boots; such targets only warn and stay unavailable. Call
+// it once after the initial Refresh.
 //
 // It deliberately does NOT require targets to be catalog-supported: the provider
 // model catalog loads asynchronously and may still be warming when this runs, and
@@ -130,13 +134,17 @@ func (s *Service) isManagedSource(source string) bool {
 // cannot freeze the snapshot). Gating startup on availability would abort an
 // otherwise-valid declaration on a cold cache or a momentarily-unreachable
 // provider — availability is runtime state, not a property of the declaration.
-func (s *Service) ValidateManagedConfig() error {
+func (s *Service) ValidateManagedConfig(declaredProviders []string) error {
+	declared := providerNameSet(declaredProviders)
 	current := s.snapshot()
 	for _, vm := range current.bySource {
 		if !vm.Managed || !vm.IsRedirect() {
 			continue
 		}
 		if err := validateRedirectStructure(current, vm); err != nil {
+			return fmt.Errorf("load virtual model %q: %w", vm.Source, err)
+		}
+		if err := s.validateTargetProviders(vm, declared); err != nil {
 			return fmt.Errorf("load virtual model %q: %w", vm.Source, err)
 		}
 	}
@@ -403,16 +411,48 @@ func (s *Service) ensureSourceKind(current snapshot, source string, wantRedirect
 }
 
 // validateRedirectTarget enforces redirect rules for an admin write: the
-// structural invariants plus a catalog-availability check. The admin API runs
-// against a warm catalog, so a target it cannot serve is a caller mistake worth
-// rejecting up front. Startup config validation uses validateRedirectStructure
-// alone, because the catalog may not be warm yet (see ValidateManagedConfig).
+// structural invariants, a target-provider check, and a catalog-availability
+// check. The admin API runs against a warm catalog, so a target it cannot serve
+// is a caller mistake worth rejecting up front. Startup config validation skips
+// the availability check, because the catalog may not be warm yet (see
+// ValidateManagedConfig).
 func (s *Service) validateRedirectTarget(current snapshot, vm VirtualModel) error {
 	if err := validateRedirectStructure(current, vm); err != nil {
 		return err
 	}
+	if err := s.validateTargetProviders(vm, nil); err != nil {
+		return err
+	}
 	if missing, ok := s.firstUnsupportedTarget(vm); ok {
 		return newValidationError("target model not found: "+missing, nil)
+	}
+	return nil
+}
+
+// validateTargetProviders checks every explicitly-named target provider against
+// the registered provider names — static configuration known before any model
+// loads, so a misspelled provider is caught even on a cold catalog. Targets
+// without an explicit provider are skipped: their model may legitimately carry
+// a non-provider prefix (a slash-shaped ID like "Qwen/Qwen3-1.7B"). A name in
+// declared is configured but did not register (e.g. credentials unset in this
+// environment); it warns instead of failing and the target stays unavailable.
+func (s *Service) validateTargetProviders(vm VirtualModel, declared map[string]struct{}) error {
+	registered := providerNameSet(s.catalog.ProviderNames())
+	for _, target := range vm.Targets {
+		name := strings.TrimSpace(target.Provider)
+		if name == "" {
+			continue
+		}
+		if _, ok := registered[name]; ok {
+			continue
+		}
+		if _, ok := declared[name]; ok {
+			slog.Warn("virtual model target provider is configured but not registered; the target stays unavailable until its credentials resolve",
+				"source", vm.Source,
+				"provider", name)
+			continue
+		}
+		return unknownTargetProviderError(name, s.catalog.ProviderNames())
 	}
 	return nil
 }

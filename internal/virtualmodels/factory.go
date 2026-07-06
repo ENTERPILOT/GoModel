@@ -56,7 +56,10 @@ func (r *Result) Close() error {
 }
 
 // New creates a virtual models subsystem with its own storage connection.
-func New(ctx context.Context, cfg *config.Config, catalog Catalog) (*Result, error) {
+// declaredProviders lists every provider name present in the providers
+// configuration, including entries that did not register (e.g. unresolved
+// credentials); see Service.ValidateManagedConfig.
+func New(ctx context.Context, cfg *config.Config, catalog Catalog, declaredProviders []string) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -64,7 +67,7 @@ func New(ctx context.Context, cfg *config.Config, catalog Catalog) (*Result, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
-	result, err := newResult(ctx, cfg, storeConn, catalog)
+	result, err := newResult(ctx, cfg, storeConn, catalog, declaredProviders)
 	if err != nil {
 		_ = storeConn.Close()
 		return nil, err
@@ -74,17 +77,17 @@ func New(ctx context.Context, cfg *config.Config, catalog Catalog) (*Result, err
 }
 
 // NewWithSharedStorage creates a virtual models subsystem using an existing storage connection.
-func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storage.Storage, catalog Catalog) (*Result, error) {
+func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storage.Storage, catalog Catalog, declaredProviders []string) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	return newResult(ctx, cfg, shared, catalog)
+	return newResult(ctx, cfg, shared, catalog, declaredProviders)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, catalog Catalog) (*Result, error) {
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, catalog Catalog, declaredProviders []string) (*Result, error) {
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
@@ -104,10 +107,10 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		return nil, err
 	}
 	// Validate the managed redirects once, here at startup: an invalid declaration
-	// (self-/cross-redirect target, or a target the catalog cannot serve) fails
-	// loudly rather than silently dropping. Background refreshes deliberately skip
-	// this so a transient catalog gap cannot freeze the snapshot.
-	if err := service.ValidateManagedConfig(); err != nil {
+	// (self-/cross-redirect target, or a misspelled target provider) fails loudly
+	// rather than silently dropping. Background refreshes deliberately skip this
+	// so a transient catalog gap cannot freeze the snapshot.
+	if err := service.ValidateManagedConfig(declaredProviders); err != nil {
 		return nil, err
 	}
 

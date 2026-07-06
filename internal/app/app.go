@@ -316,12 +316,20 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// shared storage when already available. The catalog is rate-limit aware
 	// so load balancing skips saturated providers/models while capacity
 	// exists elsewhere (RouteAvailable is nil-safe when rate limits are off).
+	// Provider names declared in YAML — including entries whose credentials did
+	// not resolve, which never register — let validation tell a misspelled
+	// target provider (abort startup) from a declared-but-inactive one (warn,
+	// target stays unavailable).
 	virtualModelCatalog := newRateLimitAwareCatalog(providerResult.Registry, rateLimitResult.Service)
+	declaredProviders := make([]string, 0, len(cfg.AppConfig.RawProviders))
+	for name := range cfg.AppConfig.RawProviders {
+		declaredProviders = append(declaredProviders, name)
+	}
 	var virtualModelsResult *virtualmodels.Result
 	if sharedStorage != nil {
-		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, virtualModelCatalog)
+		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, virtualModelCatalog, declaredProviders)
 	} else {
-		virtualModelsResult, err = virtualmodels.New(ctx, appCfg, virtualModelCatalog)
+		virtualModelsResult, err = virtualmodels.New(ctx, appCfg, virtualModelCatalog, declaredProviders)
 	}
 	if err != nil {
 		return fail("failed to initialize virtual models", err)
