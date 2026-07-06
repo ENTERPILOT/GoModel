@@ -174,3 +174,45 @@ func TestMemoryStoreDeleteReleasesByteAccounting(t *testing.T) {
 		t.Fatalf("accounting after delete = %d bytes / %d sizes, want 0/0", store.totalBytes, len(store.sizes))
 	}
 }
+
+func TestMemoryStoreUpdateNeverEvictsUpdatedEntry(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	sized := func(id string, storedAt time.Time, n int) *StoredResponse {
+		return &StoredResponse{
+			Response: &core.ResponsesResponse{ID: id, Object: "response", Model: strings.Repeat("x", n)},
+			StoredAt: storedAt,
+		}
+	}
+
+	probe := NewMemoryStore(WithTTL(0))
+	if err := probe.Create(ctx, sized("probe", now, 600)); err != nil {
+		t.Fatalf("Create(probe) error = %v", err)
+	}
+	budget := 2*probe.totalBytes + 10
+
+	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(budget))
+	// resp_grow is the OLDEST entry — without protection, oldest-first
+	// eviction would drop it right after its own successful update.
+	if err := store.Create(ctx, sized("resp_grow", now.Add(-time.Minute), 10)); err != nil {
+		t.Fatalf("Create(resp_grow) error = %v", err)
+	}
+	if err := store.Create(ctx, sized("resp_new", now, 600)); err != nil {
+		t.Fatalf("Create(resp_new) error = %v", err)
+	}
+
+	if err := store.Update(ctx, sized("resp_grow", now.Add(-time.Minute), 1000)); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	got, err := store.Get(ctx, "resp_grow")
+	if err != nil {
+		t.Fatalf("Get(resp_grow) error = %v, want protected from self-eviction", err)
+	}
+	if len(got.Response.Model) != 1000 {
+		t.Fatalf("model length = %d, want updated value", len(got.Response.Model))
+	}
+	if _, err := store.Get(ctx, "resp_new"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get(resp_new) error = %v, want ErrNotFound (evicted instead)", err)
+	}
+}

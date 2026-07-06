@@ -24,26 +24,13 @@ func TestRunCleanupLoop(t *testing.T) {
 		}
 	}
 
+	// Closing stop makes the loop return; once the goroutine has exited, no
+	// further cleanups can run by construction, so exit is the property to
+	// assert (ticks racing the stop signal may legitimately land in calls).
 	close(stop)
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("loop did not exit after stop was closed")
-	}
-
-	// Drain anything sent before the loop observed stop; with the goroutine
-	// gone, no further cleanups can run.
-	for {
-		select {
-		case <-calls:
-			continue
-		default:
-		}
-		break
-	}
-	select {
-	case <-calls:
-		t.Fatal("cleanup ran after the loop exited")
-	default:
 	}
 }

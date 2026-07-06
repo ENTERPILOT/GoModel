@@ -123,7 +123,7 @@ func (s *MemoryStore) Create(_ context.Context, conversation *StoredConversation
 		s.removeLocked(c.Conversation.ID)
 	}
 	s.putLocked(c.Conversation.ID, c, size)
-	s.enforceBoundsLocked()
+	s.enforceBoundsLocked(c.Conversation.ID)
 	return nil
 }
 
@@ -183,7 +183,7 @@ func (s *MemoryStore) Update(_ context.Context, conversation *StoredConversation
 		return ErrNotFound
 	}
 	s.putLocked(c.Conversation.ID, c, size)
-	s.enforceBoundsLocked()
+	s.enforceBoundsLocked(c.Conversation.ID)
 	return nil
 }
 
@@ -192,6 +192,11 @@ func (s *MemoryStore) AppendItems(_ context.Context, id string, items []json.Raw
 	if len(items) == 0 {
 		return nil
 	}
+	var added int64
+	for _, item := range items {
+		added += int64(len(item))
+	}
+
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -204,14 +209,18 @@ func (s *MemoryStore) AppendItems(_ context.Context, id string, items []json.Raw
 		s.removeLocked(id)
 		return ErrNotFound
 	}
-	var added int64
+	// Reject growth past the byte budget before mutating, mirroring Create and
+	// Update; otherwise bound enforcement would have to drop the very
+	// conversation the caller believes was just persisted.
+	if s.maxBytes > 0 && s.sizes[id]+added > s.maxBytes {
+		return fmt.Errorf("conversation snapshot would grow to %d bytes, exceeding the in-memory store budget of %d bytes", s.sizes[id]+added, s.maxBytes)
+	}
 	for _, item := range items {
 		conversation.Items = append(conversation.Items, core.CloneRawJSON(item))
-		added += int64(len(item))
 	}
 	s.sizes[id] += added
 	s.totalBytes += added
-	s.enforceBoundsLocked()
+	s.enforceBoundsLocked(id)
 	return nil
 }
 
@@ -290,8 +299,10 @@ func (s *MemoryStore) cleanupExpiredLocked(now time.Time) {
 }
 
 // enforceBoundsLocked evicts oldest-first until both the entry-count and
-// byte-budget caps hold.
-func (s *MemoryStore) enforceBoundsLocked() {
+// byte-budget caps hold. The protect id — the entry the caller just wrote,
+// which the byte-budget checks guarantee fits on its own — is never evicted,
+// so a successful write cannot be silently undone by its own bound enforcement.
+func (s *MemoryStore) enforceBoundsLocked(protect string) {
 	overEntries := s.maxEntries > 0 && len(s.items) > s.maxEntries
 	overBytes := s.maxBytes > 0 && s.totalBytes > s.maxBytes
 	if !overEntries && !overBytes {
@@ -315,6 +326,9 @@ func (s *MemoryStore) enforceBoundsLocked() {
 		if (s.maxEntries <= 0 || len(s.items) <= s.maxEntries) &&
 			(s.maxBytes <= 0 || s.totalBytes <= s.maxBytes) {
 			return
+		}
+		if entry.id == protect {
+			continue
 		}
 		s.removeLocked(entry.id)
 	}

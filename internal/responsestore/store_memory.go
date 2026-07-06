@@ -118,7 +118,7 @@ func (s *MemoryStore) Create(_ context.Context, response *StoredResponse) error 
 		s.removeLocked(c.Response.ID)
 	}
 	s.putLocked(c.Response.ID, c, size)
-	s.enforceBoundsLocked()
+	s.enforceBoundsLocked(c.Response.ID)
 	return nil
 }
 
@@ -178,7 +178,7 @@ func (s *MemoryStore) Update(_ context.Context, response *StoredResponse) error 
 		return ErrNotFound
 	}
 	s.putLocked(c.Response.ID, c, size)
-	s.enforceBoundsLocked()
+	s.enforceBoundsLocked(c.Response.ID)
 	return nil
 }
 
@@ -249,8 +249,10 @@ func (s *MemoryStore) cleanupExpiredLocked(now time.Time) {
 }
 
 // enforceBoundsLocked evicts oldest-first until both the entry-count and
-// byte-budget caps hold.
-func (s *MemoryStore) enforceBoundsLocked() {
+// byte-budget caps hold. The protect id — the entry the caller just wrote,
+// which checkByteBudget guarantees fits on its own — is never evicted, so a
+// successful write cannot be silently undone by its own bound enforcement.
+func (s *MemoryStore) enforceBoundsLocked(protect string) {
 	overEntries := s.maxEntries > 0 && len(s.items) > s.maxEntries
 	overBytes := s.maxBytes > 0 && s.totalBytes > s.maxBytes
 	if !overEntries && !overBytes {
@@ -274,6 +276,9 @@ func (s *MemoryStore) enforceBoundsLocked() {
 		if (s.maxEntries <= 0 || len(s.items) <= s.maxEntries) &&
 			(s.maxBytes <= 0 || s.totalBytes <= s.maxBytes) {
 			return
+		}
+		if entry.id == protect {
+			continue
 		}
 		s.removeLocked(entry.id)
 	}

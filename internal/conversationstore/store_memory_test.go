@@ -293,17 +293,87 @@ func TestMemoryStoreAppendItemsCountsTowardByteBudget(t *testing.T) {
 		t.Fatalf("Create(conv_grow) error = %v", err)
 	}
 
-	// Growing conv_grow past the budget evicts the older conversation.
-	item := json.RawMessage(fmt.Sprintf(`{"type":"message","content":%q}`, strings.Repeat("x", 900)))
-	if err := store.AppendItems(ctx, "conv_grow", []json.RawMessage{item, item}); err != nil {
+	// Growing conv_grow within its own budget but past the total evicts the
+	// older conversation, never the one just appended to.
+	item := json.RawMessage(fmt.Sprintf(`{"type":"message","content":%q}`, strings.Repeat("x", 1800)))
+	if err := store.AppendItems(ctx, "conv_grow", []json.RawMessage{item}); err != nil {
 		t.Fatalf("AppendItems() error = %v", err)
 	}
 
 	if _, err := store.Get(ctx, "conv_old"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get(conv_old) error = %v, want ErrNotFound (evicted by append growth)", err)
 	}
+	grown, err := store.Get(ctx, "conv_grow")
+	if err != nil {
+		t.Fatalf("Get(conv_grow) error = %v, want kept", err)
+	}
+	if len(grown.Items) != 1 {
+		t.Fatalf("conv_grow items = %d, want 1", len(grown.Items))
+	}
 	if store.totalBytes > 2000 {
 		t.Fatalf("totalBytes = %d, want <= 2000", store.totalBytes)
+	}
+}
+
+func TestMemoryStoreAppendItemsRejectsOversizeGrowth(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2000))
+	if err := store.Create(ctx, storedConversation("conv_other", now.Add(-time.Minute))); err != nil {
+		t.Fatalf("Create(conv_other) error = %v", err)
+	}
+	if err := store.Create(ctx, storedConversation("conv_grow", now)); err != nil {
+		t.Fatalf("Create(conv_grow) error = %v", err)
+	}
+
+	// An append that would grow the conversation past the whole budget is
+	// rejected outright instead of evicting the store out from under it.
+	item := json.RawMessage(fmt.Sprintf(`{"type":"message","content":%q}`, strings.Repeat("x", 2500)))
+	if err := store.AppendItems(ctx, "conv_grow", []json.RawMessage{item}); err == nil {
+		t.Fatal("AppendItems() error = nil, want byte budget rejection")
+	}
+
+	grown, err := store.Get(ctx, "conv_grow")
+	if err != nil {
+		t.Fatalf("Get(conv_grow) error = %v, want kept", err)
+	}
+	if len(grown.Items) != 0 {
+		t.Fatalf("conv_grow items = %d, want 0 (rejected append must not mutate)", len(grown.Items))
+	}
+	if _, err := store.Get(ctx, "conv_other"); err != nil {
+		t.Fatalf("Get(conv_other) error = %v, want untouched", err)
+	}
+}
+
+func TestMemoryStoreAppendItemsNeverEvictsAppendedConversation(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2000))
+	// conv_grow is the OLDEST entry — without protection, oldest-first
+	// eviction would drop it right after its own successful append.
+	if err := store.Create(ctx, storedConversation("conv_grow", now.Add(-time.Minute))); err != nil {
+		t.Fatalf("Create(conv_grow) error = %v", err)
+	}
+	if err := store.Create(ctx, storedConversation("conv_new", now)); err != nil {
+		t.Fatalf("Create(conv_new) error = %v", err)
+	}
+
+	item := json.RawMessage(fmt.Sprintf(`{"type":"message","content":%q}`, strings.Repeat("x", 1800)))
+	if err := store.AppendItems(ctx, "conv_grow", []json.RawMessage{item}); err != nil {
+		t.Fatalf("AppendItems() error = %v", err)
+	}
+
+	grown, err := store.Get(ctx, "conv_grow")
+	if err != nil {
+		t.Fatalf("Get(conv_grow) error = %v, want protected from self-eviction", err)
+	}
+	if len(grown.Items) != 1 {
+		t.Fatalf("conv_grow items = %d, want 1", len(grown.Items))
+	}
+	if _, err := store.Get(ctx, "conv_new"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get(conv_new) error = %v, want ErrNotFound (evicted instead)", err)
 	}
 }
 
