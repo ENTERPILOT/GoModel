@@ -205,12 +205,12 @@
                     patch._live_pending = false;
                 }
                 // A stream event's response body is a partial reconstruction of a
-                // still-running stream; the flag drops once a final state (rank
-                // >= completed) delivers the real body. Other events leave the
-                // previous flag untouched.
+                // still-running stream; the flag drops once a settled state
+                // delivers the real body. Other events leave the previous flag
+                // untouched.
                 if (eventType === 'audit.stream') {
                     patch._response_partial = true;
-                } else if (this.liveAuditStateRank(eventType) >= 30) {
+                } else if (this.liveAuditStateSettled(eventType)) {
                     patch._response_partial = false;
                 }
                 if (index >= 0) {
