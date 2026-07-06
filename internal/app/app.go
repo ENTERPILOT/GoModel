@@ -30,6 +30,7 @@ import (
 	"gomodel/internal/guardrails"
 	"gomodel/internal/httpclient"
 	"gomodel/internal/live"
+	"gomodel/internal/mcpgateway"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/ratelimit"
@@ -59,6 +60,7 @@ type App struct {
 	virtualModels    *virtualmodels.Result
 	failover         *failover.Result
 	tagging          *tagging.Result
+	mcpGateway       *mcpgateway.Result
 	pricingOverrides *pricingoverrides.Result
 	authKeys         *authkeys.Result
 	guardrails       *guardrails.Result
@@ -506,6 +508,27 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		serverUsageLogger = ratelimit.NewUsageTap(serverUsageLogger, rateLimitResult.Service)
 	}
 
+	// Initialize the MCP gateway (aggregated upstream MCP servers behind /mcp).
+	var mcpResult *mcpgateway.Result
+	if appCfg.MCP.Enabled {
+		if sharedStorage != nil {
+			mcpResult, err = mcpgateway.NewWithSharedStorage(ctx, appCfg, sharedStorage, nil, serverUsageLogger)
+		} else {
+			mcpResult, err = mcpgateway.New(ctx, appCfg, nil, serverUsageLogger)
+		}
+		if err != nil {
+			return fail("failed to initialize mcp gateway", err)
+		}
+		app.mcpGateway = mcpResult
+		closers = append(closers, app.mcpGateway.Close)
+		claimSharedStorage(mcpResult.Storage)
+		slog.Info("mcp gateway enabled",
+			"path", config.JoinBasePath(appCfg.Server.BasePath, "/mcp"),
+			"configured_servers", len(appCfg.MCP.Servers))
+	} else {
+		slog.Info("mcp gateway disabled")
+	}
+
 	serverCfg := &server.Config{
 		BasePath:                        appCfg.Server.BasePath,
 		MasterKey:                       appCfg.Server.MasterKey,
@@ -539,6 +562,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		UserPathHeader:                  appCfg.Server.UserPathHeader,
 		SwaggerEnabled:                  swaggerEnabled,
 		Tagging:                         taggingResult.Service,
+		MCPEnabled:                      appCfg.MCP.Enabled,
+	}
+	if mcpResult != nil {
+		serverCfg.MCPGateway = mcpResult.Service
 	}
 
 	// Assigned conditionally so a disabled feature leaves the interface nil
@@ -579,6 +606,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			budgetResult.Service,
 			rateLimitResult.Service,
 			taggingResult.Service,
+			mcpResult,
 			app,
 			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard),
 			app.live,
@@ -836,6 +864,14 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	// 3b. Close the MCP gateway (terminates upstream MCP sessions).
+	if a.mcpGateway != nil {
+		if err := a.mcpGateway.Close(); err != nil {
+			slog.Error("mcp gateway close error", "error", err)
+			errs = append(errs, fmt.Errorf("mcp gateway close: %w", err))
+		}
+	}
+
 	// 4. Close virtual models subsystem (aliases + access overrides).
 	if a.virtualModels != nil {
 		if err := a.virtualModels.Close(); err != nil {
@@ -1017,6 +1053,7 @@ func initAdmin(
 	budgetService *budget.Service,
 	rateLimitService *ratelimit.Service,
 	taggingService *tagging.Service,
+	mcpResult *mcpgateway.Result,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	liveBroker *live.Broker,
@@ -1062,6 +1099,14 @@ func initAdmin(
 		}
 	}
 
+	// Assigned conditionally so a disabled MCP gateway leaves the option nil
+	// (a typed-nil *mcpgateway.Service stored in the interface field would
+	// defeat the handlers' feature-unavailable check).
+	var mcpOption admin.Option
+	if mcpResult != nil && mcpResult.Service != nil {
+		mcpOption = admin.WithMCPServers(mcpResult.Service)
+	}
+
 	adminHandler := admin.NewHandler(
 		reader,
 		registry,
@@ -1078,6 +1123,7 @@ func initAdmin(
 		admin.WithBudgets(budgetService),
 		admin.WithRateLimits(rateLimitService),
 		admin.WithTagging(taggingService),
+		mcpOption,
 		admin.WithRuntimeRefresher(runtimeRefresher),
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 		admin.WithLiveBroker(liveBroker),

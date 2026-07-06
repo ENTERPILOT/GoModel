@@ -13,6 +13,7 @@ import (
 	"gomodel/internal/conversationstore"
 	"gomodel/internal/core"
 	"gomodel/internal/filestore"
+	"gomodel/internal/mcpgateway"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
 	"gomodel/internal/usage"
@@ -43,6 +44,8 @@ type Handler struct {
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
 	realtimeEnabled              bool
+	mcpEnabled                   bool
+	mcpGateway                   *mcpgateway.Service
 	responseCache                *responsecache.ResponseCacheMiddleware
 	guardrailsHash               string
 	storageProbe                 ReadinessProbe
@@ -239,6 +242,15 @@ func (h *Handler) realtime() *realtimeService {
 	}
 }
 
+func (h *Handler) mcp() *mcpService {
+	return &mcpService{
+		gateway:       h.mcpGateway,
+		budgetChecker: h.budgetChecker,
+		rateLimiter:   h.rateLimiter,
+		enabled:       h.mcpEnabled && h.mcpGateway != nil,
+	}
+}
+
 func (h *Handler) passthrough() *passthroughService {
 	return &passthroughService{
 		provider:                     h.provider,
@@ -324,6 +336,48 @@ func (h *Handler) ProviderPassthrough(c *echo.Context) error {
 // @Router       /v1/realtime [get]
 func (h *Handler) Realtime(c *echo.Context) error {
 	return h.realtime().Realtime(c)
+}
+
+// MCP handles the aggregated MCP endpoint at /mcp.
+//
+// @Summary      MCP gateway (aggregated)
+// @Description  Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {server}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset.
+// @Tags         mcp
+// @Accept       json
+// @Produce      json
+// @Produce      text/event-stream
+// @Security     BearerAuth
+// @Success      200  {object}  map[string]interface{}  "JSON-RPC response or SSE stream"
+// @Failure      401  {object}  core.OpenAIErrorEnvelope
+// @Failure      429  {object}  core.OpenAIErrorEnvelope
+// @Failure      501  {object}  core.OpenAIErrorEnvelope
+// @Router       /mcp [post]
+// @Router       /mcp [get]
+// @Router       /mcp [delete]
+func (h *Handler) MCP(c *echo.Context) error {
+	return h.mcp().handle(c, "")
+}
+
+// MCPServer handles the per-server MCP endpoints at /mcp/{server}.
+//
+// @Summary      MCP gateway (single server)
+// @Description  Streamable-HTTP MCP endpoint exposing one configured upstream MCP server with original (un-prefixed) tool names.
+// @Tags         mcp
+// @Accept       json
+// @Produce      json
+// @Produce      text/event-stream
+// @Security     BearerAuth
+// @Param        server  path      string  true  "Configured MCP server name"
+// @Success      200     {object}  map[string]interface{}  "JSON-RPC response or SSE stream"
+// @Failure      401     {object}  core.OpenAIErrorEnvelope
+// @Failure      404     {object}  core.OpenAIErrorEnvelope
+// @Failure      429     {object}  core.OpenAIErrorEnvelope
+// @Failure      501     {object}  core.OpenAIErrorEnvelope
+// @Router       /mcp/{server} [post]
+// @Router       /mcp/{server} [get]
+// @Router       /mcp/{server} [delete]
+func (h *Handler) MCPServer(c *echo.Context) error {
+	return h.mcp().handle(c, c.Param("server"))
 }
 
 // ChatCompletion handles POST /v1/chat/completions

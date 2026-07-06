@@ -63,6 +63,7 @@
                         "pages": [
                             "features/virtual-models",
                             "features/user-path",
+                            "features/mcp-gateway",
                             "features/passthrough-api",
                             "features/budgets",
                             "features/rate-limits",

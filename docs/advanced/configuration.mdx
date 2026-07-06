@@ -46,6 +46,15 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
 | `USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
 
+#### MCP Gateway
+
+See [MCP Gateway](/features/mcp-gateway) for the full feature guide.
+
+| Variable      | Description                                                                                                                      | Default            |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `MCP_ENABLED` | Expose the MCP endpoints `/mcp` and `/mcp/{server}`                                                                              | `true`             |
+| `MCP_SERVERS` | JSON object of upstream MCP servers, merged over the `mcp.servers` YAML map per name (entries are read-only in the dashboard)     | _(none)_           |
+
 #### Logging
 
 Runtime logger output. For the persisted API audit trail (request/response

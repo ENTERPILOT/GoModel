@@ -6211,6 +6211,18 @@ body.conversation-drawer-open {
   color: var(--danger);
 }
 
+/* MCP servers: secondary line under a table cell (prompt/resource counts,
+   inline last_error for degraded servers). */
+.mcp-server-sub-counts {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .copy-feedback-btn {
   display: inline-flex;
   align-items: center;

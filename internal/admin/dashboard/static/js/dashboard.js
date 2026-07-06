@@ -225,6 +225,7 @@ function dashboard() {
         "workflows",
         "audit-logs",
         "guardrails",
+        "mcp-servers",
         "auth-keys",
         "settings",
       ].includes(page)
@@ -258,6 +259,12 @@ function dashboard() {
         typeof this.fetchGuardrailsPage === "function"
       ) {
         this.fetchGuardrailsPage();
+      }
+      if (
+        page === "mcp-servers" &&
+        typeof this.fetchMcpServersPage === "function"
+      ) {
+        this.fetchMcpServersPage();
       }
       if (page === "budgets" && typeof this.fetchBudgetsPage === "function") {
         this.fetchBudgetsPage();
@@ -457,6 +464,7 @@ function dashboard() {
         this.failoverDraftsOpen ||
         (this.page === "workflows" && this.workflowFormOpen) ||
         (this.page === "guardrails" && this.guardrailFormOpen) ||
+        (this.page === "mcp-servers" && this.mcpServerFormOpen) ||
         (this.page === "auth-keys" && this.authKeyFormOpen) ||
         (this.page === "budgets" && this.budgetFormOpen) ||
         ((this.page === "rate-limits" || this.page === "models") &&
@@ -670,6 +678,12 @@ function dashboard() {
         typeof this.fetchRateLimitsPage === "function"
       ) {
         requests.push(this.fetchRateLimitsPage());
+      }
+      if (
+        this.page === "mcp-servers" &&
+        typeof this.fetchMcpServersPage === "function"
+      ) {
+        requests.push(this.fetchMcpServersPage());
       }
       if (
         this.hasCalendarModule &&
@@ -1220,6 +1234,12 @@ function dashboard() {
         ? dashboardRateLimitsModule
         : null,
       "dashboardRateLimitsModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardMcpServersModule === "function"
+        ? dashboardMcpServersModule
+        : null,
+      "dashboardMcpServersModule",
     ),
     resolveModuleFactory(
       typeof dashboardTaggingModule === "function"

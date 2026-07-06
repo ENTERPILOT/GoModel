@@ -1,0 +1,528 @@
+package mcpgateway
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"gomodel/config"
+	"gomodel/internal/core"
+	"gomodel/internal/usage"
+)
+
+// newTestUpstream serves a real MCP server over streamable HTTP and returns
+// its base URL.
+func newTestUpstream(t *testing.T, name string, configure func(*mcp.Server)) string {
+	t.Helper()
+	server := mcp.NewServer(&mcp.Implementation{Name: name, Version: "test"}, &mcp.ServerOptions{
+		Instructions: "instructions from " + name,
+	})
+	if configure != nil {
+		configure(server)
+	}
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	ts := httptest.NewServer(handler)
+	t.Cleanup(ts.Close)
+	return ts.URL
+}
+
+func addEchoTool(name string) func(*mcp.Server) {
+	return func(server *mcp.Server) {
+		server.AddTool(&mcp.Tool{
+			Name:        name,
+			Description: "echoes its input",
+			InputSchema: map[string]any{"type": "object"},
+		}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "echo:" + string(req.Params.Arguments)}},
+			}, nil
+		})
+	}
+}
+
+// recordingUsageLogger captures usage entries written by the gateway.
+type recordingUsageLogger struct {
+	mu      sync.Mutex
+	entries []*usage.UsageEntry
+}
+
+func (l *recordingUsageLogger) Write(entry *usage.UsageEntry) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = append(l.entries, entry)
+}
+
+func (l *recordingUsageLogger) Config() usage.Config { return usage.Config{Enabled: true} }
+func (l *recordingUsageLogger) Close() error         { return nil }
+
+func (l *recordingUsageLogger) all() []*usage.UsageEntry {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]*usage.UsageEntry(nil), l.entries...)
+}
+
+func testSpec(name, url string, mutate func(*ServerSpec)) ServerSpec {
+	spec := ServerSpec{
+		Name:        name,
+		URL:         url,
+		Transport:   config.MCPTransportHTTP,
+		Enabled:     true,
+		ToolTimeout: 10 * time.Second,
+		Managed:     true,
+	}
+	if mutate != nil {
+		mutate(&spec)
+	}
+	return spec
+}
+
+// newTestService builds a Service over the given specs and returns it with a
+// gateway HTTP endpoint that mimics GoModel's ingress: bearer auth is assumed
+// done; the user path is read from the standard header into the context, and
+// /mcp/{server} pins a single upstream.
+func newTestService(t *testing.T, usageLogger usage.LoggerInterface, specs ...ServerSpec) (*Service, string) {
+	t.Helper()
+	configServers := make(map[string]ServerSpec, len(specs))
+	for _, spec := range specs {
+		configServers[spec.Name] = spec
+	}
+	service, err := NewService(context.Background(), Options{
+		ConfigServers: configServers,
+		UsageLogger:   usageLogger,
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	t.Cleanup(service.Close)
+
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if userPath := r.Header.Get(core.UserPathHeader); userPath != "" {
+			r = r.WithContext(core.WithEffectiveUserPath(r.Context(), userPath))
+		}
+		pinned := ""
+		if rest, ok := strings.CutPrefix(r.URL.Path, "/mcp/"); ok {
+			pinned = rest
+		}
+		if err := service.ServeHTTP(w, r, pinned); err != nil {
+			var gatewayErr *core.GatewayError
+			status := http.StatusInternalServerError
+			if errors.As(err, &gatewayErr) {
+				status = gatewayErr.HTTPStatusCode()
+			}
+			http.Error(w, err.Error(), status)
+		}
+	}))
+	t.Cleanup(gateway.Close)
+
+	waitForConnected(t, service, len(specs))
+	return service, gateway.URL
+}
+
+// waitForConnected waits until every enabled server reports a terminal
+// status (connected or degraded), so tests do not race the async connect.
+func waitForConnected(t *testing.T, service *Service, servers int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		views := service.Views()
+		settled := 0
+		for _, view := range views {
+			if !view.Spec.Enabled || view.Status == StatusConnected || view.Status == StatusDegraded {
+				settled++
+			}
+		}
+		if len(views) == servers && settled == servers {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("upstreams did not settle: %+v", service.Views())
+}
+
+func connectClient(t *testing.T, endpoint string, headers map[string]string) *mcp.ClientSession {
+	t.Helper()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "test"}, nil)
+	transport := &mcp.StreamableClientTransport{
+		Endpoint:   endpoint,
+		HTTPClient: &http.Client{Transport: &headerRoundTripper{base: http.DefaultTransport, headers: headers}},
+	}
+	session, err := client.Connect(context.Background(), transport, nil)
+	if err != nil {
+		t.Fatalf("client connect to %s: %v", endpoint, err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	return session
+}
+
+func listToolNames(t *testing.T, session *mcp.ClientSession) []string {
+	t.Helper()
+	result, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	names := make([]string, 0, len(result.Tools))
+	for _, tool := range result.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+func TestAggregatedEndpointNamespacesAndRelays(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", addEchoTool("search"))
+	usageLog := &recordingUsageLogger{}
+	_, gatewayURL := newTestService(t, usageLog,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, nil),
+	)
+
+	session := connectClient(t, gatewayURL+"/mcp", map[string]string{
+		core.UserPathHeader: "/team-a",
+		"X-Request-ID":      "req-123",
+	})
+
+	names := listToolNames(t, session)
+	want := []string{"alpha_echo", "beta_search"}
+	if len(names) != 2 || names[0] != want[0] || names[1] != want[1] {
+		t.Fatalf("ListTools() = %v, want %v", names, want)
+	}
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "alpha_echo",
+		Arguments: map[string]any{"value": 1},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(alpha_echo) error = %v", err)
+	}
+	if len(result.Content) != 1 {
+		t.Fatalf("CallTool content length = %d, want 1", len(result.Content))
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok || !strings.HasPrefix(text.Text, "echo:") {
+		t.Fatalf("CallTool content = %#v, want echo:... text", result.Content[0])
+	}
+
+	// The tool call must be attributed in the usage pipeline.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(usageLog.all()) == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	entries := usageLog.all()
+	if len(entries) != 1 {
+		t.Fatalf("usage entries = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.Provider != "mcp" || entry.ProviderName != "alpha" || entry.Model != "alpha_echo" {
+		t.Fatalf("usage entry routing = %s/%s/%s, want mcp/alpha/alpha_echo", entry.Provider, entry.ProviderName, entry.Model)
+	}
+	if entry.UserPath != "/team-a" {
+		t.Fatalf("usage entry user path = %q, want /team-a", entry.UserPath)
+	}
+	if entry.RequestID != "req-123" {
+		t.Fatalf("usage entry request id = %q, want req-123", entry.RequestID)
+	}
+}
+
+func TestPerServerEndpointKeepsOriginalNames(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", addEchoTool("search"))
+	_, gatewayURL := newTestService(t, nil,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, nil),
+	)
+
+	session := connectClient(t, gatewayURL+"/mcp/alpha", nil)
+	names := listToolNames(t, session)
+	if len(names) != 1 || names[0] != "echo" {
+		t.Fatalf("ListTools(/mcp/alpha) = %v, want [echo]", names)
+	}
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "echo"})
+	if err != nil {
+		t.Fatalf("CallTool(echo) error = %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool(echo) unexpectedly returned isError")
+	}
+}
+
+func TestUnknownPinnedServerReturns404(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
+
+	resp, err := http.Post(gatewayURL+"/mcp/ghost", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("POST /mcp/ghost error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("POST /mcp/ghost status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestUserPathVisibilityFiltersServers(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", addEchoTool("search"))
+	_, gatewayURL := newTestService(t, nil,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, func(spec *ServerSpec) {
+			spec.UserPaths = []string{"/team-b"}
+		}),
+	)
+
+	// A /team-a caller must not discover beta's tools.
+	teamA := connectClient(t, gatewayURL+"/mcp", map[string]string{core.UserPathHeader: "/team-a"})
+	names := listToolNames(t, teamA)
+	if len(names) != 1 || names[0] != "alpha_echo" {
+		t.Fatalf("ListTools(team-a) = %v, want [alpha_echo]", names)
+	}
+	if _, err := teamA.CallTool(context.Background(), &mcp.CallToolParams{Name: "beta_search"}); err == nil {
+		t.Fatalf("CallTool(beta_search) as /team-a should fail")
+	}
+
+	// A /team-b/dev caller inherits the /team-b subtree scope.
+	teamB := connectClient(t, gatewayURL+"/mcp", map[string]string{core.UserPathHeader: "/team-b/dev"})
+	names = listToolNames(t, teamB)
+	if len(names) != 2 {
+		t.Fatalf("ListTools(team-b) = %v, want both servers", names)
+	}
+
+	// A pinned endpoint for an out-of-scope server is a 404.
+	resp, err := http.Post(gatewayURL+"/mcp/beta", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("POST /mcp/beta error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("POST /mcp/beta without scope status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestScopeHeaderNarrowsVisibleServers(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", addEchoTool("search"))
+	_, gatewayURL := newTestService(t, nil,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, nil),
+	)
+
+	session := connectClient(t, gatewayURL+"/mcp", map[string]string{ScopeHeader: "beta, ghost"})
+	names := listToolNames(t, session)
+	if len(names) != 1 || names[0] != "beta_search" {
+		t.Fatalf("ListTools(X-MCP-Servers=beta) = %v, want [beta_search]", names)
+	}
+}
+
+func TestToolFiltersHideTools(t *testing.T) {
+	url := newTestUpstream(t, "alpha", func(server *mcp.Server) {
+		addEchoTool("read")(server)
+		addEchoTool("write")(server)
+		addEchoTool("admin")(server)
+	})
+	_, gatewayURL := newTestService(t, nil,
+		testSpec("alpha", url, func(spec *ServerSpec) {
+			spec.AllowedTools = []string{"read", "write"}
+			spec.DisallowedTools = []string{"write"}
+		}),
+	)
+
+	session := connectClient(t, gatewayURL+"/mcp", nil)
+	names := listToolNames(t, session)
+	if len(names) != 1 || names[0] != "alpha_read" {
+		t.Fatalf("ListTools() = %v, want [alpha_read]", names)
+	}
+}
+
+func TestSessionBindingRejectsForeignUserPath(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
+
+	// Initialize a session as /team-a and capture its session ID.
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`
+	req, _ := http.NewRequest(http.MethodPost, gatewayURL+"/mcp", strings.NewReader(initBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set(core.UserPathHeader, "/team-a")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("initialize error = %v", err)
+	}
+	defer resp.Body.Close()
+	sessionID := resp.Header.Get("Mcp-Session-Id")
+	if sessionID == "" {
+		t.Fatalf("initialize returned no Mcp-Session-Id (status %d)", resp.StatusCode)
+	}
+
+	// Reusing the session ID under a different principal must 404.
+	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	req2, _ := http.NewRequest(http.MethodPost, gatewayURL+"/mcp", strings.NewReader(listBody))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Accept", "application/json, text/event-stream")
+	req2.Header.Set("Mcp-Session-Id", sessionID)
+	req2.Header.Set(core.UserPathHeader, "/team-b")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("tools/list error = %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-principal session reuse status = %d, want 404", resp2.StatusCode)
+	}
+}
+
+func TestDegradedUpstreamKeepsCatalogAndReportsError(t *testing.T) {
+	upstream := mcp.NewServer(&mcp.Implementation{Name: "alpha", Version: "test"}, nil)
+	addEchoTool("echo")(upstream)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil)
+	ts := httptest.NewServer(handler)
+
+	service, gatewayURL := newTestService(t, nil, testSpec("alpha", ts.URL, nil))
+
+	// Kill the upstream, then force a reconnect: the server must degrade but
+	// keep its last known catalog (stale carry-forward, not empty-connected).
+	// The gateway still holds the upstream's standalone SSE stream, so drop
+	// live connections before Close (which waits for outstanding requests).
+	ts.CloseClientConnections()
+	ts.Close()
+	if _, err := service.Reconnect(context.Background(), "alpha"); err == nil {
+		t.Fatalf("Reconnect() against a dead upstream should error")
+	}
+	views := service.Views()
+	if len(views) != 1 || views[0].Status != StatusDegraded {
+		t.Fatalf("views = %+v, want alpha degraded", views)
+	}
+	if views[0].ToolCount != 1 {
+		t.Fatalf("degraded tool count = %d, want stale catalog kept (1)", views[0].ToolCount)
+	}
+	if views[0].LastError == "" {
+		t.Fatalf("degraded server should carry last error")
+	}
+
+	// New sessions still see the stale catalog; calling the tool fails with a
+	// JSON-RPC error, never a fabricated result.
+	session := connectClient(t, gatewayURL+"/mcp", nil)
+	names := listToolNames(t, session)
+	if len(names) != 1 || names[0] != "alpha_echo" {
+		t.Fatalf("ListTools() with degraded upstream = %v, want stale [alpha_echo]", names)
+	}
+	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_echo"}); err == nil {
+		t.Fatalf("CallTool against dead upstream should return a protocol error")
+	}
+}
+
+func TestInstructionsComposeFromUpstreams(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
+
+	session := connectClient(t, gatewayURL+"/mcp", nil)
+	init := session.InitializeResult()
+	if init == nil || !strings.Contains(init.Instructions, "instructions from alpha") {
+		t.Fatalf("aggregated instructions = %q, want upstream instructions merged", init.Instructions)
+	}
+	if !strings.Contains(init.Instructions, "GoModel MCP gateway") {
+		t.Fatalf("aggregated instructions = %q, want gateway preamble", init.Instructions)
+	}
+}
+
+func TestPromptsAndResourcesRelay(t *testing.T) {
+	url := newTestUpstream(t, "alpha", func(server *mcp.Server) {
+		addEchoTool("echo")(server)
+		server.AddPrompt(&mcp.Prompt{Name: "greet", Description: "greeting"}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			return &mcp.GetPromptResult{
+				Messages: []*mcp.PromptMessage{{
+					Role:    "user",
+					Content: &mcp.TextContent{Text: "hello from " + req.Params.Name},
+				}},
+			}, nil
+		})
+		server.AddResource(&mcp.Resource{
+			URI:      "file:///alpha/readme",
+			Name:     "readme",
+			MIMEType: "text/plain",
+		}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+			return &mcp.ReadResourceResult{
+				Contents: []*mcp.ResourceContents{{URI: req.Params.URI, MIMEType: "text/plain", Text: "readme body"}},
+			}, nil
+		})
+	})
+	_, gatewayURL := newTestService(t, nil, testSpec("alpha", url, nil))
+
+	session := connectClient(t, gatewayURL+"/mcp", nil)
+
+	prompts, err := session.ListPrompts(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListPrompts() error = %v", err)
+	}
+	if len(prompts.Prompts) != 1 || prompts.Prompts[0].Name != "alpha_greet" {
+		t.Fatalf("ListPrompts() = %+v, want [alpha_greet]", prompts.Prompts)
+	}
+	prompt, err := session.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "alpha_greet"})
+	if err != nil {
+		t.Fatalf("GetPrompt(alpha_greet) error = %v", err)
+	}
+	text, ok := prompt.Messages[0].Content.(*mcp.TextContent)
+	if !ok || text.Text != "hello from greet" {
+		t.Fatalf("GetPrompt content = %#v, want original prompt name forwarded", prompt.Messages[0].Content)
+	}
+
+	resources, err := session.ListResources(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListResources() error = %v", err)
+	}
+	if len(resources.Resources) != 1 || resources.Resources[0].URI != "file:///alpha/readme" {
+		t.Fatalf("ListResources() = %+v, want alpha readme", resources.Resources)
+	}
+	read, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: "file:///alpha/readme"})
+	if err != nil {
+		t.Fatalf("ReadResource() error = %v", err)
+	}
+	if len(read.Contents) != 1 || read.Contents[0].Text != "readme body" {
+		t.Fatalf("ReadResource() = %+v, want readme body", read.Contents)
+	}
+}
+
+func TestUpstreamToolErrorRelaysVerbatim(t *testing.T) {
+	url := newTestUpstream(t, "alpha", func(server *mcp.Server) {
+		server.AddTool(&mcp.Tool{
+			Name:        "fail",
+			InputSchema: map[string]any{"type": "object"},
+		}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{
+				IsError: true,
+				Content: []mcp.Content{&mcp.TextContent{Text: "tool blew up"}},
+			}, nil
+		})
+	})
+	_, gatewayURL := newTestService(t, nil, testSpec("alpha", url, nil))
+
+	session := connectClient(t, gatewayURL+"/mcp", nil)
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_fail"})
+	if err != nil {
+		t.Fatalf("CallTool(alpha_fail) error = %v, want isError result", err)
+	}
+	if !result.IsError {
+		t.Fatalf("CallTool(alpha_fail).IsError = false, want true (relayed verbatim)")
+	}
+}
+
+func TestDisabledServerIsInvisible(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", addEchoTool("search"))
+	_, gatewayURL := newTestService(t, nil,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, func(spec *ServerSpec) { spec.Enabled = false }),
+	)
+
+	session := connectClient(t, gatewayURL+"/mcp", nil)
+	names := listToolNames(t, session)
+	if len(names) != 1 || names[0] != "alpha_echo" {
+		t.Fatalf("ListTools() = %v, want disabled beta hidden", names)
+	}
+}

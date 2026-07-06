@@ -60,6 +60,11 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.PUT("/virtual-models", h.UpsertVirtualModel)
 	g.DELETE("/virtual-models", h.DeleteVirtualModel)
 
+	g.GET("/mcp-servers", h.ListMCPServers)
+	g.PUT("/mcp-servers", h.UpsertMCPServer)
+	g.DELETE("/mcp-servers/:name", h.DeleteMCPServer)
+	g.POST("/mcp-servers/:name/reconnect", h.ReconnectMCPServer)
+
 	g.GET("/failover", h.ListFailoverRules)
 	g.PUT("/failover", h.UpsertFailoverRule)
 	g.DELETE("/failover", h.DeleteFailoverRule)

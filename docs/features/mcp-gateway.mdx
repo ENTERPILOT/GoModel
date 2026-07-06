@@ -1,0 +1,129 @@
+---
+title: "MCP Gateway"
+description: "Aggregate your MCP servers behind one authenticated GoModel endpoint with per-key tool visibility, usage tracking, and rate limits."
+icon: "plug"
+---
+
+## What the MCP gateway does
+
+GoModel can sit between your agent clients (Claude Code, Claude Desktop,
+Cursor, VS Code, …) and the MCP (Model Context Protocol) servers they use —
+the same way it already sits between your apps and model providers:
+
+- **One endpoint, one key.** Clients connect to `https://your-gateway/mcp`
+  with a GoModel API key. They never hold upstream MCP credentials; the
+  gateway injects each server's headers itself.
+- **Aggregation with namespacing.** Tools and prompts from every configured
+  server appear in one catalog as `{server}_{name}` (for example
+  `github_create_issue`), in a stable, deterministic order.
+- **Least-privilege discovery.** A server can be scoped to `user_paths`;
+  callers outside the subtree do not merely get errors — the tools never
+  appear in their `tools/list` at all. Operator-level `allowed_tools` /
+  `disallowed_tools` filters trim noisy servers, which keeps agent context
+  small.
+- **Observability.** Every tool call becomes a usage entry (server, tool,
+  duration, sizes, error flag, labels, user path) and MCP requests appear in
+  the audit log and request log like any other model traffic. User-path rate
+  limits and budgets gate MCP requests too.
+
+## Connect a client
+
+Point any streamable-HTTP MCP client at the gateway and pass your GoModel key
+as a bearer token:
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://your-gateway/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-your-gomodel-key"
+      }
+    }
+  }
+}
+```
+
+Three ways to narrow what a client sees:
+
+- `/mcp` — everything the key's user path may see, namespaced.
+- `/mcp/{server}` — a single server with its **original** tool names.
+- `X-MCP-Servers: github,jira` header — a comma-separated subset on `/mcp`.
+
+## Declare servers
+
+Servers can be managed in the dashboard (**MCP Servers** page) or declared as
+infrastructure-as-code — declarative entries override same-name dashboard
+rows and are read-only there:
+
+```yaml
+mcp:
+  enabled: true # default; MCP_ENABLED=false disables the endpoints
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp
+      headers:
+        Authorization: "Bearer ${GITHUB_PAT}"
+      user_paths: ["/engineering"] # optional visibility scope
+      disallowed_tools: ["delete_repo"]
+    local-files:
+      transport: stdio # declarative-only; see security notes
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+```
+
+Or via the `MCP_SERVERS` env var (a JSON object, merged over YAML per name):
+
+```bash
+MCP_SERVERS='{"github":{"url":"https://api.githubcopilot.com/mcp","headers":{"Authorization":"Bearer ${GITHUB_PAT}"}}}'
+```
+
+Per-server fields:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `url` | — | Endpoint for `http` (streamable HTTP) and `sse` transports |
+| `transport` | `http` | `http`, `sse` (legacy), or `stdio` (config-only) |
+| `headers` | — | Sent verbatim upstream; values support `${ENV}` |
+| `command`, `args`, `env` | — | stdio subprocess definition |
+| `enabled` | `true` | Toggle without deleting |
+| `allowed_tools` | all | Allowlist of upstream tool names |
+| `disallowed_tools` | none | Blocklist, applied after the allowlist |
+| `user_paths` | everyone | Visibility subtrees, like virtual models |
+| `tool_timeout` | `30s` | Upper bound for one `tools/call` |
+
+Invalid declarations (bad name, missing `url`/`command`, unknown transport)
+abort startup with a clear error rather than silently dropping the server.
+
+## Health and lifecycle
+
+The dashboard shows each server as **connected**, **degraded**, **connecting**,
+or **disabled**, with tool counts and the last error. A server whose listing
+fails keeps its previous catalog (marked degraded) and is re-probed every 60
+seconds; healthy catalogs re-list every 5 minutes and refresh immediately when
+the upstream sends a `list_changed` notification. **Reconnect** on the
+dashboard (or `POST /admin/mcp-servers/{name}/reconnect`) forces a redial.
+
+## Security notes
+
+- **Credential boundary.** The MCP spec forbids token passthrough; GoModel
+  terminates the client's bearer token and injects per-server credentials
+  from configuration. Client keys never reach an upstream.
+- **stdio is declarative-only.** stdio servers spawn subprocesses on the
+  gateway host, so they can only be declared in `config.yaml` / `MCP_SERVERS`.
+  The admin API and dashboard reject them — a dashboard login must never be
+  equivalent to code execution on the gateway.
+- **Sessions are not authentication.** Every request is bearer-authenticated,
+  and a session is additionally bound to the user path that initialized it;
+  presenting a leaked session ID under another identity returns 404.
+- Secret header values are shown redacted (`***`) in the admin API and
+  dashboard; saving a form with `***` preserves the stored secret.
+
+## Protocol coverage
+
+Tools, prompts, resources, and resource templates are aggregated and relayed
+with raw schemas and results untouched. Upstream `instructions` are merged
+into the gateway's `initialize` response. Server-initiated features
+(sampling, elicitation, roots) and resource subscriptions are not negotiated
+in this version, which downstream clients handle transparently.

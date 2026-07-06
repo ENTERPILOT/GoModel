@@ -38,6 +38,7 @@ type Handler struct {
 	pricingResolver     usage.PricingResolver
 	authKeys            *authkeys.Service
 	virtualModels       *virtualmodels.Service
+	mcpServers          MCPServerAdmin
 	failoverRules       *failover.Service
 	pricingOverrides    *pricingoverrides.Service
 	workflows           *workflows.Service
@@ -183,6 +184,15 @@ func WithPricingResolver(resolver usage.PricingResolver) Option {
 func WithVirtualModels(service *virtualmodels.Service) Option {
 	return func(h *Handler) {
 		h.virtualModels = service
+	}
+}
+
+// WithMCPServers enables MCP server administration endpoints. Callers must
+// not wrap a nil *mcpgateway.Service (a typed nil would defeat the handlers'
+// feature-unavailable check).
+func WithMCPServers(service MCPServerAdmin) Option {
+	return func(h *Handler) {
+		h.mcpServers = service
 	}
 }
 
