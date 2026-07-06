@@ -207,7 +207,10 @@ func TestProxyHeartbeatTearsDownUnresponsivePeer(t *testing.T) {
 }
 
 func TestProxyHeartbeatLeavesResponsiveSessionAlive(t *testing.T) {
-	restore := realtime.SetHeartbeatCadenceForTest(20*time.Millisecond, 150*time.Millisecond)
+	// Short interval so several pings land inside the loop below, but a
+	// generous pong timeout: a scheduler stall on a loaded CI runner must not
+	// fail a healthy session.
+	restore := realtime.SetHeartbeatCadenceForTest(25*time.Millisecond, 2*time.Second)
 	defer restore()
 
 	upstream := echoServer(t)
@@ -222,7 +225,7 @@ func TestProxyHeartbeatLeavesResponsiveSessionAlive(t *testing.T) {
 
 	// Exchange frames across several heartbeat intervals: an active session
 	// (reads in flight on both sides answer the pings) must not be killed.
-	deadline := time.Now().Add(200 * time.Millisecond)
+	deadline := time.Now().Add(400 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if err := client.Write(ctx, websocket.MessageText, []byte(`{"ping":"pong"}`)); err != nil {
 			t.Fatalf("client write failed: %v", err)

@@ -128,15 +128,21 @@ func heartbeat(ctx context.Context, client, upstream *websocket.Conn) error {
 }
 
 func pingBoth(ctx context.Context, client, upstream *websocket.Conn) error {
-	pingCtx, cancel := context.WithTimeout(ctx, heartbeatTimeout)
-	defer cancel()
-	if err := client.Ping(pingCtx); err != nil {
+	// Each peer gets its own full timeout budget: a slow-but-alive first ping
+	// must not leave the second one a nearly expired deadline.
+	if err := ping(ctx, client); err != nil {
 		return fmt.Errorf("client heartbeat: %w", err)
 	}
-	if err := upstream.Ping(pingCtx); err != nil {
+	if err := ping(ctx, upstream); err != nil {
 		return fmt.Errorf("upstream heartbeat: %w", err)
 	}
 	return nil
+}
+
+func ping(ctx context.Context, conn *websocket.Conn) error {
+	pingCtx, cancel := context.WithTimeout(ctx, heartbeatTimeout)
+	defer cancel()
+	return conn.Ping(pingCtx)
 }
 
 // copyFrames relays every message from src to dst, invoking tap on each payload
