@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -201,5 +202,102 @@ func TestBatchRateLimitEnforcerCountsAndReleases(t *testing.T) {
 	}
 	if err := enforcer(context.Background()); err == nil {
 		t.Fatal("third batch submission admitted over the request window")
+	}
+}
+
+func rateLimitProviderRule(provider string, maxRequests int64) ratelimit.Rule {
+	return ratelimit.Rule{Scope: ratelimit.ScopeProvider, Subject: provider, PeriodSeconds: ratelimit.PeriodMinuteSeconds, MaxRequests: &maxRequests}
+}
+
+// A saturated provider/model route with failover targets defers to the sweep:
+// the request is admitted against consumer limits and the 429 is stamped for
+// dispatch instead of being returned.
+func TestEnforceAdmissionDefersSaturatedRouteToFailover(t *testing.T) {
+	service := newTestRateLimitService(t,
+		rateLimitProviderRule("openai", 1),
+		rateLimitRuleWithRequests("/", 10),
+	)
+	checker := &countingBudgetChecker{}
+	route := rateLimitRoute{provider: "openai", model: "openai/gpt-4o"}.withFailovers(1)
+
+	c, _ := newRateLimitTestContext("/team")
+	first, err := enforceAdmission(c, service, checker, route)
+	if err != nil {
+		t.Fatalf("first enforceAdmission() error = %v", err)
+	}
+	if first.saturatedRoute != nil {
+		t.Fatal("first admission reported a saturated route")
+	}
+	first.release()
+
+	c2, _ := newRateLimitTestContext("/team")
+	second, err := enforceAdmission(c2, service, checker, route)
+	if err != nil {
+		t.Fatalf("second enforceAdmission() error = %v (saturated route must defer to failover)", err)
+	}
+	defer second.release()
+	if second.saturatedRoute == nil {
+		t.Fatal("second admission did not report the saturated route")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(second.saturatedRoute, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusTooManyRequests {
+		t.Fatalf("saturated route error = %v, want 429 gateway error", second.saturatedRoute)
+	}
+	ctx := second.dispatchContext(context.Background())
+	if core.PrimaryRouteSaturated(ctx) == nil {
+		t.Fatal("dispatchContext did not stamp the saturation marker")
+	}
+
+	// The deferred request still consumed its consumer window.
+	for _, status := range service.Statuses(time.Now().UTC()) {
+		if status.Rule.Scope == ratelimit.ScopeUserPath && status.RequestsUsed != 2 {
+			t.Fatalf("user-path requests used = %d, want 2 (deferred request still counts)", status.RequestsUsed)
+		}
+	}
+	if checker.calls != 2 {
+		t.Fatalf("budget checker calls = %d, want 2", checker.calls)
+	}
+}
+
+// Without failover targets the saturated route stays an outright 429.
+func TestEnforceAdmissionRejectsSaturatedRouteWithoutFailovers(t *testing.T) {
+	service := newTestRateLimitService(t, rateLimitProviderRule("openai", 1))
+	checker := &countingBudgetChecker{}
+	route := rateLimitRoute{provider: "openai", model: "openai/gpt-4o"}
+
+	c, _ := newRateLimitTestContext("/team")
+	adm, err := enforceAdmission(c, service, checker, route)
+	if err != nil {
+		t.Fatalf("first enforceAdmission() error = %v", err)
+	}
+	adm.release()
+
+	c2, _ := newRateLimitTestContext("/team")
+	if _, err := enforceAdmission(c2, service, checker, route); err == nil {
+		t.Fatal("saturated route without failovers admitted, want 429")
+	}
+}
+
+// Consumer breaches never defer: switching targets cannot relieve them.
+func TestEnforceAdmissionNeverDefersConsumerBreaches(t *testing.T) {
+	service := newTestRateLimitService(t, rateLimitRuleWithRequests("/team", 1))
+	checker := &countingBudgetChecker{}
+	route := rateLimitRoute{provider: "openai", model: "openai/gpt-4o"}.withFailovers(3)
+
+	c, _ := newRateLimitTestContext("/team")
+	adm, err := enforceAdmission(c, service, checker, route)
+	if err != nil {
+		t.Fatalf("first enforceAdmission() error = %v", err)
+	}
+	adm.release()
+
+	c2, _ := newRateLimitTestContext("/team")
+	_, err = enforceAdmission(c2, service, checker, route)
+	if err == nil {
+		t.Fatal("consumer breach with failovers admitted, want 429")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusTooManyRequests {
+		t.Fatalf("error = %v, want 429 gateway error", err)
 	}
 }

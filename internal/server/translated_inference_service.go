@@ -96,11 +96,13 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	release, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
+	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker,
+		rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow))))
 	if err != nil {
 		return handleError(c, err)
 	}
-	defer release()
+	defer adm.release()
+	ctx = adm.dispatchContext(ctx)
 
 	if req.Stream {
 		if len(s.inference().FailoverSelectors(workflow)) == 0 {
@@ -262,11 +264,13 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	release, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
+	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker,
+		rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow))))
 	if err != nil {
 		return handleError(c, err)
 	}
-	defer release()
+	defer adm.release()
+	ctx = adm.dispatchContext(ctx)
 
 	if req.Stream {
 		result, err := s.inference().StreamResponses(ctx, workflow, req)
@@ -449,11 +453,11 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	}
 	attachPreparedWorkflow(c, prepared.Context, prepared.Workflow)
 
-	release, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(prepared.Workflow))
+	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(prepared.Workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
-	defer release()
+	defer adm.release()
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), prepared.Workflow, prepared.Request, requestID, "/v1/embeddings")

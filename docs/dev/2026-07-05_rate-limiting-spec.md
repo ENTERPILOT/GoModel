@@ -290,12 +290,16 @@ The scopes differ in *enforcement posture*, not machinery:
 - **user_path** stays admission control: breach -> 429 at ingress. Switching
   targets cannot relieve a consumer limit, so routing never consults it.
 - **provider/model** are *routing constraints*. Admission checks them for the
-  resolved primary route (429 with honest Retry-After when the client asked
-  for that route directly), but the virtual-model balancer skips saturated
-  targets via a rate-limit-aware `Catalog.ModelAvailable` decorator (same
-  skip semantics as stale inventory), and the failover sweep skips saturated
-  candidates via a `RouteGate` on the orchestrator. The client only sees 429
-  when no viable target remains.
+  resolved primary route, but a breach does not 429 outright when failover
+  targets exist: the request is admitted against its consumer limits, the
+  stored 429 is stamped into the context, and dispatch skips the primary
+  provider (calling it would serve the request and defeat the limit) and
+  enters the failover sweep seeded with that error. The virtual-model
+  balancer skips saturated targets via a rate-limit-aware
+  `Catalog.ModelAvailable` decorator (same skip semantics as stale
+  inventory), and the sweep skips saturated candidates via a `RouteGate` on
+  the orchestrator. The client only sees 429 when no viable target remains
+  (or immediately, when no failover is configured).
 
 Token accounting for provider/model scopes charges the *executed* route from
 the usage entry (`ProviderName`/`Model`), which is exactly why these scopes

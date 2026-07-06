@@ -161,10 +161,14 @@ A saturated provider or model behaves like one with stale inventory:
 
 - **Virtual-model load balancing** skips the saturated target and picks the
   next available one, so an alias with several targets keeps serving.
-- **Failover** skips rate-saturated candidates during its sweep.
-- **Direct requests** to the capped provider or model receive `429` with an
+- **Failover rules** take over for a saturated primary route: the primary
+  provider is never called (it would happily serve the request and defeat the
+  limit), the sweep starts immediately, and rate-saturated candidates are
+  skipped along the way.
+- **Direct requests** with no failover configured receive `429` with an
   honest `Retry-After` — the same answer the provider itself would eventually
-  give, minus the wasted upstream call.
+  give, minus the wasted upstream call. Consumer (user path) breaches always
+  return `429`: switching targets cannot relieve them.
 
 Token accounting charges the provider and model that actually executed the
 request (recorded on the usage entry), so the windows stay correct under

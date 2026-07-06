@@ -31,6 +31,17 @@ func noopRelease() {}
 type rateLimitRoute struct {
 	provider string
 	model    string
+	// failovers counts the failover selectors configured for the request.
+	// When positive, a provider/model-scoped breach defers to the failover
+	// sweep instead of rejecting outright; consumer (user-path) breaches
+	// always reject, since switching targets cannot relieve them.
+	failovers int
+}
+
+// withFailovers records how many failover targets could serve the request.
+func (r rateLimitRoute) withFailovers(count int) rateLimitRoute {
+	r.failovers = count
+	return r
 }
 
 // rateLimitRouteFromWorkflow extracts the resolved route for translated
@@ -65,20 +76,61 @@ func enforceRateLimit(c *echo.Context, limiter RateLimiter, route rateLimitRoute
 	return reservation.Release, nil
 }
 
+// admission is the outcome of the shared admission sequence. release must run
+// when the request finishes. saturatedRoute, when set, is the 429 the client
+// would have received for a provider/model-scoped breach: the request was
+// admitted against its consumer limits anyway so dispatch can skip the
+// saturated primary and sweep the configured failover targets.
+type admission struct {
+	release        func()
+	saturatedRoute error
+}
+
+// dispatchContext stamps the saturated-route marker for the orchestrator.
+func (a admission) dispatchContext(ctx context.Context) context.Context {
+	return core.WithPrimaryRouteSaturated(ctx, a.saturatedRoute)
+}
+
 // enforceAdmission runs the shared admission sequence — rate limits first,
-// then budget — and returns the rate-limit release to defer. On a budget
-// rejection the reservation is released here, so callers never hold a
-// concurrency slot for a refused request.
-func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecker, route rateLimitRoute) (func(), error) {
+// then budget. On a budget rejection the reservation is released here, so
+// callers never hold a concurrency slot for a refused request.
+func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecker, route rateLimitRoute) (admission, error) {
 	release, err := enforceRateLimit(c, limiter, route)
+	var saturated error
 	if err != nil {
-		return noopRelease, err
+		saturated = routeSaturationDeferrableToFailover(err, route)
+		if saturated == nil {
+			return admission{release: noopRelease}, err
+		}
+		// The saturated route defers to failover, but consumer limits still
+		// gate (and count) the request, which may execute on another target.
+		release, err = enforceRateLimit(c, limiter, rateLimitRoute{})
+		if err != nil {
+			return admission{release: noopRelease}, err
+		}
 	}
 	if err := enforceBudget(c, checker); err != nil {
 		release()
-		return noopRelease, err
+		return admission{release: noopRelease}, err
 	}
-	return release, nil
+	return admission{release: release, saturatedRoute: saturated}, nil
+}
+
+// routeSaturationDeferrableToFailover returns the rejection when it may defer
+// to failover: only provider/model-scoped breaches qualify, and only when
+// failover targets are configured for the request.
+func routeSaturationDeferrableToFailover(err error, route rateLimitRoute) error {
+	if route.failovers == 0 {
+		return nil
+	}
+	var exceeded *ratelimit.ExceededError
+	if !errors.As(err, &exceeded) {
+		return nil
+	}
+	if exceeded.Rule.Scope != ratelimit.ScopeProvider && exceeded.Rule.Scope != ratelimit.ScopeModel {
+		return nil
+	}
+	return err
 }
 
 func acquireRateLimitForContext(ctx context.Context, limiter RateLimiter, route rateLimitRoute) (*ratelimit.Reservation, error) {
@@ -108,6 +160,10 @@ func rateLimitCheckError(err error) error {
 			message = "rate limit exceeded"
 		}
 		gatewayErr := core.NewRateLimitError("ratelimit", message).WithCode("rate_limit_exceeded")
+		// Keep the breach in the chain (Err is never serialized): admission
+		// inspects the exceeded rule's scope to decide whether a saturated
+		// route may defer to failover.
+		gatewayErr.Err = exceeded
 		return &gatewayErrorWithResponseHeaders{
 			GatewayError: gatewayErr,
 			headers:      rateLimitBreachHeaders(exceeded),

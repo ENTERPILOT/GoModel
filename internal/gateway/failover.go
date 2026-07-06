@@ -136,11 +136,18 @@ func executeTranslatedWithFailover[Req any, Resp any](
 	return executeWithFailoverResponse(ctx, o, workflow, model, provider,
 		func() (Resp, string, string, error) {
 			started := time.Now()
+			var zero Resp
+			// A rate-saturated primary route must not reach the provider (the
+			// upstream would happily serve it and defeat the limit); its
+			// stored 429 becomes the primary failure that starts the sweep.
+			if saturated := core.PrimaryRouteSaturated(ctx); saturated != nil {
+				recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, ProviderTypeFromWorkflow(workflow), ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider), started, saturated))
+				return zero, "", "", saturated
+			}
 			resp, responseProvider, err := call(ctx, req)
 			attemptProviderType := ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider)
 			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, attemptProviderType, ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider), started, err))
 			if err != nil {
-				var zero Resp
 				return zero, "", "", err
 			}
 			return resp, ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider), ProviderNameFromWorkflow(workflow), nil

@@ -35,6 +35,11 @@ const (
 	// to include usage when the provider supports it.
 	enforceReturningUsageDataKey contextKey = "enforce-returning-usage-data"
 
+	// primaryRouteSaturatedKey stores the rate-limit rejection for the
+	// resolved primary route when failover targets exist: dispatch skips the
+	// primary provider and sweeps failover instead of returning 429 outright.
+	primaryRouteSaturatedKey contextKey = "primary-route-saturated"
+
 	// guardrailsHashKey stores the SHA-256 hash of the applied guardrail rules
 	// for the current request. Set by the translated inference handlers after
 	// PatchChatRequest; consumed by the semantic cache to build params_hash.
@@ -191,6 +196,28 @@ func GetEnforceReturningUsageData(ctx context.Context) bool {
 		}
 	}
 	return false
+}
+
+// WithPrimaryRouteSaturated marks the resolved primary route as rate-saturated.
+// The stored error is the 429 the client would have received; dispatch uses it
+// as the synthetic primary failure that triggers the failover sweep, and it
+// surfaces unchanged when no failover target can take the request.
+func WithPrimaryRouteSaturated(ctx context.Context, err error) context.Context {
+	if err == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, primaryRouteSaturatedKey, err)
+}
+
+// PrimaryRouteSaturated returns the rate-limit rejection recorded for the
+// resolved primary route, or nil when the route has capacity.
+func PrimaryRouteSaturated(ctx context.Context) error {
+	if v := ctx.Value(primaryRouteSaturatedKey); v != nil {
+		if err, ok := v.(error); ok {
+			return err
+		}
+	}
+	return nil
 }
 
 // WithGuardrailsHash returns a new context with the guardrails hash attached.

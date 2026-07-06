@@ -40,11 +40,11 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 			}
 		}
 	}
-	release, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRoute{provider: info.ProviderName, model: info.Model})
+	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRoute{provider: info.ProviderName, model: info.Model})
 	if err != nil {
 		return handleError(c, err)
 	}
-	defer release()
+	defer adm.release()
 
 	ctx, _ := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))
