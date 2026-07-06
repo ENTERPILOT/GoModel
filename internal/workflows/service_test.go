@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -389,6 +390,58 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 	assertMatch("path", core.NewWorkflowSelector("anthropic", "claude-sonnet-4", "/team/a/user"), "path-team")
 	assertMatch("provider", core.NewWorkflowSelector("openai", "gpt-4o"), "provider")
 	assertMatch("global", core.NewWorkflowSelector("anthropic", "claude-sonnet-4"), "global")
+}
+
+func TestServiceRefresh_RejectsInvalidActiveSets(t *testing.T) {
+	activeVersion := func(id string, scope Scope) Version {
+		return Version{
+			ID:      id,
+			Scope:   scope,
+			Version: 1,
+			Active:  true,
+			Name:    id,
+			Payload: Payload{SchemaVersion: 1},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		versions []Version
+		wantErr  string
+	}{
+		{
+			name: "duplicate scope",
+			versions: []Version{
+				activeVersion("global", Scope{}),
+				activeVersion("team-a", Scope{UserPath: "/team"}),
+				activeVersion("team-b", Scope{UserPath: "/team"}),
+			},
+			wantErr: `duplicate active workflows for scope "path:/team": "team-a" and "team-b"`,
+		},
+		{
+			name: "missing global",
+			versions: []Version{
+				activeVersion("team-a", Scope{UserPath: "/team"}),
+			},
+			wantErr: "missing active global workflow",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service, err := NewService(&staticStore{versions: tt.versions}, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
+			if err != nil {
+				t.Fatalf("NewService() error = %v", err)
+			}
+			err = service.Refresh(context.Background())
+			if err == nil {
+				t.Fatal("Refresh() error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Refresh() error = %q, want it to contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestServiceEnsureDefaultGlobal_CreatesWhenMissing(t *testing.T) {
