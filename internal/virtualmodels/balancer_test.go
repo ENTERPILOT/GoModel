@@ -247,3 +247,84 @@ func TestRoundRobin_PruneRemovesStaleCounters(t *testing.T) {
 		t.Fatalf("gone counter retained, want pruned")
 	}
 }
+
+func TestBalancer_PrefersTargetsWithCapacity(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	// openai/gpt-4o is rate-saturated; the alias must route around it.
+	svc.SetTargetCapacity(func(qualified string) bool { return qualified != "openai/gpt-4o" })
+	if err := svc.Upsert(context.Background(), VirtualModel{
+		Source:   "smart",
+		Strategy: StrategyRoundRobin,
+		Targets: []Target{
+			{Provider: "openai", Model: "gpt-4o"},
+			{Provider: "anthropic", Model: "claude"},
+		},
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+
+	for i, got := range resolvedModels(t, svc, "smart", 4) {
+		if got != "anthropic/claude" {
+			t.Fatalf("resolution[%d] = %q, want saturated openai target skipped (anthropic/claude)", i, got)
+		}
+	}
+}
+
+// TestBalancer_AllSaturatedFallsBackToFirstTarget pins the honest-429 path:
+// when every live target is rate-saturated, the alias still resolves — to its
+// first declared target — so admission rejects with 429 and Retry-After (or
+// defers to failover) instead of the all-targets-down error.
+func TestBalancer_AllSaturatedFallsBackToFirstTarget(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	svc.SetTargetCapacity(func(string) bool { return false })
+	if err := svc.Upsert(context.Background(), VirtualModel{
+		Source:   "smart",
+		Strategy: StrategyRoundRobin,
+		Targets: []Target{
+			{Provider: "openai", Model: "gpt-4o"},
+			{Provider: "anthropic", Model: "claude"},
+		},
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+
+	for i, got := range resolvedModels(t, svc, "smart", 3) {
+		if got != "openai/gpt-4o" {
+			t.Fatalf("resolution[%d] = %q, want deterministic first target (openai/gpt-4o)", i, got)
+		}
+	}
+}
+
+// Capacity steers choice among live targets only: a target the catalog marks
+// unavailable stays excluded even when everything else is saturated.
+func TestBalancer_SaturationFallbackSkipsUnavailableTargets(t *testing.T) {
+	t.Parallel()
+	catalog := balancingCatalog()
+	catalog.stale = map[string]bool{"openai/gpt-4o": true}
+	svc, err := NewService(newSQLiteVMStore(t), catalog, true)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	svc.SetTargetCapacity(func(string) bool { return false })
+	if err := svc.Upsert(context.Background(), VirtualModel{
+		Source:   "smart",
+		Strategy: StrategyRoundRobin,
+		Targets: []Target{
+			{Provider: "openai", Model: "gpt-4o"},
+			{Provider: "anthropic", Model: "claude"},
+		},
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+
+	for i, got := range resolvedModels(t, svc, "smart", 2) {
+		if got != "anthropic/claude" {
+			t.Fatalf("resolution[%d] = %q, want first LIVE target (anthropic/claude)", i, got)
+		}
+	}
+}

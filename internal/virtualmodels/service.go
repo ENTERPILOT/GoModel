@@ -26,9 +26,24 @@ type Service struct {
 	// the same source, and are read-only to the admin API.
 	configModels []VirtualModel
 
+	// targetCapacity optionally reports whether a concrete target currently
+	// has rate-limit capacity. It steers load balancing only — capacity never
+	// affects catalog membership, so a saturated target stays listed and its
+	// redirects stay valid. Set once during startup, before serving.
+	targetCapacity func(qualifiedModel string) bool
+
 	balancer  roundRobin
 	current   atomic.Value // snapshot
 	refreshMu sync.Mutex
+}
+
+// SetTargetCapacity installs the rate-limit capacity probe consulted by load
+// balancing. Must be called before the service starts resolving requests.
+func (s *Service) SetTargetCapacity(capacity func(qualifiedModel string) bool) {
+	if s == nil {
+		return
+	}
+	s.targetCapacity = capacity
 }
 
 // NewService creates a virtual models service backed by the store and catalog.

@@ -313,15 +313,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	claimSharedStorage(conversationStoreResult.Storage)
 
 	// Initialize virtual models (unified aliases + access overrides) using
-	// shared storage when already available. The catalog is rate-limit aware
-	// so load balancing skips saturated providers/models while capacity
-	// exists elsewhere (RouteAvailable is nil-safe when rate limits are off).
-	virtualModelCatalog := newRateLimitAwareCatalog(providerResult.Registry, rateLimitResult.Service)
+	// shared storage when already available.
 	var virtualModelsResult *virtualmodels.Result
 	if sharedStorage != nil {
-		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, virtualModelCatalog)
+		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry)
 	} else {
-		virtualModelsResult, err = virtualmodels.New(ctx, appCfg, virtualModelCatalog)
+		virtualModelsResult, err = virtualmodels.New(ctx, appCfg, providerResult.Registry)
 	}
 	if err != nil {
 		return fail("failed to initialize virtual models", err)
@@ -334,6 +331,20 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// resolution (redirects), access authorization (policies), and exposed-model
 	// listing.
 	vm := app.virtualModels.Service
+
+	// Load balancing prefers targets with live rate-limit capacity and falls
+	// back to the first declared target when every target is saturated, so
+	// the request reaches admission and receives an honest 429 (or defers to
+	// failover) instead of the all-targets-down error. Capacity deliberately
+	// steers target choice only: a saturated target stays in the catalog,
+	// listed and valid.
+	if rateLimitResult.Service != nil {
+		registry := providerResult.Registry
+		limiter := rateLimitResult.Service
+		vm.SetTargetCapacity(func(qualifiedModel string) bool {
+			return limiter.RouteAvailable(registry.GetProviderName(qualifiedModel), qualifiedModel)
+		})
+	}
 
 	var failoverResult *failover.Result
 	if sharedStorage != nil {
