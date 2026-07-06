@@ -219,3 +219,158 @@ test('fetchRateLimits handles 503 as feature unavailable', async () => {
     assert.equal(JSON.stringify(module.rateLimits), '[]');
     assert.equal(module.rateLimitsLoading, false);
 });
+
+test('rateLimitNormalizedIdentity mirrors server normalization per scope', () => {
+    const module = createRateLimitsModule();
+    assert.equal(
+        module.rateLimitNormalizedIdentity('provider', ' OpenAI ', 60),
+        module.rateLimitNormalizedIdentity('provider', 'openai', 60)
+    );
+    assert.equal(
+        module.rateLimitNormalizedIdentity('model', 'OpenAI/GPT-4o', 60),
+        module.rateLimitNormalizedIdentity('model', 'openai/gpt-4o', 60)
+    );
+    assert.equal(
+        module.rateLimitNormalizedIdentity('user_path', 'team/alpha/', 60),
+        module.rateLimitNormalizedIdentity('user_path', '/team/alpha', 60)
+    );
+    assert.notEqual(
+        module.rateLimitNormalizedIdentity('user_path', '/team', 60),
+        module.rateLimitNormalizedIdentity('user_path', '/team', 3600)
+    );
+});
+
+test('rateLimitIdentityMoved detects real moves but not respellings', () => {
+    const module = createRateLimitsModule();
+    module.rateLimitEditingOriginal = { scope: 'model', subject: 'openai/gpt-4o', period_seconds: 60 };
+
+    const payload = (subject, seconds) => ({ scope: 'model', subject, limit_key: { period_seconds: seconds } });
+    assert.equal(module.rateLimitIdentityMoved(payload('OpenAI/GPT-4o', 60)), false);
+    assert.equal(module.rateLimitIdentityMoved(payload('openai/gpt-4o-mini', 60)), true);
+    assert.equal(module.rateLimitIdentityMoved(payload('openai/gpt-4o', 3600)), true);
+
+    module.rateLimitEditingOriginal = null;
+    assert.equal(module.rateLimitIdentityMoved(payload('anything', 60)), false);
+});
+
+test('submitRateLimitForm moves a rule by creating the new key then deleting the old', async () => {
+    const calls = [];
+    const module = createRateLimitsModule({
+        fetch: async (url, options) => {
+            calls.push({ url, method: options.method, body: JSON.parse(options.body) });
+            return { status: 200, json: async () => ({ rate_limits: [] }) };
+        }
+    });
+    module.requestOptions = (options) => options;
+    module.handleFetchResponse = () => true;
+
+    module.rateLimitFormOpen = true;
+    module.rateLimitEditing = true;
+    module.rateLimitEditingOriginal = { scope: 'user_path', subject: '/team', period_seconds: 60 };
+    module.rateLimitForm = { scope: 'user_path', subject: '/team', period: 'hour', period_seconds: 3600, max_requests: '5', max_tokens: '' };
+    await module.submitRateLimitForm();
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].method, 'PUT');
+    assert.equal(calls[0].body.limit_key.period_seconds, 3600);
+    assert.equal(calls[1].method, 'DELETE');
+    assert.equal(JSON.stringify(calls[1].body), JSON.stringify({
+        scope: 'user_path',
+        subject: '/team',
+        limit_key: { period_seconds: 60 }
+    }));
+    assert.equal(module.rateLimitFormOpen, false);
+    assert.match(module.rateLimitNotice, /moved/i);
+});
+
+test('submitRateLimitForm updates in place when the identity is unchanged', async () => {
+    const calls = [];
+    const module = createRateLimitsModule({
+        fetch: async (url, options) => {
+            calls.push({ method: options.method });
+            return { status: 200, json: async () => ({ rate_limits: [] }) };
+        }
+    });
+    module.requestOptions = (options) => options;
+    module.handleFetchResponse = () => true;
+
+    module.rateLimitEditing = true;
+    module.rateLimitEditingOriginal = { scope: 'user_path', subject: '/team', period_seconds: 60 };
+    module.rateLimitForm = { scope: 'user_path', subject: '/team', period: 'minute', period_seconds: 60, max_requests: '9', max_tokens: '' };
+    await module.submitRateLimitForm();
+
+    assert.deepEqual(calls.map((call) => call.method), ['PUT']);
+    assert.match(module.rateLimitNotice, /saved/i);
+});
+
+test('submitRateLimitForm keeps the form open when removing the old rule fails', async () => {
+    const module = createRateLimitsModule({
+        fetch: async (url, options) => {
+            if (options.method === 'DELETE') {
+                return { status: 500, json: async () => ({ error: { message: 'boom' } }) };
+            }
+            return { status: 200, json: async () => ({ rate_limits: [] }) };
+        }
+    });
+    module.requestOptions = (options) => options;
+    module.handleFetchResponse = (res) => res.status === 200;
+
+    module.rateLimitFormOpen = true;
+    module.rateLimitEditing = true;
+    module.rateLimitEditingOriginal = { scope: 'user_path', subject: '/team', period_seconds: 60 };
+    module.rateLimitForm = { scope: 'user_path', subject: '/other', period: 'minute', period_seconds: 60, max_requests: '9', max_tokens: '' };
+    await module.submitRateLimitForm();
+
+    assert.equal(module.rateLimitFormOpen, true);
+    assert.match(module.rateLimitFormError, /boom/);
+});
+
+test('inspector sections group model, provider, and global rules', () => {
+    const module = createRateLimitsModule();
+    module.rateLimits = [
+        { scope: 'model', subject: 'openai/gpt-4o', period_seconds: 60 },
+        { scope: 'model', subject: 'gpt-4o', period_seconds: 3600 },
+        { scope: 'model', subject: 'gpt-4o-mini', period_seconds: 60 },
+        { scope: 'provider', subject: 'openai', period_seconds: 0 },
+        { scope: 'provider', subject: 'anthropic', period_seconds: 60 },
+        { scope: 'user_path', subject: '/', user_path: '/', period_seconds: 60 },
+        { scope: 'user_path', subject: '/team', user_path: '/team', period_seconds: 60 }
+    ];
+
+    module.rateLimitInspector = { kind: 'model', provider: 'openai', model: 'GPT-4o', title: 'gpt-4o' };
+    const sections = module.rateLimitInspectorSections();
+    assert.equal(JSON.stringify(sections.map((section) => section.key)), JSON.stringify(['model', 'provider', 'global']));
+    // Both the qualified and the bare rule cover this model; the other model does not.
+    assert.equal(JSON.stringify(sections[0].items.map((item) => item.subject)), JSON.stringify(['openai/gpt-4o', 'gpt-4o']));
+    assert.equal(sections[0].subject, 'openai/GPT-4o');
+    assert.equal(JSON.stringify(sections[1].items.map((item) => item.subject)), JSON.stringify(['openai']));
+    // Only root user-path rules are global; /team is per-consumer.
+    assert.equal(JSON.stringify(sections[2].items.map((item) => item.subject)), JSON.stringify(['/']));
+
+    module.rateLimitInspector = { kind: 'provider', provider: 'anthropic', model: '', title: 'anthropic' };
+    const providerSections = module.rateLimitInspectorSections();
+    assert.equal(JSON.stringify(providerSections.map((section) => section.key)), JSON.stringify(['provider', 'global']));
+    assert.equal(JSON.stringify(providerSections[0].items.map((item) => item.subject)), JSON.stringify(['anthropic']));
+});
+
+test('inspector opens the editor prefilled and returns on close', () => {
+    const module = createRateLimitsModule();
+    module.rateLimitInspectorOpen = true;
+
+    module.openRateLimitFormFromInspector('provider', 'openai');
+    assert.equal(module.rateLimitInspectorOpen, false);
+    assert.equal(module.rateLimitFormOpen, true);
+    assert.equal(module.rateLimitForm.scope, 'provider');
+    assert.equal(module.rateLimitForm.subject, 'openai');
+    assert.equal(module.rateLimitEditing, false);
+
+    module.closeRateLimitForm();
+    assert.equal(module.rateLimitFormOpen, false);
+    assert.equal(module.rateLimitInspectorOpen, true);
+
+    // Editing an existing rule from the inspector keeps its values.
+    module.openRateLimitFormFromInspector(null, null, { scope: 'provider', subject: 'openai', period_seconds: 60, max_requests: 5 });
+    assert.equal(module.rateLimitEditing, true);
+    assert.equal(module.rateLimitForm.max_requests, '5');
+    assert.equal(JSON.stringify(module.rateLimitEditingOriginal), JSON.stringify({ scope: 'provider', subject: 'openai', period_seconds: 60 }));
+});

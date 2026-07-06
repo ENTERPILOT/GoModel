@@ -12,8 +12,12 @@
             rateLimitFormSubmitting: false,
             rateLimitFormError: '',
             rateLimitEditing: false,
+            rateLimitEditingOriginal: null,
+            rateLimitFormReturnToInspector: false,
             rateLimitResettingKey: '',
             rateLimitDeletingKey: '',
+            rateLimitInspectorOpen: false,
+            rateLimitInspector: { kind: '', provider: '', model: '', title: '' },
             rateLimitForm: {
                 scope: 'user_path',
                 subject: '/',
@@ -273,6 +277,11 @@
                 this.rateLimitNotice = '';
                 if (item) {
                     const periodSeconds = Number(item.period_seconds || 0);
+                    this.rateLimitEditingOriginal = {
+                        scope: this.rateLimitScope(item),
+                        subject: this.rateLimitSubject(item),
+                        period_seconds: periodSeconds
+                    };
                     this.rateLimitForm = {
                         scope: this.rateLimitScope(item),
                         subject: this.rateLimitSubject(item),
@@ -283,6 +292,7 @@
                         source: String(item.source || 'manual')
                     };
                 } else {
+                    this.rateLimitEditingOriginal = null;
                     this.rateLimitForm = this.defaultRateLimitForm();
                 }
                 this.rateLimitFormOpen = true;
@@ -305,7 +315,38 @@
                 this.rateLimitFormSubmitting = false;
                 this.rateLimitFormError = '';
                 this.rateLimitEditing = false;
+                this.rateLimitEditingOriginal = null;
                 this.rateLimitForm = this.defaultRateLimitForm();
+                if (this.rateLimitFormReturnToInspector) {
+                    this.rateLimitFormReturnToInspector = false;
+                    this.rateLimitInspectorOpen = true;
+                    if (typeof this.renderIconsAfterUpdate === 'function') {
+                        this.renderIconsAfterUpdate();
+                    }
+                }
+            },
+
+            // Mirrors the server's per-scope subject normalization so an edit
+            // that only respells the same identity (case, slashes) is treated
+            // as an in-place update, never a move-plus-delete of itself.
+            rateLimitNormalizedIdentity(scope, subject, periodSeconds) {
+                let normalized = String(subject || '').trim();
+                if (scope === 'provider' || scope === 'model') {
+                    normalized = normalized.toLowerCase();
+                } else {
+                    const segments = normalized.split('/').map((part) => part.trim()).filter(Boolean);
+                    normalized = '/' + segments.join('/');
+                }
+                return scope + ':' + normalized + ':' + Number(periodSeconds || 0);
+            },
+
+            rateLimitIdentityMoved(payload) {
+                const original = this.rateLimitEditingOriginal;
+                if (!original) {
+                    return false;
+                }
+                return this.rateLimitNormalizedIdentity(payload.scope, payload.subject, payload.limit_key.period_seconds)
+                    !== this.rateLimitNormalizedIdentity(original.scope, original.subject, original.period_seconds);
             },
 
             setRateLimitFormSubject(value) {
@@ -369,6 +410,8 @@
                     this.rateLimitFormError = error;
                     return;
                 }
+                const moved = this.rateLimitIdentityMoved(payload);
+                const original = this.rateLimitEditingOriginal;
                 this.rateLimitFormSubmitting = true;
                 this.rateLimitFormError = '';
                 try {
@@ -386,8 +429,14 @@
                         return;
                     }
                     this.rateLimits = this.normalizeRateLimitListPayload(await res.json());
+                    // Identity change = move: the new rule exists, now drop
+                    // the one it replaces. The new rule is created first so a
+                    // failed delete can never lose the rule.
+                    if (moved && !(await this.deleteMovedRateLimitOriginal(original))) {
+                        return;
+                    }
                     this.closeRateLimitForm();
-                    this.rateLimitNotice = 'Rate limit saved.';
+                    this.rateLimitNotice = moved ? 'Rate limit moved; live counters restarted.' : 'Rate limit saved.';
                     if (typeof this.renderIconsAfterUpdate === 'function') {
                         this.renderIconsAfterUpdate();
                     }
@@ -396,6 +445,31 @@
                     this.rateLimitFormError = 'Unable to save rate limit.';
                 } finally {
                     this.rateLimitFormSubmitting = false;
+                }
+            },
+
+            async deleteMovedRateLimitOriginal(original) {
+                try {
+                    const request = this.requestOptions({
+                        method: 'DELETE',
+                        body: JSON.stringify({
+                            scope: original.scope,
+                            subject: original.subject,
+                            limit_key: { period_seconds: Number(original.period_seconds || 0) }
+                        })
+                    });
+                    const res = await fetch('/admin/rate-limits', request);
+                    const handled = this.handleFetchResponse(res, 'rate limit move', request);
+                    if (!handled) {
+                        this.rateLimitFormError = await this.rateLimitResponseError(res, 'The new rule was saved, but the previous one could not be removed. Delete it manually.');
+                        return false;
+                    }
+                    this.rateLimits = this.normalizeRateLimitListPayload(await res.json());
+                    return true;
+                } catch (e) {
+                    console.error('Failed to remove the moved rate limit:', e);
+                    this.rateLimitFormError = 'The new rule was saved, but the previous one could not be removed. Delete it manually.';
+                    return false;
                 }
             },
 
@@ -484,6 +558,141 @@
                     return message ? String(message) : fallback;
                 } catch (_) {
                     return fallback;
+                }
+            },
+
+            // --- Effective-limits inspector (Models page) ---
+
+            rateLimitInspectorModelID(row) {
+                return String(row && row.model && row.model.id || '').trim();
+            },
+
+            openRateLimitInspectorForModel(row) {
+                const model = this.rateLimitInspectorModelID(row);
+                const provider = String(row && row.provider_name || '').trim().toLowerCase();
+                this.rateLimitInspector = {
+                    kind: 'model',
+                    provider: provider,
+                    model: model,
+                    title: String(row && row.display_name || model)
+                };
+                this.showRateLimitInspector();
+            },
+
+            openRateLimitInspectorForProvider(group) {
+                const provider = String(group && group.provider_name || '').trim().toLowerCase();
+                this.rateLimitInspector = {
+                    kind: 'provider',
+                    provider: provider,
+                    model: '',
+                    title: String(group && group.display_name || provider)
+                };
+                this.showRateLimitInspector();
+            },
+
+            showRateLimitInspector() {
+                this.rateLimitInspectorOpen = true;
+                this.fetchRateLimitsPage();
+                if (typeof this.renderIconsAfterUpdate === 'function') {
+                    this.renderIconsAfterUpdate();
+                }
+            },
+
+            closeRateLimitInspector() {
+                this.rateLimitInspectorOpen = false;
+            },
+
+            rateLimitRuleMatchesModel(rule, provider, model) {
+                if (this.rateLimitScope(rule) !== 'model') {
+                    return false;
+                }
+                const subject = String(this.rateLimitSubject(rule)).toLowerCase();
+                const bare = String(model || '').trim().toLowerCase();
+                if (!bare) {
+                    return false;
+                }
+                if (subject === bare) {
+                    return true;
+                }
+                const prov = String(provider || '').trim().toLowerCase();
+                if (!prov) {
+                    return false;
+                }
+                if (subject === prov + '/' + bare) {
+                    return true;
+                }
+                return bare.startsWith(prov + '/') && subject === bare.slice(prov.length + 1);
+            },
+
+            rateLimitRuleMatchesProvider(rule, provider) {
+                return this.rateLimitScope(rule) === 'provider'
+                    && String(this.rateLimitSubject(rule)).toLowerCase() === String(provider || '').trim().toLowerCase();
+            },
+
+            rateLimitInspectorQualifiedModel() {
+                const inspector = this.rateLimitInspector || {};
+                const model = String(inspector.model || '');
+                const provider = String(inspector.provider || '');
+                if (!provider || model.toLowerCase().startsWith(provider + '/')) {
+                    return model;
+                }
+                return provider + '/' + model;
+            },
+
+            rateLimitInspectorSections() {
+                const inspector = this.rateLimitInspector || {};
+                const rules = Array.isArray(this.rateLimits) ? this.rateLimits : [];
+                const sections = [];
+                if (inspector.kind === 'model') {
+                    sections.push({
+                        key: 'model',
+                        title: 'Model limits',
+                        scope: 'model',
+                        subject: this.rateLimitInspectorQualifiedModel(),
+                        hint: '',
+                        items: rules.filter((rule) => this.rateLimitRuleMatchesModel(rule, inspector.provider, inspector.model))
+                    });
+                }
+                sections.push({
+                    key: 'provider',
+                    title: 'Provider limits (' + inspector.provider + ')',
+                    scope: 'provider',
+                    subject: inspector.provider,
+                    hint: inspector.kind === 'model' ? 'Shared by every model routed to this provider.' : '',
+                    items: rules.filter((rule) => this.rateLimitRuleMatchesProvider(rule, inspector.provider))
+                });
+                sections.push({
+                    key: 'global',
+                    title: 'Global limits',
+                    scope: 'user_path',
+                    subject: '/',
+                    hint: 'Root user-path rules throttle all traffic. Narrower user-path rules also apply, per consumer.',
+                    items: rules.filter((rule) => this.rateLimitScope(rule) === 'user_path' && this.rateLimitSubject(rule) === '/')
+                });
+                return sections;
+            },
+
+            rateLimitInspectorSummary(item) {
+                if (this.rateLimitIsConcurrent(item)) {
+                    return this.formatRateLimitNumber(item.in_flight) + ' of ' + this.formatRateLimitNumber(item.max_requests) + ' in flight';
+                }
+                const parts = [];
+                if (item.max_requests !== null && item.max_requests !== undefined) {
+                    parts.push(this.formatRateLimitNumber(item.requests_used) + '/' + this.formatRateLimitNumber(item.max_requests) + ' req');
+                }
+                if (item.max_tokens !== null && item.max_tokens !== undefined) {
+                    parts.push(this.formatRateLimitNumber(item.tokens_used) + '/' + this.formatRateLimitNumber(item.max_tokens) + ' tok');
+                }
+                return parts.join(' · ');
+            },
+
+            openRateLimitFormFromInspector(scope, subject, item) {
+                this.rateLimitInspectorOpen = false;
+                this.rateLimitFormReturnToInspector = true;
+                this.openRateLimitForm(item || undefined);
+                if (!item) {
+                    this.rateLimitForm.scope = scope;
+                    this.rateLimitForm.subject = subject;
                 }
             }
         };

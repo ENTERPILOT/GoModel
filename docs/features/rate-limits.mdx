@@ -65,6 +65,15 @@ Pick the scope (user path, provider, or model), the subject, a period, and the
 caps. Dashboard-created rules are marked `manual`. Rules loaded from YAML or
 environment variables are marked `config` and are read-only in the dashboard.
 
+The Models page has a gauge button on every model row and provider header that
+opens the same limits for that subject in context: the model's own rules, the
+provider rules it shares, and the global (root user-path) rules — each with
+live usage — plus add and edit actions.
+
+Editing a rule's scope, subject, or period **moves** it: the rule is recreated
+under the new key and its live counters restart. Editing only the caps keeps
+the counters.
+
 Seed rules from YAML:
 
 ```yaml

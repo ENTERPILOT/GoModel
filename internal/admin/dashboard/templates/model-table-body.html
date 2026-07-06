@@ -25,6 +25,13 @@
                             {{template "dollar-icon"}}
                         </button>
                         <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="rateLimitsEnabled() && group.provider_name"
+                            :aria-label="'Rate limits for provider ' + group.display_name"
+                            :title="'Rate limits for provider ' + group.display_name"
+                            @click="openRateLimitInspectorForProvider(group)">
+                            {{template "gauge-icon"}}
+                        </button>
+                        <button type="button" class="table-action-btn table-icon-btn"
                             x-show="virtualModelsAvailable && group.access.selector"
                             :class="modelOverrideEditButtonClass(hasAccessOverride(group.access))"
                             :aria-label="modelOverrideEditButtonLabel('provider access for ' + group.display_name, hasAccessOverride(group.access))"
@@ -119,6 +126,13 @@
                                 :disabled="Boolean(rowDeletingKey)"
                                 @click="removeRedirectRow(row)">
                                 {{template "trash-icon"}}
+                            </button>
+                            <button type="button" class="table-action-btn table-icon-btn"
+                                x-show="rateLimitsEnabled() && rateLimitInspectorModelID(row)"
+                                :aria-label="'Rate limits for ' + row.display_name"
+                                :title="'Rate limits for ' + row.display_name"
+                                @click="openRateLimitInspectorForModel(row)">
+                                {{template "gauge-icon"}}
                             </button>
                             <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="virtualModelsAvailable && !row.masking_alias"

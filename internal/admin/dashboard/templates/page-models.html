@@ -402,6 +402,9 @@
     <p class="empty-state" x-show="displayModels.length === 0 && !loading && !authError && !modelFilter && (activeCategory === 'all' || !activeCategory)">No models registered.</p>
     <p class="empty-state" x-show="displayModels.length === 0 && !loading && !authError && !modelFilter && activeCategory && activeCategory !== 'all'">No models in this category.</p>
     <p class="empty-state" x-show="displayModels.length > 0 && filteredDisplayModels.length === 0 && modelFilter">No models match your filter.</p>
+
+    {{template "rate-limit-inspector" .}}
+    {{template "rate-limit-editor" .}}
 </div>
 </template>
 {{end}}
