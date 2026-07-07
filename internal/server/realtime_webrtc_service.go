@@ -86,7 +86,7 @@ func (s *realtimeService) RealtimeCalls(c *echo.Context) error {
 		s.observeCall(ctx, route, callID)
 	}
 
-	return relayRealtimeHTTPResponse(c, resp)
+	return relayRealtimeHTTPResponse(c, resp, "application/sdp")
 }
 
 // RealtimeClientSecrets handles POST /v1/realtime/client_secrets: minting
@@ -143,7 +143,7 @@ func (s *realtimeService) RealtimeClientSecrets(c *echo.Context) error {
 	if resp.StatusCode >= http.StatusBadRequest {
 		return handleError(c, realtimeUpstreamError(route.providerType, resp))
 	}
-	return relayRealtimeHTTPResponse(c, resp)
+	return relayRealtimeHTTPResponse(c, resp, "application/json")
 }
 
 // callRouter gates the realtime HTTP signaling routes and narrows the provider
@@ -211,12 +211,14 @@ func realtimeUpstreamError(providerType string, resp *http.Response) error {
 	return core.ParseProviderError(providerType, resp.StatusCode, body, nil)
 }
 
-// relayRealtimeHTTPResponse copies the upstream status, content type, and body
-// to the client. The Location header is set by the caller after rewriting.
-func relayRealtimeHTTPResponse(c *echo.Context, resp *http.Response) error {
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		c.Response().Header().Set("Content-Type", ct)
-	}
+// relayRealtimeHTTPResponse copies the upstream status and body to the client.
+// The Location header is set by the caller after rewriting. The content type is
+// pinned to the protocol-mandated value rather than echoed from upstream, and
+// sniffing is disabled, so a misbehaving upstream cannot turn the relayed bytes
+// into markup a browser would render.
+func relayRealtimeHTTPResponse(c *echo.Context, resp *http.Response, contentType string) error {
+	c.Response().Header().Set("Content-Type", contentType)
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response().WriteHeader(resp.StatusCode)
 	_, err := io.Copy(c.Response(), resp.Body)
 	return err

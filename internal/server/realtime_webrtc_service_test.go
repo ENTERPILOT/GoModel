@@ -122,6 +122,9 @@ func TestRealtimeCalls_SDPHappyPath(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); got != "application/sdp" {
 		t.Errorf("Content-Type = %q, want application/sdp", got)
 	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff on relayed upstream bytes", got)
+	}
 	if upstreamReq.body != "v=0 offer" {
 		t.Errorf("upstream body = %q, want the SDP offer", upstreamReq.body)
 	}
@@ -329,6 +332,121 @@ func TestRealtimeCalls_ErrorCases(t *testing.T) {
 	}
 }
 
+func TestRealtimeCalls_RouterWithoutCapability(t *testing.T) {
+	// A routable provider that lacks the realtime call capability must be
+	// rejected up front, not routed.
+	handler := NewHandler(&mockProvider{supportedModels: []string{"gpt-realtime"}}, nil, nil, nil)
+	handler.realtimeEnabled = true
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls?model=gpt-realtime", strings.NewReader("v=0"))
+	req.Header.Set("Content-Type", "application/sdp")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+
+	if err := handler.RealtimeCalls(c); err != nil {
+		t.Fatalf("RealtimeCalls returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "not supported") {
+		t.Errorf("body = %q, want a capability error", rec.Body.String())
+	}
+}
+
+func TestRealtimeCalls_MalformedMultipart(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		body        string
+	}{
+		{name: "missing boundary", contentType: "multipart/form-data", body: "irrelevant"},
+		{
+			name:        "invalid session JSON",
+			contentType: "multipart/form-data; boundary=b1",
+			body:        "--b1\r\nContent-Disposition: form-data; name=\"session\"\r\n\r\nnot-json\r\n--b1--\r\n",
+		},
+		{
+			name:        "truncated multipart body",
+			contentType: "multipart/form-data; boundary=b1",
+			body:        "--b1\r\nContent-Disposition: form-data",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &realtimeWebRTCMock{mockProvider: &mockProvider{supportedModels: []string{"gpt-realtime"}}}
+			handler := newRealtimeTestHandler(mock, nil)
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", tt.contentType)
+			rec := httptest.NewRecorder()
+			c := echo.New().NewContext(req, rec)
+
+			if err := handler.RealtimeCalls(c); err != nil {
+				t.Fatalf("RealtimeCalls returned error: %v", err)
+			}
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestRealtimeCalls_UnreachableUpstream(t *testing.T) {
+	mock := &realtimeWebRTCMock{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-realtime"}},
+		callTarget:   &core.RealtimeHTTPTarget{URL: "http://127.0.0.1:1/v1/realtime/calls"},
+	}
+	handler := newRealtimeTestHandler(mock, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls?model=gpt-realtime", strings.NewReader("v=0"))
+	req.Header.Set("Content-Type", "application/sdp")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+
+	if err := handler.RealtimeCalls(c); err != nil {
+		t.Fatalf("RealtimeCalls returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRealtimeCalls_NoLocationHeader(t *testing.T) {
+	// An upstream that returns no Location header yields no call id: the answer
+	// is still relayed, but nothing is registered or observed.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("v=0 answer"))
+	}))
+	defer upstream.Close()
+
+	mock := &realtimeWebRTCMock{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-realtime"}},
+		callTarget:   &core.RealtimeHTTPTarget{URL: upstream.URL + "/v1/realtime/calls"},
+	}
+	usageLogger := &usageCaptureLogger{config: usage.Config{Enabled: true}}
+	handler := newRealtimeTestHandler(mock, usageLogger)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls?model=gpt-realtime", strings.NewReader("v=0"))
+	req.Header.Set("Content-Type", "application/sdp")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+
+	if err := handler.RealtimeCalls(c); err != nil {
+		t.Fatalf("RealtimeCalls returned error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Location") != "" {
+		t.Errorf("Location = %q, want unset when upstream sent none", rec.Header().Get("Location"))
+	}
+	if mock.capturedRealtime != nil {
+		t.Error("no observer must be attached without a call id")
+	}
+}
+
 func TestRealtimeClientSecrets_HappyPath(t *testing.T) {
 	var upstreamBody map[string]any
 	var upstreamAuth string
@@ -409,6 +527,23 @@ func TestRealtimeClientSecrets_TranscriptionModelFallback(t *testing.T) {
 	}
 	if mock.capturedSecret == nil || mock.capturedSecret.Model != "gpt-4o-transcribe" {
 		t.Errorf("router received %+v, want the transcription model", mock.capturedSecret)
+	}
+}
+
+func TestRealtimeClientSecrets_InvalidJSON(t *testing.T) {
+	mock := &realtimeWebRTCMock{mockProvider: &mockProvider{supportedModels: []string{"gpt-realtime"}}}
+	handler := newRealtimeTestHandler(mock, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/client_secrets", strings.NewReader("not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+
+	if err := handler.RealtimeClientSecrets(c); err != nil {
+		t.Fatalf("RealtimeClientSecrets returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
 	}
 }
 
