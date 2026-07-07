@@ -149,6 +149,14 @@ func (u *upstream) ensureSessionLocked(ctx context.Context) (*mcp.ClientSession,
 	}
 
 	u.stateMu.Lock()
+	// close() may have disposed the upstream while the dial was in flight
+	// (close deliberately does not wait on connectMu). Storing the session
+	// then would leak it forever, so discard it instead.
+	if u.closed {
+		u.stateMu.Unlock()
+		_ = session.Close()
+		return nil, fmt.Errorf("mcp server %q was removed", u.spec.Name)
+	}
 	u.session = session
 	u.connectedAt = time.Now().UTC()
 	u.stateMu.Unlock()
@@ -193,7 +201,10 @@ func (u *upstream) transport() (mcp.Transport, error) {
 		// process holds every provider API key and the master key, and a
 		// compromised MCP server binary must not inherit them. Operators pass
 		// anything else explicitly via the server's env map (${VAR} expands
-		// in config), on top of the basics process launchers need.
+		// in config), on top of the basics process launchers need. The
+		// non-nil initialization matters: a nil cmd.Env would fall back to
+		// inheriting the full parent environment.
+		cmd.Env = []string{}
 		for _, key := range []string{"PATH", "HOME", "TMPDIR", "USER", "LANG"} {
 			if value := os.Getenv(key); value != "" {
 				cmd.Env = append(cmd.Env, key+"="+value)

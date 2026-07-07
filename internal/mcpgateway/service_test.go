@@ -511,6 +511,51 @@ func TestRemovedUpstreamRefusesRedial(t *testing.T) {
 	}
 }
 
+// TestCloseDuringDialDiscardsSession covers the dial-vs-close race: close()
+// deliberately does not wait for an in-flight dial, so a dial completing
+// after disposal must discard its fresh session instead of storing (and
+// leaking) it.
+func TestCloseDuringDialDiscardsSession(t *testing.T) {
+	upstream := mcp.NewServer(&mcp.Implementation{Name: "alpha", Version: "test"}, nil)
+	addEchoTool("echo")(upstream)
+	inner := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil)
+
+	// Gate the first request so the dial is reliably in flight when close runs.
+	dialEntered := make(chan struct{})
+	releaseDial := make(chan struct{})
+	var gateOnce sync.Once
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gateOnce.Do(func() {
+			close(dialEntered)
+			<-releaseDial
+		})
+		inner.ServeHTTP(w, r)
+	}))
+	t.Cleanup(func() {
+		ts.CloseClientConnections()
+		ts.Close()
+	})
+
+	u := newUpstream(testSpec("alpha", ts.URL, nil), nil)
+
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- u.refresh(context.Background()) }()
+
+	<-dialEntered
+	u.close()
+	close(releaseDial)
+
+	if err := <-refreshDone; err == nil {
+		t.Fatalf("refresh() racing close() should fail, not connect")
+	}
+	u.stateMu.Lock()
+	session := u.session
+	u.stateMu.Unlock()
+	if session != nil {
+		t.Fatalf("closed upstream stored the in-flight dial's session")
+	}
+}
+
 func TestInstructionsComposeFromUpstreams(t *testing.T) {
 	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
 	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
