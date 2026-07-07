@@ -6446,6 +6446,16 @@
               }
             }
           },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
           "501": {
             "description": "Not Implemented",
             "content": {
@@ -6504,11 +6514,32 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/sdp": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
+          "required": true
+        },
         "responses": {
           "201": {
             "description": "SDP answer",
             "content": {
-              "text/plain": {
+              "application/sdp": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
                 "schema": {
                   "type": "string"
                 }
@@ -6518,7 +6549,12 @@
           "400": {
             "description": "Bad Request",
             "content": {
-              "text/plain": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
@@ -6528,7 +6564,27 @@
           "401": {
             "description": "Unauthorized",
             "content": {
-              "text/plain": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
@@ -6538,7 +6594,12 @@
           "501": {
             "description": "Not Implemented",
             "content": {
-              "text/plain": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
@@ -6548,7 +6609,12 @@
           "502": {
             "description": "Bad Gateway",
             "content": {
-              "text/plain": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
@@ -6585,6 +6651,17 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "Client secret request: session config with the routing model (session.model, or the nested transcription model) plus optional expires_after; relayed verbatim",
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Provider client secret response",
@@ -6609,6 +6686,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
             "content": {
               "application/json": {
                 "schema": {

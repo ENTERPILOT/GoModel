@@ -329,6 +329,7 @@ func (h *Handler) ProviderPassthrough(c *echo.Context) error {
 // @Failure      400       {object}  core.OpenAIErrorEnvelope
 // @Failure      401       {object}  core.OpenAIErrorEnvelope
 // @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      429       {object}  core.OpenAIErrorEnvelope
 // @Failure      501       {object}  core.OpenAIErrorEnvelope
 // @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/realtime [get]
@@ -341,14 +342,18 @@ func (h *Handler) Realtime(c *echo.Context) error {
 // @Summary      Create a realtime WebRTC call
 // @Description  OpenAI-compatible WebRTC SDP exchange. Accepts a raw application/sdp offer with the model in the ?model= query parameter, or a multipart form with sdp and session (JSON) fields. The gateway routes by model, injects provider credentials, and relays the SDP answer; the Location header carries the created call id. Media flows directly between the client and the provider, so usage is recorded by a gateway-side sideband observer when usage tracking is enabled.
 // @Tags         realtime
+// @Accept       application/sdp
 // @Accept       mpfd
-// @Produce      plain
+// @Produce      application/sdp
+// @Produce      json
 // @Security     BearerAuth
 // @Param        model     query     string  false  "Model that owns the call (required for application/sdp offers)"
 // @Param        provider  query     string  false  "Optional provider hint"
+// @Param        request   body      string  true   "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields"
 // @Success      201       {string}  string  "SDP answer"
 // @Failure      400       {object}  core.OpenAIErrorEnvelope
 // @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      429       {object}  core.OpenAIErrorEnvelope
 // @Failure      501       {object}  core.OpenAIErrorEnvelope
 // @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/realtime/calls [post]
@@ -365,9 +370,11 @@ func (h *Handler) RealtimeCalls(c *echo.Context) error {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        provider  query     string  false  "Optional provider hint"
+// @Param        request   body      object  true   "Client secret request: session config with the routing model (session.model, or the nested transcription model) plus optional expires_after; relayed verbatim"
 // @Success      200       {object}  map[string]any  "Provider client secret response"
 // @Failure      400       {object}  core.OpenAIErrorEnvelope
 // @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      429       {object}  core.OpenAIErrorEnvelope
 // @Failure      501       {object}  core.OpenAIErrorEnvelope
 // @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/realtime/client_secrets [post]

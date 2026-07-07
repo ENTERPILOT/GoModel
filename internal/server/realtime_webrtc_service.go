@@ -17,6 +17,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/core"
+	"gomodel/internal/httpclient"
 	"gomodel/internal/realtime"
 )
 
@@ -190,9 +191,12 @@ func (s *realtimeService) forwardRealtimeHTTP(ctx context.Context, target *core.
 		req.Header.Set("Content-Type", contentType)
 	}
 
+	// The fallback keeps hand-constructed services (tests, embedded wiring)
+	// working, but never with an unbounded client: signaling requests must
+	// honor the configured HTTP timeouts.
 	client := s.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		client = httpclient.NewDefaultHTTPClient()
 	}
 	resp, err := client.Do(req)
 	if err != nil {

@@ -57,7 +57,9 @@ func (r *CallRegistry) Register(callID string, route CallRoute) {
 	defer r.mu.Unlock()
 	now := r.now()
 	r.pruneLocked(now)
-	if len(r.entries) >= maxCalls {
+	// Re-registering an existing id overwrites in place; only a genuinely new
+	// entry at capacity needs to make room.
+	if _, exists := r.entries[callID]; !exists && len(r.entries) >= maxCalls {
 		r.evictSoonestLocked()
 	}
 	r.entries[callID] = callEntry{route: route, expires: now.Add(r.ttl)}

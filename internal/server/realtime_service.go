@@ -86,10 +86,12 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 		switch {
 		case ok:
 			registered = true
-			if model == "" {
-				model = callRoute.Model
-			}
-			if providerHint == "" {
+			// The registry is authoritative for gateway-created calls: the attach
+			// dials by call_id alone, so a client-supplied model or provider that
+			// disagrees with the registered route must not steer model-access or
+			// rate-limit checks toward a model the call is not running.
+			model = callRoute.Model
+			if callRoute.Provider != "" {
 				providerHint = callRoute.Provider
 			}
 		case model == "":

@@ -4373,6 +4373,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
                     "501": {
                         "description": "Not Implemented",
                         "schema": {
@@ -4397,10 +4403,12 @@ const docTemplate = `{
             "post": {
                 "description": "OpenAI-compatible WebRTC SDP exchange. Accepts a raw application/sdp offer with the model in the ?model= query parameter, or a multipart form with sdp and session (JSON) fields. The gateway routes by model, injects provider credentials, and relays the SDP answer; the Location header carries the created call id. Media flows directly between the client and the provider, so usage is recorded by a gateway-side sideband observer when usage tracking is enabled.",
                 "consumes": [
+                    "application/sdp",
                     "multipart/form-data"
                 ],
                 "produces": [
-                    "text/plain"
+                    "application/sdp",
+                    "application/json"
                 ],
                 "tags": [
                     "realtime"
@@ -4418,6 +4426,15 @@ const docTemplate = `{
                         "description": "Optional provider hint",
                         "name": "provider",
                         "in": "query"
+                    },
+                    {
+                        "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 ],
                 "responses": {
@@ -4435,6 +4452,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -4478,6 +4501,15 @@ const docTemplate = `{
                         "description": "Optional provider hint",
                         "name": "provider",
                         "in": "query"
+                    },
+                    {
+                        "description": "Client secret request: session config with the routing model (session.model, or the nested transcription model) plus optional expires_after; relayed verbatim",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
                     }
                 ],
                 "responses": {
@@ -4496,6 +4528,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }

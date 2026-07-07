@@ -591,6 +591,31 @@ func TestRealtimeAttach_UsesRegistry(t *testing.T) {
 	}
 }
 
+func TestRealtimeAttach_RegistryOverridesConflictingModel(t *testing.T) {
+	// The attach dials by call_id alone, so a client naming a different model
+	// must not steer model-access or rate-limit checks away from the model the
+	// registered call actually runs.
+	mock := &realtimeWebRTCMock{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-realtime", "other-model"}},
+	}
+	handler := newRealtimeTestHandler(mock, nil)
+	handler.realtimeCalls.Register("rtc_77", realtime.CallRoute{Model: "gpt-realtime", Provider: "mock"})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/realtime?call_id=rtc_77&model=other-model", nil)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+
+	if err := handler.Realtime(c); err != nil {
+		t.Fatalf("Realtime returned error: %v", err)
+	}
+	if mock.capturedRealtime == nil {
+		t.Fatal("router was not consulted")
+	}
+	if mock.capturedRealtime.Model != "gpt-realtime" {
+		t.Errorf("router received model %q, want the registered call's model", mock.capturedRealtime.Model)
+	}
+}
+
 func TestRealtimeAttach_UnknownCallID(t *testing.T) {
 	mock := &realtimeWebRTCMock{mockProvider: &mockProvider{supportedModels: []string{"gpt-realtime"}}}
 	handler := newRealtimeTestHandler(mock, nil)

@@ -77,3 +77,26 @@ func TestCallRegistryEvictsAtCapacity(t *testing.T) {
 		t.Error("soonest-expiring call should have been evicted")
 	}
 }
+
+func TestCallRegistryReRegisterAtCapacityDoesNotEvict(t *testing.T) {
+	now := time.Unix(1000, 0)
+	r := newTestRegistry(&now)
+
+	for i := 0; i < maxCalls; i++ {
+		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "m"})
+		now = now.Add(time.Millisecond)
+	}
+	// Overwriting an existing id does not grow the map, so no unrelated entry
+	// may be evicted to make room.
+	r.Register("rtc_5", CallRoute{Model: "updated"})
+
+	if route, ok := r.Lookup("rtc_5"); !ok || route.Model != "updated" {
+		t.Errorf("route = %+v (found %v), want the entry updated in place", route, ok)
+	}
+	if _, ok := r.Lookup("rtc_0"); !ok {
+		t.Error("re-registering an existing id must not evict an unrelated entry")
+	}
+	if len(r.entries) != maxCalls {
+		t.Errorf("registry has %d entries, want %d", len(r.entries), maxCalls)
+	}
+}
