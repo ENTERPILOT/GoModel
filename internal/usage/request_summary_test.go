@@ -33,36 +33,61 @@ func TestSummarizeRequestUsage_OpenAICompatibleCachedTokens(t *testing.T) {
 	}
 }
 
-func TestSummarizeRequestUsage_AggregatesRewriteSavings(t *testing.T) {
+func TestSummarizeRequestUsage_RewriteSavings(t *testing.T) {
 	cost1 := 0.03125
 	cost2 := 0.015625
-	summary := SummarizeRequestUsage([]UsageLogEntry{
-		{Provider: "openai", InputTokens: 100, RewriteTokensSaved: 89, RewriteCostSaved: &cost1},
-		{Provider: "openai", InputTokens: 50, RewriteTokensSaved: 11, RewriteCostSaved: &cost2},
-	})
-	if summary == nil {
-		t.Fatal("expected non-nil summary")
+	costSum := cost1 + cost2
+	cases := []struct {
+		name       string
+		entries    []UsageLogEntry
+		wantTokens int64
+		wantCost   *float64
+	}{
+		{
+			name: "aggregates tokens and cost across entries",
+			entries: []UsageLogEntry{
+				{Provider: "openai", InputTokens: 100, RewriteTokensSaved: 89, RewriteCostSaved: &cost1},
+				{Provider: "openai", InputTokens: 50, RewriteTokensSaved: 11, RewriteCostSaved: &cost2},
+			},
+			wantTokens: 100,
+			wantCost:   &costSum,
+		},
+		{
+			name: "cost priced on only one entry",
+			entries: []UsageLogEntry{
+				{Provider: "openai", InputTokens: 100, RewriteTokensSaved: 89, RewriteCostSaved: &cost1},
+				{Provider: "openai", InputTokens: 50, RewriteTokensSaved: 11},
+			},
+			wantTokens: 100,
+			wantCost:   &cost1,
+		},
+		{
+			name:       "no savings leaves cost nil",
+			entries:    []UsageLogEntry{{Provider: "openai", InputTokens: 100}},
+			wantTokens: 0,
+			wantCost:   nil,
+		},
 	}
-	if summary.RewriteTokensSaved != 100 {
-		t.Fatalf("RewriteTokensSaved = %d, want 100", summary.RewriteTokensSaved)
-	}
-	if summary.RewriteCostSaved == nil || *summary.RewriteCostSaved != 0.046875 {
-		t.Fatalf("RewriteCostSaved = %v, want 0.046875", summary.RewriteCostSaved)
-	}
-}
-
-func TestSummarizeRequestUsage_NoRewriteSavingsLeavesCostNil(t *testing.T) {
-	summary := SummarizeRequestUsage([]UsageLogEntry{
-		{Provider: "openai", InputTokens: 100},
-	})
-	if summary == nil {
-		t.Fatal("expected non-nil summary")
-	}
-	if summary.RewriteTokensSaved != 0 {
-		t.Fatalf("RewriteTokensSaved = %d, want 0", summary.RewriteTokensSaved)
-	}
-	if summary.RewriteCostSaved != nil {
-		t.Fatalf("RewriteCostSaved = %v, want nil", summary.RewriteCostSaved)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			summary := SummarizeRequestUsage(tc.entries)
+			if summary == nil {
+				t.Fatal("expected non-nil summary")
+			}
+			if summary.RewriteTokensSaved != tc.wantTokens {
+				t.Fatalf("RewriteTokensSaved = %d, want %d", summary.RewriteTokensSaved, tc.wantTokens)
+			}
+			switch {
+			case tc.wantCost == nil:
+				if summary.RewriteCostSaved != nil {
+					t.Fatalf("RewriteCostSaved = %v, want nil", *summary.RewriteCostSaved)
+				}
+			case summary.RewriteCostSaved == nil:
+				t.Fatalf("RewriteCostSaved = nil, want %v", *tc.wantCost)
+			case *summary.RewriteCostSaved != *tc.wantCost:
+				t.Fatalf("RewriteCostSaved = %v, want %v", *summary.RewriteCostSaved, *tc.wantCost)
+			}
+		})
 	}
 }
 
