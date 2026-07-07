@@ -186,7 +186,16 @@ var providerDefaultModels = map[string]map[string]string{
 
 // providerEndpointPathOverrides lets a provider replace the generic endpoint
 // path when the upstream layout differs from the default OpenAI-style routes.
+// Gemini is intentionally omitted because its base URL already includes the
+// OpenAI-compatible /v1beta/openai prefix, so the embeddings path remains
+// the generic /embeddings suffix.
 var providerEndpointPathOverrides = map[string]map[string]string{
+	"openai": {
+		"embeddings": "/v1/embeddings",
+	},
+	"groq": {
+		"embeddings": "/v1/embeddings",
+	},
 	"kimicode": {
 		"embeddings": "/v1/embeddings",
 	},
