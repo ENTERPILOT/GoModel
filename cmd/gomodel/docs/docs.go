@@ -4503,12 +4503,20 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "description": "Client secret request: session config with the routing model (session.model, or the nested transcription model) plus optional expires_after; relayed verbatim",
+                        "description": "Client secret request: session config with the routing model (session.model, or the nested transcription model) plus optional expires_after; additional fields are relayed verbatim",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "type": "object",
+                            "properties": {
+                                "expires_after": {
+                                    "type": "object"
+                                },
+                                "session": {
+                                    "type": "object"
+                                }
+                            }
                         }
                     }
                 ],

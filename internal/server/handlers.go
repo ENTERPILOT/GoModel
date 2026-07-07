@@ -370,7 +370,7 @@ func (h *Handler) RealtimeCalls(c *echo.Context) error {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        provider  query     string  false  "Optional provider hint"
-// @Param        request   body      object  true   "Client secret request: session config with the routing model (session.model, or the nested transcription model) plus optional expires_after; relayed verbatim"
+// @Param        request   body      object{session=object,expires_after=object}  true  "Client secret request: session config with the routing model (session.model, or the nested transcription model) plus optional expires_after; additional fields are relayed verbatim"
 // @Success      200       {object}  map[string]any  "Provider client secret response"
 // @Failure      400       {object}  core.OpenAIErrorEnvelope
 // @Failure      401       {object}  core.OpenAIErrorEnvelope
