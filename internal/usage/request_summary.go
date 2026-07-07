@@ -64,6 +64,14 @@ func SummarizeRequestUsage(entries []UsageLogEntry) *RequestUsageSummary {
 		summary.CachedInputTokens += cachedInput
 		summary.CacheWriteInputTokens += cacheWriteInput
 		summary.OutputTokens += int64(entry.OutputTokens)
+		summary.RewriteTokensSaved += entry.RewriteTokensSaved
+		if entry.RewriteCostSaved != nil {
+			total := *entry.RewriteCostSaved
+			if summary.RewriteCostSaved != nil {
+				total += *summary.RewriteCostSaved
+			}
+			summary.RewriteCostSaved = &total
+		}
 	}
 
 	summary.TotalTokens = summary.InputTokens + summary.OutputTokens

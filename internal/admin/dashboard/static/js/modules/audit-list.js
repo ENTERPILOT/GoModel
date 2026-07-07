@@ -564,6 +564,53 @@
                 return '-' + amount + ' tokens';
             },
 
+            // auditRevisionPercentLabel renders how much of the request body
+            // this revision removed (e.g. "-21%"), or '' when sizes are
+            // missing or the revision didn't shrink the body.
+            auditRevisionPercentLabel(revision) {
+                const before = Number(revision && revision.bytes_before);
+                const after = Number(revision && revision.bytes_after);
+                if (!Number.isFinite(before) || !Number.isFinite(after) || before <= 0 || after >= before) return '';
+                const pct = (1 - after / before) * 100;
+                return '-' + (pct >= 10 ? String(Math.round(pct)) : pct.toFixed(1)) + '%';
+            },
+
+            // auditRevisionCostSavedLabel renders this revision's share of the
+            // request's priced rewrite savings (e.g. "~$0.0372"), or '' when
+            // usage tracking recorded no cost. The cost lives on the entry's
+            // usage summary (it is priced per request, not per revision), so
+            // it is apportioned by each revision's share of the saved tokens.
+            auditRevisionCostSavedLabel(entry, revision) {
+                const cost = Number(entry && entry.usage && entry.usage.rewrite_cost_saved);
+                if (!Number.isFinite(cost) || cost <= 0) return '';
+                const revisionTokens = this.auditRevisionTokensSaved(revision);
+                if (revisionTokens <= 0) return '';
+                const totalTokens = this.auditRequestRevisions(entry)
+                    .reduce((sum, r) => sum + this.auditRevisionTokensSaved(r), 0);
+                const share = totalTokens > revisionTokens ? revisionTokens / totalTokens : 1;
+                const amount = cost * share;
+                if (typeof this.formatCost === 'function') {
+                    const label = this.formatCost(amount);
+                    return label.startsWith('<') ? label : '~' + label;
+                }
+                return '~$' + amount.toFixed(4);
+            },
+
+            // auditRevisionSavingsLabel combines tokens, percent of body
+            // removed, and priced savings into the Rewritten tab's pill label
+            // (e.g. "-12.3K tokens · -21% · ~$0.0372"). Tokens gate the pill;
+            // the other segments render only when their data is available.
+            auditRevisionSavingsLabel(entry, revision) {
+                const tokens = this.auditRevisionTokensSavedLabel(revision);
+                if (!tokens) return '';
+                const parts = [tokens];
+                const percent = this.auditRevisionPercentLabel(revision);
+                if (percent) parts.push(percent);
+                const cost = this.auditRevisionCostSavedLabel(entry, revision);
+                if (cost) parts.push(cost);
+                return parts.join(' · ');
+            },
+
             // auditRequestRevisionPane renders one ingress rewrite: a structured
             // summary of what the rewriter changed plus the rewritten body when
             // it was captured. The original client request stays on the Request
@@ -585,7 +632,7 @@
                     direction: 'request',
                     seq: single ? 0 : Number(revision && revision.seq || 0),
                     kind: (revision && revision.rewriter) ? String(revision.rewriter) : '',
-                    tokensSavedLabel: this.auditRevisionTokensSavedLabel(revision),
+                    tokensSavedLabel: this.auditRevisionSavingsLabel(entry, revision),
                     layout: 'split',
                     entry,
                     copyHeaders: summary,

@@ -955,7 +955,7 @@ test('auditPanes inserts request revision tabs between request and response', ()
     assert.equal(pane.headersTitle, 'What changed');
     assert.equal(pane.headers.bytes, '1572 → 1249');
     assert.equal(pane.headers.detail.tokens_saved_estimate, 89);
-    assert.equal(pane.tokensSavedLabel, '-89 tokens');
+    assert.equal(pane.tokensSavedLabel, '-89 tokens · -21%'); // no usage summary → no cost segment
     assert.equal(pane.showBody, true);
     assert.equal(pane.showTooLarge, false);
 
@@ -987,6 +987,62 @@ test('auditRevisionTokensSavedLabel reports rewrite savings as a pill label', ()
     // Large counts use the dashboard's short token format when available.
     module.formatTokensShort = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n));
     assert.equal(module.auditRevisionTokensSavedLabel({ tokens_saved: 12340 }), '-12.3K tokens');
+});
+
+test('auditRevisionPercentLabel reports the share of the body removed', () => {
+    const module = createAuditListModule();
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 1572, bytes_after: 1249 }), '-21%');
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 1000, bytes_after: 954 }), '-4.6%');
+    // Missing sizes or a revision that grew the body renders no percent.
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 0, bytes_after: 10 }), '');
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 100, bytes_after: 120 }), '');
+    assert.equal(module.auditRevisionPercentLabel({}), '');
+    assert.equal(module.auditRevisionPercentLabel(null), '');
+});
+
+test('auditRevisionCostSavedLabel apportions the priced savings per revision', () => {
+    const module = createAuditListModule();
+    const entry = {
+        usage: { rewrite_cost_saved: 0.03 },
+        data: {
+            request_revisions: [
+                { seq: 1, rewriter: 'a', tokens_saved: 75 },
+                { seq: 2, rewriter: 'b', tokens_saved: 25 }
+            ]
+        }
+    };
+    // 75/100 and 25/100 of $0.03.
+    assert.equal(module.auditRevisionCostSavedLabel(entry, entry.data.request_revisions[0]), '~$0.0225');
+    assert.equal(module.auditRevisionCostSavedLabel(entry, entry.data.request_revisions[1]), '~$0.0075');
+
+    // A single saving revision gets the full amount.
+    const single = { usage: { rewrite_cost_saved: 0.03 }, data: { request_revisions: [{ seq: 1, tokens_saved: 89 }] } };
+    assert.equal(module.auditRevisionCostSavedLabel(single, single.data.request_revisions[0]), '~$0.0300');
+
+    // No usage summary, no priced savings, or no revision tokens → no label.
+    assert.equal(module.auditRevisionCostSavedLabel({}, { tokens_saved: 89 }), '');
+    assert.equal(module.auditRevisionCostSavedLabel({ usage: { rewrite_cost_saved: 0 } }, { tokens_saved: 89 }), '');
+    assert.equal(module.auditRevisionCostSavedLabel(single, { tokens_saved: 0 }), '');
+
+    // The dashboard's cost formatter is used when available.
+    module.formatCost = (v) => (v > 0 && v < 0.0001 ? '<$0.0001' : '$' + v.toFixed(4).replace(/(\.\d{2}\d*?)0+$/, '$1'));
+    assert.equal(module.auditRevisionCostSavedLabel(single, single.data.request_revisions[0]), '~$0.03');
+    const tiny = { usage: { rewrite_cost_saved: 0.00005 }, data: { request_revisions: [{ seq: 1, tokens_saved: 5 }] } };
+    assert.equal(module.auditRevisionCostSavedLabel(tiny, tiny.data.request_revisions[0]), '<$0.0001');
+});
+
+test('auditRevisionSavingsLabel combines tokens, percent, and cost segments', () => {
+    const module = createAuditListModule();
+    const revision = { seq: 1, rewriter: 'pro-token-compression', bytes_before: 1572, bytes_after: 1249, tokens_saved: 89 };
+    const entry = { usage: { rewrite_cost_saved: 0.0372 }, data: { request_revisions: [revision] } };
+    assert.equal(module.auditRevisionSavingsLabel(entry, revision), '-89 tokens · -21% · ~$0.0372');
+
+    // Tokens gate the pill: no tokens saved → empty even with usage costs.
+    assert.equal(module.auditRevisionSavingsLabel(entry, { seq: 2, bytes_before: 100, bytes_after: 80 }), '');
+
+    // Missing segments degrade gracefully.
+    const bare = { seq: 1, tokens_saved: 89 };
+    assert.equal(module.auditRevisionSavingsLabel({ data: { request_revisions: [bare] } }, bare), '-89 tokens');
 });
 
 test('entries without revisions render no revision tabs', () => {

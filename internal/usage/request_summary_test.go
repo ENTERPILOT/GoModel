@@ -33,6 +33,39 @@ func TestSummarizeRequestUsage_OpenAICompatibleCachedTokens(t *testing.T) {
 	}
 }
 
+func TestSummarizeRequestUsage_AggregatesRewriteSavings(t *testing.T) {
+	cost1 := 0.03125
+	cost2 := 0.015625
+	summary := SummarizeRequestUsage([]UsageLogEntry{
+		{Provider: "openai", InputTokens: 100, RewriteTokensSaved: 89, RewriteCostSaved: &cost1},
+		{Provider: "openai", InputTokens: 50, RewriteTokensSaved: 11, RewriteCostSaved: &cost2},
+	})
+	if summary == nil {
+		t.Fatal("expected non-nil summary")
+	}
+	if summary.RewriteTokensSaved != 100 {
+		t.Fatalf("RewriteTokensSaved = %d, want 100", summary.RewriteTokensSaved)
+	}
+	if summary.RewriteCostSaved == nil || *summary.RewriteCostSaved != 0.046875 {
+		t.Fatalf("RewriteCostSaved = %v, want 0.046875", summary.RewriteCostSaved)
+	}
+}
+
+func TestSummarizeRequestUsage_NoRewriteSavingsLeavesCostNil(t *testing.T) {
+	summary := SummarizeRequestUsage([]UsageLogEntry{
+		{Provider: "openai", InputTokens: 100},
+	})
+	if summary == nil {
+		t.Fatal("expected non-nil summary")
+	}
+	if summary.RewriteTokensSaved != 0 {
+		t.Fatalf("RewriteTokensSaved = %d, want 0", summary.RewriteTokensSaved)
+	}
+	if summary.RewriteCostSaved != nil {
+		t.Fatalf("RewriteCostSaved = %v, want nil", summary.RewriteCostSaved)
+	}
+}
+
 func TestSummarizeRequestUsage_AnthropicSplitCacheAccounting(t *testing.T) {
 	summary := SummarizeRequestUsage([]UsageLogEntry{
 		{
