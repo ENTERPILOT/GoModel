@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 148 end-to-end curl scenarios for release validation.
+This file contains 162 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -64,6 +64,21 @@ Stateful note:
   and `do_not_pass` passthrough stripping need gateways booted with custom
   config plus a mock upstream, so they are covered by Go unit tests rather than
   this running-stack matrix
+- `S149`-`S154` are post-v0.1.48 provider regressions (DeepSeek, Ollama,
+  Fireworks through the shared OpenAI-compatible core); they are read-only and
+  rerunnable in any order. `S151`/`S152` need a local Ollama server with at
+  least one chat model and `S153`/`S154` need an active Fireworks account —
+  each prints a loud `SKIPPED:` line and exits 0 when its upstream dependency
+  is unavailable, and fails on any gateway-side problem
+- `S155`-`S159` exercise scoped rate limits (admin CRUD, user-path request and
+  token enforcement, model-scope saturation, auth gating); each creates
+  `$QA_SUFFIX`-scoped probe rules and deletes them, so they are
+  self-contained, but `S158` saturates `deepseek/deepseek-v4-flash` for up to
+  one minute after it runs
+- `S160`-`S162` exercise `/v1/conversations` CRUD, responses/conversations
+  persistence on the PostgreSQL and MongoDB backends, and the rewrite-savings
+  usage summary fields; they clean up after themselves and are rerunnable in
+  any order
 - IaC virtual-models behavior (declarative `VIRTUAL_MODELS`/`config.yaml`,
   managed read-only, env-over-YAML, startup validation) needs gateways launched
   with custom config, so it is covered by a standalone script rather than this
@@ -2957,16 +2972,16 @@ curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
   -d "{\"headers\":[{\"header\":\"$TAG_HDR_RAW\",\"prefix\":\"qa-\",\"do_not_pass\":true,\"delimiter\":\";\"},{\"header\":\"$TAG_HDR_RAW-b\"}]}" \
   | jq -e --arg h "$TAG_HDR" '
       ([.headers[] | select(.managed | not)] | length) == 2
-      and .headers[0].header == $h
+      and (.headers[0].header | ascii_downcase) == ($h | ascii_downcase)
       and .headers[0].prefix == "qa-"
       and .headers[0].do_not_pass == true
       and .headers[0].delimiter == ";"
-      and .headers[1].header == ($h + "-B")
+      and (.headers[1].header | ascii_downcase) == (($h + "-b") | ascii_downcase)
       and .headers[1].delimiter == ","
       and ((.headers[1].do_not_pass // false) == false)
     ' >/dev/null
 curl -fsS "$BASE_URL/admin/tagging/settings" \
-  | jq -e --arg h "$TAG_HDR" 'any(.headers[]; .header == $h and .do_not_pass == true)' >/dev/null
+  | jq -e --arg h "$TAG_HDR" 'any(.headers[]; (.header | ascii_downcase) == ($h | ascii_downcase) and .do_not_pass == true)' >/dev/null
 for BAD in \
   '{"headers":[{"header":"Authorization"}]}' \
   '{"headers":[{"header":"Cookie"}]}' \
@@ -3097,7 +3112,7 @@ for TARGET in "$PG_BASE_URL|pg" "$MONGO_BASE_URL|mongo"; do
   curl -fsS -X PUT "$URL/admin/tagging/settings" \
     -H 'Content-Type: application/json' \
     -d "{\"headers\":[{\"header\":\"$BACKEND_HDR\"}]}" \
-    | jq -e --arg h "$BACKEND_HDR" 'any(.headers[]; .header == $h)' >/dev/null
+    | jq -e --arg h "$BACKEND_HDR" 'any(.headers[]; (.header | ascii_downcase) == ($h | ascii_downcase))' >/dev/null
   curl -fsS "$URL/v1/chat/completions" -H 'Content-Type: application/json' \
     -H "X-Request-ID: $RID" \
     -H "$BACKEND_HDR: $TAG-check" \
@@ -3155,4 +3170,421 @@ curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/tagging/settings" 
   | jq -R -e '. == "401"' >/dev/null
 curl -fsS "$AUTH_BASE_URL/admin/tagging/settings" -H "$ADMIN_AUTH_HEADER" \
   | jq -e '.editable == true and ((.headers // []) | type == "array")' >/dev/null
+```
+
+## 20. Post-v0.1.48 provider regressions
+
+These scenarios cover providers rewired through the shared OpenAI-compatible
+core (`#486`) and the new Fireworks provider (`#475`). DeepSeek scenarios use
+`deepseek-v4-flash`, a reasoning model that needs a generous `max_tokens`
+budget before it emits final content.
+
+### S149 DeepSeek non-streaming chat
+
+Checks translated chat on DeepSeek through the shared OpenAI-compatible core.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s149.chat.json"
+curl -fsS "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_DEEPSEEK_OK"}],"max_tokens":2000}' \
+  > "$RESP_FILE"
+jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
+assert_chat_response_contains "$RESP_FILE" "deepseek" "QA_DEEPSEEK_OK"
+```
+
+### S150 DeepSeek streaming chat
+
+Checks SSE chat streaming and the final usage chunk on DeepSeek.
+
+```bash
+SSE_FILE="$QA_RUN_DIR/s150.chat.sse"
+curl -fsS --no-buffer "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"Reply with exactly QA_DEEPSEEK_STREAM_OK"}],"max_tokens":2000}' \
+  > "$SSE_FILE"
+sed -n '1,8p' "$SSE_FILE"
+assert_chat_stream_contains "$SSE_FILE" "QA_DEEPSEEK_STREAM_OK"
+assert_chat_stream_has_usage "$SSE_FILE"
+```
+
+### S151 Ollama local non-streaming chat
+
+Checks translated chat against a local Ollama server through the shared
+OpenAI-compatible core. Skips loudly when no Ollama models are registered
+(local server not running); any gateway-side failure still fails the scenario.
+
+```bash
+OLLAMA_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
+  | jq -r '[.data[].id | select(startswith("ollama/"))] | (map(select(endswith("qwen3:8b"))) + .)[0] // empty')
+if [ -z "$OLLAMA_MODEL" ]; then
+  echo "SKIPPED: no ollama models are registered (local Ollama server unavailable)" >&2
+  exit 0
+fi
+RESP_FILE="$QA_RUN_DIR/s151.chat.json"
+curl -fsS "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$OLLAMA_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_OLLAMA_OK and nothing else. /no_think\"}],\"max_tokens\":600}" \
+  > "$RESP_FILE"
+jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
+assert_chat_response_contains "$RESP_FILE" "ollama" "QA_OLLAMA_OK"
+```
+
+### S152 Ollama local streaming chat
+
+Checks SSE chat streaming and the final usage chunk against local Ollama.
+
+```bash
+OLLAMA_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
+  | jq -r '[.data[].id | select(startswith("ollama/"))] | (map(select(endswith("qwen3:8b"))) + .)[0] // empty')
+if [ -z "$OLLAMA_MODEL" ]; then
+  echo "SKIPPED: no ollama models are registered (local Ollama server unavailable)" >&2
+  exit 0
+fi
+SSE_FILE="$QA_RUN_DIR/s152.chat.sse"
+curl -fsS --no-buffer "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$OLLAMA_MODEL\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_OLLAMA_STREAM_OK and nothing else. /no_think\"}],\"max_tokens\":600}" \
+  > "$SSE_FILE"
+sed -n '1,8p' "$SSE_FILE"
+assert_chat_stream_contains "$SSE_FILE" "QA_OLLAMA_STREAM_OK"
+assert_chat_stream_has_usage "$SSE_FILE"
+```
+
+### S153 Fireworks non-streaming chat
+
+Checks translated chat on the Fireworks provider. The provider must always be
+registered; when the upstream account itself is unavailable (suspension,
+billing) the scenario skips loudly instead of failing the release gate on an
+external billing state.
+
+```bash
+STATUS_FILE="$QA_RUN_DIR/s153.fireworks-status.json"
+curl -fsS "$BASE_URL/admin/providers/status" > "$STATUS_FILE"
+jq -e '.providers[] | select(.name == "fireworks") | .runtime.registered == true' "$STATUS_FILE" >/dev/null
+if jq -e '.providers[] | select(.name == "fireworks") | (.status != "healthy") and ((.last_error // "") | test("suspend|billing|payment|quota"; "i"))' "$STATUS_FILE" >/dev/null; then
+  echo "SKIPPED: fireworks upstream account is unavailable (billing/suspension)" >&2
+  exit 0
+fi
+FIREWORKS_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
+  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("llama-v3p1-8b-instruct$"))) + .)[0]')
+RESP_FILE="$QA_RUN_DIR/s153.chat.json"
+curl -fsS "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$FIREWORKS_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_FIREWORKS_OK\"}],\"max_tokens\":40}" \
+  > "$RESP_FILE"
+jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
+assert_chat_response_contains "$RESP_FILE" "fireworks" "QA_FIREWORKS_OK"
+```
+
+### S154 Fireworks streaming chat
+
+Checks SSE chat streaming and the final usage chunk on Fireworks, with the
+same loud skip when the upstream account is unavailable.
+
+```bash
+STATUS_FILE="$QA_RUN_DIR/s154.fireworks-status.json"
+curl -fsS "$BASE_URL/admin/providers/status" > "$STATUS_FILE"
+jq -e '.providers[] | select(.name == "fireworks") | .runtime.registered == true' "$STATUS_FILE" >/dev/null
+if jq -e '.providers[] | select(.name == "fireworks") | (.status != "healthy") and ((.last_error // "") | test("suspend|billing|payment|quota"; "i"))' "$STATUS_FILE" >/dev/null; then
+  echo "SKIPPED: fireworks upstream account is unavailable (billing/suspension)" >&2
+  exit 0
+fi
+FIREWORKS_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
+  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("llama-v3p1-8b-instruct$"))) + .)[0]')
+SSE_FILE="$QA_RUN_DIR/s154.chat.sse"
+curl -fsS --no-buffer "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$FIREWORKS_MODEL\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_FIREWORKS_STREAM_OK\"}],\"max_tokens\":40}" \
+  > "$SSE_FILE"
+sed -n '1,8p' "$SSE_FILE"
+assert_chat_stream_contains "$SSE_FILE" "QA_FIREWORKS_STREAM_OK"
+assert_chat_stream_has_usage "$SSE_FILE"
+```
+
+## 21. Scoped rate limits
+
+These scenarios cover the scoped rate-limit feature (`#482`): admin CRUD with
+validation, user-path request and token enforcement, model-scope saturation,
+and auth gating. Rules created here are deleted at the end of each scenario.
+
+### S155 Rate limit admin CRUD and validation
+
+Creates a harmless high provider-scope rule, verifies it is listed, checks
+three validation negatives, and deletes the rule.
+
+```bash
+RULES_FILE="$QA_RUN_DIR/s155.rules.json"
+curl -fsS -X PUT "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":"provider","subject":"openai","limit_key":{"period":"hour"},"max_requests":100000}' \
+  > "$RULES_FILE"
+jq -e '
+  any(.rate_limits[]?; .scope == "provider" and .subject == "openai" and .period_seconds == 3600 and .max_requests == 100000 and .source == "manual")
+  and (.server_time | type == "string")
+' "$RULES_FILE" >/dev/null
+
+BODY_FILE="$QA_RUN_DIR/s155.negative.json"
+curl -sS -o "$BODY_FILE" -w '%{http_code}' -X PUT "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":"provider","subject":"openai","max_requests":10}' \
+  | jq -R -e '. == "400"' >/dev/null
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("limit_key"))' "$BODY_FILE" >/dev/null
+
+curl -sS -o "$BODY_FILE" -w '%{http_code}' -X PUT "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":"provider","subject":"openai","user_path":"/qa/conflict","limit_key":{"period":"hour"},"max_requests":10}' \
+  | jq -R -e '. == "400"' >/dev/null
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("user_path"))' "$BODY_FILE" >/dev/null
+
+curl -sS -o "$BODY_FILE" -w '%{http_code}' -X PUT "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":"provider","subject":"openai","limit_key":{"period":"hour","period_seconds":60},"max_requests":10}' \
+  | jq -R -e '. == "400"' >/dev/null
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("period"))' "$BODY_FILE" >/dev/null
+
+curl -fsS -X DELETE "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":"provider","subject":"openai","limit_key":{"period":"hour"}}' \
+  | jq -e 'all(.rate_limits[]?; (.scope == "provider" and .subject == "openai" and .period_seconds == 3600) | not)' >/dev/null
+```
+
+### S156 User-path request limit enforcement
+
+Creates a one-request-per-minute rule on a QA path, verifies the first request
+passes with `x-ratelimit-*` headers, the second returns `429` with
+`Retry-After` and `code: rate_limit_exceeded`, and that `reset-one` unblocks
+the path again.
+
+```bash
+RL_PATH="/qa/ratelimit/requests/$QA_SUFFIX"
+HEADERS_FILE="$QA_RUN_DIR/s156.headers"
+BODY_FILE="$QA_RUN_DIR/s156.body.json"
+
+curl -fsS -X PUT "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"minute\"},\"max_requests\":1}" \
+  | jq -e --arg p "$RL_PATH" 'any(.rate_limits[]?; .scope == "user_path" and .user_path == $p and .max_requests == 1)' >/dev/null
+
+curl -fsS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_FIRST_OK"}],"max_tokens":20}'
+assert_chat_response_contains "$BODY_FILE" "openai" "QA_RL_FIRST_OK"
+grep -Eiq '^x-ratelimit-limit-requests: *1' "$HEADERS_FILE"
+grep -Eiq '^x-ratelimit-remaining-requests: *0' "$HEADERS_FILE"
+grep -Eiq '^x-ratelimit-reset-requests: *[0-9]+' "$HEADERS_FILE"
+
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -w '%{http_code}' "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_BLOCKED"}],"max_tokens":20}' \
+  | jq -R -e '. == "429"' >/dev/null
+grep -Eiq '^Retry-After: *[0-9]+' "$HEADERS_FILE"
+jq -e '.error.type == "rate_limit_error" and .error.code == "rate_limit_exceeded" and (.error.message | test("request limit"))' "$BODY_FILE" >/dev/null
+
+curl -fsS -X POST "$BASE_URL/admin/rate-limits/reset-one" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"period\":\"minute\"}" >/dev/null
+curl -fsS -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_RESET_OK"}],"max_tokens":20}'
+assert_chat_response_contains "$BODY_FILE" "openai" "QA_RL_RESET_OK"
+
+curl -fsS -X DELETE "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"minute\"}}" \
+  | jq -e --arg p "$RL_PATH" 'all(.rate_limits[]?; .user_path != $p)' >/dev/null
+```
+
+### S157 User-path token limit is post-accounted from usage
+
+Creates a one-token-per-minute rule, verifies the first request passes (token
+windows admit while the window has remaining budget and are charged from usage
+entries afterwards), waits for the charge to land on the rule counters, and
+verifies the next request is blocked with token rate-limit headers.
+
+```bash
+RL_PATH="/qa/ratelimit/tokens/$QA_SUFFIX"
+HEADERS_FILE="$QA_RUN_DIR/s157.headers"
+BODY_FILE="$QA_RUN_DIR/s157.body.json"
+RULES_FILE="$QA_RUN_DIR/s157.rules.json"
+
+curl -fsS -X PUT "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"minute\"},\"max_tokens\":1}" \
+  | jq -e --arg p "$RL_PATH" 'any(.rate_limits[]?; .scope == "user_path" and .user_path == $p and .max_tokens == 1)' >/dev/null
+
+curl -fsS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_TOKENS_OK"}],"max_tokens":20}'
+assert_chat_response_contains "$BODY_FILE" "openai" "QA_RL_TOKENS_OK"
+grep -Eiq '^x-ratelimit-limit-tokens: *1' "$HEADERS_FILE"
+
+for _ in $(seq 1 20); do
+  curl -fsS "$BASE_URL/admin/rate-limits" > "$RULES_FILE"
+  if jq -e --arg p "$RL_PATH" 'any(.rate_limits[]?; .user_path == $p and .tokens_used > 0)' "$RULES_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg p "$RL_PATH" 'any(.rate_limits[]?; .user_path == $p and .tokens_used > 0)' "$RULES_FILE" >/dev/null
+
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -w '%{http_code}' "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_TOKENS_BLOCKED"}],"max_tokens":20}' \
+  | jq -R -e '. == "429"' >/dev/null
+grep -Eiq '^Retry-After: *[0-9]+' "$HEADERS_FILE"
+grep -Eiq '^x-ratelimit-remaining-tokens: *0' "$HEADERS_FILE"
+jq -e '.error.type == "rate_limit_error" and .error.code == "rate_limit_exceeded" and (.error.message | test("token"))' "$BODY_FILE" >/dev/null
+
+curl -fsS -X DELETE "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"minute\"}}" \
+  | jq -e --arg p "$RL_PATH" 'all(.rate_limits[]?; .user_path != $p)' >/dev/null
+```
+
+### S158 Model-scope saturation returns 429 without alternatives
+
+Pins `deepseek/deepseek-v4-flash` to one request per minute; the second direct
+request has no alternative provider for the model and must be rejected with
+`429` instead of routed elsewhere. Leaves the model saturated for up to one
+minute after the scenario runs.
+
+```bash
+BODY_FILE="$QA_RUN_DIR/s158.body.json"
+
+curl -fsS -X PUT "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":"model","subject":"deepseek/deepseek-v4-flash","limit_key":{"period":"minute"},"max_requests":1}' \
+  | jq -e 'any(.rate_limits[]?; .scope == "model" and .subject == "deepseek/deepseek-v4-flash" and .max_requests == 1)' >/dev/null
+
+curl -fsS -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_RL_MODEL_OK"}],"max_tokens":2000}'
+assert_chat_response_contains "$BODY_FILE" "deepseek" "QA_RL_MODEL_OK"
+
+curl -sS -o "$BODY_FILE" -w '%{http_code}' "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_RL_MODEL_BLOCKED"}],"max_tokens":2000}' \
+  | jq -R -e '. == "429"' >/dev/null
+jq -e '.error.type == "rate_limit_error" and .error.code == "rate_limit_exceeded"' "$BODY_FILE" >/dev/null
+
+curl -fsS -X DELETE "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":"model","subject":"deepseek/deepseek-v4-flash","limit_key":{"period":"minute"}}' \
+  | jq -e 'all(.rate_limits[]?; .subject != "deepseek/deepseek-v4-flash")' >/dev/null
+```
+
+### S159 Rate limit admin requires authentication
+
+On the auth-enabled gateway the rate-limit admin endpoints are gated behind
+the master key.
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/rate-limits" \
+  | jq -R -e '. == "401"' >/dev/null
+curl -fsS "$AUTH_BASE_URL/admin/rate-limits" -H "$ADMIN_AUTH_HEADER" \
+  | jq -e '(.rate_limits | type == "array") and (.server_time | type == "string")' >/dev/null
+```
+
+## 22. Responses and conversations persistence
+
+These scenarios cover `/v1/conversations` CRUD and the persistence of
+responses/conversations snapshots to the configured storage backend (`#488`),
+plus the rewrite-savings usage summary fields (`#481`).
+
+### S160 Conversations lifecycle CRUD
+
+Creates a conversation with seed items and metadata, reads it back, updates
+the metadata, deletes it, and verifies the read-after-delete returns `404`.
+
+```bash
+CONV_FILE="$QA_RUN_DIR/s160.conversation.json"
+curl -fsS -X POST "$BASE_URL/v1/conversations" \
+  -H 'Content-Type: application/json' \
+  -d "{\"metadata\":{\"suite\":\"qa-release-$QA_SUFFIX\"},\"items\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"qa conversation seed\"}]}]}" \
+  > "$CONV_FILE"
+jq '.' "$CONV_FILE"
+jq -e --arg suite "qa-release-$QA_SUFFIX" '
+  .object == "conversation"
+  and (.id | type == "string" and startswith("conv_"))
+  and (.created_at | type == "number")
+  and .metadata.suite == $suite
+' "$CONV_FILE" >/dev/null
+CONV_ID=$(jq -er '.id' "$CONV_FILE")
+
+curl -fsS "$BASE_URL/v1/conversations/$CONV_ID" \
+  | jq -e --arg id "$CONV_ID" --arg suite "qa-release-$QA_SUFFIX" '.id == $id and .object == "conversation" and .metadata.suite == $suite' >/dev/null
+
+curl -fsS -X POST "$BASE_URL/v1/conversations/$CONV_ID" \
+  -H 'Content-Type: application/json' \
+  -d "{\"metadata\":{\"suite\":\"qa-release-$QA_SUFFIX-updated\"}}" \
+  | jq -e --arg suite "qa-release-$QA_SUFFIX-updated" '.metadata.suite == $suite' >/dev/null
+
+curl -fsS -X DELETE "$BASE_URL/v1/conversations/$CONV_ID" \
+  | jq -e --arg id "$CONV_ID" '.id == $id and .object == "conversation.deleted" and .deleted == true' >/dev/null
+
+BODY_FILE="$QA_RUN_DIR/s160.after-delete.json"
+curl -sS -o "$BODY_FILE" -w '%{http_code}' "$BASE_URL/v1/conversations/$CONV_ID" \
+  | jq -R -e '. == "404"' >/dev/null
+jq -e '.error.type == "not_found_error"' "$BODY_FILE" >/dev/null
+```
+
+### S161 Responses and conversations persist on PostgreSQL and MongoDB
+
+Creates a stored response and a conversation on the PostgreSQL and MongoDB
+gateways, reads both back, and cleans up. This covers the persistent
+responses/conversations stores added for the non-SQLite backends.
+
+```bash
+for TARGET in "$PG_BASE_URL|pg" "$MONGO_BASE_URL|mongo"; do
+  URL="${TARGET%%|*}"
+  TAG="${TARGET##*|}"
+
+  CONV_ID=$(curl -fsS -X POST "$URL/v1/conversations" \
+    -H 'Content-Type: application/json' \
+    -d "{\"metadata\":{\"backend\":\"$TAG-$QA_SUFFIX\"}}" | jq -er '.id')
+
+  RESP_FILE="$QA_RUN_DIR/s161.$TAG.response.json"
+  curl -fsS "$URL/v1/responses" \
+    -H 'Content-Type: application/json' \
+    -d "{\"model\":\"gpt-4.1-nano\",\"input\":\"Reply with exactly QA_PERSIST_${TAG}_OK\",\"max_output_tokens\":20}" \
+    > "$RESP_FILE"
+  assert_responses_response_contains "$RESP_FILE" "openai" "QA_PERSIST_${TAG}_OK"
+  RESP_ID=$(jq -er '.id' "$RESP_FILE")
+
+  curl -fsS "$URL/v1/conversations/$CONV_ID" \
+    | jq -e --arg b "$TAG-$QA_SUFFIX" '.object == "conversation" and .metadata.backend == $b' >/dev/null
+  curl -fsS "$URL/v1/responses/$RESP_ID" > "$RESP_FILE.retrieved"
+  jq -e --arg id "$RESP_ID" --arg marker "QA_PERSIST_${TAG}_OK" '
+    .id == $id and .object == "response" and .status == "completed"
+    and any(.output[]?.content[]?; .type == "output_text" and (.text | contains($marker)))
+  ' "$RESP_FILE.retrieved" >/dev/null
+
+  curl -fsS -X DELETE "$URL/v1/responses/$RESP_ID" \
+    | jq -e --arg id "$RESP_ID" '.id == $id and .object == "response.deleted" and .deleted == true' >/dev/null
+  curl -fsS -X DELETE "$URL/v1/conversations/$CONV_ID" \
+    | jq -e --arg id "$CONV_ID" '.id == $id and .deleted == true' >/dev/null
+done
+```
+
+### S162 Usage summary exposes rewrite savings fields
+
+The usage summary carries the rewrite-savings aggregates on every storage
+backend; without a registered request rewriter the token counter is zero.
+
+```bash
+for URL in "$BASE_URL" "$PG_BASE_URL" "$MONGO_BASE_URL"; do
+  curl -fsS "$URL/admin/usage/summary" \
+    | jq -e '
+        has("rewrite_tokens_saved")
+        and (.rewrite_tokens_saved | type == "number")
+        and (.rewrite_tokens_saved >= 0)
+        and has("rewrite_cost_saved")
+      ' >/dev/null
+done
 ```

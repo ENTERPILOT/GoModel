@@ -160,7 +160,11 @@ All matching rules are checked; the first exhausted limit rejects the request.
 A saturated provider or model behaves like one with stale inventory:
 
 - **Virtual-model load balancing** skips the saturated target and picks the
-  next available one, so an alias with several targets keeps serving.
+  next available one, so an alias with several targets keeps serving. When
+  every target is saturated, the alias resolves to its first target anyway so
+  the client gets the honest `429` with `Retry-After` (or failover takes
+  over) rather than an unavailable-model error, and the alias stays listed
+  in `/v1/models` throughout.
 - **Failover rules** take over for a saturated primary route: the primary
   provider is never called (it would happily serve the request and defeat the
   limit), the sweep starts immediately, and rate-saturated candidates are

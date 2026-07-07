@@ -16,6 +16,7 @@ import (
 const (
 	EventAuditStarted   = auditlog.LiveEventAuditStarted
 	EventAuditUpdated   = auditlog.LiveEventAuditUpdated
+	EventAuditStream    = auditlog.LiveEventAuditStream
 	EventAuditCompleted = auditlog.LiveEventAuditCompleted
 	EventAuditFailed    = auditlog.LiveEventAuditFailed
 	EventAuditFlushed   = auditlog.LiveEventAuditFlushed
@@ -137,6 +138,18 @@ func (b *Broker) Enabled() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return !b.closed
+}
+
+// HasLiveSubscribers reports whether any dashboard stream is currently
+// connected. Publishers of high-frequency preview events use it to skip
+// building payloads nobody would receive.
+func (b *Broker) HasLiveSubscribers() bool {
+	if b == nil || !b.enabled {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return !b.closed && len(b.subscribers) > 0
 }
 
 // Heartbeat returns the stream heartbeat interval.
@@ -504,8 +517,10 @@ func (b *Broker) PublishAuditEvent(eventType string, entry *auditlog.LogEntry) {
 }
 
 // stripAuditPreviewBodies returns a preview copy without request/response
-// bodies, marking each stripped body as captured. Reports whether anything was
-// stripped.
+// bodies, marking each stripped body as captured. A partial (mid-stream)
+// response body is not marked captured — it is not in the persisted entry —
+// and the partial flag itself is dropped so it cannot go stale in merged
+// active snapshots. Reports whether anything was stripped.
 func stripAuditPreviewBodies(preview auditPreview) (auditPreview, bool) {
 	if preview.Data == nil || (preview.Data.RequestBody == nil && preview.Data.ResponseBody == nil) {
 		return preview, false
@@ -517,8 +532,9 @@ func stripAuditPreviewBodies(preview auditPreview) (auditPreview, bool) {
 	}
 	if data.ResponseBody != nil {
 		data.ResponseBody = nil
-		data.ResponseBodyCaptured = true
+		data.ResponseBodyCaptured = !data.ResponseBodyPartial
 	}
+	data.ResponseBodyPartial = false
 	preview.Data = &data
 	return preview, true
 }
@@ -532,7 +548,7 @@ func compactAuditPreviewForRetention(preview auditPreview) auditPreview {
 	}
 	preview.Data = &auditPreviewData{
 		RequestBodyCaptured:        preview.Data.RequestBody != nil,
-		ResponseBodyCaptured:       preview.Data.ResponseBody != nil,
+		ResponseBodyCaptured:       preview.Data.ResponseBody != nil && !preview.Data.ResponseBodyPartial,
 		RequestBodyTooBigToHandle:  preview.Data.RequestBodyTooBigToHandle,
 		ResponseBodyTooBigToHandle: preview.Data.ResponseBodyTooBigToHandle,
 	}
@@ -592,6 +608,11 @@ type auditPreviewData struct {
 	ResponseBody               any                                `json:"response_body,omitempty"`
 	RequestBodyTooBigToHandle  bool                               `json:"request_body_too_big_to_handle,omitempty"`
 	ResponseBodyTooBigToHandle bool                               `json:"response_body_too_big_to_handle,omitempty"`
+	// ResponseBodyPartial marks a response body still being reconstructed from
+	// a running stream (audit.stream events). Set only on fan-out copies; the
+	// flag is cleared when bodies are stripped for retention so it cannot go
+	// stale in merged active snapshots.
+	ResponseBodyPartial bool `json:"response_body_partial,omitempty"`
 	// RequestBodyCaptured/ResponseBodyCaptured mark replay copies whose bodies
 	// were stripped from broker retention; the persisted audit entry has them.
 	RequestBodyCaptured  bool `json:"request_body_captured,omitempty"`
@@ -650,6 +671,11 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 			data.RequestBody = entry.Data.RequestBody
 			data.RequestBodyTooBigToHandle = entry.Data.RequestBodyTooBigToHandle
 		}
+		if auditPreviewIncludesLiveResponseBody(eventType) {
+			data.ResponseBody = entry.Data.ResponseBody
+			data.ResponseBodyPartial = entry.Data.ResponseBody != nil
+			data.ResponseBodyTooBigToHandle = entry.Data.ResponseBodyTooBigToHandle
+		}
 		if auditPreviewIncludesCapturedData(eventType) {
 			data.UserAgent = entry.Data.UserAgent
 			data.APIKeyHash = entry.Data.APIKeyHash
@@ -679,6 +705,14 @@ func auditPreviewIncludesLiveRequestBody(eventType string) bool {
 	return eventType == EventAuditUpdated
 }
 
+// auditPreviewIncludesLiveResponseBody reports event types that carry the
+// in-flight partial response body. Deliberately not audit.updated: metadata
+// updates would otherwise fan out heavy handler-set bodies (e.g. audio)
+// mid-request that completion events deliver anyway.
+func auditPreviewIncludesLiveResponseBody(eventType string) bool {
+	return eventType == EventAuditStream
+}
+
 func auditPreviewIncludesCapturedData(eventType string) bool {
 	return eventType == EventAuditCompleted || eventType == EventAuditFlushed || eventType == EventAuditFailed
 }
@@ -698,6 +732,7 @@ func (d auditPreviewData) hasValues() bool {
 		d.ResponseBody != nil ||
 		d.RequestBodyTooBigToHandle ||
 		d.ResponseBodyTooBigToHandle ||
+		d.ResponseBodyPartial ||
 		d.RequestBodyCaptured ||
 		d.ResponseBodyCaptured ||
 		len(d.Attempts) > 0

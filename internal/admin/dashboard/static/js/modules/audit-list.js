@@ -321,6 +321,10 @@
                 if (liveState === 'audit.completed' || liveState === 'audit.flushed' || liveState === 'audit.detail') {
                     return false;
                 }
+                // A partial response body means the stream is still running,
+                // regardless of the other completion signals (streamed entries
+                // carry status 200 from the moment headers were committed).
+                if (entry._response_partial) return true;
                 if (entry.status_code !== null && entry.status_code !== undefined && entry.status_code !== '') return false;
                 if (Number(entry.duration_ns || 0) > 0) return false;
                 if (entry.error_type || entry.error_message) return false;
@@ -537,6 +541,17 @@
                     : [];
             },
 
+            // auditRevisionPercentLabel renders how much of the request body
+            // this revision removed (e.g. "-44%"), or '' when sizes are
+            // missing or the revision didn't shrink the body.
+            auditRevisionPercentLabel(revision) {
+                const before = Number(revision && revision.bytes_before);
+                const after = Number(revision && revision.bytes_after);
+                if (!Number.isFinite(before) || !Number.isFinite(after) || before <= 0 || after >= before) return '';
+                const pct = (1 - after / before) * 100;
+                return '-' + (pct >= 10 ? String(Math.round(pct)) : pct.toFixed(1)) + '%';
+            },
+
             // auditRequestRevisionPane renders one ingress rewrite: a structured
             // summary of what the rewriter changed plus the rewritten body when
             // it was captured. The original client request stays on the Request
@@ -558,6 +573,7 @@
                     direction: 'request',
                     seq: single ? 0 : Number(revision && revision.seq || 0),
                     kind: (revision && revision.rewriter) ? String(revision.rewriter) : '',
+                    savingsLabel: this.auditRevisionPercentLabel(revision),
                     layout: 'split',
                     entry,
                     copyHeaders: summary,
@@ -692,6 +708,8 @@
 
             auditRequestPane(entry) {
                 const data = entry && entry.data ? entry.data : null;
+                const empty = !data || (!data.request_headers && !data.request_body);
+                const pending = empty && this.auditEntryLiveInProgress(entry);
 
                 return {
                     title: 'Request',
@@ -708,8 +726,10 @@
                     body: data && data.request_body,
                     bodyCacheRatioLabel: this.auditCacheRatioPillLabel(entry),
                     promptCacheHighlight: this.auditPromptCacheHighlight(entry),
-                    showEmpty: !data || (!data.request_headers && !data.request_body),
+                    showEmpty: empty && !pending,
                     emptyMessage: 'Request details were not captured.',
+                    showPending: pending,
+                    pendingMessage: 'Waiting for request data…',
                     showTooLarge: !!(data && data.request_body_too_big_to_handle),
                     tooLargeMessage: 'Request body was too large to capture.'
                 };
@@ -718,6 +738,8 @@
             auditResponsePane(entry) {
                 const data = entry && entry.data ? entry.data : null;
                 const errorMessage = this.auditEntryErrorMessage(entry);
+                const empty = !data || (!errorMessage && !data.response_headers && !data.response_body);
+                const pending = empty && this.auditEntryLiveInProgress(entry);
 
                 return {
                     title: 'Response',
@@ -732,8 +754,12 @@
                     headers: data && data.response_headers,
                     showBody: !!(data && data.response_body),
                     body: data && data.response_body,
-                    showEmpty: !data || (!errorMessage && !data.response_headers && !data.response_body),
+                    streaming: !!(entry && entry._response_partial && data && data.response_body) &&
+                        this.auditEntryLiveInProgress(entry),
+                    showEmpty: empty && !pending,
                     emptyMessage: 'Response details were not captured.',
+                    showPending: pending,
+                    pendingMessage: 'Response in progress…',
                     showTooLarge: !!(data && data.response_body_too_big_to_handle),
                     tooLargeMessage: 'Response body was too large to capture.'
                 };

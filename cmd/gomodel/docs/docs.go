@@ -247,6 +247,63 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/audit/stats": {
+            "get": {
+                "description": "Returns request counts grouped into 2xx/4xx/5xx status classes\nper time bucket, an overall success-rate summary, and average\nrequest duration per provider for the dashboard charts.\nRanges up to 3 days use hourly buckets, longer ranges daily.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get time-bucketed request status and latency stats",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auditlog.RequestStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/budgets": {
             "get": {
                 "produces": [
@@ -6133,6 +6190,26 @@ const docTemplate = `{
                 }
             }
         },
+        "auditlog.ProviderLatencySeries": {
+            "type": "object",
+            "properties": {
+                "avg_duration_ms": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "requests": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
         "auditlog.RequestRevisionSnapshot": {
             "type": "object",
             "properties": {
@@ -6153,6 +6230,78 @@ const docTemplate = `{
                 },
                 "seq": {
                     "type": "integer"
+                }
+            }
+        },
+        "auditlog.RequestStats": {
+            "type": "object",
+            "properties": {
+                "buckets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auditlog.RequestStatsBucket"
+                    }
+                },
+                "interval": {
+                    "type": "string"
+                },
+                "provider_latency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auditlog.ProviderLatencySeries"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/auditlog.RequestStatsSummary"
+                }
+            }
+        },
+        "auditlog.RequestStatsBucket": {
+            "type": "object",
+            "properties": {
+                "requests": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "string"
+                },
+                "status_2xx": {
+                    "type": "integer"
+                },
+                "status_4xx": {
+                    "type": "integer"
+                },
+                "status_5xx": {
+                    "type": "integer"
+                },
+                "status_other": {
+                    "type": "integer"
+                }
+            }
+        },
+        "auditlog.RequestStatsSummary": {
+            "type": "object",
+            "properties": {
+                "avg_duration_ms": {
+                    "type": "number"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "status_2xx": {
+                    "type": "integer"
+                },
+                "status_4xx": {
+                    "type": "integer"
+                },
+                "status_5xx": {
+                    "type": "integer"
+                },
+                "status_other": {
+                    "type": "integer"
+                },
+                "success_rate": {
+                    "type": "number"
                 }
             }
         },

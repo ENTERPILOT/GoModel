@@ -47,6 +47,7 @@ const (
 const (
 	LiveEventAuditStarted   = "audit.started"
 	LiveEventAuditUpdated   = "audit.updated"
+	LiveEventAuditStream    = "audit.stream"
 	LiveEventAuditCompleted = "audit.completed"
 	LiveEventAuditFailed    = "audit.failed"
 	LiveEventAuditFlushed   = "audit.flushed"
@@ -65,6 +66,13 @@ type LiveEventPublisher interface {
 // previews before the entry is persisted.
 type LiveEventEmitter interface {
 	PublishLiveEvent(eventType string, entry *LogEntry)
+}
+
+// LiveSubscriberReporter is optionally implemented by live publishers (and
+// emitters) that can report whether any dashboard subscriber is currently
+// connected. Publishers that cannot tell are treated as always subscribed.
+type LiveSubscriberReporter interface {
+	HasLiveSubscribers() bool
 }
 
 // LogEntry represents a single audit log entry.
@@ -184,6 +192,11 @@ type RequestRevisionSnapshot struct {
 	Rewriter    string `json:"rewriter" bson:"rewriter"`
 	BytesBefore int    `json:"bytes_before" bson:"bytes_before"`
 	BytesAfter  int    `json:"bytes_after" bson:"bytes_after"`
+
+	// TokensSaved is the rewriter-reported estimate of prompt tokens this
+	// revision saved (e.g. token compression); zero when the rewriter does
+	// not report savings.
+	TokensSaved int `json:"tokens_saved,omitempty" bson:"tokens_saved,omitempty"`
 
 	// Body is the request body after this revision (parsed JSON, or a string
 	// when not valid JSON). Populated only when body logging is enabled and

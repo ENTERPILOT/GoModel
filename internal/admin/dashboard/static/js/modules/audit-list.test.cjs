@@ -91,6 +91,67 @@ test('auditResponsePane returns the shared response-pane contract', () => {
     assert.equal(pane.tooLargeMessage, 'Response body was too large to capture.');
 });
 
+test('auditEntryLiveInProgress stays true while a partial response body is streaming', () => {
+    const module = createAuditListModule();
+    const streaming = {
+        _live: true,
+        _live_pending: true,
+        _live_state: 'audit.stream',
+        _response_partial: true,
+        status_code: 200,
+        data: { response_body: { choices: [] } }
+    };
+
+    assert.equal(module.auditEntryLiveInProgress(streaming), true);
+    assert.equal(module.auditEntryLiveInProgress({
+        ...streaming,
+        _live_state: 'audit.completed',
+        _response_partial: false,
+        duration_ns: 1000
+    }), false);
+});
+
+test('audit panes surface pending spinners and streaming badges for live rows', () => {
+    const module = createAuditListModule();
+
+    const waiting = { _live: true, _live_pending: true, _live_state: 'audit.updated', data: {} };
+    const waitingResponse = module.auditResponsePane(waiting);
+    assert.equal(waitingResponse.showPending, true);
+    assert.equal(waitingResponse.showEmpty, false);
+    assert.equal(waitingResponse.pendingMessage, 'Response in progress…');
+    const waitingRequest = module.auditRequestPane(waiting);
+    assert.equal(waitingRequest.showPending, true);
+    assert.equal(waitingRequest.showEmpty, false);
+    assert.equal(waitingRequest.pendingMessage, 'Waiting for request data…');
+
+    const streaming = {
+        _live: true,
+        _live_pending: true,
+        _live_state: 'audit.stream',
+        _response_partial: true,
+        status_code: 200,
+        data: { response_body: { choices: [{ index: 0, message: { role: 'assistant', content: 'partial' } }] } }
+    };
+    const streamingPane = module.auditResponsePane(streaming);
+    assert.equal(streamingPane.streaming, true);
+    assert.equal(streamingPane.showBody, true);
+    assert.equal(streamingPane.showPending, false);
+
+    // A stale partial flag on an already-settled entry must not keep the badge.
+    const settled = {
+        ...streaming,
+        _live_state: 'audit.completed',
+        duration_ns: 1000
+    };
+    assert.equal(module.auditResponsePane(settled).streaming, false);
+
+    const persisted = { data: {} };
+    const persistedPane = module.auditResponsePane(persisted);
+    assert.equal(persistedPane.showPending, false);
+    assert.equal(persistedPane.showEmpty, true);
+    assert.equal(persistedPane.streaming, false);
+});
+
 test('audit cache helpers summarize cached prompt usage and derive a preview from the request body', () => {
     const module = createAuditListModule({
         window: {
@@ -894,6 +955,7 @@ test('auditPanes inserts request revision tabs between request and response', ()
     assert.equal(pane.headersTitle, 'What changed');
     assert.equal(pane.headers.bytes, '1572 → 1249');
     assert.equal(pane.headers.detail.tokens_saved_estimate, 89);
+    assert.equal(pane.savingsLabel, '-21%');
     assert.equal(pane.showBody, true);
     assert.equal(pane.showTooLarge, false);
 
@@ -906,6 +968,18 @@ test('auditPanes inserts request revision tabs between request and response', ()
     entry.data.request_revisions = [revision, { ...revision, seq: 2 }];
     assert.equal(module.auditPanes(entry).map((p) => p.id).join(','), 'request,revision-1,revision-2,response');
     assert.equal(module.auditRequestRevisionPane(entry, revision).seq, 1);
+});
+
+test('auditRevisionPercentLabel reports the share of the body removed', () => {
+    const module = createAuditListModule();
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 1572, bytes_after: 1249 }), '-21%');
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 1000, bytes_after: 560 }), '-44%');
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 1000, bytes_after: 954 }), '-4.6%');
+    // Missing sizes or a revision that grew the body renders no percent.
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 0, bytes_after: 10 }), '');
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 100, bytes_after: 120 }), '');
+    assert.equal(module.auditRevisionPercentLabel({}), '');
+    assert.equal(module.auditRevisionPercentLabel(null), '');
 });
 
 test('entries without revisions render no revision tabs', () => {

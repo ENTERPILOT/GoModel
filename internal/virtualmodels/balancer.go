@@ -42,22 +42,46 @@ func (r *roundRobin) prune(active map[string]redirectEntry) {
 // supports. It reports false when no target is available.
 func (s *Service) balancedResolution(entry redirectEntry) (core.ModelSelector, bool) {
 	supported := entry.supportedTargets(s.catalog)
-	switch len(supported) {
-	case 0:
+	if len(supported) == 0 {
 		return core.ModelSelector{}, false
-	case 1:
-		// A single live target needs no strategy and must not advance round-robin
-		// state, so an alias and a one-target-available redirect behave identically.
-		return supported[0].selector, true
+	}
+	// Prefer targets with live rate-limit capacity. When every live target is
+	// saturated, fall back to the first declared one: the request then reaches
+	// admission and receives an honest 429 with Retry-After (or defers to
+	// failover) instead of the all-targets-down error path.
+	pool := s.targetsWithCapacity(supported)
+	if len(pool) == 0 {
+		pool = supported[:1]
+	}
+	if len(pool) == 1 {
+		// A single viable target needs no strategy and must not advance
+		// round-robin state, so an alias and a one-target-available redirect
+		// behave identically.
+		return pool[0].selector, true
 	}
 
 	switch normalizeStrategy(entry.strategy) {
 	case StrategyCost:
-		return s.cheapestTarget(supported).selector, true
+		return s.cheapestTarget(pool).selector, true
 	default: // StrategyRoundRobin
-		index := weightedIndex(supported, s.balancer.next(entry.vm.Source))
-		return supported[index].selector, true
+		index := weightedIndex(pool, s.balancer.next(entry.vm.Source))
+		return pool[index].selector, true
 	}
+}
+
+// targetsWithCapacity filters targets through the optional rate-limit capacity
+// probe. Without a probe every target has capacity.
+func (s *Service) targetsWithCapacity(targets []resolvedTarget) []resolvedTarget {
+	if s.targetCapacity == nil {
+		return targets
+	}
+	out := make([]resolvedTarget, 0, len(targets))
+	for _, target := range targets {
+		if s.targetCapacity(target.qualified) {
+			out = append(out, target)
+		}
+	}
+	return out
 }
 
 // weightedIndex maps a monotonic counter to a target index, honoring per-target

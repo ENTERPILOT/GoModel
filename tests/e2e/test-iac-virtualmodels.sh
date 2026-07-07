@@ -9,6 +9,9 @@
 # destructively), the VIRTUAL_MODELS env merges over config.yaml per source, a
 # STRUCTURALLY invalid declaration aborts startup, and an unknown-but-structurally
 # -valid target does NOT abort startup (it is simply skipped at resolve time).
+# Target PROVIDER names are validated at startup too (#464): a name matching no
+# configured provider aborts, while a provider declared in YAML whose credentials
+# did not resolve only warns and leaves the target unavailable.
 #
 # Requires: a built binary (make build), provider creds in .env (OpenAI + Groq),
 # and curl + jq + lsof. Runs entirely on localhost with in-memory caches and
@@ -127,12 +130,17 @@ fail_start(){ # name, VM_ENV  -> expect the process to EXIT with a clear error
   ( cd "$WORK"; nohup env GOMODEL_MASTER_KEY= PORT=$NEG_PORT BASE_PATH= STORAGE_TYPE=sqlite SQLITE_PATH="$WORK/data/neg.db" REDIS_URL= RESPONSE_CACHE_SIMPLE_ENABLED=false VIRTUAL_MODELS="$2" "$BIN" >"$WORK/neg.log" 2>&1 < /dev/null & echo $! >"$WORK/neg.pid" )
   sleep 4
   if kill -0 "$(cat "$WORK/neg.pid")" 2>/dev/null; then bad "$1 (process still alive)";
-  elif grep -qiE 'failed to initialize virtual models|strateg|cannot target itself' "$WORK/neg.log"; then ok "$1"; note "$(grep -iE 'error' "$WORK/neg.log" | tail -1 | sed 's/.*"error"://')";
+  elif grep -qiE 'failed to initialize virtual models|strateg|cannot target itself|unknown target provider' "$WORK/neg.log"; then ok "$1"; note "$(grep -iE 'error' "$WORK/neg.log" | tail -1 | sed 's/.*"error"://')";
   else bad "$1 (no clear error)"; tail -3 "$WORK/neg.log"; fi
   kill "$(cat "$WORK/neg.pid")" 2>/dev/null; rm -f "$WORK/data/neg.db"* "$WORK/neg.pid"
 }
 fail_start "I9 unknown strategy aborts startup"         '[{"source":"qa-iac-bad","strategy":"weighted","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/llama-3.1-8b-instant"}]}]'
 fail_start "I10 self-referential target aborts startup" '[{"source":"openai/gpt-4.1-nano","target":"openai/gpt-4.1-nano"}]'
+# Explicit target provider names are static config, so a typo is caught before
+# any API call (#464) — unlike model availability, which stays a resolve-time
+# concern (I11). Only the explicit "provider" field is checked; the "target"
+# shorthand and slash-shaped model IDs are never treated as provider names.
+fail_start "I12 misspelled target provider aborts startup" '[{"source":"qa-iac-badprov","targets":[{"provider":"opnai","model":"gpt-4.1-nano"}]}]'
 
 ############ availability is NOT a startup gate (F3 fix): unknown target boots, stays unavailable ############
 rm -f "$WORK/data/gomodel.db"*
@@ -147,6 +155,38 @@ else
   bad "I11 gateway aborted on an unknown target (F3 regression)"; tail -5 "$WORK/server.log"
 fi
 stop_gw
+
+############ a DECLARED provider with unresolved credentials warns, never aborts ############
+# A shared config.yaml may declare providers whose credentials are only set in
+# some environments. Two same-type entries keep the by-type env overlay from
+# credentialing them, so both stay declared-but-unregistered on every machine.
+rm -f "$WORK/data/gomodel.db"*
+cat > "$WORK/config.yaml" <<'YAML'
+providers:
+  qa-keyless-a:
+    type: anthropic
+    api_key: "${QA_UNSET_KEY_A}"
+  qa-keyless-b:
+    type: anthropic
+    api_key: "${QA_UNSET_KEY_B}"
+YAML
+export VM_ENV='[{"source":"qa-iac-keyless","targets":[{"provider":"qa-keyless-a","model":"claude-sonnet-x"}]}]'
+if start_gw >/dev/null; then
+  grep -q 'configured but not registered' "$WORK/server.log" \
+    && ok "I13 declared-but-unregistered target provider boots with a warning" \
+    || bad "I13 missing not-registered warning"
+  code=$(curl -sS -o /dev/null -w '%{http_code}' "$B/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d '{"model":"qa-iac-keyless","messages":[{"role":"user","content":"hi"}],"max_tokens":5}')
+  { [ "$code" = 404 ] || [ "$code" = 400 ]; } \
+    && ok "I13b keyless-provider redirect stays unavailable (resolve http=$code)" \
+    || bad "I13b keyless-provider redirect resolved unexpectedly (http=$code)"
+  grep -q 'configured providers skipped' "$WORK/server.log" \
+    && ok "I13c startup logs the skipped keyless providers" \
+    || bad "I13c missing skipped-providers log line"
+else
+  bad "I13 gateway aborted on a declared-but-unregistered target provider"; tail -5 "$WORK/server.log"
+fi
+stop_gw; rm -f "$WORK/config.yaml"
 
 echo "############ IaC RESULT: PASS=$PASS FAIL=$FAIL ############"
 [ "$FAIL" -eq 0 ]

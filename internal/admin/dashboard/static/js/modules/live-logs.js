@@ -183,11 +183,12 @@
                 });
                 const previous = index >= 0 ? currentEntries[index] || {} : {};
                 if (eventType === 'audit.detail') {
-                    const patch = { ...incoming, _detail_loaded: true };
+                    const patch = { ...incoming, _detail_loaded: true, _response_partial: false };
                     if (index >= 0) {
                         const merged = this.mergeLiveAuditPatch(previous, patch);
                         currentEntries.splice(index, 1, merged);
                         this.auditLog.entries = [...currentEntries];
+                        this.notifyLiveConversation(merged);
                         return merged;
                     }
                     if (!this.auditLiveInsertAllowed()) return;
@@ -203,11 +204,21 @@
                 } else {
                     patch._live_pending = false;
                 }
+                // A stream event's response body is a partial reconstruction of a
+                // still-running stream; the flag drops once a settled state
+                // delivers the real body. Other events leave the previous flag
+                // untouched.
+                if (eventType === 'audit.stream') {
+                    patch._response_partial = true;
+                } else if (this.liveAuditStateSettled(eventType)) {
+                    patch._response_partial = false;
+                }
                 if (index >= 0) {
                     const merged = this.mergeLiveAuditPatch(previous, patch);
                     currentEntries.splice(index, 1, merged);
                     this.auditLog.entries = [...currentEntries];
                     this.fetchExpandedAuditDetailIfReady(merged);
+                    this.notifyLiveConversation(merged);
                     return merged;
                 }
                 if (!this.auditLiveInsertAllowed()) return;
@@ -215,6 +226,7 @@
                 this.auditLog.total = Number(this.auditLog.total || 0) + 1;
                 const inserted = this.auditLog.entries[0];
                 this.fetchExpandedAuditDetailIfReady(inserted);
+                this.notifyLiveConversation(inserted);
                 return inserted;
             },
 
@@ -249,6 +261,15 @@
                 return this.skippedLiveUsageByRequestId && this.skippedLiveUsageByRequestId[requestID] || null;
             },
 
+            // notifyLiveConversation forwards merged live entries to the
+            // Interactions drawer (when its module is mixed in) so an open
+            // live conversation re-renders as stream chunks arrive.
+            notifyLiveConversation(entry) {
+                if (entry && typeof this.refreshLiveConversation === 'function') {
+                    this.refreshLiveConversation(entry);
+                }
+            },
+
             fetchExpandedAuditDetailIfReady(entry) {
                 if (!entry || !this.isAuditEntryExpanded || !this.isAuditEntryExpanded(entry)) return;
                 const state = String(entry._live_state || '').trim();
@@ -263,6 +284,7 @@
                 case 'audit.started':
                     return 10;
                 case 'audit.updated':
+                case 'audit.stream':
                     return 20;
                 case 'audit.completed':
                     return 30;
@@ -279,6 +301,13 @@
                 const previous = String(previousState || '').trim();
                 const incoming = String(incomingState || '').trim();
                 return this.liveAuditStateRank(previous) > this.liveAuditStateRank(incoming) ? previous : incoming;
+            },
+
+            // liveAuditStateSettled reports whether a live state already
+            // carries its final response (audit.completed or later); below
+            // that the request is still in flight.
+            liveAuditStateSettled(state) {
+                return this.liveAuditStateRank(state) >= this.liveAuditStateRank('audit.completed');
             },
 
             liveAuditEventFlushed(state) {

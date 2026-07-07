@@ -530,6 +530,20 @@ func isUnresolvedEnvPlaceholder(value string) bool {
 	return inner != "" && !strings.ContainsAny(inner, "{}")
 }
 
+// skippedProviderNames lists the YAML-declared providers that did not survive
+// credential resolution, so operators can see why a configured provider is
+// absent instead of it disappearing silently.
+func skippedProviderNames(declared, resolved map[string]config.RawProviderConfig) []string {
+	var names []string
+	for name := range declared {
+		if _, ok := resolved[name]; !ok {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // filterEmptyProviders removes providers without valid credentials.
 func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))

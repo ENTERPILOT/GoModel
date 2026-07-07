@@ -59,6 +59,9 @@ type mockAuditReader struct {
 	conversationErr     error
 	lastConversationID  string
 	lastConversationLim int
+	statsResult         *auditlog.RequestStats
+	statsErr            error
+	lastStatsParams     auditlog.RequestStatsParams
 }
 
 type mockRuntimeRefresher struct {
@@ -154,6 +157,14 @@ func (m *mockAuditReader) GetLogByID(_ context.Context, _ string) (*auditlog.Log
 		return nil, m.logByIDErr
 	}
 	return m.logByID, nil
+}
+
+func (m *mockAuditReader) GetRequestStats(_ context.Context, params auditlog.RequestStatsParams) (*auditlog.RequestStats, error) {
+	m.lastStatsParams = params
+	if m.statsErr != nil {
+		return nil, m.statsErr
+	}
+	return m.statsResult, nil
 }
 
 func (m *mockAuditReader) GetConversation(_ context.Context, logID string, limit int) (*auditlog.ConversationResult, error) {

@@ -142,6 +142,34 @@ func normalizeUserPaths(paths []string) ([]string, error) {
 	return normalized, nil
 }
 
+// providerNameSet builds a trimmed membership set from provider names.
+func providerNameSet(names []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name != "" {
+			set[name] = struct{}{}
+		}
+	}
+	return set
+}
+
+// unknownTargetProviderError reports a target provider name that no configured
+// provider matches, listing the registered names so a typo is easy to spot.
+func unknownTargetProviderError(provider string, registered []string) error {
+	names := make([]string, 0, len(registered))
+	for _, name := range registered {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	known := "none"
+	if len(names) > 0 {
+		known = strings.Join(names, ", ")
+	}
+	return newValidationError(fmt.Sprintf("unknown target provider %q (registered providers: %s)", provider, known), nil)
+}
+
 func selectorString(providerName, model string) string {
 	return modelselectors.String(providerName, model)
 }

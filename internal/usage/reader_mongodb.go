@@ -37,6 +37,8 @@ type mongoUsageLogRow struct {
 	CostSource             string         `bson:"cost_source"`
 	RawData                map[string]any `bson:"raw_data"`
 	CostsCalculationCaveat string         `bson:"costs_calculation_caveat"`
+	RewriteTokensSaved     int64          `bson:"rewrite_tokens_saved"`
+	RewriteCostSaved       *float64       `bson:"rewrite_cost_saved"`
 }
 
 func (row mongoUsageLogRow) toUsageLogEntry() UsageLogEntry {
@@ -61,6 +63,8 @@ func (row mongoUsageLogRow) toUsageLogEntry() UsageLogEntry {
 		CostSource:             row.CostSource,
 		RawData:                row.RawData,
 		CostsCalculationCaveat: row.CostsCalculationCaveat,
+		RewriteTokensSaved:     row.RewriteTokensSaved,
+		RewriteCostSaved:       row.RewriteCostSaved,
 	}
 }
 

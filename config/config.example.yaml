@@ -62,6 +62,7 @@ models:
 cache:
   model:
     refresh_interval: 3600 # how often to refresh the model registry (seconds, default: 3600)
+    recheck_interval: 60 # env: PROVIDER_RECHECK_INTERVAL; how often providers whose last refresh failed are re-probed for recovery (seconds, default: 60; 0 disables)
     local:
       cache_dir: ".cache" # local cache directory
     # To use Redis instead of local cache, remove `local` and uncomment:

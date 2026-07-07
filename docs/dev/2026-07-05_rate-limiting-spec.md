@@ -295,11 +295,15 @@ The scopes differ in *enforcement posture*, not machinery:
   stored 429 is stamped into the context, and dispatch skips the primary
   provider (calling it would serve the request and defeat the limit) and
   enters the failover sweep seeded with that error. The virtual-model
-  balancer skips saturated targets via a rate-limit-aware
-  `Catalog.ModelAvailable` decorator (same skip semantics as stale
-  inventory), and the sweep skips saturated candidates via a `RouteGate` on
-  the orchestrator. The client only sees 429 when no viable target remains
-  (or immediately, when no failover is configured).
+  balancer prefers targets with capacity via an explicit `TargetCapacity`
+  probe (post-merge fix: originally a rate-limit-aware `Catalog.ModelAvailable`
+  decorator, which conflated "throttled" with "dead" — hiding saturated
+  aliases from /v1/models and sending fully saturated aliases down the
+  all-targets-down 502 path). When every live target is saturated the
+  balancer falls back to the first declared target so admission returns the
+  honest 429. The failover sweep skips saturated candidates via a
+  `RouteGate` on the orchestrator. The client only sees 429 when no viable
+  target remains (or immediately, when no failover is configured).
 
 Token accounting for provider/model scopes charges the *executed* route from
 the usage entry (`ProviderName`/`Model`), which is exactly why these scopes

@@ -165,7 +165,8 @@ inventory could last be fetched. Providers are re-checked:
 - on every model registry refresh, controlled by `CACHE_REFRESH_INTERVAL`
   (seconds, default `3600` — hourly),
 - on the fast recheck loop, which re-probes **only** providers whose latest
-  refresh failed, controlled by `PROVIDER_RECHECK_INTERVAL` (seconds,
+  refresh failed, controlled by `PROVIDER_RECHECK_INTERVAL`
+  (`cache.model.recheck_interval` in `config.yaml`; seconds,
   default `60`; `0` disables), and
 - on demand, when a request asks for a provider-qualified model
   (`provider/model`) that is missing from the registry.

@@ -99,6 +99,75 @@ test('live audit lifecycle events merge into one dashboard row by request id', (
     assert.equal(app.auditLog.entries[0]._audit_flushed, true);
 });
 
+test('audit.stream events merge partial response bodies and keep rows pending', () => {
+    const app = createLiveLogsApp();
+
+    app.applyLiveLogEvent({
+        seq: 1,
+        type: 'audit.started',
+        data: { id: 'audit-1', request_id: 'req-1', method: 'POST', path: '/v1/chat/completions' }
+    });
+    app.applyLiveLogEvent({
+        seq: 2,
+        type: 'audit.stream',
+        data: {
+            id: 'audit-1',
+            request_id: 'req-1',
+            status_code: 200,
+            stream: true,
+            data: {
+                response_body: { choices: [{ index: 0, message: { role: 'assistant', content: 'partial' } }] },
+                response_body_partial: true
+            }
+        }
+    });
+
+    const streaming = app.auditLog.entries[0];
+    assert.equal(streaming._response_partial, true);
+    assert.equal(streaming._live_pending, true);
+    assert.equal(streaming._live_state, 'audit.stream');
+    assert.equal(streaming.data.response_body.choices[0].message.content, 'partial');
+
+    app.applyLiveLogEvent({
+        seq: 3,
+        type: 'audit.completed',
+        data: {
+            id: 'audit-1',
+            request_id: 'req-1',
+            status_code: 200,
+            duration_ns: 1000,
+            data: {
+                response_body: { choices: [{ index: 0, message: { role: 'assistant', content: 'final' } }] }
+            }
+        }
+    });
+
+    const completed = app.auditLog.entries[0];
+    assert.equal(completed._response_partial, false);
+    assert.equal(completed._live_state, 'audit.completed');
+    assert.equal(completed.data.response_body.choices[0].message.content, 'final');
+});
+
+test('live audit merges notify an open live conversation drawer', () => {
+    const app = createLiveLogsApp();
+    const seen = [];
+    app.refreshLiveConversation = (entry) => seen.push(entry);
+
+    app.applyLiveLogEvent({
+        seq: 1,
+        type: 'audit.started',
+        data: { id: 'audit-1', request_id: 'req-1' }
+    });
+    app.applyLiveLogEvent({
+        seq: 2,
+        type: 'audit.stream',
+        data: { id: 'audit-1', request_id: 'req-1', data: { response_body: { choices: [] }, response_body_partial: true } }
+    });
+
+    assert.equal(seen.length, 2);
+    assert.equal(seen[1]._response_partial, true);
+});
+
 test('live audit removed event drops suppressed preview rows', () => {
     const app = createLiveLogsApp();
     app.auditLog.entries = [{ id: 'audit-1', request_id: 'req-1' }];
