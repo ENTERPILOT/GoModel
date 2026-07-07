@@ -76,6 +76,9 @@ func TestSQLiteStoreRoundTrip(t *testing.T) {
 	if updated.Description != "updated" || updated.Enabled {
 		t.Fatalf("Get(updated) = %+v, want updated row", updated)
 	}
+	if !updated.CreatedAt.Equal(got.CreatedAt) {
+		t.Fatalf("Get(updated).CreatedAt = %v, want original %v preserved", updated.CreatedAt, got.CreatedAt)
+	}
 
 	list, err := store.List(ctx)
 	if err != nil {

@@ -114,6 +114,16 @@ dashboard (or `POST /admin/mcp-servers/{name}/reconnect`) forces a redial.
   gateway host, so they can only be declared in `config.yaml` / `MCP_SERVERS`.
   The admin API and dashboard reject them — a dashboard login must never be
   equivalent to code execution on the gateway.
+- **stdio subprocesses get a minimal environment.** Only `PATH`, `HOME`,
+  `TMPDIR`, `USER`, and `LANG` are inherited — never the gateway's provider
+  API keys or master key. Pass anything else explicitly via the server's
+  `env:` map (values support `${VAR}`).
+- **Dashboard-managed credentials live in the gateway database.** Headers of
+  admin-created servers are stored in the configured storage backend (they
+  are only redacted at the API/UI layer). If your threat model excludes
+  secrets in the database, declare those servers in `config.yaml` /
+  `MCP_SERVERS` instead — `${ENV}` references keep the secret in the
+  environment, and declarative servers never touch the store.
 - **Sessions are not authentication.** Every request is bearer-authenticated,
   and a session is additionally bound to the user path that initialized it;
   presenting a leaked session ID under another identity returns 404.

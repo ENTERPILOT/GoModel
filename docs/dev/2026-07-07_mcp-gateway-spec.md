@@ -242,7 +242,7 @@ rows shown read-only, mirroring virtual models.
 | tools/call | routed by prefix; raw args relayed; result relayed verbatim |
 | prompts/list, prompts/get | aggregated / routed (namespaced like tools) |
 | resources/list, resources/templates/list, resources/read | aggregated; read routed by exact URI, then template match |
-| notifications/tools|prompts|resources/list_changed (upstream) | catalog resync; new downstream sessions see updates |
+| upstream `list_changed` notifications (tools, prompts, resources) | catalog resync; new downstream sessions see updates |
 | notifications/cancelled, progress | request-scoped, handled by SDK per leg |
 | sampling, elicitation, roots, subscriptions, completion, logging, tasks | not negotiated in v1 |
 
@@ -279,5 +279,8 @@ rows shown read-only, mirroring virtual models.
 - Live per-session tool-list diffs (push `list_changed` into open sessions).
 - Tool-description pinning / change detection (rug-pull defense), payload
   policy hooks, semantic/progressive tool disclosure.
+- Encryption at rest for admin-managed upstream headers (needs a
+  key-management story first; until then config/env declarations keep
+  secrets out of the store entirely, and the docs say so).
 - Per-tool pricing; resource subscriptions; stateless downstream mode when
   the 2026-07-28 spec lands in a stable SDK.

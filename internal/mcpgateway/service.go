@@ -156,7 +156,12 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	if err := s.store.Upsert(ctx, server); err != nil {
 		return err
 	}
-	return s.Reload(ctx)
+	if err := s.Reload(ctx); err != nil {
+		// The row is persisted; only applying it to the running manager
+		// failed. Say so — a retry or restart picks the row up.
+		return fmt.Errorf("mcp server %q was saved but not applied: %w", server.Name, err)
+	}
+	return nil
 }
 
 // GetManaged returns one admin-managed server row from the store. Config-
@@ -180,7 +185,10 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	if err := s.store.Delete(ctx, name); err != nil {
 		return err
 	}
-	return s.Reload(ctx)
+	if err := s.Reload(ctx); err != nil {
+		return fmt.Errorf("mcp server %q was deleted but the running set was not updated: %w", name, err)
+	}
+	return nil
 }
 
 // Reconnect force-redials one server and returns its fresh state.

@@ -166,7 +166,7 @@ func (m *Manager) Reconnect(ctx context.Context, name string) (ServerView, error
 	if !ok {
 		return ServerView{}, fmt.Errorf("mcp server %q is not configured", name)
 	}
-	u.close()
+	u.reset()
 	if u.spec.Enabled {
 		if err := u.refresh(ctx); err != nil {
 			return u.view(), err

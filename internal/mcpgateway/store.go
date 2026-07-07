@@ -45,13 +45,17 @@ type ManagedServer struct {
 }
 
 // Validate checks the row against the same rules as declarative config,
-// additionally rejecting the stdio transport.
+// additionally rejecting the stdio transport. The receiver is only mutated
+// (normalized transport/URL) once every check has passed.
 func (m *ManagedServer) Validate() error {
 	if err := config.ValidateMCPServerName(m.Name); err != nil {
 		return err
 	}
 	if m.Transport == config.MCPTransportStdio {
 		return fmt.Errorf("stdio servers can only be declared in config.yaml or MCP_SERVERS, not via the admin API")
+	}
+	if m.ToolTimeoutSeconds < 0 {
+		return fmt.Errorf("tool_timeout_seconds must not be negative")
 	}
 	cfg := config.MCPServerConfig{
 		URL:         m.URL,
@@ -62,14 +66,8 @@ func (m *ManagedServer) Validate() error {
 	if err := config.ValidateMCPServerConfig(&cfg); err != nil {
 		return err
 	}
-	if cfg.Transport == config.MCPTransportStdio {
-		return fmt.Errorf("stdio servers can only be declared in config.yaml or MCP_SERVERS, not via the admin API")
-	}
 	m.Transport = cfg.Transport
 	m.URL = cfg.URL
-	if m.ToolTimeoutSeconds < 0 {
-		return fmt.Errorf("tool_timeout_seconds must not be negative")
-	}
 	return nil
 }
 

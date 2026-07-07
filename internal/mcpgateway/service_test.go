@@ -3,6 +3,7 @@ package mcpgateway
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -414,6 +415,99 @@ func TestDegradedUpstreamKeepsCatalogAndReportsError(t *testing.T) {
 	}
 	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_echo"}); err == nil {
 		t.Fatalf("CallTool against dead upstream should return a protocol error")
+	}
+}
+
+// TestDegradedUpstreamRecoversOnReprobe covers the background re-probe path:
+// after the upstream dies and comes back on the same address, a plain refresh
+// (what the maintenance loop runs) must recover without a manual reconnect.
+func TestDegradedUpstreamRecoversOnReprobe(t *testing.T) {
+	upstream := mcp.NewServer(&mcp.Implementation{Name: "alpha", Version: "test"}, nil)
+	addEchoTool("echo")(upstream)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	addr := listener.Addr().String()
+	ts1 := &httptest.Server{Listener: listener, Config: &http.Server{Handler: handler}}
+	ts1.Start()
+
+	service, _ := newTestService(t, nil, testSpec("alpha", "http://"+addr, nil))
+	u, ok := service.manager.get("alpha")
+	if !ok {
+		t.Fatalf("upstream alpha not registered")
+	}
+
+	// Kill the upstream and drive one failed refresh (the re-probe path).
+	ts1.CloseClientConnections()
+	ts1.Close()
+	if err := u.refresh(context.Background()); err == nil {
+		t.Fatalf("refresh() against a dead upstream should error")
+	}
+	if _, status := u.snapshot(); status != StatusDegraded {
+		t.Fatalf("status after failed refresh = %v, want degraded", status)
+	}
+
+	// Resurrect the upstream on the same address; the port was just freed by
+	// this process, so rebinding may need a brief retry.
+	var listener2 net.Listener
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		listener2, err = net.Listen("tcp", addr)
+		if err == nil || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("re-listen on %s: %v", addr, err)
+	}
+	ts2 := &httptest.Server{Listener: listener2, Config: &http.Server{Handler: handler}}
+	ts2.Start()
+	t.Cleanup(func() {
+		ts2.CloseClientConnections()
+		ts2.Close()
+	})
+
+	// The next refresh (as the maintenance ticker would run it) must redial
+	// from scratch and flip the server back to connected.
+	if err := u.refresh(context.Background()); err != nil {
+		t.Fatalf("refresh() after upstream recovery error = %v", err)
+	}
+	view := u.view()
+	if view.Status != StatusConnected || view.ToolCount != 1 {
+		t.Fatalf("view after recovery = %+v, want connected with 1 tool", view)
+	}
+}
+
+// TestRemovedUpstreamRefusesRedial covers the reconcile race: a background
+// refresh racing an Apply that removed the server must not dial and leak an
+// untracked session.
+func TestRemovedUpstreamRefusesRedial(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	service, _ := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
+
+	u, ok := service.manager.get("alpha")
+	if !ok {
+		t.Fatalf("upstream alpha not registered")
+	}
+
+	// Reconcile away the server, then run the stale refresh a background
+	// goroutine could still be holding.
+	service.manager.Apply(nil)
+	if err := u.refresh(context.Background()); err != nil {
+		t.Fatalf("refresh() on a removed upstream should be a no-op, got %v", err)
+	}
+	u.stateMu.Lock()
+	session := u.session
+	u.stateMu.Unlock()
+	if session != nil {
+		t.Fatalf("removed upstream redialed and holds a session")
+	}
+	if _, err := u.callTool(context.Background(), "echo", nil); err == nil {
+		t.Fatalf("callTool on a removed upstream should fail")
 	}
 }
 

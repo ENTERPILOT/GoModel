@@ -84,8 +84,8 @@ models:
 #       transport: stdio # the admin API and dashboard reject them by design
 #       command: npx
 #       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
-#       env:
-#         SOME_TOKEN: "${SOME_TOKEN}"
+#       env: # subprocesses inherit only PATH/HOME/TMPDIR/USER/LANG — never the
+#         SOME_TOKEN: "${SOME_TOKEN}" # gateway's API keys; pass extras here explicitly
 
 cache:
   model:

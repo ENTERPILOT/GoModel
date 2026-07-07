@@ -133,6 +133,18 @@ func TestApplyMCPEnvRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestApplyMCPEnvRejectsCanonicalNameCollision(t *testing.T) {
+	cfg := &Config{}
+	t.Setenv("MCP_SERVERS", `{"GitHub":{"url":"https://a.example/mcp"},"github":{"url":"https://b.example/mcp"}}`)
+	err := applyMCPEnv(cfg)
+	if err == nil {
+		t.Fatalf("applyMCPEnv() with colliding canonical names should fail")
+	}
+	if !strings.Contains(err.Error(), "canonicalize") {
+		t.Fatalf("applyMCPEnv() error = %v, want canonical-collision message", err)
+	}
+}
+
 func TestMCPServerEnabledDefaultsTrue(t *testing.T) {
 	if !MCPServerEnabled(MCPServerConfig{}) {
 		t.Fatalf("MCPServerEnabled(zero) = false, want true")

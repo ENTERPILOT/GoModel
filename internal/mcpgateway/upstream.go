@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +43,10 @@ type upstream struct {
 	status      ServerStatus
 	lastErr     string
 	connectedAt time.Time
+	// closed marks a permanently disposed upstream (removed or replaced by a
+	// reconcile). A stale background refresh must not redial it and leak an
+	// untracked session.
+	closed bool
 }
 
 func newUpstream(spec ServerSpec, httpClient *http.Client) *upstream {
@@ -80,7 +86,7 @@ func (u *upstream) snapshot() (*catalog, ServerStatus) {
 func (u *upstream) refresh(ctx context.Context) error {
 	u.connectMu.Lock()
 	defer u.connectMu.Unlock()
-	if !u.spec.Enabled {
+	if !u.spec.Enabled || u.isClosed() {
 		return nil
 	}
 
@@ -94,6 +100,11 @@ func (u *upstream) refresh(ctx context.Context) error {
 	defer cancel()
 	fresh, err := u.list(listCtx, session)
 	if err != nil {
+		// A session whose listing failed is suspect (dead transport, wedged
+		// stream). Drop it so the next re-probe starts from a fresh dial
+		// instead of reusing it forever; refreshes are infrequent, so the
+		// redial cost is negligible next to guaranteed recovery.
+		u.dropSession(session)
 		u.markDegraded(err)
 		return err
 	}
@@ -111,7 +122,11 @@ func (u *upstream) refresh(ctx context.Context) error {
 func (u *upstream) ensureSessionLocked(ctx context.Context) (*mcp.ClientSession, error) {
 	u.stateMu.Lock()
 	session := u.session
+	closed := u.closed
 	u.stateMu.Unlock()
+	if closed {
+		return nil, fmt.Errorf("mcp server %q was removed", u.spec.Name)
+	}
 	if session != nil {
 		return session, nil
 	}
@@ -174,7 +189,16 @@ func (u *upstream) transport() (mcp.Transport, error) {
 		}, nil
 	case "stdio":
 		cmd := exec.Command(u.spec.Command, u.spec.Args...)
-		cmd.Env = os.Environ()
+		// Start from a minimal environment, not os.Environ(): the gateway
+		// process holds every provider API key and the master key, and a
+		// compromised MCP server binary must not inherit them. Operators pass
+		// anything else explicitly via the server's env map (${VAR} expands
+		// in config), on top of the basics process launchers need.
+		for _, key := range []string{"PATH", "HOME", "TMPDIR", "USER", "LANG"} {
+			if value := os.Getenv(key); value != "" {
+				cmd.Env = append(cmd.Env, key+"="+value)
+			}
+		}
 		for key, value := range u.spec.Env {
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}
@@ -273,6 +297,18 @@ func (u *upstream) list(ctx context.Context, session *mcp.ClientSession) (*catal
 			fresh.templates = append(fresh.templates, template)
 		}
 	}
+
+	// Deterministic ordering across the whole catalog, not just tools: clients
+	// that embed capability lists in prompts get stable prompt-cache keys.
+	slices.SortFunc(fresh.prompts, func(a, b *mcp.Prompt) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	slices.SortFunc(fresh.resources, func(a, b *mcp.Resource) int {
+		return strings.Compare(a.URI, b.URI)
+	})
+	slices.SortFunc(fresh.templates, func(a, b *mcp.ResourceTemplate) int {
+		return strings.Compare(a.URITemplate, b.URITemplate)
+	})
 
 	return fresh, nil
 }
@@ -375,9 +411,29 @@ func (u *upstream) markDegraded(err error) {
 	u.stateMu.Unlock()
 }
 
-// close terminates the shared session.
+func (u *upstream) isClosed() bool {
+	u.stateMu.Lock()
+	defer u.stateMu.Unlock()
+	return u.closed
+}
+
+// reset drops the shared session so the next use redials. The upstream stays
+// alive — this is the "force reconnect" path, not disposal.
+func (u *upstream) reset() {
+	u.stateMu.Lock()
+	session := u.session
+	u.session = nil
+	u.stateMu.Unlock()
+	if session != nil {
+		_ = session.Close()
+	}
+}
+
+// close permanently disposes the upstream: the session is terminated and any
+// in-flight background refresh is refused a redial.
 func (u *upstream) close() {
 	u.stateMu.Lock()
+	u.closed = true
 	session := u.session
 	u.session = nil
 	u.stateMu.Unlock()

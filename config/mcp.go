@@ -105,8 +105,16 @@ func applyMCPEnv(cfg *Config) error {
 	if cfg.MCP.Servers == nil {
 		cfg.MCP.Servers = make(map[string]MCPServerConfig, len(fromEnv))
 	}
+	seen := make(map[string]string, len(fromEnv))
 	for name, server := range fromEnv {
-		cfg.MCP.Servers[canonicalTextKey(name)] = server
+		canonical := canonicalTextKey(name)
+		// Two JSON keys collapsing onto one canonical name would otherwise
+		// pick a survivor by map iteration order — fail loudly instead.
+		if previous, dup := seen[canonical]; dup {
+			return fmt.Errorf("%s: entries %q and %q both canonicalize to server name %q", envMCPServers, previous, name, canonical)
+		}
+		seen[canonical] = name
+		cfg.MCP.Servers[canonical] = server
 	}
 	return nil
 }
