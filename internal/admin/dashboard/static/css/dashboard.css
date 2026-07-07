@@ -3432,6 +3432,23 @@ textarea:focus {
   border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
 }
 
+/* Tokens saved by a request rewrite (e.g. token compression), shown on the
+   Rewritten tab next to the rewriter pill. Same blue family as the cached
+   tokens in the charts (both derive from --info); the prompt-cache variables
+   carry the per-theme tone mix that keeps the text readable. */
+.audit-tokens-saved-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--prompt-cache-color) 45%, var(--border));
+  border-radius: 999px;
+  background: var(--prompt-cache-color-bg);
+  color: var(--prompt-cache-color);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
 .audit-entry-metadata {
   display: flex;
   align-items: center;

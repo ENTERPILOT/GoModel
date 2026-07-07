@@ -137,6 +137,7 @@ func recordRequestRevision(c *echo.Context, auditLogger auditlog.LoggerInterface
 		Rewriter:    name,
 		BytesBefore: bytesBefore,
 		BytesAfter:  len(res.Body),
+		TokensSaved: res.TokensSaved,
 		Detail:      res.Detail,
 	}
 	if cfg.LogBodies && int64(len(res.Body)) <= auditlog.MaxBodyCapture {

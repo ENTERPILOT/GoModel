@@ -193,6 +193,11 @@ type RequestRevisionSnapshot struct {
 	BytesBefore int    `json:"bytes_before" bson:"bytes_before"`
 	BytesAfter  int    `json:"bytes_after" bson:"bytes_after"`
 
+	// TokensSaved is the rewriter-reported estimate of prompt tokens this
+	// revision saved (e.g. token compression); zero when the rewriter does
+	// not report savings.
+	TokensSaved int `json:"tokens_saved,omitempty" bson:"tokens_saved,omitempty"`
+
 	// Body is the request body after this revision (parsed JSON, or a string
 	// when not valid JSON). Populated only when body logging is enabled and
 	// the body is within the capture limit.

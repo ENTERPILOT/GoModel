@@ -541,6 +541,29 @@
                     : [];
             },
 
+            // auditRevisionTokensSaved returns the rewriter-reported prompt
+            // tokens this revision saved (0 when it reported none). Older
+            // entries predate the typed field, so fall back to the compression
+            // report's estimate inside the rewriter detail.
+            auditRevisionTokensSaved(revision) {
+                const typed = Number(revision && revision.tokens_saved);
+                if (Number.isFinite(typed) && typed > 0) return typed;
+                const detail = revision && revision.detail;
+                const estimate = Number(detail && detail.tokens_saved_estimate);
+                return Number.isFinite(estimate) && estimate > 0 ? estimate : 0;
+            },
+
+            // auditRevisionTokensSavedLabel renders the savings as a compact
+            // pill label (e.g. "-12.3K tokens"), or '' when nothing was saved.
+            auditRevisionTokensSavedLabel(revision) {
+                const saved = this.auditRevisionTokensSaved(revision);
+                if (saved <= 0) return '';
+                const amount = typeof this.formatTokensShort === 'function'
+                    ? this.formatTokensShort(saved)
+                    : String(saved);
+                return '-' + amount + ' tokens';
+            },
+
             // auditRequestRevisionPane renders one ingress rewrite: a structured
             // summary of what the rewriter changed plus the rewritten body when
             // it was captured. The original client request stays on the Request
@@ -562,6 +585,7 @@
                     direction: 'request',
                     seq: single ? 0 : Number(revision && revision.seq || 0),
                     kind: (revision && revision.rewriter) ? String(revision.rewriter) : '',
+                    tokensSavedLabel: this.auditRevisionTokensSavedLabel(revision),
                     layout: 'split',
                     entry,
                     copyHeaders: summary,

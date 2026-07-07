@@ -955,6 +955,7 @@ test('auditPanes inserts request revision tabs between request and response', ()
     assert.equal(pane.headersTitle, 'What changed');
     assert.equal(pane.headers.bytes, '1572 → 1249');
     assert.equal(pane.headers.detail.tokens_saved_estimate, 89);
+    assert.equal(pane.tokensSavedLabel, '-89 tokens');
     assert.equal(pane.showBody, true);
     assert.equal(pane.showTooLarge, false);
 
@@ -962,11 +963,30 @@ test('auditPanes inserts request revision tabs between request and response', ()
     const bare = module.auditRequestRevisionPane(entry, { seq: 2, rewriter: 'x', bytes_before: 10, bytes_after: 8 });
     assert.equal(bare.showBody, false);
     assert.equal(bare.showTooLarge, true);
+    assert.equal(bare.tokensSavedLabel, '');
 
     // Multiple revisions keep their sequence chips and stable tab ids.
     entry.data.request_revisions = [revision, { ...revision, seq: 2 }];
     assert.equal(module.auditPanes(entry).map((p) => p.id).join(','), 'request,revision-1,revision-2,response');
     assert.equal(module.auditRequestRevisionPane(entry, revision).seq, 1);
+});
+
+test('auditRevisionTokensSavedLabel reports rewrite savings as a pill label', () => {
+    const module = createAuditListModule();
+    // The typed field wins; the compression report estimate inside detail is
+    // the fallback for entries recorded before tokens_saved existed.
+    assert.equal(module.auditRevisionTokensSavedLabel({ tokens_saved: 89 }), '-89 tokens');
+    assert.equal(module.auditRevisionTokensSavedLabel({ detail: { tokens_saved_estimate: 42 } }), '-42 tokens');
+    assert.equal(module.auditRevisionTokensSavedLabel({ tokens_saved: 89, detail: { tokens_saved_estimate: 42 } }), '-89 tokens');
+
+    // No savings renders no pill.
+    assert.equal(module.auditRevisionTokensSavedLabel({}), '');
+    assert.equal(module.auditRevisionTokensSavedLabel({ tokens_saved: 0 }), '');
+    assert.equal(module.auditRevisionTokensSavedLabel(null), '');
+
+    // Large counts use the dashboard's short token format when available.
+    module.formatTokensShort = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n));
+    assert.equal(module.auditRevisionTokensSavedLabel({ tokens_saved: 12340 }), '-12.3K tokens');
 });
 
 test('entries without revisions render no revision tabs', () => {
