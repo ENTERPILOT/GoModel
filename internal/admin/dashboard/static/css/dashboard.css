@@ -3028,6 +3028,13 @@ textarea:focus {
 }
 
 /* Audit stats charts (Requests by Status / Provider Latency) */
+/* The Activity calendar above only spaces itself upward, so these sections
+   bring their own top margin; between the two charts it collapses with the
+   24px bottom margin into a single gap. */
+.audit-stats-section {
+  margin-top: 24px;
+}
+
 .audit-stats-header {
   align-items: flex-start;
 }

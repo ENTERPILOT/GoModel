@@ -229,7 +229,7 @@
          :style="'left: ' + calendarTooltip.x + 'px; top: ' + (calendarTooltip.y - 40) + 'px'"></div>
 
     <!-- Requests by Status Chart -->
-    <div class="model-chart-section" x-show="auditStatsHasData()">
+    <div class="model-chart-section audit-stats-section" x-show="auditStatsHasData()">
         <div class="model-chart-header audit-stats-header">
             <h3>Requests by Status</h3>
             <div class="audit-stats-kpis" role="group" aria-label="Request status summary">
@@ -260,7 +260,7 @@
     </div>
 
     <!-- Provider Latency Chart -->
-    <div class="model-chart-section" x-show="auditStatsHasData() && auditLatencyHasData()">
+    <div class="model-chart-section audit-stats-section" x-show="auditStatsHasData() && auditLatencyHasData()">
         <div class="model-chart-header audit-stats-header">
             <div class="inline-help-section" x-data="{ open: false, copyId: 'audit-latency-help-copy', showLabel: 'Show provider latency help', hideLabel: 'Hide provider latency help', text: 'Average duration of successful requests as measured at the gateway, per provider. Local cache hits and failed requests are excluded; streamed responses count until the stream completes.' }">
                 <div class="inline-help-title-row">
