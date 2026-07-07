@@ -57,37 +57,48 @@ func (p *Provider) realtimeHTTPTarget(req *core.RealtimeRequest, endpoint string
 	if req == nil || strings.TrimSpace(req.Model) == "" {
 		return nil, core.NewInvalidRequestError("model is required for realtime calls", nil)
 	}
-	root, err := p.realtimeGARoot()
+	u, err := p.realtimeRoot("http", "https")
 	if err != nil {
 		return nil, err
 	}
-	root.Path += "/" + endpoint
-	return &core.RealtimeHTTPTarget{URL: root.String(), Headers: p.realtimeAuthHeaders()}, nil
+	u.Path += "/openai/v1/realtime/" + endpoint
+	return &core.RealtimeHTTPTarget{URL: u.String(), Headers: p.realtimeAuthHeaders()}, nil
 }
 
 // realtimeAttachURL builds the GA sideband attach websocket URL:
 // wss://<resource>/openai/v1/realtime?call_id=...
 func (p *Provider) realtimeAttachURL(callID string) (string, error) {
-	u, err := p.realtimeGARoot()
+	u, err := p.realtimeRoot("ws", "wss")
 	if err != nil {
 		return "", err
 	}
-	switch strings.ToLower(u.Scheme) {
-	case "https":
-		u.Scheme = "wss"
-	case "http":
-		u.Scheme = "ws"
-	}
-	u.Path = strings.TrimSuffix(u.Path, "/realtime") + "/realtime"
+	u.Path += "/openai/v1/realtime"
 	q := url.Values{}
 	q.Set("call_id", callID)
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
 
-// realtimeGARoot derives <resource root>/openai/v1/realtime from the configured
-// base URL, stripping any existing /openai[/v1] or deployment sub-path first.
-func (p *Provider) realtimeGARoot() (*url.URL, error) {
+// realtimeURL builds wss://<resource>/openai/realtime?api-version=…&deployment=…
+// from the configured base URL's resource root. The model selects the Azure
+// deployment.
+func (p *Provider) realtimeURL(deployment string) (string, error) {
+	u, err := p.realtimeRoot("ws", "wss")
+	if err != nil {
+		return "", err
+	}
+	u.Path += "/openai/realtime"
+	q := url.Values{}
+	q.Set("api-version", p.apiVersion)
+	q.Set("deployment", deployment)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// realtimeRoot derives the resource root from the configured base URL with the
+// given scheme pair applied, stripping any existing /openai[/v1] or deployment
+// sub-path so callers can append their realtime path without doubling it.
+func (p *Provider) realtimeRoot(insecureScheme, secureScheme string) (*url.URL, error) {
 	root := resourceRootBaseURL(p.GetBaseURL())
 	u, err := url.Parse(root)
 	if err != nil || u.Host == "" {
@@ -95,16 +106,16 @@ func (p *Provider) realtimeGARoot() (*url.URL, error) {
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "https", "wss", "":
-		u.Scheme = "https"
+		u.Scheme = secureScheme
 	case "http", "ws":
-		u.Scheme = "http"
+		u.Scheme = insecureScheme
 	default:
 		return nil, core.NewInvalidRequestError("unsupported azure realtime base url scheme: "+u.Scheme, nil)
 	}
 	path := strings.TrimRight(u.Path, "/")
 	path = strings.TrimSuffix(path, "/openai/v1")
 	path = strings.TrimSuffix(path, "/openai")
-	u.Path = path + "/openai/v1/realtime"
+	u.Path = path
 	u.RawQuery = ""
 	return u, nil
 }
@@ -115,36 +126,6 @@ func (p *Provider) realtimeAuthHeaders() http.Header {
 		headers.Set("api-key", p.apiKey)
 	}
 	return headers
-}
-
-// realtimeURL builds wss://<resource>/openai/realtime?api-version=…&deployment=…
-// from the configured base URL's resource root. The model selects the Azure
-// deployment.
-func (p *Provider) realtimeURL(deployment string) (string, error) {
-	root := resourceRootBaseURL(p.GetBaseURL())
-	u, err := url.Parse(root)
-	if err != nil || u.Host == "" {
-		return "", core.NewInvalidRequestError("invalid azure realtime base url: "+root, err)
-	}
-	switch strings.ToLower(u.Scheme) {
-	case "https", "wss", "":
-		u.Scheme = "wss"
-	case "http", "ws":
-		u.Scheme = "ws"
-	default:
-		return "", core.NewInvalidRequestError("unsupported azure realtime base url scheme: "+u.Scheme, nil)
-	}
-	// Strip any existing /openai[/v1] root so a base already pointing at the
-	// OpenAI sub-path doesn't produce /openai/openai/realtime.
-	path := strings.TrimRight(u.Path, "/")
-	path = strings.TrimSuffix(path, "/openai/v1")
-	path = strings.TrimSuffix(path, "/openai")
-	u.Path = path + "/openai/realtime"
-	q := url.Values{}
-	q.Set("api-version", p.apiVersion)
-	q.Set("deployment", deployment)
-	u.RawQuery = q.Encode()
-	return u.String(), nil
 }
 
 // Compile-time assertions that Azure implements the realtime capabilities.
