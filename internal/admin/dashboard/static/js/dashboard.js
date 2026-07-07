@@ -253,10 +253,7 @@ function dashboard() {
 
       if (page === "usage" && sub === "costs") this.usageMode = "costs";
       if (page === "usage" && sub !== "costs") this.usageMode = "tokens";
-      if (page === "audit-logs") {
-        this.fetchAuditLog(true);
-        if (typeof this.fetchAuditStats === "function") this.fetchAuditStats();
-      }
+      if (page === "audit-logs") this.fetchAuditLog(true);
       if (page === "auth-keys" && typeof this.fetchAuthKeys === "function")
         this.fetchAuthKeys();
       if (
@@ -295,6 +292,7 @@ function dashboard() {
       }
       if (page === "overview") {
         this.renderChart();
+        if (typeof this.fetchAuditStats === "function") this.fetchAuditStats();
         if (typeof this.startLiveTokens === "function") this.startLiveTokens();
       }
       if (page === "usage") this.fetchUsagePage();
@@ -763,9 +761,6 @@ function dashboard() {
         typeof this.fetchAuditLog === "function"
       ) {
         requests.push(this.fetchAuditLog(true));
-        if (typeof this.fetchAuditStats === "function") {
-          requests.push(this.fetchAuditStats());
-        }
       }
       if (
         this.page === "auth-keys" &&

@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 )
@@ -72,8 +73,8 @@ func TestFoldRequestStats_HourInterval(t *testing.T) {
 	if stats.Summary.SuccessRate == nil || *stats.Summary.SuccessRate != float64(3)/float64(6) {
 		t.Fatalf("success rate = %v", stats.Summary.SuccessRate)
 	}
-	wantAvg := (400e6 + 900e6) / 3 / 1e6
-	if stats.Summary.AvgDurationMs == nil || *stats.Summary.AvgDurationMs != wantAvg {
+	wantAvg := float64(400e6+900e6) / 3 / 1e6
+	if stats.Summary.AvgDurationMs == nil || math.Abs(*stats.Summary.AvgDurationMs-wantAvg) > 1e-9 {
 		t.Fatalf("avg duration = %v, want %v", stats.Summary.AvgDurationMs, wantAvg)
 	}
 

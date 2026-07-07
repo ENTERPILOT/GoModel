@@ -50,7 +50,7 @@ function createModule(overrides = {}, contextOverrides = {}) {
     const module = factory();
 
     module.$nextTick = (callback) => callback();
-    module.page = 'audit-logs';
+    module.page = 'overview';
     module.days = '30';
     module.customStartDate = null;
     module.customEndDate = null;
@@ -185,6 +185,23 @@ test('hourly labels mark local midnight with the short date', () => {
     assert.equal(module._auditStatsBucketLabel({ start: afternoon.toISOString() }), 'Jan 16');
 });
 
+test('labels follow the dashboard effective timezone, not the browser locale', () => {
+    const { module } = createModule();
+    module.auditStats.interval = 'hour';
+
+    // Midnight UTC is 09:00 in Tokyo — an hourly bucket must label the hour
+    // in the dashboard's timezone, and the day flip must follow it too.
+    module.effectiveTimezone = () => 'Asia/Tokyo';
+    assert.equal(module._auditStatsBucketLabel({ start: '2026-01-16T00:00:00Z' }), '09:00');
+    assert.equal(module._auditStatsBucketLabel({ start: '2026-01-15T15:00:00Z' }), 'Jan 16');
+
+    module.effectiveTimezone = () => 'UTC';
+    assert.equal(module._auditStatsBucketLabel({ start: '2026-01-16T00:00:00Z' }), 'Jan 16');
+
+    module.auditStats.interval = 'day';
+    assert.equal(module._auditStatsTooltipTitle({ start: '2026-01-16T00:00:00Z' }), 'Jan 16, 2026');
+});
+
 test('renderAuditStatsCharts destroys charts when leaving the page', () => {
     FakeChart.instances = [];
     const { module } = createModule();
@@ -200,7 +217,7 @@ test('renderAuditStatsCharts destroys charts when leaving the page', () => {
     assert.ok(module.auditStatusChart);
     assert.ok(module.auditLatencyChart);
 
-    module.page = 'overview';
+    module.page = 'audit-logs';
     module.renderAuditStatsCharts();
     assert.equal(module.auditStatusChart, null);
     assert.equal(module.auditLatencyChart, null);

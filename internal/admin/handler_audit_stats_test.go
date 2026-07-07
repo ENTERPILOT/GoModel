@@ -51,6 +51,18 @@ func TestAuditStats_InvalidDate(t *testing.T) {
 	}
 }
 
+func TestAuditStats_NilReaderInvalidDate(t *testing.T) {
+	h := NewHandler(nil, nil)
+	c, rec := newHandlerContext("/admin/audit/stats?start_date=not-a-date")
+
+	if err := h.AuditStats(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 even with a nil reader", rec.Code)
+	}
+}
+
 func TestAuditStats_IntervalFollowsRangeSpan(t *testing.T) {
 	cases := []struct {
 		query string

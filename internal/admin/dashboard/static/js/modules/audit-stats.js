@@ -82,25 +82,47 @@
                 return Math.round(v) + ' ms';
             },
 
-            // Axis/legend labels: hourly buckets show the hour and mark local
-            // midnight with the short date; daily buckets show the short date.
+            // Date parts in the dashboard's effective timezone: the server
+            // buckets by the same X-GoModel-Timezone the dashboard sends, so
+            // labels must not drift to the browser's locale when the two
+            // timezones differ.
+            _auditStatsDateParts(d) {
+                const zone = typeof this.effectiveTimezone === 'function' ? this.effectiveTimezone() : undefined;
+                try {
+                    const byType = {};
+                    new Intl.DateTimeFormat('en-US', {
+                        timeZone: zone,
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        hourCycle: 'h23'
+                    }).formatToParts(d).forEach((part) => { byType[part.type] = part.value; });
+                    return { year: byType.year, month: byType.month, day: byType.day, hour: Number(byType.hour) };
+                } catch (e) {
+                    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                    return { year: String(d.getFullYear()), month: months[d.getMonth()], day: String(d.getDate()), hour: d.getHours() };
+                }
+            },
+
+            // Axis labels: hourly buckets show the hour and mark midnight with
+            // the short date; daily buckets show the short date.
             _auditStatsBucketLabel(bucket) {
                 const d = new Date(bucket.start);
                 if (Number.isNaN(d.getTime())) return String(bucket.start || '');
-                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                const day = months[d.getMonth()] + ' ' + d.getDate();
+                const parts = this._auditStatsDateParts(d);
+                const day = parts.month + ' ' + parts.day;
                 if (this.auditStats.interval !== 'hour') return day;
-                if (d.getHours() === 0) return day;
-                return String(d.getHours()).padStart(2, '0') + ':00';
+                if (parts.hour === 0) return day;
+                return String(parts.hour).padStart(2, '0') + ':00';
             },
 
             _auditStatsTooltipTitle(bucket) {
                 const d = new Date(bucket.start);
                 if (Number.isNaN(d.getTime())) return String(bucket.start || '');
                 if (this.auditStats.interval === 'hour') return this.formatTimestamp(bucket.start);
-                return d.getFullYear() + '-' +
-                    String(d.getMonth() + 1).padStart(2, '0') + '-' +
-                    String(d.getDate()).padStart(2, '0');
+                const parts = this._auditStatsDateParts(d);
+                return parts.month + ' ' + parts.day + ', ' + parts.year;
             },
 
             // Charts resolve the dashboard's status tokens (success/warning/
@@ -258,7 +280,7 @@
             _renderAuditChart(chartKey, canvasId, visible, buildConfig, retries) {
                 if (retries === undefined) retries = 3;
                 this.$nextTick(() => {
-                    if (this.page !== 'audit-logs' || !visible()) {
+                    if (this.page !== 'overview' || !visible()) {
                         if (this[chartKey]) {
                             this[chartKey].destroy();
                             this[chartKey] = null;
