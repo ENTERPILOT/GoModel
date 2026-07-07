@@ -3432,11 +3432,11 @@ textarea:focus {
   border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
 }
 
-/* Tokens saved by a request rewrite (e.g. token compression), shown on the
-   Rewritten tab next to the rewriter pill. Same blue family as the cached
-   tokens in the charts (both derive from --info); the prompt-cache variables
-   carry the per-theme tone mix that keeps the text readable. */
-.audit-tokens-saved-pill {
+/* Share of the request body removed by a rewrite (e.g. token compression),
+   shown on the Rewritten tab next to the rewriter pill. Same blue family as
+   the cached tokens in the charts (both derive from --info); the prompt-cache
+   variables carry the per-theme tone mix that keeps the text readable. */
+.audit-savings-pill {
   display: inline-flex;
   align-items: center;
   padding: 1px 7px;
