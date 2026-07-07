@@ -1471,6 +1471,78 @@
         }
       }
     },
+    "/admin/mcp-servers/{name}/catalog": {
+      "get": {
+        "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server name.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Inspect one MCP server's current catalog",
+        "parameters": [
+          {
+            "description": "MCP server name",
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/mcpgateway.CatalogView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/mcp-servers/{name}/catalog"
+          }
+        }
+      }
+    },
     "/admin/mcp-servers/{name}/reconnect": {
       "post": {
         "tags": [
@@ -11101,6 +11173,98 @@
             "type": "string"
           }
         }
+      },
+      "mcpgateway.CatalogFeature": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "mcpgateway.CatalogResource": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        }
+      },
+      "mcpgateway.CatalogTemplate": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "uri_template": {
+            "type": "string"
+          }
+        }
+      },
+      "mcpgateway.CatalogView": {
+        "type": "object",
+        "properties": {
+          "instructions": {
+            "type": "string"
+          },
+          "prompts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mcpgateway.CatalogFeature"
+            }
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mcpgateway.CatalogResource"
+            }
+          },
+          "server": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/mcpgateway.ServerStatus"
+          },
+          "templates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mcpgateway.CatalogTemplate"
+            }
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mcpgateway.CatalogFeature"
+            }
+          }
+        }
+      },
+      "mcpgateway.ServerStatus": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "connecting",
+          "connected",
+          "degraded"
+        ],
+        "x-enum-varnames": [
+          "StatusDisabled",
+          "StatusConnecting",
+          "StatusConnected",
+          "StatusDegraded"
+        ]
       },
       "pricingoverrides.Pricing": {
         "type": "object",

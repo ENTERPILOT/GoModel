@@ -464,7 +464,8 @@ function dashboard() {
         this.failoverDraftsOpen ||
         (this.page === "workflows" && this.workflowFormOpen) ||
         (this.page === "guardrails" && this.guardrailFormOpen) ||
-        (this.page === "mcp-servers" && this.mcpServerFormOpen) ||
+        (this.page === "mcp-servers" &&
+          (this.mcpServerFormOpen || this.mcpCatalogOpen)) ||
         (this.page === "auth-keys" && this.authKeyFormOpen) ||
         (this.page === "budgets" && this.budgetFormOpen) ||
         ((this.page === "rate-limits" || this.page === "models") &&
@@ -679,10 +680,9 @@ function dashboard() {
       ) {
         requests.push(this.fetchRateLimitsPage());
       }
-      if (
-        this.page === "mcp-servers" &&
-        typeof this.fetchMcpServersPage === "function"
-      ) {
+      // Fetched on every page, not just mcp-servers: the overview MCP card
+      // needs the server list to render its connected/total summary.
+      if (typeof this.fetchMcpServersPage === "function") {
         requests.push(this.fetchMcpServersPage());
       }
       if (

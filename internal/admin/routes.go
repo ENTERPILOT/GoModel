@@ -64,6 +64,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.PUT("/mcp-servers", h.UpsertMCPServer)
 	g.DELETE("/mcp-servers/:name", h.DeleteMCPServer)
 	g.POST("/mcp-servers/:name/reconnect", h.ReconnectMCPServer)
+	g.GET("/mcp-servers/:name/catalog", h.MCPServerCatalog)
 
 	g.GET("/failover", h.ListFailoverRules)
 	g.PUT("/failover", h.UpsertFailoverRule)

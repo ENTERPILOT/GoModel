@@ -309,6 +309,195 @@ test('openMcpServerEdit prefills the form and refuses managed servers', () => {
     }));
 });
 
+test('openMcpServerCatalog populates the inspector, deriving aggregated /mcp names', async () => {
+    const catalog = {
+        server: 'github',
+        status: 'connected',
+        instructions: 'Use the issue tools first.',
+        tools: [
+            { name: 'create_issue', description: 'Create a GitHub issue' },
+            { name: 'search_issues' }
+        ],
+        prompts: [{ name: 'triage', description: 'Triage an issue' }],
+        resources: [{ uri: 'repo://readme', name: 'readme', description: 'Repository readme' }],
+        templates: [{ uri_template: 'repo://{path}' }]
+    };
+    const requests = [];
+    const module = createMcpServersModule({
+        fetch: async (url, request) => {
+            requests.push({ url, request });
+            return { status: 200, statusText: 'OK', json: async () => catalog };
+        }
+    });
+    Object.assign(module, {
+        requestOptions: (options) => ({ ...(options || {}), headers: {} }),
+        handleFetchResponse: () => true
+    });
+
+    await module.openMcpServerCatalog({ name: 'github', status: 'connected' });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/mcp-servers/github/catalog');
+    assert.equal(module.mcpCatalogOpen, true);
+    assert.equal(module.mcpCatalogLoading, false);
+    assert.equal(module.mcpCatalogError, '');
+    assert.equal(module.mcpCatalog.server, 'github');
+    assert.equal(module.mcpCatalog.status, 'connected');
+    assert.equal(module.mcpCatalog.instructions, 'Use the issue tools first.');
+    assert.equal(module.mcpCatalogIsEmpty(), false);
+
+    const sections = module.mcpCatalogSections();
+    assert.equal(JSON.stringify(sections.map((section) => section.key)), JSON.stringify(['tools', 'prompts', 'resources', 'templates']));
+
+    const tools = sections[0].items;
+    assert.equal(JSON.stringify(tools[0]), JSON.stringify({
+        key: 'tool:create_issue',
+        name: 'create_issue',
+        aggregated: 'github_create_issue',
+        description: 'Create a GitHub issue'
+    }));
+    assert.equal(tools[1].aggregated, 'github_search_issues');
+    assert.equal(tools[1].description, '');
+
+    assert.equal(sections[1].items[0].aggregated, 'github_triage');
+
+    // Resources and templates keep their URIs; only tools and prompts are
+    // namespaced on the aggregated endpoint.
+    assert.equal(JSON.stringify(sections[2].items[0]), JSON.stringify({
+        key: 'resource:repo://readme',
+        name: 'repo://readme',
+        aggregated: '',
+        description: 'readme — Repository readme'
+    }));
+    assert.equal(JSON.stringify(sections[3].items[0]), JSON.stringify({
+        key: 'template:repo://{path}',
+        name: 'repo://{path}',
+        aggregated: '',
+        description: ''
+    }));
+
+    module.closeMcpServerCatalog();
+    assert.equal(module.mcpCatalogOpen, false);
+    assert.equal(JSON.stringify(module.mcpCatalog), JSON.stringify(module.defaultMcpCatalog()));
+});
+
+test('openMcpServerCatalog surfaces 404, 503, and network failures as inspector errors', async () => {
+    const notFound = createMcpServersModule({
+        fetch: async () => ({ status: 404, statusText: 'Not Found' })
+    });
+    Object.assign(notFound, {
+        requestOptions: (options) => ({ ...(options || {}), headers: {} }),
+        handleFetchResponse: () => true
+    });
+    await notFound.openMcpServerCatalog({ name: 'github' });
+    assert.equal(notFound.mcpCatalogOpen, true);
+    assert.equal(notFound.mcpCatalogLoading, false);
+    assert.equal(notFound.mcpCatalogError, 'MCP server "github" was not found.');
+    assert.equal(notFound.mcpServersAvailable, true);
+
+    const unavailable = createMcpServersModule({
+        fetch: async () => ({ status: 503, statusText: 'Service Unavailable' })
+    });
+    Object.assign(unavailable, {
+        requestOptions: (options) => ({ ...(options || {}), headers: {} }),
+        handleFetchResponse: () => true
+    });
+    await unavailable.openMcpServerCatalog({ name: 'github' });
+    assert.equal(unavailable.mcpCatalogError, 'MCP server management is unavailable.');
+    assert.equal(unavailable.mcpServersAvailable, false);
+
+    const failing = createMcpServersModule({
+        fetch: async () => {
+            throw new Error('network down');
+        }
+    });
+    Object.assign(failing, {
+        requestOptions: (options) => ({ ...(options || {}), headers: {} }),
+        handleFetchResponse: () => true
+    });
+    await failing.openMcpServerCatalog({ name: 'github' });
+    assert.equal(failing.mcpCatalogError, 'Failed to load MCP server catalog.');
+    assert.equal(failing.mcpCatalogLoading, false);
+});
+
+test('empty catalog keeps the inspector open with the empty hint state', async () => {
+    const module = createMcpServersModule({
+        fetch: async () => ({
+            status: 200,
+            statusText: 'OK',
+            json: async () => ({ server: 'github', status: 'connecting', tools: [], prompts: [], resources: [], templates: [] })
+        })
+    });
+    Object.assign(module, {
+        requestOptions: (options) => ({ ...(options || {}), headers: {} }),
+        handleFetchResponse: () => true
+    });
+
+    await module.openMcpServerCatalog({ name: 'github', status: 'connecting' });
+
+    assert.equal(module.mcpCatalogOpen, true);
+    assert.equal(module.mcpCatalogError, '');
+    assert.equal(module.mcpCatalogSections().length, 0);
+    assert.equal(module.mcpCatalogIsEmpty(), true);
+});
+
+test('normalizeMcpCatalog tolerates missing lists and malformed payloads', () => {
+    const module = createMcpServersModule();
+
+    const fromNull = module.normalizeMcpCatalog('github', null);
+    assert.equal(fromNull.server, 'github');
+    assert.equal(JSON.stringify(fromNull.tools), '[]');
+    assert.equal(JSON.stringify(fromNull.templates), '[]');
+
+    const sparse = module.normalizeMcpCatalog('github', {
+        status: 'degraded',
+        tools: [{ name: 'ok' }, 'not-an-object', null]
+    });
+    assert.equal(sparse.status, 'degraded');
+    assert.equal(JSON.stringify(sparse.tools), JSON.stringify([{ name: 'ok' }]));
+    assert.equal(JSON.stringify(sparse.prompts), '[]');
+});
+
+test('overview card helpers summarize connected/total and degraded accents', () => {
+    const module = createMcpServersModule();
+
+    module.mcpServers = [];
+    assert.equal(module.mcpOverviewVisible(), false);
+
+    module.mcpServers = [
+        { name: 'github', status: 'connected', enabled: true },
+        { name: 'search', status: 'connected', enabled: true },
+        { name: 'local', status: 'disabled', enabled: false }
+    ];
+    assert.equal(module.mcpOverviewVisible(), true);
+    assert.equal(module.mcpOverviewRatioText(), '2/3');
+    assert.equal(module.mcpOverviewSummaryClass(), 'is-healthy');
+    assert.equal(module.mcpOverviewSummaryText(), '2 of 3 servers connected');
+
+    module.mcpServers = [
+        { name: 'github', status: 'connected', enabled: true },
+        { name: 'search', status: 'degraded', enabled: true }
+    ];
+    assert.equal(module.mcpOverviewRatioText(), '1/2');
+    assert.equal(module.mcpOverviewSummaryClass(), 'is-degraded');
+    assert.equal(module.mcpOverviewSummaryText(), '1 server needs attention');
+
+    // A degraded-but-disabled server never flips the accent.
+    module.mcpServers = [
+        { name: 'github', status: 'connected', enabled: true },
+        { name: 'search', status: 'degraded', enabled: false }
+    ];
+    assert.equal(module.mcpOverviewSummaryClass(), 'is-healthy');
+
+    module.mcpServers = [{ name: 'github', status: 'connected', enabled: true }];
+    assert.equal(module.mcpOverviewSummaryText(), 'All MCP servers connected');
+
+    // Feature absent (404/503 marked it unavailable): the card hides even if
+    // stale rows linger.
+    module.mcpServersAvailable = false;
+    assert.equal(module.mcpOverviewVisible(), false);
+});
+
 test('filteredMcpServers matches name, url, transport, and status', () => {
     const module = createMcpServersModule();
     module.mcpServers = [

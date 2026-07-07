@@ -12,6 +12,18 @@
             mcpServerFormMode: 'create',
             mcpServerDeletingName: '',
             mcpServerReconnectingName: '',
+            mcpCatalogOpen: false,
+            mcpCatalogLoading: false,
+            mcpCatalogError: '',
+            mcpCatalog: {
+                server: '',
+                status: '',
+                instructions: '',
+                tools: [],
+                prompts: [],
+                resources: [],
+                templates: []
+            },
             mcpServerForm: {
                 name: '',
                 url: '',
@@ -443,6 +455,187 @@
                 } finally {
                     this.mcpServerReconnectingName = '';
                 }
+            },
+
+            defaultMcpCatalog() {
+                return {
+                    server: '',
+                    status: '',
+                    instructions: '',
+                    tools: [],
+                    prompts: [],
+                    resources: [],
+                    templates: []
+                };
+            },
+
+            normalizeMcpCatalog(name, payload) {
+                const source = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+                const list = (value) => (Array.isArray(value) ? value : []).filter((item) => item && typeof item === 'object');
+                return {
+                    server: String(source.server || name || '').trim(),
+                    status: String(source.status || '').trim(),
+                    instructions: String(source.instructions || '').trim(),
+                    tools: list(source.tools),
+                    prompts: list(source.prompts),
+                    resources: list(source.resources),
+                    templates: list(source.templates)
+                };
+            },
+
+            // mcpNamespacedName is the aggregated /mcp endpoint form of one tool
+            // or prompt name; the catalog reports the upstream originals.
+            mcpNamespacedName(name) {
+                return String(this.mcpCatalog && this.mcpCatalog.server || '') + '_' + String(name || '');
+            },
+
+            mcpCatalogSections() {
+                const catalog = this.mcpCatalog || this.defaultMcpCatalog();
+                const describe = (name, description) => {
+                    const label = String(name || '').trim();
+                    const copy = String(description || '').trim();
+                    if (label && copy) {
+                        return label + ' — ' + copy;
+                    }
+                    return copy || label;
+                };
+                const feature = (kind) => (item) => ({
+                    key: kind + ':' + String(item.name || ''),
+                    name: String(item.name || ''),
+                    aggregated: this.mcpNamespacedName(item.name),
+                    description: String(item.description || '').trim()
+                });
+                const sections = [
+                    { key: 'tools', title: 'Tools', items: (catalog.tools || []).map(feature('tool')) },
+                    { key: 'prompts', title: 'Prompts', items: (catalog.prompts || []).map(feature('prompt')) },
+                    {
+                        key: 'resources',
+                        title: 'Resources',
+                        items: (catalog.resources || []).map((item) => ({
+                            key: 'resource:' + String(item.uri || ''),
+                            name: String(item.uri || ''),
+                            aggregated: '',
+                            description: describe(item.name, item.description)
+                        }))
+                    },
+                    {
+                        key: 'templates',
+                        title: 'Resource templates',
+                        items: (catalog.templates || []).map((item) => ({
+                            key: 'template:' + String(item.uri_template || ''),
+                            name: String(item.uri_template || ''),
+                            aggregated: '',
+                            description: describe(item.name, item.description)
+                        }))
+                    }
+                ];
+                return sections.filter((section) => section.items.length > 0);
+            },
+
+            mcpCatalogIsEmpty() {
+                return this.mcpCatalogSections().length === 0;
+            },
+
+            async openMcpServerCatalog(server) {
+                const name = String(server && server.name || '').trim();
+                if (!name) {
+                    return;
+                }
+
+                this.mcpCatalogOpen = true;
+                this.mcpCatalogLoading = true;
+                this.mcpCatalogError = '';
+                this.mcpCatalog = {
+                    ...this.defaultMcpCatalog(),
+                    server: name,
+                    status: this.mcpServerStatus(server)
+                };
+                if (typeof this.renderIconsAfterUpdate === 'function') {
+                    this.renderIconsAfterUpdate();
+                }
+
+                try {
+                    const request = this.requestOptions();
+                    const res = await fetch('/admin/mcp-servers/' + encodeURIComponent(name) + '/catalog', request);
+                    if (res.status === 503) {
+                        this.mcpServersAvailable = false;
+                        this.mcpCatalogError = 'MCP server management is unavailable.';
+                        return;
+                    }
+                    if (res.status === 404) {
+                        this.mcpCatalogError = 'MCP server "' + name + '" was not found.';
+                        return;
+                    }
+                    const handled = this.handleFetchResponse(res, 'mcp server catalog', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
+                        if (res.status === 401) {
+                            this.mcpCatalogError = 'Authentication required.';
+                            return;
+                        }
+                        this.mcpCatalogError = await this.mcpServerResponseMessage(res, 'Failed to load MCP server catalog.');
+                        return;
+                    }
+                    const payload = await res.json();
+                    this.mcpCatalog = this.normalizeMcpCatalog(name, payload);
+                } catch (e) {
+                    console.error('Failed to load MCP server catalog:', e);
+                    this.mcpCatalogError = 'Failed to load MCP server catalog.';
+                } finally {
+                    this.mcpCatalogLoading = false;
+                }
+            },
+
+            closeMcpServerCatalog() {
+                this.mcpCatalogOpen = false;
+                this.mcpCatalogLoading = false;
+                this.mcpCatalogError = '';
+                this.mcpCatalog = this.defaultMcpCatalog();
+            },
+
+            // Overview-card helpers. The card is hidden entirely when the
+            // feature is unavailable or no servers are configured.
+            mcpOverviewTotal() {
+                return (this.mcpServers || []).length;
+            },
+
+            mcpOverviewConnectedCount() {
+                return (this.mcpServers || []).filter((server) => this.mcpServerStatus(server) === 'connected').length;
+            },
+
+            mcpOverviewDegradedCount() {
+                return (this.mcpServers || []).filter((server) =>
+                    server && server.enabled !== false && this.mcpServerStatus(server) === 'degraded'
+                ).length;
+            },
+
+            mcpOverviewVisible() {
+                return this.mcpServersAvailable && this.mcpOverviewTotal() > 0;
+            },
+
+            mcpOverviewRatioText() {
+                return String(this.mcpOverviewConnectedCount()) + '/' + String(this.mcpOverviewTotal());
+            },
+
+            // Mirrors providerStatusSummaryClass: the card gets a warning accent
+            // while any enabled server is degraded.
+            mcpOverviewSummaryClass() {
+                return this.mcpOverviewDegradedCount() > 0 ? 'is-degraded' : 'is-healthy';
+            },
+
+            mcpOverviewSummaryText() {
+                const degraded = this.mcpOverviewDegradedCount();
+                if (degraded > 0) {
+                    return String(degraded) + ' server' + (degraded === 1 ? '' : 's') + ' need' + (degraded === 1 ? 's' : '') + ' attention';
+                }
+                const total = this.mcpOverviewTotal();
+                const connected = this.mcpOverviewConnectedCount();
+                if (total > 0 && connected === total) {
+                    return 'All MCP servers connected';
+                }
+                return String(connected) + ' of ' + String(total) + ' server' + (total === 1 ? '' : 's') + ' connected';
             }
         };
     }

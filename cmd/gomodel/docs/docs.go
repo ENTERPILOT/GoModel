@@ -1115,6 +1115,58 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/mcp-servers/{name}/catalog": {
+            "get": {
+                "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server name.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Inspect one MCP server's current catalog",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP server name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcpgateway.CatalogView"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/mcp-servers/{name}/reconnect": {
             "post": {
                 "produces": [
@@ -8377,6 +8429,98 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "mcpgateway.CatalogFeature": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "mcpgateway.CatalogResource": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "uri": {
+                    "type": "string"
+                }
+            }
+        },
+        "mcpgateway.CatalogTemplate": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "uri_template": {
+                    "type": "string"
+                }
+            }
+        },
+        "mcpgateway.CatalogView": {
+            "type": "object",
+            "properties": {
+                "instructions": {
+                    "type": "string"
+                },
+                "prompts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcpgateway.CatalogFeature"
+                    }
+                },
+                "resources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcpgateway.CatalogResource"
+                    }
+                },
+                "server": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/mcpgateway.ServerStatus"
+                },
+                "templates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcpgateway.CatalogTemplate"
+                    }
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcpgateway.CatalogFeature"
+                    }
+                }
+            }
+        },
+        "mcpgateway.ServerStatus": {
+            "type": "string",
+            "enum": [
+                "disabled",
+                "connecting",
+                "connected",
+                "degraded"
+            ],
+            "x-enum-varnames": [
+                "StatusDisabled",
+                "StatusConnecting",
+                "StatusConnected",
+                "StatusDegraded"
+            ]
         },
         "pricingoverrides.Pricing": {
             "type": "object",

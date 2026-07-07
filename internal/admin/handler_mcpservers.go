@@ -23,6 +23,7 @@ type MCPServerAdmin interface {
 	Upsert(ctx context.Context, server mcpgateway.ManagedServer) error
 	Delete(ctx context.Context, name string) error
 	Reconnect(ctx context.Context, name string) (mcpgateway.ServerView, error)
+	Catalog(name string) (mcpgateway.CatalogView, bool)
 }
 
 // redactedMCPHeaderValue replaces upstream header values (the credential
@@ -205,6 +206,34 @@ func (h *Handler) ReconnectMCPServer(c *echo.Context) error {
 		return handleError(c, core.NewNotFoundError("mcp server not found: "+name))
 	}
 	return c.JSON(http.StatusOK, h.mcpServerView(view))
+}
+
+// MCPServerCatalog handles GET /admin/mcp-servers/:name/catalog.
+//
+// @Summary      Inspect one MCP server's current catalog
+// @Description  Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server name.
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Param        name  path  string  true  "MCP server name"
+// @Success      200   {object}  mcpgateway.CatalogView
+// @Failure      401   {object}  core.GatewayError
+// @Failure      404   {object}  core.GatewayError
+// @Failure      503   {object}  core.GatewayError
+// @Router       /admin/mcp-servers/{name}/catalog [get]
+func (h *Handler) MCPServerCatalog(c *echo.Context) error {
+	if h.mcpServers == nil {
+		return handleError(c, featureUnavailableError("mcp gateway feature is unavailable"))
+	}
+	name := strings.TrimSpace(c.Param("name"))
+	if name == "" {
+		return handleError(c, core.NewInvalidRequestError("name is required", nil))
+	}
+	catalog, ok := h.mcpServers.Catalog(name)
+	if !ok {
+		return handleError(c, core.NewNotFoundError("mcp server not found: "+name))
+	}
+	return c.JSON(http.StatusOK, catalog)
 }
 
 // buildMCPServerUpsert maps the request onto a validated ManagedServer,

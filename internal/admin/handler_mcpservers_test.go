@@ -23,6 +23,7 @@ type mcpAdminFake struct {
 	views        map[string]mcpgateway.ServerView
 	managed      map[string]struct{}
 	stored       map[string]mcpgateway.ManagedServer
+	catalogs     map[string]mcpgateway.CatalogView
 	upsertErr    error
 	deleteErr    error
 	reconnectErr error
@@ -110,6 +111,27 @@ func (f *mcpAdminFake) Reconnect(_ context.Context, name string) (mcpgateway.Ser
 	view.Status = mcpgateway.StatusConnected
 	f.views[name] = view
 	return view, nil
+}
+
+func (f *mcpAdminFake) Catalog(name string) (mcpgateway.CatalogView, bool) {
+	view, ok := f.views[name]
+	if !ok {
+		return mcpgateway.CatalogView{}, false
+	}
+	catalog := mcpgateway.CatalogView{
+		Server:    name,
+		Status:    view.Status,
+		Tools:     []mcpgateway.CatalogFeature{},
+		Prompts:   []mcpgateway.CatalogFeature{},
+		Resources: []mcpgateway.CatalogResource{},
+		Templates: []mcpgateway.CatalogTemplate{},
+	}
+	if stored, ok := f.catalogs[name]; ok {
+		catalog = stored
+		catalog.Server = name
+		catalog.Status = view.Status
+	}
+	return catalog, true
 }
 
 func newMCPHandler(fake *mcpAdminFake) *Handler {
@@ -490,6 +512,72 @@ func TestReconnectMCPServer(t *testing.T) {
 		}
 		if !containsString(view.LastError, "connection refused") {
 			t.Fatalf("view.LastError = %q, want the redial failure", view.LastError)
+		}
+	})
+}
+
+func TestMCPServerCatalog(t *testing.T) {
+	newFake := func() *mcpAdminFake {
+		fake := newMCPAdminFake()
+		fake.addStored(mcpgateway.ManagedServer{
+			Name: "github", URL: "https://mcp.example.com/mcp", Transport: "http", Enabled: true,
+		}, mcpgateway.StatusConnected)
+		fake.catalogs = map[string]mcpgateway.CatalogView{
+			"github": {
+				Tools:   []mcpgateway.CatalogFeature{{Name: "create_issue", Description: "Create an issue"}},
+				Prompts: []mcpgateway.CatalogFeature{{Name: "triage"}},
+				Resources: []mcpgateway.CatalogResource{
+					{URI: "repo://readme", Name: "readme"},
+				},
+				Templates: []mcpgateway.CatalogTemplate{},
+			},
+		}
+		return fake
+	}
+
+	t.Run("unavailable service is 503", func(t *testing.T) {
+		h := NewHandler(nil, nil)
+		c, rec := newMCPServerNameContext(http.MethodGet, "/admin/mcp-servers/github/catalog", "github")
+		if err := h.MCPServerCatalog(c); err != nil {
+			t.Fatalf("MCPServerCatalog() error = %v", err)
+		}
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("unknown name is 404", func(t *testing.T) {
+		h := newMCPHandler(newFake())
+		c, rec := newMCPServerNameContext(http.MethodGet, "/admin/mcp-servers/missing/catalog", "missing")
+		if err := h.MCPServerCatalog(c); err != nil {
+			t.Fatalf("MCPServerCatalog() error = %v", err)
+		}
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404 body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("returns the catalog snapshot", func(t *testing.T) {
+		h := newMCPHandler(newFake())
+		c, rec := newMCPServerNameContext(http.MethodGet, "/admin/mcp-servers/github/catalog", "github")
+		if err := h.MCPServerCatalog(c); err != nil {
+			t.Fatalf("MCPServerCatalog() error = %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+		}
+		var catalog mcpgateway.CatalogView
+		if err := json.Unmarshal(rec.Body.Bytes(), &catalog); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if catalog.Server != "github" || catalog.Status != mcpgateway.StatusConnected {
+			t.Fatalf("catalog = %+v, want connected github", catalog)
+		}
+		if len(catalog.Tools) != 1 || catalog.Tools[0].Name != "create_issue" {
+			t.Fatalf("catalog.Tools = %+v, want create_issue", catalog.Tools)
+		}
+		if len(catalog.Prompts) != 1 || len(catalog.Resources) != 1 {
+			t.Fatalf("catalog prompts/resources = %+v / %+v", catalog.Prompts, catalog.Resources)
 		}
 	})
 }
