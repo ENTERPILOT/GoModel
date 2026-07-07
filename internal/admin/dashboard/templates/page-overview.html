@@ -228,6 +228,59 @@
          x-text="calendarTooltip.text"
          :style="'left: ' + calendarTooltip.x + 'px; top: ' + (calendarTooltip.y - 40) + 'px'"></div>
 
+    <!-- Requests by Status Chart -->
+    <div class="model-chart-section audit-stats-section" x-show="auditStatsHasData()">
+        <div class="model-chart-header audit-stats-header">
+            <h3>Requests by Status</h3>
+            <div class="audit-stats-kpis" role="group" aria-label="Request status summary">
+                <span class="audit-stats-kpi" title="Share of requests answered with a 2xx status">
+                    <span class="audit-stats-kpi-label">Success</span>
+                    <span class="audit-stats-kpi-value mono" x-text="auditStatsSuccessRateText()"></span>
+                </span>
+                <span class="audit-stats-kpi">
+                    <span class="audit-stats-kpi-dot audit-stats-dot-2xx" aria-hidden="true"></span>
+                    <span class="audit-stats-kpi-label">2xx</span>
+                    <span class="audit-stats-kpi-value mono" x-text="auditStatsSummaryCount('status_2xx')"></span>
+                </span>
+                <span class="audit-stats-kpi">
+                    <span class="audit-stats-kpi-dot audit-stats-dot-4xx" aria-hidden="true"></span>
+                    <span class="audit-stats-kpi-label">4xx</span>
+                    <span class="audit-stats-kpi-value mono" x-text="auditStatsSummaryCount('status_4xx')"></span>
+                </span>
+                <span class="audit-stats-kpi">
+                    <span class="audit-stats-kpi-dot audit-stats-dot-5xx" aria-hidden="true"></span>
+                    <span class="audit-stats-kpi-label">5xx</span>
+                    <span class="audit-stats-kpi-value mono" x-text="auditStatsSummaryCount('status_5xx')"></span>
+                </span>
+            </div>
+        </div>
+        <div class="bar-chart-wrap">
+            <canvas id="auditStatusChartCanvas"></canvas>
+        </div>
+    </div>
+
+    <!-- Provider Latency Chart -->
+    <div class="model-chart-section audit-stats-section" x-show="auditStatsHasData() && auditLatencyHasData()">
+        <div class="model-chart-header audit-stats-header">
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'audit-latency-help-copy', showLabel: 'Show provider latency help', hideLabel: 'Hide provider latency help', text: 'Average duration of successful requests as measured at the gateway, per provider. Local cache hits and failed requests are excluded; streamed responses count until the stream completes.' }">
+                <div class="inline-help-title-row">
+                    <h3>Provider Latency</h3>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+            <div class="audit-stats-kpis">
+                <span class="audit-stats-kpi" title="Average duration of successful, uncached requests across all providers">
+                    <span class="audit-stats-kpi-label">Avg</span>
+                    <span class="audit-stats-kpi-value mono" x-text="auditStatsAvgLatencyText()"></span>
+                </span>
+            </div>
+        </div>
+        <div class="bar-chart-wrap">
+            <canvas id="auditLatencyChartCanvas"></canvas>
+        </div>
+    </div>
+
     <div id="provider-status-section" class="provider-status-section" tabindex="-1" x-show="providerStatus.providers.length > 0">
         <div class="provider-status-section-header">
             <div>

@@ -188,6 +188,15 @@ function dashboard() {
     auditStream: "",
     auditFetchToken: 0,
     auditExpandedEntries: {},
+    auditStats: {
+      interval: "day",
+      buckets: [],
+      summary: { requests: 0 },
+      provider_latency: [],
+    },
+    auditStatsFetchToken: 0,
+    auditStatusChart: null,
+    auditLatencyChart: null,
 
     // Conversation drawer state
     conversationOpen: false,
@@ -283,6 +292,7 @@ function dashboard() {
       }
       if (page === "overview") {
         this.renderChart();
+        if (typeof this.fetchAuditStats === "function") this.fetchAuditStats();
         if (typeof this.startLiveTokens === "function") this.startLiveTokens();
       }
       if (page === "usage") this.fetchUsagePage();
@@ -394,6 +404,9 @@ function dashboard() {
       this.renderBarChart();
       this.renderUserPathChart();
       this.renderLabelChart();
+      if (typeof this.renderAuditStatsCharts === "function") {
+        this.renderAuditStatsCharts();
+      }
       if (typeof this.redrawLiveTokensChart === "function") {
         // Force a rebuild so the bars pick up the new theme's colors.
         this.redrawLiveTokensChart();
@@ -1172,6 +1185,12 @@ function dashboard() {
         ? dashboardAuditListModule
         : null,
       "dashboardAuditListModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardAuditStatsModule === "function"
+        ? dashboardAuditStatsModule
+        : null,
+      "dashboardAuditStatsModule",
     ),
     resolveModuleFactory(
       typeof dashboardLiveLogsModule === "function"

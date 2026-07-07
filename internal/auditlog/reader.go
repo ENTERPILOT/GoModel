@@ -54,4 +54,8 @@ type Reader interface {
 	// It follows Responses API linkage fields when available:
 	// request_body.previous_response_id and response_body.id.
 	GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error)
+
+	// GetRequestStats returns time-bucketed status-class counts and
+	// per-provider latency aggregates for the dashboard charts.
+	GetRequestStats(ctx context.Context, params RequestStatsParams) (*RequestStats, error)
 }

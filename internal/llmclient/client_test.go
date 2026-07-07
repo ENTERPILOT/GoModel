@@ -1823,3 +1823,72 @@ func TestBackoffCalculation_WithJitter(t *testing.T) {
 		}
 	}
 }
+
+type recordingReadCloser struct {
+	io.Reader
+	closed atomic.Bool
+}
+
+func (r *recordingReadCloser) Close() error {
+	r.closed.Store(true)
+	return nil
+}
+
+func TestPreTransportErrorsCloseRawBodyReader(t *testing.T) {
+	t.Run("request build error", func(t *testing.T) {
+		client := New(DefaultConfig("test", "http://127.0.0.1:0"), nil)
+		reader := &recordingReadCloser{Reader: strings.NewReader("upload payload")}
+
+		_, err := client.DoRaw(context.Background(), Request{
+			Method:        "bogus method",
+			Endpoint:      "/files",
+			RawBodyReader: reader,
+		})
+		if err == nil {
+			t.Fatal("DoRaw() error = nil, want build error")
+		}
+		if !reader.closed.Load() {
+			t.Fatal("RawBodyReader not closed on request build error")
+		}
+	})
+
+	t.Run("circuit breaker open", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer server.Close()
+
+		config := DefaultConfig("test", server.URL)
+		config.Retry.MaxRetries = 0
+		config.CircuitBreaker = goconfig.CircuitBreakerConfig{
+			FailureThreshold: 1,
+			SuccessThreshold: 1,
+			Timeout:          time.Minute,
+		}
+		client := New(config, nil)
+
+		// Trip the breaker with one failing request.
+		if _, err := client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"}); err == nil {
+			t.Fatal("expected failure to trip the breaker")
+		}
+
+		// A pipe-backed upload rejected by the open breaker never reaches the
+		// transport; the client must close the reader so the producer
+		// goroutine (and the buffers it pins) can exit.
+		reader := &recordingReadCloser{Reader: strings.NewReader("upload payload")}
+		_, err := client.DoRaw(context.Background(), Request{
+			Method:        http.MethodPost,
+			Endpoint:      "/files",
+			RawBodyReader: reader,
+		})
+		if err == nil {
+			t.Fatal("DoRaw() error = nil, want circuit breaker open")
+		}
+		if !strings.Contains(err.Error(), "circuit breaker is open") {
+			t.Fatalf("DoRaw() error = %v, want circuit breaker open", err)
+		}
+		if !reader.closed.Load() {
+			t.Fatal("RawBodyReader not closed when the circuit breaker rejected the request")
+		}
+	})
+}

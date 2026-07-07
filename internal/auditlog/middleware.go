@@ -91,6 +91,17 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			if publisher, ok := logger.(LiveEventEmitter); ok {
 				c.Set(string(LogEntryLivePublisherKey), publisher)
 				publisher.PublishLiveEvent(LiveEventAuditStarted, entry)
+				// A handler panic unwinds past this middleware to the outer
+				// recover, skipping every terminal live event below and
+				// permanently orphaning the entry in live-dashboard
+				// active-snapshot state. Publish the removal, then let the
+				// panic continue to the recover middleware.
+				defer func() {
+					if r := recover(); r != nil {
+						publisher.PublishLiveEvent(LiveEventAuditRemoved, entry)
+						panic(r)
+					}
+				}()
 			}
 
 			// Create response body capture if logging bodies
