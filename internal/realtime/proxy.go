@@ -90,7 +90,9 @@ func relay(ctx context.Context, client, upstream *websocket.Conn, onServerFrame 
 	done := make(chan error, 3)
 	go func() { done <- copyFrames(ctx, upstream, client, nil) }()           // client -> upstream
 	go func() { done <- copyFrames(ctx, client, upstream, onServerFrame) }() // upstream -> client
-	go func() { done <- heartbeat(ctx, client, upstream) }()
+	go func() {
+		done <- heartbeat(ctx, func(ctx context.Context) error { return pingBoth(ctx, client, upstream) })
+	}()
 
 	first := <-done
 	cancel()
@@ -101,10 +103,11 @@ func relay(ctx context.Context, client, upstream *websocket.Conn, onServerFrame 
 	return normalizeCloseError(first)
 }
 
-// heartbeat pings both peers on an interval so dead connections surface as
-// ping timeouts instead of leaking the session. Pong responses are processed
-// by the concurrent copyFrames reads, which are always in flight.
-func heartbeat(ctx context.Context, client, upstream *websocket.Conn) error {
+// heartbeat pings a session's peers on an interval so dead connections surface
+// as ping timeouts instead of leaking the session. pingPeers pings every peer;
+// pong responses are processed by the session's concurrent reads, which are
+// always in flight. The relay and the sideband observer share this loop.
+func heartbeat(ctx context.Context, pingPeers func(context.Context) error) error {
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
@@ -113,10 +116,10 @@ func heartbeat(ctx context.Context, client, upstream *websocket.Conn) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if err := pingBoth(ctx, client, upstream); err != nil {
+			if err := pingPeers(ctx); err != nil {
 				// A locally closed connection means teardown is already under
-				// way and a copy loop holds the definitive close cause; wait
-				// for it instead of racing to report a secondary error.
+				// way and a concurrent read holds the definitive close cause;
+				// wait for it instead of racing to report a secondary error.
 				if errors.Is(err, net.ErrClosed) {
 					<-ctx.Done()
 					return ctx.Err()

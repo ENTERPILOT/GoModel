@@ -67,6 +67,39 @@ func TestObserveReturnsDialError(t *testing.T) {
 	}
 }
 
+func TestObserveDetectsDeadUpstream(t *testing.T) {
+	restore := SetHeartbeatCadenceForTest(30*time.Millisecond, 30*time.Millisecond)
+	defer restore()
+
+	// A server that completes the handshake and then goes silent without ever
+	// reading cannot answer pings — exactly like a peer that lost power. The
+	// heartbeat must tear the observer down long before the outer context cap.
+	hold := make(chan struct{})
+	defer close(hold)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		<-hold
+	}))
+	defer upstream.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := Observe(ctx, Target{URL: "ws" + strings.TrimPrefix(upstream.URL, "http")}, nil)
+	if err == nil {
+		t.Fatal("expected a heartbeat failure for a dead upstream")
+	}
+	if ctx.Err() != nil {
+		t.Fatal("observer ended only via the outer context; the heartbeat did not fire")
+	}
+	if !strings.Contains(err.Error(), "observer heartbeat") {
+		t.Errorf("err = %v, want a heartbeat-attributed failure", err)
+	}
+}
+
 func TestObserveStopsOnContextCancel(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
