@@ -26,6 +26,7 @@ testdata/
 ├── anthropic/
 ├── gemini/
 ├── groq/
+├── kimicode/
 └── xai/
 ```
 

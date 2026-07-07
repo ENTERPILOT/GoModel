@@ -33,6 +33,7 @@ support, not every individual model capability exposed by an upstream provider.
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
 | OpenCode Go | `OPENCODE_GO_API_KEY` (`OPENCODE_GO_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [OpenCode Go](/providers/opencode-go) |
+| Kimi Code | `KIMICODE_API_KEY` | `kimi-for-coding` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Kimi Code](/providers/kimicode) |
 | Azure OpenAI | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Azure OpenAI](/providers/azure) |
 | Oracle GenAI | `ORACLE_API_KEY` + `ORACLE_BASE_URL` | `openai.gpt-oss-120b` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Oracle GenAI](/providers/oracle) |
 | Ollama | `OLLAMA_BASE_URL` | `llama3.2` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Ollama](/providers/multiple-ollama) |
@@ -58,6 +59,10 @@ support, not every individual model capability exposed by an upstream provider.
   `qwen3.7-max`, override with `OPENCODE_GO_MESSAGES_MODELS`) are sent to the
   Anthropic-native endpoint. Set `OPENCODE_GO_API_KEY`; the base URL defaults to
   `https://opencode.ai/zen/go/v1`.
+- **Kimi Code** — no per-token pricing; quota refreshes weekly and is also
+  constrained by a rolling 5-hour window. Usage-cost tracking reports zero for
+  Kimi Code, so `cost` load-balancing cannot price it; prefer conservative
+  retry strategies.
 - **Configured model lists** — available for every provider with
   `<PROVIDER>_MODELS`, for example
   `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` or

@@ -130,6 +130,7 @@
                     "providers/opencode-go",
                     "providers/vllm",
                     "providers/multiple-ollama",
+                    "providers/kimicode",
                     {
                         "group": "Cloud Platforms",
                         "icon": "cloud",
