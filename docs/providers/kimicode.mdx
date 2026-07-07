@@ -44,9 +44,9 @@ The standard chat model alias is `kimi-for-coding`. You can reference it in a vi
 model or call it directly through the OpenAI-compatible `/v1/chat/completions` endpoint.
 
 ```yaml
-virtual:
-  kimi-coding:
-    selector: "kimicode:kimi-for-coding"
+virtual_models:
+  - source: kimi-coding
+    target: kimicode/kimi-for-coding
 ```
 
 ## Embeddings
