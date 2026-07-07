@@ -92,3 +92,22 @@ func TestKimicodeReplayEmbeddings(t *testing.T) {
 
 	compareGoldenJSON(t, goldenPathForFixture("kimicode/embeddings.json"), resp)
 }
+
+func TestKimicodeReplayChatCompletionError(t *testing.T) {
+	provider := newKimicodeReplayProvider(t, map[string]replayRoute{
+		replayKey(http.MethodPost, "/chat/completions"): {
+			statusCode:  http.StatusBadRequest,
+			contentType: "application/json",
+			body:        []byte(`{"error":{"message":"invalid request"}}`),
+		},
+	})
+
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "kimi-for-coding",
+		Messages: []core.Message{{
+			Role:    "user",
+			Content: "hello",
+		}},
+	})
+	require.Error(t, err)
+}
