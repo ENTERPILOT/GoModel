@@ -97,26 +97,6 @@ curl http://localhost:8080/v1/usage \
 ```
 
 The response covers the caller's effective user path: recorded usage over a
-date window (default: the last 30 days, UTC), plus the status of every budget
-and rate limit rule gating that path.
-
-```json
-{
-  "user_path": "/team/alpha",
-  "server_time": "2026-07-06T17:00:00Z",
-  "usage": { "start_date": "2026-06-07", "end_date": "2026-07-06", "total_requests": 128, "total_tokens": 91234, "total_cost": 1.73, ... },
-  "budgets": [ { "user_path": "/team/alpha", "period_label": "monthly", "amount": 100, "spent": 41.2, "remaining": 58.8, "exceeded": false, ... } ],
-  "rate_limits": [ { "user_path": "/team/alpha", "period_label": "minute", "max_requests": 60, "requests_used": 3, "requests_remaining": 57, ... } ]
-}
-```
-
-- With a managed API key, the key's bound `user_path` is used; the endpoint
-  needs no extra parameters, so tools like OpenCode plugins can poll it with
-  the same key they use for inference.
-- With the master key (or in unsafe mode), pass `X-GoModel-User-Path` to pick
-  the path, or omit it to see `/` (everything).
-- `start_date`, `end_date` (YYYY-MM-DD), and `days` query parameters narrow
-  the usage window (365-day maximum).
-- `usage` is `null` when no storage backend records usage; `budgets` and
-  `rate_limits` list only rules that cover the path, including ones inherited
-  from ancestor paths such as `/`.
+date window, plus the status of every budget and rate limit rule gating that
+path. See the [Usage API](/advanced/usage-api) for a full example and the
+field reference.
