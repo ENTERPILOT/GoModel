@@ -474,6 +474,12 @@ func TestStatusesForUserPathFiltersByScopeAndSubtree(t *testing.T) {
 	if got := nilService.StatusesForUserPath("/team", windowBase); got != nil {
 		t.Fatalf("nil service statuses = %v, want nil", got)
 	}
+	if got := service.StatusesForUserPath("/te:am", windowBase); got != nil {
+		t.Fatalf("invalid path statuses = %v, want nil", got)
+	}
+	if got := service.StatusesForUserPath("/team/alice", time.Time{}); len(got) != 2 {
+		t.Fatalf("zero-now statuses = %d, want 2 (defaults to current time)", len(got))
+	}
 }
 
 func TestUpsertDeleteAndHasTokenRules(t *testing.T) {

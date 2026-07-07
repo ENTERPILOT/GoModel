@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -52,30 +53,40 @@ type usageStatusSummary struct {
 }
 
 type usageStatusBudget struct {
-	UserPath      string    `json:"user_path"`
-	PeriodSeconds int64     `json:"period_seconds"`
-	PeriodLabel   string    `json:"period_label"`
-	Amount        float64   `json:"amount"`
-	Spent         float64   `json:"spent"`
-	Remaining     float64   `json:"remaining"`
-	PeriodStart   time.Time `json:"period_start"`
-	PeriodEnd     time.Time `json:"period_end"`
-	Exceeded      bool      `json:"exceeded"`
+	UserPath      string  `json:"user_path"`
+	PeriodSeconds int64   `json:"period_seconds"`
+	PeriodLabel   string  `json:"period_label"`
+	Amount        float64 `json:"amount"`
+	Spent         float64 `json:"spent"`
+	Remaining     float64 `json:"remaining"`
+	// UsageRatio is spent/amount, deliberately unclamped: values above 1
+	// mean the budget is blown through.
+	UsageRatio      float64   `json:"usage_ratio"`
+	PeriodStart     time.Time `json:"period_start"`
+	PeriodEnd       time.Time `json:"period_end"`
+	ResetsInSeconds int64     `json:"resets_in_seconds"`
+	Exceeded        bool      `json:"exceeded"`
 }
 
 type usageStatusRateLimit struct {
-	UserPath          string     `json:"user_path"`
-	PeriodSeconds     int64      `json:"period_seconds"`
-	PeriodLabel       string     `json:"period_label"`
-	MaxRequests       *int64     `json:"max_requests,omitempty"`
-	MaxTokens         *int64     `json:"max_tokens,omitempty"`
-	RequestsUsed      int64      `json:"requests_used"`
-	RequestsRemaining *int64     `json:"requests_remaining,omitempty"`
-	TokensUsed        int64      `json:"tokens_used"`
-	TokensRemaining   *int64     `json:"tokens_remaining,omitempty"`
-	InFlight          int64      `json:"in_flight"`
-	WindowStart       *time.Time `json:"window_start,omitempty"`
-	WindowEnd         *time.Time `json:"window_end,omitempty"`
+	UserPath          string `json:"user_path"`
+	PeriodSeconds     int64  `json:"period_seconds"`
+	PeriodLabel       string `json:"period_label"`
+	MaxRequests       *int64 `json:"max_requests,omitempty"`
+	MaxTokens         *int64 `json:"max_tokens,omitempty"`
+	RequestsUsed      int64  `json:"requests_used"`
+	RequestsRemaining *int64 `json:"requests_remaining,omitempty"`
+	// The usage ratios are used/limit per dimension, present only when that
+	// limit exists and unclamped (token windows can overshoot past 1).
+	RequestsUsageRatio *float64   `json:"requests_usage_ratio,omitempty"`
+	TokensUsed         int64      `json:"tokens_used"`
+	TokensRemaining    *int64     `json:"tokens_remaining,omitempty"`
+	TokensUsageRatio   *float64   `json:"tokens_usage_ratio,omitempty"`
+	InFlight           int64      `json:"in_flight"`
+	WindowStart        *time.Time `json:"window_start,omitempty"`
+	WindowEnd          *time.Time `json:"window_end,omitempty"`
+	ResetsInSeconds    *int64     `json:"resets_in_seconds,omitempty"`
+	Exhausted          bool       `json:"exhausted"`
 }
 
 // UsageStatus handles GET /v1/usage.
@@ -134,11 +145,11 @@ func (h *Handler) UsageStatus(c *echo.Context) error {
 		if err != nil && !errors.Is(err, budget.ErrUnavailable) {
 			return handleError(c, core.NewProviderError("budget", http.StatusServiceUnavailable, "failed to read budget status", err).WithCode("usage_status_failed"))
 		}
-		response.Budgets = usageStatusBudgets(results)
+		response.Budgets = usageStatusBudgets(results, now)
 	}
 
 	if reporter, ok := h.rateLimiter.(rateLimitStatusReporter); ok {
-		response.RateLimits = usageStatusRateLimits(reporter.StatusesForUserPath(userPath, now))
+		response.RateLimits = usageStatusRateLimits(reporter.StatusesForUserPath(userPath, now), now)
 	}
 
 	return c.JSON(http.StatusOK, response)
@@ -189,18 +200,20 @@ func usageStatusWindow(c *echo.Context, now time.Time) (usage.UsageQueryParams, 
 	return params, nil
 }
 
-func usageStatusBudgets(results []budget.CheckResult) []usageStatusBudget {
+func usageStatusBudgets(results []budget.CheckResult, now time.Time) []usageStatusBudget {
 	statuses := make([]usageStatusBudget, 0, len(results))
 	for _, result := range results {
 		statuses = append(statuses, usageStatusBudget{
-			UserPath:      result.Budget.UserPath,
-			PeriodSeconds: result.Budget.PeriodSeconds,
-			PeriodLabel:   budget.PeriodLabel(result.Budget.PeriodSeconds),
-			Amount:        result.Budget.Amount,
-			Spent:         result.Spent,
-			Remaining:     result.Remaining,
-			PeriodStart:   result.PeriodStart,
-			PeriodEnd:     result.PeriodEnd,
+			UserPath:        result.Budget.UserPath,
+			PeriodSeconds:   result.Budget.PeriodSeconds,
+			PeriodLabel:     budget.PeriodLabel(result.Budget.PeriodSeconds),
+			Amount:          result.Budget.Amount,
+			Spent:           result.Spent,
+			Remaining:       result.Remaining,
+			UsageRatio:      result.UsageRatio(),
+			PeriodStart:     result.PeriodStart,
+			PeriodEnd:       result.PeriodEnd,
+			ResetsInSeconds: secondsUntil(result.PeriodEnd, now),
 			// Mirrors enforcement: budgets without any usage never block.
 			Exceeded: result.HasUsage && result.Spent >= result.Budget.Amount,
 		})
@@ -208,7 +221,7 @@ func usageStatusBudgets(results []budget.CheckResult) []usageStatusBudget {
 	return statuses
 }
 
-func usageStatusRateLimits(statuses []ratelimit.Status) []usageStatusRateLimit {
+func usageStatusRateLimits(statuses []ratelimit.Status, now time.Time) []usageStatusRateLimit {
 	limits := make([]usageStatusRateLimit, 0, len(statuses))
 	for _, status := range statuses {
 		item := usageStatusRateLimit{
@@ -222,13 +235,45 @@ func usageStatusRateLimits(statuses []ratelimit.Status) []usageStatusRateLimit {
 			TokensUsed:        status.TokensUsed,
 			TokensRemaining:   status.TokensRemaining,
 			InFlight:          status.InFlight,
+			// Exhausted mirrors admission: any fully used dimension rejects
+			// (or queues behind) the next request.
+			Exhausted: (status.RequestsRemaining != nil && *status.RequestsRemaining == 0) ||
+				(status.TokensRemaining != nil && *status.TokensRemaining == 0),
 		}
+		requestsUsed := status.RequestsUsed
+		if status.Rule.PeriodSeconds == ratelimit.PeriodConcurrent {
+			requestsUsed = status.InFlight
+		}
+		item.RequestsUsageRatio = limitUsageRatio(requestsUsed, status.Rule.MaxRequests)
+		item.TokensUsageRatio = limitUsageRatio(status.TokensUsed, status.Rule.MaxTokens)
 		if !status.WindowStart.IsZero() {
 			start, end := status.WindowStart, status.WindowEnd
 			item.WindowStart = &start
 			item.WindowEnd = &end
+			resets := secondsUntil(end, now)
+			item.ResetsInSeconds = &resets
 		}
 		limits = append(limits, item)
 	}
 	return limits
+}
+
+// limitUsageRatio returns used/limit for one limit dimension, nil when the
+// dimension has no limit. Deliberately unclamped, matching budget usage
+// ratios: token windows can overshoot past 1.
+func limitUsageRatio(used int64, limit *int64) *float64 {
+	if limit == nil || *limit <= 0 {
+		return nil
+	}
+	ratio := float64(used) / float64(*limit)
+	return &ratio
+}
+
+// secondsUntil returns the whole seconds from now until t, never negative.
+func secondsUntil(t time.Time, now time.Time) int64 {
+	seconds := int64(math.Ceil(t.Sub(now).Seconds()))
+	if seconds < 0 {
+		return 0
+	}
+	return seconds
 }

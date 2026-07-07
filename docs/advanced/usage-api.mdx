@@ -53,8 +53,10 @@ curl http://localhost:8080/v1/usage \
       "amount": 100,
       "spent": 41.2,
       "remaining": 58.8,
+      "usage_ratio": 0.412,
       "period_start": "2026-07-01T00:00:00Z",
       "period_end": "2026-08-01T00:00:00Z",
+      "resets_in_seconds": 2125800,
       "exceeded": false
     }
   ],
@@ -66,10 +68,13 @@ curl http://localhost:8080/v1/usage \
       "max_requests": 60,
       "requests_used": 3,
       "requests_remaining": 57,
+      "requests_usage_ratio": 0.05,
       "tokens_used": 0,
       "in_flight": 0,
       "window_start": "2026-07-07T09:30:00Z",
-      "window_end": "2026-07-07T09:31:00Z"
+      "window_end": "2026-07-07T09:31:00Z",
+      "resets_in_seconds": 60,
+      "exhausted": false
     }
   ]
 }
@@ -102,17 +107,25 @@ database).
 
 One entry per [budget](/features/budgets) covering the path — including
 budgets inherited from ancestor paths such as `/`. `remaining` can go
-negative; `exceeded` mirrors enforcement, so when it is `true` requests are
-rejected until `period_end` (`period_seconds` of `2592000` is the
-calendar-month sentinel, not a literal 30 days).
+negative and `usage_ratio` above `1` — both mean the budget is blown through;
+`exceeded` mirrors enforcement, so when it is `true` requests are rejected
+until `period_end` (`period_seconds` of `2592000` is the calendar-month
+sentinel, not a literal 30 days). `resets_in_seconds` counts down to
+`period_end` relative to `server_time`, so it is safe to render without
+worrying about client clock skew.
 
 ### `rate_limits`
 
 Live counters for every user-path [rate limit rule](/features/rate-limits)
-covering the path. `max_tokens`/`tokens_remaining` appear only on rules with
-token limits; a `period_label` of `concurrent` marks an in-flight cap, where
-`in_flight` is the current count. Provider- and model-scoped rules are not
-listed: they describe shared infrastructure capacity, not the caller.
+covering the path. `max_tokens`/`tokens_remaining`/`tokens_usage_ratio`
+appear only on rules with token limits; a `period_label` of `concurrent`
+marks an in-flight cap, where `in_flight` is the current count (and feeds
+`requests_usage_ratio`). The `*_usage_ratio` fields are used/limit per
+dimension, unclamped — token windows can overshoot past `1`. `exhausted` is
+`true` when any dimension is fully used, and `resets_in_seconds` counts down
+to `window_end` relative to `server_time` (omitted for concurrent rules,
+which have no window). Provider- and model-scoped rules are not listed: they
+describe shared infrastructure capacity, not the caller.
 
 <Note>
   Rate limit counters are in-memory per gateway instance: they reset on

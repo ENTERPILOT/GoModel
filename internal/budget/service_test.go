@@ -304,6 +304,32 @@ func TestServiceStatusesForPathReportsAllMatchingBudgetsWithoutEnforcing(t *test
 	}
 }
 
+func TestServiceStatusesForPathErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+	store := &fakeStore{
+		budgets: []Budget{{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10}},
+		sum: func(string, time.Time, time.Time) (float64, bool, error) {
+			return 0, false, errors.New("store down")
+		},
+	}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+
+	if _, err := service.StatusesForPath(ctx, "/te:am", now); err == nil {
+		t.Fatal("StatusesForPath() with invalid path: error = nil, want normalization error")
+	}
+	results, err := service.StatusesForPath(ctx, "/team", now)
+	if err == nil || !strings.Contains(err.Error(), "store down") {
+		t.Fatalf("StatusesForPath() error = %v, want store failure", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("StatusesForPath() partial results = %d, want 0 before the failing budget", len(results))
+	}
+}
+
 func TestServiceCheckBudgetAmountBoundary(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)

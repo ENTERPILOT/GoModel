@@ -144,6 +144,85 @@ func TestUsageStatusReportsManagedKeyPath(t *testing.T) {
 	}
 }
 
+func TestUsageStatusDerivedFields(t *testing.T) {
+	maxRequests := int64(10)
+	maxTokens := int64(100)
+	requestsLeft := int64(7)
+	tokensLeft := int64(0)
+	concurrentMax := int64(2)
+	concurrentLeft := int64(0)
+	now := time.Now().UTC()
+	windowEnd := now.Add(45 * time.Second)
+	periodEnd := now.Add(90 * time.Minute)
+
+	budgets := &fakeBudgetStatusChecker{results: []budget.CheckResult{{
+		Budget:      budget.Budget{UserPath: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
+		PeriodStart: periodEnd.Add(-24 * time.Hour),
+		PeriodEnd:   periodEnd,
+		Spent:       12,
+		HasUsage:    true,
+		Remaining:   -2,
+	}}}
+	limiter := &fakeRateLimiterWithStatus{statuses: []ratelimit.Status{
+		{
+			Rule:              ratelimit.Rule{Scope: ratelimit.ScopeUserPath, Subject: "/team", PeriodSeconds: 60, MaxRequests: &maxRequests, MaxTokens: &maxTokens},
+			WindowStart:       windowEnd.Add(-time.Minute),
+			WindowEnd:         windowEnd,
+			RequestsUsed:      3,
+			RequestsRemaining: &requestsLeft,
+			TokensUsed:        120,
+			TokensRemaining:   &tokensLeft,
+		},
+		{
+			Rule:              ratelimit.Rule{Scope: ratelimit.ScopeUserPath, Subject: "/team", PeriodSeconds: ratelimit.PeriodConcurrent, MaxRequests: &concurrentMax},
+			InFlight:          2,
+			RequestsRemaining: &concurrentLeft,
+		},
+	}}
+
+	rec, body := getUsageStatus(t, &Config{BudgetChecker: budgets, RateLimiter: limiter}, "/v1/usage", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	if len(body.Budgets) != 1 {
+		t.Fatalf("budgets = %d, want 1", len(body.Budgets))
+	}
+	b := body.Budgets[0]
+	if b.UsageRatio != 1.2 {
+		t.Fatalf("budget usage_ratio = %v, want 1.2 (unclamped)", b.UsageRatio)
+	}
+	if b.ResetsInSeconds <= 85*60 || b.ResetsInSeconds > 90*60 {
+		t.Fatalf("budget resets_in_seconds = %d, want ~90 minutes", b.ResetsInSeconds)
+	}
+
+	if len(body.RateLimits) != 2 {
+		t.Fatalf("rate_limits = %d, want 2", len(body.RateLimits))
+	}
+	windowed, concurrent := body.RateLimits[0], body.RateLimits[1]
+	if windowed.RequestsUsageRatio == nil || *windowed.RequestsUsageRatio != 3.0/10.0 {
+		t.Fatalf("windowed requests_usage_ratio = %v, want 0.3", windowed.RequestsUsageRatio)
+	}
+	if windowed.TokensUsageRatio == nil || *windowed.TokensUsageRatio != 1.2 {
+		t.Fatalf("windowed tokens_usage_ratio = %v, want 1.2 (unclamped)", windowed.TokensUsageRatio)
+	}
+	if !windowed.Exhausted {
+		t.Fatal("windowed rule with zero tokens remaining must be exhausted")
+	}
+	if windowed.ResetsInSeconds == nil || *windowed.ResetsInSeconds <= 0 || *windowed.ResetsInSeconds > 45 {
+		t.Fatalf("windowed resets_in_seconds = %v, want within (0, 45]", windowed.ResetsInSeconds)
+	}
+	if concurrent.RequestsUsageRatio == nil || *concurrent.RequestsUsageRatio != 1.0 {
+		t.Fatalf("concurrent requests_usage_ratio = %v, want 1.0 (from in-flight)", concurrent.RequestsUsageRatio)
+	}
+	if !concurrent.Exhausted {
+		t.Fatal("concurrent rule at capacity must be exhausted")
+	}
+	if concurrent.ResetsInSeconds != nil || concurrent.TokensUsageRatio != nil {
+		t.Fatalf("concurrent rule resets/tokens ratio = %v/%v, want both omitted", concurrent.ResetsInSeconds, concurrent.TokensUsageRatio)
+	}
+}
+
 func TestUsageStatusMasterKeyUsesHeaderPath(t *testing.T) {
 	summarizer := &fakeUsageSummarizer{summary: &usage.UsageSummary{}}
 	cfg := &Config{MasterKey: "secret", UsageSummarizer: summarizer}

@@ -8093,7 +8093,14 @@ const docTemplate = `{
                 "remaining": {
                     "type": "number"
                 },
+                "resets_in_seconds": {
+                    "type": "integer"
+                },
                 "spent": {
+                    "type": "number"
+                },
+                "usage_ratio": {
+                    "description": "UsageRatio is spent/amount, deliberately unclamped: values above 1\nmean the budget is blown through.",
                     "type": "number"
                 },
                 "user_path": {
@@ -8104,6 +8111,9 @@ const docTemplate = `{
         "server.usageStatusRateLimit": {
             "type": "object",
             "properties": {
+                "exhausted": {
+                    "type": "boolean"
+                },
                 "in_flight": {
                     "type": "integer"
                 },
@@ -8122,11 +8132,21 @@ const docTemplate = `{
                 "requests_remaining": {
                     "type": "integer"
                 },
+                "requests_usage_ratio": {
+                    "description": "The usage ratios are used/limit per dimension, present only when that\nlimit exists and unclamped (token windows can overshoot past 1).",
+                    "type": "number"
+                },
                 "requests_used": {
+                    "type": "integer"
+                },
+                "resets_in_seconds": {
                     "type": "integer"
                 },
                 "tokens_remaining": {
                     "type": "integer"
+                },
+                "tokens_usage_ratio": {
+                    "type": "number"
                 },
                 "tokens_used": {
                     "type": "integer"
