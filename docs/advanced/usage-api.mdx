@@ -141,6 +141,6 @@ affects `usage`.
 
 | Status | Meaning                                                                |
 | ------ | ---------------------------------------------------------------------- |
-| 400    | Malformed `start_date`/`end_date`, inverted range, or invalid user path |
+| 400    | Malformed `start_date`/`end_date`/`days`, inverted range, a range beyond 365 days, or invalid user path |
 | 401    | Missing or invalid API key (when authentication is configured)          |
 | 503    | The usage or budget store could not be read (`usage_status_failed`)     |

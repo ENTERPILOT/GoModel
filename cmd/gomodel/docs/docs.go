@@ -4993,7 +4993,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Inclusive window end (YYYY-MM-DD, UTC); defaults to today",
+                        "description": "Inclusive window end (YYYY-MM-DD, UTC); defaults to today; the whole range may span at most 365 days",
                         "name": "end_date",
                         "in": "query"
                     },
@@ -6229,6 +6229,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "seq": {
+                    "type": "integer"
+                },
+                "tokens_saved": {
+                    "description": "TokensSaved is the rewriter-reported estimate of prompt tokens this\nrevision saved (e.g. token compression); zero when the rewriter does\nnot report savings.",
                     "type": "integer"
                 }
             }
@@ -8450,6 +8454,12 @@ const docTemplate = `{
                 "output_tokens": {
                     "type": "integer"
                 },
+                "rewrite_cost_saved": {
+                    "type": "number"
+                },
+                "rewrite_tokens_saved": {
+                    "type": "integer"
+                },
                 "total_tokens": {
                     "type": "integer"
                 },
@@ -8558,6 +8568,12 @@ const docTemplate = `{
                 },
                 "request_id": {
                     "type": "string"
+                },
+                "rewrite_cost_saved": {
+                    "type": "number"
+                },
+                "rewrite_tokens_saved": {
+                    "type": "integer"
                 },
                 "timestamp": {
                     "type": "string"

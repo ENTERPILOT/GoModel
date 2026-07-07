@@ -191,8 +191,11 @@ func TestUsageStatusRequiresAuth(t *testing.T) {
 
 func TestUsageStatusRejectsInvalidDates(t *testing.T) {
 	for name, target := range map[string]string{
-		"malformed start": "/v1/usage?start_date=garbage",
-		"inverted range":  "/v1/usage?start_date=2026-07-06&end_date=2026-07-01",
+		"malformed start":       "/v1/usage?start_date=garbage",
+		"inverted range":        "/v1/usage?start_date=2026-07-06&end_date=2026-07-01",
+		"range beyond 365 days": "/v1/usage?start_date=2020-01-01&end_date=2026-01-01",
+		"malformed days":        "/v1/usage?days=abc",
+		"non-positive days":     "/v1/usage?days=-5",
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec, _ := getUsageStatus(t, &Config{}, target, nil)
@@ -200,6 +203,17 @@ func TestUsageStatusRejectsInvalidDates(t *testing.T) {
 				t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestUsageStatusClampsOversizedDays(t *testing.T) {
+	summarizer := &fakeUsageSummarizer{summary: &usage.UsageSummary{}}
+	rec, _ := getUsageStatus(t, &Config{UsageSummarizer: summarizer}, "/v1/usage?days=1000", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if window := summarizer.gotParams.EndDate.Sub(summarizer.gotParams.StartDate); window != 364*24*time.Hour {
+		t.Fatalf("window = %s, want 364 days between inclusive bounds (365-day cap)", window)
 	}
 }
 

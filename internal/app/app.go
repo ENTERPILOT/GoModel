@@ -519,6 +519,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		usageReader, readerErr = usage.NewReader(usageReadStorage)
 		if readerErr != nil {
 			slog.Warn("usage reader unavailable; usage endpoints will omit usage data", "error", readerErr)
+			// Explicit reset so a typed-nil reader never reaches the nil checks
+			// downstream (same guard as pricingRecalculator).
+			usageReader = nil
 		}
 	}
 

@@ -261,7 +261,7 @@ func (s *Service) StatusesForPath(ctx context.Context, userPath string, now time
 		}
 		result, err := s.evaluateBudget(ctx, budget, now, settings)
 		if err != nil {
-			return nil, err
+			return results, err
 		}
 		results = append(results, result)
 	}

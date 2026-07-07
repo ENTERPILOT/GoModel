@@ -55,6 +55,11 @@ func BuildDateRange(startStr, endStr string, days int, location *time.Location, 
 	if start.After(end) {
 		return time.Time{}, time.Time{}, core.NewInvalidRequestError("start_date must be on or before end_date", nil)
 	}
+	// The cap guards explicit ranges too; days-derived ranges are already
+	// clamped. AddDate keeps the comparison correct across DST transitions.
+	if end.After(start.AddDate(0, 0, MaxDateRangeDays-1)) {
+		return time.Time{}, time.Time{}, core.NewInvalidRequestError("date range must not exceed 365 days", nil)
+	}
 	return start, end, nil
 }
 
