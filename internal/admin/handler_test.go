@@ -2256,6 +2256,7 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		LoggingEnabled:       "on",
 		UsageEnabled:         "off",
 		BudgetsEnabled:       "on",
+		RateLimitsEnabled:    "off",
 		GuardrailsEnabled:    "on",
 		CacheEnabled:         "on",
 		RedisURL:             "on",
@@ -2287,6 +2288,9 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	}
 	if got := body.BudgetsEnabled; got != "on" {
 		t.Fatalf("BUDGETS_ENABLED = %q, want on", got)
+	}
+	if got := body.RateLimitsEnabled; got != "off" {
+		t.Fatalf("RATE_LIMITS_ENABLED = %q, want off", got)
 	}
 	if got := body.GuardrailsEnabled; got != "on" {
 		t.Fatalf("GUARDRAILS_ENABLED = %q, want on", got)

@@ -222,6 +222,9 @@
             },
 
             async fetchRateLimitsPage() {
+                if (typeof this.ensureWorkflowRuntimeConfig === 'function') {
+                    await this.ensureWorkflowRuntimeConfig();
+                }
                 if (!this.rateLimitsEnabled()) {
                     this.rateLimits = [];
                     this.rateLimitsAvailable = false;

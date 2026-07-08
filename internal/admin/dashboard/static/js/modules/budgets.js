@@ -231,6 +231,9 @@
             },
 
             async fetchBudgetsPage() {
+                if (typeof this.ensureWorkflowRuntimeConfig === 'function') {
+                    await this.ensureWorkflowRuntimeConfig();
+                }
                 if (!this.budgetManagementEnabled()) {
                     this.budgets = [];
                     this.budgetsAvailable = false;

@@ -38,6 +38,38 @@ test('rateLimitsEnabled defaults on and respects the runtime flag', () => {
     assert.equal(module.rateLimitsEnabled(), false);
 });
 
+test('fetchRateLimitsPage waits for the runtime flags before calling a disabled endpoint', async () => {
+    const calls = [];
+    const module = createRateLimitsModule({
+        fetch(url) {
+            calls.push(url);
+            return Promise.resolve({ ok: true, json: async () => ({ rate_limits: [] }) });
+        }
+    });
+    module.headers = () => ({});
+    module.handleFetchResponse = () => true;
+
+    // Mirror the dashboard composition: the flag is unknown until the runtime
+    // config lands, and only then reports the feature as disabled. Reading the
+    // gate too early falls back to its default and hits /admin/rate-limits,
+    // which 503s when the feature is off.
+    module.workflowRuntimeConfig = {};
+    module.workflowRuntimeBooleanFlag = (name, fallback) => {
+        const value = String(module.workflowRuntimeConfig[name] || '').trim().toLowerCase();
+        return value === '' ? !!fallback : value === 'on' || value === 'true' || value === '1';
+    };
+    module.ensureWorkflowRuntimeConfig = async () => {
+        await Promise.resolve();
+        module.workflowRuntimeConfig = { RATE_LIMITS_ENABLED: 'off' };
+    };
+
+    await module.fetchRateLimitsPage();
+
+    assert.deepEqual(calls, [], 'no request should be issued while rate limits are disabled');
+    assert.equal(module.rateLimitsAvailable, false);
+    assert.equal(module.rateLimits.length, 0);
+});
+
 test('period helpers map names and seconds both ways', () => {
     const module = createRateLimitsModule();
     assert.equal(module.rateLimitPeriodSeconds('minute'), 60);

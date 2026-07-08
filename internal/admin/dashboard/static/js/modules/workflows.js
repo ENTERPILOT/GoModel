@@ -29,6 +29,8 @@
             workflowsAvailable: true,
             workflowsLoading: false,
             workflowRuntimeConfig: {},
+            workflowRuntimeConfigLoaded: false,
+            workflowRuntimeConfigPromise: null,
             workflowError: '',
             workflowNotice: '',
             workflowFilter: '',
@@ -85,6 +87,7 @@
 	                    'LOGGING_ENABLED',
 	                    'USAGE_ENABLED',
 	                    'BUDGETS_ENABLED',
+	                    'RATE_LIMITS_ENABLED',
 	                    'GUARDRAILS_ENABLED',
 	                    'CACHE_ENABLED',
 	                    'REDIS_URL',
@@ -748,7 +751,36 @@
                 return payload;
             },
 
-            async fetchWorkflowRuntimeConfig() {
+            // Feature gates (rate limits, budgets, guardrails, ...) read
+            // workflowRuntimeConfig, but dashboardDataFetches() starts every page
+            // fetch at once. Sharing the in-flight request lets a gate await the
+            // flags rather than race them, and collapses what used to be a
+            // duplicate /admin/runtime/config GET when two callers overlap.
+            fetchWorkflowRuntimeConfig() {
+                if (this.workflowRuntimeConfigPromise) {
+                    return this.workflowRuntimeConfigPromise;
+                }
+                this.workflowRuntimeConfigPromise = this.loadWorkflowRuntimeConfig().finally(() => {
+                    this.workflowRuntimeConfigLoaded = true;
+                    this.workflowRuntimeConfigPromise = null;
+                });
+                return this.workflowRuntimeConfigPromise;
+            },
+
+            // Resolves once the runtime flags have been fetched at least once, so
+            // callers gated on a flag never fall back to its default by accident.
+            async ensureWorkflowRuntimeConfig() {
+                if (this.workflowRuntimeConfigPromise) {
+                    await this.workflowRuntimeConfigPromise;
+                    return;
+                }
+                if (this.workflowRuntimeConfigLoaded) {
+                    return;
+                }
+                await this.fetchWorkflowRuntimeConfig();
+            },
+
+            async loadWorkflowRuntimeConfig() {
                 const controller = typeof AbortController === 'function' ? new AbortController() : null;
                 const timeoutID = controller && typeof setTimeout === 'function'
                     ? setTimeout(() => controller.abort(), 10000)
