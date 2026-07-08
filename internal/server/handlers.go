@@ -202,6 +202,7 @@ func (h *Handler) audio() *audioService {
 	}
 	return &audioService{
 		provider:        h.provider,
+		modelResolver:   h.modelResolver,
 		modelAuthorizer: h.modelAuthorizer,
 		budgetChecker:   h.budgetChecker,
 		rateLimiter:     h.rateLimiter,
@@ -238,6 +239,7 @@ func (h *Handler) currentResponseStore() responsestore.Store {
 func (h *Handler) realtime() *realtimeService {
 	return &realtimeService{
 		provider:        h.provider,
+		modelResolver:   h.modelResolver,
 		modelAuthorizer: h.modelAuthorizer,
 		budgetChecker:   h.budgetChecker,
 		rateLimiter:     h.rateLimiter,

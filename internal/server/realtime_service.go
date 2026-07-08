@@ -28,6 +28,7 @@ var responseDoneMarker = []byte(`"response.done"`)
 // or response translation happens here.
 type realtimeService struct {
 	provider        core.RoutableProvider
+	modelResolver   RequestModelResolver
 	modelAuthorizer RequestModelAuthorizer
 	budgetChecker   BudgetChecker
 	rateLimiter     RateLimiter
@@ -41,8 +42,10 @@ type realtimeService struct {
 // realtimeRoute carries the resolved routing identity for one session, used to
 // label its usage entries and lifecycle logs the same way audio does. endpoint,
 // when set, overrides the usage entry endpoint so WebRTC calls are
-// distinguishable from websocket sessions.
+// distinguishable from websocket sessions. selector is the fully resolved model,
+// used to route upstream on the concrete model rather than the requested alias.
 type realtimeRoute struct {
+	selector     core.ModelSelector
 	model        string
 	providerType string
 	providerName string
@@ -110,7 +113,8 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 		return handleError(c, err)
 	}
 	defer release()
-	target, err := router.RealtimeTarget(ctx, &core.RealtimeRequest{Model: model, Provider: providerHint, CallID: callID})
+	// Route on the resolved selector: an alias never reaches the provider lookup.
+	target, err := router.RealtimeTarget(ctx, &core.RealtimeRequest{Model: route.selector.Model, Provider: route.selector.Provider, CallID: callID})
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -127,16 +131,9 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 // request id. It mirrors audioService.prepare so realtime sessions are gated by
 // the same model-access and budget rules as the other model endpoints.
 func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (context.Context, realtimeRoute, error) {
-	selector, err := core.ParseModelSelector(model, providerHint)
+	selector, err := resolveServiceModel(c.Request().Context(), s.provider, s.modelResolver, model, providerHint)
 	if err != nil {
-		return nil, realtimeRoute{}, core.NewInvalidRequestError(err.Error(), err)
-	}
-	if resolver, ok := s.provider.(selectorResolver); ok {
-		resolved, _, resolveErr := resolver.ResolveModel(core.NewRequestedModelSelector(model, providerHint))
-		if resolveErr != nil {
-			return nil, realtimeRoute{}, resolveErr
-		}
-		selector = resolved
+		return nil, realtimeRoute{}, err
 	}
 	if s.modelAuthorizer != nil {
 		if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
@@ -153,6 +150,7 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 
 	qualified := selector.QualifiedModel()
 	route := realtimeRoute{
+		selector:     selector,
 		model:        selector.Model,
 		providerType: s.provider.GetProviderType(qualified),
 		providerName: selector.Provider,

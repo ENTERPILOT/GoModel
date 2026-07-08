@@ -19,6 +19,7 @@ import (
 // validate, authorize, enforce budget, route, and proxy the resulting bytes.
 type audioService struct {
 	provider        core.RoutableProvider
+	modelResolver   RequestModelResolver
 	modelAuthorizer RequestModelAuthorizer
 	budgetChecker   BudgetChecker
 	rateLimiter     RateLimiter
@@ -71,6 +72,8 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	// Dispatch on the resolved model: an alias never reaches the provider lookup.
+	req.Model, req.Provider = route.selector.Model, route.selector.Provider
 	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{provider: route.providerName, model: route.model})
 	if err != nil {
 		return handleError(c, err)
@@ -130,6 +133,8 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	// Dispatch on the resolved model: an alias never reaches the provider lookup.
+	req.Model, req.Provider = route.selector.Model, route.selector.Provider
 	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{provider: route.providerName, model: route.model})
 	if err != nil {
 		return handleError(c, err)
@@ -148,16 +153,12 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 	return s.respondAudio(c, resp)
 }
 
-// selectorResolver maps a requested model selector to the concrete registry
-// selector. The production provider (the Router) implements it; when absent, audio
-// authorizes on the parsed selector as a fallback.
-type selectorResolver interface {
-	ResolveModel(core.RequestedModelSelector) (core.ModelSelector, bool, error)
-}
-
 // audioRoute carries the resolved routing identity for a single audio call,
 // used to label its usage entry the same way the inference orchestrator does.
+// selector is the fully resolved model, kept so callers can rewrite the outgoing
+// request to the concrete provider model rather than the requested alias.
 type audioRoute struct {
+	selector     core.ModelSelector
 	model        string
 	providerType string
 	providerName string
@@ -166,23 +167,14 @@ type audioRoute struct {
 
 // prepare resolves and authorizes the model, enforces budget, and stamps the
 // request id, returning the context to dispatch with and the resolved route.
-// Authorization runs on the registry-resolved selector so model-override and
+// Authorization runs on the fully resolved selector so model-override and
 // user-path rules see the same concrete provider name as the inference orchestrator.
 func (s *audioService) prepare(c *echo.Context, model, providerHint string) (context.Context, audioRoute, error) {
-	selector, err := core.ParseModelSelector(model, providerHint)
+	// Surface resolution failures (unknown alias, registry not ready, malformed
+	// selector) instead of authorizing an unresolved selector.
+	selector, err := resolveServiceModel(c.Request().Context(), s.provider, s.modelResolver, model, providerHint)
 	if err != nil {
-		return nil, audioRoute{}, core.NewInvalidRequestError(err.Error(), err)
-	}
-	if resolver, ok := s.provider.(selectorResolver); ok {
-		// Surface resolution failures (registry not ready, malformed selector)
-		// instead of authorizing the unresolved selector. The boolean is "did the
-		// selector change", not a found flag — on no change resolved already
-		// equals the normalized selector, so it is always safe to adopt.
-		resolved, _, resolveErr := resolver.ResolveModel(core.NewRequestedModelSelector(model, providerHint))
-		if resolveErr != nil {
-			return nil, audioRoute{}, resolveErr
-		}
-		selector = resolved
+		return nil, audioRoute{}, err
 	}
 	if s.modelAuthorizer != nil {
 		if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
@@ -205,6 +197,7 @@ func (s *audioService) prepare(c *echo.Context, model, providerHint string) (con
 func (s *audioService) routeFor(selector core.ModelSelector, requestID string) audioRoute {
 	qualified := selector.QualifiedModel()
 	route := audioRoute{
+		selector:     selector,
 		model:        selector.Model,
 		providerType: s.provider.GetProviderType(qualified),
 		providerName: selector.Provider,

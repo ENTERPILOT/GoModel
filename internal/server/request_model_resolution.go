@@ -32,6 +32,37 @@ func resolveRequestModelWithAuthorizer(
 	return gateway.ResolveRequestModelWithAuthorizer(ctx, provider, resolver, authorizer, requested)
 }
 
+// resolveServiceModel maps a requested model to the concrete provider selector:
+// virtual-model (alias) resolution first, then the provider registry. It is the
+// same two-step gateway.ResolveExecutionSelector performs for chat, responses,
+// and embeddings.
+//
+// The audio and realtime endpoints do not run the workflow middleware — their
+// operations are absent from resolveWorkflow — so ensureRequestModelResolution
+// never runs for them and they must resolve here instead. Resolving against the
+// provider alone (the Router) only canonicalizes concrete registry ids and
+// leaves an alias untouched, which then fails the downstream provider lookup.
+//
+// ctx must carry the effective request user path so user_path-scoped redirects
+// apply. A nil resolver degrades to provider-only resolution.
+func resolveServiceModel(
+	ctx context.Context,
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	model, providerHint string,
+) (core.ModelSelector, error) {
+	// Parse first so a malformed selector is a 400 rather than whatever the
+	// resolver chain reports for it.
+	if _, err := core.ParseModelSelector(model, providerHint); err != nil {
+		return core.ModelSelector{}, core.NewInvalidRequestError(err.Error(), err)
+	}
+	selector, _, err := gateway.ResolveExecutionSelector(ctx, provider, resolver, core.NewRequestedModelSelector(model, providerHint))
+	if err != nil {
+		return core.ModelSelector{}, err
+	}
+	return selector, nil
+}
+
 func storeRequestModelResolution(c *echo.Context, resolution *core.RequestModelResolution) {
 	if c == nil || resolution == nil {
 		return

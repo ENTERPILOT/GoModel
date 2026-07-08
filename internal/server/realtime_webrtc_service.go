@@ -57,7 +57,8 @@ func (s *realtimeService) RealtimeCalls(c *echo.Context) error {
 	}
 	defer release()
 
-	target, err := router.RealtimeCallTarget(ctx, &core.RealtimeRequest{Model: offer.model, Provider: providerHint})
+	// Route on the resolved selector: an alias never reaches the provider lookup.
+	target, err := router.RealtimeCallTarget(ctx, &core.RealtimeRequest{Model: route.selector.Model, Provider: route.selector.Provider})
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -124,7 +125,8 @@ func (s *realtimeService) RealtimeClientSecrets(c *echo.Context) error {
 	}
 	defer release()
 
-	target, err := router.RealtimeClientSecretTarget(ctx, &core.RealtimeRequest{Model: model, Provider: providerHint})
+	// Route on the resolved selector: an alias never reaches the provider lookup.
+	target, err := router.RealtimeClientSecretTarget(ctx, &core.RealtimeRequest{Model: route.selector.Model, Provider: route.selector.Provider})
 	if err != nil {
 		return handleError(c, err)
 	}

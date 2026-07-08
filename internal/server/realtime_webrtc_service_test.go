@@ -183,8 +183,8 @@ func TestRealtimeCalls_MultipartRewritesSessionModel(t *testing.T) {
 		t.Fatalf("status = %d, want 201 (body: %s)", rec.Code, rec.Body.String())
 	}
 	// The alias routes the request; the provider must see the resolved model.
-	if mock.capturedCall == nil || mock.capturedCall.Model != "voice-alias" {
-		t.Errorf("router received %+v, want the requested model", mock.capturedCall)
+	if mock.capturedCall == nil || mock.capturedCall.Model != "gpt-realtime-2" {
+		t.Errorf("router received %+v, want the resolved model gpt-realtime-2", mock.capturedCall)
 	}
 
 	_, params, err := mime.ParseMediaType(upstreamContentType)
