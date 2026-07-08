@@ -761,14 +761,15 @@
                     return this.workflowRuntimeConfigPromise;
                 }
                 this.workflowRuntimeConfigPromise = this.loadWorkflowRuntimeConfig().finally(() => {
-                    this.workflowRuntimeConfigLoaded = true;
                     this.workflowRuntimeConfigPromise = null;
                 });
                 return this.workflowRuntimeConfigPromise;
             },
 
-            // Resolves once the runtime flags have been fetched at least once, so
-            // callers gated on a flag never fall back to its default by accident.
+            // Resolves once the runtime flags have been loaded successfully at
+            // least once, so callers gated on a flag never fall back to its
+            // default by accident. A failed load leaves the flags unloaded, so
+            // the next gated caller retries rather than trusting an empty config.
             async ensureWorkflowRuntimeConfig() {
                 if (this.workflowRuntimeConfigPromise) {
                     await this.workflowRuntimeConfigPromise;
@@ -797,6 +798,7 @@
                     }
                     if (!handled) {
                         this.workflowRuntimeConfig = {};
+                        this.workflowRuntimeConfigLoaded = false;
                         return;
                     }
                     const payload = await res.json();
@@ -808,12 +810,14 @@
                         }
 	                    }
 	                    this.workflowRuntimeConfig = next;
+	                    this.workflowRuntimeConfigLoaded = true;
 	                    if (typeof this.fetchCacheOverview === 'function') {
 	                        this.fetchCacheOverview();
 	                    }
 	                } catch (e) {
 	                    console.error('Failed to fetch dashboard config:', e);
 	                    this.workflowRuntimeConfig = {};
+	                    this.workflowRuntimeConfigLoaded = false;
                 } finally {
                     if (timeoutID !== null && typeof clearTimeout === 'function') {
                         clearTimeout(timeoutID);
