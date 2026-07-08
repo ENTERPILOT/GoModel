@@ -2,8 +2,14 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"log/slog"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -225,31 +231,29 @@ func Load() (*LoadResult, error) {
 	}, nil
 }
 
-// applyYAML reads an optional config.yaml and overlays it onto cfg.
+// configFilePaths are searched in order; the first readable file wins.
+var configFilePaths = []string{
+	"config/config.yaml",
+	"config.yaml",
+}
+
+// applyYAML reads an optional config file and overlays it onto cfg.
 // Returns the raw provider map parsed from the providers: YAML section.
 // If no config file is found, this is a no-op (not an error).
+//
+// Parsing is strict: an unknown key is an error rather than a silently ignored
+// one. A misindented section — the classic `providers:` followed by entries at
+// column zero — otherwise parses as a null section plus unknown top-level keys,
+// and the gateway boots with none of the operator's providers.
 func applyYAML(cfg *Config) (map[string]RawProviderConfig, error) {
-	paths := []string{
-		"config/config.yaml",
-		"config.yaml",
+	path, data, err := readConfigFile()
+	if err != nil {
+		return nil, err
 	}
-
-	var data []byte
-	for _, p := range paths {
-		raw, err := os.ReadFile(p)
-		if err == nil {
-			data = raw
-			break
-		}
-	}
-
-	rawProviders := make(map[string]RawProviderConfig)
-
 	if data == nil {
-		return rawProviders, nil
+		slog.Info("no config file found; using defaults and environment", "searched", configFilePaths)
+		return map[string]RawProviderConfig{}, nil
 	}
-
-	expanded := expandString(string(data))
 
 	// yamlTarget is a local struct that mirrors Config for YAML unmarshaling,
 	// using RawProviderConfig for providers so nullable resilience overrides are preserved.
@@ -259,13 +263,53 @@ func applyYAML(cfg *Config) (map[string]RawProviderConfig, error) {
 	}
 
 	target := yamlTarget{Config: cfg}
-	if err := yaml.Unmarshal([]byte(expanded), &target); err != nil {
-		return nil, fmt.Errorf("failed to parse config.yaml: %w", err)
+	decoder := yaml.NewDecoder(strings.NewReader(expandString(string(data))))
+	decoder.KnownFields(true)
+	// A file holding only comments decodes to nothing; that is an empty overlay,
+	// not a failure.
+	if err := decoder.Decode(&target); err != nil && !errors.Is(err, io.EOF) {
+		return nil, formatYAMLError(path, err)
 	}
 
-	if target.RawProviders != nil {
-		rawProviders = target.RawProviders
-	}
+	slog.Info("config file loaded", "path", path, "providers", len(target.RawProviders))
 
-	return rawProviders, nil
+	if target.RawProviders == nil {
+		return map[string]RawProviderConfig{}, nil
+	}
+	return target.RawProviders, nil
+}
+
+// readConfigFile returns the first config file that exists and its contents, or an
+// empty path and nil contents when none does. A file that exists but cannot be read
+// — wrong permissions, or a directory mounted where a file was expected — is an
+// error, not a missing file: silently falling back to defaults is how a
+// misconfigured deployment boots with no providers.
+func readConfigFile() (string, []byte, error) {
+	for _, path := range configFilePaths {
+		data, err := os.ReadFile(path)
+		switch {
+		case err == nil:
+			return path, data, nil
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		default:
+			return "", nil, fmt.Errorf("failed to read %s: %w", path, err)
+		}
+	}
+	return "", nil, nil
+}
+
+// yamlTypeSuffix matches the Go type name yaml.v3 appends to unknown-field errors
+// ("field foo not found in type config.yamlTarget"). It names an internal struct
+// the operator cannot act on, so it is stripped.
+var yamlTypeSuffix = regexp.MustCompile(` in type \S+`)
+
+// formatYAMLError rewrites a yaml.v3 decode error into a single actionable line
+// prefixed with the offending file.
+func formatYAMLError(path string, err error) error {
+	msg := yamlTypeSuffix.ReplaceAllString(err.Error(), "")
+	msg = strings.TrimPrefix(msg, "yaml: unmarshal errors:\n")
+	msg = strings.TrimPrefix(msg, "yaml: ")
+	msg = strings.ReplaceAll(msg, "\n  ", "; ")
+	return fmt.Errorf("failed to parse %s: %s", path, strings.TrimSpace(msg))
 }

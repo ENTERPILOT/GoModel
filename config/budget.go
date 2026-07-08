@@ -30,17 +30,18 @@ type BudgetUserPathConfig struct {
 }
 
 // BudgetLimitConfig declares one spend limit for a reset period.
+// The json tags support the JSON-array form of SET_BUDGET_* env values.
 type BudgetLimitConfig struct {
 	// Period accepts hourly, daily, weekly, or monthly. The resolved period is
 	// persisted as PeriodSeconds in the database.
-	Period string `yaml:"period"`
+	Period string `yaml:"period" json:"period"`
 
 	// PeriodSeconds can be set directly instead of Period. Standard values are
 	// 3600, 86400, 604800, and 2592000.
-	PeriodSeconds int64 `yaml:"period_seconds"`
+	PeriodSeconds int64 `yaml:"period_seconds" json:"period_seconds"`
 
 	// Amount is the maximum allowed tracked provider spend for the period.
-	Amount float64 `yaml:"amount"`
+	Amount float64 `yaml:"amount" json:"amount"`
 }
 
 func applyBudgetEnv(cfg *Config) error {
@@ -89,7 +90,7 @@ func parseBudgetEnvLimits(raw string) ([]BudgetLimitConfig, error) {
 	}
 	if strings.HasPrefix(raw, "[") {
 		var limits []BudgetLimitConfig
-		if err := json.Unmarshal([]byte(raw), &limits); err != nil {
+		if err := decodeStrictJSON(raw, &limits); err != nil {
 			return nil, err
 		}
 		return limits, nil

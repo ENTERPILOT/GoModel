@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -136,7 +135,7 @@ func parseRateLimitEnvLimits(raw string) ([]RateLimitRuleConfig, error) {
 	}
 	if strings.HasPrefix(raw, "[") {
 		var limits []RateLimitRuleConfig
-		if err := json.Unmarshal([]byte(raw), &limits); err != nil {
+		if err := decodeStrictJSON(raw, &limits); err != nil {
 			return nil, err
 		}
 		return limits, nil

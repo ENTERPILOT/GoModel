@@ -530,6 +530,24 @@ func isUnresolvedEnvPlaceholder(value string) bool {
 	return inner != "" && !strings.ContainsAny(inner, "{}")
 }
 
+// providerOrigins splits the resolved provider names by where they were declared:
+// the config file, or environment-variable discovery. A provider named in the
+// config file counts as fromFile even when env vars overlay its fields. Operators
+// need the split to notice a config file that contributed nothing — a misindented
+// providers: section reads as zero fromFile providers.
+func providerOrigins(declared map[string]config.RawProviderConfig, resolved map[string]ProviderConfig) (fromFile, fromEnv []string) {
+	for name := range resolved {
+		if _, ok := declared[name]; ok {
+			fromFile = append(fromFile, name)
+		} else {
+			fromEnv = append(fromEnv, name)
+		}
+	}
+	sort.Strings(fromFile)
+	sort.Strings(fromEnv)
+	return fromFile, fromEnv
+}
+
 // skippedProviderNames lists the YAML-declared providers that did not survive
 // credential resolution, so operators can see why a configured provider is
 // absent instead of it disappearing silently.

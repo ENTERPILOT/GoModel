@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestApplyVirtualModelsEnv_ParsesAndMerges(t *testing.T) {
 	cfg := &Config{VirtualModels: []VirtualModelConfig{
@@ -34,6 +37,21 @@ func TestApplyVirtualModelsEnv_Invalid(t *testing.T) {
 	t.Setenv(envVirtualModels, `{not valid json`)
 	if err := applyVirtualModelsEnv(cfg); err == nil {
 		t.Fatalf("applyVirtualModelsEnv() error = nil, want parse error")
+	}
+}
+
+// The env layer overrides YAML entry by entry, so a typo must fail loudly rather
+// than let a malformed env entry silently win over a correct YAML one.
+func TestApplyVirtualModelsEnv_RejectsUnknownField(t *testing.T) {
+	cfg := &Config{}
+	t.Setenv(envVirtualModels, `[{"source":"smart","targts":[{"model":"openai/gpt-4o"}]}]`)
+
+	err := applyVirtualModelsEnv(cfg)
+	if err == nil {
+		t.Fatal("applyVirtualModelsEnv() error = nil, want unknown-field error")
+	}
+	if !strings.Contains(err.Error(), "targts") {
+		t.Fatalf("applyVirtualModelsEnv() error = %q, want it to name the unknown field", err)
 	}
 }
 

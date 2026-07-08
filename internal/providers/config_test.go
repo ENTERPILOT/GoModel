@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -358,6 +359,40 @@ func TestSkippedProviderNames_ListsDeclaredButUnresolved(t *testing.T) {
 	want := []string{"openai"}
 	if len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("skippedProviderNames() = %v, want %v", got, want)
+	}
+}
+
+func TestProviderOrigins_SplitsConfigFileFromEnv(t *testing.T) {
+	// openai is declared in the config file and overlaid by env vars; it still
+	// counts as coming from the file. groq exists only because of env discovery.
+	declared := map[string]config.RawProviderConfig{
+		"openai": {Type: "openai"},
+		"vllm-b": {Type: "vllm", BaseURL: "http://b:8000/v1"},
+	}
+	resolved := map[string]ProviderConfig{
+		"openai": {Type: "openai"},
+		"vllm-b": {Type: "vllm"},
+		"groq":   {Type: "groq"},
+	}
+
+	fromFile, fromEnv := providerOrigins(declared, resolved)
+	if want := []string{"openai", "vllm-b"}; !slices.Equal(fromFile, want) {
+		t.Fatalf("fromFile = %v, want %v", fromFile, want)
+	}
+	if want := []string{"groq"}; !slices.Equal(fromEnv, want) {
+		t.Fatalf("fromEnv = %v, want %v", fromEnv, want)
+	}
+}
+
+// A misindented providers: section yields no config-file providers, which is the
+// signal an operator needs to see at boot.
+func TestProviderOrigins_NoDeclaredProviders(t *testing.T) {
+	fromFile, fromEnv := providerOrigins(nil, map[string]ProviderConfig{"openai": {Type: "openai"}})
+	if len(fromFile) != 0 {
+		t.Fatalf("fromFile = %v, want empty", fromFile)
+	}
+	if want := []string{"openai"}; !slices.Equal(fromEnv, want) {
+		t.Fatalf("fromEnv = %v, want %v", fromEnv, want)
 	}
 }
 

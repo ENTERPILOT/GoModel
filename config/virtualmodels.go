@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -59,7 +58,7 @@ func applyVirtualModelsEnv(cfg *Config) error {
 		return nil
 	}
 	var fromEnv []VirtualModelConfig
-	if err := json.Unmarshal([]byte(raw), &fromEnv); err != nil {
+	if err := decodeStrictJSON(raw, &fromEnv); err != nil {
 		return fmt.Errorf("invalid %s: %w", envVirtualModels, err)
 	}
 	cfg.VirtualModels = mergeByKey(cfg.VirtualModels, fromEnv, func(model VirtualModelConfig) string {

@@ -1,6 +1,19 @@
 package config
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
+
+// decodeStrictJSON decodes an infrastructure-as-code env var into target, rejecting
+// unknown keys. The env layer declares the same structures as the YAML layer and
+// overrides it entry by entry, so a typo must fail loudly here too — a silently
+// ignored key would let a malformed env entry win over a correct YAML one.
+func decodeStrictJSON(raw string, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
+}
 
 // mergeByKey overlays override entries onto base, replacing matching base
 // entries in place and appending new entries.
