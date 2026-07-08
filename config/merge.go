@@ -2,17 +2,36 @@ package config
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 )
 
-// decodeStrictJSON decodes an infrastructure-as-code env var into target, rejecting
-// unknown keys. The env layer declares the same structures as the YAML layer and
-// overrides it entry by entry, so a typo must fail loudly here too — a silently
-// ignored key would let a malformed env entry win over a correct YAML one.
+// decodeIaCJSON decodes an infrastructure-as-code env var into target. The env layer
+// declares the same structures as the YAML layer and overrides it entry by entry, so
+// a typo must fail as loudly here as it does there — a silently ignored key would let
+// a malformed env entry win over a correct YAML one. CONFIG_STRICT=false downgrades
+// unknown keys to warnings, matching the YAML layer; malformed values stay fatal.
+func decodeIaCJSON(source, raw string, target any, strict bool) error {
+	err := decodeStrictJSON(raw, target)
+	if err == nil || strict || !isUnknownFieldJSONError(err) {
+		return err
+	}
+	slog.Warn("unknown config key ignored; it has no effect", "source", source, "detail", err.Error())
+	// The strict decode stopped at the unknown key, so re-decode leniently to fill
+	// target from the whole value.
+	return json.Unmarshal([]byte(raw), target)
+}
+
 func decodeStrictJSON(raw string, target any) error {
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(target)
+}
+
+// isUnknownFieldJSONError reports whether err is encoding/json's unknown-key error,
+// the only decode error CONFIG_STRICT=false is allowed to downgrade.
+func isUnknownFieldJSONError(err error) bool {
+	return strings.HasPrefix(err.Error(), "json: unknown field ")
 }
 
 // mergeByKey overlays override entries onto base, replacing matching base

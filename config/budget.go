@@ -44,7 +44,7 @@ type BudgetLimitConfig struct {
 	Amount float64 `yaml:"amount" json:"amount"`
 }
 
-func applyBudgetEnv(cfg *Config) error {
+func applyBudgetEnv(cfg *Config, strict bool) error {
 	if cfg == nil {
 		return nil
 	}
@@ -55,7 +55,7 @@ func applyBudgetEnv(cfg *Config) error {
 		cfg.Budgets.UserPaths,
 		"SET_BUDGET_",
 		func(entry BudgetUserPathConfig) string { return entry.Path },
-		parseBudgetEnvLimits,
+		func(raw string) ([]BudgetLimitConfig, error) { return parseBudgetEnvLimits(raw, strict) },
 		func(path string, limits []BudgetLimitConfig) BudgetUserPathConfig {
 			return BudgetUserPathConfig{Path: path, Limits: limits}
 		},
@@ -67,7 +67,7 @@ func applyBudgetEnv(cfg *Config) error {
 	return nil
 }
 
-func parseBudgetEnvLimits(raw string) ([]BudgetLimitConfig, error) {
+func parseBudgetEnvLimits(raw string, strict bool) ([]BudgetLimitConfig, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
@@ -90,7 +90,7 @@ func parseBudgetEnvLimits(raw string) ([]BudgetLimitConfig, error) {
 	}
 	if strings.HasPrefix(raw, "[") {
 		var limits []BudgetLimitConfig
-		if err := decodeStrictJSON(raw, &limits); err != nil {
+		if err := decodeIaCJSON("SET_BUDGET_*", raw, &limits, strict); err != nil {
 			return nil, err
 		}
 		return limits, nil

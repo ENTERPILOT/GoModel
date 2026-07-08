@@ -64,6 +64,25 @@ structures as JSON: `VIRTUAL_MODELS`, `SET_RATE_LIMIT_*`, and `SET_BUDGET_*`.
 Because env entries override YAML entries, a typo in one of them would otherwise
 silently win over a correct YAML entry.
 
+The default is strict because a dropped `providers`, `rate_limits`, `budgets`,
+or `guardrails` entry silently changes routing, cost, or security — a cost cap
+that never applies looks exactly like a cost cap that does.
+
+Set `CONFIG_STRICT=false` to downgrade unknown keys to warnings and boot without
+them. This is for rolling a binary back under a newer config file, not for
+everyday use:
+
+```text
+WARN  unknown config key ignored; it has no effect path=config.yaml line=23 field=uranium-geryon-9b
+INFO  providers resolved total=1 from_config_file=0 from_env=1
+```
+
+`CONFIG_STRICT` relaxes which *keys* are accepted, never whether a *value* makes
+sense. A malformed value (`port: [9999, 8080]`) aborts startup in either mode.
+Entity-level validation also still applies: a virtual model whose target names a
+provider that does not exist fails startup even when the key that would have
+declared that provider was ignored with a warning.
+
 To confirm which layer supplied your providers, GoModel logs one line at boot:
 
 ```json
@@ -154,7 +173,8 @@ failed to parse config.yaml: line 2: field uranium-geryon-9b not found
 ```
 
 Indent provider entries two spaces under `providers:`. Before strict parsing,
-this booted with zero YAML providers and no error.
+this booted with zero YAML providers and no error. With `CONFIG_STRICT=false` it
+boots with zero YAML providers and four warnings.
 
 ### Per-provider resilience can only come from YAML
 

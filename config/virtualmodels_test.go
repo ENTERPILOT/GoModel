@@ -15,7 +15,7 @@ func TestApplyVirtualModelsEnv_ParsesAndMerges(t *testing.T) {
 		{"source":"new","target":"anthropic/claude"}
 	]`)
 
-	if err := applyVirtualModelsEnv(cfg); err != nil {
+	if err := applyVirtualModelsEnv(cfg, true); err != nil {
 		t.Fatalf("applyVirtualModelsEnv() error = %v", err)
 	}
 	if len(cfg.VirtualModels) != 3 {
@@ -35,7 +35,7 @@ func TestApplyVirtualModelsEnv_ParsesAndMerges(t *testing.T) {
 func TestApplyVirtualModelsEnv_Invalid(t *testing.T) {
 	cfg := &Config{}
 	t.Setenv(envVirtualModels, `{not valid json`)
-	if err := applyVirtualModelsEnv(cfg); err == nil {
+	if err := applyVirtualModelsEnv(cfg, true); err == nil {
 		t.Fatalf("applyVirtualModelsEnv() error = nil, want parse error")
 	}
 }
@@ -46,7 +46,7 @@ func TestApplyVirtualModelsEnv_RejectsUnknownField(t *testing.T) {
 	cfg := &Config{}
 	t.Setenv(envVirtualModels, `[{"source":"smart","targts":[{"model":"openai/gpt-4o"}]}]`)
 
-	err := applyVirtualModelsEnv(cfg)
+	err := applyVirtualModelsEnv(cfg, true)
 	if err == nil {
 		t.Fatal("applyVirtualModelsEnv() error = nil, want unknown-field error")
 	}
@@ -55,10 +55,34 @@ func TestApplyVirtualModelsEnv_RejectsUnknownField(t *testing.T) {
 	}
 }
 
+// CONFIG_STRICT=false applies to the env layer too: the unknown key is warned about
+// and the rest of the entry still loads.
+func TestApplyVirtualModelsEnv_LaxIgnoresUnknownField(t *testing.T) {
+	cfg := &Config{}
+	t.Setenv(envVirtualModels, `[{"source":"smart","targts":[],"target":"openai/gpt-4o"}]`)
+
+	if err := applyVirtualModelsEnv(cfg, false); err != nil {
+		t.Fatalf("applyVirtualModelsEnv() error = %v, want the unknown key ignored", err)
+	}
+	if len(cfg.VirtualModels) != 1 || cfg.VirtualModels[0].Target != "openai/gpt-4o" {
+		t.Fatalf("lax decode dropped the known fields: %#v", cfg.VirtualModels)
+	}
+}
+
+// Even lax, a value of the wrong type is fatal.
+func TestApplyVirtualModelsEnv_LaxStillRejectsMalformedValues(t *testing.T) {
+	cfg := &Config{}
+	t.Setenv(envVirtualModels, `[{"source":123}]`)
+
+	if err := applyVirtualModelsEnv(cfg, false); err == nil {
+		t.Fatal("applyVirtualModelsEnv() error = nil, want a type error")
+	}
+}
+
 func TestApplyVirtualModelsEnv_Unset(t *testing.T) {
 	cfg := &Config{VirtualModels: []VirtualModelConfig{{Source: "smart", Target: "openai/gpt-4o"}}}
 	t.Setenv(envVirtualModels, "")
-	if err := applyVirtualModelsEnv(cfg); err != nil {
+	if err := applyVirtualModelsEnv(cfg, true); err != nil {
 		t.Fatalf("applyVirtualModelsEnv() error = %v", err)
 	}
 	if len(cfg.VirtualModels) != 1 {

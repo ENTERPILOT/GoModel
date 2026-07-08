@@ -408,7 +408,7 @@ func TestRateLimitsEnabledByDefaultAndTogglable(t *testing.T) {
 }
 
 func TestParseRateLimitEnvLimits_RejectsUnknownField(t *testing.T) {
-	_, err := parseRateLimitEnvLimits(`[{"period":"minute","max_requsts":100}]`)
+	_, err := parseRateLimitEnvLimits(`[{"period":"minute","max_requsts":100}]`, true)
 	if err == nil {
 		t.Fatal("parseRateLimitEnvLimits() error = nil, want unknown-field error")
 	}

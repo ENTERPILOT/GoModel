@@ -112,6 +112,91 @@ func TestLoad_AcceptsValidYAMLShapes(t *testing.T) {
 	}
 }
 
+// CONFIG_STRICT=false relaxes what the schema accepts, so an unknown key becomes a
+// warning and the rest of the file still applies.
+func TestLoad_ConfigStrictFalseDowngradesUnknownKeysToWarnings(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv(envConfigStrict, "false")
+
+	withTempDir(t, func(dir string) {
+		// The reporter's misindented file: four keys that should have been providers,
+		// plus a server section that must still take effect.
+		writeConfigYAML(t, dir, `
+server:
+  port: "9999"
+
+providers:
+uranium-geryon-9b:
+  type: vllm
+  base_url: "http://uranium-geryon-9b:8000/v1"
+`)
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed under CONFIG_STRICT=false: %v", err)
+		}
+		if len(result.RawProviders) != 0 {
+			t.Fatalf("len(RawProviders) = %d, want 0 (the keys are not providers)", len(result.RawProviders))
+		}
+		if result.Config.Server.Port != "9999" {
+			t.Fatalf("Server.Port = %q, want the known keys to still apply", result.Config.Server.Port)
+		}
+	})
+}
+
+// CONFIG_STRICT relaxes which keys are accepted, never whether a value makes sense.
+// A malformed value is a broken config in any mode.
+func TestLoad_ConfigStrictFalseStillRejectsMalformedValues(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv(envConfigStrict, "false")
+
+	withTempDir(t, func(dir string) {
+		writeConfigYAML(t, dir, "server:\n  port: [9999, 8080]\n")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() succeeded, want a type error even under CONFIG_STRICT=false")
+		}
+		if !strings.Contains(err.Error(), "cannot unmarshal") {
+			t.Fatalf("Load() error = %q, want a type error", err)
+		}
+	})
+}
+
+// A file that mixes an unknown key with a malformed value must still fail: the
+// unknown key is downgraded, the type error is not.
+func TestLoad_ConfigStrictFalseFailsWhenAnyErrorIsFatal(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv(envConfigStrict, "false")
+
+	withTempDir(t, func(dir string) {
+		writeConfigYAML(t, dir, "bogus_section:\n  a: 1\nserver:\n  port: [9999]\n")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() succeeded, want the type error to remain fatal")
+		}
+		if strings.Contains(err.Error(), "bogus_section") {
+			t.Fatalf("Load() error = %q, want only the fatal type error reported", err)
+		}
+	})
+}
+
+func TestLoad_ConfigStrictRejectsNonBoolean(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv(envConfigStrict, "yes-please")
+
+	withTempDir(t, func(string) {
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() succeeded, want an invalid CONFIG_STRICT error")
+		}
+		if !strings.Contains(err.Error(), "invalid CONFIG_STRICT") {
+			t.Fatalf("Load() error = %q, want it to name CONFIG_STRICT", err)
+		}
+	})
+}
+
 // TestApplyYAML_ExampleConfigParses keeps the shipped example honest: every key it
 // documents must exist on Config, or operators who copy it cannot boot under strict
 // parsing. It exercises the decode only — Load additionally resolves paths the
@@ -127,7 +212,7 @@ func TestApplyYAML_ExampleConfigParses(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		writeConfigYAML(t, dir, string(example))
 
-		if _, err := applyYAML(buildDefaultConfig()); err != nil {
+		if _, err := applyYAML(buildDefaultConfig(), true); err != nil {
 			t.Fatalf("config.example.yaml does not parse: %v", err)
 		}
 	})
@@ -143,7 +228,7 @@ func TestApplyYAML_UnreadableConfigFileIsAnError(t *testing.T) {
 			t.Fatalf("Failed to create directory: %v", err)
 		}
 
-		_, err := applyYAML(buildDefaultConfig())
+		_, err := applyYAML(buildDefaultConfig(), true)
 		if err == nil {
 			t.Fatal("applyYAML() succeeded, want read error")
 		}
