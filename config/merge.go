@@ -2,6 +2,9 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 )
@@ -25,7 +28,16 @@ func decodeIaCJSON(source, raw string, target any, strict bool) error {
 func decodeStrictJSON(raw string, target any) error {
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	// Decode stops after the first JSON value and leaves the rest unread, so
+	// `[{...}] junk` would pass. json.Unmarshal rejects trailing data and so must we:
+	// silently ignoring half an env var is the bug this whole path exists to prevent.
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("unexpected data after the JSON value")
+	}
+	return nil
 }
 
 // isUnknownFieldJSONError reports whether err is encoding/json's unknown-key error,

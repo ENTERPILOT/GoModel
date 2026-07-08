@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -52,6 +53,33 @@ func TestApplyVirtualModelsEnv_RejectsUnknownField(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "targts") {
 		t.Fatalf("applyVirtualModelsEnv() error = %q, want it to name the unknown field", err)
+	}
+}
+
+// json.Decoder stops after the first value and leaves the rest unread, so trailing
+// data must be rejected explicitly — silently applying half an env var is the failure
+// this path exists to prevent. Structural, therefore fatal in both modes.
+func TestApplyVirtualModelsEnv_RejectsTrailingData(t *testing.T) {
+	trailing := map[string]string{
+		"garbage suffix":        `[{"source":"smart","target":"openai/gpt-4o"}] and then some junk`,
+		"second JSON value":     `[{"source":"smart","target":"openai/gpt-4o"}] {"targts":[]}`,
+		"second JSON on a line": "[{\"source\":\"smart\",\"target\":\"openai/gpt-4o\"}]\n{\"x\":1}",
+	}
+	for name, raw := range trailing {
+		for _, strict := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/strict=%v", name, strict), func(t *testing.T) {
+				cfg := &Config{}
+				t.Setenv(envVirtualModels, raw)
+
+				err := applyVirtualModelsEnv(cfg, strict)
+				if err == nil {
+					t.Fatal("applyVirtualModelsEnv() error = nil, want trailing-data error")
+				}
+				if !strings.Contains(err.Error(), "unexpected data after the JSON value") {
+					t.Fatalf("applyVirtualModelsEnv() error = %q, want a trailing-data error", err)
+				}
+			})
+		}
 	}
 }
 

@@ -301,10 +301,14 @@ func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, error) {
 	decoder.KnownFields(true)
 	// A file holding only comments decodes to nothing; that is an empty overlay,
 	// not a failure.
-	if err := decoder.Decode(&target); err != nil && !errors.Is(err, io.EOF) {
-		if err := reportYAMLDecodeError(path, err, strict); err != nil {
+	decodeErr := decoder.Decode(&target)
+	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
+		if err := reportYAMLDecodeError(path, decodeErr, strict); err != nil {
 			return nil, err
 		}
+	}
+	if err := ensureSingleDocument(path, decoder); err != nil {
+		return nil, err
 	}
 
 	slog.Info("config file loaded", "path", path, "providers", len(target.RawProviders))
@@ -313,6 +317,24 @@ func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, error) {
 		return map[string]RawProviderConfig{}, nil
 	}
 	return target.RawProviders, nil
+}
+
+// ensureSingleDocument rejects a config file holding more than one YAML document.
+// The decoder reads only the first, so everything after a `---` separator would be
+// applied nowhere — the same silent loss a misindented section causes. Decoding into
+// a yaml.Node accepts any shape, so this detects a second document without
+// re-triggering the unknown-key check. A structural fault, fatal regardless of
+// CONFIG_STRICT.
+func ensureSingleDocument(path string, decoder *yaml.Decoder) error {
+	var extra yaml.Node
+	err := decoder.Decode(&extra)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return formatYAMLError(path, err)
+	}
+	return fmt.Errorf("failed to parse %s: only one YAML document is supported, found another after a '---' separator", path)
 }
 
 // reportYAMLDecodeError decides the fate of a decode error. Unknown keys are fatal

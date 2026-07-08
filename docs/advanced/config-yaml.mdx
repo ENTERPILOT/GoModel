@@ -156,25 +156,28 @@ starting the process, or supply a default: `${OPENAI_API_KEY:-}`.
 
 ### A misindented `providers:` section is rejected
 
-YAML reads this as an empty `providers:` section plus three unrelated top-level
-keys, not as three providers:
+YAML reads this as an empty `providers:` section plus two unrelated top-level
+keys, not as two providers:
 
 ```yaml
 providers:
-uranium-geryon-9b:      # not indented under providers:
+uranium-geryon-9b:          # not indented under providers:
   type: vllm
   base_url: "http://uranium-geryon-9b:8000/v1"
+uranium-gemma-embedding:    # likewise
+  type: vllm
+  base_url: "http://uranium-gemma-embedding:8000/v1"
 ```
 
-Strict parsing rejects it at startup:
+Strict parsing rejects it at startup, naming every offending line:
 
 ```text
-failed to parse config.yaml: line 2: field uranium-geryon-9b not found
+failed to parse config.yaml: line 2: field uranium-geryon-9b not found; line 5: field uranium-gemma-embedding not found
 ```
 
 Indent provider entries two spaces under `providers:`. Before strict parsing,
 this booted with zero YAML providers and no error. With `CONFIG_STRICT=false` it
-boots with zero YAML providers and four warnings.
+boots with zero YAML providers and one warning per unindented key.
 
 ### Per-provider resilience can only come from YAML
 

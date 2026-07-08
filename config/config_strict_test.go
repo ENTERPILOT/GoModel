@@ -112,6 +112,29 @@ func TestLoad_AcceptsValidYAMLShapes(t *testing.T) {
 	}
 }
 
+// A second YAML document is never applied, so accepting one silently drops every key
+// it declares. Structural, therefore fatal regardless of CONFIG_STRICT.
+func TestLoad_RejectsMultipleYAMLDocuments(t *testing.T) {
+	for _, strict := range []string{"true", "false"} {
+		t.Run("CONFIG_STRICT="+strict, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			t.Setenv(envConfigStrict, strict)
+
+			withTempDir(t, func(dir string) {
+				writeConfigYAML(t, dir, "providers:\n  a:\n    type: vllm\n    base_url: \"http://a:8000/v1\"\n---\nproviders:\n  b:\n    type: vllm\n    base_url: \"http://b:8000/v1\"\n")
+
+				_, err := Load()
+				if err == nil {
+					t.Fatal("Load() succeeded, want a multi-document error")
+				}
+				if !strings.Contains(err.Error(), "only one YAML document is supported") {
+					t.Fatalf("Load() error = %q, want a multi-document error", err)
+				}
+			})
+		})
+	}
+}
+
 // CONFIG_STRICT=false relaxes what the schema accepts, so an unknown key becomes a
 // warning and the rest of the file still applies.
 func TestLoad_ConfigStrictFalseDowngradesUnknownKeysToWarnings(t *testing.T) {
