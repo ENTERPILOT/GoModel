@@ -45,7 +45,7 @@ var allowedAnthropicImageMediaTypes = map[string]struct{}{
 // Provider implements the core.Provider interface for Anthropic
 type Provider struct {
 	client *llmclient.Client
-	apiKey string
+	keys   *providers.Keyring
 
 	batchEndpointsMu sync.RWMutex
 	// batchResultEndpoints keeps endpoint hints by provider batch id and custom_id.
@@ -56,7 +56,7 @@ type Provider struct {
 // New creates a new Anthropic provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	p := &Provider{
-		apiKey:               providerCfg.APIKey,
+		keys:                 opts.Keyring(providerCfg.APIKey),
 		batchResultEndpoints: make(map[string]map[string]string),
 	}
 	clientCfg := llmclient.Config{
@@ -77,7 +77,7 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 		httpClient = http.DefaultClient
 	}
 	p := &Provider{
-		apiKey:               apiKey,
+		keys:                 providers.NewKeyring(apiKey),
 		batchResultEndpoints: make(map[string]map[string]string),
 	}
 	cfg := llmclient.DefaultConfig("anthropic", defaultBaseURL)
@@ -155,9 +155,10 @@ func (p *Provider) getBatchResultEndpoints(batchID string) map[string]string {
 	return cloned
 }
 
-// setHeaders sets the required headers for Anthropic API requests
+// setHeaders sets the required headers for Anthropic API requests. It runs once
+// per outbound request, so p.keys.Next advances the rotation per call.
 func (p *Provider) setHeaders(req *http.Request) {
-	req.Header.Set("x-api-key", p.apiKey)
+	req.Header.Set("x-api-key", p.keys.Next())
 	req.Header.Set("anthropic-version", anthropicAPIVersion)
 
 	// Forward request ID if present in context

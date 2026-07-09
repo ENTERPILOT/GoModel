@@ -65,8 +65,6 @@ func (m *memStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 
 func (m *memStore) Close() error { return nil }
 
-func int64Ptr(v int64) *int64 { return &v }
-
 // onPath builds request subjects for user-path-only tests.
 func onPath(path string) Subjects { return Subjects{UserPath: path} }
 
@@ -91,10 +89,10 @@ func TestAcquireEnforcesRequestLimit(t *testing.T) {
 	service := newTestService(t, Rule{
 		Subject:       "/team",
 		PeriodSeconds: PeriodMinuteSeconds,
-		MaxRequests:   int64Ptr(2),
+		MaxRequests:   new(int64(2)),
 	})
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, err := service.Acquire(onPath("/team/alice"), windowBase); err != nil {
 			t.Fatalf("Acquire() %d failed: %v", i, err)
 		}
@@ -124,9 +122,9 @@ func TestRetryAfterReflectsSlidingWindowRecovery(t *testing.T) {
 		service := newTestService(t, Rule{
 			Subject:       "/",
 			PeriodSeconds: PeriodMinuteSeconds,
-			MaxRequests:   int64Ptr(10),
+			MaxRequests:   new(int64(10)),
 		})
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			if _, err := service.Acquire(onPath("/"), windowBase); err != nil {
 				t.Fatalf("Acquire() %d failed: %v", i, err)
 			}
@@ -153,7 +151,7 @@ func TestRetryAfterReflectsSlidingWindowRecovery(t *testing.T) {
 		service := newTestService(t, Rule{
 			Subject:       "/",
 			PeriodSeconds: PeriodMinuteSeconds,
-			MaxTokens:     int64Ptr(10),
+			MaxTokens:     new(int64(10)),
 		})
 		// A single response overshoots the token window threefold; recovery
 		// needs the rollover plus enough decay: 30*(60-41)/60 = 9 < 10.
@@ -180,8 +178,8 @@ func TestRetryAfterReflectsSlidingWindowRecovery(t *testing.T) {
 // the minute rule's Retry-After would just earn a second 429.
 func TestAcquireReportsLongestBlockingRule(t *testing.T) {
 	service := newTestService(t,
-		Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(1)},
-		Rule{Subject: "/", PeriodSeconds: PeriodDaySeconds, MaxRequests: int64Ptr(1)},
+		Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1))},
+		Rule{Subject: "/", PeriodSeconds: PeriodDaySeconds, MaxRequests: new(int64(1))},
 	)
 
 	if _, err := service.Acquire(onPath("/"), windowBase); err != nil {
@@ -204,7 +202,7 @@ func TestAcquireRequestsShareSubtreeCounter(t *testing.T) {
 	service := newTestService(t, Rule{
 		Subject:       "/team",
 		PeriodSeconds: PeriodMinuteSeconds,
-		MaxRequests:   int64Ptr(1),
+		MaxRequests:   new(int64(1)),
 	})
 
 	if _, err := service.Acquire(onPath("/team/alice"), windowBase); err != nil {
@@ -223,10 +221,10 @@ func TestAcquireSlidingWindowWeighsPreviousWindow(t *testing.T) {
 	service := newTestService(t, Rule{
 		Subject:       "/",
 		PeriodSeconds: PeriodMinuteSeconds,
-		MaxRequests:   int64Ptr(10),
+		MaxRequests:   new(int64(10)),
 	})
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if _, err := service.Acquire(onPath("/"), windowBase); err != nil {
 			t.Fatalf("Acquire() %d failed: %v", i, err)
 		}
@@ -255,7 +253,7 @@ func TestTokenLimitIsPostAccounted(t *testing.T) {
 	service := newTestService(t, Rule{
 		Subject:       "/team",
 		PeriodSeconds: PeriodMinuteSeconds,
-		MaxTokens:     int64Ptr(100),
+		MaxTokens:     new(int64(100)),
 	})
 
 	// Tokens are unknown before the response: the first request passes.
@@ -283,7 +281,7 @@ func TestConcurrencyLimitHeldUntilRelease(t *testing.T) {
 	service := newTestService(t, Rule{
 		Subject:       "/team",
 		PeriodSeconds: PeriodConcurrent,
-		MaxRequests:   int64Ptr(1),
+		MaxRequests:   new(int64(1)),
 	})
 
 	first, err := service.Acquire(onPath("/team/alice"), windowBase)
@@ -314,8 +312,8 @@ func TestConcurrencyLimitHeldUntilRelease(t *testing.T) {
 
 func TestAcquireHeadersReportMostConstrainedRule(t *testing.T) {
 	service := newTestService(t,
-		Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(100), MaxTokens: int64Ptr(1000)},
-		Rule{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(5)},
+		Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(100)), MaxTokens: new(int64(1000))},
+		Rule{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(5))},
 	)
 
 	reservation, err := service.Acquire(onPath("/team/alice"), windowBase)
@@ -347,10 +345,10 @@ func TestAcquireWithoutMatchingRulesIsUnlimited(t *testing.T) {
 	service := newTestService(t, Rule{
 		Subject:       "/team",
 		PeriodSeconds: PeriodMinuteSeconds,
-		MaxRequests:   int64Ptr(1),
+		MaxRequests:   new(int64(1)),
 	})
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		reservation, err := service.Acquire(onPath("/other"), windowBase)
 		if err != nil {
 			t.Fatalf("Acquire() %d failed: %v", i, err)
@@ -363,8 +361,8 @@ func TestAcquireWithoutMatchingRulesIsUnlimited(t *testing.T) {
 
 func TestRejectedAcquireDoesNotConsumeCounters(t *testing.T) {
 	service := newTestService(t,
-		Rule{Subject: "/team", PeriodSeconds: PeriodConcurrent, MaxRequests: int64Ptr(1)},
-		Rule{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(10)},
+		Rule{Subject: "/team", PeriodSeconds: PeriodConcurrent, MaxRequests: new(int64(1))},
+		Rule{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(10))},
 	)
 
 	held, err := service.Acquire(onPath("/team"), windowBase)
@@ -388,8 +386,8 @@ func TestStatusesAndResets(t *testing.T) {
 	service := newTestService(t, Rule{
 		Subject:       "/team",
 		PeriodSeconds: PeriodMinuteSeconds,
-		MaxRequests:   int64Ptr(2),
-		MaxTokens:     int64Ptr(100),
+		MaxRequests:   new(int64(2)),
+		MaxTokens:     new(int64(100)),
 	})
 
 	if _, err := service.Acquire(onPath("/team"), windowBase); err != nil {
@@ -429,13 +427,66 @@ func TestStatusesAndResets(t *testing.T) {
 	}
 }
 
+func TestStatusesForUserPathFiltersByScopeAndSubtree(t *testing.T) {
+	service := newTestService(t,
+		Rule{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(5))},
+		Rule{Subject: "/team/alice", PeriodSeconds: PeriodConcurrent, MaxRequests: new(int64(2))},
+		Rule{Subject: "/other", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(5))},
+		Rule{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(100))},
+	)
+
+	if _, err := service.Acquire(onPath("/team/alice"), windowBase); err != nil {
+		t.Fatalf("Acquire() failed: %v", err)
+	}
+
+	statuses := service.StatusesForUserPath("/team/alice", windowBase)
+	if len(statuses) != 2 {
+		t.Fatalf("statuses = %d, want 2 (sibling and provider rules excluded)", len(statuses))
+	}
+	bySubject := map[string]Status{}
+	for _, status := range statuses {
+		if status.Rule.Scope != ScopeUserPath {
+			t.Fatalf("scope = %q, want user_path", status.Rule.Scope)
+		}
+		bySubject[status.Rule.Subject] = status
+	}
+	team, ok := bySubject["/team"]
+	if !ok {
+		t.Fatal("missing ancestor rule /team")
+	}
+	if team.RequestsUsed != 1 || team.RequestsRemaining == nil || *team.RequestsRemaining != 4 {
+		t.Fatalf("/team used/remaining = %d/%v, want 1/4", team.RequestsUsed, team.RequestsRemaining)
+	}
+	alice, ok := bySubject["/team/alice"]
+	if !ok {
+		t.Fatal("missing exact rule /team/alice")
+	}
+	if alice.InFlight != 1 {
+		t.Fatalf("/team/alice in-flight = %d, want 1", alice.InFlight)
+	}
+
+	if got := service.StatusesForUserPath("/unlimited", windowBase); len(got) != 0 {
+		t.Fatalf("statuses for unmatched path = %d, want 0", len(got))
+	}
+	var nilService *Service
+	if got := nilService.StatusesForUserPath("/team", windowBase); got != nil {
+		t.Fatalf("nil service statuses = %v, want nil", got)
+	}
+	if got := service.StatusesForUserPath("/te:am", windowBase); got != nil {
+		t.Fatalf("invalid path statuses = %v, want nil", got)
+	}
+	if got := service.StatusesForUserPath("/team/alice", time.Time{}); len(got) != 2 {
+		t.Fatalf("zero-now statuses = %d, want 2 (defaults to current time)", len(got))
+	}
+}
+
 func TestUpsertDeleteAndHasTokenRules(t *testing.T) {
 	service := newTestService(t)
 	if service.HasTokenRules() {
 		t.Fatal("HasTokenRules() = true for empty service")
 	}
 	if err := service.UpsertRules(context.Background(), []Rule{
-		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(100), Source: SourceManual},
+		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(100)), Source: SourceManual},
 	}); err != nil {
 		t.Fatalf("UpsertRules() failed: %v", err)
 	}
@@ -474,7 +525,7 @@ func TestProviderScopedRules(t *testing.T) {
 		Scope:         ScopeProvider,
 		Subject:       "openai",
 		PeriodSeconds: PeriodMinuteSeconds,
-		MaxRequests:   int64Ptr(1),
+		MaxRequests:   new(int64(1)),
 	})
 
 	route := Subjects{UserPath: "/team/alice", Provider: "openai", Model: "openai/gpt-4o"}
@@ -510,7 +561,7 @@ func TestModelScopedRules(t *testing.T) {
 			Scope:         ScopeModel,
 			Subject:       "gpt-4o",
 			PeriodSeconds: PeriodMinuteSeconds,
-			MaxRequests:   int64Ptr(1),
+			MaxRequests:   new(int64(1)),
 		})
 		if _, err := service.Acquire(Subjects{UserPath: "/", Provider: "openai", Model: "openai/gpt-4o"}, windowBase); err != nil {
 			t.Fatalf("Acquire() failed: %v", err)
@@ -528,7 +579,7 @@ func TestModelScopedRules(t *testing.T) {
 			Scope:         ScopeModel,
 			Subject:       "openai/gpt-4o",
 			PeriodSeconds: PeriodMinuteSeconds,
-			MaxRequests:   int64Ptr(1),
+			MaxRequests:   new(int64(1)),
 		})
 		// Matches the qualified model, and the bare model when the provider agrees.
 		if _, err := service.Acquire(Subjects{UserPath: "/", Provider: "openai", Model: "gpt-4o"}, windowBase); err != nil {
@@ -546,13 +597,13 @@ func TestModelScopedRules(t *testing.T) {
 
 func TestRouteAvailableProbesWithoutConsuming(t *testing.T) {
 	service := newTestService(t,
-		Rule{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(1)},
-		Rule{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodConcurrent, MaxRequests: int64Ptr(1)},
-		Rule{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(1)},
+		Rule{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1))},
+		Rule{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodConcurrent, MaxRequests: new(int64(1))},
+		Rule{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1))},
 	)
 
 	// Probing repeatedly consumes nothing.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if !service.routeAvailableAt("openai", "openai/gpt-4o", windowBase) {
 			t.Fatalf("RouteAvailable() probe %d = false, want true", i)
 		}
@@ -583,8 +634,8 @@ func TestRouteAvailableProbesWithoutConsuming(t *testing.T) {
 
 func TestRecordTokensChargesProviderAndModelWindows(t *testing.T) {
 	service := newTestService(t,
-		Rule{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(100)},
-		Rule{Scope: ScopeModel, Subject: "gpt-4o", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(50)},
+		Rule{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(100))},
+		Rule{Scope: ScopeModel, Subject: "gpt-4o", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(50))},
 	)
 
 	// Usage entries carry the executed provider name and a bare model id.

@@ -397,35 +397,35 @@ func TestParseProviderError_OpenRouter_TableDriven(t *testing.T) {
 			body:        []byte(`{"error":{"message":"Provider returned error","code":429,"metadata":{"provider_name":"Together","is_byok":false,"retry_after_seconds":1}},"user_id":"user_test_123"}`),
 			wantType:    ErrorTypeRateLimit,
 			wantMessage: "Provider returned error",
-			wantCode:    stringPointer("429"),
+			wantCode:    new("429"),
 		},
 		{
 			name:        "metadata raw with non generic message preserves original message",
 			body:        []byte(`{"error":{"message":"The selected provider rejected the request","code":"rate_limit_exceeded","metadata":{"raw":"deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.","provider_name":"Together"}},"user_id":"user_test_123"}`),
 			wantType:    ErrorTypeRateLimit,
 			wantMessage: "The selected provider rejected the request",
-			wantCode:    stringPointer("rate_limit_exceeded"),
+			wantCode:    new("rate_limit_exceeded"),
 		},
 		{
 			name:        "empty message with metadata raw uses raw and numeric code",
 			body:        []byte(`{"error":{"message":"","code":429,"metadata":{"raw":"deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.","provider_name":"Together","is_byok":false,"retry_after_seconds":1}},"user_id":"user_test_123"}`),
 			wantType:    ErrorTypeRateLimit,
 			wantMessage: "deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.",
-			wantCode:    stringPointer("429"),
+			wantCode:    new("429"),
 		},
 		{
 			name:        "provider returned prefix with metadata raw uses raw",
 			body:        []byte(`{"error":{"message":"Provider returned an error: upstream rejected the request","code":429,"metadata":{"raw":"deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.","provider_name":"Together"}},"user_id":"user_test_123"}`),
 			wantType:    ErrorTypeRateLimit,
 			wantMessage: "deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.",
-			wantCode:    stringPointer("429"),
+			wantCode:    new("429"),
 		},
 		{
 			name:        "malformed metadata falls back to parsed message and numeric code",
 			body:        []byte(`{"error":{"message":"Provider returned error","code":429,"metadata":"not an object"},"user_id":"user_test_123"}`),
 			wantType:    ErrorTypeRateLimit,
 			wantMessage: "Provider returned error",
-			wantCode:    stringPointer("429"),
+			wantCode:    new("429"),
 		},
 		{
 			name:        "missing metadata and object code falls back without code",
@@ -462,10 +462,6 @@ func equalStringPointers(a, b *string) bool {
 	default:
 		return *a == *b
 	}
-}
-
-func stringPointer(value string) *string {
-	return &value
 }
 
 func TestGatewayError_AsError(t *testing.T) {

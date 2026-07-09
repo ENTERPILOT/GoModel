@@ -538,10 +538,7 @@ func paginateStoredResponseInputItems(items []json.RawMessage, params core.Respo
 		limit = 100
 	}
 
-	remaining := count - start
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := max(count-start, 0)
 	hasMore := remaining > limit
 	if remaining > limit {
 		remaining = limit

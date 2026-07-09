@@ -38,6 +38,33 @@ test('budgetManagementEnabled defaults on and respects the runtime flag', () => 
     assert.equal(module.budgetManagementEnabled(), false);
 });
 
+test('fetchBudgetsPage waits for the runtime flags before calling a disabled endpoint', async () => {
+    const calls = [];
+    const module = createBudgetsModule({
+        fetch(url) {
+            calls.push(url);
+            return Promise.resolve({ ok: true, json: async () => ({ budgets: [] }) });
+        }
+    });
+    module.headers = () => ({});
+    module.handleFetchResponse = () => true;
+
+    module.workflowRuntimeConfig = {};
+    module.workflowRuntimeBooleanFlag = (name, fallback) => {
+        const value = String(module.workflowRuntimeConfig[name] || '').trim().toLowerCase();
+        return value === '' ? !!fallback : value === 'on' || value === 'true' || value === '1';
+    };
+    module.ensureWorkflowRuntimeConfig = async () => {
+        await Promise.resolve();
+        module.workflowRuntimeConfig = { BUDGETS_ENABLED: 'off' };
+    };
+
+    await module.fetchBudgetsPage();
+
+    assert.deepEqual(calls, [], 'no request should be issued while budgets are disabled');
+    assert.equal(module.budgetsAvailable, false);
+});
+
 test('budgetSettingsPayload normalizes numeric values before saving', () => {
     const module = createBudgetsModule();
     module.budgetSettings = {

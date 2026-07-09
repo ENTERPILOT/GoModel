@@ -203,7 +203,7 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 			RequestID:                 strings.TrimSpace(meta.RequestID),
 			UserPath:                  core.UserPathFromContext(ctx),
 			WorkflowVersionID:         workflowVersionID(workflow),
-			UsageEnabled:              boolPtr(workflow == nil || workflow.UsageEnabled()),
+			UsageEnabled:              new(workflow == nil || workflow.UsageEnabled()),
 		}
 		if err := o.batchStore.Create(ctx, stored); err != nil {
 			o.rollbackPreparedBatch(ctx, providerType, batchPreparation, providerBatchID)
@@ -500,8 +500,4 @@ func workflowVersionID(workflow *core.Workflow) string {
 		return ""
 	}
 	return workflow.WorkflowVersionID()
-}
-
-func boolPtr(value bool) *bool {
-	return &value
 }

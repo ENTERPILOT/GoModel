@@ -474,7 +474,7 @@ func recalculatePricingDateParams(c *echo.Context, req recalculatePricingRequest
 	now := timeNow().In(location)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location)
 
-	start, end, err := buildDateRange(strings.TrimSpace(req.StartDate), strings.TrimSpace(req.EndDate), normalizeDateRangeDays(req.Days), location, today)
+	start, end, err := usage.BuildDateRange(strings.TrimSpace(req.StartDate), strings.TrimSpace(req.EndDate), usage.NormalizeDateRangeDays(req.Days), location, today)
 	if err != nil {
 		return params, err
 	}

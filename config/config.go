@@ -2,8 +2,15 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"log/slog"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -156,7 +163,12 @@ func buildDefaultConfig() *Config {
 func Load() (*LoadResult, error) {
 	cfg := buildDefaultConfig()
 
-	rawProviders, err := applyYAML(cfg)
+	strict, err := resolveConfigStrict()
+	if err != nil {
+		return nil, err
+	}
+
+	rawProviders, err := applyYAML(cfg, strict)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +184,7 @@ func Load() (*LoadResult, error) {
 	if err := applyEnvOverrides(cfg); err != nil {
 		return nil, err
 	}
-	if err := applyVirtualModelsEnv(cfg); err != nil {
+	if err := applyVirtualModelsEnv(cfg, strict); err != nil {
 		return nil, err
 	}
 	if err := applyTaggingEnv(cfg); err != nil {
@@ -188,13 +200,13 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	applyBudgetDependencies(cfg)
-	if err := applyBudgetEnv(cfg); err != nil {
+	if err := applyBudgetEnv(cfg, strict); err != nil {
 		return nil, err
 	}
 	if err := validateBudgetConfig(&cfg.Budgets); err != nil {
 		return nil, err
 	}
-	if err := applyRateLimitEnv(cfg); err != nil {
+	if err := applyRateLimitEnv(cfg, strict); err != nil {
 		return nil, err
 	}
 	if err := validateRateLimitConfig(&cfg.RateLimits); err != nil {
@@ -235,31 +247,55 @@ func Load() (*LoadResult, error) {
 	}, nil
 }
 
-// applyYAML reads an optional config.yaml and overlays it onto cfg.
+// configFilePaths are searched in order; the first readable file wins.
+var configFilePaths = []string{
+	"config/config.yaml",
+	"config.yaml",
+}
+
+const envConfigStrict = "CONFIG_STRICT"
+
+// resolveConfigStrict reads CONFIG_STRICT, which defaults to true: an unknown key
+// in declarative config aborts startup rather than being ignored, because a
+// dropped providers, rate_limits, budgets, or guardrails entry silently changes
+// routing, cost, or security. Set it to false to downgrade unknown keys to
+// warnings — useful when rolling a binary back under a newer config file.
+//
+// It is read directly from the environment because it governs the parse of the
+// YAML layer, which runs before the env-tag overrides are applied.
+func resolveConfigStrict() (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(envConfigStrict))
+	if raw == "" {
+		return true, nil
+	}
+	strict, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("invalid %s: %q is not a boolean", envConfigStrict, raw)
+	}
+	if !strict {
+		slog.Warn("CONFIG_STRICT=false: unknown config keys are ignored with a warning instead of aborting startup")
+	}
+	return strict, nil
+}
+
+// applyYAML reads an optional config file and overlays it onto cfg.
 // Returns the raw provider map parsed from the providers: YAML section.
 // If no config file is found, this is a no-op (not an error).
-func applyYAML(cfg *Config) (map[string]RawProviderConfig, error) {
-	paths := []string{
-		"config/config.yaml",
-		"config.yaml",
+//
+// When strict, an unknown key is an error rather than a silently ignored one. A
+// misindented section — the classic `providers:` followed by entries at column
+// zero — otherwise parses as a null section plus unknown top-level keys, and the
+// gateway boots with none of the operator's providers. CONFIG_STRICT=false
+// downgrades unknown keys to warnings; malformed values stay fatal either way.
+func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, error) {
+	path, data, err := readConfigFile()
+	if err != nil {
+		return nil, err
 	}
-
-	var data []byte
-	for _, p := range paths {
-		raw, err := os.ReadFile(p)
-		if err == nil {
-			data = raw
-			break
-		}
-	}
-
-	rawProviders := make(map[string]RawProviderConfig)
-
 	if data == nil {
-		return rawProviders, nil
+		slog.Info("no config file found; using defaults and environment", "searched", configFilePaths)
+		return map[string]RawProviderConfig{}, nil
 	}
-
-	expanded := expandString(string(data))
 
 	// yamlTarget is a local struct that mirrors Config for YAML unmarshaling,
 	// using RawProviderConfig for providers so nullable resilience overrides are preserved.
@@ -269,13 +305,121 @@ func applyYAML(cfg *Config) (map[string]RawProviderConfig, error) {
 	}
 
 	target := yamlTarget{Config: cfg}
-	if err := yaml.Unmarshal([]byte(expanded), &target); err != nil {
-		return nil, fmt.Errorf("failed to parse config.yaml: %w", err)
+	decoder := yaml.NewDecoder(strings.NewReader(expandString(string(data))))
+	// Unknown keys are always detected. Whether they are fatal is decided below,
+	// so the lax mode can still name each one instead of dropping it in silence.
+	decoder.KnownFields(true)
+	// A file holding only comments decodes to nothing; that is an empty overlay,
+	// not a failure.
+	decodeErr := decoder.Decode(&target)
+	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
+		if err := reportYAMLDecodeError(path, decodeErr, strict); err != nil {
+			return nil, err
+		}
+	}
+	if err := ensureSingleDocument(path, decoder); err != nil {
+		return nil, err
 	}
 
-	if target.RawProviders != nil {
-		rawProviders = target.RawProviders
+	slog.Info("config file loaded", "path", path, "providers", len(target.RawProviders))
+
+	if target.RawProviders == nil {
+		return map[string]RawProviderConfig{}, nil
+	}
+	return target.RawProviders, nil
+}
+
+// ensureSingleDocument rejects a config file holding more than one YAML document.
+// The decoder reads only the first, so everything after a `---` separator would be
+// applied nowhere — the same silent loss a misindented section causes. Decoding into
+// a yaml.Node accepts any shape, so this detects a second document without
+// re-triggering the unknown-key check. A structural fault, fatal regardless of
+// CONFIG_STRICT.
+func ensureSingleDocument(path string, decoder *yaml.Decoder) error {
+	var extra yaml.Node
+	err := decoder.Decode(&extra)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return formatYAMLError(path, err)
+	}
+	return fmt.Errorf("failed to parse %s: only one YAML document is supported, found another after a '---' separator", path)
+}
+
+// reportYAMLDecodeError decides the fate of a decode error. Unknown keys are fatal
+// when strict and warnings otherwise; every other problem — a malformed value, a
+// syntax error — is fatal regardless, because CONFIG_STRICT relaxes what the schema
+// accepts, not whether the file makes sense. Returns nil when nothing is fatal.
+func reportYAMLDecodeError(path string, err error, strict bool) error {
+	var typeErr *yaml.TypeError
+	if strict || !errors.As(err, &typeErr) {
+		return formatYAMLError(path, err)
 	}
 
-	return rawProviders, nil
+	var fatal []string
+	for _, message := range typeErr.Errors {
+		line, field, ok := parseUnknownFieldMessage(message)
+		if !ok {
+			fatal = append(fatal, message)
+			continue
+		}
+		slog.Warn("unknown config key ignored; it has no effect",
+			"path", path, "line", line, "field", field)
+	}
+	if len(fatal) > 0 {
+		return formatYAMLError(path, &yaml.TypeError{Errors: fatal})
+	}
+	return nil
+}
+
+// unknownFieldMessage matches yaml.v3's unknown-key message, the only decode error
+// CONFIG_STRICT=false is allowed to downgrade.
+var unknownFieldMessage = regexp.MustCompile(`^line (\d+): field (\S+) not found in type \S+$`)
+
+func parseUnknownFieldMessage(message string) (line int, field string, ok bool) {
+	match := unknownFieldMessage.FindStringSubmatch(message)
+	if match == nil {
+		return 0, "", false
+	}
+	line, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0, "", false
+	}
+	return line, match[2], true
+}
+
+// readConfigFile returns the first config file that exists and its contents, or an
+// empty path and nil contents when none does. A file that exists but cannot be read
+// — wrong permissions, or a directory mounted where a file was expected — is an
+// error, not a missing file: silently falling back to defaults is how a
+// misconfigured deployment boots with no providers.
+func readConfigFile() (string, []byte, error) {
+	for _, path := range configFilePaths {
+		data, err := os.ReadFile(path)
+		switch {
+		case err == nil:
+			return path, data, nil
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		default:
+			return "", nil, fmt.Errorf("failed to read %s: %w", path, err)
+		}
+	}
+	return "", nil, nil
+}
+
+// yamlTypeSuffix matches the Go type name yaml.v3 appends to unknown-field errors
+// ("field foo not found in type config.yamlTarget"). It names an internal struct
+// the operator cannot act on, so it is stripped.
+var yamlTypeSuffix = regexp.MustCompile(` in type \S+`)
+
+// formatYAMLError rewrites a yaml.v3 decode error into a single actionable line
+// prefixed with the offending file.
+func formatYAMLError(path string, err error) error {
+	msg := yamlTypeSuffix.ReplaceAllString(err.Error(), "")
+	msg = strings.TrimPrefix(msg, "yaml: unmarshal errors:\n")
+	msg = strings.TrimPrefix(msg, "yaml: ")
+	msg = strings.ReplaceAll(msg, "\n  ", "; ")
+	return fmt.Errorf("failed to parse %s: %s", path, strings.TrimSpace(msg))
 }

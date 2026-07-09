@@ -29,6 +29,8 @@
             workflowsAvailable: true,
             workflowsLoading: false,
             workflowRuntimeConfig: {},
+            workflowRuntimeConfigLoaded: false,
+            workflowRuntimeConfigPromise: null,
             workflowError: '',
             workflowNotice: '',
             workflowFilter: '',
@@ -85,6 +87,7 @@
 	                    'LOGGING_ENABLED',
 	                    'USAGE_ENABLED',
 	                    'BUDGETS_ENABLED',
+	                    'RATE_LIMITS_ENABLED',
 	                    'GUARDRAILS_ENABLED',
 	                    'CACHE_ENABLED',
 	                    'REDIS_URL',
@@ -748,7 +751,37 @@
                 return payload;
             },
 
-            async fetchWorkflowRuntimeConfig() {
+            // Feature gates (rate limits, budgets, guardrails, ...) read
+            // workflowRuntimeConfig, but dashboardDataFetches() starts every page
+            // fetch at once. Sharing the in-flight request lets a gate await the
+            // flags rather than race them, and collapses what used to be a
+            // duplicate /admin/runtime/config GET when two callers overlap.
+            fetchWorkflowRuntimeConfig() {
+                if (this.workflowRuntimeConfigPromise) {
+                    return this.workflowRuntimeConfigPromise;
+                }
+                this.workflowRuntimeConfigPromise = this.loadWorkflowRuntimeConfig().finally(() => {
+                    this.workflowRuntimeConfigPromise = null;
+                });
+                return this.workflowRuntimeConfigPromise;
+            },
+
+            // Resolves once the runtime flags have been loaded successfully at
+            // least once, so callers gated on a flag never fall back to its
+            // default by accident. A failed load leaves the flags unloaded, so
+            // the next gated caller retries rather than trusting an empty config.
+            async ensureWorkflowRuntimeConfig() {
+                if (this.workflowRuntimeConfigPromise) {
+                    await this.workflowRuntimeConfigPromise;
+                    return;
+                }
+                if (this.workflowRuntimeConfigLoaded) {
+                    return;
+                }
+                await this.fetchWorkflowRuntimeConfig();
+            },
+
+            async loadWorkflowRuntimeConfig() {
                 const controller = typeof AbortController === 'function' ? new AbortController() : null;
                 const timeoutID = controller && typeof setTimeout === 'function'
                     ? setTimeout(() => controller.abort(), 10000)
@@ -765,6 +798,7 @@
                     }
                     if (!handled) {
                         this.workflowRuntimeConfig = {};
+                        this.workflowRuntimeConfigLoaded = false;
                         return;
                     }
                     const payload = await res.json();
@@ -776,12 +810,14 @@
                         }
 	                    }
 	                    this.workflowRuntimeConfig = next;
+	                    this.workflowRuntimeConfigLoaded = true;
 	                    if (typeof this.fetchCacheOverview === 'function') {
 	                        this.fetchCacheOverview();
 	                    }
 	                } catch (e) {
 	                    console.error('Failed to fetch dashboard config:', e);
 	                    this.workflowRuntimeConfig = {};
+	                    this.workflowRuntimeConfigLoaded = false;
                 } finally {
                     if (timeoutID !== null && typeof clearTimeout === 'function') {
                         clearTimeout(timeoutID);

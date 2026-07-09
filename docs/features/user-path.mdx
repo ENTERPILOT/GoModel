@@ -86,3 +86,17 @@ Budgets are also scoped by `user_path`. A budget for `/team/alpha` applies to
 paths such as `/team-alpha`.
 
 See [Budgets](/features/budgets) for spend limits and workflow enforcement.
+
+## Self-service usage and limits
+
+Callers can check their own consumption without admin access:
+
+```bash
+curl http://localhost:8080/v1/usage \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+The response covers the caller's effective user path: recorded usage over a
+date window, plus the status of every budget and rate limit rule gating that
+path. See the [Usage API](/advanced/usage-api) for a full example and the
+field reference.

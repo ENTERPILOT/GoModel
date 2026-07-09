@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -68,6 +69,11 @@ type FailoverConfig struct {
 	// env. It accepts either a JSON string array or object with boolean values.
 	DisabledModelsJSON string `yaml:"disabled_models_json" env:"FAILOVER_DISABLED_MODELS_JSON"`
 
+	// Overrides is a removed compatibility field. Per-model failover modes are gone;
+	// operators migrate to DisabledModels. It is still parsed — and ignored, with a
+	// warning — so an old config file keeps booting under strict YAML validation.
+	Overrides map[string]any `yaml:"overrides"`
+
 	// Manual holds the parsed manual failover lists loaded from ManualRulesPath.
 	Manual map[string][]string `yaml:"-"`
 
@@ -78,6 +84,11 @@ type FailoverConfig struct {
 func loadFailoverConfig(cfg *FailoverConfig) error {
 	if cfg == nil {
 		return nil
+	}
+
+	if len(cfg.Overrides) > 0 {
+		slog.Warn("failover.overrides was removed and is ignored; use failover.disabled_models instead")
+		cfg.Overrides = nil
 	}
 
 	cfg.DefaultMode = ResolveFailoverDefaultMode(cfg.DefaultMode)

@@ -58,8 +58,11 @@ type CompatibleProviderConfig struct {
 // AdaptChatRequest, ChatRequestHeaders, RequestMutator), not in copies of
 // the transport methods.
 type CompatibleProvider struct {
-	client             *llmclient.Client
-	apiKey             string
+	client *llmclient.Client
+	// keys resolves the credential for each outbound request. Providers in this
+	// package read it directly (see realtime.go) so a websocket dial picks up
+	// the same rotation as the HTTP endpoints.
+	keys               *providers.Keyring
 	providerName       string
 	requestMutator     RequestMutator
 	adaptChatRequest   func(*core.ChatRequest) (*core.ChatRequest, error)
@@ -68,7 +71,7 @@ type CompatibleProvider struct {
 
 func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg CompatibleProviderConfig) *CompatibleProvider {
 	p := &CompatibleProvider{
-		apiKey:             apiKey,
+		keys:               opts.Keyring(apiKey),
 		providerName:       cfg.ProviderName,
 		requestMutator:     cfg.RequestMutator,
 		adaptChatRequest:   cfg.AdaptChatRequest,
@@ -81,9 +84,11 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
+	// Resolved per request, not captured: with several keys configured this is
+	// what spreads successive calls across them.
 	p.client = llmclient.New(clientCfg, func(req *http.Request) {
 		if cfg.SetHeaders != nil {
-			cfg.SetHeaders(req, apiKey)
+			cfg.SetHeaders(req, p.keys.Next())
 		}
 	})
 	return p
@@ -94,7 +99,7 @@ func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client,
 		httpClient = http.DefaultClient
 	}
 	p := &CompatibleProvider{
-		apiKey:             apiKey,
+		keys:               providers.NewKeyring(apiKey),
 		providerName:       cfg.ProviderName,
 		requestMutator:     cfg.RequestMutator,
 		adaptChatRequest:   cfg.AdaptChatRequest,
@@ -104,7 +109,7 @@ func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client,
 	clientCfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, clientCfg, func(req *http.Request) {
 		if cfg.SetHeaders != nil {
-			cfg.SetHeaders(req, apiKey)
+			cfg.SetHeaders(req, p.keys.Next())
 		}
 	})
 	return p

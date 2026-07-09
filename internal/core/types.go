@@ -1,6 +1,10 @@
 package core
 
-import "github.com/goccy/go-json"
+import (
+	"maps"
+
+	"github.com/goccy/go-json"
+)
 
 // StreamOptions controls streaming behavior options.
 // This is used to request usage data in streaming responses.
@@ -415,9 +419,7 @@ func (m *ModelMetadata) Clone() *ModelMetadata {
 	}
 	if len(m.Capabilities) > 0 {
 		caps := make(map[string]bool, len(m.Capabilities))
-		for k, v := range m.Capabilities {
-			caps[k] = v
-		}
+		maps.Copy(caps, m.Capabilities)
 		out.Capabilities = caps
 	} else {
 		out.Capabilities = nil
@@ -436,9 +438,7 @@ func (m *ModelMetadata) Clone() *ModelMetadata {
 	out.Pricing = m.Pricing.Clone()
 	if len(m.PricingSources) > 0 {
 		out.PricingSources = make(map[string]string, len(m.PricingSources))
-		for k, v := range m.PricingSources {
-			out.PricingSources[k] = v
-		}
+		maps.Copy(out.PricingSources, m.PricingSources)
 	} else {
 		out.PricingSources = nil
 	}

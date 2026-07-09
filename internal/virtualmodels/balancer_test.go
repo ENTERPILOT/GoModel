@@ -7,8 +7,6 @@ import (
 	"gomodel/internal/core"
 )
 
-func floatPtr(v float64) *float64 { return &v }
-
 // pricedModel builds a catalog model with input/output per-Mtok pricing.
 func pricedModel(id string, inputPerMtok, outputPerMtok float64) core.Model {
 	return core.Model{
@@ -16,8 +14,8 @@ func pricedModel(id string, inputPerMtok, outputPerMtok float64) core.Model {
 		Object: "model",
 		Metadata: &core.ModelMetadata{
 			Pricing: &core.ModelPricing{
-				InputPerMtok:  floatPtr(inputPerMtok),
-				OutputPerMtok: floatPtr(outputPerMtok),
+				InputPerMtok:  new(inputPerMtok),
+				OutputPerMtok: new(outputPerMtok),
 			},
 		},
 	}
@@ -49,7 +47,7 @@ func newBalancingService(t *testing.T) *Service {
 func resolvedModels(t *testing.T, svc *Service, source string, n int) []string {
 	t.Helper()
 	out := make([]string, 0, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector(source, ""))
 		if err != nil {
 			t.Fatalf("ResolveModel() error = %v", err)
@@ -225,7 +223,7 @@ func TestBalancer_SkipsUnavailableTargets(t *testing.T) {
 func TestBalancer_WeightedIndexPlainWhenEqual(t *testing.T) {
 	t.Parallel()
 	targets := []resolvedTarget{{}, {}, {}}
-	for i := uint64(0); i < 6; i++ {
+	for i := range uint64(6) {
 		if got := weightedIndex(targets, i); got != int(i%3) {
 			t.Fatalf("weightedIndex(%d) = %d, want %d", i, got, i%3)
 		}

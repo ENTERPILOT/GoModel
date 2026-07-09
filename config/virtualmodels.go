@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -53,13 +52,13 @@ const envVirtualModels = "VIRTUAL_MODELS"
 // virtual model definitions — and merges it over the YAML-declared list. Env
 // entries override YAML entries with the same source, consistent with the rest of
 // the config pipeline where env always wins.
-func applyVirtualModelsEnv(cfg *Config) error {
+func applyVirtualModelsEnv(cfg *Config, strict bool) error {
 	raw := strings.TrimSpace(os.Getenv(envVirtualModels))
 	if raw == "" {
 		return nil
 	}
 	var fromEnv []VirtualModelConfig
-	if err := json.Unmarshal([]byte(raw), &fromEnv); err != nil {
+	if err := decodeIaCJSON(envVirtualModels, raw, &fromEnv, strict); err != nil {
 		return fmt.Errorf("invalid %s: %w", envVirtualModels, err)
 	}
 	cfg.VirtualModels = mergeByKey(cfg.VirtualModels, fromEnv, func(model VirtualModelConfig) string {

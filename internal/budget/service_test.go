@@ -111,6 +111,10 @@ func TestServiceUnavailableOperationsReturnErrors(t *testing.T) {
 			_, err := service.CheckWithResults(ctx, "/", now)
 			return err
 		}},
+		{name: "statuses for path", run: func() error {
+			_, err := service.StatusesForPath(ctx, "/", now)
+			return err
+		}},
 	}
 
 	for _, tt := range checks {
@@ -254,6 +258,75 @@ func TestServiceCheckRejectsExceededBudgetForMatchingUserPath(t *testing.T) {
 	}
 	if got := exceeded.Result.Budget.UserPath; got != "/team" {
 		t.Fatalf("exceeded budget path = %q, want /team", got)
+	}
+}
+
+func TestServiceStatusesForPathReportsAllMatchingBudgetsWithoutEnforcing(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{
+			{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{UserPath: "/team", PeriodSeconds: PeriodMonthlySeconds, Amount: 100},
+			{UserPath: "/other", PeriodSeconds: PeriodDailySeconds, Amount: 5},
+		},
+		sum: func(userPath string, start, end time.Time) (float64, bool, error) {
+			// The daily budget is exceeded; the monthly one is not.
+			if end.Sub(start) <= 24*time.Hour {
+				return 12, true, nil
+			}
+			return 42, true, nil
+		},
+	}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+
+	results, err := service.StatusesForPath(ctx, "/team/app", time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("StatusesForPath() error = %v, want nil", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("StatusesForPath() returned %d results, want 2 (exceeded budgets must not stop evaluation)", len(results))
+	}
+	byPeriod := map[int64]CheckResult{}
+	for _, result := range results {
+		if result.Budget.UserPath != "/team" {
+			t.Fatalf("result budget path = %q, want /team", result.Budget.UserPath)
+		}
+		byPeriod[result.Budget.PeriodSeconds] = result
+	}
+	if got := byPeriod[PeriodDailySeconds].Spent; got != 12 {
+		t.Fatalf("daily spent = %v, want 12", got)
+	}
+	if got := byPeriod[PeriodMonthlySeconds].Remaining; got != 58 {
+		t.Fatalf("monthly remaining = %v, want 58", got)
+	}
+}
+
+func TestServiceStatusesForPathErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+	store := &fakeStore{
+		budgets: []Budget{{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10}},
+		sum: func(string, time.Time, time.Time) (float64, bool, error) {
+			return 0, false, errors.New("store down")
+		},
+	}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+
+	if _, err := service.StatusesForPath(ctx, "/te:am", now); err == nil {
+		t.Fatal("StatusesForPath() with invalid path: error = nil, want normalization error")
+	}
+	results, err := service.StatusesForPath(ctx, "/team", now)
+	if err == nil || !strings.Contains(err.Error(), "store down") {
+		t.Fatalf("StatusesForPath() error = %v, want store failure", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("StatusesForPath() partial results = %d, want 0 before the failing budget", len(results))
 	}
 }
 

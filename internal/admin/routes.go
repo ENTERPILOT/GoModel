@@ -30,6 +30,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.POST("/usage/recalculate-pricing", h.RecalculateUsagePricing)
 
 	g.GET("/audit/log", h.AuditLog)
+	g.GET("/audit/stats", h.AuditStats)
 	g.GET("/audit/detail", h.AuditLogDetail)
 	g.GET("/audit/conversation", h.AuditConversation)
 

@@ -1,6 +1,7 @@
 package failover
 
 import (
+	"slices"
 	"strings"
 
 	"gomodel/config"
@@ -74,10 +75,5 @@ func modelSupportsCategory(meta *core.ModelMetadata, category core.ModelCategory
 	if meta == nil || len(meta.Categories) == 0 {
 		return true
 	}
-	for _, candidate := range meta.Categories {
-		if candidate == category {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(meta.Categories, category)
 }

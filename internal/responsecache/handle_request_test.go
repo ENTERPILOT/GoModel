@@ -63,8 +63,8 @@ func TestHandleRequest_SemanticMissPopulatesExactCache(t *testing.T) {
 	vecStore := NewMapVecStore()
 	semCfg := config.SemanticCacheConfig{
 		SimilarityThreshold:     0.90,
-		TTL:                     intPtr(3600),
-		MaxConversationMessages: intPtr(10),
+		TTL:                     new(3600),
+		MaxConversationMessages: new(10),
 	}
 
 	m := &ResponseCacheMiddleware{
@@ -357,8 +357,8 @@ func TestHandleRequest_FailoverUsedSkipsCacheWrites(t *testing.T) {
 	vecStore := NewMapVecStore()
 	semCfg := config.SemanticCacheConfig{
 		SimilarityThreshold:     0.90,
-		TTL:                     intPtr(3600),
-		MaxConversationMessages: intPtr(10),
+		TTL:                     new(3600),
+		MaxConversationMessages: new(10),
 	}
 
 	m := &ResponseCacheMiddleware{
@@ -625,10 +625,10 @@ func TestHandleRequest_GatewayTimeoutDoesNotPopulateSemanticCache(t *testing.T) 
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 	vecStore := NewMapVecStore()
 	semCfg := config.SemanticCacheConfig{
-		Enabled:                 boolPtr(true),
+		Enabled:                 new(true),
 		SimilarityThreshold:     0.90,
-		TTL:                     intPtr(3600),
-		MaxConversationMessages: intPtr(10),
+		TTL:                     new(3600),
+		MaxConversationMessages: new(10),
 	}
 	m := &ResponseCacheMiddleware{
 		simple:   newSimpleCacheMiddleware(store, time.Hour, nil),
@@ -689,10 +689,10 @@ func TestHandleRequest_CacheControlNoCacheBypassesAllLayers(t *testing.T) {
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 	vecStore := NewMapVecStore()
 	semCfg := config.SemanticCacheConfig{
-		Enabled:                 boolPtr(true),
+		Enabled:                 new(true),
 		SimilarityThreshold:     0.90,
-		TTL:                     intPtr(3600),
-		MaxConversationMessages: intPtr(10),
+		TTL:                     new(3600),
+		MaxConversationMessages: new(10),
 	}
 
 	m := &ResponseCacheMiddleware{

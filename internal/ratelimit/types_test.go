@@ -14,7 +14,7 @@ func TestNormalizeRule(t *testing.T) {
 	}{
 		{
 			name: "normalizes path and keeps limits",
-			rule: Rule{Subject: "team/alpha/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(10)},
+			rule: Rule{Subject: "team/alpha/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(10))},
 			check: func(t *testing.T, rule Rule) {
 				if rule.Subject != "/team/alpha" {
 					t.Fatalf("user path = %q, want /team/alpha", rule.Subject)
@@ -26,7 +26,7 @@ func TestNormalizeRule(t *testing.T) {
 		},
 		{
 			name: "empty path becomes root",
-			rule: Rule{Subject: "", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(100)},
+			rule: Rule{Subject: "", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(100))},
 			check: func(t *testing.T, rule Rule) {
 				if rule.Subject != "/" {
 					t.Fatalf("user path = %q, want /", rule.Subject)
@@ -35,7 +35,7 @@ func TestNormalizeRule(t *testing.T) {
 		},
 		{
 			name:    "negative period rejected",
-			rule:    Rule{Subject: "/", PeriodSeconds: -1, MaxRequests: int64Ptr(1)},
+			rule:    Rule{Subject: "/", PeriodSeconds: -1, MaxRequests: new(int64(1))},
 			wantErr: "period_seconds",
 		},
 		{
@@ -45,17 +45,17 @@ func TestNormalizeRule(t *testing.T) {
 		},
 		{
 			name:    "zero max_requests rejected",
-			rule:    Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(0)},
+			rule:    Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(0))},
 			wantErr: "max_requests must be greater than 0",
 		},
 		{
 			name:    "zero max_tokens rejected",
-			rule:    Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(0)},
+			rule:    Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(0))},
 			wantErr: "max_tokens must be greater than 0",
 		},
 		{
 			name:    "concurrent rule rejects max_tokens",
-			rule:    Rule{Subject: "/", PeriodSeconds: PeriodConcurrent, MaxRequests: int64Ptr(1), MaxTokens: int64Ptr(10)},
+			rule:    Rule{Subject: "/", PeriodSeconds: PeriodConcurrent, MaxRequests: new(int64(1)), MaxTokens: new(int64(10))},
 			wantErr: "max_tokens is not valid",
 		},
 		{
@@ -65,7 +65,7 @@ func TestNormalizeRule(t *testing.T) {
 		},
 		{
 			name: "model subject lowercased to match case-insensitive matching",
-			rule: Rule{Scope: ScopeModel, Subject: "OpenAI/GPT-4o", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(1)},
+			rule: Rule{Scope: ScopeModel, Subject: "OpenAI/GPT-4o", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1))},
 			check: func(t *testing.T, rule Rule) {
 				if rule.Subject != "openai/gpt-4o" {
 					t.Fatalf("subject = %q, want openai/gpt-4o", rule.Subject)
@@ -74,7 +74,7 @@ func TestNormalizeRule(t *testing.T) {
 		},
 		{
 			name:    "invalid path rejected",
-			rule:    Rule{Subject: "/a/../b", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(1)},
+			rule:    Rule{Subject: "/a/../b", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1))},
 			wantErr: "user path",
 		},
 	}

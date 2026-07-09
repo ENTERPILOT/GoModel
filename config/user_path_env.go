@@ -80,7 +80,7 @@ func userPathEnvSuffixPath(suffix string) string {
 		return "/"
 	}
 	segments := make([]string, 0)
-	for _, part := range strings.Split(suffix, "__") {
+	for part := range strings.SplitSeq(suffix, "__") {
 		part = strings.TrimSpace(part)
 		if part != "" {
 			segments = append(segments, part)

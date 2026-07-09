@@ -135,7 +135,6 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			svc := newBalancingService(t)
@@ -201,7 +200,6 @@ func TestService_ValidateManagedConfigTargetProviders(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			svc, err := NewService(newSQLiteVMStore(t), testCatalog(), true)

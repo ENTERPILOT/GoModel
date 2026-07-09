@@ -330,9 +330,7 @@ func patchResponsesInputMap(original map[string]any, patched core.ResponsesInput
 	for _, key := range []string{"type", "role", "status", "content", "call_id", "id", "name", "arguments", "output"} {
 		delete(cloned, key)
 	}
-	for key, value := range updated {
-		cloned[key] = value
-	}
+	maps.Copy(cloned, updated)
 	if patched.Type == "function_call_output" {
 		cloned["output"] = restoreResponsesInputOutputValue(original["output"], patched.Output)
 	}

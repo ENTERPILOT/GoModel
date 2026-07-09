@@ -1,0 +1,75 @@
+---
+title: "Kimi Code"
+description: "Configure Kimi Code in GoModel and understand its model alias, embeddings caveat, and quota behavior."
+icon: "code"
+---
+
+Kimi Code is an OpenAI-compatible coding assistant served at `https://api.kimi.com/coding/v1`.
+GoModel routes chat, model listing, embeddings, and passthrough requests through the shared
+OpenAI adapter. The `/v1/responses` endpoint is translated through chat completions, while
+files and batches are not supported by the upstream endpoint.
+
+## Configure
+
+```bash
+KIMICODE_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  kimicode:
+    type: kimicode
+    base_url: "https://api.kimi.com/coding/v1"
+    api_key: "${KIMICODE_API_KEY}"
+```
+
+<Note>
+  The provider `type` is `kimicode` (no hyphen). The config key (`kimicode` in
+  the example above) is arbitrary and only identifies this entry inside your
+  config; it may be changed.
+</Note>
+
+You can also override the base URL and model list with:
+
+```bash
+KIMICODE_BASE_URL=https://api.kimi.com/coding/v1
+KIMICODE_MODELS=kimi-for-coding,bge_m3_embed
+```
+
+## Models
+
+The standard chat model alias is `kimi-for-coding`. You can reference it in a virtual
+model or call it directly through the OpenAI-compatible `/v1/chat/completions` endpoint.
+
+```yaml
+virtual_models:
+  - source: kimi-coding
+    target: kimicode/kimi-for-coding
+```
+
+## Embeddings
+
+Kimi Code exposes `bge_m3_embed` for embeddings, but this model is not documented
+upstream. Treat it as experimental: test availability and dimensionality in your account
+before relying on it in production workflows.
+
+## Pricing & quota
+
+Kimi Code does not publish per-token pricing. Because GoModel's usage-cost tracking has
+no price to multiply, it reports `cost` as zero for Kimi Code requests. The `cost` load-balancing
+strategy cannot prefer or rank this provider by price, but it may still fall back to Kimi Code
+when no priced provider is available.
+
+Upstream quota works on a weekly refresh plus a rolling five-hour window. Plan for burst
+limits and prefer conservative per-provider retry overrides:
+
+```yaml
+providers:
+  kimicode:
+    type: kimicode
+    base_url: "https://api.kimi.com/coding/v1"
+    api_key: "${KIMICODE_API_KEY}"
+    retries: 3
+```

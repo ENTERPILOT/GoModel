@@ -722,9 +722,9 @@ func TestCalculateGranularCost_OutputOnlyPricing(t *testing.T) {
 func TestCalculateGranularCost_OpenAICompatibleProvidersDefaultMappings(t *testing.T) {
 	pricing := &core.ModelPricing{
 		Currency:           "USD",
-		InputPerMtok:       floatPtr(0.435),
-		OutputPerMtok:      floatPtr(0.87),
-		CachedInputPerMtok: floatPtr(0.0036),
+		InputPerMtok:       new(0.435),
+		OutputPerMtok:      new(0.87),
+		CachedInputPerMtok: new(0.0036),
 	}
 	// Cache-heavy workload: 1M input (900k cached), 200k output.
 	rawData := map[string]any{"prompt_cached_tokens": 900_000}
@@ -757,9 +757,9 @@ func TestCalculateGranularCost_OpenAICompatibleProvidersDefaultMappings(t *testi
 func TestCalculateGranularCost_DeepSeekTopLevelCacheFields(t *testing.T) {
 	pricing := &core.ModelPricing{
 		Currency:           "USD",
-		InputPerMtok:       floatPtr(0.21),
-		OutputPerMtok:      floatPtr(0.79),
-		CachedInputPerMtok: floatPtr(0.021), // DeepSeek cache-hit ≈ 0.1x input
+		InputPerMtok:       new(0.21),
+		OutputPerMtok:      new(0.79),
+		CachedInputPerMtok: new(0.021), // DeepSeek cache-hit ≈ 0.1x input
 	}
 	// prompt_tokens = 1_000_000 = 900k hit + 100k miss; 200k output.
 	rawData := map[string]any{

@@ -79,8 +79,6 @@ func TestValidateCacheConfig_RedisOnly(t *testing.T) {
 	}
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 func TestValidateCacheConfig_SemanticDisabledIgnoresInvalidVectorStore(t *testing.T) {
 	cfg := &CacheConfig{
 		Model: ModelCacheConfig{
@@ -89,7 +87,7 @@ func TestValidateCacheConfig_SemanticDisabledIgnoresInvalidVectorStore(t *testin
 		},
 		Response: ResponseCacheConfig{
 			Semantic: &SemanticCacheConfig{
-				Enabled: boolPtr(false),
+				Enabled: new(false),
 				VectorStore: VectorStoreConfig{
 					Type: "qdrant",
 					// Intentionally missing URL — valid because semantic cache is off.
@@ -110,9 +108,9 @@ func TestValidateCacheConfig_SemanticEnabledRequiresQdrantURL(t *testing.T) {
 		},
 		Response: ResponseCacheConfig{
 			Semantic: &SemanticCacheConfig{
-				Enabled:             boolPtr(true),
+				Enabled:             new(true),
 				SimilarityThreshold: 0.9,
-				TTL:                 intPtr(3600),
+				TTL:                 new(3600),
 				Embedder:            EmbedderConfig{Provider: "openai"},
 				VectorStore: VectorStoreConfig{
 					Type: "qdrant",
@@ -133,9 +131,9 @@ func TestValidateCacheConfig_SemanticEnabledRequiresQdrantCollection(t *testing.
 		},
 		Response: ResponseCacheConfig{
 			Semantic: &SemanticCacheConfig{
-				Enabled:             boolPtr(true),
+				Enabled:             new(true),
 				SimilarityThreshold: 0.9,
-				TTL:                 intPtr(3600),
+				TTL:                 new(3600),
 				Embedder:            EmbedderConfig{Provider: "openai"},
 				VectorStore: VectorStoreConfig{
 					Type:   "qdrant",
@@ -157,8 +155,8 @@ func TestValidateCacheConfig_SemanticSimilarityThresholdInvalid(t *testing.T) {
 		},
 		Response: ResponseCacheConfig{
 			Semantic: &SemanticCacheConfig{
-				Enabled:  boolPtr(true),
-				TTL:      intPtr(3600),
+				Enabled:  new(true),
+				TTL:      new(3600),
 				Embedder: EmbedderConfig{Provider: "openai"},
 				VectorStore: VectorStoreConfig{
 					Type: "pgvector",
@@ -203,9 +201,9 @@ func TestValidateCacheConfig_SemanticRequiresEmbedderProvider(t *testing.T) {
 		},
 		Response: ResponseCacheConfig{
 			Semantic: &SemanticCacheConfig{
-				Enabled:             boolPtr(true),
+				Enabled:             new(true),
 				SimilarityThreshold: 0.9,
-				TTL:                 intPtr(3600),
+				TTL:                 new(3600),
 				VectorStore: VectorStoreConfig{
 					Type: "pgvector",
 					PGVector: PGVectorConfig{
@@ -233,9 +231,9 @@ func TestValidateCacheConfig_SemanticRejectsLocalEmbedder(t *testing.T) {
 		},
 		Response: ResponseCacheConfig{
 			Semantic: &SemanticCacheConfig{
-				Enabled:             boolPtr(true),
+				Enabled:             new(true),
 				SimilarityThreshold: 0.9,
-				TTL:                 intPtr(3600),
+				TTL:                 new(3600),
 				Embedder:            EmbedderConfig{Provider: "local"},
 				VectorStore: VectorStoreConfig{
 					Type: "pgvector",
@@ -261,9 +259,9 @@ func TestValidateCacheConfig_SemanticNegativeTTL(t *testing.T) {
 		},
 		Response: ResponseCacheConfig{
 			Semantic: &SemanticCacheConfig{
-				Enabled:             boolPtr(true),
+				Enabled:             new(true),
 				SimilarityThreshold: 0.9,
-				TTL:                 intPtr(-1),
+				TTL:                 new(-1),
 				Embedder:            EmbedderConfig{Provider: "openai"},
 				VectorStore: VectorStoreConfig{
 					Type: "pgvector",

@@ -110,7 +110,11 @@ func TestProxyRelaysBidirectionally(t *testing.T) {
 func TestProxyRelaysLargeFrame(t *testing.T) {
 	upstream := echoServer(t)
 	defer upstream.Close()
-	proxy := proxyServer(t, wsURL(upstream.URL), nil, nil)
+	// Wait for Proxy to return: Accept hijacks the connection, so
+	// httptest.Server.Close does not wait for the relay goroutines, and a
+	// session leaking past the test races later tests' state.
+	retc := make(chan error, 1)
+	proxy := proxyServer(t, wsURL(upstream.URL), nil, retc)
 	defer proxy.Close()
 
 	client, ctx, cancel := dialClient(t, proxy.URL)
@@ -130,6 +134,9 @@ func TestProxyRelaysLargeFrame(t *testing.T) {
 		t.Errorf("echoed length = %d, want %d", len(data), len(big))
 	}
 	client.Close(websocket.StatusNormalClosure, "")
+	if got := waitProxy(t, retc); got != nil {
+		t.Errorf("Proxy returned %v, want nil on normal close", got)
+	}
 }
 
 func TestProxyDialErrorBeforeUpgrade(t *testing.T) {
@@ -168,5 +175,80 @@ func waitProxy(t *testing.T, retc chan error) error {
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for Proxy to return")
 		return nil
+	}
+}
+
+func TestProxyHeartbeatTearsDownUnresponsivePeer(t *testing.T) {
+	restore := realtime.SetHeartbeatCadenceForTest(30*time.Millisecond, 150*time.Millisecond)
+	defer restore()
+
+	upstream := echoServer(t)
+	defer upstream.Close()
+
+	retc := make(chan error, 1)
+	proxy := proxyServer(t, wsURL(upstream.URL), nil, retc)
+	defer proxy.Close()
+
+	// Connect and go silent: coder/websocket only answers pings while a Read
+	// is in flight, so a client that never reads models a dead peer (NAT
+	// timeout, power loss) that keeps the TCP connection nominally open.
+	client, _, cancel := dialClient(t, proxy.URL)
+	defer cancel()
+	defer client.Close(websocket.StatusNormalClosure, "")
+
+	select {
+	case err := <-retc:
+		if err == nil || !strings.Contains(err.Error(), "heartbeat") {
+			t.Fatalf("Proxy returned %v, want heartbeat failure", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("session with unresponsive peer was not torn down")
+	}
+}
+
+func TestProxyHeartbeatLeavesResponsiveSessionAlive(t *testing.T) {
+	// Short interval so several pings land inside the loop below, but a
+	// generous pong timeout: a scheduler stall on a loaded CI runner must not
+	// fail a healthy session.
+	restore := realtime.SetHeartbeatCadenceForTest(25*time.Millisecond, 2*time.Second)
+	defer restore()
+
+	upstream := echoServer(t)
+	defer upstream.Close()
+
+	retc := make(chan error, 1)
+	proxy := proxyServer(t, wsURL(upstream.URL), nil, retc)
+	defer proxy.Close()
+
+	client, ctx, cancel := dialClient(t, proxy.URL)
+	defer cancel()
+
+	// Exchange frames across several heartbeat intervals: an active session
+	// (reads in flight on both sides answer the pings) must not be killed.
+	deadline := time.Now().Add(400 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if err := client.Write(ctx, websocket.MessageText, []byte(`{"ping":"pong"}`)); err != nil {
+			t.Fatalf("client write failed: %v", err)
+		}
+		if _, _, err := client.Read(ctx); err != nil {
+			t.Fatalf("client read failed: %v", err)
+		}
+	}
+
+	select {
+	case err := <-retc:
+		t.Fatalf("session ended early: %v", err)
+	default:
+	}
+	if err := client.Close(websocket.StatusNormalClosure, ""); err != nil {
+		t.Fatalf("client close failed: %v", err)
+	}
+	select {
+	case err := <-retc:
+		if err != nil {
+			t.Fatalf("Proxy returned %v after normal close, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("proxy did not finish after client close")
 	}
 }

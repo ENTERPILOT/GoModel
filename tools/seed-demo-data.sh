@@ -426,7 +426,17 @@ INSERT INTO audit_logs (
 SELECT
   audit_id,
   timestamp,
-  CASE WHEN cache_type IS NOT NULL THEN 8000000 + (token_noise % 12000000) ELSE 90000000 + (token_noise % 260000000) END,
+  -- Each provider gets its own latency profile so the dashboard's provider
+  -- latency chart shows distinct, plausible lines instead of overlapping noise.
+  CASE WHEN cache_type IS NOT NULL THEN 8000000 + (token_noise % 12000000)
+    ELSE CAST((90000000 + (token_noise % 260000000)) * CASE provider
+      WHEN 'groq' THEN 0.45
+      WHEN 'gemini' THEN 0.8
+      WHEN 'anthropic' THEN 1.6
+      WHEN 'bailian' THEN 2.2
+      ELSE 1.0
+    END AS INTEGER)
+  END,
   provider_name || '/' || model,
   provider_name || '/' || model,
   provider,
@@ -434,7 +444,11 @@ SELECT
   0,
   NULL,
   cache_type,
-  CASE WHEN abs(token_noise / 131) % 1000 < 994 THEN 200 ELSE 500 END,
+  CASE
+    WHEN abs(token_noise / 131) % 1000 < 985 THEN 200
+    WHEN abs(token_noise / 131) % 1000 < 994 THEN 429
+    ELSE 500
+  END,
   request_id,
   NULL,
   'master_key',
@@ -443,7 +457,11 @@ SELECT
   endpoint,
   user_path,
   0,
-  CASE WHEN abs(token_noise / 131) % 1000 < 994 THEN '' ELSE 'provider_error' END,
+  CASE
+    WHEN abs(token_noise / 131) % 1000 < 985 THEN ''
+    WHEN abs(token_noise / 131) % 1000 < 994 THEN 'rate_limit_exceeded'
+    ELSE 'provider_error'
+  END,
   json_object(
     'demo_seed', 1,
     'workflow_features', json_object(
@@ -538,6 +556,14 @@ SELECT
           'type', 'provider_error',
           'code', 'demo_provider_error',
           'param', 'model'
+        )
+      )
+      WHEN abs(token_noise / 131) % 1000 >= 985 THEN json_object(
+        'error', json_object(
+          'message', 'Synthetic rate limit for demo audit inspection. Retry after a moment.',
+          'type', 'rate_limit_exceeded',
+          'code', 'demo_rate_limit',
+          'param', NULL
         )
       )
       WHEN label IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian') THEN json_object(

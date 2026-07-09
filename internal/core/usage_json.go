@@ -1,6 +1,8 @@
 package core
 
 import (
+	"maps"
+
 	"github.com/goccy/go-json"
 )
 
@@ -248,9 +250,7 @@ func mergeRawUsageObject(dst *map[string]any, raw json.RawMessage) error {
 	if *dst == nil {
 		*dst = make(map[string]any, len(decoded))
 	}
-	for key, value := range decoded {
-		(*dst)[key] = value
-	}
+	maps.Copy(*dst, decoded)
 	return nil
 }
 

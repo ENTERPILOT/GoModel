@@ -5,6 +5,7 @@ package integration
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -53,7 +54,7 @@ func TestManagedAuthKeyWorkflow_AuditAndUsageValidity_PostgreSQL(t *testing.T) {
 				Audit:      true,
 				Usage:      true,
 				Guardrails: false,
-				Failover:   boolPtr(false),
+				Failover:   new(false),
 			},
 			Guardrails: []workflows.GuardrailStep{},
 		},
@@ -162,7 +163,7 @@ func TestGuardrailWorkflow_RewritesUpstreamRequestAndPreservesAuditUsage_Postgre
 				Audit:      true,
 				Usage:      true,
 				Guardrails: true,
-				Failover:   boolPtr(false),
+				Failover:   new(false),
 			},
 			Guardrails: []workflows.GuardrailStep{
 				{Ref: "policy-system", Step: 10},
@@ -286,9 +287,7 @@ func upsertGuardrail(t *testing.T, serverURL, masterKey, name string, payload ma
 	t.Helper()
 
 	body := make(map[string]any, len(payload)+1)
-	for key, value := range payload {
-		body[key] = value
-	}
+	maps.Copy(body, payload)
 	body["name"] = name
 
 	resp := adminJSONRequest(t, http.MethodPut, serverURL+"/admin/guardrails", masterKey, body)
@@ -316,8 +315,4 @@ func adminJSONRequest(t *testing.T, method, url, masterKey string, payload map[s
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	return resp
-}
-
-func boolPtr(value bool) *bool {
-	return &value
 }

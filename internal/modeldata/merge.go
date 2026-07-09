@@ -2,6 +2,7 @@ package modeldata
 
 import (
 	"gomodel/internal/core"
+	"maps"
 )
 
 // MergeMetadata merges override onto base field-wise. Non-zero override fields
@@ -51,12 +52,8 @@ func MergeMetadata(base, override *core.ModelMetadata) *core.ModelMetadata {
 	}
 	if len(override.Capabilities) > 0 {
 		out := make(map[string]bool, len(merged.Capabilities)+len(override.Capabilities))
-		for k, v := range merged.Capabilities {
-			out[k] = v
-		}
-		for k, v := range override.Capabilities {
-			out[k] = v
-		}
+		maps.Copy(out, merged.Capabilities)
+		maps.Copy(out, override.Capabilities)
 		merged.Capabilities = out
 	}
 	if len(override.Rankings) > 0 {
@@ -64,9 +61,7 @@ func MergeMetadata(base, override *core.ModelMetadata) *core.ModelMetadata {
 		// merged.Rankings is already a deep clone from base.Clone(), so we can
 		// reuse its values directly; override values must be deep-cloned so the
 		// result does not share Elo/Rank pointers with the caller's input.
-		for k, v := range merged.Rankings {
-			out[k] = v
-		}
+		maps.Copy(out, merged.Rankings)
 		for k, v := range override.Rankings {
 			out[k] = core.CloneModelRanking(v)
 		}
@@ -89,8 +84,6 @@ func clonePricingSources(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }

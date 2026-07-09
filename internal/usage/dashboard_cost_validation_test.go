@@ -41,10 +41,10 @@ func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 	ts := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 
 	xiaomiPricing := &core.ModelPricing{
-		Currency: "USD", InputPerMtok: floatPtr(0.435), OutputPerMtok: floatPtr(0.87), CachedInputPerMtok: floatPtr(0.0036),
+		Currency: "USD", InputPerMtok: new(0.435), OutputPerMtok: new(0.87), CachedInputPerMtok: new(0.0036),
 	}
 	deepseekPricing := &core.ModelPricing{
-		Currency: "USD", InputPerMtok: floatPtr(0.21), OutputPerMtok: floatPtr(0.79), CachedInputPerMtok: floatPtr(0.021),
+		Currency: "USD", InputPerMtok: new(0.21), OutputPerMtok: new(0.79), CachedInputPerMtok: new(0.021),
 	}
 
 	// Live request 1: xiaomi, standard nested cache reporting (prompt_cached_tokens).

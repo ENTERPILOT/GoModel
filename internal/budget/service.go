@@ -233,6 +233,41 @@ func (s *Service) CheckWithResults(ctx context.Context, userPath string, now tim
 	return results, nil
 }
 
+// StatusesForPath evaluates every budget covering userPath without enforcing
+// limits. Unlike CheckWithResults it never stops at an exhausted budget, so
+// callers get the full status picture even when several budgets are exceeded.
+func (s *Service) StatusesForPath(ctx context.Context, userPath string, now time.Time) ([]CheckResult, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrUnavailable
+	}
+	userPath, err := NormalizeUserPath(userPath)
+	if err != nil {
+		return nil, err
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	now = now.UTC()
+
+	s.mu.RLock()
+	budgets := append([]Budget(nil), s.budgets...)
+	settings := s.settings
+	s.mu.RUnlock()
+
+	results := make([]CheckResult, 0, len(budgets))
+	for _, budget := range budgets {
+		if !budgetAppliesToPath(budget.UserPath, userPath) {
+			continue
+		}
+		result, err := s.evaluateBudget(ctx, budget, now, settings)
+		if err != nil {
+			return results, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
 func (s *Service) evaluateBudget(ctx context.Context, budget Budget, now time.Time, settings Settings) (CheckResult, error) {
 	start, end := PeriodBounds(now, budget.PeriodSeconds, settings)
 	if budget.LastResetAt != nil && budget.LastResetAt.After(start) {

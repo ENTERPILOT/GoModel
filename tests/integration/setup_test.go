@@ -371,7 +371,7 @@ func testPricingMetadata() *core.ModelMetadata {
 // waitForServer waits for the server to become healthy.
 func waitForServer(healthURL string) error {
 	client := &http.Client{Timeout: 2 * time.Second}
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		resp, err := client.Get(healthURL)
 		if err == nil {
 			_ = resp.Body.Close()
@@ -524,15 +524,15 @@ func handleChatCompletionStream(w http.ResponseWriter, model string) {
 	// Send content chunks
 	chunks := []string{"Hello", "!", " How", " can", " I", " help", " you", " today", "?"}
 	for i, chunk := range chunks {
-		delta := map[string]interface{}{
+		delta := map[string]any{
 			"id":      "chatcmpl-test-stream",
 			"object":  "chat.completion.chunk",
 			"model":   model,
 			"created": 1700000000,
-			"choices": []map[string]interface{}{
+			"choices": []map[string]any{
 				{
 					"index": 0,
-					"delta": map[string]interface{}{
+					"delta": map[string]any{
 						"content": chunk,
 					},
 					"finish_reason": nil,
@@ -542,8 +542,8 @@ func handleChatCompletionStream(w http.ResponseWriter, model string) {
 
 		// Last chunk has finish_reason and usage
 		if i == len(chunks)-1 {
-			delta["choices"].([]map[string]interface{})[0]["finish_reason"] = "stop"
-			delta["usage"] = map[string]interface{}{
+			delta["choices"].([]map[string]any)[0]["finish_reason"] = "stop"
+			delta["usage"] = map[string]any{
 				"prompt_tokens":     10,
 				"completion_tokens": 8,
 				"total_tokens":      18,
@@ -613,9 +613,9 @@ func handleResponsesStream(w http.ResponseWriter, model string) {
 	}
 
 	// Send response.created event
-	createdEvent := map[string]interface{}{
+	createdEvent := map[string]any{
 		"type": "response.created",
-		"response": map[string]interface{}{
+		"response": map[string]any{
 			"id":         "resp-test-stream",
 			"object":     "response",
 			"created_at": 1700000000,
@@ -630,7 +630,7 @@ func handleResponsesStream(w http.ResponseWriter, model string) {
 	// Send content delta events
 	chunks := []string{"Hello", "!", " How", " can", " I", " help", " you", "?"}
 	for _, chunk := range chunks {
-		deltaEvent := map[string]interface{}{
+		deltaEvent := map[string]any{
 			"type":  "response.output_text.delta",
 			"delta": chunk,
 		}
@@ -640,15 +640,15 @@ func handleResponsesStream(w http.ResponseWriter, model string) {
 	}
 
 	// Send response.completed event with usage
-	doneEvent := map[string]interface{}{
+	doneEvent := map[string]any{
 		"type": "response.completed",
-		"response": map[string]interface{}{
+		"response": map[string]any{
 			"id":         "resp-test-stream",
 			"object":     "response",
 			"created_at": 1700000000,
 			"model":      model,
 			"status":     "completed",
-			"usage": map[string]interface{}{
+			"usage": map[string]any{
 				"input_tokens":  10,
 				"output_tokens": 8,
 				"total_tokens":  18,

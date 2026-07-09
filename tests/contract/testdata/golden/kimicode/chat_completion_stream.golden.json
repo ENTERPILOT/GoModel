@@ -1,0 +1,494 @@
+{
+  "chunks": [
+    {
+      "choices": [
+        {
+          "delta": {
+            "content": null,
+            "role": "assistant"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": "The"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " user"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " wants"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " me"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " to"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " say"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " \""
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": "Hello"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": ","
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " World"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": "!\""
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " and"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " nothing"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " else"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": "."
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " I"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " should"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " provide"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " exactly"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " that"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " text"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " with"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " no"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " additional"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": " content"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "reasoning_content": "."
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "content": "Hello"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "content": ","
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "content": " World"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "content": "!"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    },
+    {
+      "choices": [
+        {
+          "delta": {},
+          "finish_reason": "stop",
+          "index": 0,
+          "usage": {
+            "cached_tokens": 18,
+            "completion_tokens": 32,
+            "prompt_tokens": 18,
+            "prompt_tokens_details": {
+              "cached_tokens": 18
+            },
+            "total_tokens": 50
+          }
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+      "model": "kimi-for-coding",
+      "object": "chat.completion.chunk"
+    }
+  ],
+  "done": true,
+  "text": "Hello, World!"
+}

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -69,18 +68,21 @@ type RateLimitRuleConfig struct {
 	MaxTokens *int64 `yaml:"max_tokens" json:"max_tokens"`
 }
 
-func applyRateLimitEnv(cfg *Config) error {
+func applyRateLimitEnv(cfg *Config, strict bool) error {
 	if cfg == nil {
 		return nil
 	}
 	if !cfg.RateLimits.Enabled {
 		return nil
 	}
+	parseLimits := func(raw string) ([]RateLimitRuleConfig, error) {
+		return parseRateLimitEnvLimits(raw, strict)
+	}
 	entries, err := applyUserPathLimitEnv(
 		cfg.RateLimits.UserPaths,
 		"SET_RATE_LIMIT_",
 		func(entry RateLimitUserPathConfig) string { return entry.Path },
-		parseRateLimitEnvLimits,
+		parseLimits,
 		func(path string, limits []RateLimitRuleConfig) RateLimitUserPathConfig {
 			return RateLimitUserPathConfig{Path: path, Limits: limits}
 		},
@@ -100,7 +102,7 @@ func applyRateLimitEnv(cfg *Config) error {
 		rateLimitProviderNameFromEnvSuffix,
 		normalizeRateLimitProviderName,
 		func(entry RateLimitProviderConfig) string { return entry.Name },
-		parseRateLimitEnvLimits,
+		parseLimits,
 		func(name string, limits []RateLimitRuleConfig) RateLimitProviderConfig {
 			return RateLimitProviderConfig{Name: name, Limits: limits}
 		},
@@ -129,14 +131,14 @@ func normalizeRateLimitProviderName(raw string) (string, error) {
 
 // parseRateLimitEnvLimits parses either a JSON array of rule objects or the
 // compact "rpm=100,tpm=50000,rpd=1000,concurrent=10" syntax.
-func parseRateLimitEnvLimits(raw string) ([]RateLimitRuleConfig, error) {
+func parseRateLimitEnvLimits(raw string, strict bool) ([]RateLimitRuleConfig, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
 	}
 	if strings.HasPrefix(raw, "[") {
 		var limits []RateLimitRuleConfig
-		if err := json.Unmarshal([]byte(raw), &limits); err != nil {
+		if err := decodeIaCJSON("SET_RATE_LIMIT_*", raw, &limits, strict); err != nil {
 			return nil, err
 		}
 		return limits, nil

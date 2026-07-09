@@ -7,7 +7,10 @@ package realtime
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -68,22 +71,81 @@ func Proxy(w http.ResponseWriter, r *http.Request, target Target, onServerFrame 
 	return relay(r.Context(), client, upstream, onServerFrame)
 }
 
-// relay runs the two copy loops, tears both down when either ends, and returns
-// the terminal cause (nil for a normal close).
+// Heartbeat cadence. A silently dead peer (NAT timeout, power loss — no RST,
+// no close frame) leaves both copy loops blocked in Read forever; the
+// heartbeat is the only signal that tears such sessions down. Variables so
+// tests can shrink them.
+var (
+	heartbeatInterval = 30 * time.Second
+	heartbeatTimeout  = 10 * time.Second
+)
+
+// relay runs the two copy loops plus the heartbeat, tears everything down
+// when any of them ends, and returns the terminal cause (nil for a normal
+// close).
 func relay(ctx context.Context, client, upstream *websocket.Conn, onServerFrame func([]byte)) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	done := make(chan error, 2)
+	done := make(chan error, 3)
 	go func() { done <- copyFrames(ctx, upstream, client, nil) }()           // client -> upstream
 	go func() { done <- copyFrames(ctx, client, upstream, onServerFrame) }() // upstream -> client
+	go func() {
+		done <- heartbeat(ctx, func(ctx context.Context) error { return pingBoth(ctx, client, upstream) })
+	}()
 
 	first := <-done
 	cancel()
 	closeBoth(client, upstream, first)
 	<-done
+	<-done
 
 	return normalizeCloseError(first)
+}
+
+// heartbeat pings a session's peers on an interval so dead connections surface
+// as ping timeouts instead of leaking the session. pingPeers pings every peer;
+// pong responses are processed by the session's concurrent reads, which are
+// always in flight. The relay and the sideband observer share this loop.
+func heartbeat(ctx context.Context, pingPeers func(context.Context) error) error {
+	ticker := time.NewTicker(heartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if err := pingPeers(ctx); err != nil {
+				// A locally closed connection means teardown is already under
+				// way and a concurrent read holds the definitive close cause;
+				// wait for it instead of racing to report a secondary error.
+				if errors.Is(err, net.ErrClosed) {
+					<-ctx.Done()
+					return ctx.Err()
+				}
+				return err
+			}
+		}
+	}
+}
+
+func pingBoth(ctx context.Context, client, upstream *websocket.Conn) error {
+	// Each peer gets its own full timeout budget: a slow-but-alive first ping
+	// must not leave the second one a nearly expired deadline.
+	if err := ping(ctx, client); err != nil {
+		return fmt.Errorf("client heartbeat: %w", err)
+	}
+	if err := ping(ctx, upstream); err != nil {
+		return fmt.Errorf("upstream heartbeat: %w", err)
+	}
+	return nil
+}
+
+func ping(ctx context.Context, conn *websocket.Conn) error {
+	pingCtx, cancel := context.WithTimeout(ctx, heartbeatTimeout)
+	defer cancel()
+	return conn.Ping(pingCtx)
 }
 
 // copyFrames relays every message from src to dst, invoking tap on each payload

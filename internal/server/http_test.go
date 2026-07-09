@@ -127,7 +127,7 @@ func TestStartWithListener(t *testing.T) {
 	client := &http.Client{Timeout: 200 * time.Millisecond}
 	url := "http://" + listener.Addr().String() + "/health"
 	var lastErr error
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		resp, err := client.Get(url)
 		if err == nil {
 			_ = resp.Body.Close()

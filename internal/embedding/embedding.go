@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"gomodel/config"
+	"gomodel/internal/providers"
 )
 
 const defaultTimeout = 120 * time.Second
@@ -55,9 +56,12 @@ func NewEmbedder(cfg config.EmbedderConfig, resolvedProviders map[string]config.
 	} else if typ == "gemini" {
 		model = normalizeGeminiEmbeddingModel(model)
 	}
+	// APIKey leads APIKeys and is de-duplicated away when it repeats there, so
+	// this works whether raw came from provider resolution (which normalizes
+	// both fields) or was built by hand with only APIKey set.
 	return &apiEmbedder{
 		endpointURL: endpointURL,
-		apiKey:      raw.APIKey,
+		keys:        providers.NewKeyring(append([]string{raw.APIKey}, raw.APIKeys...)...),
 		model:       model,
 		httpClient:  &http.Client{Timeout: defaultTimeout},
 	}, nil
@@ -93,9 +97,12 @@ func openAIEmbeddingsEndpointURL(base string) (string, error) {
 }
 
 // apiEmbedder calls POST …/v1/embeddings on any OpenAI-compatible endpoint.
+// It shares the provider's configured key set but keeps its own rotation
+// counter, since it does not route through the provider's HTTP client.
+// Embeddings have no prompt cache to lose, so rotating here is free.
 type apiEmbedder struct {
 	endpointURL string
-	apiKey      string
+	keys        *providers.Keyring
 	model       string
 	httpClient  *http.Client
 }
@@ -124,8 +131,8 @@ func (e *apiEmbedder) Embed(ctx context.Context, text string) ([]float32, error)
 		return nil, fmt.Errorf("embedding: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if e.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
+	if apiKey := e.keys.Next(); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	resp, err := e.httpClient.Do(req)
 	if err != nil {

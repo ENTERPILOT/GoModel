@@ -247,6 +247,63 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/audit/stats": {
+            "get": {
+                "description": "Returns request counts grouped into 2xx/4xx/5xx status classes\nper time bucket, an overall success-rate summary, and average\nrequest duration per provider for the dashboard charts.\nRanges up to 3 days use hourly buckets, longer ranges daily.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get time-bucketed request status and latency stats",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auditlog.RequestStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/budgets": {
             "get": {
                 "produces": [
@@ -4916,7 +4973,7 @@ const docTemplate = `{
         },
         "/v1/realtime": {
             "get": {
-                "description": "Upgrades to a websocket and relays an OpenAI-compatible realtime (speech-to-speech) session to the provider that owns the model named in the ?model= query parameter. Provider credentials are injected by the gateway.",
+                "description": "Upgrades to a websocket and relays an OpenAI-compatible realtime (speech-to-speech) session to the provider that owns the model named in the ?model= query parameter. Provider credentials are injected by the gateway. Passing ?call_id= instead attaches to an existing WebRTC/SIP call as a sideband channel; calls created through this gateway instance are routed automatically, others need explicit model (and provider) parameters.",
                 "tags": [
                     "realtime"
                 ],
@@ -4924,15 +4981,20 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Model that owns the realtime session",
+                        "description": "Model that owns the realtime session (required unless call_id names a call created through this gateway instance)",
                         "name": "model",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     },
                     {
                         "type": "string",
                         "description": "Optional provider hint",
                         "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Existing WebRTC/SIP call to attach to as a sideband channel",
+                        "name": "call_id",
                         "in": "query"
                     }
                 ],
@@ -4951,6 +5013,185 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "501": {
+                        "description": "Not Implemented",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/realtime/calls": {
+            "post": {
+                "description": "OpenAI-compatible WebRTC SDP exchange. Accepts a raw application/sdp offer with the model in the ?model= query parameter, or a multipart form with sdp and session (JSON) fields. The gateway routes by model, injects provider credentials, and relays the SDP answer; the Location header carries the created call id. Media flows directly between the client and the provider, so usage is recorded by a gateway-side sideband observer when usage tracking is enabled.",
+                "consumes": [
+                    "application/sdp",
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/sdp",
+                    "application/json"
+                ],
+                "tags": [
+                    "realtime"
+                ],
+                "summary": "Create a realtime WebRTC call",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model that owns the call (required for application/sdp offers)",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional provider hint",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "SDP answer",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "501": {
+                        "description": "Not Implemented",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/realtime/client_secrets": {
+            "post": {
+                "description": "OpenAI-compatible ephemeral credential minting for browser and mobile realtime clients. Routes by session.model (or the transcription model for transcription sessions), applies the same model-access, budget, and rate-limit gates as other model endpoints, and relays the provider response verbatim. The minted secret authenticates the client directly against the provider, bypassing the gateway for the session itself.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "realtime"
+                ],
+                "summary": "Mint an ephemeral realtime client secret",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Optional provider hint",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Client secret request: session config with the routing model (session.model, or the nested transcription model) plus optional expires_after; additional fields are relayed verbatim",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "expires_after": {
+                                    "type": "object"
+                                },
+                                "session": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Provider client secret response",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -5498,6 +5739,69 @@ const docTemplate = `{
                     },
                     "502": {
                         "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/usage": {
+            "get": {
+                "description": "Returns recorded usage, budget statuses, and rate limit statuses for the caller's effective user path (the path bound to the managed API key, or the user-path header for master-key callers).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "usage"
+                ],
+                "summary": "Self-service usage, budget, and rate limit status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Inclusive window start (YYYY-MM-DD, UTC); defaults to 29 days before end_date",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Inclusive window end (YYYY-MM-DD, UTC); defaults to today; the whole range may span at most 365 days",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Window length ending today when no explicit dates are given (default 30, max 365)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.usageStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -6778,6 +7082,26 @@ const docTemplate = `{
                 }
             }
         },
+        "auditlog.ProviderLatencySeries": {
+            "type": "object",
+            "properties": {
+                "avg_duration_ms": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "requests": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
         "auditlog.RequestRevisionSnapshot": {
             "type": "object",
             "properties": {
@@ -6798,6 +7122,82 @@ const docTemplate = `{
                 },
                 "seq": {
                     "type": "integer"
+                },
+                "tokens_saved": {
+                    "description": "TokensSaved is the rewriter-reported estimate of prompt tokens this\nrevision saved (e.g. token compression); zero when the rewriter does\nnot report savings.",
+                    "type": "integer"
+                }
+            }
+        },
+        "auditlog.RequestStats": {
+            "type": "object",
+            "properties": {
+                "buckets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auditlog.RequestStatsBucket"
+                    }
+                },
+                "interval": {
+                    "type": "string"
+                },
+                "provider_latency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auditlog.ProviderLatencySeries"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/auditlog.RequestStatsSummary"
+                }
+            }
+        },
+        "auditlog.RequestStatsBucket": {
+            "type": "object",
+            "properties": {
+                "requests": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "string"
+                },
+                "status_2xx": {
+                    "type": "integer"
+                },
+                "status_4xx": {
+                    "type": "integer"
+                },
+                "status_5xx": {
+                    "type": "integer"
+                },
+                "status_other": {
+                    "type": "integer"
+                }
+            }
+        },
+        "auditlog.RequestStatsSummary": {
+            "type": "object",
+            "properties": {
+                "avg_duration_ms": {
+                    "type": "number"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "status_2xx": {
+                    "type": "integer"
+                },
+                "status_4xx": {
+                    "type": "integer"
+                },
+                "status_5xx": {
+                    "type": "integer"
+                },
+                "status_other": {
+                    "type": "integer"
+                },
+                "success_rate": {
+                    "type": "number"
                 }
             }
         },
@@ -8653,6 +9053,173 @@ const docTemplate = `{
                 }
             }
         },
+        "server.usageStatusBudget": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "exceeded": {
+                    "type": "boolean"
+                },
+                "period_end": {
+                    "type": "string"
+                },
+                "period_label": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                },
+                "period_start": {
+                    "type": "string"
+                },
+                "remaining": {
+                    "type": "number"
+                },
+                "resets_in_seconds": {
+                    "type": "integer"
+                },
+                "spent": {
+                    "type": "number"
+                },
+                "usage_ratio": {
+                    "description": "UsageRatio is spent/amount, deliberately unclamped: values above 1\nmean the budget is blown through.",
+                    "type": "number"
+                },
+                "user_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.usageStatusRateLimit": {
+            "type": "object",
+            "properties": {
+                "exhausted": {
+                    "type": "boolean"
+                },
+                "in_flight": {
+                    "type": "integer"
+                },
+                "max_requests": {
+                    "type": "integer"
+                },
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "period_label": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                },
+                "requests_remaining": {
+                    "type": "integer"
+                },
+                "requests_usage_ratio": {
+                    "description": "The usage ratios are used/limit per dimension, present only when that\nlimit exists and unclamped (token windows can overshoot past 1).",
+                    "type": "number"
+                },
+                "requests_used": {
+                    "type": "integer"
+                },
+                "resets_in_seconds": {
+                    "type": "integer"
+                },
+                "tokens_remaining": {
+                    "type": "integer"
+                },
+                "tokens_usage_ratio": {
+                    "type": "number"
+                },
+                "tokens_used": {
+                    "type": "integer"
+                },
+                "user_path": {
+                    "type": "string"
+                },
+                "window_end": {
+                    "type": "string"
+                },
+                "window_start": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.usageStatusResponse": {
+            "type": "object",
+            "properties": {
+                "budgets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/server.usageStatusBudget"
+                    }
+                },
+                "rate_limits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/server.usageStatusRateLimit"
+                    }
+                },
+                "server_time": {
+                    "type": "string"
+                },
+                "usage": {
+                    "$ref": "#/definitions/server.usageStatusSummary"
+                },
+                "user_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.usageStatusSummary": {
+            "type": "object",
+            "properties": {
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "rewrite_cost_saved": {
+                    "type": "number"
+                },
+                "rewrite_tokens_saved": {
+                    "description": "Rewrite savings: prompt tokens request rewriters removed before the\nprovider call, and the estimated input cost avoided (nil when no\nmatched row had a priced savings estimate).",
+                    "type": "integer"
+                },
+                "start_date": {
+                    "type": "string"
+                },
+                "total_cost": {
+                    "type": "number"
+                },
+                "total_input_cost": {
+                    "type": "number"
+                },
+                "total_input_tokens": {
+                    "type": "integer"
+                },
+                "total_output_cost": {
+                    "type": "number"
+                },
+                "total_output_tokens": {
+                    "type": "integer"
+                },
+                "total_requests": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                },
+                "uncached_input_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "tagging.Rule": {
             "type": "object",
             "properties": {
@@ -8891,6 +9458,12 @@ const docTemplate = `{
                 "output_tokens": {
                     "type": "integer"
                 },
+                "rewrite_cost_saved": {
+                    "type": "number"
+                },
+                "rewrite_tokens_saved": {
+                    "type": "integer"
+                },
                 "total_tokens": {
                     "type": "integer"
                 },
@@ -8999,6 +9572,12 @@ const docTemplate = `{
                 },
                 "request_id": {
                     "type": "string"
+                },
+                "rewrite_cost_saved": {
+                    "type": "number"
+                },
+                "rewrite_tokens_saved": {
+                    "type": "integer"
                 },
                 "timestamp": {
                     "type": "string"

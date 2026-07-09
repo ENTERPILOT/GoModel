@@ -352,10 +352,10 @@ func TestChatCompletionStreaming(t *testing.T) {
 			if chunk.Done || len(chunk.Choices) == 0 {
 				continue
 			}
-			delta, _ := chunk.Choices[0]["delta"].(map[string]interface{})
-			if toolCalls, ok := delta["tool_calls"].([]interface{}); ok && len(toolCalls) == 1 {
-				toolCall, _ := toolCalls[0].(map[string]interface{})
-				function, _ := toolCall["function"].(map[string]interface{})
+			delta, _ := chunk.Choices[0]["delta"].(map[string]any)
+			if toolCalls, ok := delta["tool_calls"].([]any); ok && len(toolCalls) == 1 {
+				toolCall, _ := toolCalls[0].(map[string]any)
+				function, _ := toolCall["function"].(map[string]any)
 				if toolCall["id"] == "call_mock_123" && toolCall["type"] == "function" && function["name"] == "lookup_weather" && function["arguments"] == `{"city":"Warsaw"}` {
 					foundToolCall = true
 				}
@@ -382,7 +382,7 @@ func TestChatCompletionErrors(t *testing.T) {
 	})
 
 	t.Run("missing model", func(t *testing.T) {
-		resp := sendRawChatRequest(t, map[string]interface{}{
+		resp := sendRawChatRequest(t, map[string]any{
 			"messages": []map[string]string{{"role": "user", "content": "Hello"}},
 		})
 		defer closeBody(resp)
@@ -392,7 +392,7 @@ func TestChatCompletionErrors(t *testing.T) {
 
 	t.Run("unsupported model", func(t *testing.T) {
 		// Gateway validates models against registry before routing
-		resp := sendRawChatRequest(t, map[string]interface{}{
+		resp := sendRawChatRequest(t, map[string]any{
 			"model":    "invalid-model-xyz",
 			"messages": []map[string]string{{"role": "user", "content": "Hello"}},
 		})
@@ -439,7 +439,7 @@ func TestChatCompletionConcurrency(t *testing.T) {
 	}
 	results := make(chan result, numRequests)
 
-	for i := 0; i < numRequests; i++ {
+	for i := range numRequests {
 		go func(idx int) {
 			payload := defaultChatReq("Hello " + string(rune('A'+idx)))
 
@@ -457,7 +457,7 @@ func TestChatCompletionConcurrency(t *testing.T) {
 	// Collect all results in the main goroutine before asserting
 	var errors []error
 	successCount := 0
-	for i := 0; i < numRequests; i++ {
+	for range numRequests {
 		select {
 		case r := <-results:
 			if r.err != nil {

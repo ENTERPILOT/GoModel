@@ -87,6 +87,7 @@
                             "advanced/conversations-api",
                             "advanced/anthropic-messages-api",
                             "advanced/audio-api",
+                            "advanced/usage-api",
                             "advanced/guardrails",
                             "advanced/workflows",
                             "advanced/admin-endpoints"
@@ -123,6 +124,7 @@
                 "icon": "plug",
                 "pages": [
                     "providers/overview",
+                    "providers/key-rotation",
                     "providers/anthropic",
                     "providers/gemini",
                     "providers/deepseek",
@@ -131,6 +133,7 @@
                     "providers/opencode-go",
                     "providers/vllm",
                     "providers/multiple-ollama",
+                    "providers/kimicode",
                     {
                         "group": "Cloud Platforms",
                         "icon": "cloud",

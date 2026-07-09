@@ -26,7 +26,7 @@ func TestSQLiteStoreStoresPricingWithoutCurrency(t *testing.T) {
 
 	if err := store.Upsert(context.Background(), Override{
 		Selector: "openai/gpt-4o",
-		Pricing:  Pricing{InputPerMtok: ptr(1.25)},
+		Pricing:  Pricing{InputPerMtok: new(1.25)},
 	}); err != nil {
 		t.Fatalf("Upsert() error = %v", err)
 	}

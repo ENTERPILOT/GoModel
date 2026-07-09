@@ -50,6 +50,51 @@ Effective precedence is:
 `.env` is not a separate priority layer. It is just a convenient way to load
 environment variables before startup.
 
+Each layer is applied on top of the previous one, so a provider declared in
+`config.yaml` and overlaid by env vars still counts as coming from the file.
+
+## Startup Validation
+
+Declarative config is parsed strictly: an unknown key is a startup error, not a
+silently ignored one. This catches typos (`prot:` instead of `port:`) and, more
+importantly, misindented sections — see the gotcha below.
+
+This applies to `config.yaml` and to the env vars that declare the same
+structures as JSON: `VIRTUAL_MODELS`, `SET_RATE_LIMIT_*`, and `SET_BUDGET_*`.
+Because env entries override YAML entries, a typo in one of them would otherwise
+silently win over a correct YAML entry.
+
+The default is strict because a dropped `providers`, `rate_limits`, `budgets`,
+or `guardrails` entry silently changes routing, cost, or security — a cost cap
+that never applies looks exactly like a cost cap that does.
+
+Set `CONFIG_STRICT=false` to downgrade unknown keys to warnings and boot without
+them. This is for rolling a binary back under a newer config file, not for
+everyday use:
+
+```text
+WARN  unknown config key ignored; it has no effect path=config.yaml line=23 field=uranium-geryon-9b
+INFO  providers resolved total=1 from_config_file=0 from_env=1
+```
+
+`CONFIG_STRICT` relaxes which *keys* are accepted, never whether a *value* makes
+sense. A malformed value (`port: [9999, 8080]`) aborts startup in either mode.
+Entity-level validation also still applies: a virtual model whose target names a
+provider that does not exist fails startup even when the key that would have
+declared that provider was ignored with a warning.
+
+To confirm which layer supplied your providers, GoModel logs one line at boot:
+
+```json
+{"msg":"providers resolved","total":5,"from_config_file":4,"from_env":1,
+ "config_file_providers":["plutonium-qwen-dflash","uranium-gemma-embedding"],
+ "env_providers":["opencode-go"]}
+```
+
+`from_config_file: 0` while a file is loaded means the file contributed no
+providers. GoModel also logs `config file loaded` with the resolved path, or
+`no config file found` with the paths it searched.
+
 ## Current Schema
 
 The current source of truth lives in the main codebase:
@@ -94,6 +139,10 @@ services:
   wins.
 </Tip>
 
+If the mounted path exists but cannot be read — most often a directory
+bind-mounted where a file was expected — startup fails rather than silently
+falling back to defaults.
+
 ## Gotchas
 
 ### Unresolved `${VAR}` placeholders drop the provider
@@ -104,6 +153,31 @@ filter detects the `${` substring and removes the provider entirely. This also
 applies if `${VAR}` appears in the middle of the value, such as
 `prefix-${OPENAI_API_KEY}`. Always verify your env vars are exported before
 starting the process, or supply a default: `${OPENAI_API_KEY:-}`.
+
+### A misindented `providers:` section is rejected
+
+YAML reads this as an empty `providers:` section plus two unrelated top-level
+keys, not as two providers:
+
+```yaml
+providers:
+uranium-geryon-9b:          # not indented under providers:
+  type: vllm
+  base_url: "http://uranium-geryon-9b:8000/v1"
+uranium-gemma-embedding:    # likewise
+  type: vllm
+  base_url: "http://uranium-gemma-embedding:8000/v1"
+```
+
+Strict parsing rejects it at startup, naming every offending line:
+
+```text
+failed to parse config.yaml: line 2: field uranium-geryon-9b not found; line 5: field uranium-gemma-embedding not found
+```
+
+Indent provider entries two spaces under `providers:`. Before strict parsing,
+this booted with zero YAML providers and no error. With `CONFIG_STRICT=false` it
+boots with zero YAML providers and one warning per unindented key.
 
 ### Per-provider resilience can only come from YAML
 

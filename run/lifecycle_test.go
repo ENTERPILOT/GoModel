@@ -3,9 +3,13 @@ package run
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
+
+	"gomodel/config"
+	"gomodel/internal/providers"
 )
 
 type stubLifecycleApp struct {
@@ -140,5 +144,23 @@ func TestStartApplication_StopsWaitingWhenShutdownTimesOut(t *testing.T) {
 	}
 	if calls := app.shutdownCallCount(); calls != 1 {
 		t.Fatalf("shutdownCalls = %d, want 1", calls)
+	}
+}
+
+func TestMain_KimicodeProviderRegistration(t *testing.T) {
+	factory := defaultProviderFactory(&config.Config{})
+
+	registered := factory.RegisteredTypes()
+	found := slices.Contains(registered, "kimicode")
+	if !found {
+		t.Fatalf("kimicode not in RegisteredTypes() = %v", registered)
+	}
+
+	provider, err := factory.Create(providers.ProviderConfig{Type: "kimicode", APIKey: "test"})
+	if err != nil {
+		t.Fatalf("factory.Create(kimicode) error = %v, want nil", err)
+	}
+	if provider == nil {
+		t.Fatal("factory.Create(kimicode) returned nil provider")
 	}
 }

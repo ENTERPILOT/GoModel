@@ -70,7 +70,7 @@ func TestResponses(t *testing.T) {
 
 		payload := core.ResponsesRequest{
 			Model: "gpt-4.1",
-			Input: []map[string]interface{}{
+			Input: []map[string]any{
 				{"role": "user", "content": "What is 2 + 2?"},
 				{"role": "assistant", "content": "2 + 2 equals 4."},
 				{"role": "user", "content": "And what is 3 + 3?"},
@@ -231,17 +231,17 @@ func TestResponsesStreaming(t *testing.T) {
 func TestResponsesTools(t *testing.T) {
 	tests := []struct {
 		name  string
-		tools []map[string]interface{}
+		tools []map[string]any
 	}{
 		{
 			name: "file_search tool",
-			tools: []map[string]interface{}{
+			tools: []map[string]any{
 				{"type": "file_search", "vector_store_ids": []string{"vs_test"}},
 			},
 		},
 		{
 			name: "web_search tool",
-			tools: []map[string]interface{}{
+			tools: []map[string]any{
 				{"type": "web_search_preview"},
 			},
 		},
@@ -285,7 +285,7 @@ func TestResponsesErrors(t *testing.T) {
 	})
 
 	t.Run("missing model", func(t *testing.T) {
-		resp := sendRawResponsesRequest(t, map[string]interface{}{"input": "Hello"})
+		resp := sendRawResponsesRequest(t, map[string]any{"input": "Hello"})
 		defer closeBody(resp)
 
 		requireErrorResponse(t, resp, http.StatusBadRequest, core.ErrorTypeInvalidRequest, "model is required")
@@ -353,10 +353,10 @@ func TestResponsesMultimodal(t *testing.T) {
 
 	payload := core.ResponsesRequest{
 		Model: "gpt-4.1",
-		Input: []map[string]interface{}{
+		Input: []map[string]any{
 			{
 				"role": "user",
-				"content": []map[string]interface{}{
+				"content": []map[string]any{
 					{"type": "input_text", "text": "What's in this image?"},
 					{"type": "input_image", "image_url": map[string]string{"url": "https://example.com/image.jpg"}},
 				},
@@ -406,7 +406,7 @@ func TestResponsesConcurrency(t *testing.T) {
 	}
 	results := make(chan result, numRequests)
 
-	for i := 0; i < numRequests; i++ {
+	for i := range numRequests {
 		go func(idx int) {
 			payload := core.ResponsesRequest{
 				Model: "gpt-4.1",
@@ -427,7 +427,7 @@ func TestResponsesConcurrency(t *testing.T) {
 	// Collect all results in the main goroutine before asserting
 	var errors []error
 	successCount := 0
-	for i := 0; i < numRequests; i++ {
+	for range numRequests {
 		select {
 		case r := <-results:
 			if r.err != nil {

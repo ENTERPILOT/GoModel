@@ -143,8 +143,8 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 
 func passthroughBaseURL(baseURL string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if strings.HasSuffix(trimmed, "/v1") {
-		return strings.TrimSuffix(trimmed, "/v1")
+	if before, ok := strings.CutSuffix(trimmed, "/v1"); ok {
+		return before
 	}
 	return trimmed
 }

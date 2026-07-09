@@ -8,10 +8,6 @@ import (
 	"gomodel/internal/modeldata"
 )
 
-func ctxWindow(v int) *int { return &v }
-
-func price(v float64) *float64 { return &v }
-
 // TestInitialize_AppliesConfigMetadataOverrides verifies that operator-supplied
 // metadata from config.yaml takes precedence over (and merges onto) the remote
 // model registry during provider initialization. Exercises the config-driven
@@ -44,12 +40,12 @@ func TestInitialize_AppliesConfigMetadataOverrides(t *testing.T) {
 	registry.SetProviderMetadataOverrides("nippur", map[string]*core.ModelMetadata{
 		"GLM-4.7-Flash": {
 			DisplayName:   "GLM 4.7 Flash (local)",
-			ContextWindow: ctxWindow(131072),
+			ContextWindow: new(131072),
 			Capabilities:  map[string]bool{"tools": true},
 			Pricing: &core.ModelPricing{
 				Currency:      "USD",
-				InputPerMtok:  price(0),
-				OutputPerMtok: price(0),
+				InputPerMtok:  new(float64(0)),
+				OutputPerMtok: new(float64(0)),
 			},
 		},
 	})
@@ -119,7 +115,7 @@ func TestInitialize_OverrideMergesOnRemoteEnrichment(t *testing.T) {
 
 	// Override only the context window; display name should come from the remote registry.
 	registry.SetProviderMetadataOverrides("openai-main", map[string]*core.ModelMetadata{
-		"shared-model": {ContextWindow: ctxWindow(262144)},
+		"shared-model": {ContextWindow: new(262144)},
 	})
 
 	if err := registry.Initialize(context.Background()); err != nil {
@@ -302,7 +298,7 @@ func TestApplyConfigMetadataOverrides_NoOpPreservesPointerIdentity(t *testing.T)
 			ID: "same-model",
 			Metadata: &core.ModelMetadata{
 				DisplayName:   "Same Display",
-				ContextWindow: ctxWindow(131072),
+				ContextWindow: new(131072),
 				Capabilities:  map[string]bool{"tools": true},
 			},
 		},
@@ -317,7 +313,7 @@ func TestApplyConfigMetadataOverrides_NoOpPreservesPointerIdentity(t *testing.T)
 		"nippur": {
 			"same-model": {
 				DisplayName:   "Same Display",
-				ContextWindow: ctxWindow(131072),
+				ContextWindow: new(131072),
 				Capabilities:  map[string]bool{"tools": true},
 			},
 		},
@@ -383,7 +379,7 @@ func TestMetadataOverrideEmpty(t *testing.T) {
 		{"empty non-nil rankings", &core.ModelMetadata{Rankings: map[string]core.ModelRanking{}}, true},
 		{"pricing with empty tiers", &core.ModelMetadata{Pricing: &core.ModelPricing{Tiers: []core.ModelPricingTier{}}}, true},
 		{"display name set", &core.ModelMetadata{DisplayName: "X"}, false},
-		{"context window set", &core.ModelMetadata{ContextWindow: ctxWindow(1024)}, false},
+		{"context window set", &core.ModelMetadata{ContextWindow: new(1024)}, false},
 		{"capabilities set", &core.ModelMetadata{Capabilities: map[string]bool{"tools": true}}, false},
 		{"modes set", &core.ModelMetadata{Modes: []string{"chat"}}, false},
 		{"pricing currency set", &core.ModelMetadata{Pricing: &core.ModelPricing{Currency: "USD"}}, false},
@@ -429,7 +425,7 @@ func TestSetProviderMetadataOverrides_DeepClonesExternalInput(t *testing.T) {
 		"m": {
 			Modes:         []string{"chat"},
 			Capabilities:  map[string]bool{"tools": true},
-			ContextWindow: ctxWindow(4096),
+			ContextWindow: new(4096),
 			Pricing:       &core.ModelPricing{Currency: "USD"},
 		},
 	}

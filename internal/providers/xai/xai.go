@@ -43,26 +43,28 @@ type Provider struct {
 	*openai.BatchSurface
 	*openai.FileSurface
 	compat *openai.CompatibleProvider
-	apiKey string // retained to inject auth on the realtime websocket target
+	keys   *providers.Keyring // retained to inject auth on the realtime websocket target
 }
 
 // New creates a new xAI provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	return newProvider(openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL))), providerCfg.APIKey)
+	compat := openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL)))
+	return newProvider(compat, opts.Keyring(providerCfg.APIKey))
 }
 
 // NewWithHTTPClient creates a new xAI provider with a custom HTTP client.
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return newProvider(openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL)), apiKey)
+	compat := openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL))
+	return newProvider(compat, providers.NewKeyring(apiKey))
 }
 
-func newProvider(compat *openai.CompatibleProvider, apiKey string) *Provider {
+func newProvider(compat *openai.CompatibleProvider, keys *providers.Keyring) *Provider {
 	return &Provider{
 		BatchSurface: openai.NewBatchSurface(compat),
 		FileSurface:  openai.NewFileSurface(compat),
 		compat:       compat,
-		apiKey:       apiKey,
+		keys:         keys,
 	}
 }
 
@@ -161,10 +163,7 @@ func xGrokAnchorMessages(messages []core.Message) []core.Message {
 	if len(messages) == 0 {
 		return nil
 	}
-	limit := 2
-	if len(messages) < limit {
-		limit = len(messages)
-	}
+	limit := min(len(messages), 2)
 	anchor := make([]core.Message, limit)
 	copy(anchor, messages[:limit])
 	return anchor

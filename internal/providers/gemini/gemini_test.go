@@ -23,8 +23,8 @@ func TestNew(t *testing.T) {
 	// Use NewWithHTTPClient to get concrete type for internal testing
 	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
 
-	if provider.apiKey != apiKey {
-		t.Errorf("apiKey = %q, want %q", provider.apiKey, apiKey)
+	if got := provider.keys.Primary(); got != apiKey {
+		t.Errorf("primary key = %q, want %q", got, apiKey)
 	}
 	if provider.modelsURL != defaultModelsBaseURL {
 		t.Errorf("modelsURL = %q, want %q", provider.modelsURL, defaultModelsBaseURL)
@@ -1475,7 +1475,7 @@ func parseOpenAIStreamChunks(t *testing.T, stream string) []map[string]any {
 	t.Helper()
 
 	var chunks []map[string]any
-	for _, line := range strings.Split(stream, "\n") {
+	for line := range strings.SplitSeq(stream, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data:") {
 			continue

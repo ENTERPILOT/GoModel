@@ -275,6 +275,8 @@ type UsageLogEntry struct {
 	CostSource             string         `json:"cost_source,omitempty"`
 	RawData                map[string]any `json:"raw_data,omitempty"`
 	CostsCalculationCaveat string         `json:"costs_calculation_caveat,omitempty"`
+	RewriteTokensSaved     int64          `json:"rewrite_tokens_saved,omitempty"`
+	RewriteCostSaved       *float64       `json:"rewrite_cost_saved,omitempty"`
 }
 
 // EnrichUsageLogEntry populates the derived provider-cache fields on entry
@@ -309,15 +311,17 @@ type UsageLogResult struct {
 // cached prompt reads and cache writes are included even when the upstream provider
 // reports them outside the base input token count.
 type RequestUsageSummary struct {
-	Entries                   int     `json:"entries"`
-	InputTokens               int64   `json:"input_tokens"`
-	UncachedInputTokens       int64   `json:"uncached_input_tokens"`
-	CachedInputTokens         int64   `json:"cached_input_tokens"`
-	CacheWriteInputTokens     int64   `json:"cache_write_input_tokens"`
-	OutputTokens              int64   `json:"output_tokens"`
-	TotalTokens               int64   `json:"total_tokens"`
-	CachedInputRatio          float64 `json:"cached_input_ratio"`
-	EstimatedCachedCharacters int64   `json:"estimated_cached_characters"`
+	Entries                   int      `json:"entries"`
+	InputTokens               int64    `json:"input_tokens"`
+	UncachedInputTokens       int64    `json:"uncached_input_tokens"`
+	CachedInputTokens         int64    `json:"cached_input_tokens"`
+	CacheWriteInputTokens     int64    `json:"cache_write_input_tokens"`
+	OutputTokens              int64    `json:"output_tokens"`
+	TotalTokens               int64    `json:"total_tokens"`
+	CachedInputRatio          float64  `json:"cached_input_ratio"`
+	EstimatedCachedCharacters int64    `json:"estimated_cached_characters"`
+	RewriteTokensSaved        int64    `json:"rewrite_tokens_saved,omitempty"`
+	RewriteCostSaved          *float64 `json:"rewrite_cost_saved,omitempty"`
 }
 
 // CacheOverviewSummary holds cached-only aggregate statistics over a time period.

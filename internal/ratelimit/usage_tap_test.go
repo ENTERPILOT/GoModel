@@ -20,7 +20,7 @@ func TestUsageTapFeedsTokenWindowsAndDelegates(t *testing.T) {
 	service := newTestService(t, Rule{
 		Subject:       "/team",
 		PeriodSeconds: PeriodMinuteSeconds,
-		MaxTokens:     int64Ptr(1000),
+		MaxTokens:     new(int64(1000)),
 	})
 	inner := &recordingLogger{}
 	tap := NewUsageTap(inner, service)
@@ -47,8 +47,8 @@ func TestUsageTapFeedsTokenWindowsAndDelegates(t *testing.T) {
 
 func TestUsageTapChargesExecutedProviderAndModel(t *testing.T) {
 	service := newTestService(t,
-		Rule{Scope: ScopeProvider, Subject: "openai-eu", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(1000)},
-		Rule{Scope: ScopeModel, Subject: "gpt-4o", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(1000)},
+		Rule{Scope: ScopeProvider, Subject: "openai-eu", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(1000))},
+		Rule{Scope: ScopeModel, Subject: "gpt-4o", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(1000))},
 	)
 	tap := NewUsageTap(&recordingLogger{}, service)
 

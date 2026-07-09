@@ -541,6 +541,17 @@
                     : [];
             },
 
+            // auditRevisionPercentLabel renders how much of the request body
+            // this revision removed (e.g. "-44%"), or '' when sizes are
+            // missing or the revision didn't shrink the body.
+            auditRevisionPercentLabel(revision) {
+                const before = Number(revision && revision.bytes_before);
+                const after = Number(revision && revision.bytes_after);
+                if (!Number.isFinite(before) || !Number.isFinite(after) || before <= 0 || after >= before) return '';
+                const pct = (1 - after / before) * 100;
+                return '-' + (pct >= 10 ? String(Math.round(pct)) : pct.toFixed(1)) + '%';
+            },
+
             // auditRequestRevisionPane renders one ingress rewrite: a structured
             // summary of what the rewriter changed plus the rewritten body when
             // it was captured. The original client request stays on the Request
@@ -562,6 +573,7 @@
                     direction: 'request',
                     seq: single ? 0 : Number(revision && revision.seq || 0),
                     kind: (revision && revision.rewriter) ? String(revision.rewriter) : '',
+                    savingsLabel: this.auditRevisionPercentLabel(revision),
                     layout: 'split',
                     entry,
                     copyHeaders: summary,

@@ -529,6 +529,25 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		slog.Info("mcp gateway disabled")
 	}
 
+	// The self-service GET /v1/usage endpoint and the admin dashboard read
+	// usage aggregates through one shared reader. Audit storage is preferred
+	// because its schema always includes the usage tables.
+	usageReadStorage := auditResult.Storage
+	if usageReadStorage == nil {
+		usageReadStorage = usageResult.Storage
+	}
+	var usageReader usage.UsageReader
+	if usageReadStorage != nil {
+		var readerErr error
+		usageReader, readerErr = usage.NewReader(usageReadStorage)
+		if readerErr != nil {
+			slog.Warn("usage reader unavailable; usage endpoints will omit usage data", "error", readerErr)
+			// Explicit reset so a typed-nil reader never reaches the nil checks
+			// downstream (same guard as pricingRecalculator).
+			usageReader = nil
+		}
+	}
+
 	serverCfg := &server.Config{
 		BasePath:                        appCfg.Server.BasePath,
 		MasterKey:                       appCfg.Server.MasterKey,
@@ -573,6 +592,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if rateLimitResult.Service != nil {
 		serverCfg.RateLimiter = rateLimitResult.Service
 	}
+	if usageReader != nil {
+		serverCfg.UsageSummarizer = usageReader
+	}
 
 	applyExtensions(serverCfg, cfg.Extensions)
 
@@ -593,8 +615,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	usageEnabledForDashboard := usageResult.Logger.Config().Enabled
 	if adminCfg.EndpointsEnabled {
 		adminHandler, dashHandler, adminErr := initAdmin(
+			usageReader,
+			usageReadStorage,
 			auditResult.Storage,
-			usageResult.Storage,
 			providerResult.Registry,
 			providerResult.ConfiguredProviders,
 			authKeyResult.Service,
@@ -1041,7 +1064,9 @@ func (a *App) logStartupInfo() {
 // initAdmin creates the admin API handler and optionally the dashboard handler.
 // Returns nil dashboard handler if uiEnabled is false.
 func initAdmin(
-	auditStorage, usageStorage storage.Storage,
+	reader usage.UsageReader,
+	usageReadStorage storage.Storage,
+	auditStorage storage.Storage,
 	registry *providers.ModelRegistry,
 	configuredProviders []providers.SanitizedProviderConfig,
 	authKeyService *authkeys.Service,
@@ -1061,29 +1086,14 @@ func initAdmin(
 	basePath string,
 	uiEnabled bool,
 ) (*admin.Handler, *dashboard.Handler, error) {
-	// Find a storage connection for reading usage data
-	var store storage.Storage
-	if auditStorage != nil {
-		store = auditStorage
-	} else if usageStorage != nil {
-		store = usageStorage
-	}
-
-	// Create usage reader (may be nil if no storage)
-	var reader usage.UsageReader
+	// Pricing recalculation writes through the same storage the reader uses.
 	var pricingRecalculator usage.PricingRecalculator
-	if store != nil {
+	if usageReadStorage != nil && usagePricingRecalculationEnabled {
 		var err error
-		reader, err = usage.NewReader(store)
+		pricingRecalculator, err = usage.NewPricingRecalculator(usageReadStorage)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create usage reader: %w", err)
-		}
-		if usagePricingRecalculationEnabled {
-			pricingRecalculator, err = usage.NewPricingRecalculator(store)
-			if err != nil {
-				slog.Warn("usage pricing recalculation unavailable", "error", err)
-				pricingRecalculator = nil
-			}
+			slog.Warn("usage pricing recalculation unavailable", "error", err)
+			pricingRecalculator = nil
 		}
 	}
 	runtimeConfig.PricingRecalculation = dashboardEnabledValue(usagePricingRecalculationEnabled && pricingRecalculator != nil)

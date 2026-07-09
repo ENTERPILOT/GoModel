@@ -266,7 +266,7 @@ func TestBrokerStaleCursorReceivesResetAndActiveSnapshots(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
 			ID:        "audit-1",
 			RequestID: "req-1",
@@ -293,7 +293,7 @@ func TestBrokerStaleCursorReceivesResetAndActiveSnapshots(t *testing.T) {
 
 func TestBrokerSignalsResetWhenCursorFallsOutOfReplayWindow(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
 			ID:        "audit",
 			RequestID: "req",
@@ -315,7 +315,7 @@ func TestBrokerSignalsResetWhenReplayGapExceedsLimit(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 10, ReplayLimit: 2})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
 			ID:             "audit-1",
 			RequestID:      "req-1",
@@ -376,7 +376,7 @@ func TestBrokerDropsSlowSubscribers(t *testing.T) {
 	}
 	defer sub.Close()
 
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
 			ID:        "audit",
 			RequestID: "req",
@@ -977,7 +977,7 @@ func BenchmarkBrokerPublishSteadyState(b *testing.B) {
 		Model:     "gpt-test",
 		Provider:  "openai",
 	}
-	for i := 0; i < 10001; i++ {
+	for range 10001 {
 		broker.PublishUsageEvent(EventUsageFlushed, entry)
 	}
 
@@ -997,7 +997,7 @@ func TestBrokerReplayAfterBufferWrap(t *testing.T) {
 
 	// Publish 6 usage-flushed events (seq 1..6); the buffer retains seq 3..6
 	// with the ring head pointing mid-slice.
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		b.PublishUsageEvent(EventUsageFlushed, &usage.UsageEntry{
 			ID:        "usage-wrap",
 			RequestID: "req-wrap",

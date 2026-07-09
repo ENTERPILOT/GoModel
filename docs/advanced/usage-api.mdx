@@ -1,0 +1,159 @@
+---
+title: "Usage API"
+description: "Check your own usage, budget, and rate limit status with the same API key you use for inference."
+icon: "gauge"
+---
+
+## Overview
+
+`GET /v1/usage` returns the caller's own consumption and limits — no admin
+access needed. It answers three questions in one call:
+
+- How much have I used (requests, tokens, estimated cost)?
+- How much budget do I have left, and when does it reset?
+- Which rate limits apply to me, and how much headroom remains?
+
+Everything is scoped to the caller's effective
+[user path](/features/user-path), so a tool holding a managed API key — an
+OpenCode plugin, a CLI, a status widget — can poll it with the key it already
+uses for inference. Polling does not consume rate limit quota.
+
+## Quick example
+
+```bash
+curl http://localhost:8080/v1/usage \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```json
+{
+  "user_path": "/team/alpha",
+  "server_time": "2026-07-07T09:30:00Z",
+  "usage": {
+    "start_date": "2026-06-08",
+    "end_date": "2026-07-07",
+    "total_requests": 128,
+    "total_input_tokens": 74210,
+    "total_output_tokens": 17024,
+    "total_tokens": 91234,
+    "uncached_input_tokens": 61420,
+    "cached_input_tokens": 12790,
+    "cache_write_input_tokens": 0,
+    "total_input_cost": 1.12,
+    "total_output_cost": 0.61,
+    "total_cost": 1.73,
+    "rewrite_tokens_saved": 0,
+    "rewrite_cost_saved": null
+  },
+  "budgets": [
+    {
+      "user_path": "/team/alpha",
+      "period_seconds": 2592000,
+      "period_label": "monthly",
+      "amount": 100,
+      "spent": 41.2,
+      "remaining": 58.8,
+      "usage_ratio": 0.412,
+      "period_start": "2026-07-01T00:00:00Z",
+      "period_end": "2026-08-01T00:00:00Z",
+      "resets_in_seconds": 2125800,
+      "exceeded": false
+    }
+  ],
+  "rate_limits": [
+    {
+      "user_path": "/team/alpha",
+      "period_seconds": 60,
+      "period_label": "minute",
+      "max_requests": 60,
+      "requests_used": 3,
+      "requests_remaining": 57,
+      "requests_usage_ratio": 0.05,
+      "tokens_used": 0,
+      "in_flight": 0,
+      "window_start": "2026-07-07T09:30:00Z",
+      "window_end": "2026-07-07T09:31:00Z",
+      "resets_in_seconds": 60,
+      "exhausted": false
+    }
+  ]
+}
+```
+
+## Whose usage you see
+
+- **Managed API key** — the key's bound `user_path` is used. No parameters
+  needed, and the key holder cannot read outside their own subtree.
+- **Master key (or unsafe mode)** — pass `X-GoModel-User-Path` to pick a path,
+  or omit it to see `/` (everything):
+
+```bash
+curl http://localhost:8080/v1/usage \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "X-GoModel-User-Path: /team/alpha"
+```
+
+## Response fields
+
+### `usage`
+
+Aggregated from tracked requests over the date window, with the same token and
+[estimated-cost](/features/cost-tracking) semantics as the dashboard. Cost
+fields are `null` when no matched request has pricing. The whole block is
+`null` when no storage backend records usage (`USAGE_ENABLED=false` or no
+database).
+
+### `budgets`
+
+One entry per [budget](/features/budgets) covering the path — including
+budgets inherited from ancestor paths such as `/`. `remaining` can go
+negative and `usage_ratio` above `1` — both mean the budget is blown through;
+`exceeded` mirrors enforcement, so when it is `true` requests are rejected
+until `period_end` (`period_seconds` of `2592000` is the calendar-month
+sentinel, not a literal 30 days). `resets_in_seconds` counts down to
+`period_end` relative to `server_time`, so it is safe to render without
+worrying about client clock skew.
+
+### `rate_limits`
+
+Live counters for every user-path [rate limit rule](/features/rate-limits)
+covering the path. `max_tokens`/`tokens_remaining`/`tokens_usage_ratio`
+appear only on rules with token limits; a `period_label` of `concurrent`
+marks an in-flight cap, where `in_flight` is the current count (and feeds
+`requests_usage_ratio`). The `*_usage_ratio` fields are used/limit per
+dimension, unclamped — token windows can overshoot past `1`. `exhausted` is
+`true` when any dimension is fully used, and `resets_in_seconds` counts down
+to `window_end` relative to `server_time` (omitted for concurrent rules,
+which have no window). Provider- and model-scoped rules are not listed: they
+describe shared infrastructure capacity, not the caller.
+
+<Note>
+  Rate limit counters are in-memory per gateway instance: they reset on
+  restart, and with N replicas each replica keeps its own counters. Budgets
+  are the durable, cross-instance numbers.
+</Note>
+
+## Date window
+
+The `usage` block defaults to the last 30 days (UTC day boundaries). Narrow it
+with query parameters — `days`, or explicit `start_date`/`end_date`
+(YYYY-MM-DD, 365-day maximum):
+
+```bash
+curl "http://localhost:8080/v1/usage?days=7" \
+  -H "Authorization: Bearer sk_gom_..."
+
+curl "http://localhost:8080/v1/usage?start_date=2026-07-01&end_date=2026-07-07" \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+Budgets and rate limits always report their own live periods; the window only
+affects `usage`.
+
+## Errors
+
+| Status | Meaning                                                                |
+| ------ | ---------------------------------------------------------------------- |
+| 400    | Malformed `start_date`/`end_date`/`days`, inverted range, a range beyond 365 days, or invalid user path |
+| 401    | Missing or invalid API key (when authentication is configured)          |
+| 503    | The usage or budget store could not be read (`usage_status_failed`)     |

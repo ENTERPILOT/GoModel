@@ -25,8 +25,8 @@ func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) 
 	}
 
 	headers := http.Header{}
-	if p.apiKey != "" {
-		headers.Set("Authorization", "Bearer "+p.apiKey)
+	if apiKey := p.keys.Next(); apiKey != "" {
+		headers.Set("Authorization", "Bearer "+apiKey)
 	}
 
 	return &core.RealtimeTarget{URL: endpoint, Headers: headers}, nil

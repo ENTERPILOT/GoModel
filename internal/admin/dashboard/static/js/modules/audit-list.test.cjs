@@ -955,6 +955,7 @@ test('auditPanes inserts request revision tabs between request and response', ()
     assert.equal(pane.headersTitle, 'What changed');
     assert.equal(pane.headers.bytes, '1572 → 1249');
     assert.equal(pane.headers.detail.tokens_saved_estimate, 89);
+    assert.equal(pane.savingsLabel, '-21%');
     assert.equal(pane.showBody, true);
     assert.equal(pane.showTooLarge, false);
 
@@ -967,6 +968,18 @@ test('auditPanes inserts request revision tabs between request and response', ()
     entry.data.request_revisions = [revision, { ...revision, seq: 2 }];
     assert.equal(module.auditPanes(entry).map((p) => p.id).join(','), 'request,revision-1,revision-2,response');
     assert.equal(module.auditRequestRevisionPane(entry, revision).seq, 1);
+});
+
+test('auditRevisionPercentLabel reports the share of the body removed', () => {
+    const module = createAuditListModule();
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 1572, bytes_after: 1249 }), '-21%');
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 1000, bytes_after: 560 }), '-44%');
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 1000, bytes_after: 954 }), '-4.6%');
+    // Missing sizes or a revision that grew the body renders no percent.
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 0, bytes_after: 10 }), '');
+    assert.equal(module.auditRevisionPercentLabel({ bytes_before: 100, bytes_after: 120 }), '');
+    assert.equal(module.auditRevisionPercentLabel({}), '');
+    assert.equal(module.auditRevisionPercentLabel(null), '');
 });
 
 test('entries without revisions render no revision tabs', () => {

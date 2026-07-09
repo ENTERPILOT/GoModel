@@ -4,8 +4,12 @@ package config
 // overrides, credential filtering, or resilience merging. Exported so the
 // providers package can resolve it into a fully-configured ProviderConfig.
 type RawProviderConfig struct {
-	Type                     string               `yaml:"type"`
-	APIKey                   string               `yaml:"api_key"`
+	Type   string `yaml:"type"`
+	APIKey string `yaml:"api_key"`
+	// APIKeys lists additional API keys for this provider. When more than one
+	// key is resolved (counting APIKey), requests rotate across them round
+	// robin. Set it via `api_keys:` or the `<PROVIDER>_API_KEY_<n>` env vars.
+	APIKeys                  []string             `yaml:"api_keys"`
 	BaseURL                  string               `yaml:"base_url"`
 	APIVersion               string               `yaml:"api_version"`
 	Backend                  string               `yaml:"backend"`

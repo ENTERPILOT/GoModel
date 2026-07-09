@@ -22,8 +22,7 @@ import (
 func jsonFieldNames(v any) []string {
 	t := reflect.TypeOf(v)
 	names := make([]string, 0, t.NumField())
-	for i := range t.NumField() {
-		field := t.Field(i)
+	for field := range t.Fields() {
 		if !field.IsExported() {
 			continue
 		}

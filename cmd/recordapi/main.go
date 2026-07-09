@@ -21,7 +21,11 @@ import (
 	"github.com/goccy/go-json"
 )
 
-const oracleDefaultModel = "openai.gpt-oss-120b"
+const (
+	oracleDefaultModel             = "openai.gpt-oss-120b"
+	kimicodeDefaultChatModel       = "kimi-for-coding"
+	kimicodeDefaultEmbeddingsModel = "bge_m3_embed"
+)
 
 // Provider configurations
 var providerConfigs = map[string]struct {
@@ -58,6 +62,12 @@ var providerConfigs = map[string]struct {
 	"xai": {
 		baseURL:     "https://api.x.ai",
 		envKey:      "XAI_API_KEY",
+		authHeader:  "Authorization",
+		contentType: "application/json",
+	},
+	"kimicode": {
+		baseURL:     "https://api.kimi.com/coding",
+		envKey:      "KIMICODE_API_KEY",
 		authHeader:  "Authorization",
 		contentType: "application/json",
 	},
@@ -119,26 +129,75 @@ var endpointConfigs = map[string]struct {
 			"stream": true,
 		},
 	},
+	"embeddings": {
+		path:   "/embeddings",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			"model": "text-embedding-3-small",
+			"input": "hello world",
+		},
+	},
 }
 
 var providerCapabilities = map[string]map[string]bool{
 	"openai": {
-		"responses": true,
+		"responses":  true,
+		"embeddings": true,
 	},
 	"anthropic": {
-		"responses": false,
+		"responses":  false,
+		"embeddings": false,
 	},
 	"gemini": {
-		"responses": false,
+		"responses":  false,
+		"embeddings": true,
 	},
 	"groq": {
-		"responses": false,
+		"responses":  false,
+		"embeddings": true,
 	},
 	"xai": {
-		"responses": true,
+		"responses":  true,
+		"embeddings": false,
+	},
+	"kimicode": {
+		"responses":  false,
+		"embeddings": true,
 	},
 	"oracle": {
-		"responses": true,
+		"responses":  true,
+		"embeddings": false,
+	},
+}
+
+var providerDefaultModels = map[string]map[string]string{
+	"oracle": {
+		"chat":             oracleDefaultModel,
+		"chat_stream":      oracleDefaultModel,
+		"responses":        oracleDefaultModel,
+		"responses_stream": oracleDefaultModel,
+	},
+	"kimicode": {
+		"chat":        kimicodeDefaultChatModel,
+		"chat_stream": kimicodeDefaultChatModel,
+		"embeddings":  kimicodeDefaultEmbeddingsModel,
+	},
+}
+
+// providerEndpointPathOverrides lets a provider replace the generic endpoint
+// path when the upstream layout differs from the default OpenAI-style routes.
+// Gemini is intentionally omitted because its base URL already includes the
+// OpenAI-compatible /v1beta/openai prefix, so the embeddings path remains
+// the generic /embeddings suffix.
+var providerEndpointPathOverrides = map[string]map[string]string{
+	"openai": {
+		"embeddings": "/v1/embeddings",
+	},
+	"groq": {
+		"embeddings": "/v1/embeddings",
+	},
+	"kimicode": {
+		"embeddings": "/v1/embeddings",
 	},
 }
 
@@ -154,9 +213,21 @@ func providerSupportsResponses(provider string) bool {
 	return capabilities["responses"]
 }
 
+func endpointRequiresEmbeddingsCapability(endpoint string) bool {
+	return endpoint == "embeddings"
+}
+
+func providerSupportsEmbeddings(provider string) bool {
+	capabilities, ok := providerCapabilities[provider]
+	if !ok {
+		return false
+	}
+	return capabilities["embeddings"]
+}
+
 func main() {
-	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, groq, xai, oracle)")
-	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream)")
+	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, groq, xai, kimicode, oracle)")
+	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream, embeddings)")
 	output := flag.String("output", "", "Output file path (required)")
 	model := flag.String("model", "", "Override model in request")
 	flag.Parse()
@@ -191,6 +262,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: provider %q is missing responses capability (/v1/responses)\n", *provider)
 		os.Exit(1)
 	}
+	if endpointRequiresEmbeddingsCapability(*endpoint) && !providerSupportsEmbeddings(*provider) {
+		fmt.Fprintf(os.Stderr, "Error: provider %q is missing embeddings capability (/embeddings)\n", *provider)
+		os.Exit(1)
+	}
 
 	apiKey := os.Getenv(pConfig.envKey)
 	if apiKey == "" {
@@ -203,12 +278,15 @@ func main() {
 	if eConfig.requestBody != nil {
 		reqBody := eConfig.requestBody
 
-		// Oracle's OpenAI-compatible endpoint expects OCI-hosted model IDs,
-		// so use a provider-specific default instead of the generic gpt-4o-mini fixture.
+		// Provider-specific defaults override the generic fixture model when no
+		// explicit model override is supplied (e.g., Oracle's OCI-hosted IDs or
+		// Kimicode's provider-specific chat/embeddings models).
 		if *model != "" {
 			reqBody["model"] = *model
-		} else if *provider == "oracle" {
-			reqBody["model"] = oracleDefaultModel
+		} else if providerDefaults, ok := providerDefaultModels[*provider]; ok {
+			if defaultModel, ok := providerDefaults[*endpoint]; ok {
+				reqBody["model"] = defaultModel
+			}
 		}
 
 		// Adjust request for different providers
@@ -224,8 +302,14 @@ func main() {
 		bodyReader = bytes.NewReader(bodyBytes)
 	}
 
-	// Build URL
-	url := baseURL + eConfig.path
+	// Build URL, applying any provider-specific endpoint path override.
+	endpointPath := eConfig.path
+	if overrides, ok := providerEndpointPathOverrides[*provider]; ok {
+		if override, ok := overrides[*endpoint]; ok {
+			endpointPath = override
+		}
+	}
+	url := baseURL + endpointPath
 
 	// Create request
 	req, err := http.NewRequest(eConfig.method, url, bodyReader)

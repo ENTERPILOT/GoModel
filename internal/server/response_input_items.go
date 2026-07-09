@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -229,8 +230,6 @@ func cloneAnyMap(src map[string]any) map[string]any {
 		return nil
 	}
 	dst := make(map[string]any, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
+	maps.Copy(dst, src)
 	return dst
 }

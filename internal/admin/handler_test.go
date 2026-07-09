@@ -59,6 +59,9 @@ type mockAuditReader struct {
 	conversationErr     error
 	lastConversationID  string
 	lastConversationLim int
+	statsResult         *auditlog.RequestStats
+	statsErr            error
+	lastStatsParams     auditlog.RequestStatsParams
 }
 
 type mockRuntimeRefresher struct {
@@ -154,6 +157,14 @@ func (m *mockAuditReader) GetLogByID(_ context.Context, _ string) (*auditlog.Log
 		return nil, m.logByIDErr
 	}
 	return m.logByID, nil
+}
+
+func (m *mockAuditReader) GetRequestStats(_ context.Context, params auditlog.RequestStatsParams) (*auditlog.RequestStats, error) {
+	m.lastStatsParams = params
+	if m.statsErr != nil {
+		return nil, m.statsErr
+	}
+	return m.statsResult, nil
 }
 
 func (m *mockAuditReader) GetConversation(_ context.Context, logID string, limit int) (*auditlog.ConversationResult, error) {
@@ -2180,7 +2191,7 @@ func TestBuildProviderStatusItem_ClassifyAndDisplayFallbacks(t *testing.T) {
 				Type:                    "openai",
 				Registered:              true,
 				DiscoveredModelCount:    7,
-				LastModelFetchSuccessAt: timePtr(time.Now()),
+				LastModelFetchSuccessAt: new(time.Now()),
 			},
 			wantStatus:  "healthy",
 			wantLabel:   "Healthy",
@@ -2237,14 +2248,13 @@ func TestBuildProviderStatusItem_ClassifyAndDisplayFallbacks(t *testing.T) {
 	}
 }
 
-func timePtr(t time.Time) *time.Time { return &t }
-
 func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		FailoverEnabled:      "on",
 		LoggingEnabled:       "on",
 		UsageEnabled:         "off",
 		BudgetsEnabled:       "on",
+		RateLimitsEnabled:    "off",
 		GuardrailsEnabled:    "on",
 		CacheEnabled:         "on",
 		RedisURL:             "on",
@@ -2276,6 +2286,9 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	}
 	if got := body.BudgetsEnabled; got != "on" {
 		t.Fatalf("BUDGETS_ENABLED = %q, want on", got)
+	}
+	if got := body.RateLimitsEnabled; got != "off" {
+		t.Fatalf("RATE_LIMITS_ENABLED = %q, want off", got)
 	}
 	if got := body.GuardrailsEnabled; got != "on" {
 		t.Fatalf("GUARDRAILS_ENABLED = %q, want on", got)

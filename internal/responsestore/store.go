@@ -28,8 +28,8 @@ type StoredResponse struct {
 	RequestID          string                  `json:"request_id,omitempty"`
 	UserPath           string                  `json:"user_path,omitempty"`
 	WorkflowVersionID  string                  `json:"workflow_version_id,omitempty"`
-	StoredAt           time.Time               `json:"stored_at,omitempty"`
-	ExpiresAt          time.Time               `json:"expires_at,omitempty"`
+	StoredAt           time.Time               `json:"stored_at"`
+	ExpiresAt          time.Time               `json:"expires_at"`
 }
 
 // Store defines persistence operations for Responses lifecycle APIs.

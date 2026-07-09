@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -331,7 +332,7 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 
 	// Mock provider usage is 10 input + 20 output tokens per request, and this test sends 2 requests.
 	requestWindowStart := time.Now().UTC()
-	for i := 0; i < expectedRequests; i++ {
+	for range expectedRequests {
 		resp := sendJSONRequest(t, ts.URL+chatCompletionsPath, defaultChatReq("Hello usage"))
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		closeBody(resp)
@@ -374,11 +375,8 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 
 		var matchedEntries []usage.DailyUsage
 		for i := range daily {
-			for _, expectedDate := range expectedDailyDates {
-				if daily[i].Date == expectedDate {
-					matchedEntries = append(matchedEntries, daily[i])
-					break
-				}
+			if slices.Contains(expectedDailyDates, daily[i].Date) {
+				matchedEntries = append(matchedEntries, daily[i])
 			}
 		}
 		require.NotEmpty(t, matchedEntries, "expected daily usage entry for one of %v", expectedDailyDates)

@@ -39,7 +39,7 @@ func sendChatRequest(t *testing.T, payload core.ChatRequest) *http.Response {
 }
 
 // sendRawChatRequest sends a raw chat request (for testing invalid payloads).
-func sendRawChatRequest(t *testing.T, payload interface{}) *http.Response {
+func sendRawChatRequest(t *testing.T, payload any) *http.Response {
 	t.Helper()
 	return sendJSONRequest(t, gatewayURL+chatCompletionsPath, payload)
 }
@@ -51,13 +51,13 @@ func sendResponsesRequest(t *testing.T, payload core.ResponsesRequest) *http.Res
 }
 
 // sendRawResponsesRequest sends a raw responses request (for testing invalid payloads).
-func sendRawResponsesRequest(t *testing.T, payload interface{}) *http.Response {
+func sendRawResponsesRequest(t *testing.T, payload any) *http.Response {
 	t.Helper()
 	return sendJSONRequest(t, gatewayURL+responsesPath, payload)
 }
 
 // sendJSONRequest sends a JSON POST request and returns the response.
-func sendJSONRequest(t *testing.T, url string, payload interface{}) *http.Response {
+func sendJSONRequest(t *testing.T, url string, payload any) *http.Response {
 	t.Helper()
 	body, err := json.Marshal(payload)
 	require.NoError(t, err)
@@ -85,7 +85,7 @@ func requireErrorResponse(t *testing.T, resp *http.Response, status int, errorTy
 //
 // This is specifically for concurrency tests, where calling t.FailNow / require from
 // goroutines is unsafe.
-func sendJSONRequestNoT(url string, payload interface{}) (*http.Response, error) {
+func sendJSONRequestNoT(url string, payload any) (*http.Response, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -137,11 +137,11 @@ func requireRecordedResponsesRequest(t *testing.T) core.ResponsesRequest {
 
 // StreamChunk represents a parsed streaming chunk for chat completions.
 type StreamChunk struct {
-	ID      string                   `json:"id"`
-	Object  string                   `json:"object"`
-	Model   string                   `json:"model"`
-	Created int64                    `json:"created"`
-	Choices []map[string]interface{} `json:"choices"`
+	ID      string           `json:"id"`
+	Object  string           `json:"object"`
+	Model   string           `json:"model"`
+	Created int64            `json:"created"`
+	Choices []map[string]any `json:"choices"`
 	Done    bool
 }
 
@@ -177,8 +177,8 @@ func readStreamingResponse(t *testing.T, body io.Reader) []StreamChunk {
 
 // ResponsesStreamEvent represents a streaming event from the Responses API.
 type ResponsesStreamEvent struct {
-	Type string                 `json:"type"`
-	Data map[string]interface{} `json:"data,omitempty"`
+	Type string         `json:"type"`
+	Data map[string]any `json:"data,omitempty"`
 	Done bool
 }
 
@@ -193,19 +193,18 @@ func readResponsesStream(t *testing.T, body io.Reader) []ResponsesStreamEvent {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		if strings.HasPrefix(line, "event: ") {
-			currentEvent.Type = strings.TrimPrefix(line, "event: ")
+		if after, ok := strings.CutPrefix(line, "event: "); ok {
+			currentEvent.Type = after
 			continue
 		}
 
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
+		if data, ok := strings.CutPrefix(line, "data: "); ok {
 			if data == "[DONE]" {
 				events = append(events, ResponsesStreamEvent{Done: true})
 				break
 			}
 
-			var eventData map[string]interface{}
+			var eventData map[string]any
 			require.NoError(t, json.Unmarshal([]byte(data), &eventData))
 			currentEvent.Data = eventData
 			if currentEvent.Type == "" {
@@ -227,7 +226,7 @@ func extractStreamContent(chunks []StreamChunk) string {
 	var content strings.Builder
 	for _, chunk := range chunks {
 		if !chunk.Done && len(chunk.Choices) > 0 {
-			if delta, ok := chunk.Choices[0]["delta"].(map[string]interface{}); ok {
+			if delta, ok := chunk.Choices[0]["delta"].(map[string]any); ok {
 				if text, ok := delta["content"].(string); ok {
 					content.WriteString(text)
 				}

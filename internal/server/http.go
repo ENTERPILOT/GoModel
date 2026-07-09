@@ -60,6 +60,7 @@ type Config struct {
 	UsageLogger                     usage.LoggerInterface                  // Optional: Usage logger for token tracking
 	BudgetChecker                   BudgetChecker                          // Optional: per-user-path budget checker
 	RateLimiter                     RateLimiter                            // Optional: per-user-path rate limiter
+	UsageSummarizer                 UsageSummarizer                        // Optional: usage aggregates for the self-service GET /v1/usage endpoint
 	PricingResolver                 usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
 	ModelResolver                   RequestModelResolver                   // Optional: explicit model resolver used during workflow resolution
 	ModelAuthorizer                 RequestModelAuthorizer                 // Optional: request-scoped concrete model access controller
@@ -152,6 +153,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	handler.budgetChecker = budgetChecker
 	if cfg != nil {
 		handler.rateLimiter = cfg.RateLimiter
+		handler.usageSummarizer = cfg.UsageSummarizer
 	}
 	if cfg != nil {
 		handler.batchRequestPreparer = cfg.BatchRequestPreparer
@@ -289,6 +291,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Ingress capture (before auth/audit/model validation so they can consume shared raw request state)
 	userPathHeaderName := configuredUserPathHeader(cfg)
+	handler.userPathHeaderName = userPathHeaderName
 	e.Use(RequestSnapshotCapture(userPathHeaderName))
 
 	// Request labelling from configured tagging headers (after snapshot capture so
@@ -367,6 +370,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.OPTIONS("/p/:provider/*", handler.ProviderPassthrough)
 	}
 	e.GET("/v1/models", handler.ListModels)
+	e.GET("/v1/usage", handler.UsageStatus)
 	e.POST("/v1/chat/completions", handler.ChatCompletion)
 	e.POST("/v1/messages", handler.Messages)
 	e.POST("/v1/messages/count_tokens", handler.CountMessageTokens)
@@ -386,6 +390,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/audio/transcriptions", handler.AudioTranscriptions)
 	if cfg == nil || cfg.RealtimeEnabled {
 		e.GET("/v1/realtime", handler.Realtime)
+		e.POST("/v1/realtime/calls", handler.RealtimeCalls)
+		e.POST("/v1/realtime/client_secrets", handler.RealtimeClientSecrets)
 	}
 	if cfg != nil && cfg.MCPEnabled && cfg.MCPGateway != nil {
 		e.POST("/mcp", handler.MCP)

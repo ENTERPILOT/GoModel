@@ -134,7 +134,7 @@ func setupAuditLogTestServer(t *testing.T, cfg auditlog.Config, store *mockLogSt
 
 	// Wait for server to be ready
 	client := &http.Client{Timeout: 2 * time.Second}
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		resp, err := client.Get(serverURL + "/health")
 		if err == nil {
 			_ = resp.Body.Close()
@@ -225,24 +225,24 @@ func TestAuditLogMiddleware(t *testing.T) {
 		require.NotNil(t, entry.Data.ResponseBody)
 
 		// Verify request body contains our message (now stored as interface{})
-		reqBody, ok := entry.Data.RequestBody.(map[string]interface{})
+		reqBody, ok := entry.Data.RequestBody.(map[string]any)
 		require.True(t, ok, "RequestBody should be a map[string]interface{}, got %T", entry.Data.RequestBody)
 		assert.Equal(t, "gpt-4", reqBody["model"])
 
 		// Verify response body captured the upstream chat completion payload, not
 		// just an empty marker — a regression that stored {} but non-nil would
 		// otherwise slip past a NotNil-only check.
-		respBody, ok := entry.Data.ResponseBody.(map[string]interface{})
+		respBody, ok := entry.Data.ResponseBody.(map[string]any)
 		require.True(t, ok, "ResponseBody should be a map[string]interface{}, got %T", entry.Data.ResponseBody)
 		assert.Equal(t, "chat.completion", respBody["object"])
 		assert.Equal(t, "gpt-4", respBody["model"])
 		assert.NotEmpty(t, respBody["id"], "response id should be captured")
-		choices, ok := respBody["choices"].([]interface{})
+		choices, ok := respBody["choices"].([]any)
 		require.True(t, ok, "choices should be an array, got %T", respBody["choices"])
 		require.NotEmpty(t, choices)
-		choice0, ok := choices[0].(map[string]interface{})
+		choice0, ok := choices[0].(map[string]any)
 		require.True(t, ok)
-		msg, ok := choice0["message"].(map[string]interface{})
+		msg, ok := choice0["message"].(map[string]any)
 		require.True(t, ok)
 		assert.Equal(t, "assistant", msg["role"])
 		content, ok := msg["content"].(string)
@@ -495,7 +495,7 @@ func TestAuditLogConcurrency(t *testing.T) {
 		wg.Add(numRequests)
 		results := make(chan result, numRequests)
 
-		for i := 0; i < numRequests; i++ {
+		for i := range numRequests {
 			go func(idx int) {
 				defer wg.Done()
 				payload := defaultChatReq(fmt.Sprintf("Request %d", idx))
@@ -765,7 +765,7 @@ func TestAuditLogOnlyModelInteractions(t *testing.T) {
 		defer cleanup()
 
 		// Make multiple requests to health endpoint
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			resp, err := http.Get(serverURL + "/health")
 			require.NoError(t, err)
 			closeBody(resp)
@@ -825,7 +825,7 @@ func TestAuditLogOnlyModelInteractions(t *testing.T) {
 		defer cleanup()
 
 		// Make multiple health requests (should not be logged)
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			resp, err := http.Get(serverURL + "/health")
 			require.NoError(t, err)
 			closeBody(resp)
@@ -839,7 +839,7 @@ func TestAuditLogOnlyModelInteractions(t *testing.T) {
 		closeBody(resp)
 
 		// Make more health requests (should not be logged)
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			resp, err := http.Get(serverURL + "/health")
 			require.NoError(t, err)
 			closeBody(resp)

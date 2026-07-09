@@ -31,10 +31,10 @@ func TestSQLiteStoreRoundTripsNullableLimits(t *testing.T) {
 	store := newSQLiteTestStore(t)
 
 	if err := store.UpsertRules(ctx, []Rule{
-		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(100), MaxTokens: int64Ptr(5000), Source: SourceManual},
-		{Subject: "/team", PeriodSeconds: PeriodDaySeconds, MaxRequests: int64Ptr(1000), Source: SourceManual},
-		{Subject: "/team", PeriodSeconds: PeriodConcurrent, MaxRequests: int64Ptr(10), Source: SourceManual},
-		{Subject: "/tokens-only", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: int64Ptr(100), Source: SourceManual},
+		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(100)), MaxTokens: new(int64(5000)), Source: SourceManual},
+		{Subject: "/team", PeriodSeconds: PeriodDaySeconds, MaxRequests: new(int64(1000)), Source: SourceManual},
+		{Subject: "/team", PeriodSeconds: PeriodConcurrent, MaxRequests: new(int64(10)), Source: SourceManual},
+		{Subject: "/tokens-only", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(100)), Source: SourceManual},
 	}); err != nil {
 		t.Fatalf("UpsertRules() failed: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestSQLiteStoreDeleteRule(t *testing.T) {
 	store := newSQLiteTestStore(t)
 
 	if err := store.UpsertRules(ctx, []Rule{
-		{Subject: "/team", PeriodSeconds: PeriodConcurrent, MaxRequests: int64Ptr(10), Source: SourceManual},
+		{Subject: "/team", PeriodSeconds: PeriodConcurrent, MaxRequests: new(int64(10)), Source: SourceManual},
 	}); err != nil {
 		t.Fatalf("UpsertRules() failed: %v", err)
 	}
@@ -93,15 +93,15 @@ func TestSQLiteStoreReplaceConfigRulesRemovesStaleConfigRowsOnly(t *testing.T) {
 	store := newSQLiteTestStore(t)
 
 	if err := store.UpsertRules(ctx, []Rule{
-		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(10), Source: SourceConfig},
-		{Subject: "/team", PeriodSeconds: PeriodDaySeconds, MaxRequests: int64Ptr(50), Source: SourceConfig},
-		{Subject: "/manual", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(5), Source: SourceManual},
+		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(10)), Source: SourceConfig},
+		{Subject: "/team", PeriodSeconds: PeriodDaySeconds, MaxRequests: new(int64(50)), Source: SourceConfig},
+		{Subject: "/manual", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(5)), Source: SourceManual},
 	}); err != nil {
 		t.Fatalf("UpsertRules() failed: %v", err)
 	}
 
 	if err := store.ReplaceConfigRules(ctx, []Rule{
-		{Subject: "/team", PeriodSeconds: PeriodDaySeconds, MaxRequests: int64Ptr(75)},
+		{Subject: "/team", PeriodSeconds: PeriodDaySeconds, MaxRequests: new(int64(75))},
 	}); err != nil {
 		t.Fatalf("ReplaceConfigRules() failed: %v", err)
 	}
@@ -134,12 +134,12 @@ func TestSQLiteStoreReplaceConfigRulesPreservesManualCollision(t *testing.T) {
 	store := newSQLiteTestStore(t)
 
 	if err := store.UpsertRules(ctx, []Rule{
-		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(10), Source: SourceManual},
+		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(10)), Source: SourceManual},
 	}); err != nil {
 		t.Fatalf("UpsertRules() failed: %v", err)
 	}
 	if err := store.ReplaceConfigRules(ctx, []Rule{
-		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(99)},
+		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(99))},
 	}); err != nil {
 		t.Fatalf("ReplaceConfigRules() failed: %v", err)
 	}
@@ -161,12 +161,12 @@ func TestSQLiteStoreManualUpsertOverridesConfigRow(t *testing.T) {
 	store := newSQLiteTestStore(t)
 
 	if err := store.UpsertRules(ctx, []Rule{
-		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(10), Source: SourceConfig},
+		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(10)), Source: SourceConfig},
 	}); err != nil {
 		t.Fatalf("UpsertRules() failed: %v", err)
 	}
 	if err := store.UpsertRules(ctx, []Rule{
-		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(25), Source: SourceManual},
+		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(25)), Source: SourceManual},
 	}); err != nil {
 		t.Fatalf("manual UpsertRules() failed: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestSQLiteStoreMigratesPreScopeTable(t *testing.T) {
 		t.Fatalf("NewSQLiteStore() second open failed: %v", err)
 	}
 	if err := store.UpsertRules(ctx, []Rule{
-		{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: int64Ptr(500), Source: SourceManual},
+		{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(500)), Source: SourceManual},
 	}); err != nil {
 		t.Fatalf("UpsertRules() after migration failed: %v", err)
 	}

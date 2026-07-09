@@ -1288,6 +1288,7 @@ test('fetchWorkflowRuntimeConfig loads FAILOVER_ENABLED from the admin config en
                     LOGGING_ENABLED: 'on',
                     USAGE_ENABLED: 'off',
                     BUDGETS_ENABLED: 'on',
+                    RATE_LIMITS_ENABLED: 'off',
                     GUARDRAILS_ENABLED: 'on',
                     REDIS_URL: 'on',
                     SEMANTIC_CACHE_ENABLED: 'off',
@@ -1309,12 +1310,96 @@ test('fetchWorkflowRuntimeConfig loads FAILOVER_ENABLED from the admin config en
             LOGGING_ENABLED: 'on',
             USAGE_ENABLED: 'off',
             BUDGETS_ENABLED: 'on',
+            RATE_LIMITS_ENABLED: 'off',
             GUARDRAILS_ENABLED: 'on',
             REDIS_URL: 'on',
             SEMANTIC_CACHE_ENABLED: 'off',
             USAGE_PRICING_RECALCULATION_ENABLED: 'on'
         })
     );
+});
+
+test('fetchWorkflowRuntimeConfig shares one in-flight request and ensureWorkflowRuntimeConfig awaits it', async () => {
+    let calls = 0;
+    let settleFetch;
+    const module = createWorkflowsModule({
+        fetch() {
+            calls += 1;
+            return new Promise((resolve) => {
+                settleFetch = resolve;
+            });
+        }
+    });
+    module.headers = () => ({});
+    module.handleFetchResponse = () => true;
+
+    const first = module.fetchWorkflowRuntimeConfig();
+    const second = module.fetchWorkflowRuntimeConfig();
+    const ensured = module.ensureWorkflowRuntimeConfig();
+    assert.equal(calls, 1, 'overlapping callers must share one /admin/runtime/config request');
+    assert.equal(first, second);
+
+    settleFetch({ ok: true, json: async () => ({ RATE_LIMITS_ENABLED: 'off' }) });
+    await Promise.all([first, second, ensured]);
+
+    assert.equal(calls, 1);
+    assert.equal(module.workflowRuntimeConfig.RATE_LIMITS_ENABLED, 'off');
+    assert.equal(module.workflowRuntimeConfigLoaded, true);
+    assert.equal(module.workflowRuntimeConfigPromise, null);
+
+    // Flags already loaded: gates resolve without another round trip.
+    await module.ensureWorkflowRuntimeConfig();
+    assert.equal(calls, 1);
+});
+
+test('a failed runtime config load leaves the flags unloaded so ensureWorkflowRuntimeConfig retries', async () => {
+    let calls = 0;
+    const module = createWorkflowsModule({
+        console: { error() {} },
+        fetch() {
+            calls += 1;
+            if (calls === 1) {
+                return Promise.reject(new Error('network down'));
+            }
+            return Promise.resolve({ ok: true, json: async () => ({ RATE_LIMITS_ENABLED: 'off' }) });
+        }
+    });
+    module.headers = () => ({});
+    module.handleFetchResponse = () => true;
+
+    await module.ensureWorkflowRuntimeConfig();
+    assert.equal(calls, 1);
+    assert.equal(module.workflowRuntimeConfigLoaded, false, 'a failed load must not count as loaded');
+    assert.equal(module.workflowRuntimeConfigPromise, null);
+
+    // A later gated caller retries rather than trusting the empty config and
+    // falling back to every feature gate's default.
+    await module.ensureWorkflowRuntimeConfig();
+    assert.equal(calls, 2);
+    assert.equal(module.workflowRuntimeConfigLoaded, true);
+    assert.equal(module.workflowRuntimeConfig.RATE_LIMITS_ENABLED, 'off');
+});
+
+test('an unhandled runtime config response leaves the flags unloaded so ensureWorkflowRuntimeConfig retries', async () => {
+    let calls = 0;
+    const module = createWorkflowsModule({
+        fetch() {
+            calls += 1;
+            return Promise.resolve({ ok: calls > 1, json: async () => ({ RATE_LIMITS_ENABLED: 'off' }) });
+        }
+    });
+    module.headers = () => ({});
+    // Mirrors an auth failure: the response is rejected before it is parsed.
+    module.handleFetchResponse = (res) => res.ok;
+
+    await module.ensureWorkflowRuntimeConfig();
+    assert.equal(calls, 1);
+    assert.equal(module.workflowRuntimeConfigLoaded, false);
+
+    await module.ensureWorkflowRuntimeConfig();
+    assert.equal(calls, 2);
+    assert.equal(module.workflowRuntimeConfigLoaded, true);
+    assert.equal(module.workflowRuntimeConfig.RATE_LIMITS_ENABLED, 'off');
 });
 
 test('fetchWorkflowRuntimeConfig delegates cache overview refresh after loading runtime config', async () => {

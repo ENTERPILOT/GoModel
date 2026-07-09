@@ -20,8 +20,8 @@ func drainConverter(t *testing.T, chatStream string) []map[string]any {
 	}
 
 	var events []map[string]any
-	for _, block := range strings.Split(string(out), "\n\n") {
-		for _, line := range strings.Split(block, "\n") {
+	for block := range strings.SplitSeq(string(out), "\n\n") {
+		for line := range strings.SplitSeq(block, "\n") {
 			data, ok := strings.CutPrefix(line, "data: ")
 			if !ok {
 				continue

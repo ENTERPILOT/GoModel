@@ -43,12 +43,12 @@ const (
 type Provider struct {
 	compat       *openai.CompatibleProvider
 	nativeClient *llmclient.Client
-	apiKey       string // Accepted but ignored by Ollama
+	keys         *providers.Keyring // Optional; Ollama accepts a bearer token but does not require one
 }
 
 // New creates a new Ollama provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	p := &Provider{apiKey: providerCfg.APIKey}
+	p := &Provider{keys: opts.Keyring(providerCfg.APIKey)}
 	p.compat = openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(defaultBaseURL))
 
 	nativeCfg := llmclient.Config{
@@ -69,7 +69,7 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	p := &Provider{apiKey: apiKey}
+	p := &Provider{keys: providers.NewKeyring(apiKey)}
 	p.compat = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL))
 
 	nativeCfg := llmclient.DefaultConfig("ollama", defaultNativeBaseURL)
@@ -117,7 +117,7 @@ func setHeaders(req *http.Request, apiKey string) {
 
 // setNativeHeaders applies the same header policy on the native /api client.
 func (p *Provider) setNativeHeaders(req *http.Request) {
-	setHeaders(req, p.apiKey)
+	setHeaders(req, p.keys.Next())
 }
 
 // ChatCompletion sends a chat completion request to Ollama
