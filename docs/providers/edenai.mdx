@@ -1,0 +1,39 @@
+---
+title: "Eden AI"
+description: "Configure Eden AI in GoModel — an EU-hosted, OpenAI-compatible gateway to 100+ models via a single API key."
+icon: "globe"
+---
+
+[Eden AI](https://www.edenai.co) is an EU-hosted, OpenAI-compatible gateway that
+exposes 100+ models from many providers (OpenAI, Anthropic, Google, Mistral,
+DeepSeek, and more) through a single endpoint and API key. Models use the
+`provider/model` naming scheme (e.g. `anthropic/claude-sonnet-4-5`); GoModel
+sends the full id upstream unchanged.
+
+## Configure
+
+```bash
+EDENAI_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  edenai:
+    type: edenai
+    base_url: "https://api.edenai.run/v3"
+    api_key: "${EDENAI_API_KEY}"
+    models:
+      - anthropic/claude-sonnet-4-5
+      - mistral/codestral-latest
+```
+
+<Note>
+  The default endpoint is `https://api.edenai.run/v3`. For EU-only data
+  residency, set `base_url` to `https://api.eu.edenai.run/v3`.
+</Note>
+
+Because Eden AI is fully OpenAI-compatible, GoModel routes chat completions,
+embeddings, and model discovery through its shared OpenAI-compatible adapter
+with no request quirks.

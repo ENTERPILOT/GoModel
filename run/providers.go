@@ -9,6 +9,7 @@ import (
 	"gomodel/internal/providers/bailian"
 	"gomodel/internal/providers/bedrock"
 	"gomodel/internal/providers/deepseek"
+	"gomodel/internal/providers/edenai"
 	"gomodel/internal/providers/fireworks"
 	"gomodel/internal/providers/gemini"
 	"gomodel/internal/providers/groq"
@@ -44,6 +45,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(anthropic.Registration)
 	factory.Add(bedrock.Registration)
 	factory.Add(deepseek.Registration)
+	factory.Add(edenai.Registration)
 	factory.Add(fireworks.Registration)
 	factory.Add(gemini.Registration)
 	factory.Add(vertex.Registration)

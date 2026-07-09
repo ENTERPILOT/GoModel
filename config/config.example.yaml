@@ -399,6 +399,16 @@ providers:
   #     - openai/gpt-oss-120b
   #     - anthropic/claude-sonnet-4
 
+  # Example: Eden AI. EU-hosted, OpenAI-compatible gateway to 100+ models.
+  # Models use the "provider/model" scheme; the full id is sent upstream.
+  # edenai:
+  #   type: "edenai"
+  #   base_url: "https://api.edenai.run/v3"
+  #   api_key: "${EDENAI_API_KEY}"
+  #   models:
+  #     - anthropic/claude-sonnet-4-5
+  #     - mistral/codestral-latest
+
   # Example: Azure OpenAI
   # azure:
   #   type: "azure"

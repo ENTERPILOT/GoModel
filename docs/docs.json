@@ -133,6 +133,7 @@
                     "providers/gemini",
                     "providers/deepseek",
                     "providers/xai",
+                    "providers/edenai",
                     "providers/bailian",
                     "providers/xiaomi",
                     "providers/opencode-go",
