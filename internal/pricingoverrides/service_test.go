@@ -82,19 +82,15 @@ func (r selectivePricingResolver) ResolvePricing(model, provider string) *core.M
 	return r[provider+"/"+model]
 }
 
-func ptr(v float64) *float64 {
-	return &v
-}
-
 func TestServiceResolvePricingAppliesMostSpecificOverride(t *testing.T) {
 	baseInput := 1.0
 	baseOutput := 2.0
 	service, err := NewService(
 		newTestStore(
-			Override{Selector: "/", Pricing: Pricing{InputPerMtok: ptr(10)}},
-			Override{Selector: "openai/", Pricing: Pricing{InputPerMtok: ptr(20)}},
-			Override{Selector: "gpt-4o", Pricing: Pricing{InputPerMtok: ptr(30)}},
-			Override{Selector: "openai/gpt-4o", Pricing: Pricing{InputPerMtok: ptr(40)}},
+			Override{Selector: "/", Pricing: Pricing{InputPerMtok: new(float64(10))}},
+			Override{Selector: "openai/", Pricing: Pricing{InputPerMtok: new(float64(20))}},
+			Override{Selector: "gpt-4o", Pricing: Pricing{InputPerMtok: new(float64(30))}},
+			Override{Selector: "openai/gpt-4o", Pricing: Pricing{InputPerMtok: new(float64(40))}},
 		),
 		testCatalog{providerNames: []string{"openai"}},
 		staticPricingResolver{pricing: &core.ModelPricing{
@@ -127,8 +123,8 @@ func TestServiceResolvePricingAppliesMostSpecificOverride(t *testing.T) {
 func TestServiceResolvePricingModelWideBeatsProviderWide(t *testing.T) {
 	service, err := NewService(
 		newTestStore(
-			Override{Selector: "openai/", Pricing: Pricing{InputPerMtok: ptr(20)}},
-			Override{Selector: "gpt-4o", Pricing: Pricing{InputPerMtok: ptr(30)}},
+			Override{Selector: "openai/", Pricing: Pricing{InputPerMtok: new(float64(20))}},
+			Override{Selector: "gpt-4o", Pricing: Pricing{InputPerMtok: new(float64(30))}},
 		),
 		testCatalog{providerNames: []string{"openai"}},
 		nil,
@@ -149,9 +145,9 @@ func TestServiceResolvePricingModelWideBeatsProviderWide(t *testing.T) {
 func TestServiceResolvePricingPreservesSlashShapedModelIDs(t *testing.T) {
 	service, err := NewService(
 		newTestStore(
-			Override{Selector: "openrouter/", Pricing: Pricing{InputPerMtok: ptr(20)}},
-			Override{Selector: "anthropic/claude-sonnet", Pricing: Pricing{InputPerMtok: ptr(30)}},
-			Override{Selector: "openrouter/anthropic/claude-sonnet", Pricing: Pricing{InputPerMtok: ptr(40)}},
+			Override{Selector: "openrouter/", Pricing: Pricing{InputPerMtok: new(float64(20))}},
+			Override{Selector: "anthropic/claude-sonnet", Pricing: Pricing{InputPerMtok: new(float64(30))}},
+			Override{Selector: "openrouter/anthropic/claude-sonnet", Pricing: Pricing{InputPerMtok: new(float64(40))}},
 		),
 		testCatalog{providerNames: []string{"openrouter"}},
 		nil,
@@ -199,8 +195,8 @@ func TestServiceResolvePricingFallsBackToRawProviderOwnedModelForBasePricing(t *
 func TestServiceResolvePricingSlashShapedModelWideBeatsProviderWide(t *testing.T) {
 	service, err := NewService(
 		newTestStore(
-			Override{Selector: "openrouter/", Pricing: Pricing{InputPerMtok: ptr(20)}},
-			Override{Selector: "anthropic/claude-sonnet", Model: "anthropic/claude-sonnet", Pricing: Pricing{InputPerMtok: ptr(30)}},
+			Override{Selector: "openrouter/", Pricing: Pricing{InputPerMtok: new(float64(20))}},
+			Override{Selector: "anthropic/claude-sonnet", Model: "anthropic/claude-sonnet", Pricing: Pricing{InputPerMtok: new(float64(30))}},
 		),
 		testCatalog{providerNames: []string{"openrouter"}},
 		nil,
@@ -229,7 +225,7 @@ func TestServiceRejectsEmptyAndNegativePricing(t *testing.T) {
 	}
 	if err := service.Upsert(context.Background(), Override{
 		Selector: "openai/gpt-4o",
-		Pricing:  Pricing{InputPerMtok: ptr(-1)},
+		Pricing:  Pricing{InputPerMtok: new(float64(-1))},
 	}); !IsValidationError(err) {
 		t.Fatalf("Upsert(negative) error = %v, want validation", err)
 	}
@@ -248,38 +244,38 @@ func TestServiceRejectsInvalidTieredPricing(t *testing.T) {
 		{
 			name: "missing threshold",
 			pricing: Pricing{Tiers: []PricingTier{
-				{InputPerMtok: ptr(1)},
+				{InputPerMtok: new(float64(1))},
 			}},
 		},
 		{
 			name: "missing rate",
 			pricing: Pricing{Tiers: []PricingTier{
-				{UpToTokens: ptr(1000)},
+				{UpToTokens: new(float64(1000))},
 			}},
 		},
 		{
 			name: "non-increasing thresholds",
 			pricing: Pricing{Tiers: []PricingTier{
-				{UpToTokens: ptr(1000), InputPerMtok: ptr(1)},
-				{UpToTokens: ptr(500), InputPerMtok: ptr(2)},
+				{UpToTokens: new(float64(1000)), InputPerMtok: new(float64(1))},
+				{UpToTokens: new(float64(500)), InputPerMtok: new(float64(2))},
 			}},
 		},
 		{
 			name: "zero threshold",
 			pricing: Pricing{Tiers: []PricingTier{
-				{UpToMtok: ptr(0), InputPerMtok: ptr(1)},
+				{UpToMtok: new(float64(0)), InputPerMtok: new(float64(1))},
 			}},
 		},
 		{
 			name: "both threshold units",
 			pricing: Pricing{Tiers: []PricingTier{
-				{UpToTokens: ptr(1000), UpToMtok: ptr(1), InputPerMtok: ptr(1)},
+				{UpToTokens: new(float64(1000)), UpToMtok: new(float64(1)), InputPerMtok: new(float64(1))},
 			}},
 		},
 		{
 			name: "negative tier rate",
 			pricing: Pricing{Tiers: []PricingTier{
-				{UpToTokens: ptr(1000), InputPerMtok: ptr(-1)},
+				{UpToTokens: new(float64(1000)), InputPerMtok: new(float64(-1))},
 			}},
 		},
 	}
@@ -305,8 +301,8 @@ func TestServiceAcceptsIncreasingTieredPricing(t *testing.T) {
 	err = service.Upsert(context.Background(), Override{
 		Selector: "openai/gpt-4o",
 		Pricing: Pricing{Tiers: []PricingTier{
-			{UpToTokens: ptr(200_000), InputPerMtok: ptr(1)},
-			{UpToMtok: ptr(1), InputPerMtok: ptr(0.5)},
+			{UpToTokens: new(float64(200_000)), InputPerMtok: new(float64(1))},
+			{UpToMtok: new(float64(1)), InputPerMtok: new(0.5)},
 		}},
 	})
 	if err != nil {
@@ -325,7 +321,7 @@ func TestServiceReconcilesSnapshotWhenUpsertRollbackFails(t *testing.T) {
 	store.deleteErr = errors.New("rollback delete failed")
 	err = service.Upsert(context.Background(), Override{
 		Selector: "openai/gpt-4o",
-		Pricing:  Pricing{InputPerMtok: ptr(9)},
+		Pricing:  Pricing{InputPerMtok: new(float64(9))},
 	})
 	if err == nil {
 		t.Fatal("Upsert() error = nil, want refresh/rollback error")
@@ -342,7 +338,7 @@ func TestServiceReconcilesSnapshotWhenDeleteRollbackFails(t *testing.T) {
 		Selector:     "openai/gpt-4o",
 		ProviderName: "openai",
 		Model:        "gpt-4o",
-		Pricing:      Pricing{InputPerMtok: ptr(9)},
+		Pricing:      Pricing{InputPerMtok: new(float64(9))},
 	})
 	service, err := NewService(store, testCatalog{providerNames: []string{"openai"}}, nil)
 	if err != nil {
@@ -371,8 +367,8 @@ func TestServiceBuildSnapshotRejectsDuplicateNormalizedSelectors(t *testing.T) {
 	}
 
 	_, err = service.buildSnapshot([]Override{
-		{Selector: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", Pricing: Pricing{InputPerMtok: ptr(1)}},
-		{Selector: " openai/gpt-4o ", ProviderName: "openai", Model: "gpt-4o", Pricing: Pricing{InputPerMtok: ptr(2)}},
+		{Selector: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", Pricing: Pricing{InputPerMtok: new(float64(1))}},
+		{Selector: " openai/gpt-4o ", ProviderName: "openai", Model: "gpt-4o", Pricing: Pricing{InputPerMtok: new(float64(2))}},
 	})
 	if err == nil {
 		t.Fatal("buildSnapshot() error = nil, want duplicate selector error")

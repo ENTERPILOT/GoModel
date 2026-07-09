@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -176,9 +177,7 @@ func (s *realtimeService) forwardRealtimeHTTP(ctx context.Context, target *core.
 	}
 	if len(query) > 0 {
 		merged := endpoint.Query()
-		for key, values := range query {
-			merged[key] = values
-		}
+		maps.Copy(merged, query)
 		endpoint.RawQuery = merged.Encode()
 	}
 

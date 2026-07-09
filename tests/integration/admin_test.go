@@ -31,7 +31,7 @@ func TestAdminUsageSummary_PostgreSQL(t *testing.T) {
 	dbassert.ClearUsage(t, fixture.PgPool)
 
 	// Send 2 chat requests
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		payload := newChatRequest("gpt-4", "Hello!")
 		resp := sendChatRequest(t, fixture.ServerURL, payload)
 		require.Equal(t, 200, resp.StatusCode)
@@ -74,7 +74,7 @@ func TestAdminDailyUsage_PostgreSQL(t *testing.T) {
 	dbassert.ClearUsage(t, fixture.PgPool)
 
 	// Send requests
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		payload := newChatRequest("gpt-4", "Hello!")
 		resp := sendChatRequest(t, fixture.ServerURL, payload)
 		require.Equal(t, 200, resp.StatusCode)
@@ -129,7 +129,7 @@ func TestAdminUsageSummary_MongoDB(t *testing.T) {
 	dbassert.ClearUsageMongo(t, fixture.MongoDb)
 
 	// Send 2 chat requests
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		payload := newChatRequest("gpt-4", "Hello!")
 		resp := sendChatRequest(t, fixture.ServerURL, payload)
 		require.Equal(t, 200, resp.StatusCode)

@@ -347,11 +347,11 @@ func geminiModelsBaseURL(backend, nativeBaseURL string) string {
 func vertexPublisherModelsBaseURL(nativeBaseURL string) (string, bool) {
 	const projectsPath = "/v1/projects/"
 	nativeBaseURL = strings.TrimRight(strings.TrimSpace(nativeBaseURL), "/")
-	idx := strings.Index(nativeBaseURL, projectsPath)
-	if idx < 0 {
+	before, _, ok := strings.Cut(nativeBaseURL, projectsPath)
+	if !ok {
 		return "", false
 	}
-	root := strings.TrimRight(nativeBaseURL[:idx], "/")
+	root := strings.TrimRight(before, "/")
 	if root == "" {
 		return "", false
 	}

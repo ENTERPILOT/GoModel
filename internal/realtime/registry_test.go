@@ -61,7 +61,7 @@ func TestCallRegistryEvictsAtCapacity(t *testing.T) {
 	now := time.Unix(1000, 0)
 	r := newTestRegistry(&now)
 
-	for i := 0; i < maxCalls; i++ {
+	for i := range maxCalls {
 		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "m"})
 		now = now.Add(time.Millisecond) // strictly ordered expiries
 	}
@@ -82,7 +82,7 @@ func TestCallRegistryReRegisterAtCapacityDoesNotEvict(t *testing.T) {
 	now := time.Unix(1000, 0)
 	r := newTestRegistry(&now)
 
-	for i := 0; i < maxCalls; i++ {
+	for i := range maxCalls {
 		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "m"})
 		now = now.Add(time.Millisecond)
 	}

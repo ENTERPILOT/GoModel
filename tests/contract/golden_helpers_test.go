@@ -92,20 +92,17 @@ func normalizeGoldenValue(v any) any {
 }
 
 func normalizeGeneratedID(id string) string {
-	if strings.HasPrefix(id, "resp_") {
-		suffix := strings.TrimPrefix(id, "resp_")
+	if suffix, ok := strings.CutPrefix(id, "resp_"); ok {
 		if isGeneratedIDSuffix(suffix) {
 			return "resp_<generated>"
 		}
 	}
-	if strings.HasPrefix(id, "msg_") {
-		suffix := strings.TrimPrefix(id, "msg_")
+	if suffix, ok := strings.CutPrefix(id, "msg_"); ok {
 		if isGeneratedIDSuffix(suffix) {
 			return "msg_<generated>"
 		}
 	}
-	if strings.HasPrefix(id, "req_") {
-		suffix := strings.TrimPrefix(id, "req_")
+	if suffix, ok := strings.CutPrefix(id, "req_"); ok {
 		if isGeneratedIDSuffix(suffix) {
 			return "req_<generated>"
 		}

@@ -3,6 +3,7 @@ package providers
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 
@@ -111,9 +112,7 @@ func (f *ProviderFactory) discoveryConfigsSnapshot() map[string]DiscoveryConfig 
 	defer f.mu.RUnlock()
 
 	snapshot := make(map[string]DiscoveryConfig, len(f.discoveryConfigs))
-	for providerType, cfg := range f.discoveryConfigs {
-		snapshot[providerType] = cfg
-	}
+	maps.Copy(snapshot, f.discoveryConfigs)
 	return snapshot
 }
 

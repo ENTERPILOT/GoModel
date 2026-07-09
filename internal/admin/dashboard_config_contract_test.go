@@ -27,8 +27,8 @@ var (
 func TestDashboardConfigContract_MatchesFrontendAllowlist(t *testing.T) {
 	backend := map[string]bool{}
 	rt := reflect.TypeFor[DashboardConfigResponse]()
-	for i := range rt.NumField() {
-		tag := rt.Field(i).Tag.Get("json")
+	for field := range rt.Fields() {
+		tag := field.Tag.Get("json")
 		if name, _, _ := strings.Cut(tag, ","); name != "" && name != "-" {
 			backend[name] = true
 		}

@@ -213,9 +213,7 @@ func (r *ModelRegistry) snapshotConfigOverrides() map[string]map[string]*core.Mo
 	out := make(map[string]map[string]*core.ModelMetadata, len(r.configMetadataOverrides))
 	for provider, inner := range r.configMetadataOverrides {
 		innerCopy := make(map[string]*core.ModelMetadata, len(inner))
-		for modelID, meta := range inner {
-			innerCopy[modelID] = meta
-		}
+		maps.Copy(innerCopy, inner)
 		out[provider] = innerCopy
 	}
 	return out
@@ -251,8 +249,8 @@ func collectionEmpty(v reflect.Value) bool {
 // structFieldsEmpty returns true if every field of the given struct value
 // passes collectionEmpty.
 func structFieldsEmpty(v reflect.Value) bool {
-	for i := 0; i < v.NumField(); i++ {
-		if !collectionEmpty(v.Field(i)) {
+	for _, field := range v.Fields() {
+		if !collectionEmpty(field) {
 			return false
 		}
 	}

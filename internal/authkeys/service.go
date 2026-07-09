@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -423,15 +424,9 @@ func cloneSnapshot(src snapshot) snapshot {
 		bySecretHash: make(map[string]AuthKey, len(src.bySecretHash)),
 		activeByHash: make(map[string]AuthKey, len(src.activeByHash)),
 	}
-	for id, key := range src.byID {
-		next.byID[id] = key
-	}
-	for hash, key := range src.bySecretHash {
-		next.bySecretHash[hash] = key
-	}
-	for hash, key := range src.activeByHash {
-		next.activeByHash[hash] = key
-	}
+	maps.Copy(next.byID, src.byID)
+	maps.Copy(next.bySecretHash, src.bySecretHash)
+	maps.Copy(next.activeByHash, src.activeByHash)
 	return next
 }
 

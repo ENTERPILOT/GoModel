@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -24,8 +25,8 @@ type StoredConversation struct {
 	Items        []json.RawMessage  `json:"items,omitempty"`
 	UserPath     string             `json:"user_path,omitempty"`
 	RequestID    string             `json:"request_id,omitempty"`
-	StoredAt     time.Time          `json:"stored_at,omitempty"`
-	ExpiresAt    time.Time          `json:"expires_at,omitempty"`
+	StoredAt     time.Time          `json:"stored_at"`
+	ExpiresAt    time.Time          `json:"expires_at"`
 }
 
 // Store defines persistence operations for the Conversations lifecycle API.
@@ -77,9 +78,7 @@ func normalizeStoredConversation(src *StoredConversation) *StoredConversation {
 		conversationCopy := *src.Conversation
 		if conversationCopy.Metadata != nil {
 			metadataCopy := make(map[string]string, len(conversationCopy.Metadata))
-			for key, value := range conversationCopy.Metadata {
-				metadataCopy[key] = value
-			}
+			maps.Copy(metadataCopy, conversationCopy.Metadata)
 			conversationCopy.Metadata = metadataCopy
 		}
 		normalized.Conversation = &conversationCopy

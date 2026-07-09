@@ -654,8 +654,8 @@ data: [DONE]
 `
 	logger := &trackingLogger{enabled: true}
 	resolver := &streamPricingCaptureResolver{pricing: &core.ModelPricing{
-		InputPerMtok:  floatPtr(2.0),
-		OutputPerMtok: floatPtr(8.0),
+		InputPerMtok:  new(2.0),
+		OutputPerMtok: new(8.0),
 	}}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-1", "/v1/chat/completions", resolver)
 	observer.SetRewriteTokensSaved(500_000)

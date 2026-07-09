@@ -59,7 +59,7 @@ func TestSQLiteStoreRecalculatePricing_CorrectsStaleCachedCosts(t *testing.T) {
 
 	resolver := staticTestPricingResolver{
 		"xiaomi/mimo-v2.5-pro": {
-			Currency: "USD", InputPerMtok: floatPtr(0.435), OutputPerMtok: floatPtr(0.87), CachedInputPerMtok: floatPtr(0.0036),
+			Currency: "USD", InputPerMtok: new(0.435), OutputPerMtok: new(0.87), CachedInputPerMtok: new(0.0036),
 		},
 		// "openai/retired-model" intentionally absent -> resolves to nil.
 	}

@@ -36,7 +36,7 @@ func (rt *replayTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	key := replayKey(req.Method, req.URL.RequestURI())
 	route, ok := rt.routes[key]
 	if !ok {
-		notFoundBody := []byte(fmt.Sprintf(`{"error":{"message":"missing replay route: %s"}}`, key))
+		notFoundBody := fmt.Appendf(nil, `{"error":{"message":"missing replay route: %s"}}`, key)
 		return &http.Response{
 			StatusCode: http.StatusNotFound,
 			Status:     "404 Not Found",

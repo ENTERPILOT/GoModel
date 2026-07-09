@@ -71,8 +71,7 @@ func TestInputTokensRequestCopiesEveryField(t *testing.T) {
 // fill sets every exported field of v to a non-zero value.
 func fill(t *testing.T, v reflect.Value) {
 	t.Helper()
-	for i := range v.NumField() {
-		field := v.Field(i)
+	for _, field := range v.Fields() {
 		if !field.CanSet() {
 			continue
 		}

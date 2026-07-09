@@ -2191,7 +2191,7 @@ func TestBuildProviderStatusItem_ClassifyAndDisplayFallbacks(t *testing.T) {
 				Type:                    "openai",
 				Registered:              true,
 				DiscoveredModelCount:    7,
-				LastModelFetchSuccessAt: timePtr(time.Now()),
+				LastModelFetchSuccessAt: new(time.Now()),
 			},
 			wantStatus:  "healthy",
 			wantLabel:   "Healthy",
@@ -2247,8 +2247,6 @@ func TestBuildProviderStatusItem_ClassifyAndDisplayFallbacks(t *testing.T) {
 		})
 	}
 }
-
-func timePtr(t time.Time) *time.Time { return &t }
 
 func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{

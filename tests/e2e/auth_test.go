@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,7 +30,7 @@ func TestAuthenticationE2E(t *testing.T) {
 		endpoint       string
 		method         string
 		authHeader     string
-		body           interface{}
+		body           any
 		expectedStatus int
 		checkResponse  func(t *testing.T, body []byte)
 	}{
@@ -78,9 +79,9 @@ func TestAuthenticationE2E(t *testing.T) {
 			authHeader:     testMasterKey,
 			expectedStatus: http.StatusUnauthorized,
 			checkResponse: func(t *testing.T, body []byte) {
-				var resp map[string]interface{}
+				var resp map[string]any
 				require.NoError(t, json.Unmarshal(body, &resp))
-				errMap := resp["error"].(map[string]interface{})
+				errMap := resp["error"].(map[string]any)
 				assert.Equal(t, "authentication_error", errMap["type"])
 				assert.Contains(t, errMap["message"], "invalid authorization header format")
 			},
@@ -105,9 +106,9 @@ func TestAuthenticationE2E(t *testing.T) {
 			authHeader:     "",
 			expectedStatus: http.StatusUnauthorized,
 			checkResponse: func(t *testing.T, body []byte) {
-				var resp map[string]interface{}
+				var resp map[string]any
 				require.NoError(t, json.Unmarshal(body, &resp))
-				errMap := resp["error"].(map[string]interface{})
+				errMap := resp["error"].(map[string]any)
 				assert.Equal(t, "authentication_error", errMap["type"])
 			},
 		},
@@ -116,7 +117,7 @@ func TestAuthenticationE2E(t *testing.T) {
 			endpoint:   "/v1/chat/completions",
 			method:     http.MethodPost,
 			authHeader: "Bearer " + testMasterKey,
-			body: map[string]interface{}{
+			body: map[string]any{
 				"model": "gpt-4",
 				"messages": []map[string]string{
 					{"role": "user", "content": "Hello"},
@@ -135,7 +136,7 @@ func TestAuthenticationE2E(t *testing.T) {
 			endpoint:   "/v1/chat/completions",
 			method:     http.MethodPost,
 			authHeader: "",
-			body: map[string]interface{}{
+			body: map[string]any{
 				"model": "gpt-4",
 				"messages": []map[string]string{
 					{"role": "user", "content": "Hello"},
@@ -143,9 +144,9 @@ func TestAuthenticationE2E(t *testing.T) {
 			},
 			expectedStatus: http.StatusUnauthorized,
 			checkResponse: func(t *testing.T, body []byte) {
-				var resp map[string]interface{}
+				var resp map[string]any
 				require.NoError(t, json.Unmarshal(body, &resp))
-				errMap := resp["error"].(map[string]interface{})
+				errMap := resp["error"].(map[string]any)
 				assert.Equal(t, "authentication_error", errMap["type"])
 			},
 		},
@@ -154,7 +155,7 @@ func TestAuthenticationE2E(t *testing.T) {
 			endpoint:   "/v1/responses",
 			method:     http.MethodPost,
 			authHeader: "Bearer " + testMasterKey,
-			body: map[string]interface{}{
+			body: map[string]any{
 				"model": "gpt-4",
 				"input": "Hello",
 			},
@@ -170,15 +171,15 @@ func TestAuthenticationE2E(t *testing.T) {
 			endpoint:   "/v1/responses",
 			method:     http.MethodPost,
 			authHeader: "",
-			body: map[string]interface{}{
+			body: map[string]any{
 				"model": "gpt-4",
 				"input": "Hello",
 			},
 			expectedStatus: http.StatusUnauthorized,
 			checkResponse: func(t *testing.T, body []byte) {
-				var resp map[string]interface{}
+				var resp map[string]any
 				require.NoError(t, json.Unmarshal(body, &resp))
-				errMap := resp["error"].(map[string]interface{})
+				errMap := resp["error"].(map[string]any)
 				assert.Equal(t, "authentication_error", errMap["type"])
 			},
 		},
@@ -280,7 +281,7 @@ func TestAuthenticationStreamingEndpoints(t *testing.T) {
 	defer ts.Close()
 
 	t.Run("streaming chat completion with valid auth", func(t *testing.T) {
-		reqBody := map[string]interface{}{
+		reqBody := map[string]any{
 			"model":  "gpt-4",
 			"stream": true,
 			"messages": []map[string]string{
@@ -305,7 +306,7 @@ func TestAuthenticationStreamingEndpoints(t *testing.T) {
 	})
 
 	t.Run("streaming chat completion without auth", func(t *testing.T) {
-		reqBody := map[string]interface{}{
+		reqBody := map[string]any{
 			"model":  "gpt-4",
 			"stream": true,
 			"messages": []map[string]string{
@@ -326,16 +327,16 @@ func TestAuthenticationStreamingEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
-		var respBody map[string]interface{}
+		var respBody map[string]any
 		err = json.NewDecoder(resp.Body).Decode(&respBody)
 		require.NoError(t, err)
 
-		errMap := respBody["error"].(map[string]interface{})
+		errMap := respBody["error"].(map[string]any)
 		assert.Equal(t, "authentication_error", errMap["type"])
 	})
 
 	t.Run("streaming responses with valid auth", func(t *testing.T) {
-		reqBody := map[string]interface{}{
+		reqBody := map[string]any{
 			"model":  "gpt-4",
 			"stream": true,
 			"input":  "Hello",
@@ -358,7 +359,7 @@ func TestAuthenticationStreamingEndpoints(t *testing.T) {
 	})
 
 	t.Run("streaming responses without auth", func(t *testing.T) {
-		reqBody := map[string]interface{}{
+		reqBody := map[string]any{
 			"model":  "gpt-4",
 			"stream": true,
 			"input":  "Hello",
@@ -377,11 +378,11 @@ func TestAuthenticationStreamingEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
-		var respBody map[string]interface{}
+		var respBody map[string]any
 		err = json.NewDecoder(resp.Body).Decode(&respBody)
 		require.NoError(t, err)
 
-		errMap := respBody["error"].(map[string]interface{})
+		errMap := respBody["error"].(map[string]any)
 		assert.Equal(t, "authentication_error", errMap["type"])
 	})
 }
@@ -438,9 +439,10 @@ func TestAuthenticationCaseSensitivity(t *testing.T) {
 // TestAuthenticationWithSpecialCharacters verifies that master keys with special characters work
 func TestAuthenticationWithSpecialCharacters(t *testing.T) {
 	// Create a long key with printable characters
-	longKey := "very-long-key-"
-	for i := 0; i < 100; i++ {
-		longKey += "x"
+	var longKey strings.Builder
+	longKey.WriteString("very-long-key-")
+	for range 100 {
+		longKey.WriteString("x")
 	}
 
 	specialKeys := []string{
@@ -450,7 +452,7 @@ func TestAuthenticationWithSpecialCharacters(t *testing.T) {
 		"key$with$dollars",
 		"key!@#$%^&*()",
 		"key with spaces",
-		longKey,
+		longKey.String(),
 	}
 
 	for i, key := range specialKeys {

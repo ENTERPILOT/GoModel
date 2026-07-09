@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -110,11 +111,10 @@ func parseBaseURL(baseURL string) (region, endpoint string) {
 // segments from custom hosts that happen to contain "bedrock." in their name,
 // the host must end with ".amazonaws.com".
 func regionFromHost(rawURL string) string {
-	idx := strings.Index(rawURL, "://")
-	if idx < 0 {
+	_, host, ok := strings.Cut(rawURL, "://")
+	if !ok {
 		return ""
 	}
-	host := rawURL[idx+3:]
 	if slash := strings.IndexByte(host, '/'); slash >= 0 {
 		host = host[:slash]
 	}
@@ -213,12 +213,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 }
 
 func supportsTextOutput(modalities []bedrocktypes.ModelModality) bool {
-	for _, m := range modalities {
-		if m == bedrocktypes.ModelModalityText {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(modalities, bedrocktypes.ModelModalityText)
 }
 
 // Embeddings returns an error: Bedrock embedding models use a different code

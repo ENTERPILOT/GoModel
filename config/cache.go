@@ -254,14 +254,12 @@ func mergeSemanticResponseDefaults(sem *SemanticCacheConfig) {
 		sem.SimilarityThreshold = 0.92
 	}
 	if sem.TTL == nil {
-		sem.TTL = intPtr(3600)
+		sem.TTL = new(3600)
 	}
 	if sem.MaxConversationMessages == nil {
-		sem.MaxConversationMessages = intPtr(3)
+		sem.MaxConversationMessages = new(3)
 	}
 }
-
-func intPtr(v int) *int { return &v }
 
 func applyResponseSimpleEnv(resp *ResponseCacheConfig) error {
 	v, ok := os.LookupEnv("RESPONSE_CACHE_SIMPLE_ENABLED")

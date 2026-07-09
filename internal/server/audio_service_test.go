@@ -361,7 +361,7 @@ func TestAudioSpeech_CostsOutputAudioDuration(t *testing.T) {
 	wav := wavBytes(24000, 1, 16, 2.0)
 	mp3 := []byte("\xff\xfbnot-a-wav-body")
 	// gpt-4o-mini-tts-style pricing: tiny text input plus per-second audio output.
-	pricing := &core.ModelPricing{InputPerMtok: floatPtr(0.6), PerSecondOutput: floatPtr(0.00025)}
+	pricing := &core.ModelPricing{InputPerMtok: new(0.6), PerSecondOutput: new(0.00025)}
 
 	tests := []struct {
 		name           string
@@ -425,8 +425,6 @@ func TestAudioSpeech_CostsOutputAudioDuration(t *testing.T) {
 		})
 	}
 }
-
-func floatPtr(v float64) *float64 { return &v }
 
 // wavBytes builds a minimal canonical PCM WAV of the requested duration.
 func wavBytes(sampleRate, channels, bitsPerSample int, seconds float64) []byte {

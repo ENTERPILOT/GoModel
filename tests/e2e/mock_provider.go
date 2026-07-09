@@ -250,15 +250,15 @@ func (m *MockLLMServer) handleStreamingResponse(w http.ResponseWriter, req core.
 	chunks := splitIntoChunks(content, 5)
 
 	for i, chunk := range chunks {
-		delta := map[string]interface{}{
+		delta := map[string]any{
 			"id":      "chatcmpl-test-stream",
 			"object":  "chat.completion.chunk",
 			"model":   req.Model,
 			"created": time.Now().Unix(),
-			"choices": []map[string]interface{}{
+			"choices": []map[string]any{
 				{
 					"index": 0,
-					"delta": map[string]interface{}{
+					"delta": map[string]any{
 						"content": chunk,
 					},
 					"finish_reason": nil,
@@ -268,7 +268,7 @@ func (m *MockLLMServer) handleStreamingResponse(w http.ResponseWriter, req core.
 
 		// Last chunk has finish_reason
 		if i == len(chunks)-1 {
-			delta["choices"].([]map[string]interface{})[0]["finish_reason"] = "stop"
+			delta["choices"].([]map[string]any)[0]["finish_reason"] = "stop"
 		}
 
 		data, _ := json.Marshal(delta)
@@ -302,21 +302,21 @@ func (m *MockLLMServer) handleStreamingToolResponse(w http.ResponseWriter, req c
 		},
 	}
 
-	firstChunk := map[string]interface{}{
+	firstChunk := map[string]any{
 		"id":      "chatcmpl-test-stream",
 		"object":  "chat.completion.chunk",
 		"model":   req.Model,
 		"created": time.Now().Unix(),
-		"choices": []map[string]interface{}{
+		"choices": []map[string]any{
 			{
 				"index": 0,
-				"delta": map[string]interface{}{
-					"tool_calls": []map[string]interface{}{
+				"delta": map[string]any{
+					"tool_calls": []map[string]any{
 						{
 							"index": 0,
 							"id":    toolCall.ID,
 							"type":  toolCall.Type,
-							"function": map[string]interface{}{
+							"function": map[string]any{
 								"name":      toolCall.Function.Name,
 								"arguments": toolCall.Function.Arguments,
 							},
@@ -333,15 +333,15 @@ func (m *MockLLMServer) handleStreamingToolResponse(w http.ResponseWriter, req c
 	flusher.Flush()
 	time.Sleep(10 * time.Millisecond)
 
-	finalChunk := map[string]interface{}{
+	finalChunk := map[string]any{
 		"id":      "chatcmpl-test-stream",
 		"object":  "chat.completion.chunk",
 		"model":   req.Model,
 		"created": time.Now().Unix(),
-		"choices": []map[string]interface{}{
+		"choices": []map[string]any{
 			{
 				"index":         0,
-				"delta":         map[string]interface{}{},
+				"delta":         map[string]any{},
 				"finish_reason": "tool_calls",
 			},
 		},
@@ -396,19 +396,19 @@ func (m *MockLLMServer) handleResponses(w http.ResponseWriter, r *http.Request, 
 	inputText := extractInputText(req.Input)
 	responseContent := fmt.Sprintf("Mock response to: %s", inputText)
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"id":         "resp_test_" + time.Now().Format("20060102150405"),
 		"object":     "response",
 		"created_at": time.Now().Unix(),
 		"model":      req.Model,
 		"status":     "completed",
-		"output": []map[string]interface{}{
+		"output": []map[string]any{
 			{
 				"id":     fmt.Sprintf("msg_%d", time.Now().UnixNano()),
 				"type":   "message",
 				"role":   "assistant",
 				"status": "completed",
-				"content": []map[string]interface{}{
+				"content": []map[string]any{
 					{
 						"type":        "output_text",
 						"text":        responseContent,
@@ -417,7 +417,7 @@ func (m *MockLLMServer) handleResponses(w http.ResponseWriter, r *http.Request, 
 				},
 			},
 		},
-		"usage": map[string]interface{}{
+		"usage": map[string]any{
 			"input_tokens":  10,
 			"output_tokens": 20,
 			"total_tokens":  30,
@@ -447,9 +447,9 @@ func (m *MockLLMServer) handleResponsesStreaming(w http.ResponseWriter, req core
 	chunks := splitIntoChunks(content, 5)
 
 	// Send response.created event
-	createdEvent := map[string]interface{}{
+	createdEvent := map[string]any{
 		"type": "response.created",
-		"response": map[string]interface{}{
+		"response": map[string]any{
 			"id":         responseID,
 			"object":     "response",
 			"status":     "in_progress",
@@ -463,7 +463,7 @@ func (m *MockLLMServer) handleResponsesStreaming(w http.ResponseWriter, req core
 
 	// Send text delta events
 	for _, chunk := range chunks {
-		deltaEvent := map[string]interface{}{
+		deltaEvent := map[string]any{
 			"type":  "response.output_text.delta",
 			"delta": chunk,
 		}
@@ -474,15 +474,15 @@ func (m *MockLLMServer) handleResponsesStreaming(w http.ResponseWriter, req core
 	}
 
 	// Send response.completed event
-	doneEvent := map[string]interface{}{
+	doneEvent := map[string]any{
 		"type": "response.completed",
-		"response": map[string]interface{}{
+		"response": map[string]any{
 			"id":         responseID,
 			"object":     "response",
 			"status":     "completed",
 			"model":      req.Model,
 			"created_at": time.Now().Unix(),
-			"usage": map[string]interface{}{
+			"usage": map[string]any{
 				"input_tokens":  10,
 				"output_tokens": 20,
 				"total_tokens":  30,
@@ -499,22 +499,22 @@ func (m *MockLLMServer) handleResponsesStreaming(w http.ResponseWriter, req core
 }
 
 // extractInputText extracts text content from the input field.
-func extractInputText(input interface{}) string {
+func extractInputText(input any) string {
 	switch v := input.(type) {
 	case string:
 		return v
-	case []interface{}:
+	case []any:
 		// Array input - extract from last user message
 		for i := len(v) - 1; i >= 0; i-- {
-			if msg, ok := v[i].(map[string]interface{}); ok {
+			if msg, ok := v[i].(map[string]any); ok {
 				if role, _ := msg["role"].(string); role == "user" {
 					if content, ok := msg["content"].(string); ok {
 						return content
 					}
 					// Handle complex content (array of content items)
-					if contentArr, ok := msg["content"].([]interface{}); ok {
+					if contentArr, ok := msg["content"].([]any); ok {
 						for _, item := range contentArr {
-							if itemMap, ok := item.(map[string]interface{}); ok {
+							if itemMap, ok := item.(map[string]any); ok {
 								if text, ok := itemMap["text"].(string); ok {
 									return text
 								}
@@ -542,9 +542,9 @@ func generateMockResponse(req core.ChatRequest) string {
 
 func forcedToolName(req core.ChatRequest) string {
 	switch choice := req.ToolChoice.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if choiceType, _ := choice["type"].(string); choiceType == "function" {
-			if function, ok := choice["function"].(map[string]interface{}); ok {
+			if function, ok := choice["function"].(map[string]any); ok {
 				if name, _ := function["name"].(string); name != "" {
 					return name
 				}
@@ -552,7 +552,7 @@ func forcedToolName(req core.ChatRequest) string {
 		}
 	case string:
 		if choice == "required" && len(req.Tools) > 0 {
-			if function, ok := req.Tools[0]["function"].(map[string]interface{}); ok {
+			if function, ok := req.Tools[0]["function"].(map[string]any); ok {
 				if name, _ := function["name"].(string); name != "" {
 					return name
 				}
@@ -571,10 +571,7 @@ func splitIntoChunks(s string, n int) []string {
 
 	chunks := make([]string, 0)
 	for i := 0; i < len(s); i += n {
-		end := i + n
-		if end > len(s) {
-			end = len(s)
-		}
+		end := min(i+n, len(s))
 		chunks = append(chunks, s[i:end])
 	}
 	return chunks

@@ -21,8 +21,6 @@ type fakeSegmentRow struct {
 	raw      *string
 }
 
-func segRaw(s string) *string { return &s }
-
 func (f *fakeInputSegmentRows) Next() bool {
 	f.pos++
 	return f.pos <= len(f.rows)
@@ -49,10 +47,10 @@ func (f *fakeInputSegmentRows) Err() error { return f.iterErr }
 
 func TestFoldInputSegments_FoldsAndToleratesMalformedRawData(t *testing.T) {
 	rows := &fakeInputSegmentRows{rows: []fakeSegmentRow{
-		{input: 120, provider: "openai", raw: segRaw(`{"prompt_cached_tokens":80}`)},                                       // subset → uncached 40, cached 80
-		{input: 50, provider: "anthropic", raw: segRaw(`{"cache_read_input_tokens":90,"cache_creation_input_tokens":30}`)}, // split → uncached 50, cached 90, write 30
-		{input: 70, provider: "openai", raw: segRaw(`{bad json`)},                                                          // malformed → degrades to no cache → uncached 70
-		{input: 10, provider: "openai", raw: nil},                                                                          // nil raw → uncached 10
+		{input: 120, provider: "openai", raw: new(`{"prompt_cached_tokens":80}`)},                                       // subset → uncached 40, cached 80
+		{input: 50, provider: "anthropic", raw: new(`{"cache_read_input_tokens":90,"cache_creation_input_tokens":30}`)}, // split → uncached 50, cached 90, write 30
+		{input: 70, provider: "openai", raw: new(`{bad json`)},                                                          // malformed → degrades to no cache → uncached 70
+		{input: 10, provider: "openai", raw: nil},                                                                       // nil raw → uncached 10
 	}}
 
 	summary := &UsageSummary{}
@@ -86,7 +84,7 @@ func TestFoldInputSegments_ScanErrorPropagates(t *testing.T) {
 func TestFoldInputSegments_IterationErrorPropagates(t *testing.T) {
 	wantErr := errors.New("iter boom")
 	rows := &fakeInputSegmentRows{
-		rows:    []fakeSegmentRow{{input: 10, provider: "openai", raw: segRaw(`{}`)}},
+		rows:    []fakeSegmentRow{{input: 10, provider: "openai", raw: new(`{}`)}},
 		iterErr: wantErr,
 	}
 	err := foldInputSegments(rows, &UsageSummary{})

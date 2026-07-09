@@ -784,9 +784,7 @@ func TestClient_BuildErrorDoesNotRetryOrChargeBreaker(t *testing.T) {
 	}
 
 	for _, st := range states {
-		st := st
 		for _, e := range entries {
-			e := e
 			t.Run(st.name+"/"+e.name, func(t *testing.T) {
 				var attempts int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -17,9 +17,7 @@ type vecCleanup struct {
 func startVecCleanup(store VecStore) *vecCleanup {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &vecCleanup{cancel: cancel}
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	c.wg.Go(func() {
 		t := time.NewTicker(vecStoreCleanupInterval)
 		defer t.Stop()
 		for {
@@ -35,7 +33,7 @@ func startVecCleanup(store VecStore) *vecCleanup {
 				return
 			}
 		}
-	}()
+	})
 	return c
 }
 

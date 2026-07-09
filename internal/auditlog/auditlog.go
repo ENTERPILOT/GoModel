@@ -221,7 +221,7 @@ type AttemptSnapshot struct {
 	ErrorType    string    `json:"error_type,omitempty" bson:"error_type,omitempty"`
 	ErrorCode    string    `json:"error_code,omitempty" bson:"error_code,omitempty"`
 	ErrorMessage string    `json:"error_message,omitempty" bson:"error_message,omitempty"`
-	StartedAt    time.Time `json:"started_at,omitempty" bson:"started_at,omitempty"`
+	StartedAt    time.Time `json:"started_at" bson:"started_at,omitempty"`
 	DurationNs   int64     `json:"duration_ns,omitempty" bson:"duration_ns,omitempty"`
 
 	// ResponseBody and ResponseHeaders capture the raw upstream error response

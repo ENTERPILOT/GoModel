@@ -41,21 +41,19 @@ func setupRateLimitService(t *testing.T, rules []ratelimit.Rule) *ratelimit.Serv
 	return service
 }
 
-func rateLimitInt64(v int64) *int64 { return &v }
-
 func TestRateLimitRequestEnforcement_E2E(t *testing.T) {
 	mockServer.ResetRequests()
 	service := setupRateLimitService(t, []ratelimit.Rule{{
 		Subject:       "/team/rl",
 		PeriodSeconds: ratelimit.PeriodMinuteSeconds,
-		MaxRequests:   rateLimitInt64(2),
+		MaxRequests:   new(int64(2)),
 		Source:        ratelimit.SourceManual,
 	}})
 
 	ts := httptest.NewServer(setupE2EServer(t, e2eServerOptions{rateLimiter: service}))
 	defer ts.Close()
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		resp := sendBudgetChatRequest(t, ts.URL, "rate limit ok", "rl-ok-"+strconv.Itoa(i), "/team/rl/app")
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		require.Equal(t, "2", resp.Header.Get("x-ratelimit-limit-requests"))
@@ -90,7 +88,7 @@ func TestRateLimitTokenEnforcement_E2E(t *testing.T) {
 	service := setupRateLimitService(t, []ratelimit.Rule{{
 		Subject:       "/team/tokens",
 		PeriodSeconds: ratelimit.PeriodMinuteSeconds,
-		MaxTokens:     rateLimitInt64(5),
+		MaxTokens:     new(int64(5)),
 		Source:        ratelimit.SourceManual,
 	}})
 
@@ -142,7 +140,7 @@ func TestRateLimitConcurrencyEnforcement_E2E(t *testing.T) {
 	service := setupRateLimitService(t, []ratelimit.Rule{{
 		Subject:       "/team/cc",
 		PeriodSeconds: ratelimit.PeriodConcurrent,
-		MaxRequests:   rateLimitInt64(1),
+		MaxRequests:   new(int64(1)),
 		Source:        ratelimit.SourceManual,
 	}})
 
@@ -215,7 +213,7 @@ func TestRateLimitProviderScopeEnforcement_E2E(t *testing.T) {
 		Scope:         ratelimit.ScopeProvider,
 		Subject:       "test",
 		PeriodSeconds: ratelimit.PeriodMinuteSeconds,
-		MaxRequests:   rateLimitInt64(1),
+		MaxRequests:   new(int64(1)),
 		Source:        ratelimit.SourceManual,
 	}})
 

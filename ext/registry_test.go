@@ -63,15 +63,13 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 	const workers = 16
 
 	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			reg.RegisterRewriter(&namedRewriter{name: "w"})
 			reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 			reg.AddPublicPaths("/p")
 			_ = reg.Rewriters()
-		}()
+		})
 	}
 	wg.Wait()
 

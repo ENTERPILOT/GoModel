@@ -299,10 +299,7 @@ func (s *nativeFileService) recordStoredFile(ctx context.Context, resp *core.Fil
 	if strings.TrimSpace(resp.ID) == "" {
 		return nil
 	}
-	createdAt := resp.CreatedAt
-	if createdAt <= 0 {
-		createdAt = 0
-	}
+	createdAt := max(resp.CreatedAt, 0)
 	if err := s.fileStore.Upsert(ctx, &filestore.StoredFile{
 		ID:           resp.ID,
 		ProviderType: providerType,

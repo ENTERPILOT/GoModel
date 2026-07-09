@@ -33,23 +33,14 @@ func (w *windowCounter) advance(now time.Time, periodSeconds int64) {
 // estimate returns the weighted sliding-window usage at now. advance must be
 // called first for the same now.
 func (w *windowCounter) estimate(now time.Time, periodSeconds int64) int64 {
-	elapsed := now.Unix() - w.windowStart
-	if elapsed < 0 {
-		elapsed = 0
-	}
-	if elapsed > periodSeconds {
-		elapsed = periodSeconds
-	}
+	elapsed := min(max(now.Unix()-w.windowStart, 0), periodSeconds)
 	weight := float64(periodSeconds-elapsed) / float64(periodSeconds)
 	return int64(float64(w.previous)*weight) + w.current
 }
 
 // resetAfter returns the time until the current window rolls over.
 func (w *windowCounter) resetAfter(now time.Time, periodSeconds int64) time.Duration {
-	remaining := w.windowStart + periodSeconds - now.Unix()
-	if remaining < 1 {
-		remaining = 1
-	}
+	remaining := max(w.windowStart+periodSeconds-now.Unix(), 1)
 	return time.Duration(remaining) * time.Second
 }
 
@@ -146,10 +137,7 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 		if rule.MaxRequests != nil {
 			counter := l.requests[key]
 			counter.current++
-			remaining := *rule.MaxRequests - counter.estimate(now, rule.PeriodSeconds)
-			if remaining < 0 {
-				remaining = 0
-			}
+			remaining := max(*rule.MaxRequests-counter.estimate(now, rule.PeriodSeconds), 0)
 			if !headers.HasRequests || remaining < headers.RequestRemaining {
 				headers.HasRequests = true
 				headers.RequestLimit = *rule.MaxRequests
@@ -159,10 +147,7 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 		}
 		if rule.MaxTokens != nil {
 			counter := l.tokens[key]
-			remaining := *rule.MaxTokens - counter.estimate(now, rule.PeriodSeconds)
-			if remaining < 0 {
-				remaining = 0
-			}
+			remaining := max(*rule.MaxTokens-counter.estimate(now, rule.PeriodSeconds), 0)
 			if !headers.HasTokens || remaining < headers.TokenRemaining {
 				headers.HasTokens = true
 				headers.TokenLimit = *rule.MaxTokens

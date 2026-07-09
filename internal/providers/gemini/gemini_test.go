@@ -1475,7 +1475,7 @@ func parseOpenAIStreamChunks(t *testing.T, stream string) []map[string]any {
 	t.Helper()
 
 	var chunks []map[string]any
-	for _, line := range strings.Split(stream, "\n") {
+	for line := range strings.SplitSeq(stream, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data:") {
 			continue

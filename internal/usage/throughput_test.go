@@ -134,7 +134,7 @@ func TestSQLiteReaderGetTokenThroughput_SplitsAndBuckets(t *testing.T) {
 	}
 
 	// Every earlier bucket must be empty — the out-of-window row is excluded.
-	for i := 0; i < 59; i++ {
+	for i := range 59 {
 		b := tp.Buckets[i]
 		if b.InputTokens+b.OutputTokens+b.PromptCachedTokens+b.LocallyCachedTokens != 0 {
 			t.Errorf("bucket %d should be empty, got %+v", i, b)

@@ -220,7 +220,7 @@ func TestAuditLog_MultipleRequests_PostgreSQL(t *testing.T) {
 
 	// Make multiple requests with unique IDs
 	requestIDs := make([]string, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		requestIDs[i] = uuid.New().String()
 		payload := newChatRequest("gpt-4", "Hello!")
 		resp := sendChatRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{

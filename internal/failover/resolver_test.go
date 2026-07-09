@@ -341,7 +341,7 @@ func modelInfoWithCategories(
 				Rankings: map[string]core.ModelRanking{
 					"chatbot_arena": {
 						Elo:  &elo,
-						Rank: intPtr(1),
+						Rank: new(1),
 						AsOf: "2026-02-22",
 					},
 				},
@@ -350,8 +350,4 @@ func modelInfoWithCategories(
 		ProviderName: providerName,
 		ProviderType: providerType,
 	}
-}
-
-func intPtr(v int) *int {
-	return &v
 }

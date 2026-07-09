@@ -2,6 +2,7 @@ package failover
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -322,13 +323,10 @@ func (r *Resolver) autoSelectorsFor(
 		return a.key < b.key
 	})
 
-	limit := maxAutoFailoverCandidates
-	if len(candidates) < limit {
-		limit = len(candidates)
-	}
+	limit := min(len(candidates), maxAutoFailoverCandidates)
 
 	result := make([]core.ModelSelector, 0, limit)
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		seen[candidates[i].key] = struct{}{}
 		result = append(result, candidates[i].selector)
 	}
@@ -415,12 +413,7 @@ func supportsCategory(meta *core.ModelMetadata, required core.ModelCategory) boo
 	if required == "" {
 		return true
 	}
-	for _, category := range meta.Categories {
-		if category == required {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(meta.Categories, required)
 }
 
 func preferredRanking(rankings map[string]core.ModelRanking) (string, core.ModelRanking, bool) {

@@ -61,7 +61,7 @@ func TestRateLimitSaturatedPrimaryFailsOver_E2E(t *testing.T) {
 		Scope:         ratelimit.ScopeModel,
 		Subject:       "gpt-4",
 		PeriodSeconds: ratelimit.PeriodMinuteSeconds,
-		MaxRequests:   rateLimitInt64(1),
+		MaxRequests:   new(int64(1)),
 		Source:        ratelimit.SourceManual,
 	}})
 
@@ -102,7 +102,7 @@ func TestRateLimitFullySaturatedAliasReturns429_E2E(t *testing.T) {
 		Scope:         ratelimit.ScopeProvider,
 		Subject:       "test",
 		PeriodSeconds: ratelimit.PeriodMinuteSeconds,
-		MaxRequests:   rateLimitInt64(2),
+		MaxRequests:   new(int64(2)),
 		Source:        ratelimit.SourceManual,
 	}})
 

@@ -13,7 +13,7 @@ import (
 )
 
 func TestApplyRewriteSavings(t *testing.T) {
-	flatPricing := &core.ModelPricing{InputPerMtok: floatPtr(2.0), OutputPerMtok: floatPtr(8.0)}
+	flatPricing := &core.ModelPricing{InputPerMtok: new(2.0), OutputPerMtok: new(8.0)}
 
 	t.Run("nil entry and non-positive savings are no-ops", func(t *testing.T) {
 		ApplyRewriteSavings(nil, 100, flatPricing)
@@ -53,10 +53,10 @@ func TestApplyRewriteSavings(t *testing.T) {
 
 	t.Run("tier crossing re-rates the whole input", func(t *testing.T) {
 		tiered := &core.ModelPricing{
-			InputPerMtok: floatPtr(10.0),
+			InputPerMtok: new(10.0),
 			Tiers: []core.ModelPricingTier{
-				{UpToTokens: floatPtr(1000), InputPerMtok: floatPtr(1.0)},
-				{UpToTokens: floatPtr(1_000_000), InputPerMtok: floatPtr(3.0)},
+				{UpToTokens: new(float64(1000)), InputPerMtok: new(1.0)},
+				{UpToTokens: new(float64(1_000_000)), InputPerMtok: new(3.0)},
 			},
 		}
 		entry := &UsageEntry{Endpoint: "/v1/chat/completions", Provider: "openai", InputTokens: 800}
@@ -72,7 +72,7 @@ func TestApplyRewriteSavings(t *testing.T) {
 	})
 
 	t.Run("batch endpoint uses batch input rate", func(t *testing.T) {
-		pricing := &core.ModelPricing{InputPerMtok: floatPtr(2.0), BatchInputPerMtok: floatPtr(1.0)}
+		pricing := &core.ModelPricing{InputPerMtok: new(2.0), BatchInputPerMtok: new(1.0)}
 		entry := &UsageEntry{Endpoint: "/v1/batches", Provider: "openai", InputTokens: 0}
 		ApplyRewriteSavings(entry, 1_000_000, pricing)
 		if entry.RewriteCostSaved == nil {
@@ -103,7 +103,7 @@ func TestSQLiteSummaryAggregatesRewriteSavings(t *testing.T) {
 			Timestamp: time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC),
 			Model:     "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions",
 			InputTokens: 1000, OutputTokens: 50, TotalTokens: 1050,
-			RewriteTokensSaved: 400, RewriteCostSaved: floatPtr(0.0008),
+			RewriteTokensSaved: 400, RewriteCostSaved: new(0.0008),
 		},
 		{
 			ID: "with-unpriced-savings", RequestID: "req-2", ProviderID: "p-2",
@@ -181,14 +181,14 @@ func TestSQLiteRecalculatePricingRefreshesRewriteCostSaved(t *testing.T) {
 		Timestamp: time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC),
 		Model:     "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions",
 		InputTokens: 1000, OutputTokens: 50, TotalTokens: 1050,
-		RewriteTokensSaved: 500_000, RewriteCostSaved: floatPtr(123.0),
+		RewriteTokensSaved: 500_000, RewriteCostSaved: new(123.0),
 	}}); err != nil {
 		t.Fatalf("failed to seed usage entry: %v", err)
 	}
 
 	resolver := staticSavingsPricingResolver{pricing: &core.ModelPricing{
-		InputPerMtok:  floatPtr(2.0),
-		OutputPerMtok: floatPtr(8.0),
+		InputPerMtok:  new(2.0),
+		OutputPerMtok: new(8.0),
 	}}
 	if _, err := store.RecalculatePricing(ctx, RecalculatePricingParams{}, resolver); err != nil {
 		t.Fatalf("RecalculatePricing returned error: %v", err)

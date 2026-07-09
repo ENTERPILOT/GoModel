@@ -54,7 +54,7 @@ func TestMain(m *testing.M) {
 	}()
 
 	// Wait for both containers to start
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := <-errCh; err != nil {
 			log.Printf("Container setup failed: %v", err)
 			cleanup()

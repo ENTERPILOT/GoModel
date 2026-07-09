@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -182,9 +183,7 @@ func generatedConversationID() string {
 // conversation carries an empty object rather than null, matching OpenAI.
 func normalizedConversationMetadata(metadata map[string]string) map[string]string {
 	normalized := make(map[string]string, len(metadata))
-	for key, value := range metadata {
-		normalized[key] = value
-	}
+	maps.Copy(normalized, metadata)
 	return normalized
 }
 

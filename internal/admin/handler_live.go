@@ -113,7 +113,7 @@ func liveTypeFilter(raw string) liveLogTypeFilter {
 		provided: true,
 		types:    map[string]struct{}{},
 	}
-	for _, item := range strings.Split(raw, ",") {
+	for item := range strings.SplitSeq(raw, ",") {
 		item = strings.ToLower(strings.TrimSpace(item))
 		switch item {
 		case "audit", "usage":

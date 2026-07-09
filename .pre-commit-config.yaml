@@ -44,6 +44,20 @@ repos:
         language: system
         pass_filenames: false
         files: '^(internal/(auditlog|core|providers|server|usage)/.*\.go|tests/perf/.*\.go|Makefile|\.github/workflows/test\.yml)$'
+      # Reports Go modernizations (maps.Copy, slices.Contains, min/max, new(expr),
+      # range-over-int, ...) that `go fix` would apply. Check-only, by design:
+      # `go fix` rewrites source in place, and when it marks a helper
+      # `//go:fix inline` it only inlines the callers on a *later* run, leaving the
+      # helper orphaned and tripping the `unused` linter. An auto-applying hook
+      # would therefore mutate the commit and still fail it. Run `make fix` to
+      # apply, re-run until clean, then delete any now-unused helper.
+      - id: go-fix-check
+        name: make fix-check
+        entry: make fix-check
+        language: system
+        pass_filenames: false
+        files: '(\.go$|^go\.(mod|sum)$|^Makefile$)'
+
       - id: go-lint
         name: make lint
         entry: make lint

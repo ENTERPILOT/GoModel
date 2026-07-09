@@ -1,6 +1,7 @@
 package auditlog
 
 import (
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -330,9 +331,7 @@ func (l *captureLiveLogger) PublishLiveEvent(eventType string, entry *LogEntry) 
 	headers := map[string]string(nil)
 	if entry != nil && entry.Data != nil && entry.Data.RequestHeaders != nil {
 		headers = make(map[string]string, len(entry.Data.RequestHeaders))
-		for key, value := range entry.Data.RequestHeaders {
-			headers[key] = value
-		}
+		maps.Copy(headers, entry.Data.RequestHeaders)
 	}
 	var requestBody any
 	if entry != nil && entry.Data != nil {

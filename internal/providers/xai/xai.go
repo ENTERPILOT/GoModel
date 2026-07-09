@@ -161,10 +161,7 @@ func xGrokAnchorMessages(messages []core.Message) []core.Message {
 	if len(messages) == 0 {
 		return nil
 	}
-	limit := 2
-	if len(messages) < limit {
-		limit = len(messages)
-	}
+	limit := min(len(messages), 2)
 	anchor := make([]core.Message, limit)
 	copy(anchor, messages[:limit])
 	return anchor

@@ -110,7 +110,7 @@ func cleanup() {
 // waitForServer waits for the server to become healthy.
 func waitForServer(healthURL string) error {
 	client := &http.Client{Timeout: 2 * time.Second}
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		resp, err := client.Get(healthURL)
 		if err == nil {
 			_ = resp.Body.Close()
