@@ -4,6 +4,7 @@ import (
 	"maps"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -14,8 +15,15 @@ import (
 // ProviderConfig holds the fully resolved provider configuration after merging
 // global defaults with per-provider overrides.
 type ProviderConfig struct {
-	Type                     string
-	APIKey                   string
+	Type string
+	// APIKey is the provider's primary credential: the first entry of APIKeys,
+	// or "" for keyless providers. Prefer APIKeys for anything that
+	// authenticates a request, so rotation is honoured.
+	APIKey string
+	// APIKeys is the provider's full, ordered, de-duplicated key set. Requests
+	// rotate across it round robin when it holds more than one key. It is nil
+	// for keyless providers and holds exactly one entry in the common case.
+	APIKeys                  []string
 	BaseURL                  string
 	APIVersion               string
 	Backend                  string
@@ -42,9 +50,51 @@ type ProviderConfig struct {
 // (same keys as the first); use it for auxiliary clients that need the same
 // API keys and base URLs as the live router (e.g. semantic-cache embeddings).
 func resolveProviders(raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig) {
-	merged := applyProviderEnvVars(raw, discovery)
+	merged := normalizeProviderAPIKeys(applyProviderEnvVars(raw, discovery))
 	filtered := filterEmptyProviders(merged, discovery)
 	return buildProviderConfigs(filtered, global), filtered
+}
+
+// normalizeProviderAPIKeys collapses each provider's `api_key` and `api_keys`
+// into one canonical ordered set: APIKeys holds every usable key and APIKey
+// holds the first. Unresolved `${VAR}` placeholders are dropped here rather
+// than forwarded as literal credentials, so a provider whose only key failed
+// to resolve ends up keyless and is then dropped by filterEmptyProviders --
+// the same outcome as before rotation existed.
+func normalizeProviderAPIKeys(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
+	result := make(map[string]config.RawProviderConfig, len(raw))
+	for name, p := range raw {
+		keys := resolvedAPIKeys(append([]string{p.APIKey}, p.APIKeys...))
+		p.APIKeys = keys
+		p.APIKey = ""
+		if len(keys) > 0 {
+			p.APIKey = keys[0]
+		}
+		result[name] = p
+	}
+	return result
+}
+
+// resolvedAPIKeys trims, drops unresolved and empty entries, and de-duplicates
+// while preserving order.
+func resolvedAPIKeys(keys []string) []string {
+	resolved := make([]string, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if !HasResolvedProviderValue(key) {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		resolved = append(resolved, key)
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	return resolved
 }
 
 // applyProviderEnvVars overlays well-known provider env vars onto the raw YAML map.
@@ -101,7 +151,11 @@ type providerEnvSource struct {
 }
 
 type providerEnvValues struct {
-	APIKey                   string
+	APIKey string
+	// APIKeysByIndex holds `<PROVIDER>_API_KEY_<n>` values keyed by n. The
+	// unsuffixed `<PROVIDER>_API_KEY` is kept apart in APIKey so it can claim
+	// slot 1 regardless of the order os.Environ happens to return.
+	APIKeysByIndex           map[int]string
 	BaseURL                  string
 	APIVersion               string
 	Backend                  string
@@ -116,8 +170,44 @@ type providerEnvValues struct {
 	Models                   []string
 }
 
+// apiKeys returns the ordered key set this env group declares: the unsuffixed
+// key leads, then the numbered keys in ascending index order. Gaps are ignored,
+// so setting only `_API_KEY` and `_API_KEY_3` yields two keys, and a key
+// repeated across `_API_KEY` and `_API_KEY_1` is de-duplicated to one.
+func (v providerEnvValues) apiKeys() []string {
+	if strings.TrimSpace(v.APIKey) == "" && len(v.APIKeysByIndex) == 0 {
+		return nil
+	}
+
+	// The unsuffixed key sorts ahead of every numbered slot, which are 1-based.
+	byIndex := make(map[int]string, len(v.APIKeysByIndex)+1)
+	maps.Copy(byIndex, v.APIKeysByIndex)
+	if strings.TrimSpace(v.APIKey) != "" {
+		byIndex[0] = v.APIKey
+	}
+
+	indexes := make([]int, 0, len(byIndex))
+	for index := range byIndex {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+
+	keys := make([]string, 0, len(indexes))
+	for _, index := range indexes {
+		keys = append(keys, byIndex[index])
+	}
+	return resolvedAPIKeys(keys)
+}
+
+// hasAPIKey reports whether this env group carries any credential, numbered or
+// not. Base-URL defaulting keys off it, so a provider configured only through
+// `<PROVIDER>_API_KEY_2` still resolves its default endpoint.
+func (v providerEnvValues) hasAPIKey() bool {
+	return len(v.apiKeys()) > 0
+}
+
 func (v providerEnvValues) empty() bool {
-	return strings.TrimSpace(v.APIKey) == "" &&
+	return !v.hasAPIKey() &&
 		strings.TrimSpace(v.BaseURL) == "" &&
 		strings.TrimSpace(v.APIVersion) == "" &&
 		strings.TrimSpace(v.Backend) == "" &&
@@ -155,7 +245,7 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 			continue
 		}
 
-		suffix, field, ok := parseProviderEnvKey(prefix, key, spec)
+		suffix, field, index, ok := parseProviderEnvKey(prefix, key, spec)
 		if !ok {
 			continue
 		}
@@ -163,7 +253,14 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 		values := groups[suffix]
 		switch field {
 		case providerEnvFieldAPIKey:
-			values.APIKey = value
+			if index == 0 {
+				values.APIKey = value
+				break
+			}
+			if values.APIKeysByIndex == nil {
+				values.APIKeysByIndex = make(map[int]string)
+			}
+			values.APIKeysByIndex[index] = value
 		case providerEnvFieldBaseURL:
 			values.BaseURL = normalizeResolvedBaseURL(value)
 		case providerEnvFieldAPIVersion:
@@ -201,10 +298,29 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 	return groups
 }
 
-func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, providerEnvField, bool) {
+// parseProviderEnvKey splits a provider env var into the provider-name suffix,
+// the field it sets, and (for API keys) the 1-based rotation index. An index of
+// 0 means the unsuffixed `<PREFIX>_API_KEY`.
+func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, providerEnvField, int, bool) {
 	rest, ok := strings.CutPrefix(key, prefix+"_")
 	if !ok {
-		return "", 0, false
+		return "", 0, 0, false
+	}
+
+	// A trailing `_<n>` on an API key names a rotation slot, so check it before
+	// the field table: `OPENAI_API_KEY_2` is key 2 of provider `openai`, and
+	// `OPENAI_EU_API_KEY_2` is key 2 of provider `openai-eu`. A suffix that
+	// merely ends in a number is unambiguous the other way -- in
+	// `OPENAI_REGION_2_API_KEY` the digits do not trail the key, so it stays
+	// provider `openai-region-2`.
+	if base, index, isIndexed := cutAPIKeyIndex(rest); isIndexed {
+		if base == "API_KEY" {
+			return "", providerEnvFieldAPIKey, index, true
+		}
+		if suffix, found := strings.CutSuffix(base, "_API_KEY"); found && validProviderEnvSuffix(suffix) {
+			return suffix, providerEnvFieldAPIKey, index, true
+		}
+		return "", 0, 0, false
 	}
 
 	// Match field names from the right so suffixes can contain underscores.
@@ -243,15 +359,40 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 			continue
 		}
 		if rest == candidate.name {
-			return "", candidate.field, true
+			return "", candidate.field, 0, true
 		}
 		suffix, found := strings.CutSuffix(rest, "_"+candidate.name)
 		if found && validProviderEnvSuffix(suffix) {
-			return suffix, candidate.field, true
+			return suffix, candidate.field, 0, true
 		}
 	}
 
-	return "", 0, false
+	return "", 0, 0, false
+}
+
+// cutAPIKeyIndex splits a trailing rotation index off an API-key env var,
+// reporting the remaining base and the 1-based index. `_1` is accepted as well
+// as `_2` and up: operators who spell every slot out (`_1`, `_2`, `_3`) get
+// the keys they configured rather than a silently dropped first one.
+func cutAPIKeyIndex(rest string) (string, int, bool) {
+	base, digits, found := lastCut(rest, "_")
+	if !found || !strings.HasSuffix(base, "API_KEY") {
+		return "", 0, false
+	}
+	index, err := strconv.Atoi(digits)
+	if err != nil || index < 1 {
+		return "", 0, false
+	}
+	return base, index, true
+}
+
+// lastCut is strings.Cut anchored at the final separator.
+func lastCut(s, sep string) (string, string, bool) {
+	i := strings.LastIndex(s, sep)
+	if i < 0 {
+		return s, "", false
+	}
+	return s[:i], s[i+len(sep):], true
 }
 
 func validProviderEnvSuffix(suffix string) bool {
@@ -332,9 +473,15 @@ func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, pr
 
 func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) config.RawProviderConfig {
 	backend := v.Backend
+	keys := v.apiKeys()
+	primary := ""
+	if len(keys) > 0 {
+		primary = keys[0]
+	}
 	return config.RawProviderConfig{
 		Type:                     providerType,
-		APIKey:                   v.APIKey,
+		APIKey:                   primary,
+		APIKeys:                  keys,
 		BaseURL:                  v.resolvedBaseURL(spec),
 		APIVersion:               v.APIVersion,
 		Backend:                  backend,
@@ -352,19 +499,23 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 
 func (v providerEnvValues) resolvedBaseURL(spec DiscoveryConfig) string {
 	baseURL := strings.TrimSpace(v.BaseURL)
-	if baseURL == "" && strings.TrimSpace(v.APIKey) != "" && spec.DefaultBaseURL != "" {
+	if baseURL == "" && v.hasAPIKey() && spec.DefaultBaseURL != "" {
 		return spec.DefaultBaseURL
 	}
 	return baseURL
 }
 
 func overlayProviderEnvValues(existing config.RawProviderConfig, values providerEnvValues, spec DiscoveryConfig) config.RawProviderConfig {
-	if values.APIKey != "" {
-		existing.APIKey = values.APIKey
+	// Env replaces the provider's whole key set rather than merging into it, so
+	// dropping `OPENAI_API_KEY_2` from the environment removes that key instead
+	// of leaving a stale YAML entry rotating behind it.
+	if keys := values.apiKeys(); len(keys) > 0 {
+		existing.APIKey = keys[0]
+		existing.APIKeys = keys
 	}
 	if values.BaseURL != "" {
 		existing.BaseURL = values.BaseURL
-	} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && values.APIKey != "" && spec.DefaultBaseURL != "" {
+	} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && values.hasAPIKey() && spec.DefaultBaseURL != "" {
 		existing.BaseURL = spec.DefaultBaseURL
 	}
 	if values.APIVersion != "" {
@@ -639,6 +790,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 	resolved := ProviderConfig{
 		Type:                     normalizeProviderType(raw),
 		APIKey:                   raw.APIKey,
+		APIKeys:                  raw.APIKeys,
 		BaseURL:                  raw.BaseURL,
 		APIVersion:               raw.APIVersion,
 		Backend:                  raw.Backend,

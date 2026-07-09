@@ -22,10 +22,10 @@ var Registration = providers.Registration{
 }
 
 // Provider implements the core.Provider interface for Z.ai.
-// apiKey is retained to inject auth on the GLM-Realtime websocket target.
+// keys is retained to inject auth on the GLM-Realtime websocket target.
 type Provider struct {
 	*openai.ChatCompatible
-	apiKey string
+	keys *providers.Keyring
 }
 
 var _ core.Provider = (*Provider)(nil)
@@ -37,7 +37,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			ProviderName: "zai",
 			BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
 		}),
-		apiKey: cfg.APIKey,
+		keys: opts.Keyring(cfg.APIKey),
 	}
 }
 
@@ -49,6 +49,6 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 			ProviderName: "zai",
 			BaseURL:      providers.ResolveBaseURL(baseURL, defaultBaseURL),
 		}),
-		apiKey: apiKey,
+		keys: providers.NewKeyring(apiKey),
 	}
 }

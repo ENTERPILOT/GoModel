@@ -76,7 +76,9 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		ProviderName: "opencode_go",
 		BaseURL:      baseURL,
 	})
-	messages := anthropic.New(providers.ProviderConfig{APIKey: cfg.APIKey, BaseURL: baseURL}, opts)
+	// opts carries the shared keyring, so the /messages client rotates in step
+	// with the chat client above rather than pinning the primary key.
+	messages := anthropic.New(providers.ProviderConfig{APIKey: cfg.APIKey, APIKeys: cfg.APIKeys, BaseURL: baseURL}, opts)
 	return &Provider{
 		ChatCompatible: chat,
 		messages:       messages,

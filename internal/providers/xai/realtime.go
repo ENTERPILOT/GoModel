@@ -63,8 +63,8 @@ func (p *Provider) realtimeHTTPTarget(req *core.RealtimeRequest, endpoint string
 
 func (p *Provider) realtimeAuthHeaders() http.Header {
 	headers := http.Header{}
-	if p.apiKey != "" {
-		headers.Set("Authorization", "Bearer "+p.apiKey)
+	if apiKey := p.keys.Next(); apiKey != "" {
+		headers.Set("Authorization", "Bearer "+apiKey)
 	}
 	return headers
 }

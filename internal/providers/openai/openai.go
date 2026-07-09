@@ -28,12 +28,11 @@ const (
 )
 
 // Provider implements the core.Provider interface for OpenAI.
-// apiKey is retained so the provider can inject auth on the realtime websocket
-// dial target (see realtime.go); the realtime base URL is read live from the
-// embedded CompatibleProvider so SetBaseURL overrides are honored.
+// Credentials and the realtime base URL are both read live from the embedded
+// CompatibleProvider, so SetBaseURL overrides and key rotation are honored on
+// the realtime websocket dial target too (see realtime.go).
 type Provider struct {
 	*CompatibleProvider
-	apiKey string
 }
 
 // New creates a new OpenAI provider.
@@ -45,7 +44,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			BaseURL:      baseURL,
 			SetHeaders:   setHeaders,
 		}),
-		apiKey: cfg.APIKey,
 	}
 }
 
@@ -58,7 +56,6 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 			BaseURL:      defaultBaseURL,
 			SetHeaders:   setHeaders,
 		}),
-		apiKey: apiKey,
 	}
 }
 

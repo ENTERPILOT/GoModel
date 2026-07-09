@@ -1,0 +1,130 @@
+---
+title: "API Key Rotation"
+description: "Give one provider several API keys and spread requests across them round robin to lift per-key rate limits."
+icon: "key-round"
+---
+
+A provider normally holds one API key, and every request to it uses that key.
+Configure more than one and GoModel spreads requests across them round robin, so
+each key carries a fraction of the traffic. This raises the per-key rate limits
+you hit before the provider starts returning `429`.
+
+Rotation is off until a second key is configured. One key behaves exactly as it
+always has.
+
+<Warning>
+  **Rotation defeats provider prompt caching.** Providers scope their prompt
+  cache to the API key that created it, so consecutive requests sent under
+  different keys never hit a warm cache. Expect higher cost and slower
+  time-to-first-token on workloads with long, repeated prefixes — system
+  prompts, few-shot examples, long documents, or coding agents replaying a
+  conversation.
+
+  Rotate when you are rate limited. Do not rotate to save money on cached
+  prompts; it does the opposite.
+</Warning>
+
+## Configure
+
+Add keys with numbered environment variables. `<PROVIDER>_API_KEY` is the first
+key; `<PROVIDER>_API_KEY_2`, `_3`, and so on add the rest.
+
+```bash
+OPENAI_API_KEY=sk-first
+OPENAI_API_KEY_2=sk-second
+OPENAI_API_KEY_3=sk-third
+```
+
+Three keys, so requests to `openai` cycle `sk-first` → `sk-second` →
+`sk-third` → `sk-first` → …
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_keys:
+      - "${OPENAI_API_KEY}"
+      - "${OPENAI_API_KEY_2}"
+      - "${OPENAI_API_KEY_3}"
+```
+
+`api_key` and `api_keys` may be combined; `api_key` is used first.
+
+Any provider that authenticates with an API key can rotate — `ANTHROPIC_API_KEY_2`,
+`GEMINI_API_KEY_2`, `GROQ_API_KEY_2`, and so on. Providers that authenticate
+another way (Vertex AI and Bedrock, which use Google and AWS credentials) ignore
+these variables.
+
+## Rules
+
+- Numbering starts at `2`, since `<PROVIDER>_API_KEY` is key 1. Spelling out
+  `<PROVIDER>_API_KEY_1` instead of the unsuffixed form also works.
+- Gaps are fine. Setting only `_API_KEY` and `_API_KEY_3` gives two keys.
+- Duplicate keys are collapsed, so a key repeated across two variables does not
+  take a double share of the traffic.
+- Keys are used in the order configured: the unsuffixed key first, then
+  ascending by number.
+- Environment variables replace the provider's whole `api_keys` list from
+  `config.yaml` rather than merging into it.
+- A key that does not resolve — an `${UNSET_VAR}` placeholder — is dropped. A
+  provider left with no keys at all is not registered.
+
+<Note>
+  Keys rotate per outbound HTTP request, including retries. A request that a
+  provider rejects with `429` is retried under the next key rather than the one
+  that was just throttled.
+</Note>
+
+## Rotation on suffixed providers
+
+Suffixed environment variables register a *separate provider* of the same type.
+The two mechanisms compose, and the trailing number is what tells them apart:
+
+```bash
+OPENAI_EU_API_KEY=sk-eu-first
+OPENAI_EU_API_KEY_2=sk-eu-second
+```
+
+This is provider `openai-eu` with two keys. The trailing `_2` names a key.
+
+```bash
+OPENAI_REGION_2_API_KEY=sk-only
+```
+
+This is provider `openai-region-2` with one key. Here the `2` is part of the
+provider suffix, not a key number.
+
+## What rotation covers
+
+Every call GoModel makes to the provider draws the next key: chat completions,
+responses, embeddings, audio, images, batches, and provider-native
+[passthrough routes](/features/passthrough-api). Realtime websocket sessions pick a
+key when the session opens and keep it for the life of that session.
+
+Rotation is per gateway process. Counters live in memory and reset on restart,
+so `N` replicas each rotate independently — which is fine, since the goal is to
+spread load rather than to sequence it exactly.
+
+## Choosing between rotation and separate providers
+
+Both let you use several keys of one provider type. They solve different problems.
+
+| | Key rotation | Suffixed providers |
+| --- | --- | --- |
+| Config | `OPENAI_API_KEY_2` | `OPENAI_EAST_API_KEY` |
+| Model IDs | unchanged (`gpt-4o`) | provider-qualified (`openai-east/gpt-4o`) |
+| Routing | automatic, round robin | caller picks, or a [virtual model](/features/virtual-models) balances |
+| Prompt caching | lost | preserved per provider |
+| Use it for | lifting rate limits on one account | separate accounts, regions, or base URLs |
+
+If you want several keys *and* prompt caching, register them as suffixed
+providers and put a `round_robin` [virtual model](/features/virtual-models) in
+front. Each provider keeps its own key, so each keeps its own warm cache, at the
+cost of qualified model IDs and more configuration.
+
+## Verify
+
+Rotation is not reported by the API. To confirm it, watch the provider's own
+usage dashboard: traffic should divide roughly evenly across the keys.

@@ -23,8 +23,8 @@ func TestNew(t *testing.T) {
 	// Use NewWithHTTPClient to get concrete type for internal testing
 	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
 
-	if provider.apiKey != apiKey {
-		t.Errorf("apiKey = %q, want %q", provider.apiKey, apiKey)
+	if got := provider.keys.Primary(); got != apiKey {
+		t.Errorf("primary key = %q, want %q", got, apiKey)
 	}
 	if provider.modelsURL != defaultModelsBaseURL {
 		t.Errorf("modelsURL = %q, want %q", provider.modelsURL, defaultModelsBaseURL)

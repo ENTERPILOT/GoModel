@@ -122,8 +122,8 @@ func (p *Provider) realtimeRoot(insecureScheme, secureScheme string) (*url.URL, 
 
 func (p *Provider) realtimeAuthHeaders() http.Header {
 	headers := http.Header{}
-	if p.apiKey != "" {
-		headers.Set("api-key", p.apiKey)
+	if apiKey := p.keys.Next(); apiKey != "" {
+		headers.Set("api-key", apiKey)
 	}
 	return headers
 }

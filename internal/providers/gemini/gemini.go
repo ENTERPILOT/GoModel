@@ -48,7 +48,7 @@ type Provider struct {
 	client       *llmclient.Client
 	nativeClient *llmclient.Client
 	modelsClient *llmclient.Client
-	apiKey       string
+	keys         *providers.Keyring
 	backend      string
 	authType     string
 	useNativeAPI bool
@@ -75,7 +75,7 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 	baseURL, nativeBaseURL := geminiBaseURLs(providerCfg, backend)
 	modelsURL := geminiModelsBaseURL(backend, nativeBaseURL)
 	p := &Provider{
-		apiKey:       providerCfg.APIKey,
+		keys:         opts.Keyring(providerCfg.APIKey),
 		backend:      backend,
 		authType:     authType,
 		useNativeAPI: useNativeAPI(providerCfg.APIMode),
@@ -123,7 +123,7 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 	baseURL, nativeBaseURL := geminiBaseURLs(providerCfg, geminiBackendAIStudio)
 	modelsURL := geminiModelsBaseURL(geminiBackendAIStudio, nativeBaseURL)
 	p := &Provider{
-		apiKey:       apiKey,
+		keys:         providers.NewKeyring(apiKey),
 		backend:      geminiBackendAIStudio,
 		authType:     geminiAuthTypeAPIKey,
 		useNativeAPI: useNativeAPIFromEnv(),
@@ -225,10 +225,12 @@ func (p *Provider) responseProviderName() string {
 	return "gemini"
 }
 
-// setHeaders sets the required headers for Gemini API requests
+// setHeaders sets the required headers for Gemini API requests.
+// Vertex backends authenticate through a token source on the HTTP client
+// instead, so only the API-key path consumes the rotation.
 func (p *Provider) setHeaders(req *http.Request) {
 	if p.authType == geminiAuthTypeAPIKey {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+		req.Header.Set("Authorization", "Bearer "+p.keys.Next())
 	}
 
 	// Forward request ID if present in context for request tracing
@@ -240,7 +242,7 @@ func (p *Provider) setHeaders(req *http.Request) {
 // setNativeHeaders sets the required headers for Gemini native API requests.
 func (p *Provider) setNativeHeaders(req *http.Request) {
 	if p.authType == geminiAuthTypeAPIKey {
-		req.Header.Set("x-goog-api-key", p.apiKey)
+		req.Header.Set("x-goog-api-key", p.keys.Next())
 	}
 
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {

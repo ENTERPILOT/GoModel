@@ -63,10 +63,12 @@ func (p *Provider) realtimeHTTPTarget(req *core.RealtimeRequest, endpoint string
 	return &core.RealtimeHTTPTarget{URL: target, Headers: p.realtimeAuthHeaders()}, nil
 }
 
+// realtimeAuthHeaders picks the next key in the rotation. A realtime session is
+// long-lived, so the key is chosen once per session rather than per event.
 func (p *Provider) realtimeAuthHeaders() http.Header {
 	headers := http.Header{}
-	if p.apiKey != "" {
-		headers.Set("Authorization", "Bearer "+p.apiKey)
+	if apiKey := p.keys.Next(); apiKey != "" {
+		headers.Set("Authorization", "Bearer "+apiKey)
 	}
 	return headers
 }

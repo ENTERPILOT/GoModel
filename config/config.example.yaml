@@ -266,6 +266,13 @@ providers:
   openai:
     type: openai
     api_key: "sk-..."
+    # Several keys for one provider rotate round robin, raising the per-key rate
+    # limit. Equivalent env vars: OPENAI_API_KEY_2, OPENAI_API_KEY_3, ...
+    # Caveat: rotation defeats provider prompt caching, since providers scope the
+    # cache to the key that filled it.
+    # api_keys:
+    #   - "${OPENAI_API_KEY_2}"
+    #   - "${OPENAI_API_KEY_3}"
     # Per-provider resilience overrides (optional).
     # Only specified fields override the global defaults above.
     # resilience:

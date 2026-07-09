@@ -123,6 +123,7 @@
                 "icon": "plug",
                 "pages": [
                     "providers/overview",
+                    "providers/key-rotation",
                     "providers/anthropic",
                     "providers/gemini",
                     "providers/deepseek",

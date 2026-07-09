@@ -75,6 +75,10 @@ support, not every individual model capability exposed by an upstream provider.
   for providers that define a list, skipping their upstream `/models` calls.
 - **vLLM** — set `VLLM_API_KEY` only if the upstream server was started with
   `--api-key`.
+- **Multiple API keys for one provider** — set `OPENAI_API_KEY_2`,
+  `OPENAI_API_KEY_3`, and so on to spread requests across keys round robin and
+  lift per-key rate limits. This costs you provider prompt caching; see
+  [API key rotation](/providers/key-rotation).
 - **Multiple instances of one provider type** — without `config.yaml`, use
   suffixed env vars such as `OPENAI_EAST_API_KEY` and `OPENAI_EAST_BASE_URL`;
   add `OPENAI_EAST_MODELS` to configure that instance's model list. This

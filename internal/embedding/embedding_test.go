@@ -137,8 +137,8 @@ func TestAPIEmbedder_UsesProviderCredentials(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *apiEmbedder, got %T", emb)
 	}
-	if a.apiKey != "gsk-abc" {
-		t.Errorf("expected apiKey gsk-abc, got %q", a.apiKey)
+	if got := a.keys.Primary(); got != "gsk-abc" {
+		t.Errorf("expected primary key gsk-abc, got %q", got)
 	}
 	if want := "https://api.groq.com/openai/v1/embeddings"; a.endpointURL != want {
 		t.Errorf("endpointURL = %q, want %q", a.endpointURL, want)
