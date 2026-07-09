@@ -122,9 +122,10 @@ docs-openapi:
 lint:
 	golangci-lint run --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./internal/... ./tests/...
 
-# Run linter with auto-fix
+# Run linter with auto-fix. Mirrors `lint`: same tags, same packages, so the
+# autofix pass cannot silently skip the tag-gated files under tests/.
 lint-fix:
-	golangci-lint run --fix ./cmd/... ./config/... ./internal/...
+	golangci-lint run --fix --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./internal/... ./tests/...
 
 # Report modernizations go fix would apply, without touching the tree.
 # Exits non-zero when the tree has drifted; run `make fix` to apply.
