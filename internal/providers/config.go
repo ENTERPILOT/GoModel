@@ -202,8 +202,22 @@ func (v providerEnvValues) apiKeys() []string {
 // hasAPIKey reports whether this env group carries any credential, numbered or
 // not. Base-URL defaulting keys off it, so a provider configured only through
 // `<PROVIDER>_API_KEY_2` still resolves its default endpoint.
+//
+// It probes the fields directly rather than calling apiKeys: empty() asks this
+// question for every env group, and ordering the keys to then discard them
+// costs a map, a sort, and two slices. Both spellings agree because a key that
+// fails HasResolvedProviderValue -- blank, whitespace, or an unresolved
+// `${VAR}` -- is one that apiKeys would drop.
 func (v providerEnvValues) hasAPIKey() bool {
-	return len(v.apiKeys()) > 0
+	if HasResolvedProviderValue(v.APIKey) {
+		return true
+	}
+	for _, key := range v.APIKeysByIndex {
+		if HasResolvedProviderValue(key) {
+			return true
+		}
+	}
+	return false
 }
 
 func (v providerEnvValues) empty() bool {

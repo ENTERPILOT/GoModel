@@ -148,6 +148,42 @@ func TestResolveProviders_APIKeysFromYAML(t *testing.T) {
 	}
 }
 
+// hasAPIKey probes the env fields directly instead of building the ordered key
+// list. A value that cannot serve as a credential -- whitespace, or an
+// unresolved `${VAR}` -- must read as "no key", not merely "field is set".
+func TestProviderEnvValues_HasAPIKeyMatchesAPIKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		v    providerEnvValues
+		want bool
+	}{
+		{name: "no fields set"},
+		{name: "blank unsuffixed key", v: providerEnvValues{APIKey: "  "}},
+		{name: "unresolved unsuffixed key", v: providerEnvValues{APIKey: "${MISSING}"}},
+		{name: "blank numbered key", v: providerEnvValues{APIKeysByIndex: map[int]string{2: "   "}}},
+		{name: "unresolved numbered key", v: providerEnvValues{APIKeysByIndex: map[int]string{2: "${MISSING}"}}},
+		{name: "usable unsuffixed key", v: providerEnvValues{APIKey: "a"}, want: true},
+		{name: "usable numbered key only", v: providerEnvValues{APIKeysByIndex: map[int]string{2: "b"}}, want: true},
+		{
+			name: "unresolved unsuffixed key beside a usable numbered one",
+			v:    providerEnvValues{APIKey: "${MISSING}", APIKeysByIndex: map[int]string{2: "b"}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.v.hasAPIKey(); got != tt.want {
+				t.Errorf("hasAPIKey() = %v, want %v", got, tt.want)
+			}
+			// The cheap probe must never disagree with the full key list.
+			if got, want := tt.v.hasAPIKey(), len(tt.v.apiKeys()) > 0; got != want {
+				t.Errorf("hasAPIKey() = %v, but len(apiKeys()) > 0 = %v", got, want)
+			}
+		})
+	}
+}
+
 // A provider whose only key is an unresolved placeholder has no credentials at
 // all and must be dropped, exactly as before rotation existed.
 func TestResolveProviders_ProviderWithOnlyUnresolvedKeysIsDropped(t *testing.T) {
