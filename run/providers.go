@@ -13,6 +13,7 @@ import (
 	"gomodel/internal/providers/gemini"
 	"gomodel/internal/providers/groq"
 	"gomodel/internal/providers/kimicode"
+	"gomodel/internal/providers/meta"
 	"gomodel/internal/providers/minimax"
 	"gomodel/internal/providers/ollama"
 	"gomodel/internal/providers/openai"
@@ -48,6 +49,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(vertex.Registration)
 	factory.Add(groq.Registration)
 	factory.Add(kimicode.Registration)
+	factory.Add(meta.Registration)
 	factory.Add(minimax.Registration)
 	factory.Add(ollama.Registration)
 	factory.Add(opencodego.Registration)

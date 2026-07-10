@@ -326,6 +326,20 @@ providers:
     # models:
     #   - id: "accounts/fireworks/models/gpt-oss-120b"
 
+  meta:
+    type: meta
+    api_key: "..."
+    # Muse Spark models are not in the upstream model catalog yet; supply
+    # metadata here to advertise context window and pricing to the gateway.
+    # models:
+    #   - id: "muse-spark-1.1"
+    #     metadata:
+    #       context_window: 1048576
+    #       pricing:
+    #         currency: USD
+    #         input_per_mtok: 1.25
+    #         output_per_mtok: 4.25
+
   zai:
     type: zai
     api_key: "..."

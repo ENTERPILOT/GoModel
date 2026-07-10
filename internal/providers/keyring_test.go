@@ -114,14 +114,12 @@ func TestKeyringNextIsConcurrentAndEven(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range total {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			key := ring.Next()
 			mu.Lock()
 			counts[key]++
 			mu.Unlock()
-		}()
+		})
 	}
 	wg.Wait()
 

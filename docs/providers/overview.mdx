@@ -26,6 +26,7 @@ support, not every individual model capability exposed by an upstream provider.
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/providers/deepseek) |
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
 | Fireworks AI | `FIREWORKS_API_KEY` (`FIREWORKS_BASE_URL` optional) | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
+| Meta (Muse Spark) | `META_API_KEY` (`META_BASE_URL` optional) | `muse-spark-1.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
 | OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | xAI (Grok) | `XAI_API_KEY` | `grok-4` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
@@ -49,6 +50,11 @@ support, not every individual model capability exposed by an upstream provider.
 - **Fireworks AI** — model IDs are account-scoped paths such as
   `accounts/fireworks/models/gpt-oss-120b`; use them verbatim in requests and
   in `FIREWORKS_MODELS`.
+- **Meta (Muse Spark)** — the Meta Model API is OpenAI-compatible; set
+  `META_API_KEY` and route to `muse-spark-1.1`. Muse Spark models are not in
+  the upstream model catalog yet, so declare `context_window` and `pricing`
+  under `providers.meta.models` metadata in `config.yaml` if you want cost
+  tracking and context-window reporting.
 - **Xiaomi MiMo** — TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served
   through `/v1/audio/speech` and `/v1/audio/transcriptions` (translated to
   MiMo's chat-completions audio dialect) as well as directly via chat
@@ -123,7 +129,7 @@ These are the providers most users hit friction on:
   same file for both Docker and the native binary.
 </Tip>
 
-Providers without a dedicated page (OpenAI, Groq, Fireworks AI, OpenRouter,
-Z.ai, xAI, MiniMax) follow the same pattern: set the API key (and optional base
-URL where supported), start GoModel, route by model ID. The full env-var reference
+Providers without a dedicated page (OpenAI, Groq, Fireworks AI, Meta,
+OpenRouter, Z.ai, xAI, MiniMax) follow the same pattern: set the API key (and
+optional base URL where supported), start GoModel, route by model ID. The full env-var reference
 lives in [Configuration](/advanced/configuration).
