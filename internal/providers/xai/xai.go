@@ -73,7 +73,38 @@ func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
 		ProviderName:       "xai",
 		BaseURL:            baseURL,
 		SetHeaders:         setHeaders,
+		AdaptChatRequest:   adaptChatRequest,
 		ChatRequestHeaders: xGrokConversationHeaders,
+	}
+}
+
+// adaptChatRequest rewrites GoModel's common reasoning shape into xAI's
+// OpenAI-compatible chat extension. The xAI Chat Completions API accepts
+// reasoning_effort as a top-level string (e.g. grok-4.5: low/medium/high,
+// default high), not "reasoning": {"effort": "..."}; the nested shape is
+// native only to xAI's Responses API, which passes through untouched.
+func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	if req == nil || req.Reasoning == nil || strings.TrimSpace(req.Reasoning.Effort) == "" {
+		return req, nil
+	}
+	return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Model, req.Reasoning.Effort))
+}
+
+// normalizeReasoningEffort downgrades GoModel effort levels xAI does not
+// accept to their nearest equivalent. Only the multi-agent Grok family
+// accepts "xhigh" (it selects the agent count); every other model tops out
+// at "high". Unknown values pass through for the upstream to judge. See
+// docs/providers/xai.mdx for the user-facing table.
+func normalizeReasoningEffort(model, effort string) string {
+	normalized := strings.ToLower(strings.TrimSpace(effort))
+	switch normalized {
+	case "xhigh", "max":
+		if strings.Contains(strings.ToLower(model), "multi-agent") {
+			return "xhigh"
+		}
+		return "high"
+	default:
+		return normalized
 	}
 }
 

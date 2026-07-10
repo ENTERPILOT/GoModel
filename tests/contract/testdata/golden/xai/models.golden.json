@@ -59,6 +59,12 @@
       "id": "grok-2-image-1212",
       "object": "model",
       "owned_by": "xai"
+    },
+    {
+      "created": 0,
+      "id": "grok-4.5",
+      "object": "model",
+      "owned_by": "xai"
     }
   ],
   "object": "list"
