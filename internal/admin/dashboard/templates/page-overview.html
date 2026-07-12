@@ -317,7 +317,7 @@
                                 </a>
                             </h4>
                         </div>
-                        <span class="provider-status-pill" :class="providerStatusBadgeClass(provider.status)" x-text="provider.status_label"></span>
+                        <span class="provider-status-pill" :class="providerStatusBadgeClass(provider.status)" :title="providerStatusPillTitle(provider)" x-text="provider.status_label"></span>
                     </div>
 
                     <div class="provider-status-meta">
@@ -334,8 +334,8 @@
                     </div>
 
                     <div class="provider-status-details"
-                         :class="{ 'is-expanded': providerStatusDetailsExpanded, 'is-collapsed': !providerStatusDetailsExpanded }"
-                         :aria-hidden="providerStatusDetailsExpanded ? 'false' : 'true'">
+                         :class="{ 'is-expanded': providerCardExpanded(provider), 'is-collapsed': !providerCardExpanded(provider) }"
+                         :aria-hidden="providerCardExpanded(provider) ? 'false' : 'true'">
                         <div class="provider-status-details-inner">
                             <p class="provider-status-reason" x-text="provider.status_reason"></p>
                             <p class="provider-status-error" x-show="provider.last_error" x-text="provider.last_error"></p>
@@ -388,6 +388,18 @@
                             </div>
                         </div>
                     </div>
+
+                    <button type="button"
+                            class="provider-status-card-toggle"
+                            :class="{ 'is-expanded': providerCardExpanded(provider) }"
+                            :aria-expanded="providerCardExpanded(provider) ? 'true' : 'false'"
+                            :aria-label="(providerCardExpanded(provider) ? 'Collapse ' : 'Expand ') + provider.name + ' details'"
+                            :title="providerCardExpanded(provider) ? 'Collapse details' : 'Expand details'"
+                            @click="toggleProviderCard(provider)">
+                        <svg class="provider-status-card-toggle-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
                 </article>
             </template>
         </div>

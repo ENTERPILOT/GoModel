@@ -1167,6 +1167,9 @@ body.dashboard-modal-open {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px;
+  /* Cards size to their own content; a collapsed card must not stretch to
+     match an expanded neighbour in the same row. */
+  align-items: start;
 }
 
 .provider-status-card {
@@ -1177,6 +1180,41 @@ body.dashboard-modal-open {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+.provider-status-card-toggle {
+  /* Bleed to the card edges so the strip spans the full card width. */
+  margin: auto -18px -18px;
+  padding: 7px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.provider-status-card-toggle:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text);
+}
+
+.provider-status-card-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  outline-offset: -2px;
+}
+
+.provider-status-card-toggle-icon {
+  display: block;
+  transition: transform 0.28s ease;
+}
+
+.provider-status-card-toggle.is-expanded .provider-status-card-toggle-icon {
+  transform: rotate(180deg);
 }
 
 .provider-status-card-head {

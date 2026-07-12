@@ -288,8 +288,13 @@ test("overview page shows provider status summary and per-provider cards keyed b
   assert.match(indexTemplate, /:title="providerLastCheckedTitle\(provider\)"/);
   assert.match(
     indexTemplate,
-    /class="provider-status-details"[\s\S]*providerStatusDetailsExpanded/,
+    /class="provider-status-details"[\s\S]*providerCardExpanded\(provider\)/,
   );
+  assert.match(
+    indexTemplate,
+    /class="provider-status-card-toggle"[\s\S]*@click="toggleProviderCard\(provider\)"/,
+  );
+  assert.match(indexTemplate, /:title="providerStatusPillTitle\(provider\)"/);
 
   const stripRule = readCSSRule(css, ".provider-status-flag");
   assert.match(stripRule, /grid-column:\s*span 2/);

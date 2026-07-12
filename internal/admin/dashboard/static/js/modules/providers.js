@@ -1,5 +1,6 @@
 (function(global) {
     const PROVIDER_STATUS_DETAILS_STORAGE_KEY = 'gomodel_provider_status_details_expanded';
+    const PROVIDER_CARD_OVERRIDES_STORAGE_KEY = 'gomodel_provider_card_expanded_overrides';
     const PROVIDER_STATUS_POLL_MS = 3000;
 
     // Provider types that have a dedicated docs page at
@@ -32,6 +33,9 @@
     function dashboardProvidersModule() {
         return {
             providerStatusDetailsExpanded: false,
+            // Per-card expand/collapse overrides keyed by provider name; cards
+            // without an entry follow providerStatusDetailsExpanded.
+            providerCardOverrides: {},
             providerStatusPollTimer: null,
 
             emptyProviderStatus() {
@@ -49,6 +53,7 @@
 
             initProviderStatusPreferences() {
                 this.providerStatusDetailsExpanded = false;
+                this.providerCardOverrides = {};
                 try {
                     const storage = browserStorage();
                     if (storage) {
@@ -58,10 +63,45 @@
                         } else {
                             storage.setItem(PROVIDER_STATUS_DETAILS_STORAGE_KEY, 'false');
                         }
+                        const overrides = JSON.parse(storage.getItem(PROVIDER_CARD_OVERRIDES_STORAGE_KEY) || '{}');
+                        if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) {
+                            this.providerCardOverrides = overrides;
+                        }
                     }
                 } catch (_) {
                     // Ignore storage failures; details still start collapsed.
                 }
+            },
+
+            saveProviderCardOverrides() {
+                const storage = browserStorage();
+                if (!storage) {
+                    return;
+                }
+                try {
+                    storage.setItem(PROVIDER_CARD_OVERRIDES_STORAGE_KEY, JSON.stringify(this.providerCardOverrides));
+                } catch (_) {
+                    // Ignore storage failures and keep the in-memory state active.
+                }
+            },
+
+            providerCardExpanded(provider) {
+                const name = provider && provider.name ? String(provider.name) : '';
+                if (name && Object.prototype.hasOwnProperty.call(this.providerCardOverrides, name)) {
+                    return this.providerCardOverrides[name] === true;
+                }
+                return this.providerStatusDetailsExpanded;
+            },
+
+            toggleProviderCard(provider) {
+                const name = provider && provider.name ? String(provider.name) : '';
+                if (!name) {
+                    return;
+                }
+                const overrides = Object.assign({}, this.providerCardOverrides);
+                overrides[name] = !this.providerCardExpanded(provider);
+                this.providerCardOverrides = overrides;
+                this.saveProviderCardOverrides();
             },
 
             saveProviderStatusDetailsPreference() {
@@ -78,7 +118,11 @@
 
             toggleProviderStatusDetails() {
                 this.providerStatusDetailsExpanded = !this.providerStatusDetailsExpanded;
+                // The section-wide switch acts as a master control: drop any
+                // per-card overrides so every card follows it again.
+                this.providerCardOverrides = {};
                 this.saveProviderStatusDetailsPreference();
+                this.saveProviderCardOverrides();
             },
 
             providerStatusDetailsToggleLabel() {
@@ -312,6 +356,20 @@
                     : [];
                 if (models.length === 0) return 'Automatic';
                 return models.join(', ');
+            },
+
+            // Tooltip for the status pill: the classification reason plus the
+            // last error, so the collapsed card already explains its state.
+            providerStatusPillTitle(provider) {
+                if (!provider) return '';
+                const parts = [];
+                if (provider.status_reason) {
+                    parts.push(String(provider.status_reason));
+                }
+                if (provider.last_error) {
+                    parts.push('Last error: ' + String(provider.last_error));
+                }
+                return parts.join('\n\n');
             },
 
             providerRequestHealth(provider) {
