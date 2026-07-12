@@ -148,18 +148,33 @@ Given the YAML above, the effective per-provider settings are:
 
 `anthropic` and `ollama` inherit every field they did not explicitly override.
 
-## Circuit breaker vs. dashboard provider health
+## Circuit breaker and dashboard provider health
 
-The dashboard's provider status (Healthy / Degraded / Unhealthy and the
-"Last checked" timestamp) is **not** the circuit breaker. Circuit breaker
-state is not shown in the dashboard and recovers on its own within
-`timeout` (default 30s) once the provider is back; when
-[metrics](/advanced/configuration#metrics) are enabled it is exported as
-the `gomodel_circuit_breaker_state` gauge (0 = closed, 1 = half-open,
-2 = open).
+The dashboard's [provider status](/providers/overview#provider-status)
+combines two independent signals:
 
-Dashboard health reflects **model discovery**: whether the provider's model
-inventory could last be fetched. Providers are re-checked:
+- **Model discovery** — whether the provider's model inventory could last
+  be fetched (details below).
+- **Request health** — a 10-minute sliding window of real request outcomes
+  per provider and model, including the live circuit breaker state.
+
+The circuit breaker's state is shown on each provider card: expanding a
+card reveals a **Breaker State** chip, an open breaker turns the provider's
+status pill to `Circuit Open`, and a half-open breaker shows `Recovering`.
+A model whose recent requests keep failing (at least 3 errors making up
+half or more of its windowed requests) marks the provider `Degraded` even
+while model discovery still succeeds — this catches upstreams that list
+models fine but fail real calls, e.g. with misreported `4xx` errors that
+deliberately never trip the breaker.
+
+Request-health signals only ever worsen the discovery-based status, never
+improve it, and the tracking is in-memory per gateway process. The breaker
+still recovers on its own within `timeout` (default 30s) once the provider
+is back; when [metrics](/advanced/configuration#metrics) are enabled its
+state is also exported as the `gomodel_circuit_breaker_state` gauge
+(0 = closed, 1 = half-open, 2 = open).
+
+Model discovery is re-checked:
 
 - at startup,
 - on every model registry refresh, controlled by `CACHE_REFRESH_INTERVAL`

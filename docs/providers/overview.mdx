@@ -133,3 +133,53 @@ Providers without a dedicated page (OpenAI, Groq, Fireworks AI, Meta,
 OpenRouter, Z.ai, xAI, MiniMax) follow the same pattern: set the API key (and
 optional base URL where supported), start GoModel, route by model ID. The full env-var reference
 lives in [Configuration](/advanced/configuration).
+
+## Provider status
+
+The admin dashboard (`/admin/dashboard`) shows live status for every
+configured provider in the **Providers Overview** section of the
+**Overview** page.
+
+<img
+  src="/providers/provider-status.png"
+  alt="GoModel dashboard Providers Overview with a Degraded openai card showing a failing model and a Healthy vllm card"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Each card's status pill combines two signals — **model discovery** (can the
+provider's model inventory be fetched?) and **request health** (are real
+requests through the gateway succeeding?). Real-traffic signals only ever
+worsen a status, never mask a discovery failure. Hover over the pill for the
+classification reason and the most recent error.
+
+| Pill | Meaning |
+| ---- | ------- |
+| `Healthy` | Model discovery succeeded and recent traffic (if any) looks fine |
+| `Starting` | Configured and awaiting first model discovery |
+| `Configured` | Configured but no models exposed yet |
+| `Degraded` | The latest refresh failed (previous inventory still serves), **or** a specific model's recent requests keep failing |
+| `Recovering` | The circuit breaker is half-open and probing whether the provider recovered |
+| `Circuit Open` | The circuit breaker is open; traffic to the provider is paused |
+| `Unhealthy` | Model discovery failed and no models are available |
+
+Expand a card (the arrow strip at the bottom, or the section-wide
+**Show Details** switch) to see request health details:
+
+- **Recent Requests** — requests and errors through the gateway in the last
+  10 minutes.
+- **Breaker State** — the provider's live circuit-breaker state
+  (see [Resilience](/advanced/resilience)).
+- **Models (Recent Traffic)** — per-model request/error counts. A model with
+  at least 3 errors making up half or more of its windowed requests is
+  flagged in red — this catches a single broken model on an otherwise
+  healthy provider, which model discovery alone cannot see. Hover a row for
+  the model's latest error message.
+
+Request-health tracking is passive: it observes traffic your clients already
+send (background discovery probes are excluded), so an idle provider simply
+shows no recent requests. Counters are in-memory per gateway instance and
+reset on restart.
+
+The same data is available as JSON from `GET /admin/providers/status` for
+scripting and external monitoring.
