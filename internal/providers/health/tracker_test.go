@@ -1,11 +1,13 @@
 package health
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"gomodel/internal/llmclient"
 )
@@ -137,6 +139,24 @@ func TestTrackerSnapshot(t *testing.T) {
 			},
 		},
 		{
+			// Caller-side cancellations prove nothing about provider health;
+			// like the circuit breaker, the tracker treats them as neutral.
+			name: "client cancellations are not counted",
+			record: func(tracker *Tracker, _ *time.Time) {
+				for range 3 {
+					tracker.Record(llmclient.ResponseInfo{
+						Provider:     "openai",
+						Model:        "gpt-4o",
+						CircuitState: "closed",
+						Error:        fmt.Errorf("request aborted: %w", context.Canceled),
+					})
+				}
+			},
+			want: map[string]ProviderHealth{
+				"openai": {CircuitState: "closed", WindowSeconds: 600},
+			},
+		},
+		{
 			// llmclient labels body-less requests (discovery GETs, availability
 			// probes) as model "unknown"; they must not count as traffic.
 			name: "unknown-model probes only update circuit state",
@@ -261,6 +281,66 @@ func TestTrackerSnapshotCapsModelRowsTroubledFirst(t *testing.T) {
 	// Provider totals still cover every tracked model, not just listed rows.
 	if snapshot.Requests != maxSnapshotModels+5+4 {
 		t.Fatalf("provider requests = %d, want %d", snapshot.Requests, maxSnapshotModels+5+4)
+	}
+}
+
+func TestTrackerProviderLastErrorSurvivesModelCap(t *testing.T) {
+	start := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+	tracker, now := newTestTracker(start)
+	// Many models with more errors dominate the capped, errors-first listing…
+	for i := range maxSnapshotModels + 5 {
+		for range 3 {
+			tracker.Record(llmclient.ResponseInfo{
+				Provider:   "router",
+				Model:      fmt.Sprintf("busy-%02d", i),
+				StatusCode: 500,
+				Error:      errors.New("old failure"),
+			})
+		}
+	}
+	// …while the most recent failure happens on a low-error model that gets
+	// dropped from the model list.
+	*now = now.Add(time.Minute)
+	tracker.Record(llmclient.ResponseInfo{
+		Provider:   "router",
+		Model:      "quiet-model",
+		StatusCode: 400,
+		Error:      errors.New("newest failure"),
+	})
+
+	snapshot := tracker.Snapshot()["router"]
+	listed := false
+	for _, row := range snapshot.Models {
+		if row.Model == "quiet-model" {
+			listed = true
+		}
+	}
+	if listed {
+		t.Fatalf("expected quiet-model to be dropped by the snapshot cap")
+	}
+	if snapshot.LastError == nil || snapshot.LastError.Message != "newest failure" {
+		t.Fatalf("provider LastError = %+v, want newest failure", snapshot.LastError)
+	}
+	if snapshot.LastErrorModel != "quiet-model" {
+		t.Fatalf("LastErrorModel = %q, want quiet-model", snapshot.LastErrorModel)
+	}
+}
+
+func TestErrorMessageTruncationIsRuneSafe(t *testing.T) {
+	tracker, _ := newTestTracker(time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC))
+	// Multi-byte runes positioned so a byte-count cut would split one.
+	tracker.Record(llmclient.ResponseInfo{
+		Provider:   "openai",
+		Model:      "gpt-4o",
+		StatusCode: 500,
+		Error:      errors.New(strings.Repeat("é", maxErrorMessageLen)),
+	})
+	message := tracker.Snapshot()["openai"].Models[0].LastError.Message
+	if !strings.HasSuffix(message, "…") {
+		t.Fatalf("expected truncated message, got %q", message)
+	}
+	if !utf8.ValidString(message) {
+		t.Fatalf("truncated message is not valid UTF-8: %q", message)
 	}
 }
 

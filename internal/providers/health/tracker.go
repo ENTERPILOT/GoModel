@@ -5,14 +5,20 @@
 // circuit-breaker state. The admin provider-status endpoint folds its
 // snapshots into the dashboard so real-traffic failures are visible even when
 // model discovery still succeeds.
+//
+// Known limitation: hooks fire when a streaming response is established, so a
+// stream that starts with HTTP 200 and fails mid-body is recorded as a
+// success (the same blind spot applies to the Prometheus hooks).
 package health
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"gomodel/internal/llmclient"
 )
@@ -63,6 +69,11 @@ type ProviderHealth struct {
 	Requests      int           `json:"requests"`
 	Errors        int           `json:"errors"`
 	Models        []ModelHealth `json:"models,omitempty"`
+	// LastError is the most recent windowed failure across every tracked
+	// model, computed before Models is capped, with LastErrorModel naming the
+	// model it came from.
+	LastError      *ErrorInfo `json:"last_error,omitempty"`
+	LastErrorModel string     `json:"last_error_model,omitempty"`
 }
 
 type event struct {
@@ -125,10 +136,16 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 	if info.CircuitState != "" {
 		provider.circuitState = info.CircuitState
 	}
-	// llmclient reports "unknown" for body-less requests (model discovery
-	// GETs, availability probes, multipart uploads). Those are not
-	// model-attributed client traffic, so they only update circuit state.
-	if info.Model == "" || info.Model == "unknown" {
+	// Body-less requests (model discovery GETs, availability probes,
+	// multipart uploads) are not model-attributed client traffic, so they
+	// only update circuit state.
+	if info.Model == "" || info.Model == llmclient.UnknownModel {
+		return
+	}
+	// A caller-side cancellation proves nothing about provider health; the
+	// circuit breaker treats it as neutral and so does this tracker. Client
+	// deadlines (context.DeadlineExceeded) still count as failures.
+	if errors.Is(info.Error, context.Canceled) {
 		return
 	}
 
@@ -183,6 +200,10 @@ func (t *Tracker) Snapshot() map[string]ProviderHealth {
 			if model.lastError != nil && now.Sub(model.lastError.At) <= Window {
 				lastError := *model.lastError
 				row.LastError = &lastError
+				if snapshot.LastError == nil || lastError.At.After(snapshot.LastError.At) {
+					snapshot.LastError = &lastError
+					snapshot.LastErrorModel = modelName
+				}
 			}
 			snapshot.Requests += requests
 			snapshot.Errors += errors
@@ -256,7 +277,11 @@ func errorMessage(info llmclient.ResponseInfo) string {
 		message = fmt.Sprintf("provider returned HTTP %d", info.StatusCode)
 	}
 	if len(message) > maxErrorMessageLen {
-		message = message[:maxErrorMessageLen] + "…"
+		cut := maxErrorMessageLen
+		for cut > 0 && !utf8.RuneStart(message[cut]) {
+			cut--
+		}
+		message = message[:cut] + "…"
 	}
 	return message
 }

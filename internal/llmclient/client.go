@@ -597,9 +597,15 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 }
 
 // extractModel attempts to extract the model name from a request body
+// UnknownModel is the model label reported for requests whose model cannot be
+// recovered from the request body (body-less discovery GETs, availability
+// probes, multipart uploads). Hook consumers that attribute traffic per model
+// should treat it as "not model-attributed".
+const UnknownModel = "unknown"
+
 func extractModel(body any) string {
 	if body == nil {
-		return "unknown"
+		return UnknownModel
 	}
 
 	// Try ChatRequest
@@ -619,7 +625,7 @@ func extractModel(body any) string {
 	}
 
 	// Unknown request type
-	return "unknown"
+	return UnknownModel
 }
 
 // extractStatusCode tries to extract HTTP status code from an error

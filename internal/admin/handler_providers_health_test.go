@@ -27,7 +27,15 @@ func TestApplyRequestHealth(t *testing.T) {
 			},
 			{Model: "gpt-5-nano", Requests: 1},
 		},
+		LastError: &health.ErrorInfo{
+			StatusCode: 400,
+			Message:    "Error from provider",
+			At:         errorAt,
+		},
+		LastErrorModel: "qwen3.7-max",
 	}
+	flaggedModelHalfOpen := flaggedModel
+	flaggedModelHalfOpen.CircuitState = "half-open"
 
 	cases := []struct {
 		name          string
@@ -97,6 +105,16 @@ func TestApplyRequestHealth(t *testing.T) {
 			wantLastError: "qwen3.7-max: Error from provider",
 		},
 		{
+			name:          "breaker state takes precedence over flagged models",
+			status:        "healthy",
+			label:         "Healthy",
+			rh:            &flaggedModelHalfOpen,
+			wantStatus:    "degraded",
+			wantLabel:     "Recovering",
+			wantReason:    "circuit breaker is half-open; probing whether the provider has recovered",
+			wantLastError: "qwen3.7-max: Error from provider",
+		},
+		{
 			name:          "existing last error is not overwritten",
 			status:        "degraded",
 			label:         "Degraded",
@@ -134,6 +152,18 @@ func TestApplyRequestHealth(t *testing.T) {
 				t.Errorf("lastError = %q, want %q", lastError, tc.wantLastError)
 			}
 		})
+	}
+}
+
+func TestRequestHealthForTrimsSnapshotKeys(t *testing.T) {
+	healthByName := map[string]health.ProviderHealth{
+		" openai ": {Requests: 2},
+	}
+	if got := requestHealthFor(healthByName, "openai"); got == nil || got.Requests != 2 {
+		t.Fatalf("requestHealthFor() = %+v, want snapshot with 2 requests", got)
+	}
+	if got := requestHealthFor(healthByName, "missing"); got != nil {
+		t.Fatalf("requestHealthFor(missing) = %+v, want nil", got)
 	}
 }
 

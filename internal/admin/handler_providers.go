@@ -150,12 +150,16 @@ func buildProviderStatusItem(name string, cfg providers.SanitizedProviderConfig,
 	}
 }
 
+// requestHealthFor matches a status row (keyed by trimmed provider name) to
+// its health snapshot; snapshot keys are trimmed too since llmclient records
+// the configured name as-is.
 func requestHealthFor(healthByName map[string]health.ProviderHealth, name string) *health.ProviderHealth {
-	snapshot, ok := healthByName[name]
-	if !ok {
-		return nil
+	for key, snapshot := range healthByName {
+		if strings.TrimSpace(key) == name {
+			return &snapshot
+		}
 	}
-	return &snapshot
+	return nil
 }
 
 // applyRequestHealth folds real-traffic signals (circuit breaker state and
@@ -191,23 +195,17 @@ func applyRequestHealth(status, label, reason, lastError string, rh *health.Prov
 }
 
 // latestModelError surfaces the most recent per-model failure so the card can
-// show what real traffic is hitting even when discovery reports no error.
+// show what real traffic is hitting even when discovery reports no error. It
+// uses the provider-level LastError, which the tracker computes across every
+// tracked model before the snapshot's model list is capped.
 func latestModelError(rh *health.ProviderHealth) string {
-	var latest *health.ErrorInfo
-	model := ""
-	for _, row := range rh.Models {
-		if row.LastError == nil {
-			continue
-		}
-		if latest == nil || row.LastError.At.After(latest.At) {
-			latest = row.LastError
-			model = row.Model
-		}
-	}
-	if latest == nil {
+	if rh.LastError == nil {
 		return ""
 	}
-	return model + ": " + latest.Message
+	if rh.LastErrorModel == "" {
+		return rh.LastError.Message
+	}
+	return rh.LastErrorModel + ": " + rh.LastError.Message
 }
 
 func overallProviderStatus(summary providerStatusSummaryResponse) string {
