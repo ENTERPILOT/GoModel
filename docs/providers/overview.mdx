@@ -177,8 +177,8 @@ Expand a card (the arrow strip at the bottom, or the section-wide
   the model's latest error message.
 
 Request-health tracking is passive: it observes traffic your clients already
-send (background discovery probes are excluded), so an idle provider simply
-shows no recent requests. Counters are in-memory per gateway instance and
+send (the gateway's own background probes — model discovery and availability
+checks — are excluded), so an idle provider simply shows no recent requests. Counters are in-memory per gateway instance and
 reset on restart.
 
 The same data is available as JSON from `GET /admin/providers/status` for
