@@ -32,6 +32,7 @@ import (
 	"gomodel/internal/live"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
+	"gomodel/internal/providers/health"
 	"gomodel/internal/ratelimit"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
@@ -175,6 +176,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			sharedStorage = s
 		}
 	}
+
+	// Track real-traffic outcomes per provider/model for the dashboard's
+	// provider status; hooks must be composed before any provider is created.
+	requestHealth := health.NewTracker()
+	cfg.Factory.AddHooks(requestHealth.Hooks())
 
 	providerResult, err := providers.Init(ctx, cfg.AppConfig, cfg.Factory)
 	if err != nil {
@@ -605,6 +611,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			app,
 			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard),
 			app.live,
+			requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
 			appCfg.Server.BasePath,
 			adminCfg.UIEnabled,
@@ -1045,6 +1052,7 @@ func initAdmin(
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	liveBroker *live.Broker,
+	requestHealth admin.RequestHealthSource,
 	usagePricingRecalculationEnabled bool,
 	basePath string,
 	uiEnabled bool,
@@ -1091,6 +1099,7 @@ func initAdmin(
 		admin.WithRuntimeRefresher(runtimeRefresher),
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 		admin.WithLiveBroker(liveBroker),
+		admin.WithRequestHealth(requestHealth),
 	)
 
 	var dashHandler *dashboard.Handler

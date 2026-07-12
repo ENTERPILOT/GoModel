@@ -340,6 +340,30 @@
                             <p class="provider-status-reason" x-text="provider.status_reason"></p>
                             <p class="provider-status-error" x-show="provider.last_error" x-text="provider.last_error"></p>
 
+                            <div class="provider-status-health" x-show="providerRequestHealth(provider)">
+                                <div class="provider-status-config-row">
+                                    <span class="provider-status-config-label">Recent Requests</span>
+                                    <span class="provider-status-config-value" x-text="providerRecentTrafficSummary(provider)"></span>
+                                </div>
+                                <div class="provider-status-config-row" x-show="providerBreakerState(provider)">
+                                    <span class="provider-status-config-label">Breaker State</span>
+                                    <span>
+                                        <span class="provider-status-health-state" :class="providerBreakerStateClass(provider)" x-text="providerBreakerStateLabel(provider)"></span>
+                                    </span>
+                                </div>
+                                <div class="provider-status-config-row" x-show="providerHealthModels(provider).length > 0">
+                                    <span class="provider-status-config-label">Models (Recent Traffic)</span>
+                                    <div class="provider-status-health-models">
+                                        <template x-for="model in providerHealthModels(provider)" :key="model.model">
+                                            <div class="provider-status-health-model" :class="{ 'is-flagged': model.flagged }" :title="providerHealthModelTitle(model)">
+                                                <span class="provider-status-health-model-name mono" x-text="model.model"></span>
+                                                <span class="provider-status-health-model-stats" x-text="providerHealthModelStats(model)"></span>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="provider-status-config">
                                 <div class="provider-status-config-row" x-show="provider.config.base_url">
                                     <span class="provider-status-config-label">Base URL</span>

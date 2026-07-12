@@ -82,6 +82,14 @@ func (f *ProviderFactory) SetHooks(hooks llmclient.Hooks) {
 	f.hooks = hooks
 }
 
+// AddHooks composes additional hooks with any already configured, affecting
+// providers created after the call.
+func (f *ProviderFactory) AddHooks(hooks llmclient.Hooks) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hooks = llmclient.JoinHooks(f.hooks, hooks)
+}
+
 // Add adds a provider constructor to the factory.
 // Panics if reg.Type is empty or reg.New is nil — both are programming errors
 // caught at startup, not runtime conditions.

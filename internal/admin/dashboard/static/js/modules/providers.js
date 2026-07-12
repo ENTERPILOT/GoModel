@@ -312,6 +312,60 @@
                     : [];
                 if (models.length === 0) return 'Automatic';
                 return models.join(', ');
+            },
+
+            providerRequestHealth(provider) {
+                const requestHealth = provider && provider.request_health;
+                return requestHealth && typeof requestHealth === 'object' ? requestHealth : null;
+            },
+
+            providerBreakerState(provider) {
+                const requestHealth = this.providerRequestHealth(provider);
+                return requestHealth ? String(requestHealth.circuit_state || '').trim() : '';
+            },
+
+            providerBreakerStateLabel(provider) {
+                const state = this.providerBreakerState(provider);
+                if (!state) return '';
+                return state.charAt(0).toUpperCase() + state.slice(1);
+            },
+
+            providerBreakerStateClass(provider) {
+                const state = this.providerBreakerState(provider);
+                if (state === 'open') return 'is-unhealthy';
+                if (state === 'half-open') return 'is-degraded';
+                return 'is-healthy';
+            },
+
+            providerRecentTrafficSummary(provider) {
+                const requestHealth = this.providerRequestHealth(provider);
+                if (!requestHealth) return '';
+                const requests = Number(requestHealth.requests || 0);
+                const errors = Number(requestHealth.errors || 0);
+                const minutes = Math.round(Number(requestHealth.window_seconds || 0) / 60);
+                const windowText = minutes > 0 ? 'last ' + minutes + ' min' : 'recent';
+                return String(requests) + ' request' + (requests === 1 ? '' : 's') +
+                    ' · ' + String(errors) + ' error' + (errors === 1 ? '' : 's') +
+                    ' (' + windowText + ')';
+            },
+
+            providerHealthModels(provider) {
+                const requestHealth = this.providerRequestHealth(provider);
+                return requestHealth && Array.isArray(requestHealth.models) ? requestHealth.models : [];
+            },
+
+            providerHealthModelStats(model) {
+                if (!model) return '';
+                return String(Number(model.errors || 0)) + '/' + String(Number(model.requests || 0)) + ' failed';
+            },
+
+            // Tooltip with the model's most recent failure; empty when the
+            // model has no windowed errors.
+            providerHealthModelTitle(model) {
+                const lastError = model && model.last_error;
+                if (!lastError || !lastError.message) return '';
+                const prefix = lastError.status_code ? 'HTTP ' + String(lastError.status_code) + ': ' : '';
+                return prefix + lastError.message;
             }
         };
     }

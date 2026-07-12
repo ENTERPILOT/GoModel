@@ -2218,7 +2218,7 @@ func TestBuildProviderStatusItem_ClassifyAndDisplayFallbacks(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			item := buildProviderStatusItem(tc.key, tc.cfg, tc.runtime)
+			item := buildProviderStatusItem(tc.key, tc.cfg, tc.runtime, nil)
 
 			if item.Name != tc.key {
 				t.Errorf("Name = %q, want %q", item.Name, tc.key)

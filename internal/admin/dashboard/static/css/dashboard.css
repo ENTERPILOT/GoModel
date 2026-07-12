@@ -1327,6 +1327,75 @@ body.dashboard-modal-open {
   overflow-wrap: break-word;
 }
 
+.provider-status-health {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  margin-bottom: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.provider-status-health-state {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.provider-status-health-state.is-healthy {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.provider-status-health-state.is-degraded {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
+  background: color-mix(in srgb, var(--warning) 26%, var(--bg-surface));
+}
+
+.provider-status-health-state.is-unhealthy {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.provider-status-health-models {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-status-health-model {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.provider-status-health-model.is-flagged {
+  color: var(--danger);
+}
+
+.provider-status-health-model-name {
+  overflow-wrap: anywhere;
+}
+
+.provider-status-health-model-stats {
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.provider-status-health-model.is-flagged .provider-status-health-model-stats {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 /* Summary Cards */
 .cards {
   display: grid;

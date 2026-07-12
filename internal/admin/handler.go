@@ -22,6 +22,7 @@ import (
 	"gomodel/internal/live"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
+	"gomodel/internal/providers/health"
 	"gomodel/internal/ratelimit"
 	"gomodel/internal/tagging"
 	"gomodel/internal/usage"
@@ -50,6 +51,7 @@ type Handler struct {
 	runtimeConfig       DashboardConfigResponse
 	runtimeRefresher    RuntimeRefresher
 	configuredProviders []providers.SanitizedProviderConfig
+	requestHealth       RequestHealthSource
 
 	mutationMu sync.Mutex
 	pricingMu  sync.Mutex
@@ -107,6 +109,10 @@ type providerStatusItemResponse struct {
 	LastError    string                            `json:"last_error,omitempty"`
 	Config       providers.SanitizedProviderConfig `json:"config"`
 	Runtime      providers.ProviderRuntimeSnapshot `json:"runtime"`
+	// RequestHealth reports windowed real-traffic outcomes (per-model error
+	// counts and the live circuit-breaker state); nil when the provider has
+	// served no recent requests or request-health tracking is not wired.
+	RequestHealth *health.ProviderHealth `json:"request_health,omitempty"`
 }
 
 type providerStatusResponse struct {
@@ -247,6 +253,20 @@ func WithGuardrailService(service *guardrails.Service) Option {
 func WithLiveBroker(broker *live.Broker) Option {
 	return func(h *Handler) {
 		h.liveBroker = broker
+	}
+}
+
+// RequestHealthSource supplies windowed real-traffic health per provider,
+// keyed by configured provider name.
+type RequestHealthSource interface {
+	Snapshot() map[string]health.ProviderHealth
+}
+
+// WithRequestHealth folds recent request outcomes (per-model errors and the
+// live circuit-breaker state) into the provider status endpoint.
+func WithRequestHealth(source RequestHealthSource) Option {
+	return func(h *Handler) {
+		h.requestHealth = source
 	}
 }
 
