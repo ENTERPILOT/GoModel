@@ -27,15 +27,14 @@ func init() {
 		Version = v
 	}
 	for _, s := range bi.Settings {
+		if s.Value == "" {
+			continue
+		}
 		switch s.Key {
 		case "vcs.revision":
-			if Commit == "none" && s.Value != "" {
-				Commit = s.Value
-			}
+			Commit = s.Value
 		case "vcs.time":
-			if Date == "unknown" && s.Value != "" {
-				Date = s.Value
-			}
+			Date = s.Value
 		}
 	}
 }
