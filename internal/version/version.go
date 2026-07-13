@@ -3,14 +3,42 @@ package version
 import (
 	"fmt"
 	"runtime"
+	"runtime/debug"
 )
 
-// These variables are set via -ldflags during the build process
+// These variables are set via -ldflags during the build process.
+// When ldflags are absent (e.g. go install), init fills them from
+// the embedded module build info instead.
 var (
 	Version = "dev"
 	Commit  = "none"
 	Date    = "unknown"
 )
+
+func init() {
+	if Version != "dev" {
+		return
+	}
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
+	}
+	if v := bi.Main.Version; v != "" && v != "(devel)" {
+		Version = v
+	}
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			if Commit == "none" && s.Value != "" {
+				Commit = s.Value
+			}
+		case "vcs.time":
+			if Date == "unknown" && s.Value != "" {
+				Date = s.Value
+			}
+		}
+	}
+}
 
 // Info returns a formatted version string
 func Info() string {
