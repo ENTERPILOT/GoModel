@@ -8,7 +8,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 const requestSelectorPeekLimit int64 = 64 * 1024

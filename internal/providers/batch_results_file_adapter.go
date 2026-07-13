@@ -12,8 +12,8 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 type openAICompatibleBatchLine struct {

@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gomodel/internal/storage"
-	"gomodel/internal/storage/sqlutil"
+	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 )
 
 const (

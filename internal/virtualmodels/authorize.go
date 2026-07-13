@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"slices"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // EnabledByDefault reports the process-wide model availability default.

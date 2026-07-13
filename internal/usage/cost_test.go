@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestCalculateGranularCost_NilPricing(t *testing.T) {

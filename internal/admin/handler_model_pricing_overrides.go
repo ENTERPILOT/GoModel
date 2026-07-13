@@ -7,8 +7,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
-	"gomodel/internal/pricingoverrides"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 )
 
 type upsertModelPricingOverrideRequest struct {

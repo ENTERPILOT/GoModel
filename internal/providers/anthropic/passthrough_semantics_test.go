@@ -3,7 +3,7 @@ package anthropic
 import (
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {

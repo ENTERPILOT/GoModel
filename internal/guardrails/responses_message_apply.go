@@ -7,7 +7,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // responsesToMessages extracts the normalized message list from a ResponsesRequest.

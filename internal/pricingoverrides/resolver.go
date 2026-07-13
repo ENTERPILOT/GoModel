@@ -3,7 +3,7 @@ package pricingoverrides
 import (
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ResolvePricing resolves base pricing and applies the most specific DB override.

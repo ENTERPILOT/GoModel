@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 func TestListModels_ReturnsUpstreamInventory(t *testing.T) {

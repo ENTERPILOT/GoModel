@@ -11,7 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
 )
 
 type adminRateLimitStore struct {

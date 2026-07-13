@@ -8,9 +8,9 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // Registration provides factory registration for the OpenAI provider.

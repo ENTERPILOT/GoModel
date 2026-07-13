@@ -4,9 +4,9 @@ import (
 	"slices"
 	"strings"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // GenerateSuggestions builds dashboard failover-rule suggestions for every

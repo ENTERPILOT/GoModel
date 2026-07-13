@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 func newOpenAICompatibleTestClient(server *httptest.Server) *llmclient.Client {

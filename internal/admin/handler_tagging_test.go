@@ -11,7 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/tagging"
+	"github.com/enterpilot/gomodel/internal/tagging"
 )
 
 type adminTaggingStore struct {

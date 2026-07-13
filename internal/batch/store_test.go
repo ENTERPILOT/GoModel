@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestSerializeBatchValidatesID(t *testing.T) {

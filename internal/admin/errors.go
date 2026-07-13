@@ -8,14 +8,14 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/authkeys"
-	"gomodel/internal/budget"
-	"gomodel/internal/core"
-	"gomodel/internal/guardrails"
-	"gomodel/internal/pricingoverrides"
-	"gomodel/internal/ratelimit"
-	"gomodel/internal/virtualmodels"
-	"gomodel/internal/workflows"
+	"github.com/enterpilot/gomodel/internal/authkeys"
+	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/pricingoverrides"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/virtualmodels"
+	"github.com/enterpilot/gomodel/internal/workflows"
 )
 
 func budgetServiceError(message string, err error) error {

@@ -9,8 +9,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
-	"gomodel/internal/tagging"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/tagging"
 )
 
 func TestTaggingCaptureExtractsLabelsAndStripSet(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/guardrails"
 )
 
 func TestCompilerCompile_Guardrails(t *testing.T) {

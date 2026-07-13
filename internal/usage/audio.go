@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 const (

@@ -3,8 +3,8 @@ package providers
 import (
 	"testing"
 
-	"gomodel/config"
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // resolveKeys is a shorthand for the API key set the given provider ends up with.

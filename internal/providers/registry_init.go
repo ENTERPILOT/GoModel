@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	"gomodel/internal/modeldata"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
 // Initialize fetches models from all registered providers and populates the registry.

@@ -11,24 +11,24 @@ import (
 	"strings"
 	"time"
 
-	"gomodel/config"
-	"gomodel/ext"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"gomodel/internal/admin"
-	"gomodel/internal/admin/dashboard"
-	"gomodel/internal/auditlog"
-	batchstore "gomodel/internal/batch"
-	"gomodel/internal/conversationstore"
-	"gomodel/internal/core"
-	"gomodel/internal/filestore"
-	"gomodel/internal/responsecache"
-	"gomodel/internal/responsestore"
-	"gomodel/internal/tagging"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/admin/dashboard"
+	"github.com/enterpilot/gomodel/internal/auditlog"
+	batchstore "github.com/enterpilot/gomodel/internal/batch"
+	"github.com/enterpilot/gomodel/internal/conversationstore"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/filestore"
+	"github.com/enterpilot/gomodel/internal/responsecache"
+	"github.com/enterpilot/gomodel/internal/responsestore"
+	"github.com/enterpilot/gomodel/internal/tagging"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // Server wraps the Echo server

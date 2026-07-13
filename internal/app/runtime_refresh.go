@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"gomodel/internal/admin"
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 type refreshableService interface {

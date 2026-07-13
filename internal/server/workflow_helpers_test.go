@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestEnsureTranslatedRequestWorkflow_CompletesPartialWorkflowFromDecodedSelector(t *testing.T) {

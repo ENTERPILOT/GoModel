@@ -1,7 +1,7 @@
 package usage
 
 import (
-	"gomodel/internal/storage/sqlutil"
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 )
 
 // usageGroupedProviderNameSQL returns a SQL expression that collapses blank

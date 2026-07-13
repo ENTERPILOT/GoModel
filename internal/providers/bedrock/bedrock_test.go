@@ -10,8 +10,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 func TestParseBaseURL(t *testing.T) {

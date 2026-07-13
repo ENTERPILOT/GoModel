@@ -3,7 +3,7 @@ package usage
 import (
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestExtractFromRealtimeResponseDone(t *testing.T) {

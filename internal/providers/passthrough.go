@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // PassthroughEndpoint normalizes a provider-relative passthrough endpoint into

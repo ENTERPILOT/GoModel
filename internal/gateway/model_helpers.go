@@ -4,7 +4,7 @@ import (
 	"maps"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // CloneChatRequestForStreamUsage clones chat stream options before usage mutation.

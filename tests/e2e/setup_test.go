@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
-	"gomodel/internal/admin"
-	"gomodel/internal/admin/dashboard"
-	"gomodel/internal/providers"
-	"gomodel/internal/server"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/admin/dashboard"
+	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 type e2eServerOptions struct {

@@ -6,7 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
-	"gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // NewReader creates an audit log Reader from a storage backend.

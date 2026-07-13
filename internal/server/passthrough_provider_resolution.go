@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 type passthroughProviderResolution struct {

@@ -9,7 +9,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // PopulateRequestData copies the configured request capture fields into the log entry.

@@ -8,9 +8,9 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	"gomodel/internal/modeldata"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
 // SetModelList stores the parsed model list and its raw bytes for cache persistence.

@@ -7,7 +7,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 const (

@@ -9,7 +9,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestApplyRewriteSavings(t *testing.T) {

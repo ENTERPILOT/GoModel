@@ -16,9 +16,9 @@ import (
 	"github.com/coder/websocket"
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
-	"gomodel/internal/realtime"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/realtime"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // realtimeWebRTCMock extends mockProvider with the realtime routing capabilities

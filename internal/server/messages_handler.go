@@ -7,9 +7,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/anthropicapi"
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/anthropicapi"
+	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // Messages handles POST /v1/messages.

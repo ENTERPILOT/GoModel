@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/admin"
-	"gomodel/internal/admin/dashboard"
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/admin/dashboard"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/usage"
 
-	_ "gomodel/cmd/gomodel/docs"
+	_ "github.com/enterpilot/gomodel/cmd/gomodel/docs"
 
 	"github.com/labstack/echo/v5"
 )

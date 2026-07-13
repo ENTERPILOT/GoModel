@@ -11,10 +11,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/budget"
-	"gomodel/internal/core"
-	"gomodel/internal/ratelimit"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // UsageSummarizer aggregates recorded usage entries for the self-service

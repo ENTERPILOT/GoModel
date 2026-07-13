@@ -10,7 +10,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 type mongoPricingTestContextKey struct{}

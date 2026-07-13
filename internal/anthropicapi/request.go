@@ -8,7 +8,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // DecodeMessagesRequest parses an Anthropic Messages API request body.

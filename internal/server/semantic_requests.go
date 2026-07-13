@@ -3,7 +3,7 @@ package server
 import (
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func ensureWhiteBoxPrompt(c *echo.Context) *core.WhiteBoxPrompt {

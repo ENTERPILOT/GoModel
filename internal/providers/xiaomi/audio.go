@@ -10,7 +10,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // Xiaomi MiMo has no /audio/speech or /audio/transcriptions endpoints: TTS and

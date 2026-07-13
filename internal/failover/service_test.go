@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"gomodel/config"
+	"github.com/enterpilot/gomodel/config"
 )
 
 type memoryStore struct {

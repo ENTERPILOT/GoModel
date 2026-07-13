@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/budget"
-	"gomodel/internal/ratelimit"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 type fakeUsageSummarizer struct {

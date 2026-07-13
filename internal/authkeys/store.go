@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"gomodel/internal/core"
-	"gomodel/internal/validation"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/validation"
 )
 
 var (

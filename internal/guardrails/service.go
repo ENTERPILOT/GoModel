@@ -8,7 +8,7 @@ import (
 	"sort"
 	"sync"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 type serviceSnapshot struct {

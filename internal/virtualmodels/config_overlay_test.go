@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"gomodel/config"
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestConfigModels_Conversion(t *testing.T) {

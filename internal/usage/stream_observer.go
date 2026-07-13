@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // StreamUsageObserver extracts usage data from parsed SSE JSON payloads.

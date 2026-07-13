@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // TestClassifyProviderStatus_HealthyForAllowlistInventory locks in the

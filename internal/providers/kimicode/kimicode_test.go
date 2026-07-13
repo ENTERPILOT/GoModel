@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // kimibgeM3EmbedModel is the model ID used by these tests for the Kimi Code /embeddings endpoint.

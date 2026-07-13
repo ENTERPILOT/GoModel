@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 )

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 func TestRealtimeTarget(t *testing.T) {

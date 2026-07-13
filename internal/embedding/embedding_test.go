@@ -3,7 +3,7 @@ package embedding
 import (
 	"testing"
 
-	"gomodel/config"
+	"github.com/enterpilot/gomodel/config"
 )
 
 func TestNewEmbedder_EmptyProvider(t *testing.T) {

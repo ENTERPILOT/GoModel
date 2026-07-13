@@ -1,6 +1,6 @@
 package usage
 
-import "gomodel/internal/core"
+import "github.com/enterpilot/gomodel/internal/core"
 
 // PricingResolver resolves pricing metadata for a given model and provider type.
 // Implementations should check the registry first and fall back to a reverse-index

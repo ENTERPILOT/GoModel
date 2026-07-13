@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ChatExecutor applies virtual-model redirects to transport-free chat

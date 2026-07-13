@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // SQLite has a default limit of 999 bindable parameters per query (SQLITE_MAX_VARIABLE_NUMBER).

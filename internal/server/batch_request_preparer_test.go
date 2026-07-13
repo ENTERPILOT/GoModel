@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestComposeBatchRequestPreparers_CleansUpSupersededFilesAndMergesHints(t *testing.T) {

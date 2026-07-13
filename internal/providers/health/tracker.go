@@ -20,7 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 const (
