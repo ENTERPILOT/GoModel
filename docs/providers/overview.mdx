@@ -26,9 +26,10 @@ support, not every individual model capability exposed by an upstream provider.
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/providers/deepseek) |
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
 | Fireworks AI | `FIREWORKS_API_KEY` (`FIREWORKS_BASE_URL` optional) | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
+| Meta (Muse Spark) | `META_API_KEY` (`META_BASE_URL` optional) | `muse-spark-1.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
 | OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
-| xAI (Grok) | `XAI_API_KEY` | `grok-4` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
+| xAI (Grok) | `XAI_API_KEY` | `grok-4.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [xAI (Grok)](/providers/xai) |
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/providers/bailian) |
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
@@ -49,6 +50,11 @@ support, not every individual model capability exposed by an upstream provider.
 - **Fireworks AI** — model IDs are account-scoped paths such as
   `accounts/fireworks/models/gpt-oss-120b`; use them verbatim in requests and
   in `FIREWORKS_MODELS`.
+- **Meta (Muse Spark)** — the Meta Model API is OpenAI-compatible; set
+  `META_API_KEY` and route to `muse-spark-1.1`. Muse Spark models are not in
+  the upstream model catalog yet, so declare `context_window` and `pricing`
+  under `providers.meta.models` metadata in `config.yaml` if you want cost
+  tracking and context-window reporting.
 - **Xiaomi MiMo** — TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served
   through `/v1/audio/speech` and `/v1/audio/transcriptions` (translated to
   MiMo's chat-completions audio dialect) as well as directly via chat
@@ -123,7 +129,57 @@ These are the providers most users hit friction on:
   same file for both Docker and the native binary.
 </Tip>
 
-Providers without a dedicated page (OpenAI, Groq, Fireworks AI, OpenRouter,
-Z.ai, xAI, MiniMax) follow the same pattern: set the API key (and optional base
-URL where supported), start GoModel, route by model ID. The full env-var reference
+Providers without a dedicated page (OpenAI, Groq, Fireworks AI, Meta,
+OpenRouter, Z.ai, xAI, MiniMax) follow the same pattern: set the API key (and
+optional base URL where supported), start GoModel, route by model ID. The full env-var reference
 lives in [Configuration](/advanced/configuration).
+
+## Provider status
+
+The admin dashboard (`/admin/dashboard`) shows live status for every
+configured provider in the **Providers Overview** section of the
+**Overview** page.
+
+<img
+  src="/providers/provider-status.png"
+  alt="GoModel dashboard Providers Overview with a Degraded openai card showing a failing model and a Healthy vllm card"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Each card's status pill combines two signals — **model discovery** (can the
+provider's model inventory be fetched?) and **request health** (are real
+requests through the gateway succeeding?). Real-traffic signals only ever
+worsen a status, never mask a discovery failure. Hover over the pill for the
+classification reason and the most recent error.
+
+| Pill | Meaning |
+| ---- | ------- |
+| `Healthy` | Model discovery succeeded and recent traffic (if any) looks fine |
+| `Starting` | Configured and awaiting first model discovery |
+| `Configured` | Configured but no models exposed yet |
+| `Degraded` | The latest refresh failed (previous inventory still serves), **or** a specific model's recent requests keep failing |
+| `Recovering` | The circuit breaker is half-open and probing whether the provider recovered |
+| `Circuit Open` | The circuit breaker is open; traffic to the provider is paused |
+| `Unhealthy` | Model discovery failed and no models are available |
+
+Expand a card (the arrow strip at the bottom, or the section-wide
+**Show Details** switch) to see request health details:
+
+- **Recent Requests** — requests and errors through the gateway in the last
+  10 minutes.
+- **Breaker State** — the provider's live circuit-breaker state
+  (see [Resilience](/advanced/resilience#circuit-breaker-and-dashboard-provider-health)).
+- **Models (Recent Traffic)** — per-model request/error counts. A model with
+  at least 3 errors making up half or more of its windowed requests is
+  flagged in red — this catches a single broken model on an otherwise
+  healthy provider, which model discovery alone cannot see. Hover a row for
+  the model's latest error message.
+
+Request-health tracking is passive: it observes traffic your clients already
+send (the gateway's own background probes — model discovery and availability
+checks — are excluded), so an idle provider simply shows no recent requests. Counters are in-memory per gateway instance and
+reset on restart.
+
+The same data is available as JSON from `GET /admin/providers/status` for
+scripting and external monitoring.

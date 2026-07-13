@@ -1,0 +1,60 @@
+---
+title: "xAI (Grok)"
+description: "Configure xAI Grok models in GoModel and understand how reasoning effort and prompt-cache affinity are handled."
+icon: "x"
+---
+
+xAI's API is OpenAI-compatible, including a native Responses API. Models such
+as `grok-4.5` are discovered automatically from xAI's `/models` endpoint — no
+configuration beyond the API key is needed.
+
+## Configure
+
+```bash
+XAI_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  xai:
+    type: xai
+    base_url: "https://api.x.ai/v1"
+    api_key: "${XAI_API_KEY}"
+```
+
+<Note>
+  Voice models (e.g. `grok-voice-latest`) are not listed by xAI's `/models`
+  endpoint. To route realtime sessions to them, add them explicitly via
+  `XAI_MODELS=grok-voice-latest` or a configured model list.
+</Note>
+
+## Reasoning effort mapping
+
+Grok reasoning models (e.g. `grok-4.5`, defaulting to `high`) accept
+`reasoning_effort` as a top-level string on Chat Completions. GoModel rewrites
+the OpenAI-shaped `"reasoning": {"effort": "..."}` into that flat field — no
+client change required. On the Responses API the nested shape is xAI-native
+and passes through unchanged.
+
+| Client sends | xAI receives |
+| ------------ | ------------ |
+| `none` / `low` / `medium` / `high` | unchanged |
+| `xhigh` / `max` | `high` (`xhigh` on the multi-agent Grok family, where it selects the agent count) |
+| anything else | passed through for xAI to judge |
+
+Models without reasoning support reject the field upstream; omit `reasoning`
+for those.
+
+## Prompt-cache affinity
+
+xAI routes a conversation's requests to the same server via the
+`x-grok-conv-id` header; without it, cache hits are unreliable and input
+tokens are often billed at the uncached price.
+
+- **Chat Completions:** GoModel forwards a client-supplied `X-Grok-Conv-Id`
+  header, and otherwise derives a stable one from the conversation's opening
+  messages — cache affinity works with no client change.
+- **Responses API:** pass `prompt_cache_key` in the request body; GoModel
+  forwards it verbatim.

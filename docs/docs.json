@@ -21,6 +21,11 @@
     "api": {
         "url": "full"
     },
+    "integrations": {
+        "posthog": {
+            "apiKey": "phc_pHSTwDSn6q3sB9jcMfAUGFCG8WjgSqAMERjRsMKDyie9"
+        }
+    },
     "redirects": [
         {
             "source": "/features/aliases",
@@ -128,6 +133,7 @@
                     "providers/anthropic",
                     "providers/gemini",
                     "providers/deepseek",
+                    "providers/xai",
                     "providers/bailian",
                     "providers/xiaomi",
                     "providers/opencode-go",

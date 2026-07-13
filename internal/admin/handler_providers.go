@@ -10,6 +10,7 @@ import (
 
 	"gomodel/internal/core"
 	"gomodel/internal/providers"
+	"gomodel/internal/providers/health"
 )
 
 func (h *Handler) ProviderStatus(c *echo.Context) error {
@@ -41,6 +42,11 @@ func (h *Handler) RefreshRuntime(c *echo.Context) error {
 func (h *Handler) buildProviderStatusResponse() providerStatusResponse {
 	configuredByName, runtimeByName, names := h.collectProviderStatusInputs()
 
+	var healthByName map[string]health.ProviderHealth
+	if h.requestHealth != nil {
+		healthByName = h.requestHealth.Snapshot()
+	}
+
 	resp := providerStatusResponse{
 		Summary: providerStatusSummaryResponse{
 			OverallStatus: "degraded",
@@ -49,7 +55,7 @@ func (h *Handler) buildProviderStatusResponse() providerStatusResponse {
 	}
 
 	for _, name := range names {
-		item := buildProviderStatusItem(name, configuredByName[name], runtimeByName[name])
+		item := buildProviderStatusItem(name, configuredByName[name], runtimeByName[name], requestHealthFor(healthByName, name))
 		resp.Providers = append(resp.Providers, item)
 		resp.Summary.Total++
 		switch item.Status {
@@ -109,12 +115,13 @@ func (h *Handler) collectProviderStatusInputs() (
 // buildProviderStatusItem reconciles cfg/runtime gaps for a single provider
 // (either side may be zero-valued when only one source knows the name) and
 // produces the response row.
-func buildProviderStatusItem(name string, cfg providers.SanitizedProviderConfig, runtime providers.ProviderRuntimeSnapshot) providerStatusItemResponse {
+func buildProviderStatusItem(name string, cfg providers.SanitizedProviderConfig, runtime providers.ProviderRuntimeSnapshot, requestHealth *health.ProviderHealth) providerStatusItemResponse {
 	// Classify against the inputs as-given so the "Unknown" branch in
 	// classifyProviderStatus stays reachable for runtime-only providers.
 	// Synthesising cfg.Name first would always make the provider look
 	// configured to the classifier.
 	status, label, reason, lastError := classifyProviderStatus(cfg, runtime)
+	status, label, reason, lastError = applyRequestHealth(status, label, reason, lastError, requestHealth)
 
 	// For the response row, fill in display fallbacks from the peer side.
 	if strings.TrimSpace(cfg.Name) == "" {
@@ -131,15 +138,74 @@ func buildProviderStatusItem(name string, cfg providers.SanitizedProviderConfig,
 	}
 
 	return providerStatusItemResponse{
-		Name:         name,
-		Type:         strings.TrimSpace(cfg.Type),
-		Status:       status,
-		StatusLabel:  label,
-		StatusReason: reason,
-		LastError:    lastError,
-		Config:       cfg,
-		Runtime:      runtime,
+		Name:          name,
+		Type:          strings.TrimSpace(cfg.Type),
+		Status:        status,
+		StatusLabel:   label,
+		StatusReason:  reason,
+		LastError:     lastError,
+		Config:        cfg,
+		Runtime:       runtime,
+		RequestHealth: requestHealth,
 	}
+}
+
+// requestHealthFor matches a status row (keyed by trimmed provider name) to
+// its health snapshot; snapshot keys are trimmed too since llmclient records
+// the configured name as-is.
+func requestHealthFor(healthByName map[string]health.ProviderHealth, name string) *health.ProviderHealth {
+	for key, snapshot := range healthByName {
+		if strings.TrimSpace(key) == name {
+			return &snapshot
+		}
+	}
+	return nil
+}
+
+// applyRequestHealth folds real-traffic signals (circuit breaker state and
+// flagged models) into the discovery-based classification. Signals only
+// worsen a status, never improve it, and an equally severe base status keeps
+// its more specific label and reason.
+func applyRequestHealth(status, label, reason, lastError string, rh *health.ProviderHealth) (string, string, string, string) {
+	if rh == nil {
+		return status, label, reason, lastError
+	}
+
+	flagged := rh.FlaggedModels()
+	switch rh.CircuitState {
+	case "open":
+		if status != "unhealthy" {
+			status, label = "unhealthy", "Circuit Open"
+			reason = "circuit breaker is open; recent requests to this provider failed and traffic is paused"
+		}
+	case "half-open":
+		if status == "healthy" {
+			status, label = "degraded", "Recovering"
+			reason = "circuit breaker is half-open; probing whether the provider has recovered"
+		}
+	}
+	if len(flagged) > 0 && status == "healthy" {
+		status, label = "degraded", "Degraded"
+		reason = "recent requests are failing for: " + strings.Join(flagged, ", ")
+	}
+	if lastError == "" {
+		lastError = latestModelError(rh)
+	}
+	return status, label, reason, lastError
+}
+
+// latestModelError surfaces the most recent per-model failure so the card can
+// show what real traffic is hitting even when discovery reports no error. It
+// uses the provider-level LastError, which the tracker computes across every
+// tracked model before the snapshot's model list is capped.
+func latestModelError(rh *health.ProviderHealth) string {
+	if rh.LastError == nil {
+		return ""
+	}
+	if rh.LastErrorModel == "" {
+		return rh.LastError.Message
+	}
+	return rh.LastErrorModel + ": " + rh.LastError.Message
 }
 
 func overallProviderStatus(summary providerStatusSummaryResponse) string {

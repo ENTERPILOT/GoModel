@@ -262,3 +262,145 @@ test('provider status summary scrolls to providers overview section', () => {
         ['focus', { preventScroll: true }]
     ]);
 });
+
+test('request health helpers summarize windowed traffic and breaker state', () => {
+    const module = createProvidersModule();
+    const provider = {
+        request_health: {
+            circuit_state: 'half-open',
+            window_seconds: 600,
+            requests: 12,
+            errors: 1,
+            models: [
+                {
+                    model: 'qwen3.7-max',
+                    requests: 4,
+                    errors: 4,
+                    flagged: true,
+                    last_error: { status_code: 400, message: 'Error from provider' }
+                },
+                { model: 'gpt-5-nano', requests: 8, errors: 0, flagged: false }
+            ]
+        }
+    };
+
+    assert.equal(module.providerRequestHealth(provider), provider.request_health);
+    assert.equal(module.providerBreakerState(provider), 'half-open');
+    assert.equal(module.providerBreakerStateLabel(provider), 'Half-open');
+    assert.equal(module.providerBreakerStateClass(provider), 'is-degraded');
+    assert.equal(module.providerRecentTrafficSummary(provider), '12 requests · 1 error (last 10 min)');
+    assert.equal(module.providerHealthModels(provider).length, 2);
+    assert.equal(module.providerHealthModelStats(provider.request_health.models[0]), '4/4 failed');
+    assert.equal(
+        module.providerHealthModelTitle(provider.request_health.models[0]),
+        'HTTP 400: Error from provider'
+    );
+    assert.equal(module.providerHealthModelTitle(provider.request_health.models[1]), '');
+});
+
+test('request health helpers tolerate providers without request health', () => {
+    const module = createProvidersModule();
+    const provider = { name: 'openai' };
+
+    assert.equal(module.providerRequestHealth(provider), null);
+    assert.equal(module.providerBreakerState(provider), '');
+    assert.equal(module.providerBreakerStateLabel(provider), '');
+    assert.equal(module.providerRecentTrafficSummary(provider), '');
+    assert.equal(module.providerHealthModels(provider).length, 0);
+    assert.equal(module.providerHealthModelStats(null), '');
+    assert.equal(module.providerHealthModelTitle(null), '');
+});
+
+test('breaker state classes map open and closed states to pill palettes', () => {
+    const module = createProvidersModule();
+    const withState = (state) => ({ request_health: { circuit_state: state } });
+
+    assert.equal(module.providerBreakerStateClass(withState('open')), 'is-unhealthy');
+    assert.equal(module.providerBreakerStateClass(withState('closed')), 'is-healthy');
+});
+
+function createStorageStub() {
+    return {
+        values: new Map(),
+        getItem(key) {
+            return this.values.has(key) ? this.values.get(key) : null;
+        },
+        setItem(key, value) {
+            this.values.set(key, String(value));
+        }
+    };
+}
+
+test('per-card toggle overrides the section-wide default and persists', () => {
+    const storage = createStorageStub();
+    const module = createProvidersModule({ window: { localStorage: storage } });
+    module.initProviderStatusPreferences();
+
+    const ollama = { name: 'ollama' };
+    const openai = { name: 'openai' };
+
+    // Cards follow the collapsed section default until toggled individually.
+    assert.equal(module.providerCardExpanded(ollama), false);
+    module.toggleProviderCard(ollama);
+    assert.equal(module.providerCardExpanded(ollama), true);
+    assert.equal(module.providerCardExpanded(openai), false);
+
+    // Overrides survive a reload.
+    const reloaded = createProvidersModule({ window: { localStorage: storage } });
+    reloaded.initProviderStatusPreferences();
+    assert.equal(reloaded.providerCardExpanded(ollama), true);
+    assert.equal(reloaded.providerCardExpanded(openai), false);
+
+    // Toggling back persists the collapsed override too.
+    module.toggleProviderCard(ollama);
+    assert.equal(module.providerCardExpanded(ollama), false);
+});
+
+test('section-wide toggle acts as master and clears per-card overrides', () => {
+    const storage = createStorageStub();
+    const module = createProvidersModule({ window: { localStorage: storage } });
+    module.initProviderStatusPreferences();
+
+    const ollama = { name: 'ollama' };
+    module.toggleProviderCard(ollama);
+    assert.equal(module.providerCardExpanded(ollama), true);
+
+    module.toggleProviderStatusDetails();
+    assert.equal(module.providerStatusDetailsExpanded, true);
+    // The override was dropped, so the card follows the master state.
+    assert.equal(module.providerCardExpanded(ollama), true);
+
+    module.toggleProviderStatusDetails();
+    assert.equal(module.providerCardExpanded(ollama), false);
+    assert.equal(storage.getItem('gomodel_provider_card_expanded_overrides'), '{}');
+});
+
+test('per-card toggle tolerates corrupt storage and nameless providers', () => {
+    const storage = createStorageStub();
+    storage.setItem('gomodel_provider_card_expanded_overrides', 'not-json');
+    const module = createProvidersModule({ window: { localStorage: storage } });
+    module.initProviderStatusPreferences();
+
+    assert.equal(module.providerCardExpanded({ name: 'ollama' }), false);
+    module.toggleProviderCard(null);
+    module.toggleProviderCard({});
+    assert.equal(Object.keys(module.providerCardOverrides).length, 0);
+});
+
+test('status pill tooltip combines reason and last error', () => {
+    const module = createProvidersModule();
+
+    assert.equal(module.providerStatusPillTitle(null), '');
+    assert.equal(module.providerStatusPillTitle({}), '');
+    assert.equal(
+        module.providerStatusPillTitle({ status_reason: 'configured and model discovery succeeded' }),
+        'configured and model discovery succeeded'
+    );
+    assert.equal(
+        module.providerStatusPillTitle({
+            status_reason: 'recent requests are failing for: gpt-4o',
+            last_error: 'gpt-4o: authentication_error'
+        }),
+        'recent requests are failing for: gpt-4o\n\nLast error: gpt-4o: authentication_error'
+    );
+});
