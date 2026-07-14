@@ -180,6 +180,26 @@ test('fetchMcpServersPage stores the returned server list', async () => {
     assert.deepEqual(module.mcpServers, servers);
 });
 
+test('fetchMcpServersPage surfaces generic API failures', async () => {
+    const module = createMcpServersModule({
+        fetch: async () => ({
+            status: 500,
+            statusText: 'Internal Server Error',
+            json: async () => ({ error: { message: 'storage unavailable' } })
+        })
+    });
+    Object.assign(module, {
+        requestOptions: (options) => ({ ...(options || {}), headers: {} }),
+        handleFetchResponse: () => false
+    });
+
+    await module.fetchMcpServersPage();
+
+    assert.equal(module.mcpServersAvailable, true);
+    assert.equal(module.mcpServers.length, 0);
+    assert.equal(module.mcpServerError, 'storage unavailable');
+});
+
 test('submitMcpServerForm sends a normalized PUT payload', async () => {
     const requests = [];
     const module = createMcpServersModule({

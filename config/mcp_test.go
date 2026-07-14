@@ -175,6 +175,21 @@ func TestApplyMCPEnvMergesOverYAML(t *testing.T) {
 	}
 }
 
+func TestApplyMCPEnvExpandsEnvironmentReferences(t *testing.T) {
+	t.Setenv("MCP_TEST_TOKEN", `secret"token\value`)
+	t.Setenv("MCP_SERVERS", `{"github":{"url":"https://example.com/mcp","headers":{"Authorization":"Bearer ${MCP_TEST_TOKEN}"}}}`)
+	cfg := &Config{}
+
+	if err := applyMCPEnv(cfg); err != nil {
+		t.Fatalf("applyMCPEnv() error = %v", err)
+	}
+
+	got := cfg.MCP.Servers["github"].Headers["Authorization"]
+	if got != `Bearer secret"token\value` {
+		t.Fatalf("Authorization header = %q, want expanded token", got)
+	}
+}
+
 func TestApplyMCPEnvRejectsInvalidJSON(t *testing.T) {
 	cfg := &Config{}
 	t.Setenv("MCP_SERVERS", `[not json`)

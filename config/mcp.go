@@ -121,9 +121,38 @@ func applyMCPEnv(cfg *Config) error {
 			return fmt.Errorf("%s: entries %q and %q both canonicalize to server slug %q", envMCPServers, previous, name, canonical)
 		}
 		seen[canonical] = name
+		expandMCPServerEnv(&server)
 		cfg.MCP.Servers[canonical] = server
 	}
 	return nil
+}
+
+// expandMCPServerEnv matches YAML configuration semantics after JSON decoding.
+// Expanding typed values instead of the raw JSON keeps secrets containing
+// quotes or backslashes from corrupting the MCP_SERVERS document.
+func expandMCPServerEnv(server *MCPServerConfig) {
+	server.URL = expandString(server.URL)
+	server.Transport = expandString(server.Transport)
+	server.Command = expandString(server.Command)
+	server.Description = expandString(server.Description)
+	for i := range server.Args {
+		server.Args[i] = expandString(server.Args[i])
+	}
+	for i := range server.AllowedTools {
+		server.AllowedTools[i] = expandString(server.AllowedTools[i])
+	}
+	for i := range server.DisallowedTools {
+		server.DisallowedTools[i] = expandString(server.DisallowedTools[i])
+	}
+	for i := range server.UserPaths {
+		server.UserPaths[i] = expandString(server.UserPaths[i])
+	}
+	for key, value := range server.Headers {
+		server.Headers[key] = expandString(value)
+	}
+	for key, value := range server.Env {
+		server.Env[key] = expandString(value)
+	}
 }
 
 // normalizeMCPConfig canonicalizes server slugs, applies defaults, and rejects

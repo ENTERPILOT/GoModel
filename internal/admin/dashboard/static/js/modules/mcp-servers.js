@@ -309,6 +309,9 @@
                     this.mcpServersAvailable = true;
                     if (!handled) {
                         this.mcpServers = [];
+                        if (res.status !== 401) {
+                            this.mcpServerError = await this.mcpServerResponseMessage(res, 'Failed to load MCP servers.');
+                        }
                         return;
                     }
                     const payload = await res.json();
