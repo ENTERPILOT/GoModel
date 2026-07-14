@@ -83,8 +83,8 @@
                 <div class="form-field">
                     <label class="form-field-label" for="mcp-server-transport">Transport</label>
                     <select id="mcp-server-transport" class="form-select" x-model="mcpServerForm.transport">
-                        <option value="http">http</option>
-                        <option value="sse">sse</option>
+                        <option value="http">Streamable HTTP</option>
+                        <option value="sse">SSE (legacy)</option>
                     </select>
                     <small class="form-hint">stdio servers are config-only: declare them in <code>config.yaml</code> under <code>mcp.servers</code>.</small>
                 </div>
@@ -92,11 +92,6 @@
                 <div class="form-field">
                     <label class="form-field-label" for="mcp-server-url">URL</label>
                     <input id="mcp-server-url" type="text" class="mono" placeholder="https://mcp.example.com/mcp" x-model="mcpServerForm.url">
-                </div>
-
-                <div class="form-field">
-                    <label class="form-field-label" for="mcp-server-description">Description</label>
-                    <input id="mcp-server-description" type="text" placeholder="Optional description" x-model="mcpServerForm.description">
                 </div>
 
                 <div class="form-field">
@@ -121,26 +116,6 @@
                     <small class="form-hint">Sent only to the configured server origin. Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored value.</small>
                 </div>
 
-                <div class="form-field">
-                    <label class="form-field-label" for="mcp-server-allowed-tools">Allowed tools</label>
-                    <input id="mcp-server-allowed-tools" type="text" class="mono" placeholder="search_issues, get_file (comma-separated; empty allows all)" x-model="mcpServerForm.allowed_tools">
-                </div>
-
-                <div class="form-field">
-                    <label class="form-field-label" for="mcp-server-disallowed-tools">Disallowed tools</label>
-                    <input id="mcp-server-disallowed-tools" type="text" class="mono" placeholder="delete_repo (comma-separated)" x-model="mcpServerForm.disallowed_tools">
-                </div>
-
-                <div class="form-field">
-                    <label class="form-field-label" for="mcp-server-user-paths">User paths (empty means all)</label>
-                    <textarea id="mcp-server-user-paths" rows="4" class="mono" placeholder="/&#10;/team/alpha" x-model="mcpServerForm.user_paths"></textarea>
-                </div>
-
-                <div class="form-field">
-                    <label class="form-field-label" for="mcp-server-tool-timeout">Tool timeout (seconds)</label>
-                    <input id="mcp-server-tool-timeout" type="number" min="0" step="1" class="mono" placeholder="Default timeout when empty" x-model="mcpServerForm.tool_timeout_seconds">
-                </div>
-
                 <div class="vm-status-row">
                     <div class="vm-status-toggle">
                         <button type="button" class="alias-toggle"
@@ -152,6 +127,44 @@
                         </button>
                     </div>
                 </div>
+
+                <details class="mcp-server-advanced"
+                         :open="mcpServerAdvancedOpen"
+                         @toggle="mcpServerAdvancedOpen = $event.target.open">
+                    <summary>
+                        <span class="mcp-server-advanced-summary-copy">
+                            <span class="mcp-server-advanced-title">Advanced settings</span>
+                            <span class="form-hint">Description, access rules, and timeout</span>
+                        </span>
+                    </summary>
+
+                    <div class="mcp-server-advanced-fields">
+                        <div class="form-field">
+                            <label class="form-field-label" for="mcp-server-description">Description</label>
+                            <input id="mcp-server-description" type="text" placeholder="Optional description" x-model="mcpServerForm.description">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="mcp-server-allowed-tools">Allowed tools</label>
+                            <input id="mcp-server-allowed-tools" type="text" class="mono" placeholder="search_issues, get_file (comma-separated; empty allows all)" x-model="mcpServerForm.allowed_tools">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="mcp-server-disallowed-tools">Disallowed tools</label>
+                            <input id="mcp-server-disallowed-tools" type="text" class="mono" placeholder="delete_repo (comma-separated)" x-model="mcpServerForm.disallowed_tools">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="mcp-server-user-paths">User paths (empty means all)</label>
+                            <textarea id="mcp-server-user-paths" rows="4" class="mono" placeholder="/&#10;/team/alpha" x-model="mcpServerForm.user_paths"></textarea>
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="mcp-server-tool-timeout">Tool timeout (seconds)</label>
+                            <input id="mcp-server-tool-timeout" type="number" min="0" step="1" class="mono" placeholder="Default timeout when empty" x-model="mcpServerForm.tool_timeout_seconds">
+                        </div>
+                    </div>
+                </details>
 
                 <div class="form-actions">
                     <button type="button" class="pagination-btn" @click="closeMcpServerForm()">Cancel</button>

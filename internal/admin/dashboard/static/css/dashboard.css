@@ -6387,6 +6387,66 @@ body.conversation-drawer-open {
   color: var(--danger);
 }
 
+/* MCP server editor: keep optional descriptive and access-control settings in
+   a native disclosure while connection-critical fields remain immediately visible. */
+.mcp-server-advanced {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-surface) 72%, var(--bg) 28%);
+}
+
+.mcp-server-advanced > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.mcp-server-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.mcp-server-advanced > summary::after {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  content: "";
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.mcp-server-advanced[open] > summary::after {
+  transform: rotate(225deg);
+}
+
+.mcp-server-advanced-summary-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mcp-server-advanced-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mcp-server-advanced-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 14px;
+  border-top: 1px solid var(--border);
+}
+
 /* MCP servers: secondary line under a table cell (prompt/resource counts,
    inline last_error for degraded servers). */
 .mcp-server-sub-counts {

@@ -33,6 +33,31 @@ test('MCP server table remains horizontally accessible on narrow screens', () =>
     assert.match(css, /\.mcp-server-table-wrapper \.data-table\s*\{[^}]*min-width:/s);
 });
 
+test('MCP server editor exposes connection fields and collapses advanced settings on each open', () => {
+    const template = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'templates', 'page-mcp-servers.html'), 'utf8');
+    const module = createMcpServersModule();
+    const advancedIndex = template.indexOf('<details class="mcp-server-advanced"');
+
+    assert.match(template, /<details class="mcp-server-advanced"\s+:open="mcpServerAdvancedOpen"/s);
+    assert.match(template, /<option value="http">Streamable HTTP<\/option>\s*<option value="sse">SSE \(legacy\)<\/option>/s);
+    assert.ok(template.indexOf('id="mcp-server-transport"') < advancedIndex);
+    assert.ok(template.indexOf('@click="addMcpServerHeader()"') < advancedIndex);
+    assert.ok(template.indexOf('id="mcp-server-description"') > advancedIndex);
+    assert.equal(module.mcpServerAdvancedOpen, false);
+
+    module.mcpServerAdvancedOpen = true;
+    module.openMcpServerCreate();
+    assert.equal(module.mcpServerAdvancedOpen, false);
+
+    module.mcpServerAdvancedOpen = true;
+    module.openMcpServerEdit({ name: 'github', url: 'https://mcp.example.com/mcp', managed: false });
+    assert.equal(module.mcpServerAdvancedOpen, false);
+
+    module.mcpServerAdvancedOpen = true;
+    module.closeMcpServerForm();
+    assert.equal(module.mcpServerAdvancedOpen, false);
+});
+
 test('mcpHeadersToRows and mcpHeaderRowsToObject round-trip, preserving masked secrets', () => {
     const module = createMcpServersModule();
 

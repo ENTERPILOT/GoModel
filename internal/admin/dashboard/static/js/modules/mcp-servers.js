@@ -10,6 +10,7 @@
             mcpServerFormOpen: false,
             mcpServerFormSubmitting: false,
             mcpServerFormMode: 'create',
+            mcpServerAdvancedOpen: false,
             mcpServerDeletingName: '',
             mcpServerReconnectingName: '',
             mcpCatalogOpen: false,
@@ -188,6 +189,7 @@
 
             openMcpServerCreate() {
                 this.mcpServerFormMode = 'create';
+                this.mcpServerAdvancedOpen = false;
                 this.mcpServerError = '';
                 this.mcpServerNotice = '';
                 this.mcpServerForm = this.defaultMcpServerForm();
@@ -203,6 +205,7 @@
                     return;
                 }
                 this.mcpServerFormMode = 'edit';
+                this.mcpServerAdvancedOpen = false;
                 this.mcpServerError = '';
                 this.mcpServerNotice = '';
                 this.mcpServerForm = {
@@ -227,6 +230,7 @@
             closeMcpServerForm() {
                 this.mcpServerFormOpen = false;
                 this.mcpServerFormMode = 'create';
+                this.mcpServerAdvancedOpen = false;
                 this.mcpServerError = '';
                 this.mcpServerForm = this.defaultMcpServerForm();
             },
