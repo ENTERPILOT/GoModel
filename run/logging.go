@@ -38,7 +38,7 @@ func detectTTY(w io.Writer) bool {
 func newLogHandler(w io.Writer, isTTY bool, format string, level slog.Level) slog.Handler {
 	format = strings.ToLower(strings.TrimSpace(format))
 	if (isTTY && format != "json") || format == "text" {
-		return tint.NewHandler(w, &tint.Options{
+		return tint.NewTextHandler(w, &tint.Options{
 			Level:      level,
 			TimeFormat: time.Kitchen,
 			NoColor:    !isTTY,
