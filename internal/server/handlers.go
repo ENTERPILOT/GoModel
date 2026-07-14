@@ -255,11 +255,16 @@ func (h *Handler) realtime() *realtimeService {
 }
 
 func (h *Handler) mcp() *mcpService {
+	var logBodies bool
+	if h.logger != nil {
+		logBodies = h.logger.Config().LogBodies
+	}
 	return &mcpService{
 		gateway:       h.mcpGateway,
 		budgetChecker: h.budgetChecker,
 		rateLimiter:   h.rateLimiter,
 		enabled:       h.mcpEnabled && h.mcpGateway != nil,
+		logBodies:     logBodies,
 	}
 }
 

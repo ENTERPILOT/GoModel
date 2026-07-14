@@ -25,7 +25,10 @@ the same way it already sits between your apps and model providers:
   duration, sizes, error flag, labels, user path) and MCP requests appear in
   the audit log and request log like any other model traffic — labelled with
   the JSON-RPC method, and with the tool or prompt name for calls, so a
-  `tools/call` row reads `github_create_issue`, not a bare path. User-path
+  `tools/call` row reads `github_create_issue`, not a bare path. With
+  `LOGGING_LOG_BODIES=true` the JSON-RPC request and response frames are
+  recorded on the audit entry as well (tool arguments and results included),
+  subject to the same 1 MB capture cap as other endpoints. User-path
   rate limits and budgets gate MCP requests too.
 
 ## Connect a client

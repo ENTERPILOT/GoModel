@@ -71,6 +71,52 @@ func EnrichEntryWithRequestBody(c *echo.Context, body any) {
 	publishLiveAuditUpdate(c, entry)
 }
 
+// EnrichEntryWithRawRequestBody captures a raw request payload from a handler
+// whose endpoint is not ingress-managed (no request snapshot to read from),
+// applying the same size cap and JSON/UTF-8 coercion as snapshot-backed
+// capture. Callers gate on the audit LogBodies setting; an already-populated
+// request body is preserved.
+func EnrichEntryWithRawRequestBody(c *echo.Context, body []byte) {
+	if len(body) == 0 {
+		return
+	}
+	entry := entryFromContext(c)
+	if entry == nil {
+		return
+	}
+	data := ensureLogData(entry)
+	if data.RequestBody != nil || data.RequestBodyTooBigToHandle {
+		return
+	}
+	if len(body) > MaxBodyCapture {
+		data.RequestBodyTooBigToHandle = true
+	} else {
+		data.RequestBody = CaptureLoggedBody(body)
+	}
+	publishLiveAuditUpdate(c, entry)
+}
+
+// EnrichEntryWithCapturedResponseBody sets the response body and truncation
+// flag from a handler-owned response capture — for responses the middleware's
+// own writer deliberately skips, like MCP's SSE-framed POST replies.
+func EnrichEntryWithCapturedResponseBody(c *echo.Context, body any, truncated bool) {
+	if body == nil && !truncated {
+		return
+	}
+	entry := entryFromContext(c)
+	if entry == nil {
+		return
+	}
+	data := ensureLogData(entry)
+	if body != nil {
+		data.ResponseBody = body
+	}
+	if truncated {
+		data.ResponseBodyTooBigToHandle = true
+	}
+	publishLiveAuditUpdate(c, entry)
+}
+
 // EnrichEntryWithResponseBody sets the audit response body from a handler that
 // captures its own response payload (e.g. audio output served as raw bytes).
 // A nil body or missing entry is a no-op.
