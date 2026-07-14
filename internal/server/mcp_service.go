@@ -59,6 +59,9 @@ func (s *mcpService) handle(c *echo.Context, pinnedServer string) error {
 			defer capture.enrich(c)
 		}
 	}
+	// MCP responses relay upstream JSON-RPC frames that can echo request
+	// values; nosniff guarantees browsers never interpret them as HTML.
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	if err := s.gateway.ServeHTTP(c.Response(), c.Request(), pinnedServer); err != nil {
 		return handleError(c, err)
 	}

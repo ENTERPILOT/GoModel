@@ -233,6 +233,26 @@ func TestMCPServiceHandleGates(t *testing.T) {
 		}
 	})
 
+	t.Run("body logging off leaves the audit entry without bodies", func(t *testing.T) {
+		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true, logBodies: false}
+		c, rec := newMCPTestContext(http.MethodPost, mcpInitializeBody)
+		entry := &auditlog.LogEntry{}
+		c.Set(string(auditlog.LogEntryKey), entry)
+
+		if err := svc.handle(c, ""); err != nil {
+			t.Fatalf("handle() error = %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+		}
+		if entry.Data != nil && entry.Data.RequestBody != nil {
+			t.Fatalf("request body captured with body logging off: %v", entry.Data.RequestBody)
+		}
+		if entry.Data != nil && entry.Data.ResponseBody != nil {
+			t.Fatalf("response body captured with body logging off: %v", entry.Data.ResponseBody)
+		}
+	})
+
 	t.Run("GET skips the admission gates", func(t *testing.T) {
 		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true, rateLimiter: rejectingRateLimiter{}}
 		c, rec := newMCPTestContext(http.MethodGet, "")
@@ -256,6 +276,152 @@ func TestMCPServiceHandleGates(t *testing.T) {
 			t.Fatalf("status = %d, want 404 body=%s", rec.Code, rec.Body.String())
 		}
 	})
+}
+
+// TestMCPResponseCaptureWrite covers the audit-cap boundaries of the response
+// tee: the buffer stops at auditlog.MaxBodyCapture (flagging truncation) while
+// the client always receives every byte.
+func TestMCPResponseCaptureWrite(t *testing.T) {
+	tests := []struct {
+		name          string
+		writes        []string
+		wantCaptured  string
+		wantTruncated bool
+	}{
+		{
+			name:         "under the cap captures everything",
+			writes:       []string{"data: {}", "\n\n"},
+			wantCaptured: "data: {}\n\n",
+		},
+		{
+			name:         "exactly the cap captures everything untruncated",
+			writes:       []string{strings.Repeat("x", auditlog.MaxBodyCapture)},
+			wantCaptured: strings.Repeat("x", auditlog.MaxBodyCapture),
+		},
+		{
+			name:          "overflowing write is cut at the cap and flagged",
+			writes:        []string{strings.Repeat("x", auditlog.MaxBodyCapture+1)},
+			wantCaptured:  strings.Repeat("x", auditlog.MaxBodyCapture),
+			wantTruncated: true,
+		},
+		{
+			name:          "write after a full buffer only flags truncation",
+			writes:        []string{strings.Repeat("x", auditlog.MaxBodyCapture), "overflow"},
+			wantCaptured:  strings.Repeat("x", auditlog.MaxBodyCapture),
+			wantTruncated: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			capture := &mcpResponseCapture{ResponseWriter: rec}
+			var forwarded int
+			for _, w := range tt.writes {
+				n, err := capture.Write([]byte(w))
+				if err != nil {
+					t.Fatalf("Write() error = %v", err)
+				}
+				forwarded += n
+			}
+			if got := capture.body.String(); got != tt.wantCaptured {
+				t.Fatalf("captured %d bytes, want %d", len(got), len(tt.wantCaptured))
+			}
+			if capture.truncated != tt.wantTruncated {
+				t.Fatalf("truncated = %v, want %v", capture.truncated, tt.wantTruncated)
+			}
+			if want := len(strings.Join(tt.writes, "")); rec.Body.Len() != want || forwarded != want {
+				t.Fatalf("client received %d bytes (Write reported %d), want %d — the tee must never cut the response",
+					rec.Body.Len(), forwarded, want)
+			}
+		})
+	}
+}
+
+// TestMCPResponseCaptureEnrich covers what the tee records on the audit entry:
+// only SSE replies (the middleware owns the rest), with the truncation flag
+// carried through.
+func TestMCPResponseCaptureEnrich(t *testing.T) {
+	tests := []struct {
+		name          string
+		contentType   string
+		body          string
+		truncated     bool
+		wantBody      bool
+		wantTruncated bool
+	}{
+		{
+			name:        "SSE reply is recorded",
+			contentType: "text/event-stream; charset=utf-8",
+			body:        "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n",
+			wantBody:    true,
+		},
+		{
+			name:          "truncated SSE reply sets the overflow flag",
+			contentType:   "text/event-stream",
+			body:          "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"resu",
+			truncated:     true,
+			wantBody:      true,
+			wantTruncated: true,
+		},
+		{
+			name:        "non-SSE reply is left to the middleware capture",
+			contentType: "application/json",
+			body:        `{"jsonrpc":"2.0","id":1,"result":{}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, rec := newMCPTestContext(http.MethodPost, "")
+			entry := &auditlog.LogEntry{}
+			c.Set(string(auditlog.LogEntryKey), entry)
+			capture := &mcpResponseCapture{ResponseWriter: rec}
+			capture.Header().Set("Content-Type", tt.contentType)
+			if _, err := capture.Write([]byte(tt.body)); err != nil {
+				t.Fatalf("Write() error = %v", err)
+			}
+			capture.truncated = tt.truncated
+
+			capture.enrich(c)
+
+			gotBody := entry.Data != nil && entry.Data.ResponseBody != nil
+			if gotBody != tt.wantBody {
+				t.Fatalf("response body recorded = %v, want %v", gotBody, tt.wantBody)
+			}
+			gotTruncated := entry.Data != nil && entry.Data.ResponseBodyTooBigToHandle
+			if gotTruncated != tt.wantTruncated {
+				t.Fatalf("truncation flag = %v, want %v", gotTruncated, tt.wantTruncated)
+			}
+		})
+	}
+}
+
+// configLogger stubs auditlog.LoggerInterface with a fixed config.
+type configLogger struct{ cfg auditlog.Config }
+
+func (l configLogger) Write(*auditlog.LogEntry) {}
+func (l configLogger) Config() auditlog.Config  { return l.cfg }
+func (l configLogger) Close() error             { return nil }
+
+// TestHandlerMCPLogBodies covers how Handler.mcp() derives the service's
+// logBodies flag from the audit logger configuration.
+func TestHandlerMCPLogBodies(t *testing.T) {
+	tests := []struct {
+		name   string
+		logger auditlog.LoggerInterface
+		want   bool
+	}{
+		{name: "nil logger defaults to off", logger: nil, want: false},
+		{name: "body logging disabled stays off", logger: configLogger{cfg: auditlog.Config{Enabled: true}}, want: false},
+		{name: "body logging enabled propagates", logger: configLogger{cfg: auditlog.Config{Enabled: true, LogBodies: true}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &Handler{logger: tt.logger}
+			if got := h.mcp().logBodies; got != tt.want {
+				t.Fatalf("mcp().logBodies = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestEnrichMCPAuditEntryRestoresBody(t *testing.T) {
