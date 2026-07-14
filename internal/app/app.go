@@ -434,6 +434,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// server; the live provider dependency remains the bare router.
 	var provider core.RoutableProvider = app.providers.Router
 	var translatedRequestPatcher server.TranslatedRequestPatcher
+	var headerMutatorResolver server.HeaderMutatorResolver
 	var batchRequestPreparers []server.BatchRequestPreparer
 	featureCaps := runtimeWorkflowFeatureCaps(appCfg)
 
@@ -477,6 +478,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if featureCaps.Guardrails {
 		if app.guardrails != nil && app.guardrails.Service != nil {
 			translatedRequestPatcher = guardrails.NewWorkflowRequestPatcher(workflowResult.Service)
+			headerMutatorResolver = workflowResult.Service
 			if appCfg.Guardrails.EnableForBatchProcessing {
 				batchRequestPreparers = append(batchRequestPreparers, guardrails.NewWorkflowBatchPreparer(provider, workflowResult.Service))
 			}
@@ -548,6 +550,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		FailoverResolver:                failover.NewResolverWithRuleProvider(appCfg.Failover, providerResult.Registry, failoverResult.Service),
 		WorkflowPolicyResolver:          workflowResult.Service,
 		TranslatedRequestPatcher:        translatedRequestPatcher,
+		HeaderMutatorResolver:           headerMutatorResolver,
 		BatchRequestPreparer:            batchRequestPreparer,
 		ExposedModelLister:              vm,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
@@ -1126,6 +1129,8 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 		switch ruleType {
 		case "llm-based-altering":
 			ruleType = "llm_based_altering"
+		case "header-modification":
+			ruleType = "header_modification"
 		}
 		if name == "" {
 			return nil, fmt.Errorf("guardrail rule #%d: name is required", i)
@@ -1151,6 +1156,8 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 				"skip_content_prefix": rule.LLMBasedAltering.SkipContentPrefix,
 				"max_tokens":          rule.LLMBasedAltering.MaxTokens,
 			})
+		case "header_modification":
+			rawConfig, err = json.Marshal(headerModificationSeedConfig(rule.HeaderModification))
 		default:
 			return nil, fmt.Errorf("guardrail rule #%d (%q): unsupported type %q", i, name, ruleType)
 		}
@@ -1165,6 +1172,41 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 		})
 	}
 	return definitions, nil
+}
+
+// headerModificationSeedConfig converts YAML header_modification settings into
+// the definition-config JSON shape validated by the guardrails service.
+func headerModificationSeedConfig(settings config.HeaderModificationSettings) map[string]any {
+	conditions := make([]map[string]any, 0, len(settings.When))
+	for _, condition := range settings.When {
+		entry := map[string]any{"header": condition.Header}
+		if condition.Equals != nil {
+			entry["equals"] = *condition.Equals
+		}
+		if condition.Matches != nil {
+			entry["matches"] = *condition.Matches
+		}
+		if condition.Present != nil {
+			entry["present"] = *condition.Present
+		}
+		conditions = append(conditions, entry)
+	}
+	actions := make([]map[string]any, 0, len(settings.Actions))
+	for _, action := range settings.Actions {
+		entry := map[string]any{"action": action.Action, "header": action.Header}
+		if action.Value != "" {
+			entry["value"] = action.Value
+		}
+		if action.FromHeader != "" {
+			entry["from_header"] = action.FromHeader
+		}
+		actions = append(actions, entry)
+	}
+	seed := map[string]any{"actions": actions}
+	if len(conditions) > 0 {
+		seed["when"] = conditions
+	}
+	return seed
 }
 
 func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, configuredGuardrails []guardrails.Definition) workflows.CreateInput {

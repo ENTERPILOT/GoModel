@@ -770,6 +770,11 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 		}
 	}
 
+	// Apply header_modification workflow steps last so operator rules win over
+	// provider defaults; Apply never touches credential, transport, or payload
+	// metadata headers.
+	core.HeaderMutationFromContext(ctx).Apply(httpReq.Header)
+
 	return httpReq, nil
 }
 

@@ -988,3 +988,68 @@ test('entries without revisions render no revision tabs', () => {
     assert.equal(module.auditPanes(entry).map((p) => p.id).join(','), 'request,response');
     assert.equal(module.auditRequestRevisions(entry).length, 0);
 });
+
+test('auditRequestRevisionPane renders header-only revisions with the delta and no body warning', () => {
+    const module = createAuditListModule();
+    const entry = {
+        data: {
+            request_revisions: [{
+                seq: 1,
+                rewriter: 'pin-beta',
+                bytes_before: 0,
+                bytes_after: 0,
+                headers: {
+                    set: { 'Anthropic-Beta': 'context-1m' },
+                    removed: ['X-Debug']
+                }
+            }]
+        }
+    };
+
+    const pane = module.auditRequestRevisionPane(entry, entry.data.request_revisions[0]);
+
+    assert.equal(pane.headers.rewriter, 'pin-beta');
+    assert.equal('bytes' in pane.headers, false, 'byte sizes are meaningless for header-only revisions');
+    assert.deepEqual(JSON.parse(JSON.stringify(pane.headers.headers_set)), { 'Anthropic-Beta': 'context-1m' });
+    assert.deepEqual(JSON.parse(JSON.stringify(pane.headers.headers_removed)), ['X-Debug']);
+    assert.equal(pane.showBody, false);
+    assert.equal(pane.showTooLarge, false, 'header-only revisions must not warn about missing bodies');
+    assert.equal(pane.savingsLabel, '');
+});
+
+test('auditRequestRevisionPane renders names-only set deltas when header value logging is disabled', () => {
+    const module = createAuditListModule();
+    const entry = {
+        data: {
+            request_revisions: [{
+                seq: 1,
+                rewriter: 'pin-beta',
+                headers: {
+                    set: ['Anthropic-Beta', 'X-Custom-Auth'],
+                    removed: ['X-Debug']
+                }
+            }]
+        }
+    };
+
+    const pane = module.auditRequestRevisionPane(entry, entry.data.request_revisions[0]);
+
+    assert.deepEqual(JSON.parse(JSON.stringify(pane.headers.headers_set)), ['Anthropic-Beta', 'X-Custom-Auth']);
+    assert.deepEqual(JSON.parse(JSON.stringify(pane.headers.headers_removed)), ['X-Debug']);
+    assert.equal(pane.showTooLarge, false);
+});
+
+test('auditRequestRevisionPane keeps byte sizes and warning for body rewrites', () => {
+    const module = createAuditListModule();
+    const entry = {
+        data: {
+            request_revisions: [{ seq: 1, rewriter: 'compress', bytes_before: 100, bytes_after: 60 }]
+        }
+    };
+
+    const pane = module.auditRequestRevisionPane(entry, entry.data.request_revisions[0]);
+
+    assert.equal(pane.headers.bytes, '100 → 60');
+    assert.equal('headers_set' in pane.headers, false);
+    assert.equal(pane.showTooLarge, true);
+});

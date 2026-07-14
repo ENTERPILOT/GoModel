@@ -113,7 +113,7 @@ export GUARDRAILS_ENABLED=true
 | Field  | Required | Description                                                         |
 | ------ | -------- | ------------------------------------------------------------------- |
 | `name` | Yes      | Human-readable identifier. Supports spaces and unicode, but not `/`. |
-| `type` | Yes      | Guardrail type: `system_prompt` or `llm_based_altering`.            |
+| `type` | Yes      | Guardrail type: `system_prompt`, `llm_based_altering`, or `header_modification`. |
 | `user_path` | No  | Optional base user path for internal auxiliary guardrail requests. |
 | `order`| No       | Execution order. Default `0`. Same value = parallel, different = sequential. |
 
@@ -228,6 +228,77 @@ Guardrails are explicitly skipped for that internal request to avoid recursion.
   llm_based_altering:
     model: "gpt-4o-mini"
     roles: ["user"]
+```
+
+### `header_modification`
+
+Conditionally sets or removes **outbound provider-request headers** based on
+the inbound request headers. Use it to correct or steer the behavior of
+existing clients and agents without changing them — for example pinning an
+`Anthropic-Beta` feature flag for one coding agent, stripping internal debug
+headers before they leave the gateway, or renaming a header a client sends
+into the one a provider expects.
+
+Unlike the message-based types, this guardrail never touches the request body.
+It runs right after workflow resolution, and its changes are applied when the
+outbound provider request is built — on translated routes, passthrough routes
+(`/p/{provider}/...`), and realtime websocket upgrades alike.
+
+#### Settings
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `when` | No | List of inbound-header conditions. All must match; empty means always apply. |
+| `actions` | Yes | List of outbound header changes, applied in order. |
+
+Each `when` condition names a `header` and one predicate: `matches` (RE2
+regex), `equals` (exact string), or `present: true/false` (existence check —
+the default when no predicate is given). An explicit `equals: ""` matches a
+header whose value is empty.
+
+Each action has an `action` (`set` or `remove`) and a `header`. A `set` takes
+either a literal `value` or `from_header`, which copies the first inbound
+value of another header (the action is skipped when that header is absent).
+
+<Note>
+  Credential headers (`Authorization`, `Cookie`, `X-Api-Key`, ...) and
+  transport headers (`Host`, `Content-Length`, `Connection`, ...) are rejected
+  as condition sources and action targets at authoring time. Payload metadata
+  headers (`Accept-Encoding`, `Content-Encoding`, and `Content-Type`) are also
+  reserved because changing them can break decompression or body parsing. The
+  runtime refuses to touch all of these as a second line of defense.
+</Note>
+
+#### Observability
+
+Every header rule that changes a request is recorded on the audit entry's
+request-revision chain — the same mechanism used for body rewriters. Only the
+delta is stored. When `LOGGING_LOG_HEADERS=true`, set headers include their
+final values after normal credential redaction; otherwise only set header names
+are stored. Removed headers always contain names only. A request with no
+matching rules records nothing. Revisions describe the intended change and are
+not proof that execution reached provider egress. The dashboard request log
+shows each change as a **Rewritten** tab on the entry's detail drawer.
+
+#### Example
+
+```yaml
+- name: "pin-anthropic-beta"
+  type: "header_modification"
+  order: 2
+  header_modification:
+    when:
+      - header: "User-Agent"
+        matches: "^cline/"
+    actions:
+      - action: "set"
+        header: "Anthropic-Beta"
+        value: "context-1m-2025-08-07"
+      - action: "set"
+        header: "X-Team"
+        from_header: "X-Client-Team"
+      - action: "remove"
+        header: "X-Internal-Debug"
 ```
 
 ## Examples

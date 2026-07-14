@@ -251,6 +251,29 @@ guardrails:
     #     skip_content_prefix: "### safe"
     #     # prompt: "Custom rewrite instructions here."
 
+    # Example: conditionally modify outbound provider-request headers based on
+    # the inbound request headers. Conditions all have to match ("when" empty =
+    # always apply); actions run in order. Credential headers (Authorization,
+    # Cookie, API keys, ...) and transport headers (Host, Content-Length, ...)
+    # are rejected as condition sources and action targets. Applied changes are
+    # recorded on the audit entry's request-revision chain (only the delta).
+    # - name: "pin-anthropic-beta"
+    #   type: "header_modification"
+    #   order: 2
+    #   header_modification:
+    #     when:
+    #       - header: "User-Agent"
+    #         matches: "^cline/" # RE2 regex; or use "equals", or "present: false" for absence
+    #     actions:
+    #       - action: "set"
+    #         header: "Anthropic-Beta"
+    #         value: "context-1m-2025-08-07"
+    #       - action: "set"
+    #         header: "X-Team" # copy an inbound header's value to another outbound header
+    #         from_header: "X-Client-Team"
+    #       - action: "remove"
+    #         header: "X-Internal-Debug"
+
 failover:
   enabled: true # env: FAILOVER_ENABLED; default true
   manual_rules_path: "config/failover.example.json" # optional JSON map: {"primary-model": ["fallback-1", "provider/model"]}

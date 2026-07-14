@@ -122,7 +122,54 @@
                                     <template x-if="field.input === 'textarea'">
                                         <textarea :id="'guardrail-field-' + field.key" :placeholder="field.placeholder || ''" :value="guardrailFieldValue(field)" :aria-describedby="field.help ? 'guardrail-field-help-' + field.key : null" @input="setGuardrailFieldValue(field, $event.target.value)"></textarea>
                                     </template>
-                                    <template x-if="field.input !== 'select' && field.input !== 'textarea'">
+                                    <template x-if="field.input === 'header_conditions'">
+                                        <div class="guardrail-header-rows">
+                                            <template x-for="(row, index) in guardrailHeaderRows(field)" :key="field.key + '-' + index">
+                                                <div class="guardrail-header-row">
+                                                    <input type="text" placeholder="Header (e.g. User-Agent)" :value="row.header || ''" :aria-label="'Condition ' + (index + 1) + ' header'" @input="setGuardrailHeaderRowValue(field, index, 'header', $event.target.value)">
+                                                    <select class="form-select settings-select" :aria-label="'Condition ' + (index + 1) + ' operator'" @change="setGuardrailConditionMode(field, index, $event.target.value)">
+                                                        <option value="present" :selected="guardrailConditionMode(row) === 'present'">is present</option>
+                                                        <option value="absent" :selected="guardrailConditionMode(row) === 'absent'">is absent</option>
+                                                        <option value="equals" :selected="guardrailConditionMode(row) === 'equals'">equals</option>
+                                                        <option value="matches" :selected="guardrailConditionMode(row) === 'matches'">matches regex</option>
+                                                    </select>
+                                                    <input type="text" x-show="guardrailConditionValueVisible(row)" :placeholder="guardrailConditionMode(row) === 'matches' ? '^cline/' : 'expected value'" :value="row[guardrailConditionMode(row)] || ''" :aria-label="'Condition ' + (index + 1) + ' value'" @input="setGuardrailHeaderRowValue(field, index, guardrailConditionMode(row), $event.target.value)">
+                                                    <span class="guardrail-header-row-spacer" x-show="!guardrailConditionValueVisible(row)" aria-hidden="true"></span>
+                                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn" :aria-label="'Remove condition ' + (index + 1)" @click="removeGuardrailHeaderRow(field, index)">
+                                                        {{template "x-icon"}}
+                                                    </button>
+                                                </div>
+                                            </template>
+                                            <button type="button" class="pagination-btn pagination-btn-with-icon" @click="addGuardrailHeaderRow(field)">
+                                                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                                                <span>Add Condition</span>
+                                            </button>
+                                        </div>
+                                    </template>
+                                    <template x-if="field.input === 'header_actions'">
+                                        <div class="guardrail-header-rows">
+                                            <template x-for="(row, index) in guardrailHeaderRows(field)" :key="field.key + '-' + index">
+                                                <div class="guardrail-header-row">
+                                                    <select class="form-select settings-select" :aria-label="'Action ' + (index + 1) + ' kind'" @change="setGuardrailActionMode(field, index, $event.target.value)">
+                                                        <option value="set" :selected="guardrailActionMode(row) === 'set'">Set value</option>
+                                                        <option value="copy" :selected="guardrailActionMode(row) === 'copy'">Copy from header</option>
+                                                        <option value="remove" :selected="guardrailActionMode(row) === 'remove'">Remove</option>
+                                                    </select>
+                                                    <input type="text" placeholder="Header (e.g. Anthropic-Beta)" :value="row.header || ''" :aria-label="'Action ' + (index + 1) + ' header'" @input="setGuardrailHeaderRowValue(field, index, 'header', $event.target.value)">
+                                                    <input type="text" x-show="guardrailActionMode(row) !== 'remove'" :placeholder="guardrailActionMode(row) === 'copy' ? 'source header name' : 'header value'" :value="row[guardrailActionValueKey(row)] || ''" :aria-label="'Action ' + (index + 1) + ' value'" @input="setGuardrailHeaderRowValue(field, index, guardrailActionValueKey(row), $event.target.value)">
+                                                    <span class="guardrail-header-row-spacer" x-show="guardrailActionMode(row) === 'remove'" aria-hidden="true"></span>
+                                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn" :aria-label="'Remove action ' + (index + 1)" @click="removeGuardrailHeaderRow(field, index)">
+                                                        {{template "x-icon"}}
+                                                    </button>
+                                                </div>
+                                            </template>
+                                            <button type="button" class="pagination-btn pagination-btn-with-icon" @click="addGuardrailHeaderRow(field)">
+                                                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                                                <span>Add Action</span>
+                                            </button>
+                                        </div>
+                                    </template>
+                                    <template x-if="field.input !== 'select' && field.input !== 'textarea' && field.input !== 'header_conditions' && field.input !== 'header_actions'">
                                         <input :id="'guardrail-field-' + field.key" :type="field.input || 'text'" :placeholder="field.placeholder || ''" :value="guardrailFieldValue(field)" :aria-describedby="field.help ? 'guardrail-field-help-' + field.key : null" @input="setGuardrailFieldValue(field, $event.target.value)">
                                     </template>
                                 </div>

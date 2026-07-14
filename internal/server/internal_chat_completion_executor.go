@@ -78,6 +78,10 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Header modifications belong only to the user's provider request. Internal
+	// guardrail/cache execution may resolve to another provider and must not
+	// inherit that request-scoped mutation.
+	ctx = core.WithoutHeaderMutation(ctx)
 	ctx = core.WithRequestOrigin(ctx, core.RequestOriginGuardrail)
 	ctx = gateway.WithAttemptRecorder(ctx)
 

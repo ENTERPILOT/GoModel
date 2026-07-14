@@ -144,7 +144,9 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx), m.embedderIdentity)
 	paramsHash := sha256HexOf(baseParams + "\x00" + msgFp)
 
-	vec, err := m.embedder.Embed(ctx, embedText)
+	// Semantic embeddings are auxiliary calls and may use a provider unrelated
+	// to the user's route, so request-scoped outbound header rules do not apply.
+	vec, err := m.embedder.Embed(core.WithoutHeaderMutation(ctx), embedText)
 	if err != nil {
 		slog.Warn("semantic cache: embed failed, bypassing", "err", err)
 		return next()

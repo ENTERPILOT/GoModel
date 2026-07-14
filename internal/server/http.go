@@ -66,6 +66,7 @@ type Config struct {
 	WorkflowPolicyResolver          RequestWorkflowPolicyResolver          // Optional: persisted workflow resolver used during workflow resolution
 	FailoverResolver                RequestFailoverResolver                // Optional: translated-route failover resolver
 	TranslatedRequestPatcher        TranslatedRequestPatcher               // Optional: request patcher for translated routes after workflow resolution
+	HeaderMutatorResolver           HeaderMutatorResolver                  // Optional: header_modification workflow step resolver applied after workflow resolution
 	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
 	KeepOnlyAliasesAtModelsEndpoint bool                                   // Whether GET /v1/models should hide concrete provider models
@@ -331,6 +332,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// managed auth key user-path overrides are visible to policy resolution while
 	// still keeping workflow resolution failures loggable through the audit middleware.
 	e.Use(WorkflowResolutionWithResolverAndPolicy(provider, modelResolver, workflowPolicyResolver))
+
+	// Header-modification workflow steps run right after workflow resolution:
+	// they read the inbound headers and stash the outbound header mutation in
+	// context for the translated and passthrough outbound request builders.
+	if cfg != nil && cfg.HeaderMutatorResolver != nil {
+		e.Use(HeaderModificationMiddleware(cfg.HeaderMutatorResolver, auditLogger))
+	}
 
 	// Public routes
 	e.GET("/health", handler.Health)

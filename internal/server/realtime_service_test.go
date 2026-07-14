@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"testing"
+
+	"gomodel/internal/core"
 )
 
 func TestIsWebSocketUpgrade(t *testing.T) {
@@ -47,7 +49,14 @@ func TestRealtimeUpstreamHeaders(t *testing.T) {
 	target := http.Header{}
 	target.Set("Authorization", "Bearer upstream-key")
 
-	got := realtimeUpstreamHeaders(context.Background(), client, target)
+	ctx := core.WithHeaderMutation(context.Background(), &core.HeaderMutation{
+		Set: map[string]string{
+			"X-Custom":      "operator-value",
+			"X-Rule":        "applied",
+			"Authorization": "Bearer attacker",
+		},
+	})
+	got := realtimeUpstreamHeaders(ctx, client, target)
 
 	if got.Get("Authorization") != "Bearer upstream-key" {
 		t.Errorf("Authorization = %q, want injected upstream key", got.Get("Authorization"))
@@ -55,8 +64,11 @@ func TestRealtimeUpstreamHeaders(t *testing.T) {
 	if got.Get("OpenAI-Beta") != "" {
 		t.Errorf("OpenAI-Beta = %q, want stripped (GA endpoint rejects it)", got.Get("OpenAI-Beta"))
 	}
-	if got.Get("X-Custom") != "keep-me" {
-		t.Errorf("X-Custom = %q, want forwarded", got.Get("X-Custom"))
+	if got.Get("X-Custom") != "operator-value" {
+		t.Errorf("X-Custom = %q, want operator mutation", got.Get("X-Custom"))
+	}
+	if got.Get("X-Rule") != "applied" {
+		t.Errorf("X-Rule = %q, want mutation applied", got.Get("X-Rule"))
 	}
 	for key := range got {
 		if len(key) >= 13 && http.CanonicalHeaderKey(key)[:13] == "Sec-Websocket" {

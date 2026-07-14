@@ -119,6 +119,16 @@ func normalizeDefinition(def Definition) (Definition, error) {
 			return Definition{}, newValidationError("marshal guardrail config", err)
 		}
 		def.Config = raw
+	case "header_modification":
+		cfg, err := decodeHeaderModificationDefinitionConfig(def.Config)
+		if err != nil {
+			return Definition{}, err
+		}
+		raw, err := json.Marshal(cfg)
+		if err != nil {
+			return Definition{}, newValidationError("marshal guardrail config", err)
+		}
+		def.Config = raw
 	default:
 		return Definition{}, newValidationError(`unknown guardrail type: "`+def.Type+`"`, nil)
 	}
@@ -132,6 +142,8 @@ func normalizeDefinitionType(raw string) string {
 		return "system_prompt"
 	case "llm-based-altering":
 		return "llm_based_altering"
+	case "header-modification":
+		return "header_modification"
 	default:
 		return strings.ToLower(strings.TrimSpace(raw))
 	}
@@ -291,6 +303,16 @@ func buildDefinition(def Definition, executor ChatCompletionExecutor) (Guardrail
 			return nil, RuleDescriptor{}, newValidationError("build llm_based_altering guardrail: "+err.Error(), err)
 		}
 		return instance, llmBasedAlteringDescriptor(def.Name, runtimeCfg), nil
+	case "header_modification":
+		cfg, err := decodeHeaderModificationDefinitionConfig(def.Config)
+		if err != nil {
+			return nil, RuleDescriptor{}, err
+		}
+		instance, err := NewHeaderModificationGuardrail(def.Name, cfg)
+		if err != nil {
+			return nil, RuleDescriptor{}, newValidationError("build header_modification guardrail: "+err.Error(), err)
+		}
+		return instance, headerModificationDescriptor(def.Name, cfg), nil
 	default:
 		return nil, RuleDescriptor{}, newValidationError(`unknown guardrail type: "`+def.Type+`"`, nil)
 	}
@@ -337,6 +359,12 @@ func summarizeDefinition(def Definition) string {
 			}
 		}
 		return fmt.Sprintf("%s • %s • %s", target, strings.Join(runtimeCfg.Roles, ","), promptSummary)
+	case "header_modification":
+		cfg, err := decodeHeaderModificationDefinitionConfig(def.Config)
+		if err != nil {
+			return ""
+		}
+		return summarizeHeaderModification(cfg)
 	default:
 		return ""
 	}
@@ -425,6 +453,30 @@ func TypeDefinitions() []TypeDefinition {
 					Input:       "textarea",
 					Help:        "Optional custom rewrite prompt. Leave empty to use the built-in LiteLLM-derived anonymization prompt.",
 					Placeholder: "Leave empty to use the built-in anonymization prompt.",
+				},
+			},
+		},
+		{
+			Type:        "header_modification",
+			Label:       "Header Modification",
+			Description: "Conditionally sets or removes outbound provider-request headers based on the inbound request headers.",
+			Defaults: mustMarshalRaw(headerModificationDefinitionConfig{
+				When:    []headerModificationCondition{},
+				Actions: []headerModificationAction{{Action: headerActionSet}},
+			}),
+			Fields: []TypeField{
+				{
+					Key:   "when",
+					Label: "Conditions",
+					Input: "header_conditions",
+					Help:  "All conditions must match the inbound request headers. Leave empty to always apply.",
+				},
+				{
+					Key:      "actions",
+					Label:    "Actions",
+					Input:    "header_actions",
+					Required: true,
+					Help:     "Applied to the outbound provider request in order. Credential, transport, and payload metadata headers are rejected.",
 				},
 			},
 		},

@@ -6208,6 +6208,21 @@ const docTemplate = `{
                 }
             }
         },
+        "auditlog.HeaderRevisionSnapshot": {
+            "type": "object",
+            "properties": {
+                "removed": {
+                    "description": "Removed contains the names of headers the revision removes.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "set": {
+                    "description": "Set contains either map[string]string values or a []string of names,\naccording to the LOGGING_LOG_HEADERS policy described above."
+                }
+            }
+        },
         "auditlog.LogData": {
             "type": "object",
             "properties": {
@@ -6261,7 +6276,7 @@ const docTemplate = `{
                     }
                 },
                 "request_revisions": {
-                    "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that changed the body, in application order.\nRequestBody always remains the original client request; the last\nrevision is what was forwarded downstream.",
+                    "description": "RequestRevisions captures intended ingress changes in application order:\nbody rewrites and outbound header modifications. RequestBody always\nremains the original client request. A revision records what would be\napplied if execution reaches provider egress; it is not proof of egress.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/auditlog.RequestRevisionSnapshot"
@@ -6408,6 +6423,14 @@ const docTemplate = `{
                 },
                 "detail": {
                     "description": "Detail is an optional rewriter-provided structured summary of what\nchanged (for example a compression block report)."
+                },
+                "headers": {
+                    "description": "Headers records the outbound provider-request header changes made by\nthis revision. Only the delta is stored; absent means unchanged.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/auditlog.HeaderRevisionSnapshot"
+                        }
+                    ]
                 },
                 "rewriter": {
                     "type": "string"

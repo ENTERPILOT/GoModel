@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -404,6 +405,49 @@ func TestConfigGuardrailDefinitions_TrimAndCanonicalizeRuleIdentity(t *testing.T
 	}
 	if definitions[0].Type != "system_prompt" {
 		t.Fatalf("definitions[0].Type = %q, want system_prompt", definitions[0].Type)
+	}
+}
+
+func TestConfigGuardrailDefinitions_HeaderModification(t *testing.T) {
+	present := false
+	matches := "^cline/"
+	equalsEmpty := ""
+	definitions, err := configGuardrailDefinitions(config.GuardrailsConfig{
+		Enabled: true,
+		Rules: []config.GuardrailRuleConfig{
+			{
+				Name: "pin-beta",
+				Type: "header-modification",
+				HeaderModification: config.HeaderModificationSettings{
+					When: []config.HeaderConditionConfig{
+						{Header: "User-Agent", Matches: &matches},
+						{Header: "X-Empty", Equals: &equalsEmpty},
+						{Header: "X-Skip", Present: &present},
+					},
+					Actions: []config.HeaderActionConfig{
+						{Action: "set", Header: "anthropic-beta", Value: "context-1m"},
+						{Action: "remove", Header: "X-Debug"},
+						{Action: "set", Header: "X-Team", FromHeader: "X-Client-Team"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("configGuardrailDefinitions() error = %v", err)
+	}
+	if len(definitions) != 1 {
+		t.Fatalf("len(configGuardrailDefinitions()) = %d, want 1", len(definitions))
+	}
+	if definitions[0].Type != "header_modification" {
+		t.Fatalf("definitions[0].Type = %q, want header_modification", definitions[0].Type)
+	}
+	// The seeded config must survive the guardrails service validation path.
+	raw := string(definitions[0].Config)
+	for _, want := range []string{`"anthropic-beta"`, `"^cline/"`, `"equals":""`, `"from_header":"X-Client-Team"`, `"present":false`} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("seed config missing %s: %s", want, raw)
+		}
 	}
 }
 

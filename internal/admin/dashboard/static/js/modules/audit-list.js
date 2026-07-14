@@ -534,7 +534,8 @@
             },
 
             // auditRequestRevisions returns the ingress rewrite chain recorded for
-            // the entry (one item per rewriter that changed the request body).
+            // the entry (one item per rewriter or header-modification step that
+            // changed the request body or the outbound headers).
             auditRequestRevisions(entry) {
                 return entry && entry.data && Array.isArray(entry.data.request_revisions)
                     ? entry.data.request_revisions
@@ -555,15 +556,27 @@
             // auditRequestRevisionPane renders one ingress rewrite: a structured
             // summary of what the rewriter changed plus the rewritten body when
             // it was captured. The original client request stays on the Request
-            // tab; the last revision is what the provider actually received.
+            // tab. Revisions describe intended changes and do not prove egress.
             auditRequestRevisionPane(entry, revision) {
                 const body = revision && revision.body;
                 const hasBody = body != null && body !== '';
+                const headerDelta = (revision && revision.headers) || null;
                 const single = this.auditRequestRevisions(entry).length <= 1;
                 const summary = {
-                    rewriter: (revision && revision.rewriter) || '',
-                    bytes: Number(revision && revision.bytes_before || 0) + ' \u2192 ' + Number(revision && revision.bytes_after || 0)
+                    rewriter: (revision && revision.rewriter) || ''
                 };
+                if (!headerDelta || revision.bytes_before || revision.bytes_after) {
+                    summary.bytes = Number(revision && revision.bytes_before || 0) + ' \u2192 ' + Number(revision && revision.bytes_after || 0);
+                }
+                // Only changed headers are recorded. Depending on
+                // LOGGING_LOG_HEADERS, set is either a redacted name/value
+                // object or a names-only array; removed always carries names.
+                if (headerDelta && headerDelta.set) {
+                    summary.headers_set = headerDelta.set;
+                }
+                if (headerDelta && headerDelta.removed) {
+                    summary.headers_removed = headerDelta.removed;
+                }
                 if (revision && revision.detail != null) {
                     summary.detail = revision.detail;
                 }
@@ -587,7 +600,7 @@
                     body,
                     showEmpty: false,
                     emptyMessage: '',
-                    showTooLarge: !hasBody,
+                    showTooLarge: !hasBody && !headerDelta,
                     tooLargeMessage: 'Rewritten body not captured (body logging disabled or body too large).'
                 };
             },

@@ -21,10 +21,12 @@ type mockEmbedder struct {
 	vector []float32
 	err    error
 	calls  int
+	ctx    context.Context
 }
 
-func (m *mockEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
+func (m *mockEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
 	m.calls++
+	m.ctx = ctx
 	return m.vector, m.err
 }
 
@@ -63,6 +65,31 @@ func serveSemanticRequest(t *testing.T, m *semanticCacheMiddleware, body []byte,
 		t.Fatalf("Handle error: %v", err)
 	}
 	return rec
+}
+
+func TestSemanticCacheEmbeddingDoesNotInheritHeaderMutation(t *testing.T) {
+	m, _, emb := newTestSemanticMiddleware(0.9, 20, false)
+	defer func() { _ = m.close() }()
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`)
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req = req.WithContext(core.WithHeaderMutation(req.Context(), &core.HeaderMutation{
+		Set: map[string]string{"X-Outer-Rule": "must-not-leak"},
+	}))
+	c := e.NewContext(req, rec)
+
+	if err := m.Handle(&echoExchange{c: c}, body, func() error {
+		return c.JSON(http.StatusOK, map[string]string{"answer": "42"})
+	}); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if emb.ctx == nil {
+		t.Fatal("embedder context was not captured")
+	}
+	if mutation := core.HeaderMutationFromContext(emb.ctx); mutation != nil {
+		t.Fatalf("semantic embedder inherited outer header mutation: %+v", mutation)
+	}
 }
 
 func TestSemanticCacheMiddleware_CacheHit(t *testing.T) {

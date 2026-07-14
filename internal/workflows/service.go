@@ -341,6 +341,17 @@ func (s *Service) PipelineForWorkflow(workflow *core.Workflow) *guardrails.Pipel
 	return compiled.Pipeline
 }
 
+// HeaderMutatorsForContext resolves the header-mutating workflow steps for
+// the request context, in execution order. Nil when the workflow has no
+// guardrails pipeline or no header_modification steps.
+func (s *Service) HeaderMutatorsForContext(ctx context.Context) []core.HeaderMutator {
+	pipeline := s.PipelineForContext(ctx)
+	if pipeline == nil {
+		return nil
+	}
+	return pipeline.HeaderMutators()
+}
+
 // StartBackgroundRefresh periodically reloads active workflows until stopped.
 func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 	if interval <= 0 {
