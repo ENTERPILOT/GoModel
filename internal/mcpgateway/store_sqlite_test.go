@@ -29,6 +29,7 @@ func TestSQLiteStoreRoundTrip(t *testing.T) {
 
 	server := ManagedServer{
 		Name:               "github",
+		DisplayName:        "GitHub MCP",
 		URL:                "https://api.githubcopilot.com/mcp",
 		Transport:          "http",
 		Headers:            map[string]string{"Authorization": "Bearer secret"},
@@ -50,6 +51,9 @@ func TestSQLiteStoreRoundTrip(t *testing.T) {
 	if got.URL != server.URL || got.Transport != "http" || !got.Enabled {
 		t.Fatalf("Get() = %+v, want round-tripped row", got)
 	}
+	if got.Name != "github" || got.DisplayName != "GitHub MCP" {
+		t.Fatalf("Get() identity = (%q, %q), want (github, GitHub MCP)", got.Name, got.DisplayName)
+	}
 	if got.Headers["Authorization"] != "Bearer secret" {
 		t.Fatalf("Get().Headers = %v, want secret preserved", got.Headers)
 	}
@@ -65,6 +69,7 @@ func TestSQLiteStoreRoundTrip(t *testing.T) {
 
 	// Update preserves CreatedAt and bumps the row.
 	server.Description = "updated"
+	server.DisplayName = "GitHub 工具"
 	server.Enabled = false
 	if err := store.Upsert(ctx, server); err != nil {
 		t.Fatalf("Upsert(update) error = %v", err)
@@ -75,6 +80,9 @@ func TestSQLiteStoreRoundTrip(t *testing.T) {
 	}
 	if updated.Description != "updated" || updated.Enabled {
 		t.Fatalf("Get(updated) = %+v, want updated row", updated)
+	}
+	if updated.Name != "github" || updated.DisplayName != "GitHub 工具" {
+		t.Fatalf("Get(updated) identity = (%q, %q), want immutable slug and updated display name", updated.Name, updated.DisplayName)
 	}
 	if !updated.CreatedAt.Equal(got.CreatedAt) {
 		t.Fatalf("Get(updated).CreatedAt = %v, want original %v preserved", updated.CreatedAt, got.CreatedAt)
@@ -96,6 +104,38 @@ func TestSQLiteStoreRoundTrip(t *testing.T) {
 	}
 	if err := store.Delete(ctx, "github"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Delete(missing) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSQLiteStoreMigratesDisplayName(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	defer db.Close()
+	if _, err := db.Exec(`
+		CREATE TABLE mcp_servers (
+			name TEXT PRIMARY KEY, url TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT 'http',
+			headers TEXT NOT NULL DEFAULT '{}', description TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
+			allowed_tools TEXT NOT NULL DEFAULT '[]', disallowed_tools TEXT NOT NULL DEFAULT '[]', user_paths TEXT NOT NULL DEFAULT '[]',
+			tool_timeout_seconds INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+		);
+		INSERT INTO mcp_servers (name, created_at, updated_at) VALUES ('linear', 1, 1)
+	`); err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+
+	store, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore() migration error = %v", err)
+	}
+	server, err := store.Get(context.Background(), "linear")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if server.DisplayName != "linear" {
+		t.Fatalf("DisplayName = %q, want legacy slug backfilled", server.DisplayName)
 	}
 }
 

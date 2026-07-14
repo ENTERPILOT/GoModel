@@ -427,7 +427,12 @@ func (s *Service) composeInstructions(scope requestScope, views []ServerView) st
 			continue
 		}
 		if b.Len() > 0 {
-			fmt.Fprintf(&b, "\n\n## %s\n", view.Spec.Name)
+			displayName := strings.TrimSpace(view.Spec.DisplayName)
+			if displayName == "" || displayName == view.Spec.Name {
+				fmt.Fprintf(&b, "\n\n## %s\n", view.Spec.Name)
+			} else {
+				fmt.Fprintf(&b, "\n\n## %s (`%s`)\n", displayName, view.Spec.Name)
+			}
 		}
 		b.WriteString(strings.TrimSpace(snapshot.instructions))
 	}

@@ -14,6 +14,7 @@ import (
 
 type mongoMCPServerDocument struct {
 	ID                 string            `bson:"_id"`
+	DisplayName        string            `bson:"display_name,omitempty"`
 	URL                string            `bson:"url,omitempty"`
 	Transport          string            `bson:"transport,omitempty"`
 	Headers            map[string]string `bson:"headers,omitempty"`
@@ -93,6 +94,7 @@ func (s *MongoDBStore) Upsert(ctx context.Context, server ManagedServer) error {
 	stampUpsert(&server)
 	update := bson.M{
 		"$set": bson.M{
+			"display_name":         server.DisplayName,
 			"url":                  server.URL,
 			"transport":            server.Transport,
 			"headers":              server.Headers,
@@ -133,6 +135,7 @@ func (s *MongoDBStore) Close() error {
 func managedServerFromMongo(doc mongoMCPServerDocument) ManagedServer {
 	server := ManagedServer{
 		Name:               doc.ID,
+		DisplayName:        doc.DisplayName,
 		URL:                doc.URL,
 		Transport:          doc.Transport,
 		Description:        doc.Description,
@@ -140,6 +143,9 @@ func managedServerFromMongo(doc mongoMCPServerDocument) ManagedServer {
 		ToolTimeoutSeconds: doc.ToolTimeoutSeconds,
 		CreatedAt:          doc.CreatedAt.UTC(),
 		UpdatedAt:          doc.UpdatedAt.UTC(),
+	}
+	if server.DisplayName == "" {
+		server.DisplayName = server.Name
 	}
 	if len(doc.Headers) > 0 {
 		server.Headers = doc.Headers

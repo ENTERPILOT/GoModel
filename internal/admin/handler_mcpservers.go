@@ -9,6 +9,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 )
@@ -37,6 +38,7 @@ const redactedMCPHeaderValue = "***"
 // true, preserving the existing value when omitted on an update.
 type upsertMCPServerRequest struct {
 	Name               string            `json:"name"`
+	Slug               string            `json:"slug,omitempty"`
 	URL                string            `json:"url"`
 	Transport          string            `json:"transport,omitempty"`
 	Headers            map[string]string `json:"headers,omitempty"`
@@ -53,6 +55,7 @@ type upsertMCPServerRequest struct {
 // config/env-declared servers, which are read-only in the dashboard.
 type mcpServerViewResponse struct {
 	Name               string            `json:"name"`
+	Slug               string            `json:"slug"`
 	URL                string            `json:"url"`
 	Transport          string            `json:"transport"`
 	Description        string            `json:"description,omitempty"`
@@ -116,15 +119,19 @@ func (h *Handler) UpsertMCPServer(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
+	displayName := strings.TrimSpace(req.Name)
+	if displayName == "" {
 		return handleError(c, core.NewInvalidRequestError("name is required", nil))
 	}
-	if h.mcpServers.IsManaged(name) {
-		return handleError(c, core.NewInvalidRequestError("mcp server "+name+" is managed by config/env and is read-only", nil))
+	slug := strings.ToLower(strings.TrimSpace(req.Slug))
+	if slug == "" {
+		slug = config.DeriveMCPServerSlug(displayName)
+	}
+	if h.mcpServers.IsManaged(slug) {
+		return handleError(c, core.NewInvalidRequestError("mcp server "+slug+" is managed by config/env and is read-only", nil))
 	}
 
-	server, err := h.buildMCPServerUpsert(c.Request().Context(), name, req)
+	server, err := h.buildMCPServerUpsert(c.Request().Context(), slug, displayName, req)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -144,7 +151,7 @@ func (h *Handler) UpsertMCPServer(c *echo.Context) error {
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
-// @Param        name  path  string  true  "MCP server name"
+// @Param        name  path  string  true  "MCP server slug"
 // @Success      204   "No Content"
 // @Failure      400   {object}  core.GatewayError
 // @Failure      401   {object}  core.GatewayError
@@ -182,7 +189,7 @@ func (h *Handler) DeleteMCPServer(c *echo.Context) error {
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
-// @Param        name  path  string  true  "MCP server name"
+// @Param        name  path  string  true  "MCP server slug"
 // @Success      200   {object}  mcpServerViewResponse
 // @Failure      400   {object}  core.GatewayError
 // @Failure      401   {object}  core.GatewayError
@@ -211,11 +218,11 @@ func (h *Handler) ReconnectMCPServer(c *echo.Context) error {
 // MCPServerCatalog handles GET /admin/mcp-servers/:name/catalog.
 //
 // @Summary      Inspect one MCP server's current catalog
-// @Description  Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server name.
+// @Description  Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
-// @Param        name  path  string  true  "MCP server name"
+// @Param        name  path  string  true  "MCP server slug"
 // @Success      200   {object}  mcpgateway.CatalogView
 // @Failure      401   {object}  core.GatewayError
 // @Failure      404   {object}  core.GatewayError
@@ -238,8 +245,8 @@ func (h *Handler) MCPServerCatalog(c *echo.Context) error {
 
 // buildMCPServerUpsert maps the request onto a validated ManagedServer,
 // resolving "***" header placeholders against the stored row.
-func (h *Handler) buildMCPServerUpsert(ctx context.Context, name string, req upsertMCPServerRequest) (mcpgateway.ManagedServer, error) {
-	current, err := h.mcpServers.GetManaged(ctx, name)
+func (h *Handler) buildMCPServerUpsert(ctx context.Context, slug, displayName string, req upsertMCPServerRequest) (mcpgateway.ManagedServer, error) {
+	current, err := h.mcpServers.GetManaged(ctx, slug)
 	if err != nil && !errors.Is(err, mcpgateway.ErrNotFound) {
 		return mcpgateway.ManagedServer{}, mcpServerWriteError(err)
 	}
@@ -257,7 +264,8 @@ func (h *Handler) buildMCPServerUpsert(ctx context.Context, name string, req ups
 	}
 
 	server := mcpgateway.ManagedServer{
-		Name:               name,
+		Name:               slug,
+		DisplayName:        displayName,
 		URL:                strings.TrimSpace(req.URL),
 		Transport:          strings.TrimSpace(req.Transport),
 		Headers:            headers,
@@ -305,8 +313,13 @@ func mergeRedactedMCPHeaders(incoming map[string]string, current *mcpgateway.Man
 // redacting header values.
 func (h *Handler) mcpServerView(view mcpgateway.ServerView) mcpServerViewResponse {
 	spec := view.Spec
+	displayName := strings.TrimSpace(spec.DisplayName)
+	if displayName == "" {
+		displayName = spec.Name
+	}
 	resp := mcpServerViewResponse{
-		Name:               spec.Name,
+		Name:               displayName,
+		Slug:               spec.Name,
 		URL:                spec.URL,
 		Transport:          spec.Transport,
 		Description:        spec.Description,

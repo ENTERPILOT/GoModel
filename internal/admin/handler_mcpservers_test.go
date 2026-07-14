@@ -341,6 +341,29 @@ func TestUpsertMCPServer_PreservesRedactedHeadersAndEnabled(t *testing.T) {
 	}
 }
 
+func TestUpsertMCPServer_AllowsUnicodeDisplayNameAndKeepsSlug(t *testing.T) {
+	fake := newMCPAdminFake()
+	h := newMCPHandler(fake)
+
+	for _, body := range []string{
+		`{"name":"Linear MCP 线性","slug":"linear","url":"https://mcp.linear.app/mcp"}`,
+		`{"name":"Linear 问题追踪器","slug":"linear","url":"https://mcp.linear.app/mcp"}`,
+	} {
+		c, rec := newMCPServerContext(http.MethodPut, "/admin/mcp-servers", body)
+		if err := h.UpsertMCPServer(c); err != nil {
+			t.Fatalf("UpsertMCPServer() error = %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+		}
+	}
+
+	stored := fake.stored["linear"]
+	if stored.Name != "linear" || stored.DisplayName != "Linear 问题追踪器" {
+		t.Fatalf("stored identity = (%q, %q), want immutable slug and edited display name", stored.Name, stored.DisplayName)
+	}
+}
+
 func TestUpsertMCPServer_Rejections(t *testing.T) {
 	tests := []struct {
 		name string
@@ -359,8 +382,8 @@ func TestUpsertMCPServer_Rejections(t *testing.T) {
 			body: `{"url":"https://mcp.notion.com/mcp"}`,
 		},
 		{
-			name: "invalid name",
-			body: `{"name":"Bad Name!","url":"https://mcp.notion.com/mcp"}`,
+			name: "invalid slug",
+			body: `{"name":"Notion MCP","slug":"Bad Name!","url":"https://mcp.notion.com/mcp"}`,
 		},
 		{
 			name: "invalid url",

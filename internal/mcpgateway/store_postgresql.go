@@ -28,6 +28,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	_, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS mcp_servers (
 			name TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL DEFAULT '',
 			url TEXT NOT NULL DEFAULT '',
 			transport TEXT NOT NULL DEFAULT 'http',
 			headers JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -44,6 +45,12 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	if err != nil {
 		return nil, fmt.Errorf("failed to create mcp_servers table: %w", err)
 	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''`); err != nil {
+		return nil, fmt.Errorf("add mcp_servers display_name: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE mcp_servers SET display_name = name WHERE display_name = ''`); err != nil {
+		return nil, fmt.Errorf("backfill mcp_servers display_name: %w", err)
+	}
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_mcp_servers_updated_at ON mcp_servers(updated_at DESC)`,
@@ -55,7 +62,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	return &PostgreSQLStore{pool: pool}, nil
 }
 
-const postgresSelectMCPServerColumns = `name, url, transport, headers, description, enabled, allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at`
+const postgresSelectMCPServerColumns = `name, display_name, url, transport, headers, description, enabled, allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at`
 
 func (s *PostgreSQLStore) List(ctx context.Context) ([]ManagedServer, error) {
 	rows, err := s.pool.Query(ctx, `
@@ -112,10 +119,11 @@ func (s *PostgreSQLStore) Upsert(ctx context.Context, server ManagedServer) erro
 	}
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO mcp_servers (
-			name, url, transport, headers, description, enabled, allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at
+			name, display_name, url, transport, headers, description, enabled, allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11, $12, $13)
 		ON CONFLICT(name) DO UPDATE SET
+			display_name = excluded.display_name,
 			url = excluded.url,
 			transport = excluded.transport,
 			headers = excluded.headers,
@@ -128,6 +136,7 @@ func (s *PostgreSQLStore) Upsert(ctx context.Context, server ManagedServer) erro
 			updated_at = excluded.updated_at
 	`,
 		strings.TrimSpace(server.Name),
+		server.DisplayName,
 		server.URL,
 		server.Transport,
 		headersJSON,
@@ -167,6 +176,7 @@ func scanPostgreSQLMCPServer(scanner interface{ Scan(dest ...any) error }) (Mana
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&server.Name,
+		&server.DisplayName,
 		&server.URL,
 		&server.Transport,
 		&headers,
@@ -196,6 +206,9 @@ func scanPostgreSQLMCPServer(scanner interface{ Scan(dest ...any) error }) (Mana
 	}
 	if server.UserPaths, err = decodeJSONList(userPaths); err != nil {
 		return ManagedServer{}, err
+	}
+	if server.DisplayName == "" {
+		server.DisplayName = server.Name
 	}
 	server.CreatedAt = time.Unix(createdAt, 0).UTC()
 	server.UpdatedAt = time.Unix(updatedAt, 0).UTC()

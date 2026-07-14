@@ -356,7 +356,7 @@ func (h *Handler) Realtime(c *echo.Context) error {
 // MCP handles the aggregated MCP endpoint at /mcp.
 //
 // @Summary      MCP gateway (aggregated)
-// @Description  Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {server}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset.
+// @Description  Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {slug}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset of server slugs.
 // @Tags         mcp
 // @Accept       json
 // @Produce      json
@@ -382,7 +382,7 @@ func (h *Handler) MCP(c *echo.Context) error {
 // @Produce      json
 // @Produce      text/event-stream
 // @Security     BearerAuth
-// @Param        server  path      string  true  "Configured MCP server name"
+// @Param        server  path      string  true  "Configured MCP server slug"
 // @Success      200     {object}  map[string]interface{}  "JSON-RPC response or SSE stream"
 // @Failure      401     {object}  core.OpenAIErrorEnvelope
 // @Failure      404     {object}  core.OpenAIErrorEnvelope

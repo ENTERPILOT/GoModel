@@ -33,6 +33,33 @@ func TestNormalizeMCPConfigDefaultsAndValidation(t *testing.T) {
 	}
 }
 
+func TestMCPServerDisplayNameAndSlug(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"Linear MCP", "线性 MCP", "Линейный сервер", "MCP 🚀"} {
+		if err := ValidateMCPServerName(name); err != nil {
+			t.Errorf("ValidateMCPServerName(%q) error = %v", name, err)
+		}
+	}
+	if err := ValidateMCPServerSlug("linear-mcp"); err != nil {
+		t.Fatalf("ValidateMCPServerSlug(valid) error = %v", err)
+	}
+	if err := ValidateMCPServerSlug("Linear MCP"); err == nil {
+		t.Fatal("ValidateMCPServerSlug should reject spaces and uppercase characters")
+	}
+
+	derived := map[string]string{
+		"Linear MCP": "linear-mcp",
+		"Café Tools": "cafe-tools",
+		"线性":         "mcp-b7ccbb8b",
+	}
+	for name, want := range derived {
+		if got := DeriveMCPServerSlug(name); got != want {
+			t.Errorf("DeriveMCPServerSlug(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestNormalizeMCPConfigRejectsInvalid(t *testing.T) {
 	tests := []struct {
 		name    string

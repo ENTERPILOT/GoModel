@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -30,7 +31,10 @@ type Store interface {
 // execution vector (see the gateway spec), so stdio servers exist only as
 // declarative config.
 type ManagedServer struct {
-	Name               string            `json:"name"`
+	// Name is the immutable ASCII slug and remains the storage primary key.
+	Name        string `json:"slug"`
+	DisplayName string `json:"name"`
+
 	URL                string            `json:"url"`
 	Transport          string            `json:"transport"`
 	Headers            map[string]string `json:"headers,omitempty"`
@@ -48,7 +52,15 @@ type ManagedServer struct {
 // additionally rejecting the stdio transport. The receiver is only mutated
 // (normalized transport/URL) once every check has passed.
 func (m *ManagedServer) Validate() error {
-	if err := config.ValidateMCPServerName(m.Name); err != nil {
+	m.Name = strings.ToLower(strings.TrimSpace(m.Name))
+	m.DisplayName = strings.TrimSpace(m.DisplayName)
+	if m.DisplayName == "" {
+		m.DisplayName = m.Name
+	}
+	if err := config.ValidateMCPServerName(m.DisplayName); err != nil {
+		return err
+	}
+	if err := config.ValidateMCPServerSlug(m.Name); err != nil {
 		return err
 	}
 	if m.Transport == config.MCPTransportStdio {
@@ -81,6 +93,7 @@ func (m ManagedServer) Spec() ServerSpec {
 	}
 	return ServerSpec{
 		Name:            m.Name,
+		DisplayName:     m.DisplayName,
 		URL:             m.URL,
 		Transport:       m.Transport,
 		Headers:         maps.Clone(m.Headers),
@@ -146,6 +159,9 @@ func decodeJSONList(data []byte) ([]string, error) {
 
 // stampUpsert sets timestamps: CreatedAt on insert, UpdatedAt always.
 func stampUpsert(server *ManagedServer) {
+	if strings.TrimSpace(server.DisplayName) == "" {
+		server.DisplayName = strings.TrimSpace(server.Name)
+	}
 	now := time.Now().UTC()
 	if server.CreatedAt.IsZero() {
 		server.CreatedAt = now

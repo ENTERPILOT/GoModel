@@ -14,7 +14,7 @@ the same way it already sits between your apps and model providers:
   with a GoModel API key. They never hold upstream MCP credentials; the
   gateway injects each server's headers itself.
 - **Aggregation with namespacing.** Tools and prompts from every configured
-  server appear in one catalog as `{server}_{name}` (for example
+  server appear in one catalog as `{slug}_{name}` (for example
   `github_create_issue`), in a stable, deterministic order.
 - **Least-privilege discovery.** A server can be scoped to `user_paths`;
   callers outside the subtree do not merely get errors — the tools never
@@ -53,14 +53,25 @@ verification steps, see [Connect Claude Code and Codex](/mcp-proxy/claude-code-a
 Three ways to narrow what a client sees:
 
 - `/mcp` — everything the key's user path may see, namespaced.
-- `/mcp/{server}` — a single server with its **original** tool names.
+- `/mcp/{slug}` — a single server with its **original** tool names.
 - `X-MCP-Servers: github,jira` header — a comma-separated subset on `/mcp`.
 
 ## Declare servers
 
 Servers can be managed in the dashboard (**MCP Servers** page) or declared as
-infrastructure-as-code — declarative entries override same-name dashboard
+infrastructure-as-code — declarative entries override same-slug dashboard
 rows and are read-only there:
+
+Dashboard-managed servers have two identifiers:
+
+- **Name** is human-facing, accepts Unicode, and can be edited later.
+- **Slug** is derived from the name by default. It uses lowercase ASCII
+  letters, numbers, hyphens, and underscores, and can be adjusted while
+  creating the server. It becomes immutable after creation because it is used
+  in `/mcp/{slug}`, `X-MCP-Servers`, and aggregated tool names.
+
+For declarative servers, the `mcp.servers` map key is the slug and is also
+shown as the name in the dashboard.
 
 ```yaml
 mcp:
@@ -98,7 +109,7 @@ Per-server fields:
 | `user_paths` | everyone | Visibility subtrees, like virtual models |
 | `tool_timeout` | `30s` | Upper bound for one `tools/call` |
 
-Invalid declarations (bad name, missing `url`/`command`, unknown transport)
+Invalid declarations (bad slug, missing `url`/`command`, unknown transport)
 abort startup with a clear error rather than silently dropping the server.
 
 ## Health and lifecycle
@@ -109,17 +120,17 @@ summarizes MCP server health whenever servers are configured. A server whose
 listing fails keeps its previous catalog (marked degraded) and is re-probed
 every 60 seconds; healthy catalogs re-list every 5 minutes and refresh
 immediately when the upstream sends a `list_changed` notification.
-**Reconnect** on the dashboard (or `POST /admin/mcp-servers/{name}/reconnect`)
+**Reconnect** on the dashboard (or `POST /admin/mcp-servers/{slug}/reconnect`)
 forces a redial.
 
 ## Inspect a server's catalog
 
 The dashboard's catalog inspector (or
-`GET /admin/mcp-servers/{name}/catalog`) lists exactly what a server
+`GET /admin/mcp-servers/{slug}/catalog`) lists exactly what a server
 currently exposes through the gateway — tools, prompts, resources, and
 resource templates with their descriptions, after your `allowed_tools` /
 `disallowed_tools` filters. Names are the upstream originals; the aggregated
-`/mcp` endpoint serves them as `{server}_{name}`.
+`/mcp` endpoint serves them as `{slug}_{name}`.
 
 ## Security notes
 

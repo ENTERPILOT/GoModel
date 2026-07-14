@@ -126,7 +126,7 @@ for approval policies, tool filters, and project-scoped configuration.
 ## Limit the aggregated catalog
 
 To keep the `/mcp` URL while selecting a subset of upstream servers, send an
-`X-MCP-Servers` header with comma-separated server identifiers.
+`X-MCP-Servers` header with comma-separated server slugs.
 
 For Claude Code, add it beside `Authorization` in `.mcp.json`:
 
@@ -146,7 +146,7 @@ bearer_token_env_var = "GOMODEL_API_KEY"
 http_headers = { "X-MCP-Servers" = "linear,github" }
 ```
 
-Unknown identifiers in `X-MCP-Servers` are ignored. GoModel still applies the
+Unknown slugs in `X-MCP-Servers` are ignored. GoModel still applies the
 auth key's `user_path` visibility and each server's allowed/disallowed tool
 filters.
 

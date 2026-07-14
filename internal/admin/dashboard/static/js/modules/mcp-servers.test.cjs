@@ -41,6 +41,7 @@ test('MCP server editor exposes connection fields and collapses advanced setting
     assert.match(template, /<details class="mcp-server-advanced"\s+:open="mcpServerAdvancedOpen"/s);
     assert.match(template, /<option value="http">Streamable HTTP<\/option>\s*<option value="sse">SSE \(legacy\)<\/option>/s);
     assert.ok(template.indexOf('id="mcp-server-transport"') < advancedIndex);
+    assert.ok(template.indexOf('id="mcp-server-slug"') < advancedIndex);
     assert.ok(template.indexOf('@click="addMcpServerHeader()"') < advancedIndex);
     assert.ok(template.indexOf('id="mcp-server-description"') > advancedIndex);
     assert.equal(module.mcpServerAdvancedOpen, false);
@@ -56,6 +57,28 @@ test('MCP server editor exposes connection fields and collapses advanced setting
     module.mcpServerAdvancedOpen = true;
     module.closeMcpServerForm();
     assert.equal(module.mcpServerAdvancedOpen, false);
+});
+
+test('MCP display name derives an editable creation slug and preserves it while editing', () => {
+    const module = createMcpServersModule();
+    assert.equal(module.deriveMcpServerSlug('  Linear MCP  '), 'linear-mcp');
+    assert.equal(module.deriveMcpServerSlug('Café Tools'), 'cafe-tools');
+    assert.equal(module.deriveMcpServerSlug('线性'), 'mcp-b7ccbb8b');
+
+    module.openMcpServerCreate();
+    module.mcpServerForm.name = 'Linear MCP';
+    module.syncMcpServerSlugFromName();
+    assert.equal(module.mcpServerForm.slug, 'linear-mcp');
+
+    module.mcpServerForm.slug = 'linear';
+    module.markMcpServerSlugEdited();
+    module.mcpServerForm.name = 'Linear Issues';
+    module.syncMcpServerSlugFromName();
+    assert.equal(module.mcpServerForm.slug, 'linear');
+
+    module.openMcpServerEdit({ name: '线性', slug: 'linear', url: 'https://mcp.linear.app/mcp', managed: false });
+    assert.equal(module.mcpServerForm.name, '线性');
+    assert.equal(module.mcpServerForm.slug, 'linear');
 });
 
 test('mcpHeadersToRows and mcpHeaderRowsToObject round-trip, preserving masked secrets', () => {
@@ -172,6 +195,7 @@ test('submitMcpServerForm sends a normalized PUT payload', async () => {
     });
     module.mcpServerForm = {
         name: ' github ',
+        slug: 'github',
         url: ' https://mcp.example.com/mcp ',
         transport: 'sse',
         description: ' Issue tools ',
@@ -193,6 +217,7 @@ test('submitMcpServerForm sends a normalized PUT payload', async () => {
     assert.equal(requests[0].request.method, 'PUT');
     assert.deepEqual(JSON.parse(requests[0].request.body), {
         name: 'github',
+        slug: 'github',
         url: 'https://mcp.example.com/mcp',
         transport: 'sse',
         headers: { Authorization: '***' },
@@ -360,6 +385,7 @@ test('openMcpServerEdit prefills the form and refuses managed servers', () => {
     assert.equal(module.mcpServerFormMode, 'edit');
     assert.equal(JSON.stringify(module.mcpServerForm), JSON.stringify({
         name: 'github',
+        slug: 'github',
         url: 'https://mcp.example.com/mcp',
         transport: 'sse',
         description: 'Issue tools',

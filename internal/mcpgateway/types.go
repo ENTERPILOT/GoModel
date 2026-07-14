@@ -31,7 +31,10 @@ const (
 // ServerSpec is the runtime-normalized definition of one upstream server,
 // merged from declarative config (Managed=true) and the admin store.
 type ServerSpec struct {
-	Name            string
+	// Name is the stable ASCII slug used for routing and namespacing.
+	Name        string
+	DisplayName string
+
 	URL             string
 	Transport       string
 	Headers         map[string]string
@@ -54,6 +57,7 @@ type ServerSpec struct {
 func SpecFromConfig(name string, cfg config.MCPServerConfig) ServerSpec {
 	return ServerSpec{
 		Name:            name,
+		DisplayName:     name,
 		URL:             cfg.URL,
 		Transport:       cfg.Transport,
 		Headers:         maps.Clone(cfg.Headers),
@@ -74,6 +78,7 @@ func SpecFromConfig(name string, cfg config.MCPServerConfig) ServerSpec {
 // so the manager can keep an existing session across no-op reloads.
 func (s ServerSpec) equal(other ServerSpec) bool {
 	return s.Name == other.Name &&
+		s.DisplayName == other.DisplayName &&
 		s.URL == other.URL &&
 		s.Transport == other.Transport &&
 		maps.Equal(s.Headers, other.Headers) &&

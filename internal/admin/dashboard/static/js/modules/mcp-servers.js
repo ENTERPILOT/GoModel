@@ -10,6 +10,7 @@
             mcpServerFormOpen: false,
             mcpServerFormSubmitting: false,
             mcpServerFormMode: 'create',
+            mcpServerSlugEdited: false,
             mcpServerAdvancedOpen: false,
             mcpServerDeletingName: '',
             mcpServerReconnectingName: '',
@@ -27,6 +28,7 @@
             },
             mcpServerForm: {
                 name: '',
+                slug: '',
                 url: '',
                 transport: 'http',
                 description: '',
@@ -41,6 +43,7 @@
             defaultMcpServerForm() {
                 return {
                     name: '',
+                    slug: '',
                     url: '',
                     transport: 'http',
                     description: '',
@@ -61,6 +64,7 @@
                 return (this.mcpServers || []).filter((server) => {
                     const fields = [
                         server.name,
+                        server.slug,
                         server.url,
                         server.transport,
                         server.description,
@@ -113,6 +117,42 @@
                 const prompts = Number(server && server.prompt_count || 0);
                 const resources = Number(server && server.resource_count || 0);
                 return prompts + ' prompts · ' + resources + ' resources';
+            },
+
+            mcpServerSlug(server) {
+                return String(server && (server.slug || server.name) || '').trim();
+            },
+
+            deriveMcpServerSlug(name) {
+                const normalized = String(name || '')
+                    .normalize('NFKD')
+                    .toLowerCase();
+                const slug = normalized
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[^a-z0-9]+/g, '-')
+                    .replace(/^-+|-+$/g, '')
+                    .slice(0, 64)
+                    .replace(/-+$/g, '');
+                if (slug) {
+                    return slug;
+                }
+                let hash = 2166136261;
+                for (const character of normalized) {
+                    hash = Math.imul((hash ^ character.codePointAt(0)) >>> 0, 16777619) >>> 0;
+                }
+                return 'mcp-' + hash.toString(16).padStart(8, '0');
+            },
+
+            syncMcpServerSlugFromName() {
+                if (this.mcpServerFormMode === 'create' && !this.mcpServerSlugEdited) {
+                    this.mcpServerForm.slug = this.deriveMcpServerSlug(this.mcpServerForm.name);
+                }
+            },
+
+            markMcpServerSlugEdited() {
+                if (this.mcpServerFormMode === 'create') {
+                    this.mcpServerSlugEdited = true;
+                }
             },
 
             normalizeMcpCommaList(value) {
@@ -189,6 +229,7 @@
 
             openMcpServerCreate() {
                 this.mcpServerFormMode = 'create';
+                this.mcpServerSlugEdited = false;
                 this.mcpServerAdvancedOpen = false;
                 this.mcpServerError = '';
                 this.mcpServerNotice = '';
@@ -205,11 +246,13 @@
                     return;
                 }
                 this.mcpServerFormMode = 'edit';
+                this.mcpServerSlugEdited = true;
                 this.mcpServerAdvancedOpen = false;
                 this.mcpServerError = '';
                 this.mcpServerNotice = '';
                 this.mcpServerForm = {
                     name: String(server.name || '').trim(),
+                    slug: this.mcpServerSlug(server),
                     url: String(server.url || '').trim(),
                     transport: server.transport === 'sse' ? 'sse' : 'http',
                     description: String(server.description || '').trim(),
@@ -230,6 +273,7 @@
             closeMcpServerForm() {
                 this.mcpServerFormOpen = false;
                 this.mcpServerFormMode = 'create';
+                this.mcpServerSlugEdited = false;
                 this.mcpServerAdvancedOpen = false;
                 this.mcpServerError = '';
                 this.mcpServerForm = this.defaultMcpServerForm();
@@ -283,10 +327,19 @@
 
             async submitMcpServerForm() {
                 const name = String(this.mcpServerForm.name || '').trim();
+                const slug = String(this.mcpServerForm.slug || this.deriveMcpServerSlug(name)).trim().toLowerCase();
                 const url = String(this.mcpServerForm.url || '').trim();
                 const transport = this.mcpServerForm.transport === 'sse' ? 'sse' : 'http';
                 if (!name) {
                     this.mcpServerError = 'Name is required.';
+                    return;
+                }
+                if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(slug)) {
+                    this.mcpServerError = 'Slug must use 1–64 lowercase ASCII letters, numbers, hyphens, or underscores.';
+                    return;
+                }
+                if (this.mcpServerFormMode === 'create' && (this.mcpServers || []).some((server) => this.mcpServerSlug(server) === slug)) {
+                    this.mcpServerError = 'Slug "' + slug + '" is already in use.';
                     return;
                 }
                 if (!url) {
@@ -310,6 +363,7 @@
 
                 const payload = {
                     name,
+                    slug,
                     url,
                     transport,
                     headers: this.mcpHeaderRowsToObject(this.mcpServerForm.headers),
@@ -365,20 +419,21 @@
 
             async deleteMcpServer(server) {
                 const name = String(server && server.name || '').trim();
-                if (!name || this.mcpServerDeletingName || (server && server.managed)) {
+                const slug = this.mcpServerSlug(server);
+                if (!slug || this.mcpServerDeletingName || (server && server.managed)) {
                     return;
                 }
                 if (!this.mcpConfirmAction('Delete MCP server "' + name + '"? Clients lose access to its tools immediately.')) {
                     return;
                 }
 
-                this.mcpServerDeletingName = name;
+                this.mcpServerDeletingName = slug;
                 this.mcpServerError = '';
                 this.mcpServerNotice = '';
 
                 try {
                     const request = this.requestOptions({ method: 'DELETE' });
-                    const res = await fetch('/admin/mcp-servers/' + encodeURIComponent(name), request);
+                    const res = await fetch('/admin/mcp-servers/' + encodeURIComponent(slug), request);
                     if (res.status === 503) {
                         this.mcpServersAvailable = false;
                         this.mcpServerError = 'MCP server management is unavailable.';
@@ -398,7 +453,7 @@
                     }
 
                     await this.fetchMcpServersPage();
-                    if (this.mcpServerFormOpen && this.mcpServerForm.name === name) {
+                    if (this.mcpServerFormOpen && this.mcpServerForm.slug === slug) {
                         this.closeMcpServerForm();
                     }
                     this.mcpServerNotice = 'MCP server "' + name + '" deleted.';
@@ -412,17 +467,18 @@
 
             async reconnectMcpServer(server) {
                 const name = String(server && server.name || '').trim();
-                if (!name || this.mcpServerReconnectingName) {
+                const slug = this.mcpServerSlug(server);
+                if (!slug || this.mcpServerReconnectingName) {
                     return;
                 }
 
-                this.mcpServerReconnectingName = name;
+                this.mcpServerReconnectingName = slug;
                 this.mcpServerError = '';
                 this.mcpServerNotice = '';
 
                 try {
                     const request = this.requestOptions({ method: 'POST' });
-                    const res = await fetch('/admin/mcp-servers/' + encodeURIComponent(name) + '/reconnect', request);
+                    const res = await fetch('/admin/mcp-servers/' + encodeURIComponent(slug) + '/reconnect', request);
                     if (res.status === 503) {
                         this.mcpServersAvailable = false;
                         this.mcpServerError = 'MCP server management is unavailable.';
@@ -444,7 +500,7 @@
                     const refreshed = await res.json();
                     if (refreshed && refreshed.name) {
                         this.mcpServers = (this.mcpServers || []).map((item) =>
-                            item && item.name === refreshed.name ? refreshed : item
+                            this.mcpServerSlug(item) === this.mcpServerSlug(refreshed) ? refreshed : item
                         );
                     } else {
                         await this.fetchMcpServersPage();
@@ -549,7 +605,8 @@
 
             async openMcpServerCatalog(server) {
                 const name = String(server && server.name || '').trim();
-                if (!name) {
+                const slug = this.mcpServerSlug(server);
+                if (!slug) {
                     return;
                 }
 
@@ -558,7 +615,7 @@
                 this.mcpCatalogError = '';
                 this.mcpCatalog = {
                     ...this.defaultMcpCatalog(),
-                    server: name,
+                    server: slug,
                     status: this.mcpServerStatus(server)
                 };
                 if (typeof this.renderIconsAfterUpdate === 'function') {
@@ -567,7 +624,7 @@
 
                 try {
                     const request = this.requestOptions();
-                    const res = await fetch('/admin/mcp-servers/' + encodeURIComponent(name) + '/catalog', request);
+                    const res = await fetch('/admin/mcp-servers/' + encodeURIComponent(slug) + '/catalog', request);
                     if (res.status === 503) {
                         this.mcpServersAvailable = false;
                         this.mcpCatalogError = 'MCP server management is unavailable.';
@@ -590,7 +647,7 @@
                         return;
                     }
                     const payload = await res.json();
-                    this.mcpCatalog = this.normalizeMcpCatalog(name, payload);
+                    this.mcpCatalog = this.normalizeMcpCatalog(slug, payload);
                 } catch (e) {
                     console.error('Failed to load MCP server catalog:', e);
                     this.mcpCatalogError = 'Failed to load MCP server catalog.';

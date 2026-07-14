@@ -23,6 +23,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS mcp_servers (
 			name TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL DEFAULT '',
 			url TEXT NOT NULL DEFAULT '',
 			transport TEXT NOT NULL DEFAULT 'http',
 			headers TEXT NOT NULL DEFAULT '{}',
@@ -39,6 +40,9 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create mcp_servers table: %w", err)
 	}
+	if err := ensureSQLiteMCPDisplayName(db); err != nil {
+		return nil, err
+	}
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_mcp_servers_updated_at ON mcp_servers(updated_at DESC)`,
@@ -50,7 +54,39 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db}, nil
 }
 
-const sqliteSelectMCPServerColumns = `name, url, transport, headers, description, enabled, allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at`
+const sqliteSelectMCPServerColumns = `name, display_name, url, transport, headers, description, enabled, allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at`
+
+func ensureSQLiteMCPDisplayName(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(mcp_servers)`)
+	if err != nil {
+		return fmt.Errorf("inspect mcp_servers schema: %w", err)
+	}
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("inspect mcp_servers column: %w", err)
+		}
+		if name == "display_name" {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("inspect mcp_servers schema: %w", err)
+	}
+	if !found {
+		if _, err := db.Exec(`ALTER TABLE mcp_servers ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add mcp_servers display_name: %w", err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE mcp_servers SET display_name = name WHERE display_name = ''`); err != nil {
+		return fmt.Errorf("backfill mcp_servers display_name: %w", err)
+	}
+	return nil
+}
 
 func (s *SQLiteStore) List(ctx context.Context) ([]ManagedServer, error) {
 	rows, err := s.db.QueryContext(ctx, `
@@ -107,10 +143,11 @@ func (s *SQLiteStore) Upsert(ctx context.Context, server ManagedServer) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO mcp_servers (
-			name, url, transport, headers, description, enabled, allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at
+			name, display_name, url, transport, headers, description, enabled, allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
+			display_name = excluded.display_name,
 			url = excluded.url,
 			transport = excluded.transport,
 			headers = excluded.headers,
@@ -123,6 +160,7 @@ func (s *SQLiteStore) Upsert(ctx context.Context, server ManagedServer) error {
 			updated_at = excluded.updated_at
 	`,
 		strings.TrimSpace(server.Name),
+		server.DisplayName,
 		server.URL,
 		server.Transport,
 		headersJSON,
@@ -167,6 +205,7 @@ func scanSQLiteMCPServer(scanner interface{ Scan(dest ...any) error }) (ManagedS
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&server.Name,
+		&server.DisplayName,
 		&server.URL,
 		&server.Transport,
 		&headers,
@@ -195,6 +234,9 @@ func scanSQLiteMCPServer(scanner interface{ Scan(dest ...any) error }) (ManagedS
 		return ManagedServer{}, err
 	}
 	server.Enabled = enabled != 0
+	if server.DisplayName == "" {
+		server.DisplayName = server.Name
+	}
 	server.CreatedAt = time.Unix(createdAt, 0).UTC()
 	server.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return server, nil

@@ -8,8 +8,11 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"golang.org/x/text/unicode/norm"
 )
 
 // DefaultMCPToolTimeout bounds a single upstream tools/call when the server
@@ -30,9 +33,8 @@ type MCPConfig struct {
 	// Enabled gates the /mcp routes. Default: true (a no-op without servers).
 	Enabled bool `yaml:"enabled" env:"MCP_ENABLED"`
 
-	// Servers maps server names to upstream definitions. Names become tool
-	// namespaces (aggregated tools are exposed as "{name}_{tool}") and URL
-	// segments (/mcp/{name}), so they are restricted to [a-z0-9_-].
+	// Servers maps stable server slugs to upstream definitions. Slugs become
+	// tool namespaces and URL segments, so they are restricted to [a-z0-9_-].
 	Servers map[string]MCPServerConfig `yaml:"servers"`
 }
 
@@ -82,12 +84,14 @@ type MCPServerConfig struct {
 
 const envMCPServers = "MCP_SERVERS"
 
-// mcpServerNameRegex mirrors provider naming: lowercase alphanumerics with
-// hyphens/underscores, starting with an alphanumeric. Names become tool-name
-// prefixes, so the charset must stay inside the MCP tool-name alphabet.
-var mcpServerNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+// mcpServerSlugRegex stays inside the MCP tool-name alphabet because slugs
+// prefix tools and prompts on the aggregated endpoint.
+var mcpServerSlugRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
-const maxMCPServerNameLength = 64
+const (
+	maxMCPServerSlugLength = 64
+	maxMCPServerNameLength = 100
+)
 
 // applyMCPEnv parses the MCP_SERVERS env var — a JSON object mapping server
 // names to definitions — and merges it over the YAML-declared map. Env entries
@@ -114,7 +118,7 @@ func applyMCPEnv(cfg *Config) error {
 		// Two JSON keys collapsing onto one canonical name would otherwise
 		// pick a survivor by map iteration order — fail loudly instead.
 		if previous, dup := seen[canonical]; dup {
-			return fmt.Errorf("%s: entries %q and %q both canonicalize to server name %q", envMCPServers, previous, name, canonical)
+			return fmt.Errorf("%s: entries %q and %q both canonicalize to server slug %q", envMCPServers, previous, name, canonical)
 		}
 		seen[canonical] = name
 		cfg.MCP.Servers[canonical] = server
@@ -122,7 +126,7 @@ func applyMCPEnv(cfg *Config) error {
 	return nil
 }
 
-// normalizeMCPConfig canonicalizes server names, applies defaults, and rejects
+// normalizeMCPConfig canonicalizes server slugs, applies defaults, and rejects
 // invalid entries. It runs at load time so a bad declaration fails startup
 // loudly instead of silently dropping the server.
 func normalizeMCPConfig(cfg *MCPConfig) error {
@@ -132,11 +136,11 @@ func normalizeMCPConfig(cfg *MCPConfig) error {
 	normalized := make(map[string]MCPServerConfig, len(cfg.Servers))
 	for name, server := range cfg.Servers {
 		canonical := canonicalTextKey(name)
-		if err := ValidateMCPServerName(canonical); err != nil {
+		if err := ValidateMCPServerSlug(canonical); err != nil {
 			return fmt.Errorf("mcp.servers[%q]: %w", name, err)
 		}
 		if _, dup := normalized[canonical]; dup {
-			return fmt.Errorf("mcp.servers: duplicate server name %q", canonical)
+			return fmt.Errorf("mcp.servers: duplicate server slug %q", canonical)
 		}
 		if err := ValidateMCPServerConfig(&server); err != nil {
 			return fmt.Errorf("mcp.servers[%q]: %w", canonical, err)
@@ -147,19 +151,73 @@ func normalizeMCPConfig(cfg *MCPConfig) error {
 	return nil
 }
 
-// ValidateMCPServerName rejects names that cannot serve as tool-name prefixes
-// or URL segments.
+// ValidateMCPServerName accepts a human-facing Unicode display name. Machine
+// constraints belong to the separate immutable slug.
 func ValidateMCPServerName(name string) error {
+	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("server name is required")
 	}
-	if len(name) > maxMCPServerNameLength {
+	if utf8.RuneCountInString(name) > maxMCPServerNameLength {
 		return fmt.Errorf("server name exceeds %d characters", maxMCPServerNameLength)
 	}
-	if !mcpServerNameRegex.MatchString(name) {
-		return fmt.Errorf("server name %q must match %s", name, mcpServerNameRegex.String())
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("server name must not contain control characters")
+		}
 	}
 	return nil
+}
+
+// ValidateMCPServerSlug validates the stable ASCII identity used in routes,
+// scope headers, and aggregated tool/prompt names.
+func ValidateMCPServerSlug(slug string) error {
+	if slug == "" {
+		return fmt.Errorf("server slug is required")
+	}
+	if len(slug) > maxMCPServerSlugLength {
+		return fmt.Errorf("server slug exceeds %d characters", maxMCPServerSlugLength)
+	}
+	if !mcpServerSlugRegex.MatchString(slug) {
+		return fmt.Errorf("server slug %q must match %s", slug, mcpServerSlugRegex.String())
+	}
+	return nil
+}
+
+// DeriveMCPServerSlug creates a conservative default slug from a display
+// name. Callers may let users edit it before creation; once persisted it is a
+// stable identity and should not change when the display name changes.
+func DeriveMCPServerSlug(name string) string {
+	var b strings.Builder
+	pendingSeparator := false
+	normalized := norm.NFKD.String(strings.ToLower(strings.TrimSpace(name)))
+	for _, r := range normalized {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			if pendingSeparator && b.Len() > 0 && b.Len() < maxMCPServerSlugLength {
+				b.WriteByte('-')
+			}
+			pendingSeparator = false
+			if b.Len() >= maxMCPServerSlugLength {
+				break
+			}
+			b.WriteRune(r)
+			continue
+		}
+		pendingSeparator = b.Len() > 0
+	}
+	slug := strings.Trim(b.String(), "-_")
+	if slug == "" {
+		hash := uint32(2166136261)
+		for _, r := range normalized {
+			hash ^= uint32(r)
+			hash *= 16777619
+		}
+		return fmt.Sprintf("mcp-%08x", hash)
+	}
+	return slug
 }
 
 // ValidateMCPServerConfig validates one server definition and applies

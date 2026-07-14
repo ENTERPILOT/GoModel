@@ -43,8 +43,8 @@
                 <input type="text"
                        id="mcp-server-filter"
                        class="filter-input"
-                       placeholder="Filter by name, URL, transport, or status..."
-                       aria-label="Filter MCP servers by name, URL, transport, or status"
+                       placeholder="Filter by name, slug, URL, transport, or status..."
+                       aria-label="Filter MCP servers by name, slug, URL, transport, or status"
                        x-model="mcpServerFilter">
             </div>
         </div>
@@ -66,7 +66,7 @@
                 <div class="editor-header">
                     <div>
                         <h3 x-text="mcpServerFormMode === 'edit' ? 'Edit MCP Server' : 'Add MCP Server'"></h3>
-                        <p class="form-hint">Clients address tools by server name, so renames are intentionally avoided after creation.</p>
+                        <p class="form-hint">The display name can change. The slug is the stable client-facing identity.</p>
                     </div>
                     <button type="button" class="dialog-close-btn" aria-label="Close MCP server editor" @click="closeMcpServerForm()">
                         {{template "x-icon"}}
@@ -77,7 +77,15 @@
 
                 <div class="form-field">
                     <label class="form-field-label" for="mcp-server-name">Name</label>
-                    <input id="mcp-server-name" type="text" class="mono" placeholder="github" x-model="mcpServerForm.name" :disabled="mcpServerFormMode === 'edit'" data-modal-autofocus>
+                    <input id="mcp-server-name" type="text" placeholder="Linear MCP" x-model="mcpServerForm.name" @input="syncMcpServerSlugFromName()" data-modal-autofocus>
+                    <small class="form-hint">Human-readable and Unicode-friendly. You can change it later.</small>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="mcp-server-slug">Slug</label>
+                    <input id="mcp-server-slug" type="text" class="mono" placeholder="linear-mcp" x-model="mcpServerForm.slug" @input="markMcpServerSlugEdited()" :disabled="mcpServerFormMode === 'edit'">
+                    <small class="form-hint" x-show="mcpServerFormMode === 'create'">Derived from the name. You may edit it before saving.</small>
+                    <small class="form-hint" x-show="mcpServerFormMode === 'edit'">Immutable because it is used in URLs, scope headers, and aggregated tool names.</small>
                 </div>
 
                 <div class="form-field">
@@ -255,11 +263,12 @@
                 </tr>
             </thead>
             <tbody>
-                <template x-for="server in filteredMcpServers" :key="server.name">
+                <template x-for="server in filteredMcpServers" :key="mcpServerSlug(server)">
                     <tr>
                         <td>
-                            <span class="mono font-size-md" x-text="server.name"></span>
+                            <span class="font-size-md" x-text="server.name"></span>
                             <span class="alias-kind-badge" x-show="server.managed" title="Declared in configuration (config.yaml mcp.servers); read-only in the dashboard">Config</span>
+                            <div class="mcp-server-sub-counts mono" x-text="mcpServerSlug(server)"></div>
                         </td>
                         <td><span class="budget-source mono" x-text="server.transport || 'http'"></span></td>
                         <td class="mono font-size-md" :title="mcpServerEndpointLabel(server)" x-text="mcpServerEndpointLabel(server)"></td>
@@ -295,17 +304,17 @@
                                     <i data-lucide="list" class="form-action-icon" aria-hidden="true"></i>
                                 </button>
                                 <button type="button" class="table-action-btn table-icon-btn"
-                                    :disabled="mcpServerReconnectingName === server.name"
-                                    :aria-label="mcpServerReconnectingName === server.name ? 'Reconnecting MCP server ' + server.name : 'Reconnect MCP server ' + server.name"
-                                    :title="mcpServerReconnectingName === server.name ? 'Reconnecting MCP server ' + server.name : 'Reconnect MCP server ' + server.name"
+                                    :disabled="mcpServerReconnectingName === mcpServerSlug(server)"
+                                    :aria-label="mcpServerReconnectingName === mcpServerSlug(server) ? 'Reconnecting MCP server ' + server.name : 'Reconnect MCP server ' + server.name"
+                                    :title="mcpServerReconnectingName === mcpServerSlug(server) ? 'Reconnecting MCP server ' + server.name : 'Reconnect MCP server ' + server.name"
                                     @click="reconnectMcpServer(server)">
                                     <i data-lucide="refresh-cw" class="form-action-icon" aria-hidden="true"></i>
                                 </button>
                                 <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
                                     x-show="!server.managed"
-                                    :disabled="mcpServerDeletingName === server.name"
-                                    :aria-label="mcpServerDeletingName === server.name ? 'Deleting MCP server ' + server.name : 'Delete MCP server ' + server.name"
-                                    :title="mcpServerDeletingName === server.name ? 'Deleting MCP server ' + server.name : 'Delete MCP server ' + server.name"
+                                    :disabled="mcpServerDeletingName === mcpServerSlug(server)"
+                                    :aria-label="mcpServerDeletingName === mcpServerSlug(server) ? 'Deleting MCP server ' + server.name : 'Delete MCP server ' + server.name"
+                                    :title="mcpServerDeletingName === mcpServerSlug(server) ? 'Deleting MCP server ' + server.name : 'Delete MCP server ' + server.name"
                                     @click="deleteMcpServer(server)">
                                     {{template "x-icon"}}
                                 </button>
