@@ -4,7 +4,7 @@
 <div>
     <div class="page-header">
         <div>
-            <div class="inline-help-section" x-data="{ open: false, copyId: 'mcp-servers-help-copy', showLabel: 'Show MCP servers help', hideLabel: 'Hide MCP servers help', text: 'Upstream Model Context Protocol servers whose tools, prompts, and resources the gateway exposes to clients. Servers added here connect over HTTP or SSE; stdio servers and rows marked Config are declared in config.yaml under mcp.servers and are read-only in the dashboard. Saved header values are stored as secrets and shown as ***.' }">
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'mcp-servers-help-copy', showLabel: 'Show MCP servers help', hideLabel: 'Hide MCP servers help', text: 'Upstream Model Context Protocol servers whose tools, prompts, and resources the gateway exposes to clients. Servers added here connect over HTTP or SSE; stdio servers and rows marked Config are declared in config.yaml under mcp.servers and are read-only in the dashboard. Saved header values are masked in API and dashboard responses.' }">
                 <div class="inline-help-title-row">
                     <h2>MCP Servers</h2>
                     {{template "inline-help-toggle" .}}
@@ -118,7 +118,7 @@
                             <span>Add header</span>
                         </button>
                     </div>
-                    <small class="form-hint">Sent to the server on every request. Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored secret.</small>
+                    <small class="form-hint">Sent only to the configured server origin. Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored value.</small>
                 </div>
 
                 <div class="form-field">
@@ -228,7 +228,7 @@
         </div>
     </div>
 
-    <div class="table-wrapper" x-show="filteredMcpServers.length > 0 && mcpServersAvailable && !authError">
+    <div class="table-wrapper mcp-server-table-wrapper" x-show="filteredMcpServers.length > 0 && mcpServersAvailable && !authError">
         <table class="data-table">
             <thead>
                 <tr>

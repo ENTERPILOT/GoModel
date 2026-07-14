@@ -104,6 +104,9 @@ func newTestService(t *testing.T, usageLogger usage.LoggerInterface, specs ...Se
 	t.Cleanup(service.Close)
 
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authKeyID := r.Header.Get("X-Test-Auth-Key-ID"); authKeyID != "" {
+			r = r.WithContext(core.WithAuthKeyID(r.Context(), authKeyID))
+		}
 		if userPath := r.Header.Get(core.UserPathHeader); userPath != "" {
 			r = r.WithContext(core.WithEffectiveUserPath(r.Context(), userPath))
 		}
@@ -151,8 +154,10 @@ func connectClient(t *testing.T, endpoint string, headers map[string]string) *mc
 	t.Helper()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "test"}, nil)
 	transport := &mcp.StreamableClientTransport{
-		Endpoint:   endpoint,
-		HTTPClient: &http.Client{Transport: &headerRoundTripper{base: http.DefaultTransport, headers: headers}},
+		Endpoint: endpoint,
+		HTTPClient: &http.Client{Transport: &headerRoundTripper{
+			base: http.DefaultTransport, headers: headers, origin: requestOrigin(endpoint),
+		}},
 	}
 	session, err := client.Connect(context.Background(), transport, nil)
 	if err != nil {
@@ -160,6 +165,47 @@ func connectClient(t *testing.T, endpoint string, headers map[string]string) *mc
 	}
 	t.Cleanup(func() { _ = session.Close() })
 	return session
+}
+
+const testInitializeBody = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`
+
+func rawMCPPost(t *testing.T, endpoint, body string, headers map[string]string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create MCP request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("MCP request error = %v", err)
+	}
+	return resp
+}
+
+func initializeRawSession(t *testing.T, endpoint string, headers map[string]string) string {
+	t.Helper()
+	resp := rawMCPPost(t, endpoint, testInitializeBody, headers)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("initialize status = %d, want 200", resp.StatusCode)
+	}
+	sessionID := resp.Header.Get("Mcp-Session-Id")
+	if sessionID == "" {
+		t.Fatalf("initialize returned no Mcp-Session-Id")
+	}
+	return sessionID
+}
+
+func rawMCPStatus(t *testing.T, endpoint, body string, headers map[string]string) int {
+	t.Helper()
+	resp := rawMCPPost(t, endpoint, body, headers)
+	defer resp.Body.Close()
+	return resp.StatusCode
 }
 
 func listToolNames(t *testing.T, session *mcp.ClientSession) []string {
@@ -345,36 +391,121 @@ func TestSessionBindingRejectsForeignUserPath(t *testing.T) {
 	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
 	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
 
-	// Initialize a session as /team-a and capture its session ID.
-	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`
-	req, _ := http.NewRequest(http.MethodPost, gatewayURL+"/mcp", strings.NewReader(initBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set(core.UserPathHeader, "/team-a")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("initialize error = %v", err)
-	}
-	defer resp.Body.Close()
-	sessionID := resp.Header.Get("Mcp-Session-Id")
-	if sessionID == "" {
-		t.Fatalf("initialize returned no Mcp-Session-Id (status %d)", resp.StatusCode)
-	}
-
-	// Reusing the session ID under a different principal must 404.
+	sessionID := initializeRawSession(t, gatewayURL+"/mcp", map[string]string{
+		core.UserPathHeader: "/team-a",
+	})
 	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
-	req2, _ := http.NewRequest(http.MethodPost, gatewayURL+"/mcp", strings.NewReader(listBody))
-	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("Accept", "application/json, text/event-stream")
-	req2.Header.Set("Mcp-Session-Id", sessionID)
-	req2.Header.Set(core.UserPathHeader, "/team-b")
-	resp2, err := http.DefaultClient.Do(req2)
-	if err != nil {
-		t.Fatalf("tools/list error = %v", err)
+	status := rawMCPStatus(t, gatewayURL+"/mcp", listBody, map[string]string{
+		"Mcp-Session-Id":    sessionID,
+		core.UserPathHeader: "/team-b",
+	})
+	if status != http.StatusNotFound {
+		t.Fatalf("cross-principal session reuse status = %d, want 404", status)
 	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusNotFound {
-		t.Fatalf("cross-principal session reuse status = %d, want 404", resp2.StatusCode)
+}
+
+func TestSessionBindingRejectsForeignAuthKey(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
+
+	sessionID := initializeRawSession(t, gatewayURL+"/mcp", map[string]string{"X-Test-Auth-Key-ID": "key-a"})
+	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	status := rawMCPStatus(t, gatewayURL+"/mcp", listBody, map[string]string{
+		"Mcp-Session-Id":     sessionID,
+		"X-Test-Auth-Key-ID": "key-b",
+	})
+	if status != http.StatusNotFound {
+		t.Fatalf("cross-auth-key session reuse status = %d, want 404", status)
+	}
+}
+
+func TestSessionBindingRejectsDifferentPinnedEndpoint(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", addEchoTool("search"))
+	_, gatewayURL := newTestService(t, nil,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, nil),
+	)
+
+	sessionID := initializeRawSession(t, gatewayURL+"/mcp/alpha", nil)
+	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	status := rawMCPStatus(t, gatewayURL+"/mcp/beta", listBody, map[string]string{"Mcp-Session-Id": sessionID})
+	if status != http.StatusNotFound {
+		t.Fatalf("cross-endpoint session reuse status = %d, want 404", status)
+	}
+}
+
+func TestStreamableHTTPRejectsCrossOriginRequests(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
+
+	status := rawMCPStatus(t, gatewayURL+"/mcp", testInitializeBody, map[string]string{
+		"Origin": "https://attacker.example",
+	})
+	if status != http.StatusForbidden {
+		t.Fatalf("cross-origin initialize status = %d, want 403", status)
+	}
+}
+
+func TestDownstreamCapabilitiesDoNotPromiseListChanged(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
+
+	session := connectClient(t, gatewayURL+"/mcp", nil)
+	init := session.InitializeResult()
+	if init == nil || init.Capabilities == nil {
+		t.Fatalf("initialize capabilities are nil")
+	}
+	if init.Capabilities.Tools == nil || init.Capabilities.Tools.ListChanged {
+		t.Fatalf("tools capabilities = %+v, want supported without listChanged", init.Capabilities.Tools)
+	}
+	if init.Capabilities.Prompts == nil || init.Capabilities.Prompts.ListChanged {
+		t.Fatalf("prompts capabilities = %+v, want supported without listChanged", init.Capabilities.Prompts)
+	}
+	if init.Capabilities.Resources == nil || init.Capabilities.Resources.ListChanged {
+		t.Fatalf("resources capabilities = %+v, want supported without listChanged", init.Capabilities.Resources)
+	}
+}
+
+func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
+	var redirectedHeader string
+	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectedHeader = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer redirectTarget.Close()
+
+	var sameOriginHeader string
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirect" {
+			http.Redirect(w, r, redirectTarget.URL, http.StatusTemporaryRedirect)
+			return
+		}
+		sameOriginHeader = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer origin.Close()
+
+	u := newUpstream(ServerSpec{
+		Name: "headers", URL: origin.URL, Transport: "http", Enabled: true,
+		Headers: map[string]string{"Authorization": "Bearer upstream-secret"},
+	}, http.DefaultClient)
+	client := u.httpClientWithHeaders()
+	resp, err := client.Get(origin.URL + "/same-origin")
+	if err != nil {
+		t.Fatalf("same-origin request error = %v", err)
+	}
+	_ = resp.Body.Close()
+	resp, err = client.Get(origin.URL + "/redirect")
+	if err != nil {
+		t.Fatalf("redirected request error = %v", err)
+	}
+	_ = resp.Body.Close()
+	if sameOriginHeader != "Bearer upstream-secret" {
+		t.Fatalf("same-origin Authorization = %q, want configured header", sameOriginHeader)
+	}
+	if redirectedHeader != "" {
+		t.Fatalf("cross-origin Authorization = %q, want empty", redirectedHeader)
 	}
 }
 

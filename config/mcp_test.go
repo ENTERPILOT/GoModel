@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +79,11 @@ func TestNormalizeMCPConfigRejectsInvalid(t *testing.T) {
 			servers: map[string]MCPServerConfig{"a": {Command: "npx", Headers: map[string]string{"X": "y"}}},
 			wantErr: "headers are only valid",
 		},
+		{
+			name:    "invalid user path",
+			servers: map[string]MCPServerConfig{"a": {URL: "https://x/mcp", UserPaths: []string{"/team/../admin"}}},
+			wantErr: "invalid user_paths",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,6 +96,23 @@ func TestNormalizeMCPConfigRejectsInvalid(t *testing.T) {
 				t.Fatalf("normalizeMCPConfig() error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestNormalizeMCPConfigCanonicalizesUserPaths(t *testing.T) {
+	cfg := MCPConfig{Servers: map[string]MCPServerConfig{
+		"a": {
+			URL:       "https://x/mcp",
+			UserPaths: []string{" team/a ", "/team/a", "/team/b/"},
+		},
+	}}
+	if err := normalizeMCPConfig(&cfg); err != nil {
+		t.Fatalf("normalizeMCPConfig() error = %v", err)
+	}
+	got := cfg.Servers["a"].UserPaths
+	want := []string{"/team/a", "/team/b"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("UserPaths = %v, want %v", got, want)
 	}
 }
 

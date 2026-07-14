@@ -1,6 +1,7 @@
 package mcpgateway
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 
@@ -81,12 +82,42 @@ func filterTools(tools []*mcp.Tool, allowed, disallowed []string) []*mcp.Tool {
 		if !toolAllowed(tool.Name, allowed, disallowed) {
 			continue
 		}
-		filtered = append(filtered, tool)
+		filtered = append(filtered, normalizeToolSchemas(tool))
 	}
 	slices.SortFunc(filtered, func(a, b *mcp.Tool) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return filtered
+}
+
+// normalizeToolSchemas accepts imperfect upstream catalogs without letting
+// them crash the downstream SDK, which requires object-shaped schemas. A
+// missing or invalid input schema becomes a permissive object; an invalid
+// optional output schema is omitted rather than making a false promise.
+func normalizeToolSchemas(tool *mcp.Tool) *mcp.Tool {
+	clone := *tool
+	if !isObjectSchema(clone.InputSchema) {
+		clone.InputSchema = map[string]any{"type": "object", "additionalProperties": true}
+	}
+	if clone.OutputSchema != nil && !isObjectSchema(clone.OutputSchema) {
+		clone.OutputSchema = nil
+	}
+	return &clone
+}
+
+func isObjectSchema(schema any) bool {
+	if schema == nil {
+		return false
+	}
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		return false
+	}
+	var value map[string]any
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		return false
+	}
+	return value["type"] == "object"
 }
 
 func toolAllowed(name string, allowed, disallowed []string) bool {

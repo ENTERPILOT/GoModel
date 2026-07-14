@@ -123,6 +123,19 @@ func TestManagedServerValidateRequiresURL(t *testing.T) {
 	}
 }
 
+func TestManagedServerValidateRejectsInvalidUserPath(t *testing.T) {
+	t.Parallel()
+	server := ManagedServer{
+		Name:      "web",
+		URL:       "https://example.com/mcp",
+		Transport: "http",
+		UserPaths: []string{"/team/../admin"},
+	}
+	if err := server.Validate(); err == nil {
+		t.Fatalf("Validate(invalid user path) should fail")
+	}
+}
+
 func TestManagedServerSpecDefaultsTimeout(t *testing.T) {
 	t.Parallel()
 	spec := ManagedServer{Name: "web", URL: "https://example.com/mcp", Transport: "http"}.Spec()

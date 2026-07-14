@@ -6399,6 +6399,16 @@ body.conversation-drawer-open {
   white-space: nowrap;
 }
 
+/* The server table has seven information-dense columns. Preserve readable
+   cells on narrow screens and let the table scroll instead of clipping it. */
+.mcp-server-table-wrapper {
+  overflow-x: auto;
+}
+
+.mcp-server-table-wrapper .data-table {
+  min-width: 860px;
+}
+
 /* MCP overview card: reuses the provider status flag accents (is-healthy /
    is-degraded) but stays a single-column card. */
 .mcp-servers-flag {

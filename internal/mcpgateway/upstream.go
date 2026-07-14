@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"slices"
@@ -236,26 +237,41 @@ func (u *upstream) httpClientWithHeaders() *http.Client {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	clone.Transport = &headerRoundTripper{base: transport, headers: u.spec.Headers}
+	clone.Transport = &headerRoundTripper{
+		base:    transport,
+		headers: u.spec.Headers,
+		origin:  requestOrigin(u.spec.URL),
+	}
 	return &clone
 }
 
 type headerRoundTripper struct {
 	base    http.RoundTripper
 	headers map[string]string
+	origin  string
 }
 
 func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
-	for key, value := range t.headers {
-		clone.Header.Set(key, value)
+	if t.origin != "" && requestOrigin(req.URL.String()) == t.origin {
+		for key, value := range t.headers {
+			clone.Header.Set(key, value)
+		}
 	}
 	return t.base.RoundTrip(clone)
 }
 
-// list rebuilds the catalog from the upstream's declared capabilities. Raw
-// tool schemas and metadata pass through untouched: fidelity is a correctness
-// requirement, not a nicety.
+func requestOrigin(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
+}
+
+// list rebuilds the catalog from the upstream's declared capabilities. Valid
+// tool schemas and metadata pass through untouched; malformed schemas are
+// made safe for the stricter downstream SDK.
 func (u *upstream) list(ctx context.Context, session *mcp.ClientSession) (*catalog, error) {
 	fresh := &catalog{}
 	init := session.InitializeResult()

@@ -293,8 +293,8 @@
                 const rawTimeout = String(this.mcpServerForm.tool_timeout_seconds || '').trim();
                 if (rawTimeout !== '') {
                     const parsed = Number(rawTimeout);
-                    if (!Number.isFinite(parsed) || parsed < 0) {
-                        this.mcpServerError = 'Tool timeout must be a non-negative number of seconds.';
+                    if (!Number.isSafeInteger(parsed) || parsed < 0) {
+                        this.mcpServerError = 'Tool timeout must be a non-negative whole number of seconds.';
                         return;
                     }
                     toolTimeoutSeconds = parsed;
@@ -445,7 +445,14 @@
                     } else {
                         await this.fetchMcpServersPage();
                     }
-                    this.mcpServerNotice = 'MCP server "' + name + '" reconnected.';
+                    const status = this.mcpServerStatus(refreshed);
+                    if (status === 'connected') {
+                        this.mcpServerNotice = 'MCP server "' + name + '" reconnected.';
+                    } else if (status === 'disabled') {
+                        this.mcpServerNotice = 'MCP server "' + name + '" is disabled; no connection was attempted.';
+                    } else {
+                        this.mcpServerError = 'Reconnect attempted, but MCP server "' + name + '" is still ' + status + '.';
+                    }
                     if (typeof this.renderIconsAfterUpdate === 'function') {
                         this.renderIconsAfterUpdate();
                     }

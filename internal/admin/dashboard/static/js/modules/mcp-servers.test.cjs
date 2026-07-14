@@ -24,6 +24,15 @@ function createMcpServersModule(overrides) {
     return factory();
 }
 
+test('MCP server table remains horizontally accessible on narrow screens', () => {
+    const template = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'templates', 'page-mcp-servers.html'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'static', 'css', 'dashboard.css'), 'utf8');
+
+    assert.match(template, /table-wrapper mcp-server-table-wrapper/);
+    assert.match(css, /\.mcp-server-table-wrapper\s*\{[^}]*overflow-x:\s*auto/s);
+    assert.match(css, /\.mcp-server-table-wrapper \.data-table\s*\{[^}]*min-width:/s);
+});
+
 test('mcpHeadersToRows and mcpHeaderRowsToObject round-trip, preserving masked secrets', () => {
     const module = createMcpServersModule();
 
@@ -195,7 +204,11 @@ test('submitMcpServerForm validates required fields and timeout without fetching
         tool_timeout_seconds: '-3'
     };
     await module.submitMcpServerForm();
-    assert.equal(module.mcpServerError, 'Tool timeout must be a non-negative number of seconds.');
+    assert.equal(module.mcpServerError, 'Tool timeout must be a non-negative whole number of seconds.');
+
+    module.mcpServerForm.tool_timeout_seconds = '1.5';
+    await module.submitMcpServerForm();
+    assert.equal(module.mcpServerError, 'Tool timeout must be a non-negative whole number of seconds.');
 });
 
 test('deleteMcpServer targets the encoded name and skips managed rows', async () => {
@@ -271,6 +284,31 @@ test('reconnectMcpServer replaces the refreshed row in place', async () => {
     assert.deepEqual(module.mcpServers[0], refreshed);
     assert.equal(module.mcpServers[1].name, 'other');
     assert.equal(module.mcpServerNotice, 'MCP server "github" reconnected.');
+});
+
+test('reconnectMcpServer surfaces degraded and disabled outcomes accurately', async () => {
+    for (const [status, expectedError, expectedNotice] of [
+        ['degraded', 'Reconnect attempted, but MCP server "github" is still degraded.', ''],
+        ['disabled', '', 'MCP server "github" is disabled; no connection was attempted.']
+    ]) {
+        const module = createMcpServersModule({
+            fetch: async () => ({
+                status: 200,
+                statusText: 'OK',
+                json: async () => ({ name: 'github', status })
+            })
+        });
+        Object.assign(module, {
+            requestOptions: (options) => ({ ...(options || {}), headers: {} }),
+            handleFetchResponse: () => true
+        });
+        module.mcpServers = [{ name: 'github', status: 'connecting' }];
+
+        await module.reconnectMcpServer({ name: 'github' });
+
+        assert.equal(module.mcpServerError, expectedError, status);
+        assert.equal(module.mcpServerNotice, expectedNotice, status);
+    }
 });
 
 test('openMcpServerEdit prefills the form and refuses managed servers', () => {

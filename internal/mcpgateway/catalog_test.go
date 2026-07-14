@@ -1,6 +1,7 @@
 package mcpgateway
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 
@@ -88,6 +89,36 @@ func TestFilterTools(t *testing.T) {
 				t.Fatalf("filterTools() = %v, want %v", names, tt.want)
 			}
 		})
+	}
+}
+
+func TestFilterToolsNormalizesSchemasForDownstream(t *testing.T) {
+	t.Parallel()
+	validInput := map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}}
+	tools := []*mcp.Tool{
+		{Name: "missing"},
+		{Name: "invalid", InputSchema: map[string]any{"type": "string"}, OutputSchema: []string{"not", "a", "schema"}},
+		{Name: "valid", InputSchema: validInput, OutputSchema: map[string]any{"type": "object"}},
+	}
+
+	filtered := filterTools(tools, nil, nil)
+	byName := make(map[string]*mcp.Tool, len(filtered))
+	for _, tool := range filtered {
+		byName[tool.Name] = tool
+	}
+	for _, name := range []string{"missing", "invalid", "valid"} {
+		if !isObjectSchema(byName[name].InputSchema) {
+			t.Fatalf("%s input schema = %#v, want object schema", name, byName[name].InputSchema)
+		}
+	}
+	if byName["invalid"].OutputSchema != nil {
+		t.Fatalf("invalid output schema = %#v, want nil", byName["invalid"].OutputSchema)
+	}
+	if !reflect.DeepEqual(byName["valid"].InputSchema, validInput) {
+		t.Fatalf("valid input schema = %#v, want %#v", byName["valid"].InputSchema, validInput)
+	}
+	if !isObjectSchema(byName["valid"].OutputSchema) {
+		t.Fatalf("valid output schema = %#v, want preserved object", byName["valid"].OutputSchema)
 	}
 }
 

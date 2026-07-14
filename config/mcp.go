@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // DefaultMCPToolTimeout bounds a single upstream tools/call when the server
@@ -201,6 +204,20 @@ func ValidateMCPServerConfig(server *MCPServerConfig) error {
 	}
 	if server.ToolTimeout == 0 {
 		server.ToolTimeout = DefaultMCPToolTimeout
+	}
+	if len(server.UserPaths) > 0 {
+		normalized := make([]string, 0, len(server.UserPaths))
+		for _, raw := range server.UserPaths {
+			path, err := core.NormalizeUserPath(raw)
+			if err != nil {
+				return fmt.Errorf("invalid user_paths value %q: %w", raw, err)
+			}
+			if path != "" && !slices.Contains(normalized, path) {
+				normalized = append(normalized, path)
+			}
+		}
+		slices.Sort(normalized)
+		server.UserPaths = normalized
 	}
 	return nil
 }

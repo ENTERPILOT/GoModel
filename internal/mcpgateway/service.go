@@ -60,8 +60,10 @@ type Service struct {
 // additionally stops a *different* principal from riding a leaked session ID,
 // per the MCP session-hijacking guidance.
 type sessionBinding struct {
-	userPath string
-	lastSeen time.Time
+	authKeyID string
+	userPath  string
+	pinned    string
+	lastSeen  time.Time
 }
 
 // Options configures NewService.
@@ -90,10 +92,11 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		bindings:       make(map[string]sessionBinding),
 		stop:           make(chan struct{}),
 	}
-	s.handler = mcp.NewStreamableHTTPHandler(s.getServer, &mcp.StreamableHTTPOptions{
+	streamable := mcp.NewStreamableHTTPHandler(s.getServer, &mcp.StreamableHTTPOptions{
 		SessionTimeout: sessionIdleTimeout,
 		Logger:         slog.Default(),
 	})
+	s.handler = http.NewCrossOriginProtection().Handler(streamable)
 	if err := s.Reload(ctx); err != nil {
 		s.Close()
 		return nil, err
@@ -208,6 +211,7 @@ func (s *Service) Close() {
 // binding and stamps the internal identity headers tool handlers read.
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer string) error {
 	userPath := core.UserPathFromContext(r.Context())
+	authKeyID := core.GetAuthKeyID(r.Context())
 
 	if pinnedServer != "" {
 		view, ok := s.findVisibleServer(pinnedServer, userPath)
@@ -220,7 +224,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	}
 
 	if sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id")); sessionID != "" {
-		if !s.touchBinding(sessionID, userPath, r.Method == http.MethodDelete) {
+		if !s.touchBinding(sessionID, authKeyID, userPath, pinnedServer, r.Method == http.MethodDelete) {
 			// A different principal presented this session ID. Report the
 			// session as gone (404 per the transport spec) so the legitimate
 			// client's session stays unaffected and this caller re-initializes.
@@ -241,14 +245,16 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 
 // requestScope captures the visibility inputs of one downstream session.
 type requestScope struct {
-	userPath string
-	pinned   string
-	include  map[string]struct{}
+	authKeyID string
+	userPath  string
+	pinned    string
+	include   map[string]struct{}
 }
 
 func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 	scope := requestScope{
-		userPath: core.UserPathFromContext(r.Context()),
+		authKeyID: core.GetAuthKeyID(r.Context()),
+		userPath:  core.UserPathFromContext(r.Context()),
 	}
 	if pinned, ok := r.Context().Value(pinnedServerKey{}).(string); ok {
 		scope.pinned = pinned
@@ -282,13 +288,13 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		// currently empty, so list calls return empty lists instead of
 		// method-not-supported errors.
 		Capabilities: &mcp.ServerCapabilities{
-			Tools:     &mcp.ToolCapabilities{ListChanged: true},
-			Prompts:   &mcp.PromptCapabilities{ListChanged: true},
-			Resources: &mcp.ResourceCapabilities{ListChanged: true},
+			Tools:     &mcp.ToolCapabilities{},
+			Prompts:   &mcp.PromptCapabilities{},
+			Resources: &mcp.ResourceCapabilities{},
 		},
 		GetSessionID: func() string {
 			id := rand.Text()
-			s.bindSession(id, scope.userPath)
+			s.bindSession(id, scope.authKeyID, scope.userPath, scope.pinned)
 			return id
 		},
 	})
@@ -299,14 +305,16 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		endpoint = "/mcp/" + scope.pinned
 	}
 
+	toolOwners := make(map[string]string)
+	promptOwners := make(map[string]string)
 	resourceOwners := make(map[string]string)
 	for _, view := range views {
 		snapshot, _ := s.upstreamCatalog(view.Spec.Name)
 		if snapshot == nil {
 			continue
 		}
-		s.registerTools(server, view.Spec.Name, snapshot, prefixNames, endpoint)
-		s.registerPrompts(server, view.Spec.Name, snapshot, prefixNames)
+		s.registerTools(server, view.Spec.Name, snapshot, prefixNames, endpoint, toolOwners)
+		s.registerPrompts(server, view.Spec.Name, snapshot, prefixNames, promptOwners)
 		s.registerResources(server, view.Spec.Name, snapshot, resourceOwners)
 	}
 	return server
@@ -385,14 +393,21 @@ func (s *Service) composeInstructions(scope requestScope, views []ServerView) st
 }
 
 // registerTools adds one upstream's tools to a session server. Tool metadata
-// and schemas relay verbatim; only the name is prefixed on the aggregated
-// endpoint. Arguments relay as raw JSON — validation belongs to the upstream.
-func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapshot *catalog, prefix bool, endpoint string) {
+// and valid schemas relay verbatim; only the name is prefixed on the
+// aggregated endpoint. Arguments relay as raw JSON — validation belongs to
+// the upstream.
+func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapshot *catalog, prefix bool, endpoint string, owners map[string]string) {
 	for _, tool := range snapshot.tools {
 		exposed := tool.Name
 		if prefix {
 			exposed = NamespacedName(upstreamName, tool.Name)
 		}
+		if owner, taken := owners[exposed]; taken {
+			slog.Warn("mcp tool name collision; keeping first server",
+				"tool", exposed, "kept", owner, "skipped", upstreamName)
+			continue
+		}
+		owners[exposed] = upstreamName
 		clone := *tool
 		clone.Name = exposed
 		server.AddTool(&clone, s.toolHandler(upstreamName, tool.Name, exposed, endpoint))
@@ -412,12 +427,18 @@ func (s *Service) toolHandler(upstreamName, toolName, exposedName, endpoint stri
 }
 
 // registerPrompts mirrors registerTools for prompts.
-func (s *Service) registerPrompts(server *mcp.Server, upstreamName string, snapshot *catalog, prefix bool) {
+func (s *Service) registerPrompts(server *mcp.Server, upstreamName string, snapshot *catalog, prefix bool, owners map[string]string) {
 	for _, prompt := range snapshot.prompts {
 		exposed := prompt.Name
 		if prefix {
 			exposed = NamespacedName(upstreamName, prompt.Name)
 		}
+		if owner, taken := owners[exposed]; taken {
+			slog.Warn("mcp prompt name collision; keeping first server",
+				"prompt", exposed, "kept", owner, "skipped", upstreamName)
+			continue
+		}
+		owners[exposed] = upstreamName
 		clone := *prompt
 		clone.Name = exposed
 		originalName := prompt.Name
@@ -466,23 +487,29 @@ func (s *Service) registerResources(server *mcp.Server, upstreamName string, sna
 }
 
 // bindSession records the principal a new session was initialized under.
-func (s *Service) bindSession(sessionID, userPath string) {
+func (s *Service) bindSession(sessionID, authKeyID, userPath, pinned string) {
 	s.bindMu.Lock()
-	s.bindings[sessionID] = sessionBinding{userPath: userPath, lastSeen: time.Now()}
+	s.bindings[sessionID] = sessionBinding{
+		authKeyID: authKeyID,
+		userPath:  userPath,
+		pinned:    pinned,
+		lastSeen:  time.Now(),
+	}
 	s.bindMu.Unlock()
 }
 
 // touchBinding refreshes a known session binding and reports whether the
-// caller's user path matches it. Unknown session IDs pass through: the SDK
-// rejects them itself, and bindings do not survive restarts.
-func (s *Service) touchBinding(sessionID, userPath string, remove bool) bool {
+// caller's authenticated identity, user path, and endpoint pin match it.
+// Unknown session IDs pass through: the SDK rejects them itself, and bindings
+// do not survive restarts.
+func (s *Service) touchBinding(sessionID, authKeyID, userPath, pinned string, remove bool) bool {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
 	binding, ok := s.bindings[sessionID]
 	if !ok {
 		return true
 	}
-	if binding.userPath != userPath {
+	if binding.authKeyID != authKeyID || binding.userPath != userPath || binding.pinned != pinned {
 		return false
 	}
 	if remove {

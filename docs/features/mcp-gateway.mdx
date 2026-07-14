@@ -122,7 +122,10 @@ resource templates with their descriptions, after your `allowed_tools` /
 
 - **Credential boundary.** The MCP spec forbids token passthrough; GoModel
   terminates the client's bearer token and injects per-server credentials
-  from configuration. Client keys never reach an upstream.
+  from configuration. Client keys never reach an upstream, and configured
+  upstream headers are not sent across cross-origin redirects.
+- **Streamable HTTP origin checks.** Requests carrying an `Origin` header must
+  match the GoModel host, preventing browser-based DNS rebinding attacks.
 - **stdio is declarative-only.** stdio servers spawn subprocesses on the
   gateway host, so they can only be declared in `config.yaml` / `MCP_SERVERS`.
   The admin API and dashboard reject them — a dashboard login must never be
@@ -137,16 +140,23 @@ resource templates with their descriptions, after your `allowed_tools` /
   secrets in the database, declare those servers in `config.yaml` /
   `MCP_SERVERS` instead — `${ENV}` references keep the secret in the
   environment, and declarative servers never touch the store.
+- **Remote URLs are server-side egress.** Dashboard-managed HTTP/SSE servers
+  deliberately support private and loopback endpoints. Protect admin write
+  access and enforce your deployment's egress policy so untrusted operators
+  cannot use the gateway to probe internal services.
 - **Sessions are not authentication.** Every request is bearer-authenticated,
-  and a session is additionally bound to the user path that initialized it;
-  presenting a leaked session ID under another identity returns 404.
+  and a session is additionally bound to the managed auth-key identity, user
+  path, and pinned endpoint that initialized it; presenting a leaked session
+  ID under another identity returns 404.
 - Secret header values are shown redacted (`***`) in the admin API and
   dashboard; saving a form with `***` preserves the stored secret.
 
 ## Protocol coverage
 
-Tools, prompts, resources, and resource templates are aggregated and relayed
-with raw schemas and results untouched. Upstream `instructions` are merged
-into the gateway's `initialize` response. Server-initiated features
-(sampling, elicitation, roots) and resource subscriptions are not negotiated
-in this version, which downstream clients handle transparently.
+Tools, prompts, resources, and resource templates are aggregated and relayed.
+Valid schemas and all results remain untouched; malformed tool schemas are
+normalized to safe object schemas rather than crashing downstream sessions.
+Upstream `instructions` are merged into the gateway's `initialize` response.
+Server-initiated features (sampling, elicitation, roots) and resource
+subscriptions are not negotiated in this version, which downstream clients
+handle transparently.

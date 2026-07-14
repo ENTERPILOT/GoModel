@@ -61,6 +61,7 @@ func (m *ManagedServer) Validate() error {
 		URL:         m.URL,
 		Transport:   m.Transport,
 		Headers:     m.Headers,
+		UserPaths:   m.UserPaths,
 		ToolTimeout: time.Duration(m.ToolTimeoutSeconds) * time.Second,
 	}
 	if err := config.ValidateMCPServerConfig(&cfg); err != nil {
@@ -68,6 +69,7 @@ func (m *ManagedServer) Validate() error {
 	}
 	m.Transport = cfg.Transport
 	m.URL = cfg.URL
+	m.UserPaths = cfg.UserPaths
 	return nil
 }
 
