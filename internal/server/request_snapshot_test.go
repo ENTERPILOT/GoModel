@@ -195,6 +195,65 @@ func TestRequestSnapshotCapture_NormalizesUserPathHeader(t *testing.T) {
 	assert.Equal(t, "/team/alpha/user", c.Request().Header.Get(core.UserPathHeader))
 }
 
+func TestRequestSnapshotCapture_StampsUserPathForNonIngressManagedModelEndpoints(t *testing.T) {
+	// MCP, realtime, and audio endpoints take no snapshot, but their header
+	// identity must still reach the context: session binding, rate limits,
+	// budgets, and usage attribution read core.UserPathFromContext.
+	for _, path := range []string{"/mcp", "/mcp/alpha", "/v1/realtime/calls", "/v1/audio/speech"} {
+		t.Run(path, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+			req.Header.Set(core.UserPathHeader, " team//alpha/ ")
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			var capturedUserPath string
+			handler := RequestSnapshotCapture()(func(c *echo.Context) error {
+				capturedUserPath = core.UserPathFromContext(c.Request().Context())
+				assert.Nil(t, core.GetRequestSnapshot(c.Request().Context()))
+				return c.String(http.StatusOK, "ok")
+			})
+
+			require.NoError(t, handler(c))
+			assert.Equal(t, "/team/alpha", capturedUserPath)
+			assert.Equal(t, "/team/alpha", c.Request().Header.Get(core.UserPathHeader))
+		})
+	}
+}
+
+func TestRequestSnapshotCapture_RejectsInvalidUserPathOnNonIngressManagedModelEndpoints(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{}`))
+	req.Header.Set(core.UserPathHeader, "/team/../escape")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
+		t.Fatal("handler must not run for an invalid user-path header")
+		return nil
+	})
+
+	require.NoError(t, handler(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestRequestSnapshotCapture_SkipsUserPathStampingForNonModelEndpoints(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/providers", nil)
+	req.Header.Set(core.UserPathHeader, "/team/alpha")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	var capturedUserPath string
+	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
+		capturedUserPath = core.UserPathFromContext(c.Request().Context())
+		return c.String(http.StatusOK, "ok")
+	})
+
+	require.NoError(t, handler(c))
+	assert.Equal(t, "", capturedUserPath)
+}
+
 func TestRequestSnapshotCapture_UsesConfiguredUserPathHeader(t *testing.T) {
 	e := echo.New()
 	const headerName = "X-Tenant-Path"

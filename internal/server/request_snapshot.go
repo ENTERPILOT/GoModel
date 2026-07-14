@@ -27,6 +27,23 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 			c.Response().Header().Set("X-Request-ID", requestID)
 			desc := core.DescribeEndpoint(req.Method, req.URL.Path)
 			if !desc.IngressManaged {
+				// Model endpoints that own their transport (MCP, realtime,
+				// audio) take no snapshot, but their identity must still reach
+				// the context: rate limits, budgets, session binding, and
+				// usage attribution all read core.UserPathFromContext. A
+				// managed key's bound path still wins — auth middleware runs
+				// later and its context value shadows this one.
+				if desc.ModelInteraction {
+					userPath, err := core.NormalizeUserPath(req.Header.Get(userPathHeaderName))
+					if err != nil {
+						return handleError(c, core.NewInvalidRequestError("invalid "+userPathHeaderName+" header", err))
+					}
+					if userPath != "" {
+						req.Header.Set(userPathHeaderName, userPath)
+						ctx := core.WithUserPathHeaderName(req.Context(), userPathHeaderName)
+						req = req.WithContext(core.WithEffectiveUserPath(ctx, userPath))
+					}
+				}
 				c.SetRequest(req)
 				return next(c)
 			}
