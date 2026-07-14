@@ -828,7 +828,7 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 
 // Shutdown gracefully tears down app components in dependency order.
 // Order:
-// 1. Cancel HTTP server context, close live streams, and wait for the server to stop.
+// 1. Close long-lived streams, cancel the HTTP server context, and wait for it to stop.
 // 2. Provider subsystem close (stops model refresh loop and cache resources).
 // 3. Batch store close.
 // 4. Usage logger close (flushes pending usage records).
@@ -849,16 +849,23 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	var errs []error
 
-	// 1. Stop HTTP server first (stop accepting new requests)
+	// 1. End long-lived streams before asking the HTTP server to drain. MCP
+	// Streamable HTTP clients intentionally keep a GET request open; leaving it
+	// alive here makes Echo wait until its graceful-shutdown timeout.
+	if a.mcpGateway != nil && a.mcpGateway.Service != nil {
+		a.mcpGateway.Service.Close()
+	}
+	if a.live != nil {
+		a.live.Close()
+	}
+
+	// Stop accepting new requests and wait for in-flight requests to finish.
 	a.serverMu.Lock()
 	serverStop := a.serverStop
 	serverDone := a.serverDone
 	a.serverMu.Unlock()
 	if serverStop != nil {
 		serverStop()
-	}
-	if a.live != nil {
-		a.live.Close()
 	}
 	if serverDone != nil {
 		select {

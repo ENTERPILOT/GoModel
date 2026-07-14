@@ -51,6 +51,11 @@ type Service struct {
 	bindMu   sync.Mutex
 	bindings map[string]sessionBinding
 
+	requestMu      sync.Mutex
+	requestCancels map[uint64]context.CancelFunc
+	nextRequestID  uint64
+	closing        bool
+
 	stopOnce sync.Once
 	stop     chan struct{}
 }
@@ -90,6 +95,7 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		userPathHeader: core.UserPathHeaderName(opts.UserPathHeader),
 		configSpecs:    opts.ConfigServers,
 		bindings:       make(map[string]sessionBinding),
+		requestCancels: make(map[uint64]context.CancelFunc),
 		stop:           make(chan struct{}),
 	}
 	streamable := mcp.NewStreamableHTTPHandler(s.getServer, &mcp.StreamableHTTPOptions{
@@ -199,10 +205,27 @@ func (s *Service) Reconnect(ctx context.Context, name string) (ServerView, error
 	return s.manager.Reconnect(ctx, name)
 }
 
-// Close stops background work and terminates upstream sessions.
+// Close stops background work, terminates upstream sessions, and cancels
+// downstream HTTP exchanges. Streamable HTTP clients keep a GET request open
+// for server events, so those request contexts must be ended before the HTTP
+// server can complete its graceful drain.
 func (s *Service) Close() {
-	s.stopOnce.Do(func() { close(s.stop) })
-	s.manager.Close()
+	s.stopOnce.Do(func() {
+		close(s.stop)
+
+		s.requestMu.Lock()
+		s.closing = true
+		cancels := make([]context.CancelFunc, 0, len(s.requestCancels))
+		for _, cancel := range s.requestCancels {
+			cancels = append(cancels, cancel)
+		}
+		s.requestMu.Unlock()
+		for _, cancel := range cancels {
+			cancel()
+		}
+
+		s.manager.Close()
+	})
 }
 
 // ServeHTTP handles one downstream MCP HTTP exchange. pinnedServer is the
@@ -210,6 +233,25 @@ func (s *Service) Close() {
 // authentication has already run; this layer enforces session-to-principal
 // binding and stamps the internal identity headers tool handlers read.
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer string) error {
+	requestCtx, cancel := context.WithCancel(r.Context())
+	s.requestMu.Lock()
+	if s.closing {
+		s.requestMu.Unlock()
+		cancel()
+		return fmt.Errorf("MCP gateway is shutting down")
+	}
+	requestID := s.nextRequestID
+	s.nextRequestID++
+	s.requestCancels[requestID] = cancel
+	s.requestMu.Unlock()
+	defer func() {
+		cancel()
+		s.requestMu.Lock()
+		delete(s.requestCancels, requestID)
+		s.requestMu.Unlock()
+	}()
+	r = r.WithContext(requestCtx)
+
 	userPath := core.UserPathFromContext(r.Context())
 	authKeyID := core.GetAuthKeyID(r.Context())
 

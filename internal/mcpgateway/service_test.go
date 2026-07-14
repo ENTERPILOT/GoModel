@@ -687,6 +687,42 @@ func TestCloseDuringDialDiscardsSession(t *testing.T) {
 	}
 }
 
+func TestCloseCancelsActiveDownstreamRequests(t *testing.T) {
+	service, err := NewService(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	requestStarted := make(chan struct{})
+	requestDone := make(chan error, 1)
+	service.handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(requestStarted)
+		<-r.Context().Done()
+	})
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+		requestDone <- service.ServeHTTP(httptest.NewRecorder(), req, "")
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("downstream request did not start")
+	}
+
+	service.Close()
+	service.Close() // Close remains safe when the subsystem owner closes again.
+
+	select {
+	case err := <-requestDone:
+		if err != nil {
+			t.Fatalf("ServeHTTP() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close did not cancel the downstream request")
+	}
+}
+
 func TestInstructionsComposeFromUpstreams(t *testing.T) {
 	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
 	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
