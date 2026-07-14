@@ -1,6 +1,6 @@
 package openai
 
-import "gomodel/internal/providers"
+import "github.com/enterpilot/gomodel/internal/providers"
 
 var passthroughSemanticEnricher = providers.NewSemanticEnricher("openai", map[string]providers.PassthroughEndpointSemantics{
 	"/chat/completions": {Operation: "openai.chat_completions", AuditPath: "/v1/chat/completions"},

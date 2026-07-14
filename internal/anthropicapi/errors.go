@@ -3,7 +3,7 @@ package anthropicapi
 import (
 	"net/http"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ErrorFromGateway converts a gateway error into an HTTP status code and the

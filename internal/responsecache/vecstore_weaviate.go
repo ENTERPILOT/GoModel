@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"gomodel/config"
+	"github.com/enterpilot/gomodel/config"
 )
 
 type weaviateStore struct {

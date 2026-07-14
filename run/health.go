@@ -12,7 +12,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/config"
+	"github.com/enterpilot/gomodel/config"
 )
 
 func runHealthProbe(timeout time.Duration) error {

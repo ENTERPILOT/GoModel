@@ -3,7 +3,7 @@ package usage
 import (
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 const (

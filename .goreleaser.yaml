@@ -19,9 +19,9 @@ builds:
     main: ./cmd/gomodel
     ldflags:
       - -s -w
-      - -X gomodel/internal/version.Version={{.Version}}
-      - -X gomodel/internal/version.Commit={{.Commit}}
-      - -X gomodel/internal/version.Date={{.Date}}
+      - -X github.com/enterpilot/gomodel/internal/version.Version={{.Version}}
+      - -X github.com/enterpilot/gomodel/internal/version.Commit={{.Commit}}
+      - -X github.com/enterpilot/gomodel/internal/version.Date={{.Date}}
 
 archives:
   - formats: ['tar.gz']

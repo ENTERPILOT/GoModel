@@ -16,10 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
-	"gomodel/internal/admin"
-	"gomodel/internal/core"
-	"gomodel/internal/ratelimit"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 func setupRateLimitService(t *testing.T, rules []ratelimit.Rule) *ratelimit.Service {

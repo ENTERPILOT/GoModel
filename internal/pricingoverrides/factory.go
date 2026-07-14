@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
-	"gomodel/config"
-	"gomodel/internal/storage"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // Result holds the initialized pricing override service and any owned resources.

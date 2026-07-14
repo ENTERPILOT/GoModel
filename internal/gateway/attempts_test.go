@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // A failed attempt must notify the observer immediately (so the live audit

@@ -12,8 +12,8 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/config"
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 const defaultTimeout = 120 * time.Second

@@ -3,8 +3,8 @@ package server
 import (
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
-	"gomodel/internal/tagging"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/tagging"
 )
 
 // TaggingCapture extracts request labels from the configured tagging headers

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	"gomodel/internal/modeldata"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
 // registryMockProvider is a mock implementation of core.Provider for Registry testing.

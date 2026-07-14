@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // applyKeyedLimitEnv merges <prefix>* env entries into keyed config entries.

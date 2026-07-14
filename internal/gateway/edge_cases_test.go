@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	batchstore "gomodel/internal/batch"
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	batchstore "github.com/enterpilot/gomodel/internal/batch"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 func TestMergeStoredBatchFromUpstreamPreservesGatewayOwnedMetadata(t *testing.T) {

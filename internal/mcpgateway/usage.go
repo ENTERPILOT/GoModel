@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // recordToolCall emits one usage entry per tools/call so MCP traffic shows up

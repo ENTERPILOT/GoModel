@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 func newTTSServer(t *testing.T, audioBase64 string) (*httptest.Server, *[]byte) {

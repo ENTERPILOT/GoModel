@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"gomodel/internal/core"
-	"gomodel/internal/streaming"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 // buildRawUsageFromDetails merges typed token detail fields into a RawUsage map.

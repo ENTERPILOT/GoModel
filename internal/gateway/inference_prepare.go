@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // PrepareChatRequest resolves workflow/model policy and applies translated request patching.

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/providers"
-	"gomodel/internal/providers/health"
+	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/health"
 )
 
 func TestApplyRequestHealth(t *testing.T) {

@@ -1,7 +1,7 @@
 package budget
 
 import (
-	"gomodel/internal/storage/sqlutil"
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 
 	"context"
 	"fmt"

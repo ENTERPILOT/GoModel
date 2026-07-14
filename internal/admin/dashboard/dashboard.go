@@ -12,8 +12,8 @@ import (
 	"net/http"
 	"strings"
 
-	"gomodel/config"
-	"gomodel/internal/version"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/version"
 
 	"github.com/labstack/echo/v5"
 )

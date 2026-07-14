@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"gomodel/config"
+	"github.com/enterpilot/gomodel/config"
 )
 
 func TestReadyProbeURL(t *testing.T) {

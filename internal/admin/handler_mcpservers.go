@@ -9,8 +9,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
-	"gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/mcpgateway"
 )
 
 // MCPServerAdmin is the narrow surface of *mcpgateway.Service the admin API

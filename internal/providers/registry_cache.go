@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"gomodel/internal/cache/modelcache"
-	"gomodel/internal/core"
-	"gomodel/internal/modeldata"
+	"github.com/enterpilot/gomodel/internal/cache/modelcache"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
 // LoadFromCache loads the model list from the cache backend.

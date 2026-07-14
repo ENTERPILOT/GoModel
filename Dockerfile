@@ -22,7 +22,7 @@ ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} go build \
-	-ldflags="-s -w -X gomodel/internal/version.Version=${VERSION} -X gomodel/internal/version.Commit=${COMMIT} -X gomodel/internal/version.Date=${DATE}" \
+	-ldflags="-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION} -X github.com/enterpilot/gomodel/internal/version.Commit=${COMMIT} -X github.com/enterpilot/gomodel/internal/version.Date=${DATE}" \
 	-o /gomodel ./cmd/gomodel
 
 # Create .cache and data directories for runtime (with placeholder for COPY)

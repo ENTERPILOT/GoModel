@@ -3,7 +3,7 @@ package server
 import (
 	"sort"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ExposedModelLister surfaces additional public models to include in GET /v1/models.

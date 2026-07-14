@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gomodel/config"
+	"github.com/enterpilot/gomodel/config"
 )
 
 type pgVecStore struct {

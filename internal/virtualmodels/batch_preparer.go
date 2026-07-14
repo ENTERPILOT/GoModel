@@ -5,7 +5,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // BatchPreparer rewrites redirect (alias) sources for native batch subrequests

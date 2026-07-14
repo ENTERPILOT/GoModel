@@ -3,7 +3,7 @@ package workflows
 import (
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // View is the admin-facing representation of one active workflow version.

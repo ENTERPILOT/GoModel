@@ -3,7 +3,7 @@ package guardrails
 import (
 	"context"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ContextPipelineResolver resolves a request-scoped guardrails pipeline.

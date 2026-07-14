@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // Target is one concrete (provider, model) destination of a redirect.

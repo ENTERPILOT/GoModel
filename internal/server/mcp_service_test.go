@@ -12,8 +12,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/mcpgateway"
-	"gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
 )
 
 func TestMCPAuditLabel(t *testing.T) {

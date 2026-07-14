@@ -13,7 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
-	"gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/budget"
 )
 
 // QueryBudgets returns all persisted budget rows from PostgreSQL.

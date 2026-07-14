@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ApplyWorkflowPolicy applies the first matching workflow policy to workflow.

@@ -13,9 +13,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
-	"gomodel/internal/version"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/version"
 )
 
 // sessionIdleTimeout closes downstream sessions that stop sending requests,

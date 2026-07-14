@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"gomodel/internal/modelselectors"
+	"github.com/enterpilot/gomodel/internal/modelselectors"
 )
 
 // DuplicateSelectorError reports two stored rows that normalize to one selector.

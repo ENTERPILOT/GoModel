@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // pricedModel builds a catalog model with input/output per-Mtok pricing.

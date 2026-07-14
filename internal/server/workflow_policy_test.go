@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/gateway"
 )
 
 type requestWorkflowPolicyResolverFunc func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)

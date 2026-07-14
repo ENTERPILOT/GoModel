@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 type modelCountProvider interface {

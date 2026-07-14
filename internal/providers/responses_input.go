@@ -6,7 +6,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ConvertResponsesInputToMessages converts a Responses API input payload into Chat API messages.

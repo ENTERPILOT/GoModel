@@ -12,8 +12,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/budget"
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 type countingBudgetChecker struct {

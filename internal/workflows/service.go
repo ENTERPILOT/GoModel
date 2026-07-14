@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gomodel/internal/core"
-	"gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/guardrails"
 )
 
 const (

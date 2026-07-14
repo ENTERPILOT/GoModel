@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 type providerRefreshTarget struct {

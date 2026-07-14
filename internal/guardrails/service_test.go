@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 type testStore struct {

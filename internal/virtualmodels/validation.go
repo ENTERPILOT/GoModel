@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"gomodel/internal/core"
-	"gomodel/internal/modelselectors"
-	"gomodel/internal/validation"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/modelselectors"
+	"github.com/enterpilot/gomodel/internal/validation"
 )
 
 // IsValidationError reports whether err is a validation error.

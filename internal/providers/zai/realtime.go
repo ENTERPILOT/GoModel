@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // realtimePath is the fixed GLM-Realtime websocket path. It is the same across

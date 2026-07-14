@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/config"
+	"github.com/enterpilot/gomodel/config"
 )
 
 var globalRetry = config.RetryConfig{

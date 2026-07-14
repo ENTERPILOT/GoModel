@@ -21,7 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // Note: contextKey type and constants (LogEntryKey, LogEntryStreamingKey,

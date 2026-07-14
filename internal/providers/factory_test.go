@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 var _ ProviderConstructor = func(_ ProviderConfig, _ ProviderOptions) core.Provider { return nil }

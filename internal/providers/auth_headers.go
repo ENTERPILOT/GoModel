@@ -3,7 +3,7 @@ package providers
 import (
 	"net/http"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // AuthHeaderConfig describes how a provider populates outbound request headers.

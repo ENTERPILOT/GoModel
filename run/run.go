@@ -26,10 +26,10 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"gomodel/config"
-	"gomodel/ext"
-	"gomodel/internal/app"
-	"gomodel/internal/version"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
+	"github.com/enterpilot/gomodel/internal/app"
+	"github.com/enterpilot/gomodel/internal/version"
 )
 
 var shutdownTimeout = 30 * time.Second
