@@ -8,51 +8,59 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestResolveNamespacedName(t *testing.T) {
+func TestNamespacedName(t *testing.T) {
 	t.Parallel()
-	servers := []string{"github", "git", "git_hub", "beta-tools"}
+	if full := NamespacedName("github", "create_issue"); full != "github_create_issue" {
+		t.Fatalf("NamespacedName() = %q, want github_create_issue", full)
+	}
+}
 
+func TestBareToolAliases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name       string
-		full       string
-		wantServer string
-		wantTool   string
-		wantOK     bool
+		name   string
+		owners map[string]string
+		want   map[string]string
 	}{
-		{name: "simple", full: "github_create_issue", wantServer: "github", wantTool: "create_issue", wantOK: true},
-		{name: "longest prefix wins over shorter server", full: "git_hub_sync", wantServer: "git_hub", wantTool: "sync", wantOK: true},
-		{name: "shorter server still resolves", full: "git_clone", wantServer: "git", wantTool: "clone", wantOK: true},
-		{name: "hyphenated server", full: "beta-tools_search", wantServer: "beta-tools", wantTool: "search", wantOK: true},
-		{name: "unknown server", full: "ghost_tool", wantOK: false},
-		{name: "no separator", full: "github", wantOK: false},
-		{name: "empty tool part", full: "github_", wantOK: false},
+		{
+			name:   "unique bare names alias",
+			owners: map[string]string{"alpha_echo": "alpha", "beta_search": "beta"},
+			want:   map[string]string{"echo": "alpha_echo", "search": "beta_search"},
+		},
+		{
+			name:   "ambiguous bare name gets no alias",
+			owners: map[string]string{"alpha_echo": "alpha", "beta_echo": "beta"},
+			want:   map[string]string{},
+		},
+		{
+			name: "bare name colliding with a namespaced name gets no alias",
+			// beta's tool is literally named "alpha_echo"; the namespaced
+			// registration must keep winning for that exact name.
+			owners: map[string]string{"alpha_echo": "alpha", "beta_alpha_echo": "beta"},
+			want:   map[string]string{"echo": "alpha_echo"},
+		},
+		{
+			name: "server names containing the separator stay unambiguous",
+			owners: map[string]string{
+				"git_hub_sync": "git_hub",
+				"git_clone":    "git",
+			},
+			want: map[string]string{"sync": "git_hub_sync", "clone": "git_clone"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			server, tool, ok := ResolveNamespacedName(tt.full, servers)
-			if ok != tt.wantOK {
-				t.Fatalf("ResolveNamespacedName(%q) ok = %v, want %v", tt.full, ok, tt.wantOK)
+			got := bareToolAliases(tt.owners)
+			if len(got) != len(tt.want) {
+				t.Fatalf("bareToolAliases() = %v, want %v", got, tt.want)
 			}
-			if !tt.wantOK {
-				return
-			}
-			if server != tt.wantServer || tool != tt.wantTool {
-				t.Fatalf("ResolveNamespacedName(%q) = (%q, %q), want (%q, %q)", tt.full, server, tool, tt.wantServer, tt.wantTool)
+			for bare, exposed := range tt.want {
+				if got[bare] != exposed {
+					t.Fatalf("bareToolAliases()[%q] = %q, want %q", bare, got[bare], exposed)
+				}
 			}
 		})
-	}
-}
-
-func TestNamespacedNameRoundTrip(t *testing.T) {
-	t.Parallel()
-	full := NamespacedName("github", "create_issue")
-	if full != "github_create_issue" {
-		t.Fatalf("NamespacedName() = %q, want github_create_issue", full)
-	}
-	server, tool, ok := ResolveNamespacedName(full, []string{"github"})
-	if !ok || server != "github" || tool != "create_issue" {
-		t.Fatalf("round trip = (%q, %q, %v)", server, tool, ok)
 	}
 }
 

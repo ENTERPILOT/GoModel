@@ -277,6 +277,68 @@ func TestAggregatedEndpointNamespacesAndRelays(t *testing.T) {
 	}
 }
 
+func TestAggregatedEndpointAcceptsUniqueBareToolName(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", addEchoTool("search"))
+	usageLog := &recordingUsageLogger{}
+	_, gatewayURL := newTestService(t, usageLog,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, nil),
+	)
+
+	session := connectClient(t, gatewayURL+"/mcp", nil)
+
+	// tools/list stays namespaced; only tools/call accepts the bare name.
+	names := listToolNames(t, session)
+	if len(names) != 2 || names[0] != "alpha_echo" || names[1] != "beta_search" {
+		t.Fatalf("ListTools() = %v, want [alpha_echo beta_search]", names)
+	}
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "echo",
+		Arguments: map[string]any{"value": 1},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(echo) error = %v", err)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok || !strings.HasPrefix(text.Text, "echo:") {
+		t.Fatalf("CallTool(echo) content = %#v, want echo:... text", result.Content[0])
+	}
+
+	// Usage accounting stays canonical: the entry records the namespaced name.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(usageLog.all()) == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	entries := usageLog.all()
+	if len(entries) != 1 || entries[0].Model != "alpha_echo" || entries[0].ProviderName != "alpha" {
+		t.Fatalf("usage entries = %+v, want one alpha/alpha_echo entry", entries)
+	}
+}
+
+func TestAggregatedEndpointRejectsAmbiguousBareToolName(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", addEchoTool("echo"))
+	_, gatewayURL := newTestService(t, nil,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, nil),
+	)
+
+	session := connectClient(t, gatewayURL+"/mcp", nil)
+
+	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "echo"}); err == nil {
+		t.Fatalf("CallTool(echo) succeeded, want unknown-tool error for an ambiguous bare name")
+	}
+
+	// The namespaced forms keep working.
+	for _, name := range []string{"alpha_echo", "beta_echo"} {
+		if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name}); err != nil {
+			t.Fatalf("CallTool(%s) error = %v", name, err)
+		}
+	}
+}
+
 func TestPerServerEndpointKeepsOriginalNames(t *testing.T) {
 	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
 	betaURL := newTestUpstream(t, "beta", addEchoTool("search"))
