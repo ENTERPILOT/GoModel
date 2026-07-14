@@ -68,7 +68,6 @@
                         "pages": [
                             "features/virtual-models",
                             "features/user-path",
-                            "features/mcp-gateway",
                             "features/passthrough-api",
                             "features/budgets",
                             "features/rate-limits",
@@ -76,6 +75,14 @@
                             "features/labelling",
                             "features/cache",
                             "features/failover"
+                        ]
+                    },
+                    {
+                        "group": "MCP Proxy",
+                        "icon": "waypoints",
+                        "pages": [
+                            "features/mcp-gateway",
+                            "mcp-proxy/claude-code-and-codex"
                         ]
                     },
                     {
