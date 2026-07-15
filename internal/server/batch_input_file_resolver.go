@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"gomodel/internal/core"
-	"gomodel/internal/filestore"
-	"gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/filestore"
+	"github.com/enterpilot/gomodel/internal/gateway"
 )
 
 type batchInputFileProviderResolver struct {

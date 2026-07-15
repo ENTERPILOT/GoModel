@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 type recordingLogger struct {

@@ -48,6 +48,10 @@
             <i data-lucide="shield-check" class="nav-icon" aria-hidden="true"></i>
             <span>Guardrails (experimental)</span>
         </a>
+        <a href="{{appURL "/admin/dashboard/mcp-servers"}}" class="nav-item" :class="{ active: page === 'mcp-servers' }" title="MCP Servers" @click.prevent="navigate('mcp-servers')">
+            <i data-lucide="plug" class="nav-icon" aria-hidden="true"></i>
+            <span>MCP Servers</span>
+        </a>
         <a href="{{appURL "/admin/dashboard/settings"}}" class="nav-item" :class="{ active: page === 'settings' }" title="Settings" @click.prevent="navigate('settings')">
             <i data-lucide="settings" class="nav-icon" aria-hidden="true"></i>
             <span>Settings</span>

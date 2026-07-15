@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"gomodel/config"
+	"github.com/enterpilot/gomodel/config"
 )
 
 func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {

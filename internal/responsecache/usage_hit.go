@@ -4,8 +4,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.PricingResolver) func(exchange, []byte, string) {

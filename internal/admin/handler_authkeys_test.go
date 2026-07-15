@@ -12,7 +12,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/authkeys"
+	"github.com/enterpilot/gomodel/internal/authkeys"
 )
 
 type authKeyTestStore struct {

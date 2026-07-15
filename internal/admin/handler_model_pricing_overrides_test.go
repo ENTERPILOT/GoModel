@@ -11,8 +11,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/modelselectors"
-	"gomodel/internal/pricingoverrides"
+	"github.com/enterpilot/gomodel/internal/modelselectors"
+	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 )
 
 type modelPricingOverrideTestStore struct {

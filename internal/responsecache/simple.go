@@ -16,8 +16,8 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/tidwall/gjson"
 
-	"gomodel/internal/cache"
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/cache"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 var cacheablePaths = map[string]bool{

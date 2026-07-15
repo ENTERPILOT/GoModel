@@ -9,7 +9,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ChatProvider is the minimal interface needed by the shared Responses-to-Chat adapter.

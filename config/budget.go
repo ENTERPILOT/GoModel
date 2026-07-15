@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // BudgetsConfig holds per-user-path spend limits.

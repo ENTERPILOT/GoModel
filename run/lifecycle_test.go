@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/config"
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 type stubLifecycleApp struct {

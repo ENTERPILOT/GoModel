@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 const requestSnapshotInlineBodyLimit int64 = 64 * 1024

@@ -3,7 +3,7 @@ package providers
 import (
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestEnsureProviderBatchID(t *testing.T) {

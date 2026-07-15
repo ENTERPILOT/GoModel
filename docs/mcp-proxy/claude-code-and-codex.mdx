@@ -1,0 +1,167 @@
+---
+title: "Connect Claude Code and Codex"
+description: "Connect Claude Code or Codex to the GoModel MCP proxy with Streamable HTTP and a GoModel bearer key."
+icon: "terminal"
+---
+
+Claude Code and Codex can use GoModel as one authenticated MCP endpoint. They
+receive the tools that GoModel exposes, while credentials for Linear, GitHub,
+and other upstream MCP servers remain in GoModel.
+
+`Claude Code or Codex -> GoModel /mcp -> upstream MCP servers`
+
+## Before you start
+
+You need:
+
+- A running GoModel deployment that the client can reach.
+- At least one connected MCP server in the GoModel dashboard or configuration.
+- A GoModel master key or managed auth key allowed to see that server.
+
+Set the client credential in your shell:
+
+```bash
+export GOMODEL_API_KEY="sk-your-gomodel-key"
+```
+
+Use HTTPS for a remote deployment. For a local GoModel process, replace the
+example URL with `http://localhost:8080/mcp`.
+
+<Note>
+  Send only the GoModel key from the client. Configure upstream tokens, such as
+  a Linear API key, in GoModel's MCP server settings instead.
+</Note>
+
+## Choose an endpoint
+
+| Endpoint | Catalog exposed to the client |
+| --- | --- |
+| `https://gomodel.example.com/mcp` | Every server visible to the key, with names such as `linear_create_issue` |
+| `https://gomodel.example.com/mcp/linear` | Only Linear, with its original tool names |
+| `https://gomodel.example.com/mcp/github` | Only GitHub, with its original tool names |
+
+The aggregated `/mcp` endpoint is the usual choice. A per-server endpoint is
+useful when one agent should receive a smaller catalog.
+
+## Claude Code
+
+Add GoModel as a user-scoped Streamable HTTP server:
+
+```bash
+claude mcp add \
+  --transport http \
+  --scope user \
+  gomodel \
+  https://gomodel.example.com/mcp \
+  --header "Authorization: Bearer ${GOMODEL_API_KEY}"
+```
+
+Check the saved connection:
+
+```bash
+claude mcp list
+claude mcp get gomodel
+```
+
+Start Claude Code and enter `/mcp` to inspect the connection and available
+tools.
+
+### Keep the key out of a shared file
+
+For project-scoped setup, create `.mcp.json` in the project root. Claude Code
+expands environment variables in URLs and headers:
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://gomodel.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${GOMODEL_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+The file can be shared without the key. Each user exports
+`GOMODEL_API_KEY` locally and approves the project MCP server when Claude Code
+prompts them.
+
+See the official [Claude Code MCP documentation](https://docs.anthropic.com/en/docs/claude-code/mcp)
+for configuration scopes and additional management commands.
+
+## Codex
+
+Codex can read the bearer token from an environment variable without storing
+its value in the MCP configuration:
+
+```bash
+codex mcp add gomodel \
+  --url https://gomodel.example.com/mcp \
+  --bearer-token-env-var GOMODEL_API_KEY
+```
+
+Check the saved connection:
+
+```bash
+codex mcp list
+```
+
+Start Codex and enter `/mcp` to inspect the server and its tools. The Codex CLI
+and IDE extension share this MCP configuration.
+
+The equivalent `~/.codex/config.toml` entry is:
+
+```toml
+[mcp_servers.gomodel]
+url = "https://gomodel.example.com/mcp"
+bearer_token_env_var = "GOMODEL_API_KEY"
+```
+
+See the official [Codex MCP documentation](https://developers.openai.com/codex/mcp/)
+for approval policies, tool filters, and project-scoped configuration.
+
+## Limit the aggregated catalog
+
+To keep the `/mcp` URL while selecting a subset of upstream servers, send an
+`X-MCP-Servers` header with comma-separated server slugs.
+
+For Claude Code, add it beside `Authorization` in `.mcp.json`:
+
+```json
+"headers": {
+  "Authorization": "Bearer ${GOMODEL_API_KEY}",
+  "X-MCP-Servers": "linear,github"
+}
+```
+
+For Codex, add a static header:
+
+```toml
+[mcp_servers.gomodel]
+url = "https://gomodel.example.com/mcp"
+bearer_token_env_var = "GOMODEL_API_KEY"
+http_headers = { "X-MCP-Servers" = "linear,github" }
+```
+
+Unknown slugs in `X-MCP-Servers` are ignored. GoModel still applies the
+auth key's `user_path` visibility and each server's allowed/disallowed tool
+filters.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| `401 Unauthorized` | `GOMODEL_API_KEY` is exported and contains a valid GoModel key |
+| Connected with no tools | The key's `user_path`, the server's visibility settings, and allowed/disallowed tool filters |
+| Server is degraded | Open its catalog in the dashboard, inspect the last error, then use **Reconnect** |
+| Works locally but not remotely | The public URL, TLS certificate, firewall, and reverse-proxy forwarding for `/mcp` |
+
+GoModel uses bearer authentication rather than an interactive OAuth flow for
+its downstream MCP endpoint. Do not run `codex mcp login gomodel`; configure
+the bearer token as shown above.
+
+For proxy behavior, upstream configuration, lifecycle, and security details,
+see [MCP Gateway](/features/mcp-gateway).

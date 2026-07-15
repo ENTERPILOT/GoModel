@@ -15,33 +15,34 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/config"
-	"gomodel/ext"
-	"gomodel/internal/admin"
-	"gomodel/internal/admin/dashboard"
-	"gomodel/internal/auditlog"
-	"gomodel/internal/authkeys"
-	"gomodel/internal/batch"
-	"gomodel/internal/budget"
-	"gomodel/internal/conversationstore"
-	"gomodel/internal/core"
-	"gomodel/internal/failover"
-	"gomodel/internal/filestore"
-	"gomodel/internal/guardrails"
-	"gomodel/internal/httpclient"
-	"gomodel/internal/live"
-	"gomodel/internal/pricingoverrides"
-	"gomodel/internal/providers"
-	"gomodel/internal/providers/health"
-	"gomodel/internal/ratelimit"
-	"gomodel/internal/responsecache"
-	"gomodel/internal/responsestore"
-	"gomodel/internal/server"
-	"gomodel/internal/storage"
-	"gomodel/internal/tagging"
-	"gomodel/internal/usage"
-	"gomodel/internal/virtualmodels"
-	"gomodel/internal/workflows"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
+	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/admin/dashboard"
+	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/authkeys"
+	"github.com/enterpilot/gomodel/internal/batch"
+	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/conversationstore"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/failover"
+	"github.com/enterpilot/gomodel/internal/filestore"
+	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/httpclient"
+	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/pricingoverrides"
+	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/health"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/responsecache"
+	"github.com/enterpilot/gomodel/internal/responsestore"
+	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/tagging"
+	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/virtualmodels"
+	"github.com/enterpilot/gomodel/internal/workflows"
 )
 
 // App represents the main application with all its dependencies.
@@ -60,6 +61,7 @@ type App struct {
 	virtualModels    *virtualmodels.Result
 	failover         *failover.Result
 	tagging          *tagging.Result
+	mcpGateway       *mcpgateway.Result
 	pricingOverrides *pricingoverrides.Result
 	authKeys         *authkeys.Result
 	guardrails       *guardrails.Result
@@ -514,6 +516,27 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		serverUsageLogger = ratelimit.NewUsageTap(serverUsageLogger, rateLimitResult.Service)
 	}
 
+	// Initialize the MCP gateway (aggregated upstream MCP servers behind /mcp).
+	var mcpResult *mcpgateway.Result
+	if appCfg.MCP.Enabled {
+		if sharedStorage != nil {
+			mcpResult, err = mcpgateway.NewWithSharedStorage(ctx, appCfg, sharedStorage, nil, serverUsageLogger)
+		} else {
+			mcpResult, err = mcpgateway.New(ctx, appCfg, nil, serverUsageLogger)
+		}
+		if err != nil {
+			return fail("failed to initialize mcp gateway", err)
+		}
+		app.mcpGateway = mcpResult
+		closers = append(closers, app.mcpGateway.Close)
+		claimSharedStorage(mcpResult.Storage)
+		slog.Info("mcp gateway enabled",
+			"path", config.JoinBasePath(appCfg.Server.BasePath, "/mcp"),
+			"configured_servers", len(appCfg.MCP.Servers))
+	} else {
+		slog.Info("mcp gateway disabled")
+	}
+
 	// The self-service GET /v1/usage endpoint and the admin dashboard read
 	// usage aggregates through one shared reader. Audit storage is preferred
 	// because its schema always includes the usage tables.
@@ -567,6 +590,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		UserPathHeader:                  appCfg.Server.UserPathHeader,
 		SwaggerEnabled:                  swaggerEnabled,
 		Tagging:                         taggingResult.Service,
+		MCPEnabled:                      appCfg.MCP.Enabled,
+	}
+	if mcpResult != nil {
+		serverCfg.MCPGateway = mcpResult.Service
 	}
 
 	// Assigned conditionally so a disabled feature leaves the interface nil
@@ -611,6 +638,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			budgetResult.Service,
 			rateLimitResult.Service,
 			taggingResult.Service,
+			mcpResult,
 			app,
 			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard),
 			app.live,
@@ -803,7 +831,7 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 
 // Shutdown gracefully tears down app components in dependency order.
 // Order:
-// 1. Cancel HTTP server context, close live streams, and wait for the server to stop.
+// 1. Close long-lived streams, cancel the HTTP server context, and wait for it to stop.
 // 2. Provider subsystem close (stops model refresh loop and cache resources).
 // 3. Batch store close.
 // 4. Usage logger close (flushes pending usage records).
@@ -824,16 +852,23 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	var errs []error
 
-	// 1. Stop HTTP server first (stop accepting new requests)
+	// 1. End long-lived streams before asking the HTTP server to drain. MCP
+	// Streamable HTTP clients intentionally keep a GET request open; leaving it
+	// alive here makes Echo wait until its graceful-shutdown timeout.
+	if a.mcpGateway != nil && a.mcpGateway.Service != nil {
+		a.mcpGateway.Service.Close()
+	}
+	if a.live != nil {
+		a.live.Close()
+	}
+
+	// Stop accepting new requests and wait for in-flight requests to finish.
 	a.serverMu.Lock()
 	serverStop := a.serverStop
 	serverDone := a.serverDone
 	a.serverMu.Unlock()
 	if serverStop != nil {
 		serverStop()
-	}
-	if a.live != nil {
-		a.live.Close()
 	}
 	if serverDone != nil {
 		select {
@@ -866,6 +901,14 @@ func (a *App) Shutdown(ctx context.Context) error {
 		if err := a.providers.Close(); err != nil {
 			slog.Error("providers close error", "error", err)
 			errs = append(errs, fmt.Errorf("providers close: %w", err))
+		}
+	}
+
+	// 3b. Close the MCP gateway (terminates upstream MCP sessions).
+	if a.mcpGateway != nil {
+		if err := a.mcpGateway.Close(); err != nil {
+			slog.Error("mcp gateway close error", "error", err)
+			errs = append(errs, fmt.Errorf("mcp gateway close: %w", err))
 		}
 	}
 
@@ -1052,6 +1095,7 @@ func initAdmin(
 	budgetService *budget.Service,
 	rateLimitService *ratelimit.Service,
 	taggingService *tagging.Service,
+	mcpResult *mcpgateway.Result,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	liveBroker *live.Broker,
@@ -1083,6 +1127,14 @@ func initAdmin(
 		}
 	}
 
+	// Assigned conditionally so a disabled MCP gateway leaves the option nil
+	// (a typed-nil *mcpgateway.Service stored in the interface field would
+	// defeat the handlers' feature-unavailable check).
+	var mcpOption admin.Option
+	if mcpResult != nil && mcpResult.Service != nil {
+		mcpOption = admin.WithMCPServers(mcpResult.Service)
+	}
+
 	adminHandler := admin.NewHandler(
 		reader,
 		registry,
@@ -1099,6 +1151,7 @@ func initAdmin(
 		admin.WithBudgets(budgetService),
 		admin.WithRateLimits(rateLimitService),
 		admin.WithTagging(taggingService),
+		mcpOption,
 		admin.WithRuntimeRefresher(runtimeRefresher),
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 		admin.WithLiveBroker(liveBroker),

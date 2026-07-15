@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"gomodel/config"
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 type configuredProviderModelsApplyReason string

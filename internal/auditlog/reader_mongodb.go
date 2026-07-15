@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"

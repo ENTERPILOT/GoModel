@@ -8,7 +8,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/modelselectors"
+	"github.com/enterpilot/gomodel/internal/modelselectors"
 )
 
 // ErrNotFound indicates a requested pricing override was not found.

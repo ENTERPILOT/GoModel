@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // realtimeMockProvider is a mockProvider that also implements core.RealtimeProvider

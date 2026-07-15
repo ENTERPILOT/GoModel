@@ -21,7 +21,7 @@ package guardrails
 import (
 	"context"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // Message represents a single message in a conversation.

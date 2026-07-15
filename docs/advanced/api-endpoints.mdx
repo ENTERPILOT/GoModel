@@ -66,6 +66,17 @@ For request and response details, see the dedicated guides:
 | ------------------- | -------------------------------------------- | ---------------------------------------------------------- |
 | `/p/{provider}/...` | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | Provider-native passthrough with opaque upstream responses |
 
+## MCP Gateway
+
+Streamable-HTTP MCP (Model Context Protocol) endpoints aggregating the
+configured upstream MCP servers (when `MCP_ENABLED`, default on). See
+[MCP Gateway](/features/mcp-gateway).
+
+| Endpoint        | Method            | Description                                                                     |
+| --------------- | ----------------- | ------------------------------------------------------------------------------- |
+| `/mcp`          | POST, GET, DELETE | Aggregated MCP endpoint; tools/prompts namespaced as `{server}_{name}`          |
+| `/mcp/{server}` | POST, GET, DELETE | Single configured MCP server with original tool names                           |
+
 ## Admin Endpoints
 
 Admin REST and dashboard routes (`/admin/*`) are covered in

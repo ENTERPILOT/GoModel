@@ -1,7 +1,7 @@
 package pricingoverrides
 
 import (
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func clonePricing(p Pricing) Pricing {

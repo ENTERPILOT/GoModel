@@ -11,24 +11,25 @@ import (
 	"strings"
 	"time"
 
-	"gomodel/config"
-	"gomodel/ext"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"gomodel/internal/admin"
-	"gomodel/internal/admin/dashboard"
-	"gomodel/internal/auditlog"
-	batchstore "gomodel/internal/batch"
-	"gomodel/internal/conversationstore"
-	"gomodel/internal/core"
-	"gomodel/internal/filestore"
-	"gomodel/internal/responsecache"
-	"gomodel/internal/responsestore"
-	"gomodel/internal/tagging"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/admin/dashboard"
+	"github.com/enterpilot/gomodel/internal/auditlog"
+	batchstore "github.com/enterpilot/gomodel/internal/batch"
+	"github.com/enterpilot/gomodel/internal/conversationstore"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/filestore"
+	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/responsecache"
+	"github.com/enterpilot/gomodel/internal/responsestore"
+	"github.com/enterpilot/gomodel/internal/tagging"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // Server wraps the Echo server
@@ -78,6 +79,8 @@ type Config struct {
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
 	RealtimeEnabled                 bool                                   // Enable realtime websocket route /v1/realtime and passthrough upgrades
+	MCPEnabled                      bool                                   // Enable the MCP gateway routes /mcp and /mcp/{server}
+	MCPGateway                      *mcpgateway.Service                    // MCP gateway service (nil if disabled or not wired)
 	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
 	AllowPassthroughV1Alias         *bool                                  // Allow /p/{provider}/v1/... aliases; nil defaults to true
 	UserPathHeader                  string                                 // Header carrying the request user path (default: X-GoModel-User-Path)
@@ -168,6 +171,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Mirror the route-registration default below: a nil config enables realtime
 	// so the documented default and the registered route stay consistent.
 	handler.realtimeEnabled = cfg == nil || cfg.RealtimeEnabled
+	if cfg != nil {
+		handler.mcpEnabled = cfg.MCPEnabled
+		handler.mcpGateway = cfg.MCPGateway
+	}
 	if cfg != nil && !passthroughV1PrefixNormalizationEnabled(cfg) {
 		handler.normalizePassthroughV1Prefix = false
 	}
@@ -393,6 +400,14 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.GET("/v1/realtime", handler.Realtime)
 		e.POST("/v1/realtime/calls", handler.RealtimeCalls)
 		e.POST("/v1/realtime/client_secrets", handler.RealtimeClientSecrets)
+	}
+	if cfg != nil && cfg.MCPEnabled && cfg.MCPGateway != nil {
+		e.POST("/mcp", handler.MCP)
+		e.GET("/mcp", handler.MCP)
+		e.DELETE("/mcp", handler.MCP)
+		e.POST("/mcp/:server", handler.MCPServer)
+		e.GET("/mcp/:server", handler.MCPServer)
+		e.DELETE("/mcp/:server", handler.MCPServer)
 	}
 	e.POST("/v1/files", handler.CreateFile)
 	e.GET("/v1/files", handler.ListFiles)

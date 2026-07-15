@@ -9,7 +9,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/streaming"
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 type responseWriterUnwrapper interface {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // RouteGate reports whether a provider/model route currently has rate-limit

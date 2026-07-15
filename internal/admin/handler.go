@@ -13,21 +13,21 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/auditlog"
-	"gomodel/internal/authkeys"
-	"gomodel/internal/budget"
-	"gomodel/internal/core"
-	"gomodel/internal/failover"
-	"gomodel/internal/guardrails"
-	"gomodel/internal/live"
-	"gomodel/internal/pricingoverrides"
-	"gomodel/internal/providers"
-	"gomodel/internal/providers/health"
-	"gomodel/internal/ratelimit"
-	"gomodel/internal/tagging"
-	"gomodel/internal/usage"
-	"gomodel/internal/virtualmodels"
-	"gomodel/internal/workflows"
+	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/authkeys"
+	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/failover"
+	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/pricingoverrides"
+	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/health"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/tagging"
+	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/virtualmodels"
+	"github.com/enterpilot/gomodel/internal/workflows"
 )
 
 // Handler serves admin API endpoints.
@@ -39,6 +39,7 @@ type Handler struct {
 	pricingResolver     usage.PricingResolver
 	authKeys            *authkeys.Service
 	virtualModels       *virtualmodels.Service
+	mcpServers          MCPServerAdmin
 	failoverRules       *failover.Service
 	pricingOverrides    *pricingoverrides.Service
 	workflows           *workflows.Service
@@ -189,6 +190,15 @@ func WithPricingResolver(resolver usage.PricingResolver) Option {
 func WithVirtualModels(service *virtualmodels.Service) Option {
 	return func(h *Handler) {
 		h.virtualModels = service
+	}
+}
+
+// WithMCPServers enables MCP server administration endpoints. Callers must
+// not wrap a nil *mcpgateway.Service (a typed nil would defeat the handlers'
+// feature-unavailable check).
+func WithMCPServers(service MCPServerAdmin) Option {
+	return func(h *Handler) {
+		h.mcpServers = service
 	}
 }
 

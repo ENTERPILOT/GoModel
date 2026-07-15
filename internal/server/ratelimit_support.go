@@ -10,8 +10,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
-	"gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
 )
 
 // RateLimiter admits or rejects requests against configured rate limit rules.

@@ -3,7 +3,7 @@ package modeldata
 import (
 	"regexp"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // terminalReleaseDateSuffixPatterns are intentionally broad because provider

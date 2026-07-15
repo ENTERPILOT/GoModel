@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/cache/modelcache"
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
-	"gomodel/internal/providers"
-	"gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/cache/modelcache"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/server"
 )
 
 // =============================================================================

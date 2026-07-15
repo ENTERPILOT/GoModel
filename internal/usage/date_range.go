@@ -3,7 +3,7 @@ package usage
 import (
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 const (

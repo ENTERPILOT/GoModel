@@ -4,7 +4,7 @@ package gateway
 import (
 	"context"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ModelResolver resolves raw request selectors into concrete model selectors

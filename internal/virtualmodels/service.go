@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // Service is the single native engine over the virtual_models store. It serves

@@ -1,0 +1,179 @@
+---
+title: "MCP Gateway"
+description: "Aggregate your MCP servers behind one authenticated GoModel endpoint with per-key tool visibility, usage tracking, and rate limits."
+icon: "plug"
+---
+
+## What the MCP gateway does
+
+GoModel can sit between your agent clients (Claude Code, Claude Desktop,
+Cursor, VS Code, …) and the MCP (Model Context Protocol) servers they use —
+the same way it already sits between your apps and model providers:
+
+- **One endpoint, one key.** Clients connect to `https://your-gateway/mcp`
+  with a GoModel API key. They never hold upstream MCP credentials; the
+  gateway injects each server's headers itself.
+- **Aggregation with namespacing.** Tools and prompts from every configured
+  server appear in one catalog as `{slug}_{name}` (for example
+  `github_create_issue`), in a stable, deterministic order.
+- **Least-privilege discovery.** A server can be scoped to `user_paths`;
+  callers outside the subtree do not merely get errors — the tools never
+  appear in their `tools/list` at all. Operator-level `allowed_tools` /
+  `disallowed_tools` filters trim noisy servers, which keeps agent context
+  small.
+- **Observability.** Every tool call becomes a usage entry (server, tool,
+  duration, sizes, error flag, labels, user path) and MCP requests appear in
+  the audit log and request log like any other model traffic — labelled with
+  the JSON-RPC method, and with the tool or prompt name for calls, so a
+  `tools/call` row reads `github_create_issue`, not a bare path. With
+  `LOGGING_LOG_BODIES=true` the JSON-RPC request and response frames are
+  recorded on the audit entry as well (tool arguments and results included),
+  subject to the same 1 MB capture cap as other endpoints. User-path
+  rate limits and budgets gate MCP requests too.
+
+## Connect a client
+
+Point any streamable-HTTP MCP client at the gateway and pass your GoModel key
+as a bearer token:
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://your-gateway/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-your-gomodel-key"
+      }
+    }
+  }
+}
+```
+
+For client-specific commands, environment-variable authentication, and
+verification steps, see [Connect Claude Code and Codex](/mcp-proxy/claude-code-and-codex).
+
+Three ways to narrow what a client sees:
+
+- `/mcp` — everything the key's user path may see, namespaced.
+- `/mcp/{slug}` — a single server with its **original** tool names.
+- `X-MCP-Servers: github,jira` header — a comma-separated subset on `/mcp`.
+
+## Declare servers
+
+Servers can be managed in the dashboard (**MCP Servers** page) or declared as
+infrastructure-as-code — declarative entries override same-slug dashboard
+rows and are read-only there:
+
+Dashboard-managed servers have two identifiers:
+
+- **Name** is human-facing, accepts Unicode, and can be edited later.
+- **Slug** is derived from the name by default. It uses lowercase ASCII
+  letters, numbers, hyphens, and underscores, and can be adjusted while
+  creating the server. It becomes immutable after creation because it is used
+  in `/mcp/{slug}`, `X-MCP-Servers`, and aggregated tool names.
+
+For declarative servers, the `mcp.servers` map key is the slug and is also
+shown as the name in the dashboard.
+
+```yaml
+mcp:
+  enabled: true # default; MCP_ENABLED=false disables the endpoints
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp
+      headers:
+        Authorization: "Bearer ${GITHUB_PAT}"
+      user_paths: ["/engineering"] # optional visibility scope
+      disallowed_tools: ["delete_repo"]
+    local-files:
+      transport: stdio # declarative-only; see security notes
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+```
+
+Or via the `MCP_SERVERS` env var (a JSON object, merged over YAML per name):
+
+```bash
+MCP_SERVERS='{"github":{"url":"https://api.githubcopilot.com/mcp","headers":{"Authorization":"Bearer ${GITHUB_PAT}"}}}'
+```
+
+Per-server fields:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `url` | — | Endpoint for `http` (streamable HTTP) and `sse` transports |
+| `transport` | `http` | `http`, `sse` (legacy), or `stdio` (config-only) |
+| `headers` | — | Sent verbatim upstream; values support `${ENV}` |
+| `command`, `args`, `env` | — | stdio subprocess definition |
+| `enabled` | `true` | Toggle without deleting |
+| `allowed_tools` | all | Allowlist of upstream tool names |
+| `disallowed_tools` | none | Blocklist, applied after the allowlist |
+| `user_paths` | everyone | Visibility subtrees, like virtual models |
+| `tool_timeout` | `30s` | Upper bound for one `tools/call` |
+
+Invalid declarations (bad slug, missing `url`/`command`, unknown transport)
+abort startup with a clear error rather than silently dropping the server.
+
+## Health and lifecycle
+
+The dashboard shows each server as **connected**, **degraded**, **connecting**,
+or **disabled**, with tool counts and the last error, and the Overview page
+summarizes MCP server health whenever servers are configured. A server whose
+listing fails keeps its previous catalog (marked degraded) and is re-probed
+every 60 seconds; healthy catalogs re-list every 5 minutes and refresh
+immediately when the upstream sends a `list_changed` notification.
+**Reconnect** on the dashboard (or `POST /admin/mcp-servers/{slug}/reconnect`)
+forces a redial.
+
+## Inspect a server's catalog
+
+The dashboard's catalog inspector (or
+`GET /admin/mcp-servers/{slug}/catalog`) lists exactly what a server
+currently exposes through the gateway — tools, prompts, resources, and
+resource templates with their descriptions, after your `allowed_tools` /
+`disallowed_tools` filters. Names are the upstream originals; the aggregated
+`/mcp` endpoint serves them as `{slug}_{name}`.
+
+## Security notes
+
+- **Credential boundary.** The MCP spec forbids token passthrough; GoModel
+  terminates the client's bearer token and injects per-server credentials
+  from configuration. Client keys never reach an upstream, and configured
+  upstream headers are not sent across cross-origin redirects.
+- **Streamable HTTP origin checks.** Requests carrying an `Origin` header must
+  match the GoModel host, preventing browser-based DNS rebinding attacks.
+- **stdio is declarative-only.** stdio servers spawn subprocesses on the
+  gateway host, so they can only be declared in `config.yaml` / `MCP_SERVERS`.
+  The admin API and dashboard reject them — a dashboard login must never be
+  equivalent to code execution on the gateway.
+- **stdio subprocesses get a minimal environment.** Only `PATH`, `HOME`,
+  `TMPDIR`, `USER`, and `LANG` are inherited — never the gateway's provider
+  API keys or master key. Pass anything else explicitly via the server's
+  `env:` map (values support `${VAR}`).
+- **Dashboard-managed credentials live in the gateway database.** Headers of
+  admin-created servers are stored in the configured storage backend (they
+  are only redacted at the API/UI layer). If your threat model excludes
+  secrets in the database, declare those servers in `config.yaml` /
+  `MCP_SERVERS` instead — `${ENV}` references keep the secret in the
+  environment, and declarative servers never touch the store.
+- **Remote URLs are server-side egress.** Dashboard-managed HTTP/SSE servers
+  deliberately support private and loopback endpoints. Protect admin write
+  access and enforce your deployment's egress policy so untrusted operators
+  cannot use the gateway to probe internal services.
+- **Sessions are not authentication.** Every request is bearer-authenticated,
+  and a session is additionally bound to the managed auth-key identity, user
+  path, and pinned endpoint that initialized it; presenting a leaked session
+  ID under another identity returns 404.
+- Secret header values are shown redacted (`***`) in the admin API and
+  dashboard; saving a form with `***` preserves the stored secret.
+
+## Protocol coverage
+
+Tools, prompts, resources, and resource templates are aggregated and relayed.
+Valid schemas and all results remain untouched; malformed tool schemas are
+normalized to safe object schemas rather than crashing downstream sessions.
+Upstream `instructions` are merged into the gateway's `initialize` response.
+Server-initiated features (sampling, elicitation, roots) and resource
+subscriptions are not negotiated in this version, which downstream clients
+handle transparently.

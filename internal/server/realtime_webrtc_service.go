@@ -17,9 +17,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/core"
-	"gomodel/internal/httpclient"
-	"gomodel/internal/realtime"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
+	"github.com/enterpilot/gomodel/internal/realtime"
 )
 
 // realtimeCallsPath labels usage entries and Location headers for WebRTC calls.

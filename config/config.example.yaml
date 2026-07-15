@@ -59,6 +59,34 @@ models:
 #       - { model: openai/gpt-4o }
 #       - { model: groq/llama-3.3-70b }
 
+# MCP gateway: aggregate upstream MCP (Model Context Protocol) servers behind the
+# authenticated /mcp endpoint. Tools/prompts are namespaced as {server}_{name};
+# /mcp/{server} exposes one upstream with original names. Servers declared here or
+# via the MCP_SERVERS env var (a JSON object merged over this map, winning per name)
+# are read-only in the dashboard; the dashboard manages its own additional servers.
+# The gateway is the credential boundary: client API keys never reach an upstream,
+# and upstream headers support ${ENV} references. `user_paths` limits which callers
+# can even discover a server (subtree match, like virtual models).
+# mcp:
+#   enabled: true # env: MCP_ENABLED (default: true; a no-op with no servers)
+#   servers:
+#     github:
+#       url: https://api.githubcopilot.com/mcp
+#       transport: http # http (streamable HTTP, default) | sse (legacy) | stdio
+#       headers:
+#         Authorization: "Bearer ${GITHUB_PAT}"
+#       description: GitHub tools
+#       allowed_tools: [] # allowlist of upstream tool names; empty = all
+#       disallowed_tools: [] # blocklist, applied after the allowlist
+#       user_paths: [] # restrict visibility to these user-path subtrees; empty = everyone
+#       tool_timeout: 30s # per tools/call upper bound
+#     local-files: # stdio servers spawn a subprocess and are declarative-only:
+#       transport: stdio # the admin API and dashboard reject them by design
+#       command: npx
+#       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+#       env: # subprocesses inherit only PATH/HOME/TMPDIR/USER/LANG — never the
+#         SOME_TOKEN: "${SOME_TOKEN}" # gateway's API keys; pass extras here explicitly
+
 cache:
   model:
     refresh_interval: 3600 # how often to refresh the model registry (seconds, default: 3600)

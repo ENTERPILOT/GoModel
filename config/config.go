@@ -15,7 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // Config holds the application configuration.
@@ -36,6 +36,7 @@ type Config struct {
 	Workflows  WorkflowsConfig  `yaml:"workflows"`
 	Resilience ResilienceConfig `yaml:"resilience"`
 	Tagging    TaggingConfig    `yaml:"tagging"`
+	MCP        MCPConfig        `yaml:"mcp"`
 
 	// VirtualModels declares redirects, load balancers, and access policies as
 	// infrastructure-as-code. They override admin-store rows of the same source.
@@ -146,6 +147,9 @@ func buildDefaultConfig() *Config {
 			LiveLogsHeartbeatSeconds: 15,
 		},
 		Guardrails: GuardrailsConfig{},
+		MCP: MCPConfig{
+			Enabled: true,
+		},
 	}
 }
 
@@ -187,6 +191,12 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := normalizeTaggingConfig(&cfg.Tagging); err != nil {
+		return nil, err
+	}
+	if err := applyMCPEnv(cfg); err != nil {
+		return nil, err
+	}
+	if err := normalizeMCPConfig(&cfg.MCP); err != nil {
 		return nil, err
 	}
 	applyBudgetDependencies(cfg)

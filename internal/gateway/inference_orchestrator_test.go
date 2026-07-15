@@ -6,8 +6,8 @@ import (
 	"math"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 type usageCaptureLogger struct {

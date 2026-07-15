@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // slowMockProvider simulates network latency to provoke race conditions

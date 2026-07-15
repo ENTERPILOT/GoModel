@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // SQLiteStore persists response snapshots in SQLite.

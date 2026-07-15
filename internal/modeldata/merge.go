@@ -1,7 +1,7 @@
 package modeldata
 
 import (
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 	"maps"
 )
 

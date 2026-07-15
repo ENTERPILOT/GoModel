@@ -1,0 +1,339 @@
+{{define "dashboard-page-mcp-servers"}}
+<!-- MCP Servers Page -->
+<template x-if="page==='mcp-servers'">
+<div>
+    <div class="page-header">
+        <div>
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'mcp-servers-help-copy', showLabel: 'Show MCP servers help', hideLabel: 'Hide MCP servers help', text: 'Upstream Model Context Protocol servers whose tools, prompts, and resources the gateway exposes to clients. Servers added here connect over HTTP or SSE; stdio servers and rows marked Config are declared in config.yaml under mcp.servers and are read-only in the dashboard. Saved header values are masked in API and dashboard responses.' }">
+                <div class="inline-help-title-row">
+                    <h2>MCP Servers</h2>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+        </div>
+        <div class="page-header-controls">
+            <button type="button"
+                    class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                    x-show="mcpServersAvailable && !authError"
+                    :disabled="mcpServerFormSubmitting"
+                    @click="openMcpServerCreate()">
+                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                <span>Add MCP Server</span>
+            </button>
+        </div>
+    </div>
+
+    {{template "auth-banner" .}}
+
+    <div class="alert alert-warning" x-show="!mcpServersAvailable && !authError">
+        MCP server management is unavailable.
+    </div>
+    <p class="form-error" x-show="mcpServerError && !authError && !mcpServerFormOpen" x-text="mcpServerError" role="alert" aria-live="assertive"></p>
+    <div class="alert alert-success" x-show="mcpServerNotice && !mcpServerFormOpen" x-text="mcpServerNotice" role="status" aria-live="polite"></div>
+    <div class="loading-state" x-show="mcpServersLoading && !authError">
+        <div class="loading-spinner"></div>
+        <span>Loading MCP servers...</span>
+    </div>
+
+    <div class="table-toolbar" x-show="(mcpServers.length > 0 || mcpServerFilter) && mcpServersAvailable && !authError">
+        <div class="table-toolbar-main">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text"
+                       id="mcp-server-filter"
+                       class="filter-input"
+                       placeholder="Filter by name, slug, URL, transport, or status..."
+                       aria-label="Filter MCP servers by name, slug, URL, transport, or status"
+                       x-model="mcpServerFilter">
+            </div>
+        </div>
+    </div>
+
+    <div class="editor-modal-backdrop"
+         x-cloak
+         x-show="mcpServerFormOpen"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="editor-modal-shell"
+         x-cloak
+         x-show="mcpServerFormOpen"
+         x-transition.opacity.duration.160ms
+         @click="closeMcpServerForm()"
+         @keydown.escape.window="mcpServerFormOpen && !authDialogOpen && closeMcpServerForm()">
+        <div class="model-editor" x-show="mcpServerFormOpen" x-ref="mcpServerEditor" role="dialog" aria-modal="true" aria-label="MCP server editor" @click.stop>
+            <form class="form" @submit.prevent="submitMcpServerForm()">
+                <div class="editor-header">
+                    <div>
+                        <h3 x-text="mcpServerFormMode === 'edit' ? 'Edit MCP Server' : 'Add MCP Server'"></h3>
+                        <p class="form-hint">The display name can change. The slug is the stable client-facing identity.</p>
+                    </div>
+                    <button type="button" class="dialog-close-btn" aria-label="Close MCP server editor" @click="closeMcpServerForm()">
+                        {{template "x-icon"}}
+                    </button>
+                </div>
+
+                <p class="form-error" x-show="mcpServerError" x-text="mcpServerError" role="alert" aria-live="assertive"></p>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="mcp-server-name">Name</label>
+                    <input id="mcp-server-name" type="text" placeholder="Linear MCP" x-model="mcpServerForm.name" @input="syncMcpServerSlugFromName()" data-modal-autofocus>
+                    <small class="form-hint">Human-readable and Unicode-friendly. You can change it later.</small>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="mcp-server-slug">Slug</label>
+                    <input id="mcp-server-slug" type="text" class="mono" placeholder="linear-mcp" x-model="mcpServerForm.slug" @input="markMcpServerSlugEdited()" :disabled="mcpServerFormMode === 'edit'">
+                    <small class="form-hint" x-show="mcpServerFormMode === 'create'">Derived from the name. You may edit it before saving.</small>
+                    <small class="form-hint" x-show="mcpServerFormMode === 'edit'">Immutable because it is used in URLs, scope headers, and aggregated tool names.</small>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="mcp-server-transport">Transport</label>
+                    <select id="mcp-server-transport" class="form-select" x-model="mcpServerForm.transport">
+                        <option value="http">Streamable HTTP</option>
+                        <option value="sse">SSE (legacy)</option>
+                    </select>
+                    <small class="form-hint">stdio servers are config-only: declare them in <code>config.yaml</code> under <code>mcp.servers</code>.</small>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="mcp-server-url">URL</label>
+                    <input id="mcp-server-url" type="text" class="mono" placeholder="https://mcp.example.com/mcp" x-model="mcpServerForm.url">
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field-label">Headers</label>
+                    <div class="vm-target-list">
+                        <template x-for="(header, index) in mcpServerForm.headers" :key="index">
+                            <div class="vm-target-row">
+                                <input type="text" class="mono vm-target-model" placeholder="Authorization" x-model="header.name" aria-label="Header name">
+                                <input type="text" class="mono vm-target-model" placeholder="Bearer secret-token" x-model="header.value" aria-label="Header value">
+                                <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn vm-target-remove" @click="removeMcpServerHeader(index)" aria-label="Remove header" title="Remove header">
+                                    {{template "trash-icon"}}
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="failover-target-actions">
+                        <button type="button" class="pagination-btn pagination-btn-with-icon" @click="addMcpServerHeader()">
+                            <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                            <span>Add header</span>
+                        </button>
+                    </div>
+                    <small class="form-hint">Sent only to the configured server origin. Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored value.</small>
+                </div>
+
+                <div class="vm-status-row">
+                    <div class="vm-status-toggle">
+                        <button type="button" class="alias-toggle"
+                                :class="{ enabled: mcpServerForm.enabled }"
+                                :aria-label="(mcpServerForm.enabled ? 'Disable' : 'Enable') + ' MCP server'"
+                                @click="mcpServerForm.enabled = !mcpServerForm.enabled">
+                            <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                            <span x-text="mcpServerForm.enabled ? 'Enabled' : 'Disabled'"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <details class="mcp-server-advanced"
+                         :open="mcpServerAdvancedOpen"
+                         @toggle="mcpServerAdvancedOpen = $event.target.open">
+                    <summary>
+                        <span class="mcp-server-advanced-summary-copy">
+                            <span class="mcp-server-advanced-title">Advanced settings</span>
+                            <span class="form-hint">Description, access rules, and timeout</span>
+                        </span>
+                    </summary>
+
+                    <div class="mcp-server-advanced-fields">
+                        <div class="form-field">
+                            <label class="form-field-label" for="mcp-server-description">Description</label>
+                            <input id="mcp-server-description" type="text" placeholder="Optional description" x-model="mcpServerForm.description">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="mcp-server-allowed-tools">Allowed tools</label>
+                            <input id="mcp-server-allowed-tools" type="text" class="mono" placeholder="search_issues, get_file (comma-separated; empty allows all)" x-model="mcpServerForm.allowed_tools">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="mcp-server-disallowed-tools">Disallowed tools</label>
+                            <input id="mcp-server-disallowed-tools" type="text" class="mono" placeholder="delete_repo (comma-separated)" x-model="mcpServerForm.disallowed_tools">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="mcp-server-user-paths">User paths (empty means all)</label>
+                            <textarea id="mcp-server-user-paths" rows="4" class="mono" placeholder="/&#10;/team/alpha" x-model="mcpServerForm.user_paths"></textarea>
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="mcp-server-tool-timeout">Tool timeout (seconds)</label>
+                            <input id="mcp-server-tool-timeout" type="number" min="0" step="1" class="mono" placeholder="Default timeout when empty" x-model="mcpServerForm.tool_timeout_seconds">
+                        </div>
+                    </div>
+                </details>
+
+                <div class="form-actions">
+                    <button type="button" class="pagination-btn" @click="closeMcpServerForm()">Cancel</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" :disabled="mcpServerFormSubmitting">
+                        <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="mcpServerFormSubmitting ? 'Saving...' : 'Save'"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Catalog inspector: read-only view of what one server currently exposes. -->
+    <div class="editor-modal-backdrop"
+         x-cloak
+         x-show="mcpCatalogOpen"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="editor-modal-shell"
+         x-cloak
+         x-show="mcpCatalogOpen"
+         x-transition.opacity.duration.160ms
+         @click="closeMcpServerCatalog()"
+         @keydown.escape.window="mcpCatalogOpen && !authDialogOpen && closeMcpServerCatalog()">
+        <div class="model-editor" x-show="mcpCatalogOpen" role="dialog" aria-modal="true" aria-label="MCP server catalog" @click.stop>
+            <div class="editor-header">
+                <div>
+                    <h3>Server Catalog</h3>
+                    <p class="form-hint mcp-catalog-subtitle">
+                        <code class="mono" x-text="mcpCatalog.server"></code>
+                        <span class="audit-status-badge"
+                              :class="mcpServerStatusClass(mcpCatalog)"
+                              x-text="mcpServerStatus(mcpCatalog)"></span>
+                    </p>
+                </div>
+                <button type="button" class="dialog-close-btn" aria-label="Close MCP server catalog" @click="closeMcpServerCatalog()">
+                    {{template "x-icon"}}
+                </button>
+            </div>
+
+            <div class="loading-state" x-show="mcpCatalogLoading">
+                <div class="loading-spinner"></div>
+                <span>Loading catalog...</span>
+            </div>
+            <p class="form-error" x-show="mcpCatalogError && !mcpCatalogLoading" x-text="mcpCatalogError" role="alert" aria-live="assertive"></p>
+
+            <p class="form-hint" x-show="!mcpCatalogLoading && !mcpCatalogError && mcpCatalog.instructions" x-text="mcpCatalog.instructions"></p>
+
+            <template x-for="section in mcpCatalogSections()" :key="section.key">
+                <section class="form-section mcp-catalog-section" x-show="!mcpCatalogLoading && !mcpCatalogError">
+                    <h4 class="form-field-label" x-text="section.title"></h4>
+                    <ul class="mcp-catalog-list">
+                        <template x-for="item in section.items" :key="item.key">
+                            <li class="mcp-catalog-item">
+                                <code class="mcp-catalog-item-name mono" x-text="item.name" :title="item.aggregated || item.name"></code>
+                                <div class="mcp-catalog-item-aggregated mono"
+                                     x-show="item.aggregated"
+                                     :title="item.aggregated ? 'Exposed on the aggregated /mcp endpoint as ' + item.aggregated : ''"
+                                     x-text="item.aggregated"></div>
+                                <p class="mcp-catalog-item-description" x-show="item.description" x-text="item.description"></p>
+                            </li>
+                        </template>
+                    </ul>
+                </section>
+            </template>
+
+            <p class="empty-state" x-show="!mcpCatalogLoading && !mcpCatalogError && mcpCatalogIsEmpty()">
+                No tools listed — the server may still be connecting or degraded.
+            </p>
+
+            <div class="form-actions">
+                <button type="button" class="pagination-btn" @click="closeMcpServerCatalog()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-wrapper mcp-server-table-wrapper" x-show="filteredMcpServers.length > 0 && mcpServersAvailable && !authError">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Transport</th>
+                    <th>Endpoint</th>
+                    <th>Status</th>
+                    <th>Tools</th>
+                    <th>Enabled</th>
+                    <th class="col-actions">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="server in filteredMcpServers" :key="mcpServerSlug(server)">
+                    <tr>
+                        <td>
+                            <span class="font-size-md" x-text="server.name"></span>
+                            <span class="alias-kind-badge" x-show="server.managed" title="Declared in configuration (config.yaml mcp.servers); read-only in the dashboard">Config</span>
+                            <div class="mcp-server-sub-counts mono" x-text="mcpServerSlug(server)"></div>
+                        </td>
+                        <td><span class="budget-source mono" x-text="server.transport || 'http'"></span></td>
+                        <td class="mono font-size-md" :title="mcpServerEndpointLabel(server)" x-text="mcpServerEndpointLabel(server)"></td>
+                        <td>
+                            <span class="audit-status-badge"
+                                  :class="mcpServerStatusClass(server)"
+                                  :title="mcpServerStatusTitle(server)"
+                                  x-text="mcpServerStatus(server)"></span>
+                            <div class="mcp-server-sub-counts" x-show="mcpServerStatus(server) === 'degraded' && server.last_error" x-text="server.last_error"></div>
+                        </td>
+                        <td>
+                            <span x-text="formatNumber(server.tool_count || 0)"></span>
+                            <div class="mcp-server-sub-counts" x-text="mcpServerSubCountsLabel(server)"></div>
+                        </td>
+                        <td>
+                            <span class="auth-key-status-badge"
+                                  :class="server.enabled ? 'auth-key-status-active' : 'auth-key-status-inactive'"
+                                  x-text="server.enabled ? 'Enabled' : 'Disabled'"></span>
+                        </td>
+                        <td class="col-actions">
+                            <div class="alias-actions-cell">
+                                <button type="button" class="table-action-btn table-icon-btn"
+                                    x-show="!server.managed"
+                                    :aria-label="'Edit MCP server ' + server.name"
+                                    :title="'Edit MCP server ' + server.name"
+                                    @click="openMcpServerEdit(server)">
+                                    {{template "edit-icon"}}
+                                </button>
+                                <button type="button" class="table-action-btn table-icon-btn"
+                                    :aria-label="'Inspect catalog of MCP server ' + server.name"
+                                    :title="'Inspect catalog of MCP server ' + server.name"
+                                    @click="openMcpServerCatalog(server)">
+                                    <i data-lucide="list" class="form-action-icon" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" class="table-action-btn table-icon-btn"
+                                    :disabled="mcpServerReconnectingName === mcpServerSlug(server)"
+                                    :aria-label="mcpServerReconnectingName === mcpServerSlug(server) ? 'Reconnecting MCP server ' + server.name : 'Reconnect MCP server ' + server.name"
+                                    :title="mcpServerReconnectingName === mcpServerSlug(server) ? 'Reconnecting MCP server ' + server.name : 'Reconnect MCP server ' + server.name"
+                                    @click="reconnectMcpServer(server)">
+                                    <i data-lucide="refresh-cw" class="form-action-icon" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                    x-show="!server.managed"
+                                    :disabled="mcpServerDeletingName === mcpServerSlug(server)"
+                                    :aria-label="mcpServerDeletingName === mcpServerSlug(server) ? 'Deleting MCP server ' + server.name : 'Delete MCP server ' + server.name"
+                                    :title="mcpServerDeletingName === mcpServerSlug(server) ? 'Deleting MCP server ' + server.name : 'Delete MCP server ' + server.name"
+                                    @click="deleteMcpServer(server)">
+                                    {{template "x-icon"}}
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="empty-state"
+       x-show="mcpServers.length === 0 && !mcpServerFilter && !mcpServersLoading && !authError && !mcpServerError && mcpServersAvailable">
+        No MCP servers yet. Add one here, or declare servers in <code>config.yaml</code> under <code>mcp.servers</code>.
+    </p>
+    <p class="empty-state"
+       x-show="mcpServers.length > 0 && filteredMcpServers.length === 0 && mcpServerFilter && !mcpServersLoading && !authError && mcpServersAvailable">
+        No MCP servers match your filter.
+    </p>
+</div>
+</template>
+{{end}}

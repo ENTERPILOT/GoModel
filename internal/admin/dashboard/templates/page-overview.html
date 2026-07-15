@@ -124,6 +124,16 @@
                     @click="scrollToProviderStatusSection()"></button>
             <span class="provider-status-card-note" x-show="!providerStatusHasIssues()" x-text="providerStatusSummaryText()"></span>
         </div>
+        <div class="card provider-status-flag mcp-servers-flag" x-show="mcpOverviewVisible()" :class="mcpOverviewSummaryClass()">
+            <div class="card-label">MCP Servers</div>
+            <div class="card-value provider-status-value" x-text="mcpOverviewRatioText()">-</div>
+            <button type="button"
+                    class="provider-status-card-link"
+                    aria-label="View MCP servers"
+                    title="View MCP servers"
+                    x-text="mcpOverviewSummaryText()"
+                    @click="navigate('mcp-servers')"></button>
+        </div>
     </div>
 
     <!-- Cache Meter -->

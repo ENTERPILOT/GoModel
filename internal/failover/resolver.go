@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 const maxAutoFailoverCandidates = 5

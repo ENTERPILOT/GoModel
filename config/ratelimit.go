@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // RateLimitsConfig holds request, token, and concurrency limits scoped to

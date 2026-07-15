@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
-	"gomodel/config"
-	"gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // Result holds the initialized workflow service and any owned resources.

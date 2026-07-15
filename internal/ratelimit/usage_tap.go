@@ -3,7 +3,7 @@ package ratelimit
 import (
 	"time"
 
-	"gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // UsageTap decorates a usage logger so every recorded entry also feeds token

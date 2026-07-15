@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"gomodel/internal/core"
-	"gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // RealtimeTarget implements core.RealtimeProvider for OpenAI's realtime websocket

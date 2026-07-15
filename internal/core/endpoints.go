@@ -29,6 +29,7 @@ const (
 	OperationAudioTranscriptions Operation = "audio_transcriptions"
 	OperationRealtime            Operation = "realtime"
 	OperationProviderPassthrough Operation = "provider_passthrough"
+	OperationMCP                 Operation = "mcp"
 )
 
 // EndpointDescriptor centralizes the transport-facing classification of model and provider routes.
@@ -143,6 +144,17 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationRealtime,
 		}
+	case path == "/mcp" || strings.HasPrefix(path, "/mcp/"):
+		// The MCP gateway relays JSON-RPC tool traffic to upstream MCP servers.
+		// It is a model interaction (incurs usage, must be observable, may hold
+		// a long-lived SSE stream that needs the write deadline cleared) but is
+		// not IngressManaged: the MCP SDK handler owns the exchange rather than
+		// the JSON inference pipeline.
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			Dialect:          "mcp",
+			Operation:        OperationMCP,
+		}
 	case strings.HasPrefix(path, "/p/"):
 		return EndpointDescriptor{
 			ModelInteraction: true,
@@ -199,6 +211,11 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 		if method == http.MethodPost && path == "/v1/realtime/calls" {
 			// SDP exchange bodies are application/sdp or multipart form data.
 			return BodyModeOpaque
+		}
+		return BodyModeNone
+	case OperationMCP:
+		if method == http.MethodPost {
+			return BodyModeJSON
 		}
 		return BodyModeNone
 	case OperationProviderPassthrough:

@@ -8,7 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // TestDashboardCostAggregation_EndToEnd validates the numbers shown on the

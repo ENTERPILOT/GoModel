@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"gomodel/internal/core"
-	"gomodel/internal/modeldata"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
 // TestInitialize_AppliesConfigMetadataOverrides verifies that operator-supplied

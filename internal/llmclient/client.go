@@ -21,9 +21,9 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	"gomodel/internal/httpclient"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // RequestInfo contains metadata about a request for observability hooks

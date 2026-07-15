@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"gomodel/config"
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestService_RenameMovesRedirectToNewSource(t *testing.T) {

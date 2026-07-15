@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func mustDecode(t *testing.T, body string) *MessagesRequest {

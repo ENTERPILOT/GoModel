@@ -10,8 +10,8 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"gomodel/internal/core"
-	"gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 func newSQLiteTestStore(t *testing.T) *SQLiteStore {

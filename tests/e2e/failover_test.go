@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
-	"gomodel/internal/core"
-	"gomodel/internal/ratelimit"
-	"gomodel/internal/virtualmodels"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
 // staticFailoverResolver returns a fixed selector list, standing in for the

@@ -7,9 +7,9 @@ import (
 	"sort"
 	"sync"
 
-	"gomodel/config"
-	"gomodel/internal/core"
-	"gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 // ProviderOptions bundles runtime settings passed from the factory to provider constructors.

@@ -78,6 +78,14 @@
                         ]
                     },
                     {
+                        "group": "MCP Proxy",
+                        "icon": "waypoints",
+                        "pages": [
+                            "features/mcp-gateway",
+                            "mcp-proxy/claude-code-and-codex"
+                        ]
+                    },
+                    {
                         "group": "Advanced",
                         "icon": "settings-2",
                         "pages": [
