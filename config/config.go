@@ -67,6 +67,7 @@ func buildDefaultConfig() *Config {
 				"openai",
 				"anthropic",
 				"openrouter",
+				"kilo",
 				"zai",
 				"vllm",
 				"deepseek",

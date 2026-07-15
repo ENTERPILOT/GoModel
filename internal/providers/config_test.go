@@ -41,6 +41,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"openrouter": {
 		DefaultBaseURL: "https://openrouter.ai/api/v1",
 	},
+	"kilo": {
+		DefaultBaseURL: "https://api.kilo.ai/api/gateway",
+	},
 	"zai": {
 		DefaultBaseURL: "https://api.z.ai/api/paas/v4",
 	},
@@ -506,6 +509,26 @@ func TestApplyProviderEnvVars_DiscoversOpenRouterFromAPIKey(t *testing.T) {
 	}
 	if p.BaseURL != testDiscoveryConfigs["openrouter"].DefaultBaseURL {
 		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["openrouter"].DefaultBaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversKiloFromAPIKey(t *testing.T) {
+	t.Setenv("KILO_API_KEY", "kilo-key")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["kilo"]
+	if !exists {
+		t.Fatal("expected kilo to be discovered from env var")
+	}
+	if p.APIKey != "kilo-key" {
+		t.Errorf("APIKey = %q, want kilo-key", p.APIKey)
+	}
+	if p.Type != "kilo" {
+		t.Errorf("Type = %q, want kilo", p.Type)
+	}
+	if p.BaseURL != testDiscoveryConfigs["kilo"].DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["kilo"].DefaultBaseURL)
 	}
 }
 

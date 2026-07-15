@@ -130,7 +130,7 @@ from passthrough requests before forwarding them upstream.
 
 Passthrough is intentionally narrow while the API is in beta.
 
-- `openai`, `anthropic`, `openrouter`, `zai`, `vllm`, and `deepseek` are enabled by
+- `openai`, `anthropic`, `openrouter`, `kilo`, `zai`, `vllm`, and `deepseek` are enabled by
   default.
 - GoModel does not translate passthrough request bodies or response bodies.
 - Provider-native error bodies and status codes are proxied instead of converted
@@ -145,7 +145,7 @@ Passthrough routes are enabled by default:
 ```env
 ENABLE_PASSTHROUGH_ROUTES=true
 ALLOW_PASSTHROUGH_V1_ALIAS=true
-ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,zai,vllm,deepseek
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,vllm,deepseek
 ```
 
 Set `ENABLED_PASSTHROUGH_PROVIDERS` to the provider types you want to expose.

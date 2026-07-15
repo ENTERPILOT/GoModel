@@ -1,6 +1,6 @@
 # GoModel Helm Chart
 
-High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, Groq, Z.ai, xAI, Oracle).
+High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, Groq, Kilo AI, Z.ai, xAI, Oracle).
 
 ## Prerequisites
 
@@ -64,6 +64,8 @@ helm install gomodel ./helm \
 | `providers.xai.enabled`          | Enable xAI                                                                                     | `false`                |
 | `providers.zai.enabled`          | Enable Z.ai                                                                                    | `false`                |
 | `providers.zai.baseUrl`          | Optional Z.ai base URL mapped to `ZAI_BASE_URL`; use Coding Plan endpoint when needed          | `""`                   |
+| `providers.kilo.enabled`         | Enable Kilo AI                                                                                  | `false`                |
+| `providers.kilo.baseUrl`         | Optional Kilo AI Gateway base URL mapped to `KILO_BASE_URL`                                    | `""`                   |
 | `providers.oracle.enabled`       | Enable Oracle                                                                                  | `false`                |
 | `providers.oracle.baseUrl`       | Oracle OpenAI-compatible base URL mapped to `ORACLE_BASE_URL`; required when Oracle is enabled | `""`                   |
 | `providers.vllm.enabled`         | Enable vLLM                                                                                    | `false`                |
@@ -92,6 +94,7 @@ stringData:
   ANTHROPIC_API_KEY: "sk-ant-..."
   GEMINI_API_KEY: "..."
   ZAI_API_KEY: "..."
+  KILO_API_KEY: "..."
   ORACLE_API_KEY: "..."
   VLLM_API_KEY: "..."
 ```

@@ -13,7 +13,7 @@ server:
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
-  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "zai", "vllm", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
+  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "kilo", "zai", "vllm", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
   realtime_enabled: true # env: REALTIME_ENABLED; expose /v1/realtime websocket and /p/{provider}/v1/realtime upgrades (OpenAI only)
 
 models:
@@ -426,6 +426,16 @@ providers:
   #   models:
   #     - openai/gpt-oss-120b
   #     - anthropic/claude-sonnet-4
+
+  # Example: Kilo AI Gateway. Model IDs use provider/model and are forwarded
+  # unchanged. You can also set KILO_MODELS as a comma-separated env var.
+  # kilo:
+  #   type: "kilo"
+  #   base_url: "https://api.kilo.ai/api/gateway"
+  #   api_key: "${KILO_API_KEY}"
+  #   models:
+  #     - anthropic/claude-sonnet-4.5
+  #     - openai/gpt-5.5
 
   # Example: Azure OpenAI
   # azure:

@@ -22,6 +22,7 @@ func clearProviderEnvVars(t *testing.T) {
 		"XAI_API_KEY", "XAI_BASE_URL", "XAI_MODELS",
 		"GROQ_API_KEY", "GROQ_BASE_URL", "GROQ_MODELS",
 		"OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENROUTER_MODELS", "OPENROUTER_SITE_URL", "OPENROUTER_APP_NAME",
+		"KILO_API_KEY", "KILO_BASE_URL", "KILO_MODELS",
 		"ZAI_API_KEY", "ZAI_BASE_URL", "ZAI_MODELS",
 		"AZURE_API_KEY", "AZURE_BASE_URL", "AZURE_API_VERSION", "AZURE_MODELS",
 		"ORACLE_API_KEY", "ORACLE_BASE_URL", "ORACLE_MODELS",
@@ -120,7 +121,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if !cfg.Server.AllowPassthroughV1Alias {
 		t.Error("expected Server.AllowPassthroughV1Alias=true")
 	}
-	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic", "openrouter", "zai", "vllm", "deepseek"}; !reflect.DeepEqual(got, want) {
+	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "vllm", "deepseek"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("expected Server.EnabledPassthroughProviders=%v, got %v", want, got)
 	}
 	if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeFallback {
@@ -1128,7 +1129,7 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 			t.Fatalf("expected Cache.Model.Redis to be nil in example config, got %+v", result.Config.Cache.Model.Redis)
 		}
 		gotProviders := result.Config.Server.EnabledPassthroughProviders
-		wantProviders := []string{"openai", "anthropic", "openrouter", "zai", "vllm", "deepseek", "bailian"}
+		wantProviders := []string{"openai", "anthropic", "openrouter", "kilo", "zai", "vllm", "deepseek", "bailian"}
 		if !reflect.DeepEqual(gotProviders, wantProviders) {
 			t.Fatalf("Server.EnabledPassthroughProviders = %v, want %v", gotProviders, wantProviders)
 		}
