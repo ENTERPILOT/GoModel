@@ -136,10 +136,11 @@ type LogData struct {
 	// stores split this into audit_log_attempts; Mongo stores it embedded.
 	Attempts []AttemptSnapshot `json:"attempts,omitempty" bson:"attempts,omitempty"`
 
-	// RequestRevisions captures intended ingress changes in application order:
-	// body rewrites and outbound header modifications. RequestBody always
-	// remains the original client request. A revision records what would be
-	// applied if execution reaches provider egress; it is not proof of egress.
+	// RequestRevisions captures intended request-processing changes in
+	// application order: body rewrites and outbound header modifications.
+	// RequestBody always remains the original client request. A revision records
+	// what would be applied if execution reaches provider egress; it is not proof
+	// of egress.
 	RequestRevisions []RequestRevisionSnapshot `json:"request_revisions,omitempty" bson:"request_revisions,omitempty"`
 
 	// Request parameters

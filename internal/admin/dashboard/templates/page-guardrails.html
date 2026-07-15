@@ -149,7 +149,7 @@
                                     <template x-if="field.input === 'header_actions'">
                                         <div class="guardrail-header-rows">
                                             <template x-for="(row, index) in guardrailHeaderRows(field)" :key="field.key + '-' + index">
-                                                <div class="guardrail-header-row">
+                                                <div class="guardrail-header-row guardrail-action-row">
                                                     <select class="form-select settings-select" :aria-label="'Action ' + (index + 1) + ' kind'" @change="setGuardrailActionMode(field, index, $event.target.value)">
                                                         <option value="set" :selected="guardrailActionMode(row) === 'set'">Set value</option>
                                                         <option value="copy" :selected="guardrailActionMode(row) === 'copy'">Copy from header</option>
