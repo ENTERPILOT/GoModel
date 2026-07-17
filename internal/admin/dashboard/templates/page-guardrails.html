@@ -170,7 +170,7 @@
                                         </div>
                                     </template>
                                     <template x-if="field.input !== 'select' && field.input !== 'textarea' && field.input !== 'header_conditions' && field.input !== 'header_actions'">
-                                        <input :id="'guardrail-field-' + field.key" :type="field.input || 'text'" :placeholder="field.placeholder || ''" :value="guardrailFieldValue(field)" :aria-describedby="field.help ? 'guardrail-field-help-' + field.key : null" @input="setGuardrailFieldValue(field, $event.target.value)">
+										<input :id="'guardrail-field-' + field.key" :type="field.input === 'string_list' ? 'text' : (field.input || 'text')" :placeholder="field.placeholder || ''" :value="guardrailFieldValue(field)" :aria-describedby="field.help ? 'guardrail-field-help-' + field.key : null" @input="setGuardrailFieldValue(field, $event.target.value)">
                                     </template>
                                 </div>
                             </template>

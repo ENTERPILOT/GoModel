@@ -24,3 +24,23 @@ func IsCredentialHeader(name string) bool {
 	_, ok := credentialHeaders[strings.ToLower(strings.TrimSpace(name))]
 	return ok
 }
+
+// ShouldRedactHeader reports whether an audit log should hide a header value.
+// It deliberately uses a broader heuristic than IsCredentialHeader: custom
+// upstreams commonly use names such as X-Session-Token or X-Custom-Auth, but
+// those names must remain authorable as outbound policy targets.
+func ShouldRedactHeader(name string) bool {
+	if IsCredentialHeader(name) {
+		return true
+	}
+	parts := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(name)), func(r rune) bool {
+		return r == '-' || r == '_' || r == '.'
+	})
+	for _, part := range parts {
+		switch part {
+		case "auth", "credential", "credentials", "key", "secret", "session", "token":
+			return true
+		}
+	}
+	return false
+}

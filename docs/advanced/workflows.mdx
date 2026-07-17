@@ -15,6 +15,7 @@ They currently control gateway-owned behavior such as:
 - audit logging
 - usage tracking
 - guardrails
+- outbound header policies
 - translated-route failover
 
 Each request matches exactly one active workflow.
@@ -115,7 +116,10 @@ curl -X POST http://localhost:8080/admin/workflows \
         "guardrails": false,
         "failover": true
       },
-      "guardrails": []
+      "guardrails": [],
+      "header_policies": [
+        { "ref": "pin-anthropic-beta", "step": 10 }
+      ]
     }
   }'
 ```
@@ -126,3 +130,4 @@ curl -X POST http://localhost:8080/admin/workflows \
 - `scope_user_path` is normalized to canonical slash form
 - managed API keys can override the request user path header; workflow matching uses the effective request user path
 - budget enforcement runs only when the global budget feature and the matched workflow's `budget` feature are both enabled; see [Budgets](/features/budgets)
+- `header_policies` are an egress stage independent of the message `guardrails` feature flag; their resolved plan participates in response-cache identity and applies only to the selected primary provider route

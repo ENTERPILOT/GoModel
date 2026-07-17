@@ -17,6 +17,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/version"
 )
 
@@ -229,9 +230,6 @@ func (u *upstream) httpClientWithHeaders() *http.Client {
 	if base == nil {
 		base = http.DefaultClient
 	}
-	if len(u.spec.Headers) == 0 {
-		return base
-	}
 	clone := *base
 	transport := base.Transport
 	if transport == nil {
@@ -254,6 +252,10 @@ type headerRoundTripper struct {
 func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
 	if t.origin != "" && requestOrigin(req.URL.String()) == t.origin {
+		// The downstream workflow's resolved plan may target MCP egress too.
+		// Apply it only on the configured origin, then overlay the upstream's
+		// static credentials so redirects cannot receive either policy or auth.
+		core.HeaderPlanFromContext(req.Context()).Apply(clone.Header)
 		for key, value := range t.headers {
 			clone.Header.Set(key, value)
 		}

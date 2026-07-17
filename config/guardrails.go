@@ -84,10 +84,17 @@ type LLMBasedAlteringSettings struct {
 	MaxTokens int `yaml:"max_tokens"`
 }
 
-// HeaderModificationSettings holds the type-specific settings for a
-// header_modification guardrail: conditions over inbound request headers and
-// the outbound provider-request header changes to apply when they all match.
+// HeaderModificationSettings holds the type-specific settings for an outbound
+// header policy. The legacy config location remains under guardrails so
+// existing deployments do not need a configuration migration.
 type HeaderModificationSettings struct {
+	// Methods optionally limits the policy to these HTTP methods.
+	Methods []string `yaml:"methods"`
+
+	// Endpoints optionally limits the policy to public request paths. A trailing
+	// '*' matches a prefix.
+	Endpoints []string `yaml:"endpoints"`
+
 	// When lists inbound-header conditions; all must match. Empty = always apply.
 	When []HeaderConditionConfig `yaml:"when"`
 

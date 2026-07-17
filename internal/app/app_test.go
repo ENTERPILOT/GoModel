@@ -344,6 +344,23 @@ func TestDefaultWorkflowInput_TrimsConfiguredGuardrailRefs(t *testing.T) {
 	}
 }
 
+func TestDefaultWorkflowInput_CompilesHeaderRulesIntoEgressPolicies(t *testing.T) {
+	cfg := &config.Config{Guardrails: config.GuardrailsConfig{
+		Enabled: true,
+		Rules:   []config.GuardrailRuleConfig{{Name: "pin-beta", Type: "header_modification", Order: 20}},
+	}}
+	input := defaultWorkflowInput(cfg, []string{"pin-beta"}, []guardrails.Definition{{Name: "pin-beta", Type: "header_modification"}})
+	if input.Payload.Features.Guardrails {
+		t.Fatal("header-only workflow enabled the message guardrail feature")
+	}
+	if len(input.Payload.Guardrails) != 0 || len(input.Payload.HeaderPolicies) != 1 {
+		t.Fatalf("payload stages = guardrails:%v header_policies:%v", input.Payload.Guardrails, input.Payload.HeaderPolicies)
+	}
+	if input.Payload.HeaderPolicies[0].Ref != "pin-beta" {
+		t.Fatalf("header policy ref = %q, want pin-beta", input.Payload.HeaderPolicies[0].Ref)
+	}
+}
+
 func TestConfigGuardrailDefinitions_DisabledIgnoresInvalidRules(t *testing.T) {
 	definitions, err := configGuardrailDefinitions(config.GuardrailsConfig{
 		Enabled: false,
@@ -419,6 +436,8 @@ func TestConfigGuardrailDefinitions_HeaderModification(t *testing.T) {
 				Name: "pin-beta",
 				Type: "header-modification",
 				HeaderModification: config.HeaderModificationSettings{
+					Methods:   []string{"POST"},
+					Endpoints: []string{"/v1/*"},
 					When: []config.HeaderConditionConfig{
 						{Header: "User-Agent", Matches: &matches},
 						{Header: "X-Empty", Equals: &equalsEmpty},
@@ -444,7 +463,7 @@ func TestConfigGuardrailDefinitions_HeaderModification(t *testing.T) {
 	}
 	// The seeded config must survive the guardrails service validation path.
 	raw := string(definitions[0].Config)
-	for _, want := range []string{`"anthropic-beta"`, `"^cline/"`, `"equals":""`, `"from_header":"X-Client-Team"`, `"present":false`} {
+	for _, want := range []string{`"methods":["POST"]`, `"endpoints":["/v1/*"]`, `"anthropic-beta"`, `"^cline/"`, `"equals":""`, `"from_header":"X-Client-Team"`, `"present":false`} {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("seed config missing %s: %s", want, raw)
 		}

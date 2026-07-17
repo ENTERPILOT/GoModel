@@ -479,3 +479,21 @@ test('sanitizeGuardrailConfig removes header list keys with no complete rows', (
     const config = module.sanitizeGuardrailConfig('header_modification', { when: [{ header: '' }] });
     assert.equal('when' in config, false);
 });
+
+test('string-list policy fields round-trip as normalized arrays', () => {
+    const module = createGuardrailsModule();
+    module.guardrailTypes = [{
+        type: 'header_modification',
+        defaults: { actions: [] },
+        fields: [{ key: 'endpoints', input: 'string_list' }]
+    }];
+    module.guardrailForm = module.defaultGuardrailForm('header_modification');
+    const field = module.guardrailTypes[0].fields[0];
+
+    module.setGuardrailFieldValue(field, ' /v1/chat/completions, /p/anthropic/* ');
+    assert.equal(module.guardrailFieldValue(field), '/v1/chat/completions, /p/anthropic/*');
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(module.sanitizeGuardrailConfig('header_modification', module.cloneGuardrailJSON(module.guardrailForm.config)).endpoints)),
+        ['/v1/chat/completions', '/p/anthropic/*']
+    );
+});

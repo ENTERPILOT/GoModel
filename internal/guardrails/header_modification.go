@@ -2,7 +2,6 @@ package guardrails
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -42,8 +41,10 @@ type headerModificationAction struct {
 }
 
 type headerModificationDefinitionConfig struct {
-	When    []headerModificationCondition `json:"when,omitempty"`
-	Actions []headerModificationAction    `json:"actions"`
+	Methods   []string                      `json:"methods,omitempty"`
+	Endpoints []string                      `json:"endpoints,omitempty"`
+	When      []headerModificationCondition `json:"when,omitempty"`
+	Actions   []headerModificationAction    `json:"actions"`
 }
 
 const (
@@ -69,6 +70,16 @@ func decodeHeaderModificationDefinitionConfig(raw json.RawMessage) (headerModifi
 		return headerModificationDefinitionConfig{}, newValidationError("invalid header_modification config: trailing data", nil)
 	}
 
+	var err error
+	cfg.Methods, err = normalizeHeaderPolicyMethods(cfg.Methods)
+	if err != nil {
+		return headerModificationDefinitionConfig{}, err
+	}
+	cfg.Endpoints, err = normalizeHeaderPolicyEndpoints(cfg.Endpoints)
+	if err != nil {
+		return headerModificationDefinitionConfig{}, err
+	}
+
 	for i := range cfg.When {
 		condition, err := normalizeHeaderModificationCondition(cfg.When[i], i)
 		if err != nil {
@@ -88,6 +99,40 @@ func decodeHeaderModificationDefinitionConfig(raw json.RawMessage) (headerModifi
 		cfg.Actions[i] = action
 	}
 	return cfg, nil
+}
+
+func normalizeHeaderPolicyMethods(methods []string) ([]string, error) {
+	normalized := make([]string, 0, len(methods))
+	for _, method := range methods {
+		method = strings.ToUpper(strings.TrimSpace(method))
+		if method != "" && !headerFieldNameRE.MatchString(method) {
+			return nil, newValidationError("invalid header_modification HTTP method: "+method, nil)
+		}
+		if method != "" && !slices.Contains(normalized, method) {
+			normalized = append(normalized, method)
+		}
+	}
+	return normalized, nil
+}
+
+func normalizeHeaderPolicyEndpoints(endpoints []string) ([]string, error) {
+	normalized := make([]string, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint == "" {
+			continue
+		}
+		if !strings.HasPrefix(endpoint, "/") {
+			return nil, newValidationError("header_modification endpoint must start with '/': "+endpoint, nil)
+		}
+		if strings.Count(endpoint, "*") > 1 || (strings.Contains(endpoint, "*") && !strings.HasSuffix(endpoint, "*")) {
+			return nil, newValidationError("header_modification endpoint wildcard is only allowed as a trailing '*': "+endpoint, nil)
+		}
+		if !slices.Contains(normalized, endpoint) {
+			normalized = append(normalized, endpoint)
+		}
+	}
+	return normalized, nil
 }
 
 func normalizeHeaderModificationCondition(condition headerModificationCondition, index int) (headerModificationCondition, error) {
@@ -172,18 +217,21 @@ type compiledHeaderCondition struct {
 	present bool
 }
 
-// HeaderModificationGuardrail is a workflow step that conditionally modifies
-// outbound provider-request headers. It never touches messages: Process is
-// the identity so the step composes with message guardrails in one pipeline.
-type HeaderModificationGuardrail struct {
+// HeaderPolicy is a workflow egress-policy step that conditionally modifies
+// outbound provider-request headers. It is deliberately not a Guardrail:
+// message processing and outbound-attempt preparation have different timing,
+// concurrency, cache, and failure semantics.
+type HeaderPolicy struct {
 	name       string
+	methods    []string
+	endpoints  []string
 	conditions []compiledHeaderCondition
 	actions    []headerModificationAction
 }
 
-// NewHeaderModificationGuardrail compiles a validated definition config into
-// an executable header-modification step.
-func NewHeaderModificationGuardrail(name string, cfg headerModificationDefinitionConfig) (*HeaderModificationGuardrail, error) {
+// NewHeaderPolicy compiles a validated definition config into an executable
+// outbound header-policy step.
+func NewHeaderPolicy(name string, cfg headerModificationDefinitionConfig) (*HeaderPolicy, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("guardrail name is required")
@@ -206,39 +254,48 @@ func NewHeaderModificationGuardrail(name string, cfg headerModificationDefinitio
 		conditions = append(conditions, compiled)
 	}
 
-	return &HeaderModificationGuardrail{
+	return &HeaderPolicy{
 		name:       name,
+		methods:    append([]string(nil), cfg.Methods...),
+		endpoints:  append([]string(nil), cfg.Endpoints...),
 		conditions: conditions,
 		actions:    append([]headerModificationAction(nil), cfg.Actions...),
 	}, nil
 }
 
 // Name returns the guardrail's unique name.
-func (g *HeaderModificationGuardrail) Name() string {
+func (g *HeaderPolicy) Name() string {
 	if g == nil {
 		return ""
 	}
 	return g.name
 }
 
-// Process is the identity: header steps do not modify messages.
-func (g *HeaderModificationGuardrail) Process(_ context.Context, msgs []Message) ([]Message, error) {
-	return msgs, nil
-}
-
-// HeaderMutation evaluates the rule against the inbound client headers and
-// returns the outbound mutation, or nil when a condition does not hold.
-func (g *HeaderModificationGuardrail) HeaderMutation(inbound http.Header) *core.HeaderMutation {
+// ResolveHeaderPlan evaluates the policy against the inbound client headers
+// and returns immutable egress intent, or nil when a condition does not hold.
+func (g *HeaderPolicy) ResolveHeaderPlan(input core.HeaderPolicyInput) *core.HeaderPlan {
 	if g == nil {
 		return nil
 	}
+	if len(g.methods) > 0 && !slices.Contains(g.methods, strings.ToUpper(strings.TrimSpace(input.Method))) {
+		return nil
+	}
+	if len(g.endpoints) > 0 && !slices.ContainsFunc(g.endpoints, func(selector string) bool {
+		if before, ok := strings.CutSuffix(selector, "*"); ok {
+			return strings.HasPrefix(input.Path, before)
+		}
+		return input.Path == selector
+	}) {
+		return nil
+	}
+	inbound := input.Headers
 	for _, condition := range g.conditions {
 		if !condition.holds(inbound) {
 			return nil
 		}
 	}
 
-	mutation := &core.HeaderMutation{}
+	plan := &core.HeaderPlan{}
 	for _, action := range g.actions {
 		switch action.Action {
 		case headerActionSet:
@@ -249,20 +306,20 @@ func (g *HeaderModificationGuardrail) HeaderMutation(inbound http.Header) *core.
 					continue
 				}
 			}
-			if mutation.Set == nil {
-				mutation.Set = make(map[string]string)
+			if plan.Set == nil {
+				plan.Set = make(map[string]string)
 			}
-			mutation.Set[action.Header] = value
-			mutation.Remove = removeStringOnce(mutation.Remove, action.Header)
+			plan.Set[action.Header] = value
+			plan.Remove = removeStringOnce(plan.Remove, action.Header)
 		case headerActionRemove:
-			delete(mutation.Set, action.Header)
-			mutation.Remove = appendStringOnce(mutation.Remove, action.Header)
+			delete(plan.Set, action.Header)
+			plan.Remove = appendStringOnce(plan.Remove, action.Header)
 		}
 	}
-	if mutation.IsZero() {
+	if plan.IsZero() {
 		return nil
 	}
-	return mutation
+	return plan
 }
 
 func (c compiledHeaderCondition) holds(inbound http.Header) bool {
@@ -303,23 +360,6 @@ func removeStringOnce(values []string, value string) []string {
 		}
 	}
 	return values
-}
-
-// HeaderMutators returns the pipeline's header-mutating steps in execution
-// order (ascending step order, registration order within a step).
-func (p *Pipeline) HeaderMutators() []core.HeaderMutator {
-	if p == nil {
-		return nil
-	}
-	var mutators []core.HeaderMutator
-	for _, group := range p.groups() {
-		for _, e := range group {
-			if mutator, ok := e.guardrail.(core.HeaderMutator); ok {
-				mutators = append(mutators, mutator)
-			}
-		}
-	}
-	return mutators
 }
 
 func headerModificationDescriptor(name string, cfg headerModificationDefinitionConfig) RuleDescriptor {

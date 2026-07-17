@@ -770,10 +770,9 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 		}
 	}
 
-	// Apply header_modification workflow steps last so operator rules win over
-	// provider defaults; Apply never touches credential, transport, or payload
-	// metadata headers.
-	core.HeaderMutationFromContext(ctx).Apply(httpReq.Header)
+	// Apply the resolved egress plan after provider defaults. Protected
+	// credentials, framing, and payload metadata remain provider-owned.
+	core.HeaderPlanFromContext(ctx).Apply(httpReq.Header)
 
 	return httpReq, nil
 }

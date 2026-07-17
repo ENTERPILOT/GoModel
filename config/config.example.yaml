@@ -289,6 +289,8 @@ guardrails:
     #   type: "header_modification"
     #   order: 2
     #   header_modification:
+    #     methods: ["POST"] # optional; empty matches every method
+    #     endpoints: ["/v1/chat/completions", "/p/anthropic/*"] # optional; trailing * matches a prefix
     #     when:
     #       - header: "User-Agent"
     #         matches: "^cline/" # RE2 regex; or use "equals", or "present: false" for absence

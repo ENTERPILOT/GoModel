@@ -2455,3 +2455,31 @@ test('fetchWorkflowVersion aborts hung requests, clears the timeout, and cleans 
         false
     );
 });
+
+test('buildWorkflowRequest emits outbound header policies independently of guardrails', () => {
+    const module = createWorkflowsModule();
+    module.workflowForm.features.guardrails = false;
+    module.workflowForm.header_policies = [{ ref: 'pin-beta', step: 10 }];
+
+    const payload = module.buildWorkflowRequest();
+
+    assert.equal(payload.workflow_payload.features.guardrails, false);
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(payload.workflow_payload.header_policies)),
+        [{ ref: 'pin-beta', step: 10 }]
+    );
+});
+
+test('validateWorkflowRequest rejects duplicate outbound header policy refs', () => {
+    const module = createWorkflowsModule();
+    const payload = module.buildWorkflowRequest();
+    payload.workflow_payload.header_policies = [
+        { ref: 'pin-beta', step: 10 },
+        { ref: 'pin-beta', step: 20 }
+    ];
+
+    assert.equal(
+        module.validateWorkflowRequest(payload),
+        'Each header policy ref may appear only once in a workflow.'
+    );
+});

@@ -45,6 +45,7 @@
                 scope_user_path: ''
             },
             guardrailRefs: [],
+            headerPolicyRefs: [],
             workflowForm: {
                 scope_provider: '',
                 scope_model: '',
@@ -59,7 +60,8 @@
                     guardrails: false,
                     failover: true
                 },
-                guardrails: []
+                guardrails: [],
+                header_policies: []
             },
 
             defaultWorkflowForm() {
@@ -77,7 +79,8 @@
                         guardrails: false,
                         failover: true
                     },
-                    guardrails: []
+                    guardrails: [],
+                    header_policies: []
                 };
             },
 
@@ -242,6 +245,9 @@
                         workflow.workflow_hash,
                         ...(Array.isArray(workflow.workflow_payload && workflow.workflow_payload.guardrails)
                             ? workflow.workflow_payload.guardrails.map((step) => step.ref)
+                            : []),
+                        ...(Array.isArray(workflow.workflow_payload && workflow.workflow_payload.header_policies)
+                            ? workflow.workflow_payload.header_policies.map((step) => step.ref)
                             : [])
                     ];
                     return fields.some((value) => String(value || '').toLowerCase().includes(filter));
@@ -405,6 +411,7 @@
                 features.failover = rawFeatures.failover;
                 const guardrailsEnabled = !!features.guardrails;
                 const guardrails = guardrailsEnabled ? this.workflowSourceGuardrails(form) : [];
+                const headerPolicies = this.workflowSourceHeaderPolicies(form);
                 const scopeType = this.workflowScopeType(scope);
                 const scopeDisplay = this.workflowScopeDisplay(scope);
 
@@ -429,7 +436,8 @@
                             guardrails: guardrailsEnabled,
                             failover: !!features.failover
                         },
-                        guardrails
+                        guardrails,
+                        ...(headerPolicies.length ? { header_policies: headerPolicies } : {})
                     }
                 };
             },
@@ -491,6 +499,24 @@
                         step: this.parseWorkflowGuardrailStep(step && step.step)
                     }))
                     .filter((step) => Number.isInteger(step.step) && step.step >= 0);
+            },
+
+            workflowSourceHeaderPolicies(source) {
+                const raw = Array.isArray(source && source.workflow_payload && source.workflow_payload.header_policies)
+                    ? source.workflow_payload.header_policies
+                    : Array.isArray(source && source.header_policies)
+                        ? source.header_policies
+                        : [];
+                return raw
+                    .map((step) => ({
+                        ref: String(step && step.ref || '').trim(),
+                        step: this.parseWorkflowGuardrailStep(step && step.step)
+                    }))
+                    .filter((step) => Number.isInteger(step.step) && step.step >= 0);
+            },
+
+            workflowHeaderPolicies(workflow) {
+                return this.workflowSourceHeaderPolicies(workflow);
             },
 
             canDeactivateWorkflow(workflow) {
@@ -575,6 +601,7 @@
                         }))
                         .filter((step) => Number.isInteger(step.step) && step.step >= 0)
                     : this.workflowSourceGuardrails(workflow);
+                const storedHeaderPolicies = this.workflowSourceHeaderPolicies(workflow);
                 this.workflowForm = {
                     scope_provider: this.workflowScopeProviderValue(workflow.scope),
                     scope_model: String(workflow.scope && workflow.scope.scope_model || ''),
@@ -590,6 +617,10 @@
                         failover: !!storedFeatures.failover
                     },
                     guardrails: storedGuardrails.map((step) => ({
+                        ref: String(step && step.ref || ''),
+                        step: Number.isFinite(step && step.step) ? step.step : 10
+                    })),
+                    header_policies: storedHeaderPolicies.map((step) => ({
                         ref: String(step && step.ref || ''),
                         step: Number.isFinite(step && step.step) ? step.step : 10
                     }))
@@ -635,6 +666,20 @@
             removeWorkflowGuardrailStep(index) {
                 if (!Array.isArray(this.workflowForm.guardrails)) return;
                 this.workflowForm.guardrails.splice(index, 1);
+            },
+
+            addWorkflowHeaderPolicyStep() {
+                const steps = Array.isArray(this.workflowForm.header_policies) ? this.workflowForm.header_policies : [];
+                const nextStep = steps.reduce((maxStep, step) => {
+                    const parsed = Number(step && step.step);
+                    return Number.isFinite(parsed) ? Math.max(maxStep, parsed) : maxStep;
+                }, 0) + 10;
+                this.workflowForm.header_policies.push(this.defaultWorkflowGuardrailStep(nextStep));
+            },
+
+            removeWorkflowHeaderPolicyStep(index) {
+                if (!Array.isArray(this.workflowForm.header_policies)) return;
+                this.workflowForm.header_policies.splice(index, 1);
             },
 
             workflowScopeUserPathValidationError(value) {
@@ -720,6 +765,10 @@
                         };
                     })
                     : [];
+                const headerPolicies = (Array.isArray(form.header_policies) ? form.header_policies : []).map((step) => ({
+                    ref: String(step && step.ref || '').trim(),
+                    step: this.parseWorkflowGuardrailStep(step && step.step)
+                }));
 
                 const payload = {
                     scope_provider_name: provider,
@@ -736,7 +785,8 @@
                             budget: !!features.budget,
                             guardrails: !!features.guardrails
                         },
-                        guardrails
+                        guardrails,
+                        ...(headerPolicies.length ? { header_policies: headerPolicies } : {})
                     }
                 };
                 if (includeFailover) {
@@ -855,12 +905,12 @@
                 const guardrails = Array.isArray(payload.workflow_payload && payload.workflow_payload.guardrails)
                     ? payload.workflow_payload.guardrails
                     : [];
-                if (!features.guardrails) {
-                    return '';
-                }
+                const headerPolicies = Array.isArray(payload.workflow_payload && payload.workflow_payload.header_policies)
+                    ? payload.workflow_payload.header_policies
+                    : [];
 
                 const seen = new Set();
-                for (const step of guardrails) {
+                for (const step of features.guardrails ? guardrails : []) {
                     if (!step.ref) {
                         return 'Each guardrail step needs a guardrail ref.';
                     }
@@ -871,6 +921,20 @@
                         return 'Each guardrail ref may appear only once in a workflow.';
                     }
                     seen.add(step.ref);
+                }
+
+                const seenPolicies = new Set();
+                for (const step of headerPolicies) {
+                    if (!step.ref) {
+                        return 'Each header policy step needs a policy ref.';
+                    }
+                    if (!Number.isInteger(step.step) || step.step < 0) {
+                        return 'Each header policy step must use a non-negative integer step number.';
+                    }
+                    if (seenPolicies.has(step.ref)) {
+                        return 'Each header policy ref may appear only once in a workflow.';
+                    }
+                    seenPolicies.add(step.ref);
                 }
 
                 return '';
@@ -952,11 +1016,30 @@
                 }
             },
 
+            async fetchWorkflowHeaderPolicies() {
+                try {
+                    const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    const res = await fetch('/admin/workflows/header-policies', request);
+                    const handled = this.handleFetchResponse(res, 'workflow header policies', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) return;
+                    if (!handled) {
+                        this.headerPolicyRefs = [];
+                        return;
+                    }
+                    const payload = await res.json();
+                    this.headerPolicyRefs = Array.isArray(payload) ? payload : [];
+                } catch (e) {
+                    console.error('Failed to fetch workflow header policies:', e);
+                    this.headerPolicyRefs = [];
+                }
+            },
+
             async fetchWorkflowsPage() {
                 await Promise.all([
                     this.fetchWorkflowRuntimeConfig(),
                     this.fetchWorkflows(),
-                    this.fetchWorkflowGuardrails()
+                    this.fetchWorkflowGuardrails(),
+                    this.fetchWorkflowHeaderPolicies()
                 ]);
             },
 

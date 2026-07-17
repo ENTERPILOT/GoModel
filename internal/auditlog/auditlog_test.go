@@ -112,6 +112,19 @@ func TestRedactHeaders(t *testing.T) {
 			},
 		},
 		{
+			name: "redact custom credential-like headers",
+			input: map[string]string{
+				"X-Session-Token": "session-secret",
+				"X-Custom-Auth":   "custom-secret",
+				"Anthropic-Beta":  "context-1m",
+			},
+			expected: map[string]string{
+				"X-Session-Token": "[REDACTED]",
+				"X-Custom-Auth":   "[REDACTED]",
+				"Anthropic-Beta":  "context-1m",
+			},
+		},
+		{
 			name: "case insensitive redaction",
 			input: map[string]string{
 				"AUTHORIZATION": "Bearer token",

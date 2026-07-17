@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // StepReference points to one named guardrail and the step it should run at.
@@ -13,8 +15,33 @@ type StepReference struct {
 }
 
 type registryEntry struct {
-	guardrail  Guardrail
-	descriptor RuleDescriptor
+	guardrail    Guardrail
+	headerPolicy core.HeaderPolicy
+	descriptor   RuleDescriptor
+}
+
+// GuardrailNames returns only message-processing definitions.
+func (r *Registry) GuardrailNames() []string {
+	return r.namesMatching(func(entry registryEntry) bool { return entry.guardrail != nil })
+}
+
+// HeaderPolicyNames returns only outbound header-policy definitions.
+func (r *Registry) HeaderPolicyNames() []string {
+	return r.namesMatching(func(entry registryEntry) bool { return entry.headerPolicy != nil })
+}
+
+func (r *Registry) namesMatching(matches func(registryEntry) bool) []string {
+	if r == nil {
+		return []string{}
+	}
+	names := make([]string, 0, len(r.entries))
+	for name, entry := range r.entries {
+		if matches(entry) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Registry stores named guardrails so workflows can reference them by id.
@@ -72,6 +99,26 @@ func (r *Registry) Register(g Guardrail, descriptor RuleDescriptor) error {
 	return nil
 }
 
+// RegisterHeaderPolicy adds one named outbound-attempt policy.
+func (r *Registry) RegisterHeaderPolicy(policy core.HeaderPolicy, descriptor RuleDescriptor) error {
+	if r == nil {
+		return fmt.Errorf("registry is required")
+	}
+	if policy == nil {
+		return fmt.Errorf("header policy is required")
+	}
+	name := strings.TrimSpace(policy.Name())
+	if name == "" {
+		return fmt.Errorf("header policy name is required")
+	}
+	if _, exists := r.entries[name]; exists {
+		return fmt.Errorf("duplicate policy registration: %q", name)
+	}
+	descriptor.Name = name
+	r.entries[name] = registryEntry{headerPolicy: policy, descriptor: descriptor}
+	return nil
+}
+
 // BuildPipeline resolves named guardrail references into an executable pipeline and hash.
 func (r *Registry) BuildPipeline(steps []StepReference) (*Pipeline, string, error) {
 	if len(steps) == 0 {
@@ -92,10 +139,46 @@ func (r *Registry) BuildPipeline(steps []StepReference) (*Pipeline, string, erro
 		if !ok {
 			return nil, "", fmt.Errorf("unknown guardrail ref: %q", name)
 		}
+		if entry.guardrail == nil {
+			return nil, "", fmt.Errorf("ref %q is an outbound header policy, not a guardrail", name)
+		}
 		pipeline.Add(entry.guardrail, step.Step)
 		descriptor := entry.descriptor
 		descriptor.Order = step.Step
 		descriptors = append(descriptors, descriptor)
 	}
 	return pipeline, ComputeGuardrailsHash(descriptors), nil
+}
+
+// BuildHeaderPolicies resolves named references into ordered egress policies
+// and a deterministic configuration hash.
+func (r *Registry) BuildHeaderPolicies(steps []StepReference) ([]core.HeaderPolicy, string, error) {
+	if len(steps) == 0 {
+		return nil, "", nil
+	}
+	if r == nil {
+		return nil, "", fmt.Errorf("policy registry is required")
+	}
+	ordered := append([]StepReference(nil), steps...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Step < ordered[j].Step })
+	policies := make([]core.HeaderPolicy, 0, len(ordered))
+	descriptors := make([]RuleDescriptor, 0, len(ordered))
+	for _, step := range ordered {
+		name := strings.TrimSpace(step.Ref)
+		if name == "" {
+			return nil, "", fmt.Errorf("header policy ref is required")
+		}
+		entry, ok := r.entries[name]
+		if !ok {
+			return nil, "", fmt.Errorf("unknown header policy ref: %q", name)
+		}
+		if entry.headerPolicy == nil {
+			return nil, "", fmt.Errorf("ref %q is a guardrail, not an outbound header policy", name)
+		}
+		policies = append(policies, entry.headerPolicy)
+		descriptor := entry.descriptor
+		descriptor.Order = step.Step
+		descriptors = append(descriptors, descriptor)
+	}
+	return policies, ComputeGuardrailsHash(descriptors), nil
 }

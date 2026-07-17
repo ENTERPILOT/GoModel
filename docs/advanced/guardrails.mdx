@@ -113,7 +113,7 @@ export GUARDRAILS_ENABLED=true
 | Field  | Required | Description                                                         |
 | ------ | -------- | ------------------------------------------------------------------- |
 | `name` | Yes      | Human-readable identifier. Supports spaces and unicode, but not `/`. |
-| `type` | Yes      | Guardrail type: `system_prompt`, `llm_based_altering`, or `header_modification`. |
+| `type` | Yes      | Definition type: `system_prompt`, `llm_based_altering`, or the outbound policy type `header_modification`. |
 | `user_path` | No  | Optional base user path for internal auxiliary guardrail requests. |
 | `order`| No       | Execution order. Default `0`. Same value = parallel, different = sequential. |
 
@@ -239,15 +239,24 @@ existing clients and agents without changing them — for example pinning an
 headers before they leave the gateway, or renaming a header a client sends
 into the one a provider expects.
 
-Unlike the message-based types, this guardrail never touches the request body.
-It runs right after workflow resolution, and its changes are applied when the
-outbound provider request is built — on translated routes, passthrough routes
-(`/p/{provider}/...`), and realtime websocket upgrades alike.
+Despite its legacy definition type, this is an **outbound header policy**, not
+a message guardrail. New workflow versions reference it in `header_policies`.
+The gateway resolves an immutable header plan after workflow selection and
+before cache lookup, then applies it while constructing the selected primary
+provider attempt. Translated, passthrough, realtime websocket, and WebRTC
+routes share the same protected-header enforcement.
+
+Header policies do not leak into internal LLM/embedder calls or into a
+different failover provider. Retries of the same primary provider reuse the
+same resolved plan. The effective plan is part of exact and semantic cache
+identity, including values copied with `from_header`.
 
 #### Settings
 
 | Field | Required | Description |
 | ----- | -------- | ----------- |
+| `methods` | No | HTTP methods to match, such as `POST`. Empty matches every method. |
+| `endpoints` | No | Public request paths to match. A trailing `*` matches a prefix, such as `/p/anthropic/*`. |
 | `when` | No | List of inbound-header conditions. All must match; empty means always apply. |
 | `actions` | Yes | List of outbound header changes, applied in order. |
 
@@ -274,11 +283,29 @@ value of another header (the action is skipped when that header is absent).
 Every header rule that changes a request is recorded on the audit entry's
 request-revision chain — the same mechanism used for body rewriters. Only the
 delta is stored. When `LOGGING_LOG_HEADERS=true`, set headers include their
-final values after normal credential redaction; otherwise only set header names
-are stored. Removed headers always contain names only. A request with no
+final values after credential redaction. Redaction also recognizes custom
+credential-like names such as `X-Session-Token` and `X-Custom-Auth`. When
+header logging is disabled, only set header names are stored. Removed headers
+always contain names only. A request with no
 matching rules records nothing. Revisions describe the intended change and are
 not proof that execution reached provider egress. The dashboard request log
 shows each change as a **Rewritten** tab on the entry's detail drawer.
+
+For API-authored workflows, attach the named definition explicitly:
+
+```json
+{
+  "workflow_payload": {
+    "schema_version": 1,
+    "features": { "guardrails": false },
+    "header_policies": [{ "ref": "pin-anthropic-beta", "step": 10 }]
+  }
+}
+```
+
+Workflow versions created by the preview implementation may still contain a
+`header_modification` reference in `guardrails`. They remain readable and are
+migrated into the egress stage when compiled in memory.
 
 #### Example
 

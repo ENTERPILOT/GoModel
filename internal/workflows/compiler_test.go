@@ -8,6 +8,13 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 )
 
+type compilerHeaderPolicy struct{ name string }
+
+func (p compilerHeaderPolicy) Name() string { return p.name }
+func (p compilerHeaderPolicy) ResolveHeaderPlan(core.HeaderPolicyInput) *core.HeaderPlan {
+	return &core.HeaderPlan{Set: map[string]string{"X-Test": "1"}}
+}
+
 func TestCompilerCompile_Guardrails(t *testing.T) {
 	registry := guardrails.NewRegistry()
 	rule, err := guardrails.NewSystemPromptGuardrail("policy-system", guardrails.SystemPromptInject, "be precise")
@@ -52,6 +59,56 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 	}
 	if compiled.Policy.GuardrailsHash == "" {
 		t.Fatal("compiled guardrails hash is empty")
+	}
+}
+
+func TestCompilerCompile_HeaderPoliciesAreSeparateFromMessagePipeline(t *testing.T) {
+	registry := guardrails.NewRegistry()
+	if err := registry.RegisterHeaderPolicy(compilerHeaderPolicy{name: "headers"}, guardrails.RuleDescriptor{Type: "header_modification", Content: "v1"}); err != nil {
+		t.Fatalf("RegisterHeaderPolicy() error = %v", err)
+	}
+
+	compiled, err := NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
+		ID: "workflow-headers",
+		Payload: Payload{
+			SchemaVersion:  1,
+			Features:       FeatureFlags{Guardrails: false},
+			HeaderPolicies: []HeaderPolicyStep{{Ref: "headers", Step: 10}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if compiled.Pipeline != nil {
+		t.Fatal("header policy was compiled into the message guardrail pipeline")
+	}
+	if len(compiled.HeaderPolicies) != 1 || compiled.HeaderPolicies[0].Name() != "headers" {
+		t.Fatalf("compiled header policies = %#v, want headers", compiled.HeaderPolicies)
+	}
+}
+
+func TestCompilerCompile_LegacyHeaderGuardrailReferenceMigratesAtCompileTime(t *testing.T) {
+	registry := guardrails.NewRegistry()
+	if err := registry.RegisterHeaderPolicy(compilerHeaderPolicy{name: "headers"}, guardrails.RuleDescriptor{Type: "header_modification", Content: "v1"}); err != nil {
+		t.Fatalf("RegisterHeaderPolicy() error = %v", err)
+	}
+
+	compiled, err := NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
+		ID: "workflow-legacy",
+		Payload: Payload{
+			SchemaVersion: 1,
+			Features:      FeatureFlags{Guardrails: true},
+			Guardrails:    []GuardrailStep{{Ref: "headers", Step: 10}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if compiled.Pipeline != nil {
+		t.Fatal("legacy header ref was left in the message guardrail pipeline")
+	}
+	if len(compiled.HeaderPolicies) != 1 {
+		t.Fatalf("len(HeaderPolicies) = %d, want 1", len(compiled.HeaderPolicies))
 	}
 }
 

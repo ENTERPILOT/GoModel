@@ -21,8 +21,8 @@ type stubHeaderMutator struct {
 
 func (m *stubHeaderMutator) Name() string { return m.name }
 
-func (m *stubHeaderMutator) HeaderMutation(inbound http.Header) *core.HeaderMutation {
-	m.seen = inbound
+func (m *stubHeaderMutator) ResolveHeaderPlan(input core.HeaderPolicyInput) *core.HeaderPlan {
+	m.seen = input.Headers
 	return m.mutation
 }
 
@@ -30,11 +30,11 @@ type stubHeaderMutatorResolver struct {
 	mutators []core.HeaderMutator
 }
 
-func (r *stubHeaderMutatorResolver) HeaderMutatorsForContext(context.Context) []core.HeaderMutator {
+func (r *stubHeaderMutatorResolver) HeaderPoliciesForContext(context.Context) []core.HeaderPolicy {
 	return r.mutators
 }
 
-func runHeaderModificationMiddleware(t *testing.T, resolver HeaderMutatorResolver, auditLogger auditlog.LoggerInterface, entry *auditlog.LogEntry) (*core.HeaderMutation, *auditlog.LogEntry) {
+func runHeaderModificationMiddleware(t *testing.T, resolver HeaderPolicyResolver, auditLogger auditlog.LoggerInterface, entry *auditlog.LogEntry) (*core.HeaderPlan, *auditlog.LogEntry) {
 	t.Helper()
 
 	e := echo.New()
@@ -47,7 +47,7 @@ func runHeaderModificationMiddleware(t *testing.T, resolver HeaderMutatorResolve
 	}
 
 	var carried *core.HeaderMutation
-	handler := HeaderModificationMiddleware(resolver, auditLogger)(func(c *echo.Context) error {
+	handler := HeaderPolicyPlanningMiddleware(resolver, auditLogger)(func(c *echo.Context) error {
 		carried = core.HeaderMutationFromContext(c.Request().Context())
 		return nil
 	})

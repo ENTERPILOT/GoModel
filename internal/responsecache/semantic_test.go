@@ -24,6 +24,15 @@ type mockEmbedder struct {
 	ctx    context.Context
 }
 
+func TestComputeParamsHash_VariesOnResolvedHeaderPlan(t *testing.T) {
+	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`)
+	first := computeParamsHash(body, "/v1/chat/completions", nil, "", "embedder", &core.HeaderPlan{Set: map[string]string{"X-Tenant": "one"}})
+	second := computeParamsHash(body, "/v1/chat/completions", nil, "", "embedder", &core.HeaderPlan{Set: map[string]string{"X-Tenant": "two"}})
+	if first == second {
+		t.Fatal("semantic params hash did not vary on the effective header plan")
+	}
+}
+
 func (m *mockEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
 	m.calls++
 	m.ctx = ctx

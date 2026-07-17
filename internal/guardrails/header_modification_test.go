@@ -6,15 +6,17 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
-func mustHeaderModification(t *testing.T, config string) *HeaderModificationGuardrail {
+func mustHeaderModification(t *testing.T, config string) *HeaderPolicy {
 	t.Helper()
 	cfg, err := decodeHeaderModificationDefinitionConfig(json.RawMessage(config))
 	if err != nil {
 		t.Fatalf("decode config: %v", err)
 	}
-	guardrail, err := NewHeaderModificationGuardrail("test-rule", cfg)
+	guardrail, err := NewHeaderPolicy("test-rule", cfg)
 	if err != nil {
 		t.Fatalf("build guardrail: %v", err)
 	}
@@ -245,7 +247,7 @@ func TestHeaderModificationEvaluation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			guardrail := mustHeaderModification(t, tt.config)
-			mutation := guardrail.HeaderMutation(tt.inbound)
+			mutation := guardrail.ResolveHeaderPlan(core.HeaderPolicyInput{Headers: tt.inbound})
 			if tt.wantNil {
 				if !mutation.IsZero() {
 					t.Fatalf("expected no mutation, got %+v", mutation)
@@ -275,40 +277,6 @@ func TestHeaderModificationEvaluation(t *testing.T) {
 	}
 }
 
-func TestHeaderModificationProcessIsIdentity(t *testing.T) {
-	guardrail := mustHeaderModification(t, `{"actions":[{"action":"set","header":"X-A","value":"1"}]}`)
-	msgs := []Message{{Role: "user", Content: "hi"}}
-	got, err := guardrail.Process(t.Context(), msgs)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 1 || got[0].Role != "user" || got[0].Content != "hi" {
-		t.Fatalf("expected identity, got %+v", got)
-	}
-}
-
-func TestPipelineHeaderMutatorsOrder(t *testing.T) {
-	first := mustHeaderModification(t, `{"actions":[{"action":"set","header":"X-A","value":"1"}]}`)
-	second := mustHeaderModification(t, `{"actions":[{"action":"set","header":"X-B","value":"2"}]}`)
-	prompt, err := NewSystemPromptGuardrail("sp", SystemPromptInject, "hello")
-	if err != nil {
-		t.Fatalf("build system prompt: %v", err)
-	}
-
-	pipeline := NewPipeline()
-	pipeline.Add(second, 2)
-	pipeline.Add(prompt, 1)
-	pipeline.Add(first, 0)
-
-	mutators := pipeline.HeaderMutators()
-	if len(mutators) != 2 {
-		t.Fatalf("expected 2 header mutators, got %d", len(mutators))
-	}
-	if mutators[0].Name() != first.Name() || mutators[1].Name() != second.Name() {
-		t.Fatalf("unexpected order: %s, %s", mutators[0].Name(), mutators[1].Name())
-	}
-}
-
 func TestHeaderModificationDefinitionNormalization(t *testing.T) {
 	def := Definition{
 		Name:   "beta-pin",
@@ -333,5 +301,18 @@ func TestHeaderModificationDefinitionNormalization(t *testing.T) {
 	view := ViewFromDefinition(normalized)
 	if !strings.Contains(view.Summary, "set Anthropic-Beta") {
 		t.Fatalf("unexpected summary: %q", view.Summary)
+	}
+}
+
+func TestHeaderPolicyMethodAndEndpointSelectors(t *testing.T) {
+	policy := mustHeaderModification(t, `{"methods":["post"],"endpoints":["/v1/*"],"actions":[{"action":"set","header":"X-Test","value":"1"}]}`)
+	if plan := policy.ResolveHeaderPlan(core.HeaderPolicyInput{Method: http.MethodGet, Path: "/v1/chat/completions"}); !plan.IsZero() {
+		t.Fatalf("GET unexpectedly matched: %+v", plan)
+	}
+	if plan := policy.ResolveHeaderPlan(core.HeaderPolicyInput{Method: http.MethodPost, Path: "/mcp"}); !plan.IsZero() {
+		t.Fatalf("unselected endpoint unexpectedly matched: %+v", plan)
+	}
+	if plan := policy.ResolveHeaderPlan(core.HeaderPolicyInput{Method: http.MethodPost, Path: "/v1/chat/completions"}); plan.IsZero() {
+		t.Fatal("selected method and endpoint did not produce a plan")
 	}
 }

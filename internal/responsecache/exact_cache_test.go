@@ -26,6 +26,15 @@ type concurrentTrackingStore struct {
 	releaseCh     chan struct{}
 }
 
+func TestHashRequest_VariesOnResolvedHeaderPlan(t *testing.T) {
+	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`)
+	first := hashRequest("/v1/chat/completions", body, nil, &core.HeaderPlan{Set: map[string]string{"X-Tenant": "one"}})
+	second := hashRequest("/v1/chat/completions", body, nil, &core.HeaderPlan{Set: map[string]string{"X-Tenant": "two"}})
+	if first == second {
+		t.Fatal("exact cache key did not vary on the effective header plan")
+	}
+}
+
 func newConcurrentTrackingStore() *concurrentTrackingStore {
 	return &concurrentTrackingStore{
 		enterCh:   make(chan struct{}, 1024),

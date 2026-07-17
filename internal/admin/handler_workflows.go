@@ -67,7 +67,15 @@ func (h *Handler) ListWorkflowGuardrails(c *echo.Context) error {
 		return c.JSON(http.StatusOK, []string{})
 	}
 
-	return c.JSON(http.StatusOK, h.guardrails.Names())
+	return c.JSON(http.StatusOK, h.guardrails.GuardrailNames())
+}
+
+// ListWorkflowHeaderPolicies handles GET /admin/workflows/header-policies.
+func (h *Handler) ListWorkflowHeaderPolicies(c *echo.Context) error {
+	if h.guardrails == nil {
+		return c.JSON(http.StatusOK, []string{})
+	}
+	return c.JSON(http.StatusOK, h.guardrails.HeaderPolicyNames())
 }
 
 // CreateWorkflow handles POST /admin/workflows
@@ -97,6 +105,9 @@ func (h *Handler) CreateWorkflow(c *echo.Context) error {
 	}
 
 	if err := h.validateWorkflowGuardrails(req.Payload); err != nil {
+		return handleError(c, err)
+	}
+	if err := h.validateWorkflowHeaderPolicies(req.Payload); err != nil {
 		return handleError(c, err)
 	}
 
@@ -173,10 +184,14 @@ func (h *Handler) activeWorkflowGuardrailReferences(ctx context.Context, name st
 
 	references := make([]string, 0)
 	for _, view := range views {
-		if !view.Payload.Features.Guardrails {
-			continue
+		steps := make([]workflows.GuardrailStep, 0, len(view.Payload.Guardrails)+len(view.Payload.HeaderPolicies))
+		if view.Payload.Features.Guardrails {
+			steps = append(steps, view.Payload.Guardrails...)
 		}
-		for _, step := range view.Payload.Guardrails {
+		for _, policy := range view.Payload.HeaderPolicies {
+			steps = append(steps, workflows.GuardrailStep(policy))
+		}
+		for _, step := range steps {
 			if strings.TrimSpace(step.Ref) != name {
 				continue
 			}
@@ -186,6 +201,29 @@ func (h *Handler) activeWorkflowGuardrailReferences(ctx context.Context, name st
 	}
 	sort.Strings(references)
 	return references, nil
+}
+
+func (h *Handler) validateWorkflowHeaderPolicies(payload workflows.Payload) error {
+	if len(payload.HeaderPolicies) == 0 {
+		return nil
+	}
+	if h.guardrails == nil {
+		return featureUnavailableError("header policy catalog is unavailable for workflow authoring")
+	}
+	known := make(map[string]struct{}, len(h.guardrails.HeaderPolicyNames()))
+	for _, name := range h.guardrails.HeaderPolicyNames() {
+		known[name] = struct{}{}
+	}
+	for _, step := range payload.HeaderPolicies {
+		ref := strings.TrimSpace(step.Ref)
+		if ref == "" {
+			continue
+		}
+		if _, ok := known[ref]; !ok {
+			return core.NewInvalidRequestError("unknown header policy ref: "+ref, nil)
+		}
+	}
+	return nil
 }
 
 func (h *Handler) validateWorkflowGuardrails(payload workflows.Payload) error {

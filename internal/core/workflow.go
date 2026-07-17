@@ -10,6 +10,8 @@ const (
 	ExecutionModePassthrough ExecutionMode = "passthrough"
 	ExecutionModeNativeBatch ExecutionMode = "native_batch"
 	ExecutionModeNativeFile  ExecutionMode = "native_file"
+	ExecutionModeRealtime    ExecutionMode = "realtime"
+	ExecutionModeMCP         ExecutionMode = "mcp"
 )
 
 // CapabilitySet advertises the gateway behaviors that are valid for a request.

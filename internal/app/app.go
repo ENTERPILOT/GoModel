@@ -436,7 +436,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// server; the live provider dependency remains the bare router.
 	var provider core.RoutableProvider = app.providers.Router
 	var translatedRequestPatcher server.TranslatedRequestPatcher
-	var headerMutatorResolver server.HeaderMutatorResolver
+	var headerPolicyResolver server.HeaderPolicyResolver
 	var batchRequestPreparers []server.BatchRequestPreparer
 	featureCaps := runtimeWorkflowFeatureCaps(appCfg)
 
@@ -480,7 +480,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if featureCaps.Guardrails {
 		if app.guardrails != nil && app.guardrails.Service != nil {
 			translatedRequestPatcher = guardrails.NewWorkflowRequestPatcher(workflowResult.Service)
-			headerMutatorResolver = workflowResult.Service
+			headerPolicyResolver = workflowResult.Service
 			if appCfg.Guardrails.EnableForBatchProcessing {
 				batchRequestPreparers = append(batchRequestPreparers, guardrails.NewWorkflowBatchPreparer(provider, workflowResult.Service))
 			}
@@ -573,7 +573,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		FailoverResolver:                failover.NewResolverWithRuleProvider(appCfg.Failover, providerResult.Registry, failoverResult.Service),
 		WorkflowPolicyResolver:          workflowResult.Service,
 		TranslatedRequestPatcher:        translatedRequestPatcher,
-		HeaderMutatorResolver:           headerMutatorResolver,
+		HeaderPolicyResolver:            headerPolicyResolver,
 		BatchRequestPreparer:            batchRequestPreparer,
 		ExposedModelLister:              vm,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
@@ -1256,6 +1256,12 @@ func headerModificationSeedConfig(settings config.HeaderModificationSettings) ma
 		actions = append(actions, entry)
 	}
 	seed := map[string]any{"actions": actions}
+	if len(settings.Methods) > 0 {
+		seed["methods"] = settings.Methods
+	}
+	if len(settings.Endpoints) > 0 {
+		seed["endpoints"] = settings.Endpoints
+	}
 	if len(conditions) > 0 {
 		seed["when"] = conditions
 	}
@@ -1276,6 +1282,7 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 		},
 	}
 	available := make(map[string]struct{}, len(availableGuardrails))
+	typesByName := make(map[string]string, len(configuredGuardrails))
 	for _, name := range availableGuardrails {
 		available[strings.TrimSpace(name)] = struct{}{}
 	}
@@ -1285,6 +1292,7 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 			continue
 		}
 		available[name] = struct{}{}
+		typesByName[name] = strings.TrimSpace(definition.Type)
 	}
 	if cfg.Guardrails.Enabled && len(cfg.Guardrails.Rules) > 0 {
 		payload.Guardrails = make([]workflows.GuardrailStep, 0, len(cfg.Guardrails.Rules))
@@ -1298,10 +1306,11 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 					continue
 				}
 			}
-			payload.Guardrails = append(payload.Guardrails, workflows.GuardrailStep{
-				Ref:  name,
-				Step: rule.Order,
-			})
+			if typesByName[name] == "header_modification" {
+				payload.HeaderPolicies = append(payload.HeaderPolicies, workflows.HeaderPolicyStep{Ref: name, Step: rule.Order})
+			} else {
+				payload.Guardrails = append(payload.Guardrails, workflows.GuardrailStep{Ref: name, Step: rule.Order})
+			}
 		}
 	}
 	payload.Features.Guardrails = len(payload.Guardrails) > 0

@@ -153,7 +153,9 @@ func executeTranslatedWithFailover[Req any, Resp any](
 			return resp, ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider), ProviderNameFromWorkflow(workflow), nil
 		},
 		func(selector core.ModelSelector, providerType, providerName string) (Resp, string, error) {
-			resp, responseProvider, err := call(ctx, cloneForSelector(req, selector))
+			// Header policies are scoped to the selected primary route. A
+			// different failover provider must not inherit its egress contract.
+			resp, responseProvider, err := call(core.WithoutHeaderPlan(ctx), cloneForSelector(req, selector))
 			if err != nil {
 				var zero Resp
 				return zero, "", err

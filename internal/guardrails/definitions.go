@@ -303,16 +303,6 @@ func buildDefinition(def Definition, executor ChatCompletionExecutor) (Guardrail
 			return nil, RuleDescriptor{}, newValidationError("build llm_based_altering guardrail: "+err.Error(), err)
 		}
 		return instance, llmBasedAlteringDescriptor(def.Name, runtimeCfg), nil
-	case "header_modification":
-		cfg, err := decodeHeaderModificationDefinitionConfig(def.Config)
-		if err != nil {
-			return nil, RuleDescriptor{}, err
-		}
-		instance, err := NewHeaderModificationGuardrail(def.Name, cfg)
-		if err != nil {
-			return nil, RuleDescriptor{}, newValidationError("build header_modification guardrail: "+err.Error(), err)
-		}
-		return instance, headerModificationDescriptor(def.Name, cfg), nil
 	default:
 		return nil, RuleDescriptor{}, newValidationError(`unknown guardrail type: "`+def.Type+`"`, nil)
 	}
@@ -458,13 +448,33 @@ func TypeDefinitions() []TypeDefinition {
 		},
 		{
 			Type:        "header_modification",
-			Label:       "Header Modification",
-			Description: "Conditionally sets or removes outbound provider-request headers based on the inbound request headers.",
+			Label:       "Outbound Header Policy",
+			Description: "Conditionally plans outbound provider-request headers. Runs as workflow egress policy, not as a message guardrail.",
 			Defaults: mustMarshalRaw(headerModificationDefinitionConfig{
 				When:    []headerModificationCondition{},
 				Actions: []headerModificationAction{{Action: headerActionSet}},
 			}),
 			Fields: []TypeField{
+				{
+					Key:   "methods",
+					Label: "HTTP methods",
+					Input: "checkboxes",
+					Help:  "Optional. Leave empty for every method.",
+					Options: []TypeOption{
+						{Value: "GET", Label: "GET"},
+						{Value: "POST", Label: "POST"},
+						{Value: "PUT", Label: "PUT"},
+						{Value: "DELETE", Label: "DELETE"},
+						{Value: "PATCH", Label: "PATCH"},
+					},
+				},
+				{
+					Key:         "endpoints",
+					Label:       "Endpoint paths",
+					Input:       "string_list",
+					Help:        "Optional comma-separated public paths. A trailing * matches a path prefix.",
+					Placeholder: "/v1/chat/completions, /p/anthropic/*",
+				},
 				{
 					Key:   "when",
 					Label: "Conditions",

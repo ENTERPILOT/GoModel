@@ -129,6 +129,9 @@
                 if (field.input === 'checkboxes') {
                     return this.normalizeGuardrailArrayValue(value);
                 }
+				if (field.input === 'string_list') {
+					return this.normalizeGuardrailArrayValue(value).join(', ');
+				}
                 return value;
             },
 
@@ -145,7 +148,7 @@
                         const parsed = Number(trimmed);
                         nextConfig[field.key] = Number.isFinite(parsed) ? parsed : trimmed;
                     }
-                } else if (field.input === 'checkboxes') {
+				} else if (field.input === 'checkboxes' || field.input === 'string_list') {
                     nextConfig[field.key] = this.normalizeGuardrailArrayValue(value);
                 } else {
                     nextConfig[field.key] = value;
@@ -257,6 +260,12 @@
             // are meaningful and must be preserved.
             sanitizeGuardrailConfig(type, config) {
                 this.guardrailTypeFields(type).forEach((field) => {
+					if (field.input === 'string_list') {
+						const values = this.normalizeGuardrailArrayValue(config[field.key]);
+						if (values.length > 0) config[field.key] = values;
+						else delete config[field.key];
+						return;
+					}
                     if (!this.guardrailHeaderRowField(field)) {
                         return;
                     }
@@ -551,6 +560,9 @@
                     if (typeof this.fetchWorkflowGuardrails === 'function') {
                         this.fetchWorkflowGuardrails();
                     }
+                    if (typeof this.fetchWorkflowHeaderPolicies === 'function') {
+                        this.fetchWorkflowHeaderPolicies();
+                    }
                     this.guardrailNotice = 'Guardrail "' + name + '" saved.';
                     this.closeGuardrailForm();
                 } catch (e) {
@@ -619,6 +631,9 @@
                     await this.fetchGuardrails();
                     if (typeof this.fetchWorkflowGuardrails === 'function') {
                         this.fetchWorkflowGuardrails();
+                    }
+                    if (typeof this.fetchWorkflowHeaderPolicies === 'function') {
+                        this.fetchWorkflowHeaderPolicies();
                     }
                     if (this.guardrailFormOpen && this.guardrailFormOriginalName === name) {
                         this.closeGuardrailForm();

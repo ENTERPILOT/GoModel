@@ -68,7 +68,7 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
 	}
 	path := ex.Path()
 	plan := core.GetWorkflow(ex.Context())
-	key := hashRequest(path, body, plan)
+	key := hashRequest(path, body, plan, core.HeaderPlanFromContext(ex.Context()))
 	cached, err := m.store.Get(ex.Context(), key)
 	if err != nil {
 		return false, nil
@@ -99,7 +99,7 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 	}
 	path := ex.Path()
 	plan := core.GetWorkflow(ex.Context())
-	key := hashRequest(path, body, plan)
+	key := hashRequest(path, body, plan, core.HeaderPlanFromContext(ex.Context()))
 
 	data, ok, err := ex.Capture("response cache: failed to capture cacheable response body", next)
 	if err != nil {
@@ -193,16 +193,20 @@ func isStreamingRequestGJSON(path string, body []byte) bool {
 	return result.Bool()
 }
 
-func hashRequest(path string, body []byte, plan *core.Workflow) string {
+func hashRequest(path string, body []byte, workflow *core.Workflow, headerPlans ...*core.HeaderPlan) string {
 	h := sha256.New()
 	h.Write([]byte(path))
 	h.Write([]byte{0})
-	if plan != nil {
-		h.Write([]byte(plan.Mode))
+	if workflow != nil {
+		h.Write([]byte(workflow.Mode))
 		h.Write([]byte{0})
-		h.Write([]byte(plan.ProviderType))
+		h.Write([]byte(workflow.ProviderType))
 		h.Write([]byte{0})
-		h.Write([]byte(plan.ResolvedQualifiedModel()))
+		h.Write([]byte(workflow.ResolvedQualifiedModel()))
+		h.Write([]byte{0})
+	}
+	if len(headerPlans) > 0 {
+		h.Write([]byte(headerPlans[0].CacheFingerprint()))
 		h.Write([]byte{0})
 	}
 	h.Write(cacheKeyRequestBody(path, body))

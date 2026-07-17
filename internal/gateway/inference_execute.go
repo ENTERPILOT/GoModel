@@ -414,7 +414,7 @@ func streamTranslatedProviderRequest[Req any](
 
 	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, failoverModel, err := tryFailoverStream(ctx, o, workflow, model, provider, err,
 		func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error) {
-			stream, err := call(ctx, cloneForSelector(req, selector))
+			stream, err := call(core.WithoutHeaderPlan(ctx), cloneForSelector(req, selector))
 			if err != nil {
 				return nil, "", "", err
 			}

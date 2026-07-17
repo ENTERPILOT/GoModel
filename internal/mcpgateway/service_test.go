@@ -531,19 +531,23 @@ func TestDownstreamCapabilitiesDoNotPromiseListChanged(t *testing.T) {
 
 func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
 	var redirectedHeader string
+	var redirectedPolicyHeader string
 	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		redirectedHeader = r.Header.Get("Authorization")
+		redirectedPolicyHeader = r.Header.Get("X-Workflow-Policy")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer redirectTarget.Close()
 
 	var sameOriginHeader string
+	var sameOriginPolicyHeader string
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/redirect" {
 			http.Redirect(w, r, redirectTarget.URL, http.StatusTemporaryRedirect)
 			return
 		}
 		sameOriginHeader = r.Header.Get("Authorization")
+		sameOriginPolicyHeader = r.Header.Get("X-Workflow-Policy")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer origin.Close()
@@ -553,12 +557,21 @@ func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
 		Headers: map[string]string{"Authorization": "Bearer upstream-secret"},
 	}, http.DefaultClient)
 	client := u.httpClientWithHeaders()
-	resp, err := client.Get(origin.URL + "/same-origin")
+	ctx := core.WithHeaderPlan(t.Context(), &core.HeaderPlan{Set: map[string]string{"X-Workflow-Policy": "applied"}})
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, origin.URL+"/same-origin", nil)
+	if err != nil {
+		t.Fatalf("build same-origin request: %v", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("same-origin request error = %v", err)
 	}
 	_ = resp.Body.Close()
-	resp, err = client.Get(origin.URL + "/redirect")
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, origin.URL+"/redirect", nil)
+	if err != nil {
+		t.Fatalf("build redirect request: %v", err)
+	}
+	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatalf("redirected request error = %v", err)
 	}
@@ -568,6 +581,12 @@ func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
 	}
 	if redirectedHeader != "" {
 		t.Fatalf("cross-origin Authorization = %q, want empty", redirectedHeader)
+	}
+	if sameOriginPolicyHeader != "applied" {
+		t.Fatalf("same-origin policy header = %q, want applied", sameOriginPolicyHeader)
+	}
+	if redirectedPolicyHeader != "" {
+		t.Fatalf("cross-origin policy header = %q, want empty", redirectedPolicyHeader)
 	}
 }
 

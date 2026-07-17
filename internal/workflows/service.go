@@ -23,9 +23,10 @@ const (
 
 // CompiledWorkflow is the immutable runtime projection cached in the hot-path snapshot.
 type CompiledWorkflow struct {
-	Version  Version
-	Policy   *core.ResolvedWorkflowPolicy
-	Pipeline *guardrails.Pipeline
+	Version        Version
+	Policy         *core.ResolvedWorkflowPolicy
+	Pipeline       *guardrails.Pipeline
+	HeaderPolicies []core.HeaderPolicy
 }
 
 // Compiler turns one persisted workflow version into its runtime projection.
@@ -341,15 +342,21 @@ func (s *Service) PipelineForWorkflow(workflow *core.Workflow) *guardrails.Pipel
 	return compiled.Pipeline
 }
 
-// HeaderMutatorsForContext resolves the header-mutating workflow steps for
-// the request context, in execution order. Nil when the workflow has no
-// guardrails pipeline or no header_modification steps.
-func (s *Service) HeaderMutatorsForContext(ctx context.Context) []core.HeaderMutator {
-	pipeline := s.PipelineForContext(ctx)
-	if pipeline == nil {
+// HeaderPoliciesForContext resolves the workflow's outbound attempt policies
+// independently from the message guardrail pipeline.
+func (s *Service) HeaderPoliciesForContext(ctx context.Context) []core.HeaderPolicy {
+	if s == nil || ctx == nil {
 		return nil
 	}
-	return pipeline.HeaderMutators()
+	workflow := core.GetWorkflow(ctx)
+	if workflow == nil || workflow.Policy == nil {
+		return nil
+	}
+	compiled := s.snapshot().byVersionID[strings.TrimSpace(workflow.Policy.VersionID)]
+	if compiled == nil {
+		return nil
+	}
+	return compiled.HeaderPolicies
 }
 
 // StartBackgroundRefresh periodically reloads active workflows until stopped.

@@ -255,6 +255,20 @@ func (s *Service) Names() []string {
 	return append([]string(nil), s.snapshot.order...)
 }
 
+// GuardrailNames returns only message-processing guardrails.
+func (s *Service) GuardrailNames() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.snapshot.registry.GuardrailNames()
+}
+
+// HeaderPolicyNames returns only outbound header policies.
+func (s *Service) HeaderPolicyNames() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.snapshot.registry.HeaderPolicyNames()
+}
+
 // BuildPipeline resolves named steps through the current in-memory guardrail registry.
 func (s *Service) BuildPipeline(steps []StepReference) (*Pipeline, string, error) {
 	if len(steps) == 0 {
@@ -270,6 +284,21 @@ func (s *Service) BuildPipeline(steps []StepReference) (*Pipeline, string, error
 	return registry.BuildPipeline(steps)
 }
 
+// BuildHeaderPolicies resolves outbound policy references through the current
+// in-memory catalog.
+func (s *Service) BuildHeaderPolicies(steps []StepReference) ([]core.HeaderPolicy, string, error) {
+	if len(steps) == 0 {
+		return nil, "", nil
+	}
+	s.mu.RLock()
+	registry := s.snapshot.registry
+	s.mu.RUnlock()
+	if registry == nil {
+		return nil, "", core.NewProviderError("", http.StatusBadGateway, "header policy catalog is not loaded", nil)
+	}
+	return registry.BuildHeaderPolicies(steps)
+}
+
 func buildSnapshot(definitions []Definition, executor ChatCompletionExecutor) (serviceSnapshot, error) {
 	next := serviceSnapshot{
 		definitions: make(map[string]Definition, len(definitions)),
@@ -281,12 +310,26 @@ func buildSnapshot(definitions []Definition, executor ChatCompletionExecutor) (s
 		if err != nil {
 			return serviceSnapshot{}, fmt.Errorf("load guardrail %q: %w", definition.Name, err)
 		}
-		instance, descriptor, err := buildDefinition(normalized, executor)
-		if err != nil {
-			return serviceSnapshot{}, fmt.Errorf("load guardrail %q: %w", normalized.Name, err)
-		}
-		if err := next.registry.Register(instance, descriptor); err != nil {
-			return serviceSnapshot{}, fmt.Errorf("register guardrail %q: %w", normalized.Name, err)
+		if normalized.Type == "header_modification" {
+			cfg, err := decodeHeaderModificationDefinitionConfig(normalized.Config)
+			if err != nil {
+				return serviceSnapshot{}, fmt.Errorf("load header policy %q: %w", normalized.Name, err)
+			}
+			policy, err := NewHeaderPolicy(normalized.Name, cfg)
+			if err != nil {
+				return serviceSnapshot{}, fmt.Errorf("build header policy %q: %w", normalized.Name, err)
+			}
+			if err := next.registry.RegisterHeaderPolicy(policy, headerModificationDescriptor(normalized.Name, cfg)); err != nil {
+				return serviceSnapshot{}, fmt.Errorf("register header policy %q: %w", normalized.Name, err)
+			}
+		} else {
+			instance, descriptor, err := buildDefinition(normalized, executor)
+			if err != nil {
+				return serviceSnapshot{}, fmt.Errorf("load guardrail %q: %w", normalized.Name, err)
+			}
+			if err := next.registry.Register(instance, descriptor); err != nil {
+				return serviceSnapshot{}, fmt.Errorf("register guardrail %q: %w", normalized.Name, err)
+			}
 		}
 		next.definitions[normalized.Name] = normalized
 		next.order = append(next.order, normalized.Name)

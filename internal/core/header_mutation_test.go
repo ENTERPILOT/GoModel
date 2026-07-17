@@ -90,3 +90,30 @@ func TestIsProtectedHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestHeaderPlanCacheFingerprintIsStableAndValueSensitive(t *testing.T) {
+	first := &HeaderPlan{Set: map[string]string{"X-B": "2", "X-A": "1"}, Remove: []string{"X-Z"}}
+	reordered := &HeaderPlan{Set: map[string]string{"X-A": "1", "X-B": "2"}, Remove: []string{"X-Z"}}
+	changed := &HeaderPlan{Set: map[string]string{"X-A": "different", "X-B": "2"}, Remove: []string{"X-Z"}}
+
+	if first.CacheFingerprint() != reordered.CacheFingerprint() {
+		t.Fatal("equivalent plans produced different cache fingerprints")
+	}
+	if first.CacheFingerprint() == changed.CacheFingerprint() {
+		t.Fatal("different resolved values produced the same cache fingerprint")
+	}
+}
+
+func TestShouldRedactHeaderRecognizesCustomCredentialNames(t *testing.T) {
+	for _, name := range []string{"X-Session-Token", "X-Api-Token", "X-Custom-Auth", "X-Upstream-Secret"} {
+		if !ShouldRedactHeader(name) {
+			t.Fatalf("%s should be redacted from audit logs", name)
+		}
+		if IsProtectedHeader(name) {
+			t.Fatalf("%s should remain authorable as an outbound policy target", name)
+		}
+	}
+	if ShouldRedactHeader("Anthropic-Beta") {
+		t.Fatal("Anthropic-Beta should remain visible when header logging is enabled")
+	}
+}

@@ -354,7 +354,7 @@ func displayAuditProviderName(providerName, provider string) string {
 	return strings.TrimSpace(provider)
 }
 
-// RedactHeaders redacts credential headers (core.IsCredentialHeader) from a
+// RedactHeaders redacts known and likely credential headers from a
 // header map. Values are replaced with "[REDACTED]" to prevent leaking
 // secrets. The original map is not modified; a new map is returned.
 func RedactHeaders(headers map[string]string) map[string]string {
@@ -364,7 +364,7 @@ func RedactHeaders(headers map[string]string) map[string]string {
 
 	result := make(map[string]string, len(headers))
 	for key, value := range headers {
-		if core.IsCredentialHeader(key) {
+		if core.ShouldRedactHeader(key) {
 			result[key] = "[REDACTED]"
 		} else {
 			result[key] = value

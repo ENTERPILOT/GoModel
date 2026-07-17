@@ -10,42 +10,43 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// HeaderMutatorResolver resolves the request-scoped header-mutating workflow
-// steps, in execution order. Implemented by the workflows service.
-type HeaderMutatorResolver interface {
-	HeaderMutatorsForContext(ctx context.Context) []core.HeaderMutator
+// HeaderPolicyResolver resolves request-scoped outbound policies in execution
+// order. Implemented by the workflows service.
+type HeaderPolicyResolver interface {
+	HeaderPoliciesForContext(ctx context.Context) []core.HeaderPolicy
 }
 
-// HeaderModificationMiddleware evaluates header_modification workflow steps
-// against the inbound request headers. It must run after workflow resolution
-// (steps are selected by the resolved workflow) and stores the merged
-// outbound header mutation in the request context; the outbound builders for
-// translated and passthrough routes apply it when constructing the provider
-// request. Each step that changes anything is recorded on the audit entry's
-// request-revision chain as an intended change, whether or not execution later
-// reaches provider egress.
-func HeaderModificationMiddleware(resolver HeaderMutatorResolver, auditLogger auditlog.LoggerInterface) echo.MiddlewareFunc {
+// HeaderPolicyPlanningMiddleware evaluates outbound header policies after
+// workflow resolution and before any cache lookup. It stores one immutable,
+// fully resolved plan for the primary provider route. Each matching policy is
+// recorded as intended change; the revision is not proof of provider egress.
+func HeaderPolicyPlanningMiddleware(resolver HeaderPolicyResolver, auditLogger auditlog.LoggerInterface) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			mutators := resolver.HeaderMutatorsForContext(c.Request().Context())
-			if len(mutators) == 0 {
+			policies := resolver.HeaderPoliciesForContext(c.Request().Context())
+			if len(policies) == 0 {
 				return next(c)
 			}
 
 			inbound := c.Request().Header
-			merged := &core.HeaderMutation{}
-			for _, mutator := range mutators {
-				mutation := mutator.HeaderMutation(inbound)
-				if mutation.IsZero() {
+			input := core.HeaderPolicyInput{
+				Headers: inbound,
+				Method:  c.Request().Method,
+				Path:    c.Request().URL.Path,
+			}
+			merged := &core.HeaderPlan{}
+			for _, policy := range policies {
+				plan := policy.ResolveHeaderPlan(input)
+				if plan.IsZero() {
 					continue
 				}
-				recordHeaderRevision(c, auditLogger, mutator.Name(), mutation)
-				merged.Merge(mutation)
+				recordHeaderRevision(c, auditLogger, policy.Name(), plan)
+				merged.Merge(plan)
 			}
 
 			if !merged.IsZero() {
 				req := c.Request()
-				c.SetRequest(req.WithContext(core.WithHeaderMutation(req.Context(), merged)))
+				c.SetRequest(req.WithContext(core.WithHeaderPlan(req.Context(), merged)))
 			}
 			return next(c)
 		}
@@ -57,7 +58,7 @@ func HeaderModificationMiddleware(resolver HeaderMutatorResolver, auditLogger au
 // the same LOGGING_LOG_HEADERS gate and redaction policy as normal request
 // headers; when value logging is disabled only the set header names are kept.
 // Body fields stay empty because header steps never touch the body.
-func recordHeaderRevision(c *echo.Context, auditLogger auditlog.LoggerInterface, name string, mutation *core.HeaderMutation) {
+func recordHeaderRevision(c *echo.Context, auditLogger auditlog.LoggerInterface, name string, plan *core.HeaderPlan) {
 	if auditLogger == nil {
 		return
 	}
@@ -67,20 +68,20 @@ func recordHeaderRevision(c *echo.Context, auditLogger auditlog.LoggerInterface,
 	}
 
 	delta := &auditlog.HeaderRevisionSnapshot{}
-	if len(mutation.Set) > 0 {
+	if len(plan.Set) > 0 {
 		if cfg.LogHeaders {
-			delta.Set = auditlog.RedactHeaders(mutation.Set)
+			delta.Set = auditlog.RedactHeaders(plan.Set)
 		} else {
-			names := make([]string, 0, len(mutation.Set))
-			for header := range mutation.Set {
+			names := make([]string, 0, len(plan.Set))
+			for header := range plan.Set {
 				names = append(names, header)
 			}
 			sort.Strings(names)
 			delta.Set = names
 		}
 	}
-	if len(mutation.Remove) > 0 {
-		delta.Removed = append([]string(nil), mutation.Remove...)
+	if len(plan.Remove) > 0 {
+		delta.Removed = append([]string(nil), plan.Remove...)
 	}
 	auditlog.EnrichEntryWithRequestRevision(c, auditlog.RequestRevisionSnapshot{
 		Rewriter: name,

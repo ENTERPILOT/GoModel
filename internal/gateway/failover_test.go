@@ -238,6 +238,33 @@ func TestExecuteTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 	}
 }
 
+func TestExecuteTranslatedFailoverDoesNotInheritPrimaryHeaderPlan(t *testing.T) {
+	o, workflow := failoverTestFixture()
+	ctx := core.WithHeaderPlan(context.Background(), &core.HeaderPlan{Set: map[string]string{"Anthropic-Beta": "primary-only"}})
+
+	callCount := 0
+	_, _, _, _, didFailover, err := executeTranslatedWithFailover(
+		ctx, o, workflow, "req", "openai/gpt-4o", "openai",
+		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
+		func(callCtx context.Context, _ string) (string, string, error) {
+			callCount++
+			if callCount == 1 {
+				if core.HeaderPlanFromContext(callCtx) == nil {
+					t.Fatal("primary attempt lost its header plan")
+				}
+				return "", "", core.NewProviderError("openai", http.StatusBadGateway, "primary failed", nil)
+			}
+			if core.HeaderPlanFromContext(callCtx) != nil {
+				t.Fatal("failover attempt inherited the primary route's header plan")
+			}
+			return "ok", "openai", nil
+		},
+	)
+	if err != nil || !didFailover || callCount != 2 {
+		t.Fatalf("failover result = (calls:%d used:%v err:%v), want two calls and success", callCount, didFailover, err)
+	}
+}
+
 // When every failover target is also unavailable, the client receives the
 // original rate-limit rejection, not a provider error.
 func TestExecuteTranslatedSaturatedPrimarySurfaces429WhenNoTargetRemains(t *testing.T) {
