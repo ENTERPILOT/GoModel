@@ -456,18 +456,54 @@ func TestToChatRequestRoundTripsAsJSON(t *testing.T) {
 }
 
 func TestEstimateChatInputTokens(t *testing.T) {
-	if got := EstimateChatInputTokens(nil); got != 0 {
-		t.Errorf("nil request = %d, want 0", got)
-	}
-	req := &core.ChatRequest{
-		Messages: []core.Message{
-			{Role: "system", Content: "You are terse."},
-			{Role: "user", Content: "What is 2+2?"},
+	tests := []struct {
+		name string
+		req  *core.ChatRequest
+		want int
+	}{
+		{
+			name: "nil request",
+			req:  nil,
+			want: 0,
+		},
+		{
+			name: "messages only",
+			req: &core.ChatRequest{
+				Messages: []core.Message{
+					{Role: "system", Content: "You are terse."},
+					{Role: "user", Content: "What is 2+2?"},
+				},
+			},
+			// "You are terse." (14) + "What is 2+2?" (12) = 26 chars → ceil(26/4) = 7
+			want: 7,
+		},
+		{
+			name: "tool calls and tool definitions",
+			req: &core.ChatRequest{
+				Messages: []core.Message{
+					{
+						Role: "assistant",
+						ToolCalls: []core.ToolCall{
+							{Function: core.FunctionCall{Name: "weather", Arguments: `{"city":"Paris"}`}},
+						},
+					},
+				},
+				Tools: []map[string]any{
+					{"type": "function", "function": map[string]any{"name": "weather"}},
+				},
+			},
+			// "weather" (7) + `{"city":"Paris"}` (16) = 23 chars, plus the
+			// marshaled tool definition
+			// `{"function":{"name":"weather"},"type":"function"}` (49 chars).
+			// Total 72 chars → ceil(72/4) = 18.
+			want: 18,
 		},
 	}
-	got := EstimateChatInputTokens(req)
-	// "You are terse." (14) + "What is 2+2?" (12) = 26 chars → ceil(26/4) = 7
-	if got != 7 {
-		t.Errorf("estimate = %d, want 7", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := EstimateChatInputTokens(tc.req); got != tc.want {
+				t.Errorf("estimate = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
