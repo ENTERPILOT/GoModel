@@ -46,7 +46,7 @@ Passthrough routes use this shape:
 ```
 
 For Anthropic, these two paths map to the same upstream endpoint when
-`ALLOW_PASSTHROUGH_V1_ALIAS=true`, which is the default:
+`GOMODEL_ALLOW_PASSTHROUGH_V1_ALIAS=true`, which is the default:
 
 ```text
 /p/anthropic/messages
@@ -143,9 +143,9 @@ Passthrough is intentionally narrow while the API is in beta.
 Passthrough routes are enabled by default:
 
 ```env
-ENABLE_PASSTHROUGH_ROUTES=true
-ALLOW_PASSTHROUGH_V1_ALIAS=true
-ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,vllm,deepseek
+GOMODEL_ENABLE_PASSTHROUGH_ROUTES=true
+GOMODEL_ALLOW_PASSTHROUGH_V1_ALIAS=true
+GOMODEL_ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,vllm,deepseek
 ```
 
-Set `ENABLED_PASSTHROUGH_PROVIDERS` to the provider types you want to expose.
+Set `GOMODEL_ENABLED_PASSTHROUGH_PROVIDERS` to the provider types you want to expose.

@@ -90,7 +90,7 @@ fixed in configuration; rename them by editing the declaration.
 ## Define virtual models as code
 
 Operators who manage configuration as infrastructure-as-code can declare virtual
-models in `config.yaml` or the `VIRTUAL_MODELS` environment variable instead of
+models in `config.yaml` or the `GOMODEL_VIRTUAL_MODELS` environment variable instead of
 the dashboard. Declarative entries are applied at startup, **override** any
 admin-store row with the same `source`, and are shown read-only in the dashboard
 (a **Config** badge). Edit the configuration to change them.
@@ -123,7 +123,7 @@ The same list as a single environment variable (JSON), which overrides
 `config.yaml` entries with a matching `source`:
 
 ```env
-VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama-3.3-70b"}]}]
+GOMODEL_VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama-3.3-70b"}]}]
 ```
 
 Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
@@ -148,7 +148,7 @@ Two lenient exceptions keep valid setups booting:
 To hide provider models from `GET /v1/models`, set:
 
 ```env
-KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true
+GOMODEL_KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true
 ```
 
 When this is enabled, GoModel returns enabled redirects from `/v1/models`

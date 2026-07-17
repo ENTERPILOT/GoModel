@@ -48,21 +48,21 @@ spec:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
                   key: PORT
-            - name: BASE_PATH
+            - name: GOMODEL_BASE_PATH
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: BASE_PATH
-            - name: USER_PATH_HEADER
+                  key: GOMODEL_BASE_PATH
+            - name: GOMODEL_USER_PATH_HEADER
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: USER_PATH_HEADER
-            - name: BODY_SIZE_LIMIT
+                  key: GOMODEL_USER_PATH_HEADER
+            - name: GOMODEL_BODY_SIZE_LIMIT
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: BODY_SIZE_LIMIT
+                  key: GOMODEL_BODY_SIZE_LIMIT
             # Cache configuration
             {{- if or .Values.redis.enabled .Values.cache.redis.url }}
             - name: REDIS_URL
@@ -71,44 +71,44 @@ spec:
                   name: {{ include "gomodel.providerSecretName" . }}
                   key: REDIS_URL
                   optional: true
-            - name: REDIS_KEY_MODELS
+            - name: GOMODEL_REDIS_KEY_MODELS
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: REDIS_KEY_MODELS
-            - name: REDIS_KEY_RESPONSES
+                  key: GOMODEL_REDIS_KEY_MODELS
+            - name: GOMODEL_REDIS_KEY_RESPONSES
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: REDIS_KEY_RESPONSES
-            - name: REDIS_TTL_MODELS
+                  key: GOMODEL_REDIS_KEY_RESPONSES
+            - name: GOMODEL_REDIS_TTL_MODELS
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: REDIS_TTL_MODELS
-            - name: REDIS_TTL_RESPONSES
+                  key: GOMODEL_REDIS_TTL_MODELS
+            - name: GOMODEL_REDIS_TTL_RESPONSES
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: REDIS_TTL_RESPONSES
+                  key: GOMODEL_REDIS_TTL_RESPONSES
             {{- end }}
             # Logging configuration
-            - name: LOG_FORMAT
+            - name: GOMODEL_LOG_FORMAT
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: LOG_FORMAT
+                  key: GOMODEL_LOG_FORMAT
             # Metrics configuration
-            - name: METRICS_ENABLED
+            - name: GOMODEL_METRICS_ENABLED
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: METRICS_ENABLED
-            - name: METRICS_ENDPOINT
+                  key: GOMODEL_METRICS_ENABLED
+            - name: GOMODEL_METRICS_ENDPOINT
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: METRICS_ENDPOINT
+                  key: GOMODEL_METRICS_ENDPOINT
             # Authentication
             {{- if or .Values.auth.masterKey .Values.auth.existingSecret }}
             - name: GOMODEL_MASTER_KEY

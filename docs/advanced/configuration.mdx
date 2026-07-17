@@ -36,15 +36,27 @@ GoModel automatically discovers providers from well-known environment variables.
 
 The most common way to configure GoModel. Set any of the variables below to override defaults.
 
+<Note>
+  GoModel-defined variables are canonically spelled `GOMODEL_<NAME>`, as shown
+  below. The unprefixed spellings from earlier releases (`SQLITE_PATH`,
+  `LOGGING_ENABLED`, ...) still work but are deprecated — each logs a startup
+  warning naming its replacement, and they will be removed in a future major
+  release. When both spellings are set, the `GOMODEL_` one wins. Two groups
+  keep their bare names permanently: `PORT` and `REDIS_URL` (injected by PaaS
+  platforms), and the provider family (`OPENAI_API_KEY`, `<PROVIDER>_BASE_URL`,
+  `<PROVIDER>_MODELS`, ...), which lives in each vendor's namespace and is what
+  makes GoModel drop-in compatible.
+</Note>
+
 #### Server
 
 | Variable             | Description                                           | Default                |
 | -------------------- | ----------------------------------------------------- | ---------------------- |
 | `PORT`               | HTTP server port                                      | `8080`                 |
-| `BASE_PATH`          | Mount path prefix, for example `/g`                   | `/`                    |
+| `GOMODEL_BASE_PATH`          | Mount path prefix, for example `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | Authentication key for securing the gateway           | _(empty, unsafe mode)_ |
-| `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
-| `USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
+| `GOMODEL_BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
+| `GOMODEL_USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
 
 #### MCP Gateway
 
@@ -52,8 +64,8 @@ See [MCP Gateway](/features/mcp-gateway) for the full feature guide.
 
 | Variable      | Description                                                                                                                      | Default            |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `MCP_ENABLED` | Expose the MCP endpoints `/mcp` and `/mcp/{server}`                                                                              | `true`             |
-| `MCP_SERVERS` | JSON object of upstream MCP servers, merged over the `mcp.servers` YAML map per name (entries are read-only in the dashboard)     | _(none)_           |
+| `GOMODEL_MCP_ENABLED` | Expose the MCP endpoints `/mcp` and `/mcp/{server}`                                                                              | `true`             |
+| `GOMODEL_MCP_SERVERS` | JSON object of upstream MCP servers, merged over the `mcp.servers` YAML map per name (entries are read-only in the dashboard)     | _(none)_           |
 
 #### Logging
 
@@ -62,21 +74,21 @@ bodies, headers), see [Audit Logging](#audit-logging) below.
 
 | Variable     | Description                                                                                                                                                                       | Default              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `LOG_FORMAT` | `text` for colorized human output, `json` for structured logs. Unset auto-detects: text on a TTY, JSON otherwise. Force `json` in production / CloudWatch / Datadog / GCP setups. | _(auto-detect)_      |
-| `LOG_LEVEL`  | Minimum log level: `debug`, `info`, `warn`, `error`. Aliases `dbg`, `inf`, `warning`, `err` are also accepted.                                                                    | `info`               |
+| `GOMODEL_LOG_FORMAT` | `text` for colorized human output, `json` for structured logs. Unset auto-detects: text on a TTY, JSON otherwise. Force `json` in production / CloudWatch / Datadog / GCP setups. | _(auto-detect)_      |
+| `GOMODEL_LOG_LEVEL`  | Minimum log level: `debug`, `info`, `warn`, `error`. Aliases `dbg`, `inf`, `warning`, `err` are also accepted.                                                                    | `info`               |
 
 #### Cache
 
 | Variable            | Description                       | Default          |
 | ------------------- | --------------------------------- | ---------------- |
 | `GOMODEL_CACHE_DIR` | Directory for local cache files   | `.cache`         |
-| `CACHE_REFRESH_INTERVAL` | Seconds between provider model re-discovery runs | `3600` (1h) |
-| `PROVIDER_RECHECK_INTERVAL` | Seconds between re-probes of providers whose last refresh failed (`0` disables) | `60` |
+| `GOMODEL_CACHE_REFRESH_INTERVAL` | Seconds between provider model re-discovery runs | `3600` (1h) |
+| `GOMODEL_PROVIDER_RECHECK_INTERVAL` | Seconds between re-probes of providers whose last refresh failed (`0` disables) | `60` |
 | `REDIS_URL`         | Redis connection URL              | _(empty)_        |
-| `REDIS_KEY_MODELS`     | Redis key for model cache           | `gomodel:models`    |
-| `REDIS_KEY_RESPONSES`  | Redis key for response cache        | `gomodel:response:` |
-| `REDIS_TTL_MODELS`     | TTL in seconds for model cache      | `86400` (24h)    |
-| `REDIS_TTL_RESPONSES`  | TTL in seconds for response cache   | `3600` (1h)      |
+| `GOMODEL_REDIS_KEY_MODELS`     | Redis key for model cache           | `gomodel:models`    |
+| `GOMODEL_REDIS_KEY_RESPONSES`  | Redis key for response cache        | `gomodel:response:` |
+| `GOMODEL_REDIS_TTL_MODELS`     | TTL in seconds for model cache      | `86400` (24h)    |
+| `GOMODEL_REDIS_TTL_RESPONSES`  | TTL in seconds for response cache   | `3600` (1h)      |
 
 <Tip>
   See [Cache](/features/cache) for exact-cache behavior, response headers,
@@ -85,8 +97,8 @@ bodies, headers), see [Audit Logging](#audit-logging) below.
 </Tip>
 
 <Note>
-  `CACHE_REFRESH_INTERVAL` also sets how often the dashboard re-checks
-  provider health ("Last checked"), and `PROVIDER_RECHECK_INTERVAL` how
+  `GOMODEL_CACHE_REFRESH_INTERVAL` also sets how often the dashboard re-checks
+  provider health ("Last checked"), and `GOMODEL_PROVIDER_RECHECK_INTERVAL` how
   quickly a failed provider is re-probed for recovery. See
   [Resilience](/advanced/resilience#circuit-breaker-and-dashboard-provider-health).
 </Note>
@@ -97,34 +109,34 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 
 | Variable             | Description                                   | Default           |
 | -------------------- | --------------------------------------------- | ----------------- |
-| `STORAGE_TYPE`       | Backend: `sqlite`, `postgresql`, or `mongodb` | `sqlite`          |
-| `SQLITE_PATH`        | SQLite database file path                     | `data/gomodel.db` |
-| `POSTGRES_URL`       | PostgreSQL connection string                  | _(empty)_         |
-| `POSTGRES_MAX_CONNS` | PostgreSQL connection pool size               | `10`              |
-| `MONGODB_URL`        | MongoDB connection string; a database named in its path is used | _(empty)_ |
-| `MONGODB_DATABASE`   | MongoDB database name; overrides the URL path | `gomodel`         |
+| `GOMODEL_STORAGE_TYPE`       | Backend: `sqlite`, `postgresql`, or `mongodb` | `sqlite`          |
+| `GOMODEL_SQLITE_PATH`        | SQLite database file path                     | `data/gomodel.db` |
+| `GOMODEL_POSTGRES_URL`       | PostgreSQL connection string                  | _(empty)_         |
+| `GOMODEL_POSTGRES_MAX_CONNS` | PostgreSQL connection pool size               | `10`              |
+| `GOMODEL_MONGODB_URL`        | MongoDB connection string; a database named in its path is used | _(empty)_ |
+| `GOMODEL_MONGODB_DATABASE`   | MongoDB database name; overrides the URL path | `gomodel`         |
 
 #### Audit Logging
 
 | Variable                          | Description                                | Default |
 | --------------------------------- | ------------------------------------------ | ------- |
-| `LOGGING_ENABLED`                 | Enable audit logging                       | `false` |
-| `LOGGING_LOG_BODIES`              | Log request/response bodies                | `true`  |
-| `LOGGING_LOG_AUDIO_BODIES`        | Log audio endpoint inputs/outputs          | `false` |
-| `LOGGING_LOG_HEADERS`             | Log headers (sensitive ones auto-redacted) | `true`  |
-| `LOGGING_ONLY_MODEL_INTERACTIONS` | Only log AI model endpoints                | `true`  |
-| `LOGGING_BUFFER_SIZE`             | In-memory buffer before flush              | `1000`  |
-| `LOGGING_FLUSH_INTERVAL`          | Flush interval in seconds                  | `5`     |
-| `LOGGING_RETENTION_DAYS`          | Auto-delete after N days (0 = forever)     | `30`    |
+| `GOMODEL_LOGGING_ENABLED`                 | Enable audit logging                       | `false` |
+| `GOMODEL_LOGGING_LOG_BODIES`              | Log request/response bodies                | `true`  |
+| `GOMODEL_LOGGING_LOG_AUDIO_BODIES`        | Log audio endpoint inputs/outputs          | `false` |
+| `GOMODEL_LOGGING_LOG_HEADERS`             | Log headers (sensitive ones auto-redacted) | `true`  |
+| `GOMODEL_LOGGING_ONLY_MODEL_INTERACTIONS` | Only log AI model endpoints                | `true`  |
+| `GOMODEL_LOGGING_BUFFER_SIZE`             | In-memory buffer before flush              | `1000`  |
+| `GOMODEL_LOGGING_FLUSH_INTERVAL`          | Flush interval in seconds                  | `5`     |
+| `GOMODEL_LOGGING_RETENTION_DAYS`          | Auto-delete after N days (0 = forever)     | `30`    |
 
 <Warning>
-  When `LOGGING_LOG_BODIES` is enabled, request and response bodies are stored
+  When `GOMODEL_LOGGING_LOG_BODIES` is enabled, request and response bodies are stored
   in full. These may contain sensitive data such as PII or API keys embedded in
   prompts.
 </Warning>
 
 <Note>
-  `LOGGING_LOG_AUDIO_BODIES` refines `LOGGING_LOG_BODIES` for audio endpoints —
+  `GOMODEL_LOGGING_LOG_AUDIO_BODIES` refines `GOMODEL_LOGGING_LOG_BODIES` for audio endpoints —
   it has no effect unless body logging is enabled. With both on, `/v1/audio/speech`
   stores its text input and the generated audio (base64, capped at 8 MB) so the
   dashboard can play it back, and `/v1/audio/transcriptions` stores the uploaded
@@ -140,12 +152,12 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 
 | Variable                       | Description                                    | Default |
 | ------------------------------ | ---------------------------------------------- | ------- |
-| `USAGE_ENABLED`                | Enable token usage tracking                    | `true`  |
-| `USAGE_PRICING_RECALCULATION_ENABLED` | Enable the admin usage pricing recalculation action when supported | `true` |
-| `ENFORCE_RETURNING_USAGE_DATA` | Auto-add `include_usage` to streaming requests | `true`  |
-| `USAGE_BUFFER_SIZE`            | In-memory buffer before flush                  | `1000`  |
-| `USAGE_FLUSH_INTERVAL`         | Flush interval in seconds                      | `5`     |
-| `USAGE_RETENTION_DAYS`         | Auto-delete after N days (0 = forever)         | `90`    |
+| `GOMODEL_USAGE_ENABLED`                | Enable token usage tracking                    | `true`  |
+| `GOMODEL_USAGE_PRICING_RECALCULATION_ENABLED` | Enable the admin usage pricing recalculation action when supported | `true` |
+| `GOMODEL_ENFORCE_RETURNING_USAGE_DATA` | Auto-add `include_usage` to streaming requests | `true`  |
+| `GOMODEL_USAGE_BUFFER_SIZE`            | In-memory buffer before flush                  | `1000`  |
+| `GOMODEL_USAGE_FLUSH_INTERVAL`         | Flush interval in seconds                      | `5`     |
+| `GOMODEL_USAGE_RETENTION_DAYS`         | Auto-delete after N days (0 = forever)         | `90`    |
 
 #### Budgets
 
@@ -154,26 +166,26 @@ starts with budget management disabled and logs a warning.
 
 | Variable            | Description                                             | Default |
 | ------------------- | ------------------------------------------------------- | ------- |
-| `BUDGETS_ENABLED`   | Enable budget management and workflow budget checks when usage tracking is enabled | `true`  |
-| `SET_BUDGET_<PATH>` | Seed budget limits for a user path, such as `daily=10` | _(empty)_ |
+| `GOMODEL_BUDGETS_ENABLED`   | Enable budget management and workflow budget checks when usage tracking is enabled | `true`  |
+| `GOMODEL_SET_BUDGET_<PATH>` | Seed budget limits for a user path, such as `daily=10` | _(empty)_ |
 
-`SET_BUDGET_<PATH>` supports the standard periods `hourly`, `daily`, `weekly`,
+`GOMODEL_SET_BUDGET_<PATH>` supports the standard periods `hourly`, `daily`, `weekly`,
 and `monthly`. The `<PATH>` suffix is lowercased; use double underscores
 (`__`) between path segments, while single underscores stay inside a segment.
-For example, `SET_BUDGET_TEAM__ALPHA__SERVICE="daily=10"` configures
-`/team/alpha/service`, and `SET_BUDGET_TEAM_ALPHA="daily=10"` configures
+For example, `GOMODEL_SET_BUDGET_TEAM__ALPHA__SERVICE="daily=10"` configures
+`/team/alpha/service`, and `GOMODEL_SET_BUDGET_TEAM_ALPHA="daily=10"` configures
 `/team_alpha`. This differs from provider `<SUFFIX>` variables below, which
 convert underscores to hyphens in provider names.
 
-`SET_BUDGET_="monthly=500"` means a literal environment variable named
-`SET_BUDGET_`, which configures the root path `/`. POSIX permits that name, but
+`GOMODEL_SET_BUDGET_="monthly=500"` means a literal environment variable named
+`GOMODEL_SET_BUDGET_`, which configures the root path `/`. POSIX permits that name, but
 some shells and orchestrators, including some Kubernetes validators, may reject
 it. Use YAML or the dashboard when your environment cannot set it.
 
 Migration note: budget management depends on usage tracking. If
-`USAGE_ENABLED=false`, GoModel starts with budgets disabled and logs a warning,
-even when `BUDGETS_ENABLED=true`. Set both `USAGE_ENABLED=true` and
-`BUDGETS_ENABLED=true` to enforce budgets.
+`GOMODEL_USAGE_ENABLED=false`, GoModel starts with budgets disabled and logs a warning,
+even when `GOMODEL_BUDGETS_ENABLED=true`. Set both `GOMODEL_USAGE_ENABLED=true` and
+`GOMODEL_BUDGETS_ENABLED=true` to enforce budgets.
 
 See [Budgets](/features/budgets) for YAML examples, periods, matching, and
 workflow enforcement.
@@ -187,19 +199,19 @@ workflow enforcement.
 
 | Variable           | Description                              | Default    |
 | ------------------ | ---------------------------------------- | ---------- |
-| `METRICS_ENABLED`  | Enable Prometheus metrics (experimental) | `false`    |
-| `METRICS_ENDPOINT` | HTTP path for metrics                    | `/metrics` |
+| `GOMODEL_METRICS_ENABLED`  | Enable Prometheus metrics (experimental) | `false`    |
+| `GOMODEL_METRICS_ENDPOINT` | HTTP path for metrics                    | `/metrics` |
 
 #### Admin
 
 | Variable                              | Description                                      | Default |
 | ------------------------------------- | ------------------------------------------------ | ------- |
-| `ADMIN_ENDPOINTS_ENABLED`             | Enable the admin REST API                        | `true`  |
-| `ADMIN_UI_ENABLED`                    | Enable the admin dashboard UI                    | `true`  |
-| `DASHBOARD_LIVE_LOGS_ENABLED`         | Stream realtime dashboard audit/usage previews   | `true`  |
-| `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | In-memory replay window for live dashboard events | `10000` |
-| `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Max events replayed to one reconnecting client   | `1000`  |
-| `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | Idle stream heartbeat interval in seconds      | `15`    |
+| `GOMODEL_ADMIN_ENDPOINTS_ENABLED`             | Enable the admin REST API                        | `true`  |
+| `GOMODEL_ADMIN_UI_ENABLED`                    | Enable the admin dashboard UI                    | `true`  |
+| `GOMODEL_DASHBOARD_LIVE_LOGS_ENABLED`         | Stream realtime dashboard audit/usage previews   | `true`  |
+| `GOMODEL_DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | In-memory replay window for live dashboard events | `10000` |
+| `GOMODEL_DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Max events replayed to one reconnecting client   | `1000`  |
+| `GOMODEL_DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | Idle stream heartbeat interval in seconds      | `15`    |
 
 Live dashboard logs are compact previews for the Audit Logs and Usage pages.
 They update rows before the async database flush finishes. The stored audit and
@@ -212,8 +224,8 @@ These control timeouts for upstream API requests to LLM providers.
 
 | Variable                       | Description                                  | Default        |
 | ------------------------------ | -------------------------------------------- | -------------- |
-| `HTTP_TIMEOUT`                 | Overall request timeout in seconds           | `600` (10 min) |
-| `HTTP_RESPONSE_HEADER_TIMEOUT` | Time to wait for response headers in seconds | `600` (10 min) |
+| `GOMODEL_HTTP_TIMEOUT`                 | Overall request timeout in seconds           | `600` (10 min) |
+| `GOMODEL_HTTP_RESPONSE_HEADER_TIMEOUT` | Time to wait for response headers in seconds | `600` (10 min) |
 
 #### Provider API Keys
 
@@ -240,14 +252,14 @@ Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example 
 Every provider type also accepts a comma-separated configured model list via
 `<PROVIDER>_MODELS`, for example `OPENROUTER_MODELS`, `ORACLE_MODELS`,
 `AZURE_MODELS`, or `VLLM_MODELS`. By default,
-`CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses configured lists only when
+`GOMODEL_CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses configured lists only when
 upstream `/models` fails, returns nil, or returns an empty list. Set
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models for
+`GOMODEL_CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models for
 providers that define a list and skip their upstream `/models` calls. YAML
 `providers.<name>.models` provides the same model-list input for named provider
 blocks.
 
-For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
+For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `GOMODEL_OPENROUTER_SITE_URL` and `GOMODEL_OPENROUTER_APP_NAME`.
 
 ### 2. `.env` File
 
@@ -256,7 +268,7 @@ GoModel automatically loads a `.env` file from the working directory at startup.
 ```bash
 # .env
 PORT=3000
-BASE_PATH=/g
+GOMODEL_BASE_PATH=/g
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 ```
@@ -371,7 +383,7 @@ export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecl
 export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optional configured model list
 export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
 export KILO_MODELS="anthropic/claude-sonnet-4.5,openai/gpt-5.5"
-export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback or allowlist
+export GOMODEL_CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback or allowlist
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
 export VLLM_BASE_URL="http://localhost:8000/v1" # Registers keyless "vllm" provider
 # Optional: export VLLM_API_KEY="token-abc123"
@@ -544,7 +556,7 @@ them.
 
 | Variable                       | Description                                       | Default |
 | ------------------------------ | ------------------------------------------------- | ------- |
-| `ANTHROPIC_DEFAULT_MAX_TOKENS` | Value injected when the caller omits `max_tokens` | `4096`  |
+| `GOMODEL_ANTHROPIC_DEFAULT_MAX_TOKENS` | Value injected when the caller omits `max_tokens` | `4096`  |
 
 Raise this for newer models that routinely produce longer outputs (Sonnet 4.6,
 Opus 4.7). Setting `max_tokens` explicitly on a request always wins over the

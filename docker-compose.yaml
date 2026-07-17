@@ -16,15 +16,15 @@ services:
       # Cache configuration
       - REDIS_URL=redis://redis:6379
       # Metrics
-      - METRICS_ENABLED=true
+      - GOMODEL_METRICS_ENABLED=true
       # Storage configuration (PostgreSQL for audit logs)
-      - POSTGRES_URL=postgres://gomodel:gomodel@postgres:5432/gomodel
+      - GOMODEL_POSTGRES_URL=postgres://gomodel:gomodel@postgres:5432/gomodel
       # MongoDB configuration (uncomment to use MongoDB instead)
-      - MONGODB_URL=mongodb://mongodb:27017/gomodel
+      - GOMODEL_MONGODB_URL=mongodb://mongodb:27017/gomodel
       # Audit logging - all enabled with PostgreSQL
-      - LOGGING_ENABLED=true
-      # - STORAGE_TYPE=postgresql
-      - STORAGE_TYPE=mongodb
+      - GOMODEL_LOGGING_ENABLED=true
+      # - GOMODEL_STORAGE_TYPE=postgresql
+      - GOMODEL_STORAGE_TYPE=mongodb
     depends_on:
       redis:
         condition: service_healthy

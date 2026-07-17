@@ -41,7 +41,7 @@ gomodel --health
 
 The probe always targets the loopback interface (`127.0.0.1`) since it runs
 inside the same container as the server, but it derives the `PORT` and
-`BASE_PATH` from configuration instead of hardcoding `8080` and `/health`. Bound
+`GOMODEL_BASE_PATH` from configuration instead of hardcoding `8080` and `/health`. Bound
 the request with `--health-timeout`:
 
 ```bash

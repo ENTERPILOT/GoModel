@@ -5,20 +5,20 @@
 
 server:
   port: "8080"
-  base_path: "/" # env: BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/
+  base_path: "/" # env: GOMODEL_BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/
   master_key: "your-secret-key"
   body_size_limit: "10M"
-  swagger_enabled: false # env: SWAGGER_ENABLED; requires a binary built with -tags=swagger
+  swagger_enabled: false # env: GOMODEL_SWAGGER_ENABLED; requires a binary built with -tags=swagger
   pprof_enabled: false # expose /debug/pprof/* for local profiling only
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
-  user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
+  user_path_header: "X-GoModel-User-Path" # env: GOMODEL_USER_PATH_HEADER; inbound header used for user_path scoping
   enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "kilo", "zai", "vllm", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
-  realtime_enabled: true # env: REALTIME_ENABLED; expose /v1/realtime websocket and /p/{provider}/v1/realtime upgrades (OpenAI only)
+  realtime_enabled: true # env: GOMODEL_REALTIME_ENABLED; expose /v1/realtime websocket and /p/{provider}/v1/realtime upgrades (OpenAI only)
 
 models:
-  enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an access override allows one or more user paths
-  configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists
+  enabled_by_default: true # env: GOMODEL_MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an access override allows one or more user paths
+  configured_provider_models_mode: "fallback" # env: GOMODEL_CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists
 
 # Tagging based on headers: label every request from the listed headers. Labels
 # are recorded in usage tracking and audit logs. A header value can carry several
@@ -27,10 +27,10 @@ models:
 # `do_not_pass: true`. An env entry replaces the whole YAML entry with the same
 # header name (unset companion vars reset fields to defaults, they do not
 # inherit the YAML values); other env entries are appended:
-#   TAGGING_HEADER_1=X-My-Tags
-#   TAGGING_HEADER_1_PREFIX=tag-        # optional
-#   TAGGING_HEADER_1_DONOTPASS=true     # optional, default false (headers are passed as-is)
-#   TAGGING_HEADER_1_DELIMITER=";"      # optional, default ","
+#   GOMODEL_TAGGING_HEADER_1=X-My-Tags
+#   GOMODEL_TAGGING_HEADER_1_PREFIX=tag-        # optional
+#   GOMODEL_TAGGING_HEADER_1_DONOTPASS=true     # optional, default false (headers are passed as-is)
+#   GOMODEL_TAGGING_HEADER_1_DELIMITER=";"      # optional, default ","
 # Entries declared here or via env are read-only in the dashboard; omit this
 # section to manage tagging headers only from the UI (Settings → Tagging based on headers).
 # tagging:
@@ -43,7 +43,7 @@ models:
 
 # Virtual models as infrastructure-as-code: redirects, load balancers, and access
 # policies. These override admin-store rows with the same source and are read-only
-# in the dashboard. The VIRTUAL_MODELS env var (a JSON array) merges over this list
+# in the dashboard. The GOMODEL_VIRTUAL_MODELS env var (a JSON array) merges over this list
 # and wins per source. Omit this section to manage virtual models only from the UI.
 # virtual_models:
 #   - source: regular # a plain alias
@@ -62,13 +62,13 @@ models:
 # MCP gateway: aggregate upstream MCP (Model Context Protocol) servers behind the
 # authenticated /mcp endpoint. Tools/prompts are namespaced as {server}_{name};
 # /mcp/{server} exposes one upstream with original names. Servers declared here or
-# via the MCP_SERVERS env var (a JSON object merged over this map, winning per name)
+# via the GOMODEL_MCP_SERVERS env var (a JSON object merged over this map, winning per name)
 # are read-only in the dashboard; the dashboard manages its own additional servers.
 # The gateway is the credential boundary: client API keys never reach an upstream,
 # and upstream headers support ${ENV} references. `user_paths` limits which callers
 # can even discover a server (subtree match, like virtual models).
 # mcp:
-#   enabled: true # env: MCP_ENABLED (default: true; a no-op with no servers)
+#   enabled: true # env: GOMODEL_MCP_ENABLED (default: true; a no-op with no servers)
 #   servers:
 #     github:
 #       url: https://api.githubcopilot.com/mcp
@@ -90,7 +90,7 @@ models:
 cache:
   model:
     refresh_interval: 3600 # how often to refresh the model registry (seconds, default: 3600)
-    recheck_interval: 60 # env: PROVIDER_RECHECK_INTERVAL; how often providers whose last refresh failed are re-probed for recovery (seconds, default: 60; 0 disables)
+    recheck_interval: 60 # env: GOMODEL_PROVIDER_RECHECK_INTERVAL; how often providers whose last refresh failed are re-probed for recovery (seconds, default: 60; 0 disables)
     local:
       cache_dir: ".cache" # local cache directory
     # To use Redis instead of local cache, remove `local` and uncomment:
@@ -99,13 +99,13 @@ cache:
     #   key: "gomodel:models"
     #   ttl: 86400 # 24 hours in seconds
   # response:
-  #   simple: # omit the whole `simple` key to disable exact-match caching (unless RESPONSE_CACHE_SIMPLE_ENABLED=true)
+  #   simple: # omit the whole `simple` key to disable exact-match caching (unless GOMODEL_RESPONSE_CACHE_SIMPLE_ENABLED=true)
   #     enabled: true # default when `simple` is present; set false to disable while keeping the block
   #     redis:
   #       url: "redis://localhost:6379"
   #       key: "gomodel:response:"
   #       ttl: 3600
-  #   semantic: # omit the whole `semantic` key to disable semantic caching (unless SEMANTIC_CACHE_ENABLED=true)
+  #   semantic: # omit the whole `semantic` key to disable semantic caching (unless GOMODEL_SEMANTIC_CACHE_ENABLED=true)
   #     enabled: true
   #     embedder:
   #       provider: openai # must match a key under `providers` (openai, gemini, groq, …)
@@ -151,7 +151,7 @@ logging:
   only_model_interactions: true
 
 usage:
-  # Usage actions require USAGE_ENABLED=true (or usage.enabled: true) and a supported
+  # Usage actions require GOMODEL_USAGE_ENABLED=true (or usage.enabled: true) and a supported
   # storage backend; pricing recalculation appears only when both usage tracking and
   # pricing_recalculation_enabled are enabled.
   enabled: true
@@ -162,10 +162,10 @@ usage:
   retention_days: 90
 
 budgets:
-  enabled: true # env: BUDGETS_ENABLED; with no configured budgets this has no effect
+  enabled: true # env: GOMODEL_BUDGETS_ENABLED; with no configured budgets this has no effect
   user_paths:
     # Env equivalent:
-    # SET_BUDGET_USER__PATH__EXAMPLE="daily=10,weekly=50"
+    # GOMODEL_SET_BUDGET_USER__PATH__EXAMPLE="daily=10,weekly=50"
     - path: "/user/path/example"
       limits:
         - period: "daily" # hourly, daily, weekly, monthly; stored in DB as period_seconds
@@ -174,15 +174,15 @@ budgets:
           amount: 50.00
 
 rate_limits:
-  enabled: true # env: RATE_LIMITS_ENABLED; with no configured rules this has no effect
+  enabled: true # env: GOMODEL_RATE_LIMITS_ENABLED; with no configured rules this has no effect
   user_paths:
     # Env equivalent:
-    # SET_RATE_LIMIT_USER__PATH__EXAMPLE="rpm=100,tpm=50000,rpd=10000,concurrent=10"
+    # GOMODEL_SET_RATE_LIMIT_USER__PATH__EXAMPLE="rpm=100,tpm=50000,rpd=10000,concurrent=10"
     - path: "/user/path/example"
       limits:
         - period: "minute" # minute, hour, day, concurrent; stored in DB as period_seconds
           max_requests: 100
-          max_tokens: 50000 # requires usage tracking (USAGE_ENABLED=true)
+          max_tokens: 50000 # requires usage tracking (GOMODEL_USAGE_ENABLED=true)
         - period: "day"
           max_requests: 10000
         - period: "concurrent" # max_requests caps in-flight requests
@@ -190,7 +190,7 @@ rate_limits:
   # Provider rules cap one configured provider across all consumers and
   # models. Virtual-model load balancing and failover skip a saturated
   # provider while another target has capacity; when no target can take the
-  # request it gets 429. Env equivalent: SET_PROVIDER_RATE_LIMIT_OPENAI="rpm=500"
+  # request it gets 429. Env equivalent: GOMODEL_SET_PROVIDER_RATE_LIMIT_OPENAI="rpm=500"
   providers:
     - name: "openai"
       limits:
@@ -280,7 +280,7 @@ guardrails:
     #     # prompt: "Custom rewrite instructions here."
 
 failover:
-  enabled: true # env: FAILOVER_ENABLED; default true
+  enabled: true # env: GOMODEL_FAILOVER_ENABLED; default true
   manual_rules_path: "config/failover.example.json" # optional JSON map: {"primary-model": ["fallback-1", "provider/model"]}
   rules:
     "gpt-4o":

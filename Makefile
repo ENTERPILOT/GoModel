@@ -7,8 +7,8 @@ VERSION ?= $(shell git describe --tags --always --dirty)
 COMMIT ?= $(shell git rev-parse --short HEAD)
 DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 DOCS_API_SERVERS ?= http://localhost:8080
-LOG_LEVEL ?= debug
-SWAGGER_ENABLED ?= true
+GOMODEL_LOG_LEVEL ?= debug
+GOMODEL_SWAGGER_ENABLED ?= true
 
 # Build tags covering every file the linter and fixers must see. Without these,
 # tag-gated files (tests/e2e, tests/integration, tests/contract) are skipped.
@@ -28,7 +28,7 @@ build:
 	go build -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
 # Run the application
 run:
-	LOG_LEVEL=$(LOG_LEVEL) SWAGGER_ENABLED=$(SWAGGER_ENABLED) go run -tags=swagger ./cmd/gomodel
+	GOMODEL_LOG_LEVEL=$(GOMODEL_LOG_LEVEL) GOMODEL_SWAGGER_ENABLED=$(GOMODEL_SWAGGER_ENABLED) go run -tags=swagger ./cmd/gomodel
 
 # Clean build artifacts
 clean:
@@ -47,7 +47,7 @@ image:
 	docker compose --profile app up -d
 
 # Seed rolling demo usage/audit data into SQLite.
-# Usage: SQLITE_PATH=data/gomodel.db make seed-demo-data
+# Usage: GOMODEL_SQLITE_PATH=data/gomodel.db make seed-demo-data
 seed-demo-data:
 	bash tools/seed-demo-data.sh
 

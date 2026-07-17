@@ -1,6 +1,8 @@
 # Environment variable prefix migration
 
-Status: mechanism shipped; documentation rename pending.
+Status: mechanism shipped; documentation surface renamed to canonical
+spellings (docs site, README, .env.template, config.example.yaml, helm,
+docker-compose, Makefile).
 
 GoModel-defined environment variables are canonically spelled `GOMODEL_<NAME>`.
 The unprefixed spelling still resolves but is deprecated and warns once per
@@ -121,13 +123,12 @@ the named reads outside the tag walker (`GOMODEL_CONFIG_STRICT`,
 
 ## Remaining work
 
-The mechanism is in place and both spellings work. Still to do:
+The mechanism is in place, both spellings work, and the documentation surface
+(docs site, `README.md`, `.env.template`, `config/config.example.yaml`,
+`CLAUDE.md`, `helm/`, `docker-compose.yaml`, `Makefile`) teaches the canonical
+spellings. Dated material under `docs/dev/`, `docs/adr/`, and the benchmark
+directories deliberately keeps the spellings it was written with. Still to do:
 
-1. Rename the variables throughout the documentation surface to the canonical
-   spelling: `.env.template`, `config/config.example.yaml`, `README.md`,
-   `CLAUDE.md`, `helm/`, `docker-compose.yaml`, and the benchmark compose files.
-   Deliberately not done in the mechanism PR: it is a large mechanical diff, and
-   the exempt rules above make a blind find-and-replace unsafe.
-2. Decide on accepting bare `DATABASE_URL` for Postgres (PaaS interop win, new
+1. Decide on accepting bare `DATABASE_URL` for Postgres (PaaS interop win, new
    behavior rather than a rename).
-3. Pick the release that removes the legacy spellings.
+2. Pick the release that removes the legacy spellings.

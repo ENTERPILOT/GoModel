@@ -28,14 +28,14 @@ Use budgets when you want limits such as:
 Budgets are enabled by default:
 
 ```env
-BUDGETS_ENABLED=true
+GOMODEL_BUDGETS_ENABLED=true
 ```
 
 Budgets depend on usage tracking because spend is calculated from usage cost
 records:
 
 ```env
-USAGE_ENABLED=true
+GOMODEL_USAGE_ENABLED=true
 ```
 
 If usage tracking is disabled, GoModel starts with budget management disabled
@@ -73,16 +73,16 @@ budgets:
 Or use environment variables:
 
 ```env
-SET_BUDGET_TEAM__ALPHA="daily=10,weekly=50"
-SET_BUDGET_="monthly=500"
+GOMODEL_SET_BUDGET_TEAM__ALPHA="daily=10,weekly=50"
+GOMODEL_SET_BUDGET_="monthly=500"
 ```
 
-The suffix after `SET_BUDGET_` becomes a user path. Use double underscores
+The suffix after `GOMODEL_SET_BUDGET_` becomes a user path. Use double underscores
 (`__`) between path segments; single underscores remain part of a segment:
 
-- `SET_BUDGET_TEAM__ALPHA` -> `/team/alpha`
-- `SET_BUDGET_USER_123` -> `/user_123`
-- `SET_BUDGET_` -> `/`
+- `GOMODEL_SET_BUDGET_TEAM__ALPHA` -> `/team/alpha`
+- `GOMODEL_SET_BUDGET_USER_123` -> `/user_123`
+- `GOMODEL_SET_BUDGET_` -> `/`
 
 There is no escape for a literal double underscore inside a path segment. Use
 YAML or the dashboard for paths that need a `__` segment value.

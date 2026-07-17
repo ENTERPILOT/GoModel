@@ -100,7 +100,7 @@ curl http://localhost:8080/v1/usage \
 Aggregated from tracked requests over the date window, with the same token and
 [estimated-cost](/features/cost-tracking) semantics as the dashboard. Cost
 fields are `null` when no matched request has pricing. The whole block is
-`null` when no storage backend records usage (`USAGE_ENABLED=false` or no
+`null` when no storage backend records usage (`GOMODEL_USAGE_ENABLED=false` or no
 database).
 
 ### `budgets`

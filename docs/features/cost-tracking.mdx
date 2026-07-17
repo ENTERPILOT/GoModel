@@ -68,7 +68,7 @@ A `---` value means the cost is unknown because no pricing was available, which 
 
 ## Recalculate stored costs
 
-Recalculating recomputes the stored cost of matching usage rows from current pricing. Use it after changing an override, or when pricing was unavailable at the time a request ran. The action is enabled by default (`USAGE_PRICING_RECALCULATION_ENABLED`); on the usage view, choose **Recalculate**, then type `recalculate` to confirm. It is scoped to the selected date range, provider or model, and user path.
+Recalculating recomputes the stored cost of matching usage rows from current pricing. Use it after changing an override, or when pricing was unavailable at the time a request ran. The action is enabled by default (`GOMODEL_USAGE_PRICING_RECALCULATION_ENABLED`); on the usage view, choose **Recalculate**, then type `recalculate` to confirm. It is scoped to the selected date range, provider or model, and user path.
 
 <Warning>
   Recalculation **overwrites** the cost fields of every matching row. If a row's

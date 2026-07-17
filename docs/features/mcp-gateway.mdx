@@ -26,7 +26,7 @@ the same way it already sits between your apps and model providers:
   the audit log and request log like any other model traffic — labelled with
   the JSON-RPC method, and with the tool or prompt name for calls, so a
   `tools/call` row reads `github_create_issue`, not a bare path. With
-  `LOGGING_LOG_BODIES=true` the JSON-RPC request and response frames are
+  `GOMODEL_LOGGING_LOG_BODIES=true` the JSON-RPC request and response frames are
   recorded on the audit entry as well (tool arguments and results included),
   subject to the same 1 MB capture cap as other endpoints. User-path
   rate limits and budgets gate MCP requests too.
@@ -78,7 +78,7 @@ shown as the name in the dashboard.
 
 ```yaml
 mcp:
-  enabled: true # default; MCP_ENABLED=false disables the endpoints
+  enabled: true # default; GOMODEL_MCP_ENABLED=false disables the endpoints
   servers:
     github:
       url: https://api.githubcopilot.com/mcp
@@ -92,10 +92,10 @@ mcp:
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 ```
 
-Or via the `MCP_SERVERS` env var (a JSON object, merged over YAML per name):
+Or via the `GOMODEL_MCP_SERVERS` env var (a JSON object, merged over YAML per name):
 
 ```bash
-MCP_SERVERS='{"github":{"url":"https://api.githubcopilot.com/mcp","headers":{"Authorization":"Bearer ${GITHUB_PAT}"}}}'
+GOMODEL_MCP_SERVERS='{"github":{"url":"https://api.githubcopilot.com/mcp","headers":{"Authorization":"Bearer ${GITHUB_PAT}"}}}'
 ```
 
 Per-server fields:
@@ -144,7 +144,7 @@ resource templates with their descriptions, after your `allowed_tools` /
 - **Streamable HTTP origin checks.** Requests carrying an `Origin` header must
   match the GoModel host, preventing browser-based DNS rebinding attacks.
 - **stdio is declarative-only.** stdio servers spawn subprocesses on the
-  gateway host, so they can only be declared in `config.yaml` / `MCP_SERVERS`.
+  gateway host, so they can only be declared in `config.yaml` / `GOMODEL_MCP_SERVERS`.
   The admin API and dashboard reject them — a dashboard login must never be
   equivalent to code execution on the gateway.
 - **stdio subprocesses get a minimal environment.** Only `PATH`, `HOME`,
@@ -155,7 +155,7 @@ resource templates with their descriptions, after your `allowed_tools` /
   admin-created servers are stored in the configured storage backend (they
   are only redacted at the API/UI layer). If your threat model excludes
   secrets in the database, declare those servers in `config.yaml` /
-  `MCP_SERVERS` instead — `${ENV}` references keep the secret in the
+  `GOMODEL_MCP_SERVERS` instead — `${ENV}` references keep the secret in the
   environment, and declarative servers never touch the store.
 - **Remote URLs are server-side egress.** Dashboard-managed HTTP/SSE servers
   deliberately support private and loopback endpoints. Protect admin write

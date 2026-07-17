@@ -77,19 +77,19 @@ in YAML.
 
 | Variable                 | Type     | Default | Description                                |
 | ------------------------ | -------- | ------- | ------------------------------------------ |
-| `RETRY_MAX_RETRIES`      | int      | `3`     | Maximum retry attempts per request         |
-| `RETRY_INITIAL_BACKOFF`  | duration | `1s`    | First retry wait (e.g. `500ms`, `2s`)      |
-| `RETRY_MAX_BACKOFF`      | duration | `30s`   | Upper cap on retry wait                    |
-| `RETRY_BACKOFF_FACTOR`   | float    | `2.0`   | Exponential multiplier between retries     |
-| `RETRY_JITTER_FACTOR`    | float    | `0.1`   | Random jitter as a fraction of the backoff |
+| `GOMODEL_RETRY_MAX_RETRIES`      | int      | `3`     | Maximum retry attempts per request         |
+| `GOMODEL_RETRY_INITIAL_BACKOFF`  | duration | `1s`    | First retry wait (e.g. `500ms`, `2s`)      |
+| `GOMODEL_RETRY_MAX_BACKOFF`      | duration | `30s`   | Upper cap on retry wait                    |
+| `GOMODEL_RETRY_BACKOFF_FACTOR`   | float    | `2.0`   | Exponential multiplier between retries     |
+| `GOMODEL_RETRY_JITTER_FACTOR`    | float    | `0.1`   | Random jitter as a fraction of the backoff |
 
 ### Circuit Breaker
 
 | Variable                            | Type     | Default | Description                                   |
 | ----------------------------------- | -------- | ------- | --------------------------------------------- |
-| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int      | `5`     | Consecutive failures before opening           |
-| `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | int      | `2`     | Consecutive successes to close again          |
-| `CIRCUIT_BREAKER_TIMEOUT`           | duration | `30s`   | How long the circuit stays open before probing |
+| `GOMODEL_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int      | `5`     | Consecutive failures before opening           |
+| `GOMODEL_CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | int      | `2`     | Consecutive successes to close again          |
+| `GOMODEL_CIRCUIT_BREAKER_TIMEOUT`           | duration | `30s`   | How long the circuit stays open before probing |
 
 ## YAML
 
@@ -132,7 +132,7 @@ inherits from the built-in defaults.
 
 <Note>
   Per-provider tuning **must** come from YAML. Environment variables set
-  global defaults only — `RETRY_MAX_RETRIES` cannot target a single provider.
+  global defaults only — `GOMODEL_RETRY_MAX_RETRIES` cannot target a single provider.
   See [config.yaml gotchas](/advanced/config-yaml#gotchas).
 </Note>
 
@@ -177,10 +177,10 @@ state is also exported as the `gomodel_circuit_breaker_state` gauge
 Model discovery is re-checked:
 
 - at startup,
-- on every model registry refresh, controlled by `CACHE_REFRESH_INTERVAL`
+- on every model registry refresh, controlled by `GOMODEL_CACHE_REFRESH_INTERVAL`
   (seconds, default `3600` — hourly),
 - on the fast recheck loop, which re-probes **only** providers whose latest
-  refresh failed, controlled by `PROVIDER_RECHECK_INTERVAL`
+  refresh failed, controlled by `GOMODEL_PROVIDER_RECHECK_INTERVAL`
   (`cache.model.recheck_interval` in `config.yaml`; seconds,
   default `60`; `0` disables), and
 - on demand, when a request asks for a provider-qualified model
@@ -199,7 +199,7 @@ and marked stale, and the dashboard shows the provider as Degraded
   load-balanced redirect keeps working through its healthy targets.
 
 The fast recheck loop re-probes the provider every
-`PROVIDER_RECHECK_INTERVAL` seconds, updating "Last checked" and restoring
+`GOMODEL_PROVIDER_RECHECK_INTERVAL` seconds, updating "Last checked" and restoring
 normal routing typically within a minute of the provider coming back. A
 provider that was already down at startup (nothing discovered yet) shows as
 Unhealthy until its first successful fetch.

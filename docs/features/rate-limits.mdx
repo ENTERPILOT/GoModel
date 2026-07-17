@@ -39,14 +39,14 @@ request and token velocity over seconds-to-a-day with fast in-memory counters.
 Rate limits are enabled by default and cost nothing until rules exist:
 
 ```env
-RATE_LIMITS_ENABLED=true
+GOMODEL_RATE_LIMITS_ENABLED=true
 ```
 
 Token limits (`max_tokens`) are counted from usage records, so they require
 usage tracking:
 
 ```env
-USAGE_ENABLED=true
+GOMODEL_USAGE_ENABLED=true
 ```
 
 Request and concurrency limits work without usage tracking. If token rules are
@@ -103,15 +103,15 @@ rate_limits:
           max_tokens: 90000
 ```
 
-Or use environment variables. User-path rules use `SET_RATE_LIMIT_<PATH>`
-(the suffix maps to a user path exactly like `SET_BUDGET_*`; `__` separates
-path segments); provider rules use `SET_PROVIDER_RATE_LIMIT_<NAME>`
+Or use environment variables. User-path rules use `GOMODEL_SET_RATE_LIMIT_<PATH>`
+(the suffix maps to a user path exactly like `GOMODEL_SET_BUDGET_*`; `__` separates
+path segments); provider rules use `GOMODEL_SET_PROVIDER_RATE_LIMIT_<NAME>`
 (underscores become hyphens, like provider-instance env vars):
 
 ```env
-SET_RATE_LIMIT_TEAM__ALPHA="rpm=100,tpm=50000,rpd=10000,concurrent=10"
-SET_RATE_LIMIT_="rpm=1000"
-SET_PROVIDER_RATE_LIMIT_OPENAI="rpm=500,concurrent=50"
+GOMODEL_SET_RATE_LIMIT_TEAM__ALPHA="rpm=100,tpm=50000,rpd=10000,concurrent=10"
+GOMODEL_SET_RATE_LIMIT_="rpm=1000"
+GOMODEL_SET_PROVIDER_RATE_LIMIT_OPENAI="rpm=500,concurrent=50"
 ```
 
 Compact names map to periods: `rpm`/`tpm` per minute, `rph`/`tph` per hour,
@@ -119,7 +119,7 @@ Compact names map to periods: `rpm`/`tpm` per minute, `rph`/`tph` per hour,
 rule objects is also accepted for custom windows:
 
 ```env
-SET_RATE_LIMIT_TEAM__ALPHA='[{"period_seconds":300,"max_requests":50}]'
+GOMODEL_SET_RATE_LIMIT_TEAM__ALPHA='[{"period_seconds":300,"max_requests":50}]'
 ```
 
 Model rules have no env form (model ids are not env-name safe); declare them

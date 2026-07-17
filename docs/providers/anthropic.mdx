@@ -13,7 +13,7 @@ thinking and effort controls, which differ by model generation.
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
 # ANTHROPIC_BASE_URL=https://api.anthropic.com/v1   # optional override
-# ANTHROPIC_DEFAULT_MAX_TOKENS=4096                 # injected when callers omit max_tokens
+# GOMODEL_ANTHROPIC_DEFAULT_MAX_TOKENS=4096                 # injected when callers omit max_tokens
 ```
 
 Or in `config.yaml`:
@@ -27,7 +27,7 @@ providers:
 
 <Note>
   Anthropic's `/v1/messages` requires `max_tokens` on every request. GoModel
-  injects `ANTHROPIC_DEFAULT_MAX_TOKENS` (default `4096`) when a caller omits
+  injects `GOMODEL_ANTHROPIC_DEFAULT_MAX_TOKENS` (default `4096`) when a caller omits
   it, keeping the OpenAI-compatible surface lenient.
 </Note>
 

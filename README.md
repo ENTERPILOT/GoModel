@@ -36,10 +36,10 @@
 
 ```bash
 docker run --rm -p 8080:8080 \
-  -e LOGGING_ENABLED=true \
-  -e LOGGING_LOG_BODIES=true \
-  -e LOG_FORMAT=text \
-  -e LOGGING_LOG_HEADERS=true \
+  -e GOMODEL_LOGGING_ENABLED=true \
+  -e GOMODEL_LOGGING_LOG_BODIES=true \
+  -e GOMODEL_LOG_FORMAT=text \
+  -e GOMODEL_LOGGING_LOG_HEADERS=true \
   -e OPENAI_API_KEY="your-openai-key" \
   enterpilot/gomodel
 ```

@@ -18,19 +18,19 @@ endpoint in GoModel.
 ### Disabled by Default
 
 Metrics are **disabled by default**. To enable metrics collection, set
-`METRICS_ENABLED=true` and start GoModel:
+`GOMODEL_METRICS_ENABLED=true` and start GoModel:
 
 <CodeGroup>
 
 ```bash Docker (.env file)
-# Add METRICS_ENABLED=true to your .env file, then:
+# Add GOMODEL_METRICS_ENABLED=true to your .env file, then:
 docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
 # Metrics available at http://localhost:8080/metrics
 ```
 
 ```bash Docker (inline -e)
 docker run --rm -p 8080:8080 \
-  -e METRICS_ENABLED=true \
+  -e GOMODEL_METRICS_ENABLED=true \
   enterpilot/gomodel
 # Metrics available at http://localhost:8080/metrics
 ```
@@ -39,7 +39,7 @@ docker run --rm -p 8080:8080 \
 # Requires Go 1.26.4+; produces bin/gomodel.
 make build
 
-export METRICS_ENABLED=true
+export GOMODEL_METRICS_ENABLED=true
 ./bin/gomodel
 # Metrics available at http://localhost:8080/metrics
 ```
@@ -57,13 +57,13 @@ export METRICS_ENABLED=true
 **Option 1: Environment Variable**
 
 ```bash
-METRICS_ENABLED=false
+GOMODEL_METRICS_ENABLED=false
 ```
 
 **Option 2: .env file**
 
 ```bash
-echo "METRICS_ENABLED=false" >> .env
+echo "GOMODEL_METRICS_ENABLED=false" >> .env
 ```
 
 **Option 3: config.yaml**
@@ -78,8 +78,8 @@ metrics:
 Change the default `/metrics` path:
 
 ```bash
-METRICS_ENABLED=true
-METRICS_ENDPOINT=/internal/prometheus
+GOMODEL_METRICS_ENABLED=true
+GOMODEL_METRICS_ENDPOINT=/internal/prometheus
 ```
 
 ## Configuration Options
@@ -88,8 +88,8 @@ METRICS_ENDPOINT=/internal/prometheus
 
 | Variable           | Default    | Description                       |
 | ------------------ | ---------- | --------------------------------- |
-| `METRICS_ENABLED`  | `false`    | Enable/disable metrics collection |
-| `METRICS_ENDPOINT` | `/metrics` | HTTP path for metrics endpoint    |
+| `GOMODEL_METRICS_ENABLED`  | `false`    | Enable/disable metrics collection |
+| `GOMODEL_METRICS_ENDPOINT` | `/metrics` | HTTP path for metrics endpoint    |
 
 ### Via config.yaml
 
@@ -112,8 +112,8 @@ metrics:
 ```bash
 PORT=8080
 GOMODEL_MASTER_KEY=your-secret-key
-METRICS_ENABLED=true
-METRICS_ENDPOINT=/metrics
+GOMODEL_METRICS_ENABLED=true
+GOMODEL_METRICS_ENDPOINT=/metrics
 OPENAI_API_KEY=sk-...
 ```
 
@@ -123,7 +123,7 @@ OPENAI_API_KEY=sk-...
 
 ```bash
 PORT=8080
-METRICS_ENABLED=false
+GOMODEL_METRICS_ENABLED=false
 OPENAI_API_KEY=sk-...
 ```
 
@@ -264,11 +264,11 @@ scrape_configs:
 
 ```bash
 # Check configuration
-echo $METRICS_ENABLED  # "true" enables; empty or "false" disables
+echo $GOMODEL_METRICS_ENABLED  # "true" enables; empty or "false" disables
 ```
 
-Set `METRICS_ENABLED=true` via your `.env` file, an inline `-e METRICS_ENABLED=true`
-flag, or `export METRICS_ENABLED=true` (see the [Quick Start](#disabled-by-default)
+Set `GOMODEL_METRICS_ENABLED=true` via your `.env` file, an inline `-e GOMODEL_METRICS_ENABLED=true`
+flag, or `export GOMODEL_METRICS_ENABLED=true` (see the [Quick Start](#disabled-by-default)
 for the three launch forms), then restart GoModel.
 
 ### No Metrics Data Appearing
@@ -294,13 +294,13 @@ curl http://localhost:8080/metrics | grep gomodel_requests_total
 **Incorrect:**
 
 ```bash
-export METRICS_ENDPOINT=metrics  # Missing leading slash
+export GOMODEL_METRICS_ENDPOINT=metrics  # Missing leading slash
 ```
 
 **Correct:**
 
 ```bash
-export METRICS_ENDPOINT=/metrics  # Has leading slash
+export GOMODEL_METRICS_ENDPOINT=/metrics  # Has leading slash
 ```
 
 ## Best Practices

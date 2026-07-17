@@ -34,7 +34,7 @@ must use the same suffix for each instance: for example, pair
 
 Configured provider model lists can stay in env via `<PROVIDER>_MODELS`, for
 example `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, or `VLLM_MODELS`.
-Set `CONFIGURED_PROVIDER_MODELS_MODE=fallback` (default) to use those lists only
+Set `GOMODEL_CONFIGURED_PROVIDER_MODELS_MODE=fallback` (default) to use those lists only
 when upstream `/models` fails or is empty, or `allowlist` to expose only the
 configured models for providers that define a list and skip their upstream
 `/models` calls.
@@ -60,7 +60,7 @@ silently ignored one. This catches typos (`prot:` instead of `port:`) and, more
 importantly, misindented sections — see the gotcha below.
 
 This applies to `config.yaml` and to the env vars that declare the same
-structures as JSON: `VIRTUAL_MODELS`, `SET_RATE_LIMIT_*`, and `SET_BUDGET_*`.
+structures as JSON: `GOMODEL_VIRTUAL_MODELS`, `GOMODEL_SET_RATE_LIMIT_*`, and `GOMODEL_SET_BUDGET_*`.
 Because env entries override YAML entries, a typo in one of them would otherwise
 silently win over a correct YAML entry.
 
@@ -68,7 +68,7 @@ The default is strict because a dropped `providers`, `rate_limits`, `budgets`,
 or `guardrails` entry silently changes routing, cost, or security — a cost cap
 that never applies looks exactly like a cost cap that does.
 
-Set `CONFIG_STRICT=false` to downgrade unknown keys to warnings and boot without
+Set `GOMODEL_CONFIG_STRICT=false` to downgrade unknown keys to warnings and boot without
 them. This is for rolling a binary back under a newer config file, not for
 everyday use:
 
@@ -77,7 +77,7 @@ WARN  unknown config key ignored; it has no effect path=config.yaml line=23 fiel
 INFO  providers resolved total=1 from_config_file=0 from_env=1
 ```
 
-`CONFIG_STRICT` relaxes which *keys* are accepted, never whether a *value* makes
+`GOMODEL_CONFIG_STRICT` relaxes which *keys* are accepted, never whether a *value* makes
 sense. A malformed value (`port: [9999, 8080]`) aborts startup in either mode.
 Entity-level validation also still applies: a virtual model whose target names a
 provider that does not exist fails startup even when the key that would have
@@ -103,11 +103,11 @@ The current source of truth lives in the main codebase:
 - [config/config.example.yaml](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.example.yaml)
 
 For deployments mounted below a domain root, set `server.base_path` or
-`BASE_PATH`. For example, `BASE_PATH=/g` serves the gateway at `/g/v1/...`,
+`GOMODEL_BASE_PATH`. For example, `GOMODEL_BASE_PATH=/g` serves the gateway at `/g/v1/...`,
 `/g/admin/...`, and `/g/health`.
 
 To change the inbound user path header, set `server.user_path_header` or
-`USER_PATH_HEADER`. The default remains `X-GoModel-User-Path`.
+`GOMODEL_USER_PATH_HEADER`. The default remains `X-GoModel-User-Path`.
 
 ## Docker
 
@@ -176,12 +176,12 @@ failed to parse config.yaml: line 2: field uranium-geryon-9b not found; line 5: 
 ```
 
 Indent provider entries two spaces under `providers:`. Before strict parsing,
-this booted with zero YAML providers and no error. With `CONFIG_STRICT=false` it
+this booted with zero YAML providers and no error. With `GOMODEL_CONFIG_STRICT=false` it
 boots with zero YAML providers and one warning per unindented key.
 
 ### Per-provider resilience can only come from YAML
 
-The env-var override walk skips `map` fields. `RETRY_MAX_RETRIES` changes the
+The env-var override walk skips `map` fields. `GOMODEL_RETRY_MAX_RETRIES` changes the
 global default for all providers but cannot target a single provider.
 Per-provider tuning requires a `providers.<name>.resilience:` block in
 `config.yaml`.

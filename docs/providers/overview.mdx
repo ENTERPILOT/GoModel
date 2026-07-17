@@ -69,7 +69,7 @@ support, not every individual model capability exposed by an upstream provider.
   `XIAOMI_MODELS`.
 - **OpenCode Go (OpenCode Zen)** — routes per model: most models use
   OpenAI-style `/chat/completions`, while `/messages`-only models (default
-  `qwen3.7-max`, override with `OPENCODE_GO_MESSAGES_MODELS`) are sent to the
+  `qwen3.7-max`, override with `GOMODEL_OPENCODE_GO_MESSAGES_MODELS`) are sent to the
   Anthropic-native endpoint. Set `OPENCODE_GO_API_KEY`; the base URL defaults to
   `https://opencode.ai/zen/go/v1`.
 - **Kimi Code** — no per-token pricing; quota refreshes weekly and is also
@@ -82,9 +82,9 @@ support, not every individual model capability exposed by an upstream provider.
   `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek defaults to
   `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only when using a
   compatible proxy or alternate DeepSeek endpoint. By default,
-  `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses those lists only when upstream
+  `GOMODEL_CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses those lists only when upstream
   `/models` is unavailable or empty. Set
-  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models
+  `GOMODEL_CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models
   for providers that define a list, skipping their upstream `/models` calls.
 - **vLLM** — set `VLLM_API_KEY` only if the upstream server was started with
   `--api-key`.
