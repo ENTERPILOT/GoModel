@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +15,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
+
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 // defaultMaxTokensEnvVar overrides the fallback applied when callers omit
@@ -30,7 +31,7 @@ const fallbackMaxTokens = 4096
 var invalidDefaultMaxTokensWarnOnce sync.Once
 
 func resolveDefaultMaxTokens() int {
-	raw := strings.TrimSpace(os.Getenv(defaultMaxTokensEnvVar))
+	raw := strings.TrimSpace(envcompat.Get(defaultMaxTokensEnvVar))
 	if raw == "" {
 		return fallbackMaxTokens
 	}

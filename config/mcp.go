@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/envcompat"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -93,12 +93,12 @@ const (
 	maxMCPServerNameLength = 100
 )
 
-// applyMCPEnv parses the MCP_SERVERS env var — a JSON object mapping server
+// applyMCPEnv parses the GOMODEL_MCP_SERVERS env var — a JSON object mapping server
 // names to definitions — and merges it over the YAML-declared map. Env entries
 // replace YAML entries with the same name, consistent with the rest of the
 // config pipeline where env always wins.
 func applyMCPEnv(cfg *Config) error {
-	raw := strings.TrimSpace(os.Getenv(envMCPServers))
+	raw := strings.TrimSpace(envcompat.Get(envMCPServers))
 	if raw == "" {
 		return nil
 	}

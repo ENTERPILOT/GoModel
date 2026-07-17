@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 // applyEnvOverrides walks cfg's struct fields and applies env var overrides
@@ -84,7 +86,7 @@ func applyEnvOverridesValue(v reflect.Value) error {
 		if envKey == "" {
 			continue
 		}
-		envVal := os.Getenv(envKey)
+		envVal := envcompat.Get(envKey)
 		if envVal == "" {
 			continue
 		}

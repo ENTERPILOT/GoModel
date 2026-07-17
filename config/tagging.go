@@ -2,13 +2,13 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 // DefaultTaggingDelimiter separates multiple labels inside one header value.
@@ -39,21 +39,24 @@ type TaggingHeaderConfig struct {
 	Delimiter string `yaml:"delimiter,omitempty" json:"delimiter,omitempty"`
 }
 
-var taggingHeaderEnvRegex = regexp.MustCompile(`^TAGGING_HEADER_([0-9]+)=`)
+const taggingHeaderEnvPrefix = "TAGGING_HEADER_"
 
-// applyTaggingEnv reads TAGGING_HEADER_<N> env vars (with optional
-// TAGGING_HEADER_<N>_PREFIX, TAGGING_HEADER_<N>_DONOTPASS, and
-// TAGGING_HEADER_<N>_DELIMITER companions) and merges them over the
+var taggingHeaderEnvIndexRegex = regexp.MustCompile(`^[0-9]+$`)
+
+// applyTaggingEnv reads GOMODEL_TAGGING_HEADER_<N> env vars (with optional
+// _PREFIX, _DONOTPASS, and _DELIMITER companions) and merges them over the
 // YAML-declared list. Env entries override YAML entries with the same header
 // name, consistent with the rest of the config pipeline where env always wins.
 func applyTaggingEnv(cfg *Config) error {
+	// Scan surfaces the companions too (suffix "1_PREFIX"); keep only the bare
+	// indexes, then resolve each entry's companions through envcompat so a
+	// canonical base with a legacy companion — or the reverse — still resolves.
 	indexes := make([]int, 0)
-	for _, kv := range os.Environ() {
-		m := taggingHeaderEnvRegex.FindStringSubmatch(kv)
-		if m == nil {
+	for _, item := range envcompat.Scan(taggingHeaderEnvPrefix) {
+		if !taggingHeaderEnvIndexRegex.MatchString(item.Suffix) {
 			continue
 		}
-		n, err := strconv.Atoi(m[1])
+		n, err := strconv.Atoi(item.Suffix)
 		if err != nil {
 			continue
 		}
@@ -63,16 +66,16 @@ func applyTaggingEnv(cfg *Config) error {
 
 	fromEnv := make([]TaggingHeaderConfig, 0, len(indexes))
 	for _, n := range indexes {
-		key := fmt.Sprintf("TAGGING_HEADER_%d", n)
-		header := strings.TrimSpace(os.Getenv(key))
+		key := fmt.Sprintf("%s%d", taggingHeaderEnvPrefix, n)
+		header := strings.TrimSpace(envcompat.Get(key))
 		if header == "" {
 			continue
 		}
 		fromEnv = append(fromEnv, TaggingHeaderConfig{
 			Header:    header,
-			Prefix:    os.Getenv(key + "_PREFIX"),
-			DoNotPass: parseBool(os.Getenv(key + "_DONOTPASS")),
-			Delimiter: os.Getenv(key + "_DELIMITER"),
+			Prefix:    envcompat.Get(key + "_PREFIX"),
+			DoNotPass: parseBool(envcompat.Get(key + "_DONOTPASS")),
+			Delimiter: envcompat.Get(key + "_DELIMITER"),
 		})
 	}
 

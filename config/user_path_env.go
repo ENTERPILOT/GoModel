@@ -2,10 +2,10 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 // applyKeyedLimitEnv merges <prefix>* env entries into keyed config entries.
@@ -21,18 +21,17 @@ func applyKeyedLimitEnv[Entry any, Limit any](
 	parseLimits func(string) ([]Limit, error),
 	newEntry func(key string, limits []Limit) Entry,
 ) ([]Entry, error) {
-	for _, item := range os.Environ() {
-		key, value, ok := strings.Cut(item, "=")
-		if !ok || !strings.HasPrefix(key, prefix) || strings.TrimSpace(value) == "" {
+	for _, item := range envcompat.Scan(prefix) {
+		if strings.TrimSpace(item.Value) == "" {
 			continue
 		}
-		entryKeyValue, err := keyFromSuffix(key[len(prefix):])
+		entryKeyValue, err := keyFromSuffix(item.Suffix)
 		if err != nil {
-			return nil, fmt.Errorf("invalid value for %s: %w", key, err)
+			return nil, fmt.Errorf("invalid value for %s: %w", item.Name, err)
 		}
-		limits, err := parseLimits(value)
+		limits, err := parseLimits(item.Value)
 		if err != nil {
-			return nil, fmt.Errorf("invalid value for %s: %w", key, err)
+			return nil, fmt.Errorf("invalid value for %s: %w", item.Name, err)
 		}
 		if len(limits) == 0 {
 			continue

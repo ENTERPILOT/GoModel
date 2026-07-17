@@ -6,7 +6,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -14,6 +13,8 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/anthropic"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
+
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 // defaultBaseURL is the OpenCode Zen "Go" endpoint. Its /chat/completions and
@@ -107,7 +108,7 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 // OPENCODE_GO_MESSAGES_MODELS override when present.
 func loadMessagesModels() map[string]struct{} {
 	ids := defaultMessagesModels
-	if override := strings.TrimSpace(os.Getenv(messagesModelsEnvVar)); override != "" {
+	if override := strings.TrimSpace(envcompat.Get(messagesModelsEnvVar)); override != "" {
 		ids = strings.Split(override, ",")
 	}
 	set := make(map[string]struct{}, len(ids))

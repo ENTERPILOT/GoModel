@@ -3,9 +3,10 @@ package config
 import (
 	"fmt"
 	"math"
-	"os"
 	"strconv"
 	"strings"
+
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 // CacheConfig holds model and response cache configuration.
@@ -262,7 +263,7 @@ func mergeSemanticResponseDefaults(sem *SemanticCacheConfig) {
 }
 
 func applyResponseSimpleEnv(resp *ResponseCacheConfig) error {
-	v, ok := os.LookupEnv("RESPONSE_CACHE_SIMPLE_ENABLED")
+	v, ok := envcompat.Lookup("RESPONSE_CACHE_SIMPLE_ENABLED")
 	if ok && !parseBool(v) {
 		resp.Simple = nil
 		return nil
@@ -279,19 +280,19 @@ func applyResponseSimpleEnv(resp *ResponseCacheConfig) error {
 		b := parseBool(v)
 		simple.Enabled = &b
 	}
-	if u := os.Getenv("REDIS_URL"); u != "" {
+	if u := envcompat.Get("REDIS_URL"); u != "" {
 		if simple.Redis == nil {
 			simple.Redis = &RedisResponseConfig{}
 		}
 		simple.Redis.URL = u
 	}
-	if k := os.Getenv("REDIS_KEY_RESPONSES"); k != "" {
+	if k := envcompat.Get("REDIS_KEY_RESPONSES"); k != "" {
 		if simple.Redis == nil {
 			simple.Redis = &RedisResponseConfig{}
 		}
 		simple.Redis.Key = k
 	}
-	if ts := os.Getenv("REDIS_TTL_RESPONSES"); ts != "" {
+	if ts := envcompat.Get("REDIS_TTL_RESPONSES"); ts != "" {
 		if simple.Redis == nil {
 			simple.Redis = &RedisResponseConfig{}
 		}
@@ -305,7 +306,7 @@ func applyResponseSimpleEnv(resp *ResponseCacheConfig) error {
 }
 
 func applyResponseSemanticEnv(resp *ResponseCacheConfig) error {
-	v, enabledKeySet := os.LookupEnv("SEMANTIC_CACHE_ENABLED")
+	v, enabledKeySet := envcompat.Lookup("SEMANTIC_CACHE_ENABLED")
 	if enabledKeySet && !parseBool(v) {
 		resp.Semantic = nil
 		return nil
@@ -322,84 +323,84 @@ func applyResponseSemanticEnv(resp *ResponseCacheConfig) error {
 		b := parseBool(v)
 		sem.Enabled = &b
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_THRESHOLD"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_THRESHOLD"); val != "" {
 		f, err := strconv.ParseFloat(val, 64)
 		if err != nil {
 			return fmt.Errorf("invalid value for SEMANTIC_CACHE_THRESHOLD: %q is not a valid float", val)
 		}
 		sem.SimilarityThreshold = f
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_TTL"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_TTL"); val != "" {
 		i, err := strconv.Atoi(val)
 		if err != nil {
 			return fmt.Errorf("invalid value for SEMANTIC_CACHE_TTL: %q is not a valid integer", val)
 		}
 		sem.TTL = &i
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_MAX_CONV_MESSAGES"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_MAX_CONV_MESSAGES"); val != "" {
 		i, err := strconv.Atoi(val)
 		if err != nil {
 			return fmt.Errorf("invalid value for SEMANTIC_CACHE_MAX_CONV_MESSAGES: %q is not a valid integer", val)
 		}
 		sem.MaxConversationMessages = &i
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_EXCLUDE_SYSTEM_PROMPT"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_EXCLUDE_SYSTEM_PROMPT"); val != "" {
 		sem.ExcludeSystemPrompt = parseBool(val)
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_EMBEDDER_PROVIDER"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_EMBEDDER_PROVIDER"); val != "" {
 		sem.Embedder.Provider = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_EMBEDDER_MODEL"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_EMBEDDER_MODEL"); val != "" {
 		sem.Embedder.Model = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_VECTOR_STORE_TYPE"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_VECTOR_STORE_TYPE"); val != "" {
 		sem.VectorStore.Type = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_QDRANT_URL"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_QDRANT_URL"); val != "" {
 		sem.VectorStore.Qdrant.URL = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_QDRANT_COLLECTION"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_QDRANT_COLLECTION"); val != "" {
 		sem.VectorStore.Qdrant.Collection = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_QDRANT_API_KEY"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_QDRANT_API_KEY"); val != "" {
 		sem.VectorStore.Qdrant.APIKey = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_PGVECTOR_URL"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_PGVECTOR_URL"); val != "" {
 		sem.VectorStore.PGVector.URL = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_PGVECTOR_TABLE"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_PGVECTOR_TABLE"); val != "" {
 		sem.VectorStore.PGVector.Table = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_PGVECTOR_DIMENSION"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_PGVECTOR_DIMENSION"); val != "" {
 		n, err := strconv.Atoi(val)
 		if err != nil {
 			return fmt.Errorf("invalid value for SEMANTIC_CACHE_PGVECTOR_DIMENSION: %q is not a valid integer", val)
 		}
 		sem.VectorStore.PGVector.Dimension = n
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_PINECONE_HOST"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_PINECONE_HOST"); val != "" {
 		sem.VectorStore.Pinecone.Host = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_PINECONE_API_KEY"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_PINECONE_API_KEY"); val != "" {
 		sem.VectorStore.Pinecone.APIKey = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_PINECONE_NAMESPACE"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_PINECONE_NAMESPACE"); val != "" {
 		sem.VectorStore.Pinecone.Namespace = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_PINECONE_DIMENSION"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_PINECONE_DIMENSION"); val != "" {
 		n, err := strconv.Atoi(val)
 		if err != nil {
 			return fmt.Errorf("invalid value for SEMANTIC_CACHE_PINECONE_DIMENSION: %q is not a valid integer", val)
 		}
 		sem.VectorStore.Pinecone.Dimension = n
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_WEAVIATE_URL"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_WEAVIATE_URL"); val != "" {
 		sem.VectorStore.Weaviate.URL = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_WEAVIATE_CLASS"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_WEAVIATE_CLASS"); val != "" {
 		sem.VectorStore.Weaviate.Class = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_WEAVIATE_API_KEY"); val != "" {
+	if val := envcompat.Get("SEMANTIC_CACHE_WEAVIATE_API_KEY"); val != "" {
 		sem.VectorStore.Weaviate.APIKey = val
 	}
 	return nil

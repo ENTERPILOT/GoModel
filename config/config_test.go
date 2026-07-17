@@ -7,8 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
 	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 // clearProviderEnvVars unsets all known provider-related environment variables.
@@ -69,14 +72,21 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
 		"WORKFLOW_REFRESH_INTERVAL",
 	} {
-		t.Setenv(key, "")
-		os.Unsetenv(key)
+		// Both spellings: the canonical GOMODEL_-prefixed name takes precedence
+		// over the legacy bare one, so an ambient canonical value would shadow
+		// whatever a test sets bare (and vice versa).
+		for _, name := range []string{key, envcompat.Prefix + key} {
+			t.Setenv(name, "")
+			os.Unsetenv(name)
+		}
 	}
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
-		if strings.HasPrefix(key, "SET_BUDGET_") || strings.HasPrefix(key, "SET_RATE_LIMIT_") || strings.HasPrefix(key, "SET_PROVIDER_RATE_LIMIT_") || strings.HasPrefix(key, "TAGGING_HEADER_") {
-			t.Setenv(key, "")
-			os.Unsetenv(key)
+		for _, prefix := range []string{"SET_BUDGET_", "SET_RATE_LIMIT_", "SET_PROVIDER_RATE_LIMIT_", "TAGGING_HEADER_"} {
+			if strings.HasPrefix(key, prefix) || strings.HasPrefix(key, envcompat.Prefix+prefix) {
+				t.Setenv(key, "")
+				os.Unsetenv(key)
+			}
 		}
 	}
 	clearProviderEnvVars(t)

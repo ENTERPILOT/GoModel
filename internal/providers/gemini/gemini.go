@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -19,6 +18,8 @@ import (
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/googlecommon"
+
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 // Registration provides factory registration for the Gemini provider.
@@ -302,7 +303,7 @@ func useNativeAPI(apiMode string) bool {
 }
 
 func useNativeAPIFromEnv() bool {
-	value, ok := os.LookupEnv(useNativeAPIEnvVar)
+	value, ok := envcompat.Lookup(useNativeAPIEnvVar)
 	if !ok || strings.TrimSpace(value) == "" {
 		return true
 	}

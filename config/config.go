@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/enterpilot/gomodel/internal/envcompat"
 	"github.com/enterpilot/gomodel/internal/storage"
 )
 
@@ -256,7 +257,7 @@ var configFilePaths = []string{
 
 const envConfigStrict = "CONFIG_STRICT"
 
-// resolveConfigStrict reads CONFIG_STRICT, which defaults to true: an unknown key
+// resolveConfigStrict reads GOMODEL_CONFIG_STRICT, which defaults to true: an unknown key
 // in declarative config aborts startup rather than being ignored, because a
 // dropped providers, rate_limits, budgets, or guardrails entry silently changes
 // routing, cost, or security. Set it to false to downgrade unknown keys to
@@ -265,7 +266,7 @@ const envConfigStrict = "CONFIG_STRICT"
 // It is read directly from the environment because it governs the parse of the
 // YAML layer, which runs before the env-tag overrides are applied.
 func resolveConfigStrict() (bool, error) {
-	raw := strings.TrimSpace(os.Getenv(envConfigStrict))
+	raw := strings.TrimSpace(envcompat.Get(envConfigStrict))
 	if raw == "" {
 		return true, nil
 	}

@@ -4,10 +4,11 @@ package httpclient
 import (
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 // ClientConfig holds configuration options for creating HTTP clients
@@ -40,7 +41,7 @@ type ClientConfig struct {
 // getEnvDuration reads a duration from an environment variable, returning the default if not set or invalid.
 // Accepts either plain integers (interpreted as seconds) or Go duration strings (e.g., "10m", "1h30m").
 func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
-	val := os.Getenv(key)
+	val := envcompat.Get(key)
 	if val == "" {
 		return defaultVal
 	}

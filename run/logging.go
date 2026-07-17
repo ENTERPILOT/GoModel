@@ -10,6 +10,8 @@ import (
 
 	"github.com/lmittmann/tint"
 	"golang.org/x/term"
+
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 const (
@@ -18,12 +20,12 @@ const (
 )
 
 func configureLogging(w io.Writer) error {
-	level, err := parseLogLevel(os.Getenv(envLogLevel))
+	level, err := parseLogLevel(envcompat.Get(envLogLevel))
 	if err != nil {
 		return err
 	}
 
-	slog.SetDefault(slog.New(newLogHandler(w, detectTTY(w), os.Getenv(envLogFormat), level)))
+	slog.SetDefault(slog.New(newLogHandler(w, detectTTY(w), envcompat.Get(envLogFormat), level)))
 	return nil
 }
 

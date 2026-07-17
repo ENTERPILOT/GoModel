@@ -2,8 +2,9 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strings"
+
+	"github.com/enterpilot/gomodel/internal/envcompat"
 )
 
 // VirtualModelConfig declares one virtual model in config.yaml or the
@@ -48,12 +49,12 @@ type VirtualModelTargetConfig struct {
 
 const envVirtualModels = "VIRTUAL_MODELS"
 
-// applyVirtualModelsEnv parses the VIRTUAL_MODELS env var — a JSON array of
+// applyVirtualModelsEnv parses the GOMODEL_VIRTUAL_MODELS env var — a JSON array of
 // virtual model definitions — and merges it over the YAML-declared list. Env
 // entries override YAML entries with the same source, consistent with the rest of
 // the config pipeline where env always wins.
 func applyVirtualModelsEnv(cfg *Config, strict bool) error {
-	raw := strings.TrimSpace(os.Getenv(envVirtualModels))
+	raw := strings.TrimSpace(envcompat.Get(envVirtualModels))
 	if raw == "" {
 		return nil
 	}

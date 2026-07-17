@@ -104,6 +104,17 @@ If this repository is not the official GoModel repository, ask the user whether 
 
 Full reference: `.env.template` and `config/config.yaml`
 
+**Env var naming:** GoModel-defined variables are canonically spelled
+`GOMODEL_<NAME>` (`GOMODEL_SQLITE_PATH`, `GOMODEL_LOGGING_ENABLED`, ...). The
+unprefixed spellings listed below still resolve but are deprecated and warn once
+each at startup; when both are set, the `GOMODEL_` one wins. Two groups keep
+their bare names permanently: `PORT` and `REDIS_URL` (injected by PaaS
+platforms), and the provider family (`OPENAI_API_KEY`, `<PROVIDER>_BASE_URL`,
+`<PROVIDER>_MODELS`, ...), which lives in each vendor's namespace and is what
+makes GoModel drop-in compatible. New variables must take the prefix unless they
+fall in one of those two groups. Details and the full mapping:
+`docs/dev/2026-07-17_env-prefix-migration.md`.
+
 **Key config groups:**
 
 - **Server:**
