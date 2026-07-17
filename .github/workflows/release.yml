@@ -213,10 +213,10 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           jq --arg v "$version" \
             '.version = $v | .packages[0].identifier = "docker.io/enterpilot/gomodel:" + $v' \
-            server.json > server.json.tmp && mv server.json.tmp server.json
+            docs/server.json > server.json.tmp && mv server.json.tmp docs/server.json
 
       - name: Authenticate to MCP Registry
         run: ./mcp-publisher login github-oidc
 
       - name: Publish server to MCP Registry
-        run: ./mcp-publisher publish
+        run: ./mcp-publisher publish docs/server.json
