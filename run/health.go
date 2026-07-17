@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,7 +16,18 @@ import (
 	"github.com/enterpilot/gomodel/config"
 )
 
+// silenceProbeLogging discards slog output for the short-lived --health and
+// --ready processes. They load config without configureLogging, so anything
+// slog writes — such as the envcompat deprecation warnings, re-emitted by
+// every fresh probe process — would otherwise pollute periodic healthcheck
+// output through the bootstrap text handler.
+func silenceProbeLogging() {
+	slog.SetDefault(slog.New(slog.DiscardHandler))
+}
+
 func runHealthProbe(timeout time.Duration) error {
+	silenceProbeLogging()
+
 	result, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -31,6 +43,8 @@ func runHealthProbe(timeout time.Duration) error {
 }
 
 func runReadyProbe(timeout time.Duration) error {
+	silenceProbeLogging()
+
 	result, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)

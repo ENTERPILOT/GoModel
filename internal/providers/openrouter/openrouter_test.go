@@ -96,6 +96,47 @@ func TestChatCompletion_UsesEnvOverridesForAttributionHeaders(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_UsesCanonicalEnvSpellingsForAttributionHeaders(t *testing.T) {
+	t.Setenv("GOMODEL_OPENROUTER_SITE_URL", "https://canonical.example")
+	t.Setenv("GOMODEL_OPENROUTER_APP_NAME", "Canonical App")
+
+	var gotReferer string
+	var gotTitle string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotReferer = r.Header.Get("HTTP-Referer")
+		gotTitle = r.Header.Get("X-OpenRouter-Title")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-123",
+			"object":"chat.completion",
+			"created":1677652288,
+			"model":"openai/gpt-4o-mini",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "openai/gpt-4o-mini",
+		Messages: []core.Message{
+			{Role: "user", Content: "hi"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotReferer != "https://canonical.example" {
+		t.Fatalf("HTTP-Referer = %q, want https://canonical.example", gotReferer)
+	}
+	if gotTitle != "Canonical App" {
+		t.Fatalf("X-OpenRouter-Title = %q, want Canonical App", gotTitle)
+	}
+}
+
 func TestPassthrough_PreservesUserProvidedAttributionHeaders(t *testing.T) {
 	var gotReferer string
 	var gotTitle string

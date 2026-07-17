@@ -2,10 +2,10 @@ package openrouter
 
 import (
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/envcompat"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
@@ -83,8 +83,12 @@ func setHeaders(req *http.Request, apiKey string) {
 	})
 }
 
+// envOrDefault resolves GoModel-defined attribution config (these are not
+// OpenRouter's own env vars — its attribution mechanism is the HTTP-Referer /
+// X-Title headers), so the names take the GOMODEL_ prefix like any other
+// GoModel variable.
 func envOrDefault(key, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+	if value := strings.TrimSpace(envcompat.Get(key)); value != "" {
 		return value
 	}
 	return fallback

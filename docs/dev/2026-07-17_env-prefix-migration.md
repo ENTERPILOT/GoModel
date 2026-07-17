@@ -31,18 +31,25 @@ rule either way.
 
 Implemented in `internal/envcompat`:
 
-1. A **non-empty value wins, canonical first**. `GOMODEL_SQLITE_PATH` beats
-   `SQLITE_PATH`.
-2. An **empty canonical does not shadow a working legacy value**. A Compose file
-   with an unexpanded `GOMODEL_SQLITE_PATH=` alongside a real `SQLITE_PATH`
-   resolves to the real one instead of silently discarding it.
-3. Presence is still reported when only empty values are set, so callers that
+1. A **value with non-whitespace content wins, canonical first**.
+   `GOMODEL_SQLITE_PATH` beats `SQLITE_PATH`.
+2. A **blank canonical does not shadow a working legacy value**. A Compose file
+   with an unexpanded `GOMODEL_SQLITE_PATH=` (or a quoted-but-unexpanded
+   `GOMODEL_SQLITE_PATH=" "`) alongside a real `SQLITE_PATH` resolves to the
+   real one instead of silently discarding it.
+3. Presence is still reported when only blank values are set, so callers that
    use the `ok` bool to detect an explicit `""` keep working
    (`RESPONSE_CACHE_SIMPLE_ENABLED=` means "off", not "unset").
 4. Reading a legacy spelling logs `WARN` once per variable, naming the
    replacement.
 5. Exempt names and names already carrying the prefix are read as given, never
-   double-prefixed.
+   double-prefixed. Setting the prefixed spelling of an exempt name
+   (`GOMODEL_PORT`) warns once that it is not read, so a mechanically-prefixed
+   env block cannot become a silent misconfiguration.
+6. `Scan` (the dynamic families) resolves every discovered suffix through the
+   same `lookup` as `Lookup`, so the two cannot diverge, and each `Entry.Name`
+   is the spelling that actually supplied the value — error messages name a
+   variable that exists in the operator's environment.
 
 ## Exempt — these keep their bare names permanently
 
@@ -76,6 +83,7 @@ credentials, so they are prefixed:
 | `GOMODEL_USE_GOOGLE_GEMINI_NATIVE_API` | Routing flag, not a Google credential. |
 | `GOMODEL_ANTHROPIC_DEFAULT_MAX_TOKENS` | Translation behavior, not Anthropic auth. Breaks visual symmetry with `ANTHROPIC_API_KEY`. |
 | `GOMODEL_OPENCODE_GO_MESSAGES_MODELS` | Routing, but easily confused with the exempt `<PROVIDER>_MODELS` pattern. |
+| `GOMODEL_OPENROUTER_SITE_URL`, `GOMODEL_OPENROUTER_APP_NAME` | Attribution config GoModel invents (OpenRouter's own mechanism is the `HTTP-Referer` / `X-Title` headers, not env vars). |
 
 ## Everything else
 
@@ -100,9 +108,10 @@ the named reads outside the tag walker (`GOMODEL_CONFIG_STRICT`,
 - **`Scan` sorts by suffix.** Callers resolve suffixes to canonical keys and two
   suffixes can collide there, so iteration order decides which wins; sorting
   keeps that from depending on the order the OS returns.
-- **`Scan` reports the legacy spelling as `Entry.Name`** so callers resolve
-  companions back through `Lookup`. This is what lets a canonical
-  `GOMODEL_TAGGING_HEADER_1` pair with a legacy `TAGGING_HEADER_1_PREFIX`.
+- **Companions resolve through `Lookup`/`Get` by bare name**, which accepts
+  either spelling. This is what lets a canonical `GOMODEL_TAGGING_HEADER_1`
+  pair with a legacy `TAGGING_HEADER_1_PREFIX`. (`Entry.Name` itself is the
+  spelling that supplied the value, reserved for messages.)
 - **`GOMODEL_CONFIG_STRICT` is read before the env-tag walker** because it
   governs the YAML parse, so it calls `envcompat` at its own site.
 - **`HTTP_TIMEOUT` / `HTTP_RESPONSE_HEADER_TIMEOUT` are read twice** — by the

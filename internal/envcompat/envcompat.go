@@ -41,40 +41,17 @@ var warned sync.Map
 // whether either spelling was set, distinguishing an unset variable from one
 // explicitly set to the empty string.
 //
-// A non-empty value always wins, canonical first. An empty canonical does not
-// shadow a working legacy value: `GOMODEL_SQLITE_PATH=` (an unexpanded compose
-// variable, say) alongside a real SQLITE_PATH resolves to the real one rather
-// than silently discarding it. Presence is still reported when only empty
-// values are set, so callers that use the bool to detect an explicit ""
-// keep working.
+// A value with non-whitespace content always wins, canonical first. A blank
+// canonical does not shadow a working legacy value: `GOMODEL_SQLITE_PATH=` or
+// `GOMODEL_SQLITE_PATH=" "` (an unexpanded compose variable, say) alongside a
+// real SQLITE_PATH resolves to the real one rather than silently discarding
+// it. When only blank values are set, presence is still reported with the raw
+// value, so callers that use the bool to detect an explicit "" keep working.
 //
 // Names that are exempt or already carry the prefix are read as given.
 func Lookup(name string) (string, bool) {
-	if exempt[name] || strings.HasPrefix(name, Prefix) {
-		return os.LookupEnv(name)
-	}
-
-	canonical := Prefix + name
-	canonicalValue, canonicalSet := os.LookupEnv(canonical)
-	if canonicalSet && canonicalValue != "" {
-		return canonicalValue, true
-	}
-
-	legacyValue, legacySet := os.LookupEnv(name)
-	if legacySet && legacyValue != "" {
-		warn(name, canonical)
-		return legacyValue, true
-	}
-
-	switch {
-	case canonicalSet:
-		return "", true
-	case legacySet:
-		warn(name, canonical)
-		return "", true
-	default:
-		return "", false
-	}
+	value, ok, _ := lookup(name, false)
+	return value, ok
 }
 
 // Get returns the value of name, or "" when neither spelling is set.
@@ -83,12 +60,66 @@ func Get(name string) string {
 	return value
 }
 
+// Quiet returns the value of name like Get, but never logs a deprecation
+// warning. It exists for code that must resolve a variable before the slog
+// handler is installed (the logging configuration itself); calling Get for the
+// same name afterwards emits the warning through the configured handler, since
+// Quiet does not consume the warn-once budget.
+func Quiet(name string) string {
+	value, _, _ := lookup(name, true)
+	return value
+}
+
+// lookup implements the resolution shared by Lookup, Quiet, and Scan, and
+// reports which spelling supplied the result so messages can name a variable
+// that actually exists in the operator's environment.
+func lookup(name string, quiet bool) (value string, ok bool, source string) {
+	if exempt[name] {
+		if _, prefixedSet := os.LookupEnv(Prefix + name); prefixedSet && !quiet {
+			warnPrefixedExempt(name)
+		}
+		value, ok = os.LookupEnv(name)
+		return value, ok, name
+	}
+	if strings.HasPrefix(name, Prefix) {
+		value, ok = os.LookupEnv(name)
+		return value, ok, name
+	}
+
+	canonical := Prefix + name
+	canonicalValue, canonicalSet := os.LookupEnv(canonical)
+	if canonicalSet && strings.TrimSpace(canonicalValue) != "" {
+		return canonicalValue, true, canonical
+	}
+
+	legacyValue, legacySet := os.LookupEnv(name)
+	if legacySet && strings.TrimSpace(legacyValue) != "" {
+		if !quiet {
+			warn(name, canonical)
+		}
+		return legacyValue, true, name
+	}
+
+	switch {
+	case canonicalSet:
+		return canonicalValue, true, canonical
+	case legacySet:
+		if !quiet {
+			warn(name, canonical)
+		}
+		return legacyValue, true, name
+	default:
+		return "", false, name
+	}
+}
+
 // Entry is one variable found by Scan.
 type Entry struct {
-	// Name is the legacy (unprefixed) spelling of the variable, regardless of
-	// which spelling was actually set. Callers pass it back to Lookup to
-	// resolve companion variables, so a canonical entry with a legacy
-	// companion — or the reverse — resolves correctly.
+	// Name is the spelling that actually supplied the value — canonical when
+	// the GOMODEL_-prefixed variable won, legacy otherwise — so error messages
+	// can name a variable that exists in the operator's environment.
+	// Companion variables are resolved by passing their bare name to Lookup
+	// or Get, which accepts either spelling.
 	Name string
 
 	// Suffix is the part of the name following the scanned prefix.
@@ -103,8 +134,9 @@ type Entry struct {
 // discovered by walking the environment rather than looked up by name
 // (GOMODEL_SET_RATE_LIMIT_<PATH>, GOMODEL_TAGGING_HEADER_<N>, ...).
 //
-// When both spellings of the same suffix are set, the canonical one wins and
-// the legacy one is ignored — matching Lookup's precedence.
+// Each discovered suffix is resolved through the same precedence as Lookup —
+// the two cannot diverge — so the canonical spelling wins when it has content
+// and a blank canonical does not shadow a working legacy value.
 //
 // Entries are sorted by suffix. Callers resolve suffixes to canonical keys and
 // two suffixes can collide there (SET_RATE_LIMIT_A_ and SET_RATE_LIMIT_A both
@@ -113,35 +145,27 @@ type Entry struct {
 func Scan(prefix string) []Entry {
 	canonicalPrefix := Prefix + prefix
 
-	bySuffix := make(map[string]Entry)
-	legacy := make(map[string]string)
-
+	suffixes := make(map[string]bool)
 	for _, kv := range os.Environ() {
-		key, value, ok := strings.Cut(kv, "=")
-		if !ok {
+		key, _, found := strings.Cut(kv, "=")
+		if !found {
 			continue
 		}
 		switch {
 		case strings.HasPrefix(key, canonicalPrefix):
-			suffix := key[len(canonicalPrefix):]
-			bySuffix[suffix] = Entry{Name: prefix + suffix, Suffix: suffix, Value: value}
+			suffixes[key[len(canonicalPrefix):]] = true
 		case strings.HasPrefix(key, prefix):
-			legacy[key[len(prefix):]] = value
+			suffixes[key[len(prefix):]] = true
 		}
 	}
 
-	for suffix, value := range legacy {
-		if _, canonicalSet := bySuffix[suffix]; canonicalSet {
+	entries := make([]Entry, 0, len(suffixes))
+	for suffix := range suffixes {
+		value, ok, source := lookup(prefix+suffix, false)
+		if !ok {
 			continue
 		}
-		name := prefix + suffix
-		warn(name, Prefix+name)
-		bySuffix[suffix] = Entry{Name: name, Suffix: suffix, Value: value}
-	}
-
-	entries := make([]Entry, 0, len(bySuffix))
-	for _, entry := range bySuffix {
-		entries = append(entries, entry)
+		entries = append(entries, Entry{Name: source, Suffix: suffix, Value: value})
 	}
 	slices.SortFunc(entries, func(a, b Entry) int {
 		return strings.Compare(a.Suffix, b.Suffix)
@@ -156,5 +180,20 @@ func warn(legacy, canonical string) {
 	slog.Warn("deprecated environment variable: rename it before the next major release",
 		"variable", legacy,
 		"use", canonical,
+	)
+}
+
+// warnPrefixedExempt fires once when the GOMODEL_-prefixed spelling of an
+// exempt name is set. The prefixed name is never read, so an operator who
+// prefixed their whole env block mechanically would otherwise get a silent
+// misconfiguration (GOMODEL_PORT=9090 booting on 8080).
+func warnPrefixedExempt(name string) {
+	prefixed := Prefix + name
+	if _, seen := warned.LoadOrStore(prefixed, struct{}{}); seen {
+		return
+	}
+	slog.Warn("environment variable is not read: this name is platform-injected and stays bare",
+		"variable", prefixed,
+		"use", name,
 	)
 }

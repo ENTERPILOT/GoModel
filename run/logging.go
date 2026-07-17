@@ -20,12 +20,22 @@ const (
 )
 
 func configureLogging(w io.Writer) error {
-	level, err := parseLogLevel(envcompat.Get(envLogLevel))
+	// Resolve both variables without warning: nothing may log before the
+	// handler below is installed, or the deprecation warnings would go to
+	// Go's bootstrap text handler on os.Stderr (unparseable in a JSON
+	// deployment, wrong writer for embedded callers).
+	level, err := parseLogLevel(envcompat.Quiet(envLogLevel))
 	if err != nil {
 		return err
 	}
 
-	slog.SetDefault(slog.New(newLogHandler(w, detectTTY(w), envcompat.Get(envLogFormat), level)))
+	slog.SetDefault(slog.New(newLogHandler(w, detectTTY(w), envcompat.Quiet(envLogFormat), level)))
+
+	// Re-read through the warning path now that the configured handler is
+	// live; Quiet did not consume the warn-once budget, so legacy spellings
+	// warn here, exactly once, in the configured format.
+	envcompat.Get(envLogLevel)
+	envcompat.Get(envLogFormat)
 	return nil
 }
 

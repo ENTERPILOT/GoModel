@@ -220,16 +220,39 @@ func TestScan(t *testing.T) {
 		}
 	})
 
-	t.Run("Name is always the legacy spelling so companions resolve", func(t *testing.T) {
+	t.Run("Name is the spelling that supplied the value", func(t *testing.T) {
 		captureWarnings(t)
 		t.Setenv("GOMODEL_TAGGING_HEADER_1", "X-Team")
+		t.Setenv("SET_BUDGET_TEAM", "daily=10")
 
 		entries := Scan("TAGGING_HEADER_")
 		if len(entries) != 1 {
 			t.Fatalf("Scan returned %d entries, want 1", len(entries))
 		}
-		if entries[0].Name != "TAGGING_HEADER_1" {
-			t.Errorf("Name = %q, want %q", entries[0].Name, "TAGGING_HEADER_1")
+		if entries[0].Name != "GOMODEL_TAGGING_HEADER_1" {
+			t.Errorf("Name = %q, want the canonical spelling that was set", entries[0].Name)
+		}
+
+		entries = Scan("SET_BUDGET_")
+		if len(entries) != 1 {
+			t.Fatalf("Scan returned %d entries, want 1", len(entries))
+		}
+		if entries[0].Name != "SET_BUDGET_TEAM" {
+			t.Errorf("Name = %q, want the legacy spelling that was set", entries[0].Name)
+		}
+	})
+
+	t.Run("blank canonical does not shadow a working legacy value", func(t *testing.T) {
+		captureWarnings(t)
+		t.Setenv("GOMODEL_SET_RATE_LIMIT_TEAM", "")
+		t.Setenv("SET_RATE_LIMIT_TEAM", "rpm=10")
+
+		entries := Scan("SET_RATE_LIMIT_")
+		if len(entries) != 1 {
+			t.Fatalf("Scan returned %d entries, want 1: %+v", len(entries), entries)
+		}
+		if entries[0].Value != "rpm=10" {
+			t.Errorf("value = %q, want %q (blank canonical must not discard the legacy rule)", entries[0].Value, "rpm=10")
 		}
 	})
 
@@ -290,5 +313,73 @@ func TestEmptyCanonicalReportsPresenceWhenNoLegacy(t *testing.T) {
 	got, ok := Lookup("SQLITE_PATH")
 	if got != "" || !ok {
 		t.Errorf("Lookup = (%q, %v), want (%q, true)", got, ok, "")
+	}
+}
+
+// A whitespace-only canonical (a quoted-but-unexpanded compose value, say)
+// must behave like an empty one: it cannot shadow a working legacy value,
+// because every caller that inspects the value trims it first.
+func TestWhitespaceCanonicalDoesNotShadowLegacy(t *testing.T) {
+	captureWarnings(t)
+	t.Setenv("GOMODEL_STORAGE_TYPE", "  ")
+	t.Setenv("STORAGE_TYPE", "postgresql")
+
+	got, ok := Lookup("STORAGE_TYPE")
+	if got != "postgresql" || !ok {
+		t.Errorf("Lookup = (%q, %v), want (%q, true)", got, ok, "postgresql")
+	}
+}
+
+func TestWhitespaceCanonicalReturnedWhenNoLegacy(t *testing.T) {
+	captureWarnings(t)
+	t.Setenv("GOMODEL_STORAGE_TYPE", "  ")
+
+	got, ok := Lookup("STORAGE_TYPE")
+	if got != "  " || !ok {
+		t.Errorf("Lookup = (%q, %v), want (%q, true)", got, ok, "  ")
+	}
+}
+
+// Quiet resolves without warning and without consuming the warn-once budget,
+// so the logging configuration can read LOG_LEVEL/LOG_FORMAT before the slog
+// handler exists and still get the warning emitted afterwards through Get.
+func TestQuietDefersWarningToNextGet(t *testing.T) {
+	buf := captureWarnings(t)
+	t.Setenv("SQLITE_PATH", "/legacy.db")
+
+	if got := Quiet("SQLITE_PATH"); got != "/legacy.db" {
+		t.Fatalf("Quiet = %q, want %q", got, "/legacy.db")
+	}
+	if strings.Contains(buf.String(), "deprecated environment variable") {
+		t.Fatalf("Quiet must not warn; log: %q", buf.String())
+	}
+
+	Get("SQLITE_PATH")
+	if got := strings.Count(buf.String(), "variable=SQLITE_PATH"); got != 1 {
+		t.Errorf("Get after Quiet warned %d times, want 1; log: %q", got, buf.String())
+	}
+}
+
+// The prefixed spelling of an exempt name is never read; setting it warns once
+// so a mechanically-prefixed env block does not turn into a silent
+// misconfiguration (GOMODEL_PORT=9090 booting on 8080).
+func TestPrefixedExemptNameWarns(t *testing.T) {
+	buf := captureWarnings(t)
+	t.Setenv("GOMODEL_PORT", "9090")
+
+	for range 3 {
+		if got := Get("PORT"); got != "" {
+			t.Fatalf("Get(PORT) = %q, want the prefixed spelling ignored", got)
+		}
+	}
+
+	if got := strings.Count(buf.String(), "variable=GOMODEL_PORT"); got != 1 {
+		t.Errorf("GOMODEL_PORT warned %d times, want 1; log: %q", got, buf.String())
+	}
+	if !strings.Contains(buf.String(), "use=PORT") {
+		t.Errorf("warning should point at the bare name; log: %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "deprecated environment variable") {
+		t.Errorf("exempt warning must not claim the bare name is deprecated; log: %q", buf.String())
 	}
 }
