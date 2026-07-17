@@ -1,12 +1,16 @@
 package openai
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -426,6 +430,21 @@ func (p *CompatibleProvider) CreateBatch(ctx context.Context, req *core.BatchReq
 	if req == nil {
 		return nil, core.NewInvalidRequestError("batch request is required", nil)
 	}
+	// The OpenAI batch API only accepts file-backed input. Inline requests (the
+	// gateway extension used by the Anthropic Message Batches dialect) are
+	// materialized into a JSONL input file first, so inline batches route to
+	// OpenAI-compatible providers the same as everywhere else. The file has the
+	// same lifecycle as a caller-uploaded batch input file.
+	if req.InputFileID == "" && len(req.Requests) > 0 {
+		fileID, err := p.uploadInlineBatchInput(ctx, req.Requests)
+		if err != nil {
+			return nil, err
+		}
+		fileBacked := *req
+		fileBacked.InputFileID = fileID
+		fileBacked.Requests = nil
+		req = &fileBacked
+	}
 	var resp core.BatchResponse
 	err := p.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
@@ -437,6 +456,32 @@ func (p *CompatibleProvider) CreateBatch(ctx context.Context, req *core.BatchReq
 	}
 	providers.EnsureProviderBatchID(&resp)
 	return &resp, nil
+}
+
+// uploadInlineBatchInput renders inline batch items as the OpenAI batch input
+// JSONL and uploads it with purpose "batch".
+func (p *CompatibleProvider) uploadInlineBatchInput(ctx context.Context, items []core.BatchRequestItem) (string, error) {
+	var buf bytes.Buffer
+	for i, item := range items {
+		line, err := json.Marshal(item)
+		if err != nil {
+			return "", core.NewInvalidRequestError(fmt.Sprintf("requests[%d]: %v", i, err), err)
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+	file, err := p.CreateFile(ctx, &core.FileCreateRequest{
+		Purpose:  "batch",
+		Filename: "inline-batch-input.jsonl",
+		Content:  buf.Bytes(),
+	})
+	if err != nil {
+		return "", err
+	}
+	if file == nil || file.ID == "" {
+		return "", core.NewProviderError(p.providerName, http.StatusBadGateway, "batch input file upload returned no file id", nil)
+	}
+	return file.ID, nil
 }
 
 func (p *CompatibleProvider) GetBatch(ctx context.Context, id string) (*core.BatchResponse, error) {

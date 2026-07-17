@@ -1081,6 +1081,20 @@ func (r *Router) CancelBatch(ctx context.Context, providerType, id string) (*cor
 	return stampProvider(resp, providerType), err
 }
 
+// DeleteBatch routes native batch deletion to a provider type. It reports
+// core.ErrNativeBatchDeleteUnsupported for providers whose upstream batch API
+// has no delete operation, so callers can fall back to gateway-local deletion.
+func (r *Router) DeleteBatch(ctx context.Context, providerType, id string) error {
+	_, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (struct{}, error) {
+		deleter, ok := bp.(core.NativeBatchDeleteProvider)
+		if !ok {
+			return struct{}{}, core.ErrNativeBatchDeleteUnsupported
+		}
+		return struct{}{}, deleter.DeleteBatch(ctx, id)
+	})
+	return err
+}
+
 // GetBatchResults routes native batch results lookup to a provider type.
 func (r *Router) GetBatchResults(ctx context.Context, providerType, id string) (*core.BatchResultsResponse, error) {
 	return routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResultsResponse, error) {

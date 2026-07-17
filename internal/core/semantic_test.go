@@ -334,3 +334,35 @@ func BenchmarkDeriveSnapshotSelectorHintsGJSON(b *testing.B) {
 		}
 	}
 }
+
+func TestDeriveBatchRouteInfoFromTransport_MessagesBatches(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantAction string
+		wantID     string
+	}{
+		{name: "create", method: http.MethodPost, path: "/v1/messages/batches", wantAction: BatchActionCreate},
+		{name: "list", method: http.MethodGet, path: "/v1/messages/batches", wantAction: BatchActionList},
+		{name: "get", method: http.MethodGet, path: "/v1/messages/batches/msgbatch_1", wantAction: BatchActionGet, wantID: "msgbatch_1"},
+		{name: "cancel", method: http.MethodPost, path: "/v1/messages/batches/msgbatch_1/cancel", wantAction: BatchActionCancel, wantID: "msgbatch_1"},
+		{name: "delete", method: http.MethodDelete, path: "/v1/messages/batches/msgbatch_1", wantAction: BatchActionDelete, wantID: "msgbatch_1"},
+		{name: "results", method: http.MethodGet, path: "/v1/messages/batches/msgbatch_1/results", wantAction: BatchActionResults, wantID: "msgbatch_1"},
+		{name: "openai delete", method: http.MethodDelete, path: "/v1/batches/batch_1", wantAction: BatchActionDelete, wantID: "batch_1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DeriveBatchRouteInfoFromTransport(tc.method, tc.path, nil, nil)
+			if got == nil {
+				t.Fatal("derived nil route info")
+			}
+			if got.Action != tc.wantAction {
+				t.Fatalf("action = %q, want %q", got.Action, tc.wantAction)
+			}
+			if got.BatchID != tc.wantID {
+				t.Fatalf("batch id = %q, want %q", got.BatchID, tc.wantID)
+			}
+		})
+	}
+}

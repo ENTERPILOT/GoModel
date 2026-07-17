@@ -3,6 +3,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"io"
 )
 
@@ -66,6 +67,22 @@ type NativeBatchRoutableProvider interface {
 	ListBatches(ctx context.Context, providerType string, limit int, after string) (*BatchListResponse, error)
 	CancelBatch(ctx context.Context, providerType, id string) (*BatchResponse, error)
 	GetBatchResults(ctx context.Context, providerType, id string) (*BatchResultsResponse, error)
+}
+
+// ErrNativeBatchDeleteUnsupported reports that a provider's upstream batch
+// API has no delete operation. Callers fall back to gateway-local deletion.
+var ErrNativeBatchDeleteUnsupported = errors.New("native batch deletion is not supported by this provider")
+
+// NativeBatchDeleteProvider is an optional native batch extension for
+// providers whose upstream supports deleting an ended batch (the Anthropic
+// Message Batches dialect exposes DELETE; the OpenAI batch API does not).
+type NativeBatchDeleteProvider interface {
+	DeleteBatch(ctx context.Context, id string) error
+}
+
+// NativeBatchDeleteRoutableProvider extends routing with native batch deletion.
+type NativeBatchDeleteRoutableProvider interface {
+	DeleteBatch(ctx context.Context, providerType, id string) error
 }
 
 // NativeBatchProviderTypeLister exposes registered provider types that support

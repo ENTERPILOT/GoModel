@@ -160,6 +160,18 @@ func (s *MongoDBStore) Update(ctx context.Context, batch *StoredBatch) error {
 	return nil
 }
 
+// Delete removes a stored batch object.
+func (s *MongoDBStore) Delete(ctx context.Context, id string) error {
+	result, err := s.collection.DeleteOne(ctx, bson.M{"_id": id})
+	if err != nil {
+		return fmt.Errorf("delete batch: %w", err)
+	}
+	if result.DeletedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // Close is a no-op; Mongo client lifecycle is managed by storage layer.
 func (s *MongoDBStore) Close() error {
 	return nil

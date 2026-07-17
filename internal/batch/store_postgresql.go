@@ -166,6 +166,18 @@ func (s *PostgreSQLStore) Update(ctx context.Context, batch *StoredBatch) error 
 	return nil
 }
 
+// Delete removes a stored batch object.
+func (s *PostgreSQLStore) Delete(ctx context.Context, id string) error {
+	cmd, err := s.pool.Exec(ctx, `DELETE FROM batches WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete batch: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // Close is a no-op; pool lifecycle is managed by storage layer.
 func (s *PostgreSQLStore) Close() error {
 	return nil

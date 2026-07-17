@@ -21,6 +21,8 @@ func TestDescribeEndpointPath(t *testing.T) {
 		{path: "/v1/conversations", managed: true, dialect: "openai_compat", operation: OperationConversations, bodyMode: BodyModeNone, interaction: true},
 		{path: "/v1/conversations/conv_1", managed: true, dialect: "openai_compat", operation: OperationConversations, bodyMode: BodyModeNone, interaction: true},
 		{path: "/v1/batches", managed: true, dialect: "openai_compat", operation: OperationBatches, bodyMode: BodyModeNone, interaction: true},
+		{path: "/v1/messages/batches", managed: true, dialect: "anthropic", operation: OperationBatches, bodyMode: BodyModeNone, interaction: true},
+		{path: "/v1/messages/batches/msgbatch_1/results", managed: true, dialect: "anthropic", operation: OperationBatches, bodyMode: BodyModeNone, interaction: true},
 		{path: "/v1/embeddings/", managed: true, dialect: "openai_compat", operation: OperationEmbeddings, bodyMode: BodyModeJSON, interaction: true},
 		{path: "/v1/files/file_1", managed: true, dialect: "openai_compat", operation: OperationFiles, bodyMode: BodyModeNone, interaction: true},
 		{path: "/v1/audio/speech", managed: false, dialect: "openai_compat", operation: OperationAudioSpeech, bodyMode: BodyModeJSON, interaction: true},

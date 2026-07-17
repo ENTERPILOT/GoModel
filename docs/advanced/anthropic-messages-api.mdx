@@ -29,9 +29,36 @@ endpoint routes anywhere and is fully managed.
 | `POST /v1/messages` | Creates a message through translated model routing. Supports streaming (`stream: true`) with Anthropic-format SSE events. |
 | `POST /v1/messages/count_tokens` | Returns a heuristic input token estimate. |
 | `GET /v1/models` | Returns the catalog in the Anthropic list shape (`type: "model"`, `display_name`, `created_at`) when the request carries the `anthropic-version` header the Anthropic SDKs always send; OpenAI shape otherwise. |
+| `POST /v1/messages/batches` | Creates a Message Batch. Inline `requests[].params` are translated per item, so a batch can target any provider with native batch support (Anthropic, OpenAI, …), not only Anthropic. |
+| `GET /v1/messages/batches` | Lists batches (`limit`, `after_id`). |
+| `GET /v1/messages/batches/{id}` | Retrieves a batch (`processing_status`, `request_counts`, `results_url` once ended). |
+| `POST /v1/messages/batches/{id}/cancel` | Cancels a running batch. |
+| `DELETE /v1/messages/batches/{id}` | Deletes an ended batch. Deleted upstream too when the provider's batch API supports it (Anthropic); otherwise removed from the gateway only. |
+| `GET /v1/messages/batches/{id}/results` | Streams results as JSONL. Successful items are returned in the Anthropic Messages shape regardless of the provider that served them. |
 
-The Anthropic Message Batches API (`/v1/messages/batches`) is not implemented; batch
-processing is available through the OpenAI-compatible `/v1/batches` endpoint.
+## Message Batches
+
+`/v1/messages/batches` shares the gateway's native-batch pipeline with the
+OpenAI-compatible `/v1/batches` route — the two are dialect views of the same
+resource. Batch IDs are interchangeable across the two dialects (`msgbatch_<uuid>`
+here, `batch_<uuid>` there). All requests in one batch must resolve to a single
+provider; per-item `custom_id` values are required and must be unique.
+
+Providers whose batch API is file-based (OpenAI-compatible) receive inline
+requests as an automatically uploaded JSONL input file. `request_counts` maps the
+provider's aggregate counts: while a batch runs, unfinished requests are reported
+as `processing`; once it ends, any remainder is attributed by the batch outcome
+(`canceled`, `expired`, or `errored`).
+
+```python
+batch = client.messages.batches.create(requests=[
+    {"custom_id": "q1", "params": {"model": "openai/gpt-4o-mini", "max_tokens": 64,
+        "messages": [{"role": "user", "content": "What is 2+3?"}]}},
+])
+# poll client.messages.batches.retrieve(batch.id) until "ended", then:
+for entry in client.messages.batches.results(batch.id):
+    print(entry.custom_id, entry.result.type)
+```
 
 ## Authentication
 

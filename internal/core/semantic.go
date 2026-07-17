@@ -442,7 +442,18 @@ func fileIDFromTransport(path string, routeParams map[string]string) string {
 	return strings.TrimSpace(parts[2])
 }
 
+// normalizeBatchTransportPath maps the Anthropic Message Batches route root
+// (/v1/messages/batches) onto the canonical /v1/batches root so one
+// derivation covers both batch ingress dialects.
+func normalizeBatchTransportPath(path string) string {
+	if path == "/v1/messages/batches" || strings.HasPrefix(path, "/v1/messages/batches/") {
+		return "/v1/batches" + strings.TrimPrefix(path, "/v1/messages/batches")
+	}
+	return path
+}
+
 func batchActionFromTransport(method, path string) string {
+	path = normalizeBatchTransportPath(path)
 	switch {
 	case path == "/v1/batches" && method == http.MethodPost:
 		return BatchActionCreate
@@ -452,6 +463,8 @@ func batchActionFromTransport(method, path string) string {
 		return BatchActionResults
 	case strings.HasSuffix(path, "/cancel") && strings.HasPrefix(path, "/v1/batches/") && method == http.MethodPost:
 		return BatchActionCancel
+	case strings.HasPrefix(path, "/v1/batches/") && method == http.MethodDelete:
+		return BatchActionDelete
 	case strings.HasPrefix(path, "/v1/batches/") && method == http.MethodGet:
 		return BatchActionGet
 	default:
@@ -464,7 +477,7 @@ func batchIDFromTransport(path string, routeParams map[string]string) string {
 		return id
 	}
 
-	trimmed := strings.Trim(strings.TrimSpace(path), "/")
+	trimmed := strings.Trim(strings.TrimSpace(normalizeBatchTransportPath(path)), "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) < 3 || parts[0] != "v1" || parts[1] != "batches" {
 		return ""

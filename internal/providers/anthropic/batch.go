@@ -238,6 +238,18 @@ func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchRespo
 	return mapped, nil
 }
 
+// DeleteBatch deletes an ended Anthropic native message batch.
+func (p *Provider) DeleteBatch(ctx context.Context, id string) error {
+	var resp struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	}
+	return p.client.Do(ctx, llmclient.Request{
+		Method:   http.MethodDelete,
+		Endpoint: "/messages/batches/" + url.PathEscape(id),
+	}, &resp)
+}
+
 func (p *Provider) getBatchResults(ctx context.Context, id string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
 	resp, err := p.client.DoPassthrough(ctx, llmclient.Request{
 		Method:   http.MethodGet,

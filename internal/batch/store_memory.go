@@ -116,6 +116,17 @@ func (s *MemoryStore) Update(_ context.Context, batch *StoredBatch) error {
 	return nil
 }
 
+// Delete removes a stored batch object.
+func (s *MemoryStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.items[id]; !exists {
+		return ErrNotFound
+	}
+	delete(s.items, id)
+	return nil
+}
+
 // Close releases resources (no-op for memory store).
 func (s *MemoryStore) Close() error {
 	return nil

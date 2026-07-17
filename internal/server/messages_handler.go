@@ -53,6 +53,101 @@ func (h *Handler) CountMessageTokens(c *echo.Context) error {
 	return h.translatedInference().CountMessageTokens(c)
 }
 
+// MessagesBatches handles POST /v1/messages/batches.
+//
+// @Summary      Create a message batch (Anthropic Message Batches API)
+// @Tags         messages
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        request  body      anthropicapi.BatchCreateRequest  true  "Anthropic Message Batches create request"
+// @Success      200      {object}  anthropicapi.MessageBatch
+// @Failure      400      {object}  anthropicapi.ErrorResponse
+// @Failure      401      {object}  anthropicapi.ErrorResponse
+// @Failure      429      {object}  anthropicapi.ErrorResponse
+// @Failure      502      {object}  anthropicapi.ErrorResponse
+// @Router       /v1/messages/batches [post]
+func (h *Handler) MessagesBatches(c *echo.Context) error {
+	return h.nativeBatch().CreateMessageBatch(c)
+}
+
+// GetMessagesBatch handles GET /v1/messages/batches/{id}.
+//
+// @Summary      Get a message batch
+// @Tags         messages
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path      string  true  "Message batch ID"
+// @Success      200  {object}  anthropicapi.MessageBatch
+// @Failure      401  {object}  anthropicapi.ErrorResponse
+// @Failure      404  {object}  anthropicapi.ErrorResponse
+// @Router       /v1/messages/batches/{id} [get]
+func (h *Handler) GetMessagesBatch(c *echo.Context) error {
+	return h.nativeBatch().GetMessageBatch(c)
+}
+
+// ListMessagesBatches handles GET /v1/messages/batches.
+//
+// @Summary      List message batches
+// @Tags         messages
+// @Produce      json
+// @Security     BearerAuth
+// @Param        after_id  query     string  false  "Pagination cursor"
+// @Param        limit     query     int     false  "Maximum items to return (1-100, default 20)"
+// @Success      200       {object}  anthropicapi.MessageBatchList
+// @Failure      401       {object}  anthropicapi.ErrorResponse
+// @Router       /v1/messages/batches [get]
+func (h *Handler) ListMessagesBatches(c *echo.Context) error {
+	return h.nativeBatch().ListMessageBatches(c)
+}
+
+// CancelMessagesBatch handles POST /v1/messages/batches/{id}/cancel.
+//
+// @Summary      Cancel a message batch
+// @Tags         messages
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path      string  true  "Message batch ID"
+// @Success      200  {object}  anthropicapi.MessageBatch
+// @Failure      401  {object}  anthropicapi.ErrorResponse
+// @Failure      404  {object}  anthropicapi.ErrorResponse
+// @Router       /v1/messages/batches/{id}/cancel [post]
+func (h *Handler) CancelMessagesBatch(c *echo.Context) error {
+	return h.nativeBatch().CancelMessageBatch(c)
+}
+
+// DeleteMessagesBatch handles DELETE /v1/messages/batches/{id}.
+//
+// @Summary      Delete an ended message batch
+// @Tags         messages
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path      string  true  "Message batch ID"
+// @Success      200  {object}  anthropicapi.DeletedMessageBatch
+// @Failure      400  {object}  anthropicapi.ErrorResponse
+// @Failure      401  {object}  anthropicapi.ErrorResponse
+// @Failure      404  {object}  anthropicapi.ErrorResponse
+// @Router       /v1/messages/batches/{id} [delete]
+func (h *Handler) DeleteMessagesBatch(c *echo.Context) error {
+	return h.nativeBatch().DeleteMessageBatch(c)
+}
+
+// MessagesBatchResults handles GET /v1/messages/batches/{id}/results.
+//
+// @Summary      Get message batch results (JSONL)
+// @Tags         messages
+// @Produce      octet-stream
+// @Security     BearerAuth
+// @Param        id   path      string  true  "Message batch ID"
+// @Success      200  {string}  string  "JSONL stream of batch results"
+// @Failure      401  {object}  anthropicapi.ErrorResponse
+// @Failure      404  {object}  anthropicapi.ErrorResponse
+// @Failure      409  {object}  anthropicapi.ErrorResponse
+// @Router       /v1/messages/batches/{id}/results [get]
+func (h *Handler) MessagesBatchResults(c *echo.Context) error {
+	return h.nativeBatch().MessageBatchResults(c)
+}
+
 // Messages translates an Anthropic Messages request and dispatches it through
 // the shared chat-completions pipeline (workflow resolution, response cache).
 func (s *translatedInferenceService) Messages(c *echo.Context) error {

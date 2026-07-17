@@ -91,6 +91,16 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationEmbeddings,
 		}
+	case path == "/v1/messages/batches" || strings.HasPrefix(path, "/v1/messages/batches/"):
+		// Anthropic Message Batches dialect. Translated to the canonical batch
+		// type at ingress and served by the same native-batch pipeline as
+		// /v1/batches (see ADR-0007 for the edge-translation pattern).
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			IngressManaged:   true,
+			Dialect:          "anthropic",
+			Operation:        OperationBatches,
+		}
 	case path == "/v1/messages" || path == "/v1/messages/count_tokens":
 		// Anthropic Messages dialect. It is translated to the canonical chat
 		// type at ingress and runs through the chat-completions pipeline, so it

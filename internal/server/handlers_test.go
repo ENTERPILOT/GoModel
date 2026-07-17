@@ -359,6 +359,10 @@ func (s *failingBatchStore) Update(context.Context, *batchstore.StoredBatch) err
 	return batchstore.ErrNotFound
 }
 
+func (s *failingBatchStore) Delete(context.Context, string) error {
+	return batchstore.ErrNotFound
+}
+
 func (s *failingBatchStore) Close() error {
 	return nil
 }

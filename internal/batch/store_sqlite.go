@@ -159,6 +159,22 @@ func (s *SQLiteStore) Update(ctx context.Context, batch *StoredBatch) error {
 	return nil
 }
 
+// Delete removes a stored batch object.
+func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM batches WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete batch: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read delete rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // Close is a no-op; DB lifecycle is managed by storage layer.
 func (s *SQLiteStore) Close() error {
 	return nil

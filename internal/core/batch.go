@@ -32,6 +32,9 @@ const (
 	BatchActionCancel = "cancel"
 	// BatchActionResults represents GET /v1/batches/{id}/results.
 	BatchActionResults = "results"
+	// BatchActionDelete represents DELETE /v1/messages/batches/{id}
+	// (Anthropic Message Batches dialect; the OpenAI dialect has no delete).
+	BatchActionDelete = "delete"
 )
 
 // BatchRouteInfo is sparse canonical metadata the gateway can derive for /v1/batches* routes.

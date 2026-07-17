@@ -93,3 +93,23 @@ func TestMemoryStoreListAfter(t *testing.T) {
 		t.Fatalf("unexpected after result: %+v", next)
 	}
 }
+
+func TestMemoryStoreDelete(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+
+	if err := store.Delete(ctx, "missing"); err != ErrNotFound {
+		t.Fatalf("delete missing = %v, want ErrNotFound", err)
+	}
+
+	b := &StoredBatch{Batch: &core.BatchResponse{ID: "batch-1", Object: "batch", Status: "completed"}}
+	if err := store.Create(ctx, b); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.Delete(ctx, "batch-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := store.Get(ctx, "batch-1"); err != ErrNotFound {
+		t.Fatalf("get after delete = %v, want ErrNotFound", err)
+	}
+}

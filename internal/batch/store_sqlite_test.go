@@ -75,3 +75,32 @@ func TestSQLiteStoreLifecycle(t *testing.T) {
 		t.Fatalf("status = %q, want cancelled", got2.Batch.Status)
 	}
 }
+
+func TestSQLiteStoreDelete(t *testing.T) {
+	st, err := storage.NewSQLite(storage.SQLiteConfig{Path: filepath.Join(t.TempDir(), "batches.db")})
+	if err != nil {
+		t.Fatalf("new sqlite storage: %v", err)
+	}
+	defer st.Close()
+
+	store, err := NewSQLiteStore(st.DB())
+	if err != nil {
+		t.Fatalf("new sqlite batch store: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := store.Delete(ctx, "missing"); err != ErrNotFound {
+		t.Fatalf("delete missing = %v, want ErrNotFound", err)
+	}
+
+	b := &StoredBatch{Batch: &core.BatchResponse{ID: "batch-sql-del", Object: "batch", Status: "completed"}}
+	if err := store.Create(ctx, b); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.Delete(ctx, "batch-sql-del"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := store.Get(ctx, "batch-sql-del"); err != ErrNotFound {
+		t.Fatalf("get after delete = %v, want ErrNotFound", err)
+	}
+}
