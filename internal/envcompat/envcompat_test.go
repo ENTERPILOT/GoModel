@@ -25,8 +25,10 @@ func captureWarnings(t *testing.T) *bytes.Buffer {
 	t.Helper()
 
 	for _, name := range testVars {
-		unset(t, name)
-		unset(t, Prefix+name)
+		for _, spelling := range []string{name, Prefix + name} {
+			t.Setenv(spelling, "") // snapshots the prior value for restore
+			os.Unsetenv(spelling)
+		}
 	}
 
 	buf := &bytes.Buffer{}
@@ -34,27 +36,9 @@ func captureWarnings(t *testing.T) *bytes.Buffer {
 	slog.SetDefault(slog.New(slog.NewTextHandler(buf, nil)))
 	t.Cleanup(func() {
 		slog.SetDefault(previous)
-		warned.Clear()
 	})
 	warned.Clear()
 	return buf
-}
-
-// unset removes name for the duration of the test, restoring any prior value.
-func unset(t *testing.T, name string) {
-	t.Helper()
-	previous, existed := os.LookupEnv(name)
-	if !existed {
-		return
-	}
-	if err := os.Unsetenv(name); err != nil {
-		t.Fatalf("unset %s: %v", name, err)
-	}
-	t.Cleanup(func() {
-		if err := os.Setenv(name, previous); err != nil {
-			t.Fatalf("restore %s: %v", name, err)
-		}
-	})
 }
 
 func TestLookup(t *testing.T) {

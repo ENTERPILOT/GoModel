@@ -142,7 +142,11 @@ func applyEnvOverridesValue(v reflect.Value) error {
 	return nil
 }
 
-// expandString expands environment variable references like ${VAR} or ${VAR:-default} in a string.
+// expandString expands environment variable references like ${VAR} or
+// ${VAR:-default} in a string. It deliberately reads the environment verbatim,
+// never through envcompat: the referenced names are operator-chosen and
+// commonly provider-family ones (${OPENAI_API_KEY}), so GOMODEL_-prefix
+// resolution and deprecation warnings must not apply.
 func expandString(s string) string {
 	if s == "" {
 		return s

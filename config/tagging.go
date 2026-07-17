@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,21 +40,17 @@ type TaggingHeaderConfig struct {
 
 const taggingHeaderEnvPrefix = "TAGGING_HEADER_"
 
-var taggingHeaderEnvIndexRegex = regexp.MustCompile(`^[0-9]+$`)
-
 // applyTaggingEnv reads GOMODEL_TAGGING_HEADER_<N> env vars (with optional
 // _PREFIX, _DONOTPASS, and _DELIMITER companions) and merges them over the
 // YAML-declared list. Env entries override YAML entries with the same header
 // name, consistent with the rest of the config pipeline where env always wins.
 func applyTaggingEnv(cfg *Config) error {
-	// Scan surfaces the companions too (suffix "1_PREFIX"); keep only the bare
-	// indexes, then resolve each entry's companions through envcompat so a
-	// canonical base with a legacy companion — or the reverse — still resolves.
+	// Scan surfaces the companions too (suffix "1_PREFIX"); Atoi keeps only
+	// the bare indexes, then each entry's companions resolve through envcompat
+	// so a canonical base with a legacy companion — or the reverse — still
+	// resolves.
 	indexes := make([]int, 0)
 	for _, item := range envcompat.Scan(taggingHeaderEnvPrefix) {
-		if !taggingHeaderEnvIndexRegex.MatchString(item.Suffix) {
-			continue
-		}
 		n, err := strconv.Atoi(item.Suffix)
 		if err != nil {
 			continue

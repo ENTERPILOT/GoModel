@@ -128,8 +128,6 @@ func TestEnvPrefixConfigStrict(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			clearAllConfigEnvVars(t)
-			t.Setenv("CONFIG_STRICT", "")
-			t.Setenv("GOMODEL_CONFIG_STRICT", "")
 			for k, v := range tt.env {
 				t.Setenv(k, v)
 			}
@@ -151,8 +149,6 @@ func TestEnvPrefixVirtualModels(t *testing.T) {
 	for _, spelling := range []string{"GOMODEL_VIRTUAL_MODELS", "VIRTUAL_MODELS"} {
 		t.Run(spelling, func(t *testing.T) {
 			clearAllConfigEnvVars(t)
-			t.Setenv("VIRTUAL_MODELS", "")
-			t.Setenv("GOMODEL_VIRTUAL_MODELS", "")
 			t.Setenv(spelling, payload)
 
 			cfg := &Config{}
@@ -312,10 +308,6 @@ func TestEnvPrefixSemanticCache(t *testing.T) {
 	for _, spelling := range []string{"GOMODEL_SEMANTIC_CACHE_ENABLED", "SEMANTIC_CACHE_ENABLED"} {
 		t.Run(spelling, func(t *testing.T) {
 			clearAllConfigEnvVars(t)
-			t.Setenv("SEMANTIC_CACHE_ENABLED", "")
-			t.Setenv("GOMODEL_SEMANTIC_CACHE_ENABLED", "")
-			t.Setenv("SEMANTIC_CACHE_THRESHOLD", "")
-			t.Setenv("GOMODEL_SEMANTIC_CACHE_THRESHOLD", "")
 			t.Setenv(spelling, "true")
 			t.Setenv(strings.Replace(spelling, "ENABLED", "THRESHOLD", 1), "0.9")
 

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -1113,6 +1114,7 @@ func TestChatCompletionWithContext(t *testing.T) {
 
 func TestConvertToAnthropicRequest(t *testing.T) {
 	t.Setenv(defaultMaxTokensEnvVar, "")
+	resetDefaultMaxTokens(t)
 
 	temp := 0.7
 	maxTokens := 1024
@@ -4998,6 +5000,17 @@ func TestPassthrough(t *testing.T) {
 	}
 }
 
+// resetDefaultMaxTokens clears the process-lifetime memoization so a test
+// that flips the env var sees its own value, and restores a fresh memo for
+// whichever test runs next.
+func resetDefaultMaxTokens(t *testing.T) {
+	t.Helper()
+	defaultMaxTokens = sync.OnceValue(resolveDefaultMaxTokens)
+	t.Cleanup(func() {
+		defaultMaxTokens = sync.OnceValue(resolveDefaultMaxTokens)
+	})
+}
+
 func TestResolveDefaultMaxTokens(t *testing.T) {
 	tests := []struct {
 		name string
@@ -5023,6 +5036,7 @@ func TestResolveDefaultMaxTokens(t *testing.T) {
 
 func TestConvertToAnthropicRequest_HonoursDefaultMaxTokensEnv(t *testing.T) {
 	t.Setenv(defaultMaxTokensEnvVar, "32768")
+	resetDefaultMaxTokens(t)
 	req := &core.ChatRequest{
 		Model: "claude-sonnet-4-6",
 		Messages: []core.Message{

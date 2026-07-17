@@ -202,7 +202,9 @@ func (u *upstream) transport() (mcp.Transport, error) {
 		// process holds every provider API key and the master key, and a
 		// compromised MCP server binary must not inherit them. Operators pass
 		// anything else explicitly via the server's env map (${VAR} expands
-		// in config), on top of the basics process launchers need. The
+		// in config), on top of the basics process launchers need — read
+		// verbatim, not through envcompat: these are system names, not
+		// GoModel config. The
 		// non-nil initialization matters: a nil cmd.Env would fall back to
 		// inheriting the full parent environment.
 		cmd.Env = []string{}

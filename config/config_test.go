@@ -41,7 +41,7 @@ func clearProviderEnvVars(t *testing.T) {
 func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"CONFIG_STRICT",
+		"CONFIG_STRICT", "VIRTUAL_MODELS", "MCP_SERVERS",
 		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
@@ -74,18 +74,25 @@ func clearAllConfigEnvVars(t *testing.T) {
 	} {
 		// Both spellings: the canonical GOMODEL_-prefixed name takes precedence
 		// over the legacy bare one, so an ambient canonical value would shadow
-		// whatever a test sets bare (and vice versa).
-		for _, name := range []string{key, envcompat.Prefix + key} {
+		// whatever a test sets bare (and vice versa). Keys already carrying
+		// the prefix (GOMODEL_MASTER_KEY) have only the one spelling.
+		names := []string{key}
+		if !strings.HasPrefix(key, envcompat.Prefix) {
+			names = append(names, envcompat.Prefix+key)
+		}
+		for _, name := range names {
 			t.Setenv(name, "")
 			os.Unsetenv(name)
 		}
 	}
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
+		bare := strings.TrimPrefix(key, envcompat.Prefix)
 		for _, prefix := range []string{"SET_BUDGET_", "SET_RATE_LIMIT_", "SET_PROVIDER_RATE_LIMIT_", "TAGGING_HEADER_"} {
-			if strings.HasPrefix(key, prefix) || strings.HasPrefix(key, envcompat.Prefix+prefix) {
+			if strings.HasPrefix(bare, prefix) {
 				t.Setenv(key, "")
 				os.Unsetenv(key)
+				break
 			}
 		}
 	}

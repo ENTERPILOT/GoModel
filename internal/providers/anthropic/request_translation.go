@@ -14,9 +14,8 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/providers"
-
 	"github.com/enterpilot/gomodel/internal/envcompat"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // defaultMaxTokensEnvVar overrides the fallback applied when callers omit
@@ -29,6 +28,12 @@ const defaultMaxTokensEnvVar = "ANTHROPIC_DEFAULT_MAX_TOKENS"
 const fallbackMaxTokens = 4096
 
 var invalidDefaultMaxTokensWarnOnce sync.Once
+
+// defaultMaxTokens memoizes resolveDefaultMaxTokens: the value is read on
+// every translated request that omits max_tokens, and the environment cannot
+// change mid-process. Tests that flip the env var reset it via
+// resetDefaultMaxTokens.
+var defaultMaxTokens = sync.OnceValue(resolveDefaultMaxTokens)
 
 func resolveDefaultMaxTokens() int {
 	raw := strings.TrimSpace(envcompat.Get(defaultMaxTokensEnvVar))
@@ -306,7 +311,7 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	if req.MaxTokens != nil {
 		anthropicReq.MaxTokens = *req.MaxTokens
 	} else {
-		anthropicReq.MaxTokens = resolveDefaultMaxTokens()
+		anthropicReq.MaxTokens = defaultMaxTokens()
 	}
 
 	if effort := resolveAnthropicReasoningEffort(req); effort != "" {

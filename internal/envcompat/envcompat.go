@@ -163,6 +163,10 @@ func Scan(prefix string) []Entry {
 	for suffix := range suffixes {
 		value, ok, source := lookup(prefix+suffix, false)
 		if !ok {
+			// Only reachable when prefix+suffix expands to an exempt name
+			// whose bare spelling is unset (Scan("REDIS_") with only
+			// GOMODEL_REDIS_URL in the environment); no current caller scans
+			// such a prefix.
 			continue
 		}
 		entries = append(entries, Entry{Name: source, Suffix: suffix, Value: value})
@@ -174,13 +178,8 @@ func Scan(prefix string) []Entry {
 }
 
 func warn(legacy, canonical string) {
-	if _, seen := warned.LoadOrStore(legacy, struct{}{}); seen {
-		return
-	}
-	slog.Warn("deprecated environment variable: rename it before the next major release",
-		"variable", legacy,
-		"use", canonical,
-	)
+	warnOnce("deprecated environment variable: rename it before the next major release",
+		legacy, canonical)
 }
 
 // warnPrefixedExempt fires once when the GOMODEL_-prefixed spelling of an
@@ -188,12 +187,15 @@ func warn(legacy, canonical string) {
 // prefixed their whole env block mechanically would otherwise get a silent
 // misconfiguration (GOMODEL_PORT=9090 booting on 8080).
 func warnPrefixedExempt(name string) {
-	prefixed := Prefix + name
-	if _, seen := warned.LoadOrStore(prefixed, struct{}{}); seen {
+	warnOnce("environment variable is not read: this name is platform-injected and stays bare",
+		Prefix+name, name)
+}
+
+// warnOnce logs at most one warning per variable for the process lifetime, so
+// a variable read on a hot path cannot spam the log.
+func warnOnce(msg, variable, use string) {
+	if _, seen := warned.LoadOrStore(variable, struct{}{}); seen {
 		return
 	}
-	slog.Warn("environment variable is not read: this name is platform-injected and stays bare",
-		"variable", prefixed,
-		"use", name,
-	)
+	slog.Warn(msg, "variable", variable, "use", use)
 }
