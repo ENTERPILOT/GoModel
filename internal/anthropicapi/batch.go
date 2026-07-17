@@ -115,8 +115,10 @@ func ToBatchRequest(req *BatchCreateRequest) (*core.BatchRequest, error) {
 	items := make([]core.BatchRequestItem, 0, len(req.Requests))
 	seen := make(map[string]struct{}, len(req.Requests))
 	for i, item := range req.Requests {
-		customID := strings.TrimSpace(item.CustomID)
-		if customID == "" {
+		// custom_id is the caller's correlation key: validate blankness on a
+		// trimmed copy but carry the original verbatim so results match it.
+		customID := item.CustomID
+		if strings.TrimSpace(customID) == "" {
 			return nil, core.NewInvalidRequestError(
 				fmt.Sprintf("requests[%d].custom_id is required", i), nil)
 		}
@@ -198,12 +200,10 @@ func FromBatchResponse(batch *core.BatchResponse) *MessageBatch {
 	}
 	out.RequestCounts = messageBatchCounts(batch, out.ProcessingStatus)
 	out.CancelInitiatedAt = rfc3339FromUnixPtr(batch.CancellingAt)
+	// ended_at stays null when the provider reported no transition timestamp:
+	// fabricating one at render time would make repeated retrievals disagree.
 	out.EndedAt = rfc3339FromUnixPtr(firstUnix(batch.CompletedAt, batch.FailedAt, batch.CancelledAt))
 	if out.ProcessingStatus == "ended" {
-		if out.EndedAt == nil {
-			ended := rfc3339FromUnix(time.Now().Unix())
-			out.EndedAt = &ended
-		}
 		resultsURL := "/v1/messages/batches/" + out.ID + "/results"
 		out.ResultsURL = &resultsURL
 	}

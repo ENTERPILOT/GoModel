@@ -218,14 +218,20 @@ func TestFromBatchResponse(t *testing.T) {
 				if out.ResultsURL == nil || *out.ResultsURL != "/v1/messages/batches/msgbatch_1/results" {
 					t.Fatalf("results_url = %v", out.ResultsURL)
 				}
-				if out.EndedAt == nil {
-					t.Fatal("ended batches must carry ended_at")
-				}
 			} else if out.ResultsURL != nil {
 				t.Fatalf("results_url should be null while %s", tc.wantStatus)
 			}
 			if tc.batch.CancellingAt != nil && out.CancelInitiatedAt == nil {
 				t.Fatal("cancel_initiated_at missing")
+			}
+			// ended_at reflects a provider-reported timestamp and is never
+			// fabricated at render time.
+			if tc.batch.CompletedAt != nil {
+				if out.EndedAt == nil || *out.EndedAt != "1970-01-01T00:33:20Z" {
+					t.Fatalf("ended_at = %v", out.EndedAt)
+				}
+			} else if out.EndedAt != nil {
+				t.Fatalf("ended_at fabricated without a provider timestamp: %v", *out.EndedAt)
 			}
 		})
 	}

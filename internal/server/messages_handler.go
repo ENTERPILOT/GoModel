@@ -136,7 +136,7 @@ func (h *Handler) DeleteMessagesBatch(c *echo.Context) error {
 //
 // @Summary      Get message batch results (JSONL)
 // @Tags         messages
-// @Produce      octet-stream
+// @Produce      application/x-jsonl
 // @Security     BearerAuth
 // @Param        id   path      string  true  "Message batch ID"
 // @Success      200  {string}  string  "JSONL stream of batch results"

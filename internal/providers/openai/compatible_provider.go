@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -435,11 +436,13 @@ func (p *CompatibleProvider) CreateBatch(ctx context.Context, req *core.BatchReq
 	// materialized into a JSONL input file first, so inline batches route to
 	// OpenAI-compatible providers the same as everywhere else. The file has the
 	// same lifecycle as a caller-uploaded batch input file.
+	uploadedInputFileID := ""
 	if req.InputFileID == "" && len(req.Requests) > 0 {
 		fileID, err := p.uploadInlineBatchInput(ctx, req.Requests)
 		if err != nil {
 			return nil, err
 		}
+		uploadedInputFileID = fileID
 		fileBacked := *req
 		fileBacked.InputFileID = fileID
 		fileBacked.Requests = nil
@@ -452,6 +455,15 @@ func (p *CompatibleProvider) CreateBatch(ctx context.Context, req *core.BatchReq
 		Body:     req,
 	}, &resp)
 	if err != nil {
+		// Best-effort cleanup: the gateway created the input file, so a failed
+		// batch creation must not leave the caller's request content orphaned
+		// on the provider.
+		if uploadedInputFileID != "" {
+			if _, cleanupErr := p.DeleteFile(ctx, uploadedInputFileID); cleanupErr != nil {
+				slog.Warn("failed to clean up inline batch input file after batch create failure",
+					"provider", p.providerName, "file_id", uploadedInputFileID, "error", cleanupErr)
+			}
+		}
 		return nil, err
 	}
 	providers.EnsureProviderBatchID(&resp)

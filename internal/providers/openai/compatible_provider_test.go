@@ -236,73 +236,118 @@ func TestCompatibleProvider_ChatRequestHeaders_AppliedToChatOnly(t *testing.T) {
 	}
 }
 
-func TestCompatibleProvider_CreateBatch_UploadsInlineRequestsAsInputFile(t *testing.T) {
-	var uploadedJSONL string
-	var batchCreateBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/files" && r.Method == http.MethodPost:
-			if err := r.ParseMultipartForm(1 << 20); err != nil {
-				t.Fatalf("parse multipart: %v", err)
-			}
-			file, _, err := r.FormFile("file")
-			if err != nil {
-				t.Fatalf("read file part: %v", err)
-			}
-			content, _ := io.ReadAll(file)
-			uploadedJSONL = string(content)
-			_, _ = w.Write([]byte(`{"id":"file-abc","object":"file","purpose":"batch"}`))
-		case r.URL.Path == "/batches" && r.Method == http.MethodPost:
-			if err := json.NewDecoder(r.Body).Decode(&batchCreateBody); err != nil {
-				t.Fatalf("decode batch body: %v", err)
-			}
-			_, _ = w.Write([]byte(`{"id":"batch-up-1","object":"batch","status":"validating","input_file_id":"file-abc"}`))
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	provider := NewCompatibleProviderWithHTTPClient(
-		"test-key",
-		server.Client(),
-		llmclient.Hooks{},
-		CompatibleProviderConfig{ProviderName: "openai", BaseURL: server.URL},
-	)
-
-	resp, err := provider.CreateBatch(context.Background(), &core.BatchRequest{
+func TestCompatibleProvider_CreateBatch_InlineRequests(t *testing.T) {
+	inlineReq := &core.BatchRequest{
 		Endpoint:         "/v1/chat/completions",
 		CompletionWindow: "24h",
 		Requests: []core.BatchRequestItem{
 			{CustomID: "a", Method: "POST", URL: "/v1/chat/completions", Body: json.RawMessage(`{"model":"gpt-4o-mini","messages":[]}`)},
 			{CustomID: "b", Method: "POST", URL: "/v1/chat/completions", Body: json.RawMessage(`{"model":"gpt-4o-mini","messages":[]}`)},
 		},
-	})
-	if err != nil {
-		t.Fatalf("CreateBatch: %v", err)
-	}
-	if resp.ID != "batch-up-1" {
-		t.Fatalf("batch id = %q", resp.ID)
 	}
 
-	lines := strings.Split(strings.TrimSpace(uploadedJSONL), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("uploaded JSONL lines = %d content=%q", len(lines), uploadedJSONL)
+	tests := []struct {
+		name            string
+		uploadStatus    int
+		batchStatus     int
+		wantErr         bool
+		wantBatchCall   bool
+		wantFileDeleted bool
+	}{
+		{name: "upload then create succeeds", uploadStatus: http.StatusOK, batchStatus: http.StatusOK, wantBatchCall: true},
+		{name: "upload failure prevents batch create", uploadStatus: http.StatusInternalServerError, wantErr: true},
+		{name: "create failure cleans up the uploaded file", uploadStatus: http.StatusOK, batchStatus: http.StatusBadRequest, wantErr: true, wantBatchCall: true, wantFileDeleted: true},
 	}
-	var first map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-		t.Fatalf("first line: %v", err)
-	}
-	if first["custom_id"] != "a" || first["url"] != "/v1/chat/completions" || first["method"] != "POST" {
-		t.Fatalf("first line = %v", first)
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var uploadedJSONL string
+			var batchCreateBody map[string]any
+			batchCalled := false
+			fileDeleted := false
 
-	if batchCreateBody["input_file_id"] != "file-abc" {
-		t.Fatalf("batch create input_file_id = %v", batchCreateBody["input_file_id"])
-	}
-	if _, hasInline := batchCreateBody["requests"]; hasInline {
-		t.Fatalf("inline requests leaked to the provider create body: %v", batchCreateBody)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/files" && r.Method == http.MethodPost:
+					if tc.uploadStatus != http.StatusOK {
+						w.WriteHeader(tc.uploadStatus)
+						_, _ = w.Write([]byte(`{"error":{"message":"upload boom"}}`))
+						return
+					}
+					if err := r.ParseMultipartForm(1 << 20); err != nil {
+						t.Fatalf("parse multipart: %v", err)
+					}
+					file, _, err := r.FormFile("file")
+					if err != nil {
+						t.Fatalf("read file part: %v", err)
+					}
+					content, _ := io.ReadAll(file)
+					uploadedJSONL = string(content)
+					_, _ = w.Write([]byte(`{"id":"file-abc","object":"file","purpose":"batch"}`))
+				case r.URL.Path == "/batches" && r.Method == http.MethodPost:
+					batchCalled = true
+					if tc.batchStatus != http.StatusOK {
+						w.WriteHeader(tc.batchStatus)
+						_, _ = w.Write([]byte(`{"error":{"message":"create boom"}}`))
+						return
+					}
+					if err := json.NewDecoder(r.Body).Decode(&batchCreateBody); err != nil {
+						t.Fatalf("decode batch body: %v", err)
+					}
+					_, _ = w.Write([]byte(`{"id":"batch-up-1","object":"batch","status":"validating","input_file_id":"file-abc"}`))
+				case r.URL.Path == "/files/file-abc" && r.Method == http.MethodDelete:
+					fileDeleted = true
+					_, _ = w.Write([]byte(`{"id":"file-abc","object":"file","deleted":true}`))
+				default:
+					t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			defer server.Close()
+
+			provider := NewCompatibleProviderWithHTTPClient(
+				"test-key",
+				server.Client(),
+				llmclient.Hooks{},
+				CompatibleProviderConfig{ProviderName: "openai", BaseURL: server.URL},
+			)
+
+			resp, err := provider.CreateBatch(context.Background(), inlineReq)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("CreateBatch: %v", err)
+				}
+				if resp.ID != "batch-up-1" {
+					t.Fatalf("batch id = %q", resp.ID)
+				}
+
+				lines := strings.Split(strings.TrimSpace(uploadedJSONL), "\n")
+				if len(lines) != 2 {
+					t.Fatalf("uploaded JSONL lines = %d content=%q", len(lines), uploadedJSONL)
+				}
+				var first map[string]any
+				if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+					t.Fatalf("first line: %v", err)
+				}
+				if first["custom_id"] != "a" || first["url"] != "/v1/chat/completions" || first["method"] != "POST" {
+					t.Fatalf("first line = %v", first)
+				}
+				if batchCreateBody["input_file_id"] != "file-abc" {
+					t.Fatalf("batch create input_file_id = %v", batchCreateBody["input_file_id"])
+				}
+				if _, hasInline := batchCreateBody["requests"]; hasInline {
+					t.Fatalf("inline requests leaked to the provider create body: %v", batchCreateBody)
+				}
+			}
+			if batchCalled != tc.wantBatchCall {
+				t.Fatalf("batch endpoint called = %v, want %v", batchCalled, tc.wantBatchCall)
+			}
+			if fileDeleted != tc.wantFileDeleted {
+				t.Fatalf("input file deleted = %v, want %v", fileDeleted, tc.wantFileDeleted)
+			}
+		})
 	}
 }
