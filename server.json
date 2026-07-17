@@ -1,0 +1,35 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.enterpilot/gomodel",
+  "title": "GoModel",
+  "description": "Self-hosted gateway aggregating upstream MCP servers behind one authenticated HTTP endpoint.",
+  "repository": {
+    "url": "https://github.com/ENTERPILOT/GoModel",
+    "source": "github"
+  },
+  "version": "0.1.52",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "docker.io/enterpilot/gomodel:0.1.52",
+      "runtimeHint": "docker",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:8080/mcp"
+      },
+      "environmentVariables": [
+        {
+          "name": "GOMODEL_MASTER_KEY",
+          "description": "Gateway API key clients authenticate with; unset runs the gateway in unsafe (no-auth) mode.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "MCP_SERVERS",
+          "description": "JSON object of upstream MCP servers to aggregate, e.g. {\"github\":{\"url\":\"https://api.githubcopilot.com/mcp/\",\"headers\":{\"Authorization\":\"Bearer ${GITHUB_PAT}\"}}}. Servers can also be declared in config.yaml or the admin dashboard.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

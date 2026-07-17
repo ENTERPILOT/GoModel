@@ -31,6 +31,9 @@ RUN mkdir -p /app/.cache /app/data && touch /app/.cache/.keep /app/data/.keep
 # Runtime stage
 FROM gcr.io/distroless/static-debian12:nonroot
 
+# Ownership proof for the MCP Registry; must match the name in server.json
+LABEL io.modelcontextprotocol.server.name="io.github.enterpilot/gomodel"
+
 # Copy binary and runtime config
 COPY --from=builder /gomodel /gomodel
 COPY --from=builder /app/config/*.yaml /app/config/
