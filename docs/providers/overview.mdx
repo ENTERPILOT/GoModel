@@ -28,6 +28,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Fireworks AI | `FIREWORKS_API_KEY` (`FIREWORKS_BASE_URL` optional) | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | Meta (Muse Spark) | `META_API_KEY` (`META_BASE_URL` optional) | `muse-spark-1.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
 | OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Kilo AI | `KILO_API_KEY` (`KILO_BASE_URL` optional) | `anthropic/claude-sonnet-4.5` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
 | Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | xAI (Grok) | `XAI_API_KEY` | `grok-4.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [xAI (Grok)](/providers/xai) |
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/providers/bailian) |
@@ -55,6 +56,12 @@ support, not every individual model capability exposed by an upstream provider.
   the upstream model catalog yet, so declare `context_window` and `pricing`
   under `providers.meta.models` metadata in `config.yaml` if you want cost
   tracking and context-window reporting.
+- **Kilo AI** — model IDs use `provider/model` (for example,
+  `anthropic/claude-sonnet-4.5`) and are forwarded unchanged. GoModel serves
+  `/v1/responses` by translating it to Kilo's chat-completions endpoint. If
+  another configured provider exposes the same raw model ID, select Kilo
+  explicitly with `kilo/anthropic/claude-sonnet-4.5`; GoModel removes only the
+  outer `kilo/` routing qualifier before forwarding.
 - **Xiaomi MiMo** — TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served
   through `/v1/audio/speech` and `/v1/audio/transcriptions` (translated to
   MiMo's chat-completions audio dialect) as well as directly via chat
@@ -130,7 +137,7 @@ These are the providers most users hit friction on:
 </Tip>
 
 Providers without a dedicated page (OpenAI, Groq, Fireworks AI, Meta,
-OpenRouter, Z.ai, xAI, MiniMax) follow the same pattern: set the API key (and
+OpenRouter, Kilo AI, Z.ai, xAI, MiniMax) follow the same pattern: set the API key (and
 optional base URL where supported), start GoModel, route by model ID. The full env-var reference
 lives in [Configuration](/advanced/configuration).
 

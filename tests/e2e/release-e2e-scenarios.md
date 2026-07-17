@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 162 end-to-end curl scenarios for release validation.
+This file contains 172 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -8,6 +8,9 @@ These scenarios are prepared for execution across these local gateways:
 - `http://localhost:18082` - MongoDB-backed smoke gateway
 - `http://localhost:18083` - SQLite-backed guardrail gateway
 - `http://localhost:18084` - SQLite-backed auth + exact-cache gateway
+- `http://localhost:18090` - mock MCP upstream (`tests/e2e/mockmcp`, started by
+  the stack manager; `/alpha` requires the `X-Mock-Token` header, `/beta` is
+  open)
 
 ## Recommended runner
 
@@ -75,6 +78,13 @@ Stateful note:
   `$QA_SUFFIX`-scoped probe rules and deletes them, so they are
   self-contained, but `S158` saturates `deepseek/deepseek-v4-flash` for up to
   one minute after it runs
+- `S163`-`S172` exercise the MCP gateway (admin CRUD with secret redaction,
+  aggregation/namespacing, tools/prompts/resources relay, usage and audit
+  logging with JSON-RPC bodies, identity-bound sessions, store parity on
+  PostgreSQL/MongoDB) plus provider `request_health` on
+  `/admin/providers/status`; each scenario registers `$QA_SUFFIX`-scoped
+  servers against the local mock MCP upstream on port 18090 and deletes them,
+  so they are self-contained and rerunnable in any order
 - `S160`-`S162` exercise `/v1/conversations` CRUD, responses/conversations
   persistence on the PostgreSQL and MongoDB backends, and the rewrite-savings
   usage summary fields; they clean up after themselves and are rerunnable in
@@ -248,6 +258,101 @@ assert_embeddings_response() {
     and (.usage.total_tokens | type == "number")
     and (.usage.total_tokens >= $min_total_tokens)
   ' "$file" >/dev/null
+}
+
+export MCP_UPSTREAM_BASE="${MCP_UPSTREAM_BASE:-http://localhost:18090}"
+export MCP_UPSTREAM_TOKEN="${MCP_UPSTREAM_TOKEN:-qa-mock-mcp-secret}"
+# Slug-safe names (lowercase alnum + dashes), so name == derived slug and the
+# DELETE path and {server}_{tool} namespacing can use them directly.
+export QA_MCP_ALPHA="qa-alpha-$QA_SUFFIX"
+export QA_MCP_BETA="qa-beta-$QA_SUFFIX"
+
+# Posts one JSON-RPC frame to an MCP endpoint and prints the decoded reply
+# frames (SSE data lines stripped; plain JSON passed through).
+# usage: mcp_post URL SESSION_ID JSON [extra curl args...]
+mcp_post() {
+  local url="$1" session="$2" body="$3"
+  shift 3
+  local args=(-sS "$url"
+    -H 'Content-Type: application/json'
+    -H 'Accept: application/json, text/event-stream'
+    -H 'MCP-Protocol-Version: 2025-06-18'
+    -d "$body")
+  if [ -n "$session" ]; then
+    args+=(-H "Mcp-Session-Id: $session")
+  fi
+  curl "${args[@]}" "$@" | sed -n -e 's/^data: //p' -e t -e '/^{/p'
+}
+
+# Runs the MCP initialize handshake and prints the assigned session id.
+# usage: mcp_initialize URL HEADERS_FILE BODY_FILE [extra curl args...]
+mcp_initialize() {
+  local url="$1" headers_file="$2" body_file="$3"
+  shift 3
+  curl -sS -D "$headers_file" -o "$body_file" "$url" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"qa-release","version":"1"}}}' \
+    "$@"
+  grep -i '^mcp-session-id:' "$headers_file" | awk '{print $2}' | tr -d '\r'
+}
+
+# Sends notifications/initialized to finish the handshake.
+# usage: mcp_initialized URL SESSION_ID [extra curl args...]
+mcp_initialized() {
+  local url="$1" session="$2"
+  shift 2
+  curl -sS -o /dev/null "$url" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H "Mcp-Session-Id: $session" \
+    -H 'MCP-Protocol-Version: 2025-06-18' \
+    -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    "$@"
+}
+
+# Waits until one admin-registered MCP server reaches the wanted status.
+# usage: mcp_wait_status BASE_URL SERVER_NAME WANTED_STATUS
+mcp_wait_status() {
+  local base="$1" name="$2" wanted="$3"
+  for _ in $(seq 1 20); do
+    if curl -fsS "$base/admin/mcp-servers" \
+      | jq -e --arg n "$name" --arg s "$wanted" 'any(.[]?; .name == $n and .status == $s)' >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "error: MCP server $name did not reach status $wanted on $base" >&2
+  curl -fsS "$base/admin/mcp-servers" | jq . >&2 || true
+  exit 1
+}
+
+# Registers the token-gated alpha and open beta mock upstreams on one gateway
+# and waits for both to connect.
+# usage: mcp_register_release_servers BASE_URL
+mcp_register_release_servers() {
+  local base="$1"
+  curl -fsS -X PUT "$base/admin/mcp-servers" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$QA_MCP_ALPHA\",\"url\":\"$MCP_UPSTREAM_BASE/alpha\",\"transport\":\"http\",\"headers\":{\"X-Mock-Token\":\"$MCP_UPSTREAM_TOKEN\"},\"description\":\"qa release alpha\"}" \
+    > "$QA_RUN_DIR/mcp-alpha.json"
+  curl -fsS -X PUT "$base/admin/mcp-servers" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$QA_MCP_BETA\",\"url\":\"$MCP_UPSTREAM_BASE/beta\",\"transport\":\"http\",\"description\":\"qa release beta\"}" \
+    > "$QA_RUN_DIR/mcp-beta.json"
+  export QA_MCP_ALPHA_SLUG QA_MCP_BETA_SLUG
+  QA_MCP_ALPHA_SLUG=$(jq -er '.slug' "$QA_RUN_DIR/mcp-alpha.json")
+  QA_MCP_BETA_SLUG=$(jq -er '.slug' "$QA_RUN_DIR/mcp-beta.json")
+  mcp_wait_status "$base" "$QA_MCP_ALPHA" connected
+  mcp_wait_status "$base" "$QA_MCP_BETA" connected
+}
+
+# Deletes the QA MCP servers; safe to call when they do not exist.
+# usage: mcp_cleanup_release_servers BASE_URL
+mcp_cleanup_release_servers() {
+  local base="$1"
+  curl -sS -o /dev/null -X DELETE "$base/admin/mcp-servers/$QA_MCP_ALPHA" || true
+  curl -sS -o /dev/null -X DELETE "$base/admin/mcp-servers/$QA_MCP_BETA" || true
 }
 
 run_release_budget_enforcement() {
@@ -3587,4 +3692,547 @@ for URL in "$BASE_URL" "$PG_BASE_URL" "$MONGO_BASE_URL"; do
         and has("rewrite_cost_saved")
       ' >/dev/null
 done
+```
+
+## 23. MCP gateway and provider request health
+
+These scenarios cover the post-v0.1.51 features: the aggregating MCP gateway
+(PR #502), JSON-RPC body capture on MCP audit entries (PR #534), and
+real-traffic `request_health` on provider status (PR #521). They need the mock
+MCP upstream on port 18090 (started by `manage-release-e2e-stack.sh`).
+
+### S163 Admin MCP server CRUD with secret redaction and catalog inspector
+
+Registers the token-gated alpha and open beta upstreams, checks the admin
+view (headers redacted as `***`, connection state, tool counts), reads the
+per-server catalog, and deletes both.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+
+mcp_register_release_servers "$BASE_URL"
+
+LIST_FILE="$QA_RUN_DIR/s163.list.json"
+curl -fsS "$BASE_URL/admin/mcp-servers" > "$LIST_FILE"
+jq -e --arg a "$QA_MCP_ALPHA" --arg b "$QA_MCP_BETA" '
+  any(.[]; .name == $a and .managed == false and .transport == "http" and .status == "connected"
+      and .tool_count == 2 and .prompt_count == 1 and .resource_count == 1
+      and .headers["X-Mock-Token"] == "***")
+  and any(.[]; .name == $b and .managed == false and .status == "connected" and .tool_count == 2)
+' "$LIST_FILE" >/dev/null
+
+CATALOG_FILE="$QA_RUN_DIR/s163.catalog.json"
+curl -fsS "$BASE_URL/admin/mcp-servers/$QA_MCP_ALPHA_SLUG/catalog" > "$CATALOG_FILE"
+jq '.' "$CATALOG_FILE" | head -40
+jq -e '
+  ([.tools[]?.name] | sort == ["add","echo"])
+  and any(.prompts[]?; .name == "greeting")
+  and any(.resources[]?; .uri == "mock://alpha/info")
+' "$CATALOG_FILE" >/dev/null
+
+mcp_cleanup_release_servers "$BASE_URL"
+curl -fsS "$BASE_URL/admin/mcp-servers" \
+  | jq -e --arg a "$QA_MCP_ALPHA" --arg b "$QA_MCP_BETA" 'all(.[]?; .name != $a and .name != $b)' >/dev/null
+```
+
+### S164 Aggregated /mcp initialize with merged instructions and namespaced tools
+
+Runs the streamable-HTTP handshake against `/mcp` with plain curl and checks
+that upstream instructions are merged into the gateway `initialize` result and
+that `tools/list` exposes deterministic `{server}_{tool}` names.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+
+mcp_register_release_servers "$BASE_URL"
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+HEADERS_FILE="$QA_RUN_DIR/s164.init.headers"
+INIT_FILE="$QA_RUN_DIR/s164.init.raw"
+SID=$(mcp_initialize "$BASE_URL/mcp" "$HEADERS_FILE" "$INIT_FILE")
+[ -n "$SID" ]
+sed -n -e 's/^data: //p' -e t -e '/^{/p' "$INIT_FILE" | jq -e '
+  .result.protocolVersion != null
+  and (.result.serverInfo.name | type == "string")
+  and (.result.instructions | contains("MOCKMCP_ALPHA_INSTRUCTIONS"))
+' >/dev/null
+mcp_initialized "$BASE_URL/mcp" "$SID"
+
+TOOLS_FILE="$QA_RUN_DIR/s164.tools.json"
+mcp_post "$BASE_URL/mcp" "$SID" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' > "$TOOLS_FILE"
+jq -c '.result.tools | map(.name)' "$TOOLS_FILE"
+jq -e --arg a "$QA_MCP_ALPHA_SLUG" --arg b "$QA_MCP_BETA_SLUG" '
+  (.result.tools | map(.name)) as $names
+  | ($names | index($a + "_add") != null)
+    and ($names | index($a + "_echo") != null)
+    and ($names | index($b + "_fetch") != null)
+    and ($names | index($b + "_search") != null)
+    and ($names == ($names | sort))
+' "$TOOLS_FILE" >/dev/null
+```
+
+### S165 tools/call by namespaced and bare name plus MCP usage entries
+
+Calls one tool through the aggregated endpoint using its namespaced name and
+another using its unique bare name, then checks the usage entry written for
+the call (`provider="mcp"`, `provider_name`=server, `model`=namespaced tool).
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+
+mcp_register_release_servers "$BASE_URL"
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+# Session binding pins the session to its initializing principal, so the
+# user-path header must be identical on every request of the session.
+MCP_QA_PATH="/team/mcp/e2e/$QA_SUFFIX"
+HEADERS_FILE="$QA_RUN_DIR/s165.init.headers"
+INIT_FILE="$QA_RUN_DIR/s165.init.raw"
+SID=$(mcp_initialize "$BASE_URL/mcp" "$HEADERS_FILE" "$INIT_FILE" -H "X-GoModel-User-Path: $MCP_QA_PATH")
+mcp_initialized "$BASE_URL/mcp" "$SID" -H "X-GoModel-User-Path: $MCP_QA_PATH"
+
+REQ_ID="qa-mcp-call-$QA_SUFFIX"
+CALL_FILE="$QA_RUN_DIR/s165.call.json"
+mcp_post "$BASE_URL/mcp" "$SID" \
+  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_ALPHA_SLUG}_echo\",\"arguments\":{\"marker\":\"QA_MCP_NAMESPACED_OK\"}}}" \
+  -H "X-Request-ID: $REQ_ID" \
+  -H "X-GoModel-User-Path: $MCP_QA_PATH" \
+  > "$CALL_FILE"
+jq '.' "$CALL_FILE"
+jq -e '
+  (.result.isError // false) == false
+  and any(.result.content[]?; .type == "text" and (.text | contains("echo:") and contains("QA_MCP_NAMESPACED_OK")))
+' "$CALL_FILE" >/dev/null
+
+# A unique bare tool name resolves to its single namespaced registration
+# (spec'd Postel fallback; was a KNOWN GAP until 2026-07-15). "search" exists
+# only on the beta server.
+BARE_FILE="$QA_RUN_DIR/s165.bare.json"
+mcp_post "$BASE_URL/mcp" "$SID" \
+  '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"search","arguments":{"q":"qa-bare"}}}' \
+  -H "X-GoModel-User-Path: $MCP_QA_PATH" \
+  > "$BARE_FILE"
+jq -e '
+  (.result.isError // false) == false
+  and any(.result.content[]?; .type == "text" and (.text | contains("search:") and contains("qa-bare")))
+' "$BARE_FILE" >/dev/null
+
+# A name that matches nothing (namespaced or bare) still errors. Ambiguous
+# bare names (same tool on two servers) are covered by unit tests; the two
+# mock servers expose disjoint tool sets.
+mcp_post "$BASE_URL/mcp" "$SID" \
+  '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"qa-no-such-bare-tool","arguments":{}}}' \
+  -H "X-GoModel-User-Path: $MCP_QA_PATH" \
+  | jq -e '(.error != null) or (.result.isError == true)' >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s165.usage.json"
+FOUND=0
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/usage/log?search=$REQ_ID&limit=5" > "$USAGE_FILE"
+  if jq -e --arg rid "$REQ_ID" --arg model "${QA_MCP_ALPHA_SLUG}_echo" --arg server "$QA_MCP_ALPHA_SLUG" --arg up "$MCP_QA_PATH" '
+    any(.entries[]?; .request_id == $rid and .provider == "mcp" and .provider_name == $server and .model == $model and .user_path == $up)
+  ' "$USAGE_FILE" >/dev/null; then
+    FOUND=1
+    break
+  fi
+  sleep 1
+done
+if [ "$FOUND" -ne 1 ]; then
+  jq '.' "$USAGE_FILE" >&2 || true
+  echo "error: MCP tools/call usage entry was not flushed for $REQ_ID" >&2
+  exit 1
+fi
+```
+
+### S166 Per-server endpoint original names and X-MCP-Servers narrowing
+
+The per-server endpoint `/mcp/{server}` exposes original tool names, and the
+`X-MCP-Servers` request header narrows an aggregated session to a subset.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+
+mcp_register_release_servers "$BASE_URL"
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+HEADERS_FILE="$QA_RUN_DIR/s166.init.headers"
+INIT_FILE="$QA_RUN_DIR/s166.init.raw"
+SID=$(mcp_initialize "$BASE_URL/mcp/$QA_MCP_BETA_SLUG" "$HEADERS_FILE" "$INIT_FILE")
+mcp_initialized "$BASE_URL/mcp/$QA_MCP_BETA_SLUG" "$SID"
+mcp_post "$BASE_URL/mcp/$QA_MCP_BETA_SLUG" "$SID" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | jq -e '(.result.tools | map(.name) | sort) == ["fetch","search"]' >/dev/null
+
+NARROW_HEADERS="$QA_RUN_DIR/s166.narrow.headers"
+NARROW_INIT="$QA_RUN_DIR/s166.narrow.raw"
+NSID=$(mcp_initialize "$BASE_URL/mcp" "$NARROW_HEADERS" "$NARROW_INIT" -H "X-MCP-Servers: $QA_MCP_ALPHA_SLUG")
+mcp_initialized "$BASE_URL/mcp" "$NSID" -H "X-MCP-Servers: $QA_MCP_ALPHA_SLUG"
+mcp_post "$BASE_URL/mcp" "$NSID" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  -H "X-MCP-Servers: $QA_MCP_ALPHA_SLUG" \
+  | jq -e --arg a "$QA_MCP_ALPHA_SLUG" '
+      (.result.tools | map(.name) | sort) == [$a + "_add", $a + "_echo"]
+    ' >/dev/null
+```
+
+### S167 MCP audit entries carry JSON-RPC bodies and nosniff
+
+With `LOGGING_LOG_BODIES` on, an MCP `tools/call` audit entry is labelled with
+the tool name and `provider="mcp"`, and captures both the JSON-RPC request
+frame and the SSE-decoded response frame. The MCP response also carries
+`X-Content-Type-Options: nosniff`.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+
+mcp_register_release_servers "$BASE_URL"
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+HEADERS_FILE="$QA_RUN_DIR/s167.init.headers"
+INIT_FILE="$QA_RUN_DIR/s167.init.raw"
+SID=$(mcp_initialize "$BASE_URL/mcp" "$HEADERS_FILE" "$INIT_FILE")
+grep -Eiq '^x-content-type-options: *nosniff' "$HEADERS_FILE"
+mcp_initialized "$BASE_URL/mcp" "$SID"
+
+REQ_ID="qa-mcp-audit-$QA_SUFFIX"
+CALL_HEADERS="$QA_RUN_DIR/s167.call.headers"
+mcp_post "$BASE_URL/mcp" "$SID" \
+  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_ALPHA_SLUG}_echo\",\"arguments\":{\"marker\":\"QA_MCP_AUDIT_BODY_OK\"}}}" \
+  -H "X-Request-ID: $REQ_ID" \
+  -D "$CALL_HEADERS" \
+  > "$QA_RUN_DIR/s167.call.json"
+grep -Eiq '^x-content-type-options: *nosniff' "$CALL_HEADERS"
+
+AUDIT_FILE="$QA_RUN_DIR/s167.audit.json"
+FOUND=0
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/audit/log?search=$REQ_ID&limit=5" > "$AUDIT_FILE"
+  if jq -e --arg rid "$REQ_ID" --arg tool "${QA_MCP_ALPHA_SLUG}_echo" '
+    any(.entries[]?;
+      .request_id == $rid
+      and .provider == "mcp"
+      and .requested_model == $tool
+      and .status_code == 200
+      and ((.data.request_body | tojson) | contains("QA_MCP_AUDIT_BODY_OK"))
+      and ((.data.response_body | tojson) | (contains("echo:") and contains("QA_MCP_AUDIT_BODY_OK"))))
+  ' "$AUDIT_FILE" >/dev/null; then
+    FOUND=1
+    break
+  fi
+  sleep 1
+done
+if [ "$FOUND" -ne 1 ]; then
+  jq '.' "$AUDIT_FILE" >&2 || true
+  echo "error: MCP audit entry with bodies was not flushed for $REQ_ID" >&2
+  exit 1
+fi
+```
+
+### S168 MCP negatives: unknown server, unknown tool, session identity binding, header-principal enforcement, stdio rejected
+
+Unknown per-server endpoints 404, an unknown tool returns a JSON-RPC error,
+a session initialized by one user path is invisible to another principal,
+header-identified MCP posts are gated by user-path rate limits, `user_paths`
+server scoping admits subtree members and hides the server from outsiders,
+and the admin API rejects runtime-registered stdio servers.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+
+mcp_register_release_servers "$BASE_URL"
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/mcp/qa-no-such-server-$QA_BUDGET_SUFFIX" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"qa","version":"1"}}}' \
+  | grep -q '^404$'
+
+HEADERS_FILE="$QA_RUN_DIR/s168.init.headers"
+INIT_FILE="$QA_RUN_DIR/s168.init.raw"
+SID=$(mcp_initialize "$BASE_URL/mcp" "$HEADERS_FILE" "$INIT_FILE" -H "X-GoModel-User-Path: /team/mcp/owner/$QA_SUFFIX")
+mcp_initialized "$BASE_URL/mcp" "$SID" -H "X-GoModel-User-Path: /team/mcp/owner/$QA_SUFFIX"
+
+mcp_post "$BASE_URL/mcp" "$SID" \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"qa_totally_unknown_tool","arguments":{}}}' \
+  -H "X-GoModel-User-Path: /team/mcp/owner/$QA_SUFFIX" \
+  | jq -e '(.error != null) or (.result.isError == true)' >/dev/null
+
+# Session-to-principal binding sees header-based user paths (was a KNOWN BUG
+# until 2026-07-15: /mcp was not stamped with the user-path header, so header
+# principals could ride a leaked session ID). A different header principal —
+# or no header at all — presenting the owner's session ID gets 404.
+curl -sS -o "$QA_RUN_DIR/s168.stolen.body" -w '%{http_code}' "$BASE_URL/mcp" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-06-18' \
+  -H "Mcp-Session-Id: $SID" \
+  -H "X-GoModel-User-Path: /team/mcp/intruder/$QA_SUFFIX" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/list"}' \
+  | grep -q '^404$'
+curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/mcp" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-06-18' \
+  -H "Mcp-Session-Id: $SID" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/list"}' \
+  | grep -q '^404$'
+# The owner keeps working under the original header.
+mcp_post "$BASE_URL/mcp" "$SID" '{"jsonrpc":"2.0","id":5,"method":"tools/list"}' \
+  -H "X-GoModel-User-Path: /team/mcp/owner/$QA_SUFFIX" \
+  | jq -e '.result.tools | length > 0' >/dev/null
+
+# Cross-endpoint session reuse IS rejected: a session initialized on one
+# pinned endpoint cannot be presented on another.
+PIN_HEADERS="$QA_RUN_DIR/s168.pin.headers"
+PIN_INIT="$QA_RUN_DIR/s168.pin.raw"
+PSID=$(mcp_initialize "$BASE_URL/mcp/$QA_MCP_ALPHA_SLUG" "$PIN_HEADERS" "$PIN_INIT")
+curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/mcp/$QA_MCP_BETA_SLUG" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-06-18' \
+  -H "Mcp-Session-Id: $PSID" \
+  -d '{"jsonrpc":"2.0","id":5,"method":"tools/list"}' \
+  | grep -q '^404$'
+
+curl -sS -o "$QA_RUN_DIR/s168.stdio.body" -w '%{http_code}' -X PUT "$BASE_URL/admin/mcp-servers" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-stdio-$QA_BUDGET_SUFFIX\",\"transport\":\"stdio\",\"url\":\"\",\"command\":\"/bin/echo\"}" \
+  | grep -q '^400$'
+
+# User-path rate limits gate header-identified MCP posts (was a KNOWN BUG
+# until 2026-07-15: admission resolved the path to "/" because the header was
+# never stamped into the context). Sessionless posts keep the accounting
+# simple: one rule request per POST, no handshake traffic on the counter.
+RL_PATH="/qa/mcp-admission/$QA_SUFFIX"
+trap 'mcp_cleanup_release_servers "$BASE_URL"; curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/rate-limits" -H "Content-Type: application/json" -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"minute\"}}" || true' EXIT
+curl -fsS -X PUT "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"minute\"},\"max_requests\":1}" >/dev/null
+curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/mcp" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"jsonrpc":"2.0","id":10,"method":"tools/list"}' \
+  | grep -q '^200$'
+RL_BODY="$QA_RUN_DIR/s168.rl.body"
+RL_HEADERS="$QA_RUN_DIR/s168.rl.headers"
+curl -sS -D "$RL_HEADERS" -o "$RL_BODY" -w '%{http_code}' "$BASE_URL/mcp" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"jsonrpc":"2.0","id":11,"method":"tools/list"}' \
+  | grep -q '^429$'
+grep -Eiq '^Retry-After: *[0-9]+' "$RL_HEADERS"
+jq -e '.error.code == "rate_limit_exceeded"' "$RL_BODY" >/dev/null
+
+# user_paths server scoping admits subtree members and hides the server from
+# everyone else (was fail-closed-for-all until 2026-07-15). Re-scoping alpha
+# is the last mutation in this scenario; cleanup deletes the row anyway.
+SECRET_PATH="/team/mcp/secret/$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/mcp-servers" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$QA_MCP_ALPHA\",\"url\":\"$MCP_UPSTREAM_BASE/alpha\",\"transport\":\"http\",\"headers\":{\"X-Mock-Token\":\"$MCP_UPSTREAM_TOKEN\"},\"user_paths\":[\"$SECRET_PATH\"],\"description\":\"qa release alpha scoped\"}" >/dev/null
+mcp_wait_status "$BASE_URL" "$QA_MCP_ALPHA" connected
+
+MEMBER_HEADERS="$QA_RUN_DIR/s168.member.headers"
+MEMBER_INIT="$QA_RUN_DIR/s168.member.raw"
+MSID=$(mcp_initialize "$BASE_URL/mcp" "$MEMBER_HEADERS" "$MEMBER_INIT" -H "X-GoModel-User-Path: $SECRET_PATH/dev")
+mcp_initialized "$BASE_URL/mcp" "$MSID" -H "X-GoModel-User-Path: $SECRET_PATH/dev"
+mcp_post "$BASE_URL/mcp" "$MSID" '{"jsonrpc":"2.0","id":12,"method":"tools/list"}' \
+  -H "X-GoModel-User-Path: $SECRET_PATH/dev" \
+  | jq -e --arg a "$QA_MCP_ALPHA_SLUG" 'any(.result.tools[]?; .name == $a + "_echo")' >/dev/null
+
+OUTSIDER_HEADERS="$QA_RUN_DIR/s168.outsider.headers"
+OUTSIDER_INIT="$QA_RUN_DIR/s168.outsider.raw"
+OSID=$(mcp_initialize "$BASE_URL/mcp" "$OUTSIDER_HEADERS" "$OUTSIDER_INIT" -H "X-GoModel-User-Path: /team/mcp/outsider/$QA_SUFFIX")
+mcp_initialized "$BASE_URL/mcp" "$OSID" -H "X-GoModel-User-Path: /team/mcp/outsider/$QA_SUFFIX"
+mcp_post "$BASE_URL/mcp" "$OSID" '{"jsonrpc":"2.0","id":13,"method":"tools/list"}' \
+  -H "X-GoModel-User-Path: /team/mcp/outsider/$QA_SUFFIX" \
+  | jq -e --arg a "$QA_MCP_ALPHA_SLUG" '
+      all(.result.tools[]?; (.name | startswith($a + "_")) | not)
+      and (.result.tools | length > 0)
+    ' >/dev/null
+
+# The pinned endpoint honors the same scoping: outsiders get 404.
+curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/mcp/$QA_MCP_ALPHA_SLUG" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "X-GoModel-User-Path: /team/mcp/outsider/$QA_SUFFIX" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"qa","version":"1"}}}' \
+  | grep -q '^404$'
+```
+
+### S169 Secret *** round-trip preserves the stored header; a wrong secret breaks the dial
+
+Re-upserting the token-gated server with the redaction placeholder must keep
+the stored `X-Mock-Token`, so the reconnect still succeeds; upserting a wrong
+token must leave the server unable to connect.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+
+mcp_register_release_servers "$BASE_URL"
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+curl -fsS -X PUT "$BASE_URL/admin/mcp-servers" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$QA_MCP_ALPHA\",\"url\":\"$MCP_UPSTREAM_BASE/alpha\",\"transport\":\"http\",\"headers\":{\"X-Mock-Token\":\"***\"},\"description\":\"qa release alpha updated\"}" \
+  | jq -e '.headers["X-Mock-Token"] == "***" and .description == "qa release alpha updated"' >/dev/null
+curl -fsS -X POST "$BASE_URL/admin/mcp-servers/$QA_MCP_ALPHA_SLUG/reconnect" >/dev/null
+mcp_wait_status "$BASE_URL" "$QA_MCP_ALPHA" connected
+
+HEADERS_FILE="$QA_RUN_DIR/s169.init.headers"
+INIT_FILE="$QA_RUN_DIR/s169.init.raw"
+SID=$(mcp_initialize "$BASE_URL/mcp/$QA_MCP_ALPHA_SLUG" "$HEADERS_FILE" "$INIT_FILE")
+mcp_initialized "$BASE_URL/mcp/$QA_MCP_ALPHA_SLUG" "$SID"
+mcp_post "$BASE_URL/mcp/$QA_MCP_ALPHA_SLUG" "$SID" \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{"marker":"QA_MCP_SECRET_KEPT"}}}' \
+  | jq -e 'any(.result.content[]?; .text | contains("QA_MCP_SECRET_KEPT"))' >/dev/null
+
+curl -fsS -X PUT "$BASE_URL/admin/mcp-servers" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$QA_MCP_ALPHA\",\"url\":\"$MCP_UPSTREAM_BASE/alpha\",\"transport\":\"http\",\"headers\":{\"X-Mock-Token\":\"definitely-wrong\"}}" \
+  > "$QA_RUN_DIR/s169.wrong.json" || true
+
+BROKEN=0
+for _ in $(seq 1 20); do
+  curl -fsS -X POST "$BASE_URL/admin/mcp-servers/$QA_MCP_ALPHA_SLUG/reconnect" > "$QA_RUN_DIR/s169.reconnect.json" || true
+  if curl -fsS "$BASE_URL/admin/mcp-servers" \
+    | jq -e --arg n "$QA_MCP_ALPHA" 'any(.[]?; .name == $n and .status != "connected")' >/dev/null; then
+    BROKEN=1
+    break
+  fi
+  sleep 1
+done
+if [ "$BROKEN" -ne 1 ]; then
+  curl -fsS "$BASE_URL/admin/mcp-servers" | jq . >&2 || true
+  echo "error: alpha stayed connected despite a wrong upstream token" >&2
+  exit 1
+fi
+```
+
+### S170 Provider request health folded into /admin/providers/status
+
+After real chat traffic the provider status carries `request_health`: a
+10-minute window of per-model request counts plus the circuit-breaker state.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s170.chat.json"
+curl -fsS "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: qa-health-$QA_SUFFIX" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_HEALTH_OK"}],"max_tokens":20}' \
+  > "$RESP_FILE"
+assert_chat_response_contains "$RESP_FILE" "openai" "QA_HEALTH_OK"
+
+STATUS_FILE="$QA_RUN_DIR/s170.status.json"
+FOUND=0
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/providers/status" > "$STATUS_FILE"
+  if jq -e '
+    any(.providers[]?;
+      .name == "openai"
+      and .request_health != null
+      and .request_health.window_seconds == 600
+      and .request_health.requests >= 1
+      and ((.request_health.circuit_state // "closed") == "closed")
+      and any(.request_health.models[]?; (.model | startswith("gpt-4.1-nano")) and .requests >= 1))
+  ' "$STATUS_FILE" >/dev/null; then
+    FOUND=1
+    break
+  fi
+  sleep 1
+done
+if [ "$FOUND" -ne 1 ]; then
+  jq '{summary, openai: [.providers[]? | select(.name == "openai") | {status, request_health}]}' "$STATUS_FILE" >&2 || true
+  echo "error: openai request_health did not reflect the seeded request" >&2
+  exit 1
+fi
+jq -e 'all(.providers[]?; .status_reason | type == "string" and length > 0)' "$STATUS_FILE" >/dev/null
+```
+
+### S171 MCP server store parity on PostgreSQL and MongoDB
+
+The `mcp_servers` admin store round-trips on both non-SQLite backends, and a
+registered server serves tool calls through each gateway.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+
+for URL in "$PG_BASE_URL" "$MONGO_BASE_URL"; do
+  curl -fsS -X PUT "$URL/admin/mcp-servers" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$QA_MCP_BETA\",\"url\":\"$MCP_UPSTREAM_BASE/beta\",\"transport\":\"http\"}" \
+    | jq -e --arg n "$QA_MCP_BETA" '.name == $n and .managed == false' >/dev/null
+  mcp_wait_status "$URL" "$QA_MCP_BETA" connected
+
+  HEADERS_FILE="$QA_RUN_DIR/s171.init.headers"
+  INIT_FILE="$QA_RUN_DIR/s171.init.raw"
+  SID=$(mcp_initialize "$URL/mcp" "$HEADERS_FILE" "$INIT_FILE")
+  mcp_initialized "$URL/mcp" "$SID"
+  mcp_post "$URL/mcp" "$SID" \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_BETA}_fetch\",\"arguments\":{\"u\":\"qa-parity\"}}}" \
+    | jq -e 'any(.result.content[]?; .text | contains("fetch:") and contains("qa-parity"))' >/dev/null
+
+  curl -fsS -X DELETE "$URL/admin/mcp-servers/$QA_MCP_BETA" >/dev/null
+  curl -fsS "$URL/admin/mcp-servers" \
+    | jq -e --arg n "$QA_MCP_BETA" 'all(.[]?; .name != $n)' >/dev/null
+done
+```
+
+### S172 Namespaced prompts and resources relay through /mcp
+
+Prompts are namespaced like tools; resources and resource templates relay
+verbatim, and `resources/read` returns the upstream payload.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+
+mcp_register_release_servers "$BASE_URL"
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+HEADERS_FILE="$QA_RUN_DIR/s172.init.headers"
+INIT_FILE="$QA_RUN_DIR/s172.init.raw"
+SID=$(mcp_initialize "$BASE_URL/mcp" "$HEADERS_FILE" "$INIT_FILE")
+mcp_initialized "$BASE_URL/mcp" "$SID"
+
+mcp_post "$BASE_URL/mcp" "$SID" '{"jsonrpc":"2.0","id":2,"method":"prompts/list"}' \
+  | jq -e --arg a "$QA_MCP_ALPHA_SLUG" 'any(.result.prompts[]?; .name == $a + "_greeting")' >/dev/null
+
+mcp_post "$BASE_URL/mcp" "$SID" \
+  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"prompts/get\",\"params\":{\"name\":\"${QA_MCP_ALPHA_SLUG}_greeting\"}}" \
+  | jq -e 'any(.result.messages[]?; .content.text == "MOCKMCP_GREETING_OK")' >/dev/null
+
+mcp_post "$BASE_URL/mcp" "$SID" '{"jsonrpc":"2.0","id":4,"method":"resources/list"}' \
+  | jq -e 'any(.result.resources[]?; .uri == "mock://alpha/info")' >/dev/null
+
+mcp_post "$BASE_URL/mcp" "$SID" \
+  '{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"mock://alpha/info"}}' \
+  | jq -e 'any(.result.contents[]?; .text == "MOCKMCP_ALPHA_RESOURCE_OK")' >/dev/null
 ```

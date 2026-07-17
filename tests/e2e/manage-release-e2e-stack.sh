@@ -8,6 +8,9 @@ BIN="${GOMODEL_RELEASE_BINARY:-$REPO_ROOT/bin/gomodel}"
 ENV_FILE="${GOMODEL_RELEASE_ENV_FILE:-$REPO_ROOT/.env}"
 PG_DATABASE="${GOMODEL_RELEASE_PG_DATABASE:-gomodel_release_e2e}"
 MONGO_DATABASE="${GOMODEL_RELEASE_MONGO_DATABASE:-gomodel_release_e2e}"
+MOCK_MCP_BIN="${GOMODEL_RELEASE_MOCK_MCP_BINARY:-$REPO_ROOT/bin/mockmcp}"
+MOCK_MCP_PORT="${GOMODEL_RELEASE_MOCK_MCP_PORT:-18090}"
+MOCK_MCP_TOKEN="${GOMODEL_RELEASE_MOCK_MCP_TOKEN:-qa-mock-mcp-secret}"
 
 BUILD_BEFORE_START=0
 
@@ -31,6 +34,9 @@ Gateways:
   mongo-smoke           http://localhost:18082
   guardrails            http://localhost:18083
   auth-cache            http://localhost:18084
+
+Helpers:
+  mock-mcp              http://localhost:18090 (mock MCP upstream: /alpha token-gated, /beta open)
 EOF
 }
 
@@ -96,6 +102,81 @@ ensure_binary() {
   if (( BUILD_BEFORE_START == 1 )) || [[ ! -x "$BIN" ]]; then
     (cd "$REPO_ROOT" && make build)
   fi
+  if (( BUILD_BEFORE_START == 1 )) || [[ ! -x "$MOCK_MCP_BIN" ]]; then
+    (cd "$REPO_ROOT" && go build -o "$MOCK_MCP_BIN" ./tests/e2e/mockmcp)
+  fi
+}
+
+start_mock_mcp() {
+  local dir="$STACK_DIR/mock-mcp"
+  local log_file="$dir/logs/server.log"
+  local pid_file="$dir/server.pid"
+
+  mkdir -p "$dir/logs"
+
+  if is_pid_running "$pid_file"; then
+    printf 'mock-mcp already running pid=%s url=http://localhost:%s\n' "$(cat "$pid_file")" "$MOCK_MCP_PORT"
+    return 0
+  fi
+
+  # A foreign process on the port would answer the health probe and mask a
+  # failed bind (e.g. a manually started mockmcp with a different token).
+  if curl -fsS "http://localhost:$MOCK_MCP_PORT/healthz" >/dev/null 2>&1; then
+    die "port $MOCK_MCP_PORT is already in use by an unmanaged process; stop it before starting mock-mcp"
+  fi
+
+  rm -f "$pid_file"
+
+  (
+    cd "$dir"
+    nohup env PORT="$MOCK_MCP_PORT" MOCK_MCP_TOKEN="$MOCK_MCP_TOKEN" "$MOCK_MCP_BIN" >"$log_file" 2>&1 < /dev/null &
+    echo $! >"$pid_file"
+  )
+
+  local attempt
+  for attempt in $(seq 1 15); do
+    if curl -fsS "http://localhost:$MOCK_MCP_PORT/healthz" >/dev/null 2>&1; then
+      printf 'started mock-mcp pid=%s url=http://localhost:%s\n' "$(cat "$pid_file")" "$MOCK_MCP_PORT"
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "failed to start mock-mcp on port $MOCK_MCP_PORT" >&2
+  [[ -f "$log_file" ]] && tail -n 40 "$log_file" >&2
+  exit 1
+}
+
+stop_mock_mcp() {
+  local pid_file="$STACK_DIR/mock-mcp/server.pid"
+  local pid
+
+  if [[ ! -f "$pid_file" ]]; then
+    printf 'mock-mcp not running\n'
+    return 0
+  fi
+
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+  fi
+  rm -f "$pid_file"
+  printf 'stopped mock-mcp\n'
+}
+
+status_mock_mcp() {
+  local pid_file="$STACK_DIR/mock-mcp/server.pid"
+  local health="down"
+  local pid="stopped"
+
+  if is_pid_running "$pid_file"; then
+    pid="$(cat "$pid_file")"
+    if curl -fsS "http://localhost:$MOCK_MCP_PORT/healthz" >/dev/null 2>&1; then
+      health="ok"
+    fi
+  fi
+
+  printf '%-12s pid=%-8s url=http://localhost:%s health=%s\n' "mock-mcp" "$pid" "$MOCK_MCP_PORT" "$health"
 }
 
 ensure_pg_database() {
@@ -246,6 +327,7 @@ start_stack() {
   mkdir -p "$STACK_DIR"
   ensure_pg_database
   write_guardrail_config
+  start_mock_mcp
 
   start_gateway sqlite-main \
     -u GOMODEL_MASTER_KEY \
@@ -337,9 +419,11 @@ stop_stack() {
   stop_gateway mongo-smoke
   stop_gateway pg-smoke
   stop_gateway sqlite-main
+  stop_mock_mcp
 }
 
 status_stack() {
+  status_mock_mcp
   status_gateway sqlite-main
   status_gateway pg-smoke
   status_gateway mongo-smoke

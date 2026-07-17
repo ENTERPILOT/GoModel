@@ -226,6 +226,7 @@ Set these to automatically register providers. No YAML configuration required.
 | `GEMINI_API_KEY`     | Google Gemini                                      |
 | `DEEPSEEK_API_KEY`   | DeepSeek                                           |
 | `OPENROUTER_API_KEY` | OpenRouter                                         |
+| `KILO_API_KEY`       | Kilo AI Gateway                                    |
 | `ZAI_API_KEY`        | Z.ai                                               |
 | `XAI_API_KEY`        | xAI (Grok)                                         |
 | `GROQ_API_KEY`       | Groq                                               |
@@ -234,7 +235,7 @@ Set these to automatically register providers. No YAML configuration required.
 | `OLLAMA_BASE_URL`    | Ollama (no API key needed)                        |
 | `VLLM_BASE_URL`      | vLLM (no API key needed unless upstream requires) |
 
-Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). DeepSeek defaults to `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only for a compatible proxy or alternate DeepSeek endpoint. OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. vLLM defaults to `http://localhost:8000/v1` when `VLLM_API_KEY` is set, but keyless deployments should set `VLLM_BASE_URL` explicitly to register the provider. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
+Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). DeepSeek defaults to `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only for a compatible proxy or alternate DeepSeek endpoint. OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Kilo AI defaults to `https://api.kilo.ai/api/gateway` and can be overridden with `KILO_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. vLLM defaults to `http://localhost:8000/v1` when `VLLM_API_KEY` is set, but keyless deployments should set `VLLM_BASE_URL` explicitly to register the provider. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
 
 Every provider type also accepts a comma-separated configured model list via
 `<PROVIDER>_MODELS`, for example `OPENROUTER_MODELS`, `ORACLE_MODELS`,
@@ -360,6 +361,7 @@ export DEEPSEEK_API_KEY="..."        # Registers "deepseek" provider
 export XAI_API_KEY="..."             # Registers "xai" provider
 export GROQ_API_KEY="gsk_..."        # Registers "groq" provider
 export OPENROUTER_API_KEY="sk-or-..." # Registers "openrouter" provider
+export KILO_API_KEY="..."            # Registers "kilo" provider
 export ZAI_API_KEY="..."             # Registers "zai" provider
 # Optional: export ZAI_BASE_URL="https://api.z.ai/api/coding/paas/v4"
 export AZURE_API_KEY="..."           # Registers "azure" provider when paired with AZURE_BASE_URL
@@ -368,6 +370,7 @@ export ORACLE_API_KEY="..."          # Registers "oracle" provider when paired w
 export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
 export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optional configured model list
 export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
+export KILO_MODELS="anthropic/claude-sonnet-4.5,openai/gpt-5.5"
 export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback or allowlist
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
 export VLLM_BASE_URL="http://localhost:8000/v1" # Registers keyless "vllm" provider

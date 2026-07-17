@@ -359,7 +359,55 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		s.registerPrompts(server, view.Spec.Name, snapshot, prefixNames, promptOwners)
 		s.registerResources(server, view.Spec.Name, snapshot, resourceOwners)
 	}
+	if prefixNames {
+		if aliases := bareToolAliases(toolOwners); len(aliases) > 0 {
+			server.AddReceivingMiddleware(bareToolCallMiddleware(aliases))
+		}
+	}
 	return server
+}
+
+// bareToolAliases maps each unambiguous bare tool name to its namespaced
+// name, so tools/call on the aggregated endpoint accepts a unique bare name
+// (Postel, per the gateway spec). A bare name claimed by several servers, or
+// one that collides with a registered namespaced name, gets no alias — the
+// caller must use the namespaced form.
+func bareToolAliases(owners map[string]string) map[string]string {
+	counts := make(map[string]int, len(owners))
+	aliases := make(map[string]string, len(owners))
+	for exposed, owner := range owners {
+		bare := strings.TrimPrefix(exposed, owner+namespaceSeparator)
+		counts[bare]++
+		aliases[bare] = exposed
+	}
+	for bare := range aliases {
+		if counts[bare] > 1 {
+			delete(aliases, bare)
+			continue
+		}
+		if _, taken := owners[bare]; taken {
+			delete(aliases, bare)
+		}
+	}
+	return aliases
+}
+
+// bareToolCallMiddleware rewrites a bare tools/call name to its namespaced
+// registration before dispatch. Exact namespaced names never reach the alias
+// map (they are excluded at build time), so registered names always win.
+func bareToolCallMiddleware(aliases map[string]string) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if method == "tools/call" {
+				if call, ok := req.(*mcp.CallToolRequest); ok && call.Params != nil {
+					if exposed, ok := aliases[call.Params.Name]; ok {
+						call.Params.Name = exposed
+					}
+				}
+			}
+			return next(ctx, method, req)
+		}
+	}
 }
 
 func (s *Service) upstreamCatalog(name string) (*catalog, ServerStatus) {

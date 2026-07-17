@@ -52,23 +52,6 @@ func NamespacedName(server, name string) string {
 	return server + namespaceSeparator + name
 }
 
-// ResolveNamespacedName splits an aggregated name back into (server, name) by
-// longest-prefix match against the known server names, so server names that
-// themselves contain the separator stay unambiguous.
-func ResolveNamespacedName(full string, servers []string) (server, name string, ok bool) {
-	best := ""
-	for _, candidate := range servers {
-		prefix := candidate + namespaceSeparator
-		if strings.HasPrefix(full, prefix) && len(full) > len(prefix) && len(candidate) > len(best) {
-			best = candidate
-		}
-	}
-	if best == "" {
-		return "", "", false
-	}
-	return best, full[len(best)+len(namespaceSeparator):], true
-}
-
 // filterTools applies the operator-level allow/deny lists to original tool
 // names and returns tools in deterministic (sorted) order. Deterministic
 // ordering keeps downstream tools/list stable, which keeps provider prompt
