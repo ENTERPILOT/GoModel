@@ -315,14 +315,20 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 		// Emit chunk if we have stop_reason or usage data
 		if (event.Delta != nil && event.Delta.StopReason != "") || event.Usage != nil {
 			var finishReason any
+			delta := map[string]any{}
 			if event.Delta != nil && event.Delta.StopReason != "" {
 				finishReason = sc.mapStreamStopReason(event.Delta.StopReason)
+				// Carry the matched stop sequence as a delta extension field:
+				// OpenAI's finish_reason "stop" cannot express it.
+				if event.Delta.StopSequence != "" {
+					delta["stop_sequence"] = event.Delta.StopSequence
+				}
 			}
 			var usage *anthropicUsage
 			if sc.hasUsage {
 				usage = &sc.usage
 			}
-			return sc.formatChatChunk(map[string]any{}, finishReason, usage)
+			return sc.formatChatChunk(delta, finishReason, usage)
 		}
 
 	case "message_stop":

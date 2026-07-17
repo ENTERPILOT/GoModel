@@ -482,6 +482,34 @@ func EstimateInputTokens(req *MessagesRequest) int {
 	for _, tool := range req.Tools {
 		chars += len(tool.Name) + len(tool.Description) + len(bytes.TrimSpace(tool.InputSchema))
 	}
+	return tokensFromChars(chars)
+}
+
+// EstimateChatInputTokens returns the same chars/4 heuristic for a canonical
+// chat request. It seeds the stream converter's message_start usage, where the
+// Anthropic contract expects input tokens before the upstream has reported any.
+func EstimateChatInputTokens(req *core.ChatRequest) int {
+	if req == nil {
+		return 0
+	}
+	chars := 0
+	for _, msg := range req.Messages {
+		chars += len(core.ExtractTextContent(msg.Content))
+		for _, call := range msg.ToolCalls {
+			chars += len(call.Function.Name) + len(call.Function.Arguments)
+		}
+	}
+	for _, tool := range req.Tools {
+		if raw, err := json.Marshal(tool); err == nil {
+			chars += len(raw)
+		}
+	}
+	return tokensFromChars(chars)
+}
+
+// tokensFromChars converts a character count to the heuristic token estimate
+// (roughly characters / 4, at least 1 for non-empty input).
+func tokensFromChars(chars int) int {
 	tokens := (chars + 3) / 4
 	if tokens == 0 && chars > 0 {
 		return 1

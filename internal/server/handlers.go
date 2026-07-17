@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
@@ -539,6 +540,17 @@ func (h *Handler) ListModels(c *echo.Context) error {
 			}
 			resp = mergeExposedModelsResponse(resp, exposed)
 		}
+	}
+
+	// The models route is shared by both wire dialects. Anthropic SDK clients
+	// are identified by the anthropic-version header they always send; render
+	// the Anthropic list shape for them, the OpenAI shape for everyone else.
+	if c.Request().Header.Get("anthropic-version") != "" {
+		var models []core.Model
+		if resp != nil {
+			models = resp.Data
+		}
+		return c.JSON(http.StatusOK, anthropicapi.FromModels(models))
 	}
 
 	return c.JSON(http.StatusOK, resp)

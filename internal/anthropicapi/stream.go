@@ -19,6 +19,7 @@ type chatChunk struct {
 		Delta struct {
 			Content          string              `json:"content"`
 			ReasoningContent string              `json:"reasoning_content"`
+			StopSequence     string              `json:"stop_sequence"`
 			ToolCalls        []chatToolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
@@ -58,13 +59,20 @@ func (u chatUsage) cacheRead() int {
 // NewStreamConverter wraps an OpenAI-style chat completion SSE stream and emits
 // the equivalent Anthropic Messages SSE event sequence. The returned reader
 // owns body and closes it on Close.
-func NewStreamConverter(body io.ReadCloser, model string) io.ReadCloser {
+//
+// inputTokensEstimate seeds message_start's usage.input_tokens: the Anthropic
+// contract reports input tokens at stream start, but the OpenAI upstream only
+// delivers usage in the final chunk, so a heuristic estimate is the best
+// available value there. The authoritative usage still arrives in
+// message_delta, which SDK accumulators prefer.
+func NewStreamConverter(body io.ReadCloser, model string, inputTokensEstimate int) io.ReadCloser {
 	return &streamConverter{
-		reader:    bufio.NewReader(body),
-		body:      body,
-		model:     model,
-		buffer:    streaming.NewStreamBuffer(1024),
-		toolBlock: make(map[int]int),
+		reader:        bufio.NewReader(body),
+		body:          body,
+		model:         model,
+		buffer:        streaming.NewStreamBuffer(1024),
+		toolBlock:     make(map[int]int),
+		inputEstimate: inputTokensEstimate,
 	}
 }
 
@@ -76,16 +84,18 @@ type streamConverter struct {
 	buffer streaming.StreamBuffer
 	model  string
 
-	started    bool
-	blockOpen  bool
-	blockType  string
-	curIndex   int
-	nextIndex  int
-	toolBlock  map[int]int
-	stopReason string
-	usage      chatUsage
-	finalized  bool
-	closed     bool
+	started       bool
+	blockOpen     bool
+	blockType     string
+	curIndex      int
+	nextIndex     int
+	toolBlock     map[int]int
+	stopReason    string
+	stopSequence  string
+	inputEstimate int
+	usage         chatUsage
+	finalized     bool
+	closed        bool
 }
 
 func (sc *streamConverter) Read(p []byte) (int, error) {
@@ -178,6 +188,9 @@ func (sc *streamConverter) handleChunk(chunk *chatChunk) {
 		for _, call := range choice.Delta.ToolCalls {
 			sc.handleToolCall(call)
 		}
+		if choice.Delta.StopSequence != "" {
+			sc.stopSequence = choice.Delta.StopSequence
+		}
 		if choice.FinishReason != "" {
 			sc.stopReason = stopReasonFromFinish(choice.FinishReason, len(sc.toolBlock) > 0)
 		}
@@ -268,7 +281,7 @@ func (sc *streamConverter) ensureStarted(id, model string) {
 			"content":       []any{},
 			"stop_reason":   nil,
 			"stop_sequence": nil,
-			"usage":         map[string]any{"input_tokens": 0, "output_tokens": 0},
+			"usage":         map[string]any{"input_tokens": sc.inputEstimate, "output_tokens": 0},
 		},
 	})
 }
@@ -286,9 +299,14 @@ func (sc *streamConverter) finalize() {
 	if stopReason == "" {
 		stopReason = "end_turn"
 	}
+	var stopSequence any
+	if sc.stopSequence != "" && stopReason == "end_turn" {
+		stopReason = "stop_sequence"
+		stopSequence = sc.stopSequence
+	}
 	sc.emit("message_delta", map[string]any{
 		"type":  "message_delta",
-		"delta": map[string]any{"stop_reason": stopReason, "stop_sequence": nil},
+		"delta": map[string]any{"stop_reason": stopReason, "stop_sequence": stopSequence},
 		"usage": sc.usagePayload(),
 	})
 	sc.emit("message_stop", map[string]any{"type": "message_stop"})

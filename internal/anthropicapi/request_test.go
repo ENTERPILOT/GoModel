@@ -454,3 +454,20 @@ func TestToChatRequestRoundTripsAsJSON(t *testing.T) {
 		t.Fatalf("json.Marshal(chat): %v", err)
 	}
 }
+
+func TestEstimateChatInputTokens(t *testing.T) {
+	if got := EstimateChatInputTokens(nil); got != 0 {
+		t.Errorf("nil request = %d, want 0", got)
+	}
+	req := &core.ChatRequest{
+		Messages: []core.Message{
+			{Role: "system", Content: "You are terse."},
+			{Role: "user", Content: "What is 2+2?"},
+		},
+	}
+	got := EstimateChatInputTokens(req)
+	// "You are terse." (14) + "What is 2+2?" (12) = 26 chars → ceil(26/4) = 7
+	if got != 7 {
+		t.Errorf("estimate = %d, want 7", got)
+	}
+}

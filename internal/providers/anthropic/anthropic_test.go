@@ -284,6 +284,30 @@ func TestChatCompletion(t *testing.T) {
 			},
 		},
 		{
+			name:       "stop sequence hit carries the matched sequence",
+			statusCode: http.StatusOK,
+			responseBody: `{
+				"id": "msg_stop",
+				"type": "message",
+				"role": "assistant",
+				"model": "claude-sonnet-4-5-20250929",
+				"content": [{"type": "text", "text": "1 2 3 "}],
+				"stop_reason": "stop_sequence",
+				"stop_sequence": "7",
+				"usage": {"input_tokens": 6, "output_tokens": 4}
+			}`,
+			expectedError: false,
+			checkResponse: func(t *testing.T, resp *core.ChatResponse) {
+				choice := resp.Choices[0]
+				if choice.FinishReason != "stop" {
+					t.Errorf("FinishReason = %q, want stop", choice.FinishReason)
+				}
+				if choice.StopSequence != "7" {
+					t.Errorf("StopSequence = %q, want 7", choice.StopSequence)
+				}
+			},
+		},
+		{
 			name:          "API error - unauthorized",
 			statusCode:    http.StatusUnauthorized,
 			responseBody:  `{"type": "error", "error": {"type": "authentication_error", "message": "Invalid API key"}}`,
@@ -427,6 +451,43 @@ data: {"type":"message_stop"}
 				}
 				if !strings.Contains(responseStr, "[DONE]") {
 					t.Error("response should end with [DONE]")
+				}
+			},
+		},
+		{
+			name:       "stop sequence hit rides the chunk delta",
+			statusCode: http.StatusOK,
+			responseBody: `event: message_start
+data: {"type":"message_start","message":{"id":"msg_stop","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":6,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1 2 3 "}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"stop_sequence","stop_sequence":"7"},"usage":{"output_tokens":4}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`,
+			expectedError: false,
+			checkStream: func(t *testing.T, body io.ReadCloser) {
+				defer func() { _ = body.Close() }()
+				respBody, err := io.ReadAll(body)
+				if err != nil {
+					t.Fatalf("failed to read response body: %v", err)
+				}
+				responseStr := string(respBody)
+				if !strings.Contains(responseStr, `"stop_sequence":"7"`) {
+					t.Errorf("chunk stream should carry the matched stop sequence, got: %s", responseStr)
+				}
+				if !strings.Contains(responseStr, `"finish_reason":"stop"`) {
+					t.Errorf("finish_reason should stay OpenAI-conservative \"stop\", got: %s", responseStr)
 				}
 			},
 		},

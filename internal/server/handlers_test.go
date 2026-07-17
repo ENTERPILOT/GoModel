@@ -2794,6 +2794,78 @@ func TestListModels(t *testing.T) {
 	}
 }
 
+func TestListModels_AnthropicDialect(t *testing.T) {
+	mock := &mockProvider{
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{
+					ID:       "gpt-4o-mini",
+					Object:   "model",
+					Created:  1721172741,
+					OwnedBy:  "system",
+					Metadata: &core.ModelMetadata{DisplayName: "GPT-4o mini"},
+				},
+				{
+					ID:      "gpt-4-turbo",
+					Object:  "model",
+					Created: 1712361441,
+					OwnedBy: "system",
+				},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+
+	// The anthropic-version header marks an Anthropic SDK client; the shared
+	// models route renders the Anthropic list shape for it.
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.ListModels(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	var body struct {
+		Data []struct {
+			Type        string `json:"type"`
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+			CreatedAt   string `json:"created_at"`
+		} `json:"data"`
+		HasMore bool    `json:"has_more"`
+		FirstID *string `json:"first_id"`
+		LastID  *string `json:"last_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(body.Data) != 2 {
+		t.Fatalf("len(data) = %d, want 2", len(body.Data))
+	}
+	first := body.Data[0]
+	if first.Type != "model" || first.ID != "gpt-4o-mini" || first.DisplayName != "GPT-4o mini" {
+		t.Errorf("first model = %+v", first)
+	}
+	if first.CreatedAt != "2024-07-16T23:32:21Z" {
+		t.Errorf("created_at = %q, want RFC3339", first.CreatedAt)
+	}
+	// Models without metadata fall back to the ID as display name.
+	if body.Data[1].DisplayName != "gpt-4-turbo" {
+		t.Errorf("fallback display_name = %q", body.Data[1].DisplayName)
+	}
+	if body.HasMore {
+		t.Error("has_more should be false (single page)")
+	}
+	if body.FirstID == nil || *body.FirstID != "gpt-4o-mini" || body.LastID == nil || *body.LastID != "gpt-4-turbo" {
+		t.Errorf("first_id/last_id = %v/%v", body.FirstID, body.LastID)
+	}
+}
+
 func TestListModels_MergesExposedModelsWithoutAliasProviderDecorator(t *testing.T) {
 	catalog := &aliasesTestCatalog{
 		supported: map[string]bool{

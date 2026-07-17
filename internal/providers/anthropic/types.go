@@ -72,13 +72,14 @@ type anthropicContentSource struct {
 
 // anthropicResponse represents the Anthropic API response format
 type anthropicResponse struct {
-	ID         string             `json:"id"`
-	Type       string             `json:"type"`
-	Role       string             `json:"role"`
-	Content    []anthropicContent `json:"content"`
-	Model      string             `json:"model"`
-	StopReason string             `json:"stop_reason"`
-	Usage      anthropicUsage     `json:"usage"`
+	ID           string             `json:"id"`
+	Type         string             `json:"type"`
+	Role         string             `json:"role"`
+	Content      []anthropicContent `json:"content"`
+	Model        string             `json:"model"`
+	StopReason   string             `json:"stop_reason"`
+	StopSequence string             `json:"stop_sequence,omitempty"`
+	Usage        anthropicUsage     `json:"usage"`
 }
 
 // anthropicContent represents content in Anthropic response
@@ -112,12 +113,13 @@ type anthropicStreamEvent struct {
 
 // anthropicDelta represents a delta in streaming response
 type anthropicDelta struct {
-	Type        string `json:"type"`
-	Text        string `json:"text,omitempty"`
-	Thinking    string `json:"thinking,omitempty"`
-	Signature   string `json:"signature,omitempty"`
-	PartialJSON string `json:"partial_json,omitempty"`
-	StopReason  string `json:"stop_reason,omitempty"`
+	Type         string `json:"type"`
+	Text         string `json:"text,omitempty"`
+	Thinking     string `json:"thinking,omitempty"`
+	Signature    string `json:"signature,omitempty"`
+	PartialJSON  string `json:"partial_json,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+	StopSequence string `json:"stop_sequence,omitempty"`
 }
 
 // anthropicModelInfo represents a model in Anthropic's models API response

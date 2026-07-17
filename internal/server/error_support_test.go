@@ -165,3 +165,59 @@ func TestHandleError_EnrichesAuditEntryWithGatewayErrorCode(t *testing.T) {
 		t.Fatalf("entry.Data.ErrorCode = %q, want budget_exceeded", entry.Data.ErrorCode)
 	}
 }
+
+func TestHandleRouteNotFound_AnthropicDialect(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages/batches", nil)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handleRouteNotFound(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	var body struct {
+		Type  string `json:"type"`
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Type != "error" || body.Error.Type != "not_found_error" {
+		t.Errorf("envelope = %+v, want anthropic error envelope", body)
+	}
+	if !strings.Contains(body.Error.Message, "/v1/messages/batches") {
+		t.Errorf("message should name the path, got %q", body.Error.Message)
+	}
+}
+
+func TestHandleRouteNotFound_OpenAIDialect(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/v1/does-not-exist", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handleRouteNotFound(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	var body struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Error.Type != "not_found_error" {
+		t.Errorf("envelope = %s, want OpenAI error envelope with not_found_error", rec.Body.String())
+	}
+}

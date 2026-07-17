@@ -120,7 +120,7 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 			result.Meta.FailoverModel,
 			result.Stream,
 			func(stream io.ReadCloser) io.ReadCloser {
-				return anthropicapi.NewStreamConverter(stream, model)
+				return anthropicapi.NewStreamConverter(stream, model, anthropicapi.EstimateChatInputTokens(req))
 			},
 		)
 	}

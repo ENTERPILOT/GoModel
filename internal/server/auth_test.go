@@ -49,6 +49,7 @@ func TestAuthMiddleware(t *testing.T) {
 		name           string
 		masterKey      string
 		authHeader     string
+		apiKeyHeader   string
 		expectedStatus int
 		expectedBody   string
 	}{
@@ -67,11 +68,33 @@ func TestAuthMiddleware(t *testing.T) {
 			expectedBody:   "ok",
 		},
 		{
-			name:           "missing authorization header - denies request",
+			name:           "missing credentials - denies request",
 			masterKey:      "secret-key-123",
 			authHeader:     "",
 			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   `{"error":{"message":"missing authorization header","type":"authentication_error","param":null,"code":null}}`,
+			expectedBody:   `{"error":{"message":"missing credentials: send 'Authorization: Bearer <token>' or 'x-api-key: <token>'","type":"authentication_error","param":null,"code":null}}`,
+		},
+		{
+			name:           "valid x-api-key - allows request",
+			masterKey:      "secret-key-123",
+			apiKeyHeader:   "secret-key-123",
+			expectedStatus: http.StatusOK,
+			expectedBody:   "ok",
+		},
+		{
+			name:           "invalid x-api-key - denies request",
+			masterKey:      "secret-key-123",
+			apiKeyHeader:   "wrong-key",
+			expectedStatus: http.StatusUnauthorized,
+			expectedBody:   `{"error":{"message":"invalid master key","type":"authentication_error","param":null,"code":null}}`,
+		},
+		{
+			name:           "authorization header takes precedence over x-api-key",
+			masterKey:      "secret-key-123",
+			authHeader:     "Bearer wrong-key",
+			apiKeyHeader:   "secret-key-123",
+			expectedStatus: http.StatusUnauthorized,
+			expectedBody:   `{"error":{"message":"invalid master key","type":"authentication_error","param":null,"code":null}}`,
 		},
 		{
 			name:           "invalid authorization format - denies request",
@@ -119,6 +142,9 @@ func TestAuthMiddleware(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
+			}
+			if tt.apiKeyHeader != "" {
+				req.Header.Set("x-api-key", tt.apiKeyHeader)
 			}
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)

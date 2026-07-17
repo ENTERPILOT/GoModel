@@ -11,7 +11,7 @@ import (
 // sequence of emitted Anthropic events (the decoded data: payloads).
 func drainConverter(t *testing.T, chatStream string) []map[string]any {
 	t.Helper()
-	conv := NewStreamConverter(io.NopCloser(strings.NewReader(chatStream)), "fallback-model")
+	conv := NewStreamConverter(io.NopCloser(strings.NewReader(chatStream)), "fallback-model", 0)
 	defer conv.Close() //nolint:errcheck
 
 	out, err := io.ReadAll(conv)
@@ -142,7 +142,7 @@ func (c *closeTracker) Close() error {
 // and leaked the provider connection.
 func TestStreamConverterCloseClosesUnderlying(t *testing.T) {
 	body := &closeTracker{Reader: strings.NewReader("data: [DONE]\n\n")}
-	conv := NewStreamConverter(body, "m")
+	conv := NewStreamConverter(body, "m", 0)
 
 	if _, err := io.ReadAll(conv); err != nil {
 		t.Fatalf("ReadAll: %v", err)
@@ -162,5 +162,74 @@ func TestStreamConverterEmptyStream(t *testing.T) {
 	want := []string{"message_start", "message_delta", "message_stop"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("event sequence = %v, want %v", got, want)
+	}
+}
+
+func TestStreamConverterStopSequence(t *testing.T) {
+	// The anthropic provider carries a natively-reported stop sequence as a
+	// delta extension field; the converter must surface it per the Anthropic
+	// contract instead of collapsing to end_turn.
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-3","model":"claude","choices":[{"delta":{"content":"1 2 3 "},"finish_reason":null}]}`,
+		`data: {"choices":[{"delta":{"stop_sequence":"7"},"finish_reason":"stop"}],"usage":{"prompt_tokens":6,"completion_tokens":3}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	events := drainConverter(t, chatStream)
+	final := events[len(events)-2]
+	if final["type"] != "message_delta" {
+		t.Fatalf("expected message_delta before message_stop, got %v", final["type"])
+	}
+	delta := final["delta"].(map[string]any)
+	if delta["stop_reason"] != "stop_sequence" || delta["stop_sequence"] != "7" {
+		t.Errorf("message_delta delta = %+v, want stop_reason=stop_sequence stop_sequence=7", delta)
+	}
+}
+
+func TestStreamConverterMessageStartInputEstimate(t *testing.T) {
+	// message_start reports the heuristic input estimate (the upstream only
+	// delivers usage in its final chunk); message_delta stays authoritative.
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-4","model":"gpt","choices":[{"delta":{"content":"hi"},"finish_reason":null}]}`,
+		`data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":1}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	conv := NewStreamConverter(io.NopCloser(strings.NewReader(chatStream)), "m", 42)
+	defer conv.Close() //nolint:errcheck
+	out, err := io.ReadAll(conv)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	var start, delta map[string]any
+	for block := range strings.SplitSeq(string(out), "\n\n") {
+		for line := range strings.SplitSeq(block, "\n") {
+			data, ok := strings.CutPrefix(line, "data: ")
+			if !ok {
+				continue
+			}
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(data), &payload); err != nil {
+				t.Fatalf("unmarshal %q: %v", data, err)
+			}
+			switch payload["type"] {
+			case "message_start":
+				start = payload
+			case "message_delta":
+				delta = payload
+			}
+		}
+	}
+
+	usage := start["message"].(map[string]any)["usage"].(map[string]any)
+	if usage["input_tokens"] != float64(42) {
+		t.Errorf("message_start usage = %+v, want input_tokens=42", usage)
+	}
+	finalUsage := delta["usage"].(map[string]any)
+	if finalUsage["input_tokens"] != float64(11) || finalUsage["output_tokens"] != float64(1) {
+		t.Errorf("message_delta usage = %+v, want real 11/1", finalUsage)
 	}
 }

@@ -153,9 +153,12 @@ end to end, including request-validation and upstream errors.
   not model-specific. Mitigation: documented clearly; adequate for budgeting/UX sizing, not for
   hard context-limit decisions.
 - **`stop_reason` fidelity for stop sequences.** `stop_sequences` are honored end to end (the
-  OpenAI `stop` field is mapped to Anthropic `stop_sequences`), but the canonical chat type has
-  no distinct "stop sequence" finish reason, so a stop-sequence-triggered completion is reported
-  as `stop_reason: "end_turn"` rather than `"stop_sequence"`. The output is truncated correctly;
+  OpenAI `stop` field is mapped to Anthropic `stop_sequences`). The canonical chat type keeps the
+  conservative OpenAI `finish_reason` but carries a natively-reported matched sequence as a
+  `stop_sequence` choice extension (same spirit as the relayed `reasoning_content`), so requests
+  served by the Anthropic provider report the full `stop_reason: "stop_sequence"` contract.
+  OpenAI-family providers conflate stop-parameter hits with natural stops in `finish_reason`, so
+  completions there still report `stop_reason: "end_turn"`; the output is truncated correctly,
   only the reason label differs.
 - Anthropic-specific request features routed to non-Anthropic providers degrade gracefully
   (dropped or approximated), consistent with Postel's law.

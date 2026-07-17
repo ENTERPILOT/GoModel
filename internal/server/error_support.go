@@ -37,6 +37,21 @@ func writeGatewayError(c *echo.Context, gatewayErr *core.GatewayError) error {
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 }
 
+// handleRouteNotFound renders unknown-route 404s in the caller's wire dialect
+// so SDK clients raise clean typed errors instead of parsing echo's default
+// {"message": "Not Found"} body. Anthropic SDK clients are recognized by the
+// anthropic-version header they always send (the path itself is unclassified —
+// that is what makes it a 404).
+func handleRouteNotFound(c *echo.Context) error {
+	r := c.Request()
+	notFound := core.NewNotFoundError("unknown API endpoint: " + r.Method + " " + r.URL.Path)
+	if requestDialect(c) == "anthropic" || r.Header.Get("anthropic-version") != "" {
+		status, body := anthropicapi.ErrorFromGateway(notFound)
+		return c.JSON(status, body)
+	}
+	return c.JSON(notFound.HTTPStatusCode(), notFound.ToJSON())
+}
+
 // requestDialect reports the ingress wire dialect classified for the request
 // path (e.g. "anthropic", "openai_compat"), or "" when unclassified.
 func requestDialect(c *echo.Context) string {

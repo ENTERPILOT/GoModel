@@ -59,6 +59,7 @@ func convertFromAnthropicResponse(resp *anthropicResponse) *core.ChatResponse {
 				Index:        0,
 				Message:      msg,
 				FinishReason: finishReason,
+				StopSequence: resp.StopSequence,
 			},
 		},
 		Usage: usage,

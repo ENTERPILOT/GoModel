@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -50,21 +51,11 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 				}
 			}
 
-			// Get Authorization header
-			authHeader := c.Request().Header.Get("Authorization")
-			if authHeader == "" {
-				authErr := authenticationError(c, "missing authorization header")
+			token, tokenErr := requestAuthToken(c.Request())
+			if tokenErr != "" {
+				authErr := authenticationError(c, tokenErr)
 				return writeGatewayError(c, authErr)
 			}
-
-			// Extract Bearer token
-			const prefix = "Bearer "
-			if !strings.HasPrefix(authHeader, prefix) {
-				authErr := authenticationError(c, "invalid authorization header format, expected 'Bearer <token>'")
-				return writeGatewayError(c, authErr)
-			}
-
-			token := strings.TrimPrefix(authHeader, prefix)
 			if masterKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(masterKey)) == 1 {
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodMasterKey)
 				return next(c)
@@ -86,6 +77,25 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 			return writeGatewayError(c, authErr)
 		}
 	}
+}
+
+// requestAuthToken extracts the caller's credential from the request. The
+// primary scheme is "Authorization: Bearer <token>"; the Anthropic-native
+// "x-api-key: <token>" header is accepted as a fallback so Anthropic SDK
+// clients work without switching their auth configuration. A non-empty
+// errMessage describes why no token could be extracted.
+func requestAuthToken(r *http.Request) (token, errMessage string) {
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+		const prefix = "Bearer "
+		if !strings.HasPrefix(authHeader, prefix) {
+			return "", "invalid authorization header format, expected 'Bearer <token>'"
+		}
+		return strings.TrimPrefix(authHeader, prefix), ""
+	}
+	if apiKey := r.Header.Get("x-api-key"); apiKey != "" {
+		return apiKey, ""
+	}
+	return "", "missing credentials: send 'Authorization: Bearer <token>' or 'x-api-key: <token>'"
 }
 
 // applyAuthKeyResult enriches the request context and audit entry with the

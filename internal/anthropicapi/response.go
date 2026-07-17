@@ -43,6 +43,15 @@ func FromChatResponse(resp *core.ChatResponse) *MessagesResponse {
 			})
 		}
 		out.StopReason = stopReasonFromFinish(choice.FinishReason, len(choice.Message.ToolCalls) > 0)
+		// Providers that report the matched stop sequence natively carry it as
+		// a choice extension; surface it per the Anthropic contract. OpenAI's
+		// finish_reason "stop" conflates natural and stop-parameter stops, so
+		// OpenAI-family providers keep reporting "end_turn".
+		if choice.StopSequence != "" && out.StopReason == "end_turn" {
+			out.StopReason = "stop_sequence"
+			sequence := choice.StopSequence
+			out.StopSequence = &sequence
+		}
 	}
 	if out.StopReason == "" {
 		out.StopReason = "end_turn"

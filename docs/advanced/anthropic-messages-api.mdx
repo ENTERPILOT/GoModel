@@ -28,6 +28,32 @@ endpoint routes anywhere and is fully managed.
 | --- | --- |
 | `POST /v1/messages` | Creates a message through translated model routing. Supports streaming (`stream: true`) with Anthropic-format SSE events. |
 | `POST /v1/messages/count_tokens` | Returns a heuristic input token estimate. |
+| `GET /v1/models` | Returns the catalog in the Anthropic list shape (`type: "model"`, `display_name`, `created_at`) when the request carries the `anthropic-version` header the Anthropic SDKs always send; OpenAI shape otherwise. |
+
+The Anthropic Message Batches API (`/v1/messages/batches`) is not implemented; batch
+processing is available through the OpenAI-compatible `/v1/batches` endpoint.
+
+## Authentication
+
+Both credential styles work, so the official Anthropic SDKs are drop-in:
+
+- `Authorization: Bearer <key>` — GoModel's primary scheme.
+- `x-api-key: <key>` — the Anthropic-native header, accepted as a fallback when no
+  `Authorization` header is present.
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    api_key="<your GoModel key>",       # sent as x-api-key — works as-is
+    base_url="https://your-gateway",
+)
+client.messages.create(
+    model="openai/gpt-4o-mini",          # any configured provider's model
+    max_tokens=256,
+    messages=[{"role": "user", "content": "Hello"}],
+)
+```
 
 ## Example
 
@@ -72,12 +98,17 @@ features that have no canonical equivalent are not preserved end to end:
   are forwarded.
 - **`document` and other non-text/image content blocks** are rejected with a clear
   `400` error rather than silently dropped.
-- **`stop_sequences`** are honored, but a stop-sequence-triggered completion reports
-  `stop_reason: "end_turn"` instead of `"stop_sequence"` (the output is still truncated
+- **`stop_sequences`** are honored on every provider. Providers that report the
+  matched sequence natively (Anthropic) get the full contract back:
+  `stop_reason: "stop_sequence"` plus the `stop_sequence` value. OpenAI-family
+  providers conflate stop-parameter hits with natural stops in `finish_reason`,
+  so completions there report `stop_reason: "end_turn"` (output is still truncated
   correctly).
 - **`count_tokens`** returns a provider-agnostic heuristic estimate (≈ characters / 4),
   not a tokenizer-exact count. Use it for budgeting and UX sizing, not hard
-  context-limit decisions.
+  context-limit decisions. The same estimate seeds `usage.input_tokens` in the
+  streaming `message_start` event; the authoritative counts arrive in the final
+  `message_delta` event, which SDK accumulators prefer.
 
 For byte-exact Anthropic fidelity (including prompt-cache breakpoints), use the
 `/p/anthropic/v1/messages` passthrough route instead.

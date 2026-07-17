@@ -339,6 +339,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// still keeping workflow resolution failures loggable through the audit middleware.
 	e.Use(WorkflowResolutionWithResolverAndPolicy(provider, modelResolver, workflowPolicyResolver))
 
+	// Unknown routes get a dialect-aware canonical error envelope instead of
+	// echo's default {"message": "Not Found"} body.
+	e.RouteNotFound("/*", handleRouteNotFound)
+
 	// Public routes
 	e.GET("/health", handler.Health)
 	e.GET("/health/ready", handler.Ready)

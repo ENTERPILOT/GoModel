@@ -155,3 +155,39 @@ func TestFromChatResponseNil(t *testing.T) {
 		t.Fatalf("FromChatResponse(nil) = %+v", resp)
 	}
 }
+
+func TestFromChatResponseStopSequence(t *testing.T) {
+	resp := &core.ChatResponse{
+		ID:    "abc",
+		Model: "claude",
+		Choices: []core.Choice{{
+			Message:      core.ResponseMessage{Role: "assistant", Content: "1 2 3 "},
+			FinishReason: "stop",
+			StopSequence: "7",
+		}},
+	}
+	out := FromChatResponse(resp)
+	if out.StopReason != "stop_sequence" {
+		t.Errorf("StopReason = %q, want stop_sequence", out.StopReason)
+	}
+	if out.StopSequence == nil || *out.StopSequence != "7" {
+		t.Errorf("StopSequence = %v, want 7", out.StopSequence)
+	}
+}
+
+func TestFromChatResponseStopSequenceDoesNotOverrideToolUse(t *testing.T) {
+	resp := &core.ChatResponse{
+		Choices: []core.Choice{{
+			Message: core.ResponseMessage{
+				Role:      "assistant",
+				ToolCalls: []core.ToolCall{{ID: "t1", Type: "function", Function: core.FunctionCall{Name: "f", Arguments: "{}"}}},
+			},
+			FinishReason: "tool_calls",
+			StopSequence: "7",
+		}},
+	}
+	out := FromChatResponse(resp)
+	if out.StopReason != "tool_use" || out.StopSequence != nil {
+		t.Errorf("got stop_reason=%q stop_sequence=%v, want tool_use/nil", out.StopReason, out.StopSequence)
+	}
+}
