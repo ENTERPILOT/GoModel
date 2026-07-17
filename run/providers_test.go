@@ -9,7 +9,7 @@ import (
 
 func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
-		"anthropic", "azure", "bailian", "bedrock", "deepseek", "fireworks",
+		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "deepseek", "fireworks",
 		"gemini", "groq", "kilo", "kimicode", "meta", "minimax", "ollama", "openai", "opencode_go",
 		"openrouter", "oracle", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}

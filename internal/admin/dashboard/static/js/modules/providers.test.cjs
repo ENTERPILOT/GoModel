@@ -92,6 +92,7 @@ test('providerDocUrl links provider types with docs and stays empty otherwise', 
     // Types with a dedicated docs page.
     assert.equal(module.providerDocUrl({ type: 'anthropic' }), 'https://gomodel.enterpilot.io/docs/providers/anthropic');
     assert.equal(module.providerDocUrl({ config: { type: 'bedrock' } }), 'https://gomodel.enterpilot.io/docs/providers/bedrock');
+    assert.equal(module.providerDocUrl({ type: 'bedrock-mantle' }), 'https://gomodel.enterpilot.io/docs/providers/bedrock-mantle');
     // Type slug differs from the docs slug.
     assert.equal(module.providerDocUrl({ type: 'opencode_go' }), 'https://gomodel.enterpilot.io/docs/providers/opencode-go');
     // Resolves even when the (type) label is hidden because name === type.

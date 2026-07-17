@@ -8,6 +8,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/azure"
 	"github.com/enterpilot/gomodel/internal/providers/bailian"
 	"github.com/enterpilot/gomodel/internal/providers/bedrock"
+	"github.com/enterpilot/gomodel/internal/providers/bedrockmantle"
 	"github.com/enterpilot/gomodel/internal/providers/deepseek"
 	"github.com/enterpilot/gomodel/internal/providers/fireworks"
 	"github.com/enterpilot/gomodel/internal/providers/gemini"
@@ -44,6 +45,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(oracle.Registration)
 	factory.Add(anthropic.Registration)
 	factory.Add(bedrock.Registration)
+	factory.Add(bedrockmantle.Registration)
 	factory.Add(deepseek.Registration)
 	factory.Add(fireworks.Registration)
 	factory.Add(gemini.Registration)
