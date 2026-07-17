@@ -58,6 +58,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"bedrock": {
 		AllowAPIKeyless: true,
 	},
+	"bedrock-mantle": {
+		AllowAPIKeyless: true,
+	},
 	"oracle": {
 		RequireBaseURL: true,
 	},
@@ -660,6 +663,25 @@ func TestApplyProviderEnvVars_DiscoversSuffixedVertexProvider(t *testing.T) {
 	}
 	if len(bedrock.Models) != 1 || bedrock.Models[0].ID != "anthropic.claude-3-5-haiku-20241022-v1:0" {
 		t.Fatalf("Bedrock Models = %v, want [anthropic.claude-3-5-haiku-20241022-v1:0]", bedrock.Models)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversBedrockMantle(t *testing.T) {
+	t.Setenv("BEDROCK_MANTLE_API_KEY", "ABSK-test")
+	t.Setenv("BEDROCK_MANTLE_BASE_URL", "us-east-2")
+	t.Setenv("BEDROCK_MANTLE_API_MODE", "auto")
+	t.Setenv("BEDROCK_MANTLE_MODELS", "openai.gpt-5.6-sol,openai.gpt-5.6-terra")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	p, exists := got["bedrock-mantle"]
+	if !exists {
+		t.Fatal("expected bedrock-mantle to be discovered from BEDROCK_MANTLE_* env vars")
+	}
+	if p.Type != "bedrock-mantle" || p.APIKey != "ABSK-test" || p.BaseURL != "us-east-2" || p.APIMode != "auto" {
+		t.Fatalf("bedrock-mantle config = %+v", p)
+	}
+	if len(p.Models) != 2 || p.Models[0].ID != "openai.gpt-5.6-sol" || p.Models[1].ID != "openai.gpt-5.6-terra" {
+		t.Fatalf("bedrock-mantle models = %v", p.Models)
 	}
 }
 

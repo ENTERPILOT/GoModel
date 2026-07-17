@@ -474,6 +474,19 @@ providers:
   #   #   - anthropic.claude-3-5-haiku-20241022-v1:0
   #   #   - amazon.nova-lite-v1:0
 
+  # Example: Amazon Bedrock Mantle. This is the OpenAI-compatible Bedrock
+  # endpoint and is required for Responses-only models such as GPT-5.6.
+  # Authenticate with api_key or omit it to use the AWS credential chain.
+  # bedrock-mantle:
+  #   type: "bedrock-mantle"
+  #   base_url: "us-east-1"
+  #   api_key: "${BEDROCK_MANTLE_API_KEY}"
+  #   api_mode: "auto" # auto, openai, or standard
+  #   models:
+  #     - openai.gpt-5.6-sol
+  #     - openai.gpt-5.6-terra
+  #     - openai.gpt-5.6-luna
+
   # Example: local Ollama server with explicit per-model metadata.
   # Use the rich entry form to declare context_window, pricing, capabilities,
   # etc. for models that aren't in the upstream ai-model-list registry. Plain

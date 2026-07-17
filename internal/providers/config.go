@@ -655,7 +655,18 @@ func sortedDiscoveryTypes(discovery map[string]DiscoveryConfig) []string {
 	for providerType := range discovery {
 		types = append(types, providerType)
 	}
-	sort.Strings(types)
+	// A registered prefix can also look like a suffixed instance of a shorter
+	// provider (BEDROCK_MANTLE_* vs BEDROCK_*). Apply the more specific prefix
+	// first; the shorter provider will then see an existing, differently typed
+	// target and leave it alone. Keep lexical order as the deterministic tie
+	// breaker.
+	sort.Slice(types, func(i, j int) bool {
+		left, right := envPrefix(types[i]), envPrefix(types[j])
+		if len(left) != len(right) {
+			return len(left) > len(right)
+		}
+		return types[i] < types[j]
+	})
 	return types
 }
 

@@ -41,6 +41,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Ollama | `OLLAMA_BASE_URL` | `llama3.2` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Ollama](/providers/multiple-ollama) |
 | vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/providers/vllm) |
 | Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + AWS credentials | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/providers/bedrock) |
+| Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` or AWS credentials | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/providers/bedrock-mantle) |
 
 ✅ Supported ❌ Unsupported
 
@@ -48,6 +49,9 @@ support, not every individual model capability exposed by an upstream provider.
 
 - **Z.ai GLM Coding Plan** — set
   `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+- **Amazon Bedrock Mantle** — GPT-5.6 Sol, Terra, and Luna accept only the
+  Responses API on Mantle. GoModel sends `/v1/responses` requests directly to
+  AWS and selects the required `/openai/v1/responses` upstream path.
 - **Fireworks AI** — model IDs are account-scoped paths such as
   `accounts/fireworks/models/gpt-oss-120b`; use them verbatim in requests and
   in `FIREWORKS_MODELS`.

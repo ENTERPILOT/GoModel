@@ -16,8 +16,12 @@ import (
 type RequestMutator func(*llmclient.Request)
 
 type CompatibleProviderConfig struct {
-	ProviderName   string
-	BaseURL        string
+	ProviderName string
+	BaseURL      string
+	// HTTPClient overrides the shared default client while retaining the
+	// factory-provided retry, circuit-breaker, and observability settings.
+	// Providers use this for transport-level concerns such as request signing.
+	HTTPClient     *http.Client
 	SetHeaders     func(*http.Request, string)
 	RequestMutator RequestMutator
 	// AdaptChatRequest rewrites the typed chat request before provider
@@ -86,11 +90,16 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 	}
 	// Resolved per request, not captured: with several keys configured this is
 	// what spreads successive calls across them.
-	p.client = llmclient.New(clientCfg, func(req *http.Request) {
+	headerSetter := func(req *http.Request) {
 		if cfg.SetHeaders != nil {
 			cfg.SetHeaders(req, p.keys.Next())
 		}
-	})
+	}
+	if cfg.HTTPClient != nil {
+		p.client = llmclient.NewWithHTTPClient(cfg.HTTPClient, clientCfg, headerSetter)
+	} else {
+		p.client = llmclient.New(clientCfg, headerSetter)
+	}
 	return p
 }
 

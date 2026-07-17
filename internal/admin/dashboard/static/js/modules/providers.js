@@ -13,6 +13,7 @@
         azure: 'azure',
         bailian: 'bailian',
         bedrock: 'bedrock',
+        'bedrock-mantle': 'bedrock-mantle',
         deepseek: 'deepseek',
         gemini: 'gemini',
         opencode_go: 'opencode-go',

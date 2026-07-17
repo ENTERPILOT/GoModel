@@ -153,6 +153,7 @@
                         "pages": [
                             "providers/vertex",
                             "providers/bedrock",
+                            "providers/bedrock-mantle",
                             "providers/azure",
                             "providers/oracle"
                         ]
