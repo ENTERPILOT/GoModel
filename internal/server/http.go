@@ -110,7 +110,16 @@ type ReadinessProbe interface {
 
 // New creates a new HTTP server
 func New(provider core.RoutableProvider, cfg *Config) *Server {
-	e := echo.New()
+	// The router-level NotFoundHandler fires only when no route matches the
+	// path at all, so unknown routes get a dialect-aware canonical error
+	// envelope while echo's 405 handling for known paths stays intact (a
+	// wildcard RouteNotFound route would shadow it and turn 405s into 404s).
+	e := echo.NewWithConfig(echo.Config{
+		Router: echo.NewRouter(echo.RouterConfig{
+			AllowOverwritingRoute: true,
+			NotFoundHandler:       handleRouteNotFound,
+		}),
+	})
 	e.Logger = slog.Default()
 	basePath := configuredBasePath(cfg)
 	if basePath != "/" {
@@ -338,10 +347,6 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// managed auth key user-path overrides are visible to policy resolution while
 	// still keeping workflow resolution failures loggable through the audit middleware.
 	e.Use(WorkflowResolutionWithResolverAndPolicy(provider, modelResolver, workflowPolicyResolver))
-
-	// Unknown routes get a dialect-aware canonical error envelope instead of
-	// echo's default {"message": "Not Found"} body.
-	e.RouteNotFound("/*", handleRouteNotFound)
 
 	// Public routes
 	e.GET("/health", handler.Health)

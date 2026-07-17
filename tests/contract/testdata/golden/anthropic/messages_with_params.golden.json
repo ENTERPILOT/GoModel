@@ -6,7 +6,8 @@
       "message": {
         "content": "1, 2, ",
         "role": "assistant"
-      }
+      },
+      "stop_sequence": "3"
     }
   ],
   "created": 0,
