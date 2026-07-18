@@ -101,6 +101,7 @@
                             "advanced/audio-api",
                             "advanced/usage-api",
                             "advanced/guardrails",
+                            "advanced/header-policies",
                             "advanced/workflows",
                             "advanced/admin-endpoints"
                         ]

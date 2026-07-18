@@ -63,7 +63,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"RATE_LIMITS_ENABLED",
 		"DASHBOARD_LIVE_LOGS_ENABLED", "DASHBOARD_LIVE_LOGS_BUFFER_SIZE",
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
-		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
+		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING", "HEADER_POLICIES_ENABLED", "HEADER_POLICIES_JSON",
 		"FAILOVER_MODE", "FAILOVER_MANUAL_RULES_PATH", "FAILOVER_ENABLED", "FAILOVER_RULES_JSON", "FAILOVER_DISABLED_MODELS", "FAILOVER_DISABLED_MODELS_JSON",
 		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
@@ -99,6 +99,9 @@ func withTempDir(t *testing.T, fn func(dir string)) {
 
 func TestBuildDefaultConfig(t *testing.T) {
 	cfg := buildDefaultConfig()
+	if !cfg.HeaderPolicies.Enabled {
+		t.Fatal("expected HeaderPolicies.Enabled=true")
+	}
 
 	if cfg.Server.Port != "8080" {
 		t.Errorf("expected Server.Port=8080, got %s", cfg.Server.Port)
@@ -251,6 +254,92 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Resilience.CircuitBreaker != expectedCB {
 		t.Errorf("expected Resilience.CircuitBreaker=%+v, got %+v", expectedCB, cfg.Resilience.CircuitBreaker)
 	}
+}
+
+func TestLoad_HeaderPoliciesFromYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	withTempDir(t, func(_ string) {
+		if err := os.WriteFile("config.yaml", []byte(`
+header_policies:
+  enabled: true
+  policies:
+    - name: pin-beta
+      description: Anthropic beta
+      step: 20
+      methods: [POST]
+      paths: [/v1/chat/completions, /p/anthropic/*]
+      when:
+        - header: User-Agent
+          matches: ^cline/
+      actions:
+        - action: set
+          header: Anthropic-Beta
+          value: context-1m
+`), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		policies := result.Config.HeaderPolicies.Policies
+		if len(policies) != 1 || policies[0].Name != "pin-beta" || policies[0].Step != 20 {
+			t.Fatalf("policies = %#v", policies)
+		}
+		if len(policies[0].Paths) != 2 || policies[0].Paths[1] != "/p/anthropic/*" {
+			t.Fatalf("paths = %#v", policies[0].Paths)
+		}
+	})
+}
+
+func TestLoad_HeaderPoliciesJSONOverridesYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv("HEADER_POLICIES_ENABLED", "false")
+	t.Setenv("HEADER_POLICIES_JSON", `[{"name":"from-env","step":30,"paths":["/v1/*"],"actions":[{"action":"set","header":"X-Team","from_header":"X-Client-Team"}]}]`)
+	withTempDir(t, func(_ string) {
+		if err := os.WriteFile("config.yaml", []byte(`
+header_policies:
+  policies:
+    - name: from-yaml
+      actions:
+        - action: remove
+          header: X-Debug
+`), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.Config.HeaderPolicies.Enabled {
+			t.Fatal("HEADER_POLICIES_ENABLED=false was ignored")
+		}
+		policies := result.Config.HeaderPolicies.Policies
+		if len(policies) != 1 || policies[0].Name != "from-env" || policies[0].Actions[0].FromHeader != "X-Client-Team" {
+			t.Fatalf("policies = %#v", policies)
+		}
+	})
+}
+
+func TestLoad_HeaderPoliciesJSONRejectsUnknownFields(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv("HEADER_POLICIES_JSON", `[{"name":"bad","actons":[]}]`)
+	withTempDir(t, func(_ string) {
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "HEADER_POLICIES_JSON") {
+			t.Fatalf("Load() error = %v", err)
+		}
+	})
+}
+
+func TestLoad_HeaderPoliciesJSONRejectsTrailingData(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv("HEADER_POLICIES_JSON", `[] {}`)
+	withTempDir(t, func(_ string) {
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() error = nil, want trailing JSON error")
+		}
+	})
 }
 
 func TestLoadBudgetEnvUserPath(t *testing.T) {

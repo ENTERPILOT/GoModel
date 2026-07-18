@@ -435,7 +435,7 @@ func extractTextFromContent(content any) string {
 // This ensures semantically similar prompts with different parameters or guardrail
 // policies never share a cache entry. endpointPath is the raw URL path
 // (e.g. "/v1/chat/completions") and isolates entries across distinct endpoints.
-func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, guardrailsHash, embedderIdentity string, headerPlans ...*core.HeaderPlan) string {
+func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, guardrailsHash, embedderIdentity string, headerPlan *core.HeaderPlan) string {
 	var req struct {
 		Model           string              `json:"model"`
 		Temperature     *float64            `json:"temperature"`
@@ -526,9 +526,7 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, gu
 
 	h.Write([]byte(guardrailsHash))
 	h.Write([]byte{0})
-	if len(headerPlans) > 0 {
-		h.Write([]byte(headerPlans[0].CacheFingerprint()))
-	}
+	h.Write([]byte(headerPlan.CacheFingerprint()))
 	h.Write([]byte{0})
 	h.Write([]byte(embedderIdentity))
 

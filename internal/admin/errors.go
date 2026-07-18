@@ -12,6 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
@@ -50,9 +51,10 @@ func validationWriter(isValidation func(error) bool) func(error) error {
 }
 
 var (
-	workflowWriteError  = validationWriter(workflows.IsValidationError)
-	authKeyWriteError   = validationWriter(authkeys.IsValidationError)
-	guardrailWriteError = validationWriter(guardrails.IsValidationError)
+	workflowWriteError     = validationWriter(workflows.IsValidationError)
+	authKeyWriteError      = validationWriter(authkeys.IsValidationError)
+	guardrailWriteError    = validationWriter(guardrails.IsValidationError)
+	headerPolicyWriteError = validationWriter(headerpolicy.IsValidationError)
 )
 
 // virtualModelWriteError surfaces validation errors as 400 and other failures

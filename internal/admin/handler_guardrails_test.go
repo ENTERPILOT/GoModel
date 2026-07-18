@@ -142,6 +142,9 @@ func TestListGuardrailTypes(t *testing.T) {
 	var sawSystemPrompt bool
 	var sawLLMBasedAltering bool
 	for _, typeDef := range body {
+		if typeDef.Type == "header_modification" {
+			t.Fatal("header_modification must be managed through /admin/header-policies")
+		}
 		switch typeDef.Type {
 		case "system_prompt":
 			sawSystemPrompt = true

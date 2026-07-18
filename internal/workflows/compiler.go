@@ -6,18 +6,26 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 )
 
 type compiler struct {
-	registry    guardrails.Catalog
-	featureCaps core.WorkflowFeatures
+	guardrails     guardrails.Catalog
+	headerPolicies headerpolicy.Catalog
+	featureCaps    core.WorkflowFeatures
 }
 
 // NewCompilerWithFeatureCaps creates the default workflow compiler for the
 // v1 payload with process-level feature caps applied at compile time.
 func NewCompilerWithFeatureCaps(registry guardrails.Catalog, featureCaps core.WorkflowFeatures) Compiler {
+	return NewCompilerWithCatalogs(registry, nil, featureCaps)
+}
+
+// NewCompilerWithCatalogs creates a compiler with independently owned message
+// guardrail and outbound header-policy catalogs.
+func NewCompilerWithCatalogs(guardrailCatalog guardrails.Catalog, headerPolicyCatalog headerpolicy.Catalog, featureCaps core.WorkflowFeatures) Compiler {
 	return &compiler{
-		registry:    registry,
+		guardrails: guardrailCatalog, headerPolicies: headerPolicyCatalog,
 		featureCaps: featureCaps,
 	}
 }
@@ -40,8 +48,8 @@ func (c *compiler) Compile(version Version) (*CompiledWorkflow, error) {
 	}
 
 	legacyHeaderPolicies := make(map[string]struct{})
-	if c.registry != nil {
-		for _, name := range c.registry.HeaderPolicyNames() {
+	if c.headerPolicies != nil {
+		for _, name := range c.headerPolicies.Names() {
 			legacyHeaderPolicies[name] = struct{}{}
 		}
 	}
@@ -66,10 +74,10 @@ func (c *compiler) Compile(version Version) (*CompiledWorkflow, error) {
 		}
 	}
 
-	headerSteps := make([]guardrails.StepReference, 0, len(version.Payload.HeaderPolicies)+len(version.Payload.Guardrails))
+	headerSteps := make([]headerpolicy.Reference, 0, len(version.Payload.HeaderPolicies)+len(version.Payload.Guardrails))
 	seenHeaderPolicies := make(map[string]struct{})
 	for _, step := range version.Payload.HeaderPolicies {
-		headerSteps = append(headerSteps, guardrails.StepReference{Ref: step.Ref, Step: step.Step})
+		headerSteps = append(headerSteps, headerpolicy.Reference{Ref: step.Ref, Step: step.Step})
 		seenHeaderPolicies[step.Ref] = struct{}{}
 	}
 	// Compatibility: workflow versions authored by the preview stored header
@@ -83,10 +91,10 @@ func (c *compiler) Compile(version Version) (*CompiledWorkflow, error) {
 			if _, duplicate := seenHeaderPolicies[step.Ref]; duplicate {
 				continue
 			}
-			headerSteps = append(headerSteps, guardrails.StepReference{Ref: step.Ref, Step: step.Step})
+			headerSteps = append(headerSteps, headerpolicy.Reference{Ref: step.Ref, Step: step.Step})
 		}
 	}
-	headerPolicies, _, err := c.compileHeaderPolicies(headerSteps)
+	headerPolicies, err := c.compileHeaderPolicies(headerSteps)
 	if err != nil {
 		return nil, err
 	}
@@ -99,34 +107,34 @@ func (c *compiler) Compile(version Version) (*CompiledWorkflow, error) {
 	}, nil
 }
 
-func (c *compiler) compileHeaderPolicies(steps []guardrails.StepReference) ([]core.HeaderPolicy, string, error) {
+func (c *compiler) compileHeaderPolicies(steps []headerpolicy.Reference) ([]core.HeaderPolicy, error) {
 	if len(steps) == 0 {
-		return nil, "", nil
+		return nil, nil
 	}
-	if c == nil || c.registry == nil {
-		return nil, "", core.NewProviderError("", http.StatusBadGateway, "header policies are configured but no policy catalog is available", nil)
+	if c == nil || c.headerPolicies == nil {
+		return nil, core.NewProviderError("", http.StatusBadGateway, "header policies are configured but no policy catalog is available", nil)
 	}
-	policies, hash, err := c.registry.BuildHeaderPolicies(steps)
+	policies, err := c.headerPolicies.BuildHeaderPolicies(steps)
 	if err == nil {
-		return policies, hash, nil
+		return policies, nil
 	}
 	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
-		return nil, "", gatewayErr
+		return nil, gatewayErr
 	}
-	return nil, "", core.NewProviderError("", http.StatusBadGateway, "compile header policies: "+err.Error(), err)
+	return nil, core.NewProviderError("", http.StatusBadGateway, "compile header policies: "+err.Error(), err)
 }
 
 func (c *compiler) compileGuardrails(steps []guardrails.StepReference) (*guardrails.Pipeline, string, error) {
 	if len(steps) == 0 {
 		return nil, "", nil
 	}
-	if c == nil || c.registry == nil {
+	if c == nil || c.guardrails == nil {
 		return nil, "", core.NewProviderError("", http.StatusBadGateway, "guardrails are enabled but no guardrail registry is configured", nil)
 	}
-	if c.registry.Len() == 0 {
+	if c.guardrails.Len() == 0 {
 		return nil, "", core.NewProviderError("", http.StatusBadGateway, "guardrails are enabled but no guardrails are loaded", nil)
 	}
-	pipeline, hash, err := c.registry.BuildPipeline(steps)
+	pipeline, hash, err := c.guardrails.BuildPipeline(steps)
 	if err == nil {
 		return pipeline, hash, nil
 	}

@@ -70,7 +70,13 @@ func recordHeaderRevision(c *echo.Context, auditLogger auditlog.LoggerInterface,
 	delta := &auditlog.HeaderRevisionSnapshot{}
 	if len(plan.Set) > 0 {
 		if cfg.LogHeaders {
-			delta.Set = auditlog.RedactHeaders(plan.Set)
+			values := auditlog.RedactHeaders(plan.Set)
+			for _, header := range plan.SensitiveSet {
+				if _, exists := values[header]; exists {
+					values[header] = auditlog.RedactedHeaderValue
+				}
+			}
+			delta.Set = values
 		} else {
 			names := make([]string, 0, len(plan.Set))
 			for header := range plan.Set {

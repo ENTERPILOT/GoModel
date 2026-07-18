@@ -49,7 +49,7 @@ func TestRealtimeUpstreamHeaders(t *testing.T) {
 	target := http.Header{}
 	target.Set("Authorization", "Bearer upstream-key")
 
-	ctx := core.WithHeaderMutation(context.Background(), &core.HeaderMutation{
+	ctx := core.WithHeaderPlan(context.Background(), &core.HeaderPlan{
 		Set: map[string]string{
 			"X-Custom":      "operator-value",
 			"X-Rule":        "applied",

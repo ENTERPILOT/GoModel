@@ -20,23 +20,24 @@ import (
 
 // Config holds the application configuration.
 type Config struct {
-	Server     ServerConfig     `yaml:"server"`
-	Models     ModelsConfig     `yaml:"models"`
-	Cache      CacheConfig      `yaml:"cache"`
-	Storage    StorageConfig    `yaml:"storage"`
-	Logging    LogConfig        `yaml:"logging"`
-	Usage      UsageConfig      `yaml:"usage"`
-	Budgets    BudgetsConfig    `yaml:"budgets"`
-	RateLimits RateLimitsConfig `yaml:"rate_limits"`
-	Metrics    MetricsConfig    `yaml:"metrics"`
-	HTTP       HTTPConfig       `yaml:"http"`
-	Admin      AdminConfig      `yaml:"admin"`
-	Guardrails GuardrailsConfig `yaml:"guardrails"`
-	Failover   FailoverConfig   `yaml:"failover"`
-	Workflows  WorkflowsConfig  `yaml:"workflows"`
-	Resilience ResilienceConfig `yaml:"resilience"`
-	Tagging    TaggingConfig    `yaml:"tagging"`
-	MCP        MCPConfig        `yaml:"mcp"`
+	Server         ServerConfig         `yaml:"server"`
+	Models         ModelsConfig         `yaml:"models"`
+	Cache          CacheConfig          `yaml:"cache"`
+	Storage        StorageConfig        `yaml:"storage"`
+	Logging        LogConfig            `yaml:"logging"`
+	Usage          UsageConfig          `yaml:"usage"`
+	Budgets        BudgetsConfig        `yaml:"budgets"`
+	RateLimits     RateLimitsConfig     `yaml:"rate_limits"`
+	Metrics        MetricsConfig        `yaml:"metrics"`
+	HTTP           HTTPConfig           `yaml:"http"`
+	Admin          AdminConfig          `yaml:"admin"`
+	Guardrails     GuardrailsConfig     `yaml:"guardrails"`
+	HeaderPolicies HeaderPoliciesConfig `yaml:"header_policies"`
+	Failover       FailoverConfig       `yaml:"failover"`
+	Workflows      WorkflowsConfig      `yaml:"workflows"`
+	Resilience     ResilienceConfig     `yaml:"resilience"`
+	Tagging        TaggingConfig        `yaml:"tagging"`
+	MCP            MCPConfig            `yaml:"mcp"`
 
 	// VirtualModels declares redirects, load balancers, and access policies as
 	// infrastructure-as-code. They override admin-store rows of the same source.
@@ -147,7 +148,8 @@ func buildDefaultConfig() *Config {
 			LiveLogsReplayLimit:      1000,
 			LiveLogsHeartbeatSeconds: 15,
 		},
-		Guardrails: GuardrailsConfig{},
+		Guardrails:     GuardrailsConfig{},
+		HeaderPolicies: HeaderPoliciesConfig{Enabled: true},
 		MCP: MCPConfig{
 			Enabled: true,
 		},
@@ -183,6 +185,9 @@ func Load() (*LoadResult, error) {
 	mergeSemanticResponseDefaults(cfg.Cache.Response.Semantic)
 
 	if err := applyEnvOverrides(cfg); err != nil {
+		return nil, err
+	}
+	if err := applyHeaderPoliciesEnv(cfg); err != nil {
 		return nil, err
 	}
 	if err := applyVirtualModelsEnv(cfg, strict); err != nil {

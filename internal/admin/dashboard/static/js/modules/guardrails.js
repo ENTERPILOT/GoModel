@@ -129,9 +129,6 @@
                 if (field.input === 'checkboxes') {
                     return this.normalizeGuardrailArrayValue(value);
                 }
-				if (field.input === 'string_list') {
-					return this.normalizeGuardrailArrayValue(value).join(', ');
-				}
                 return value;
             },
 
@@ -148,7 +145,7 @@
                         const parsed = Number(trimmed);
                         nextConfig[field.key] = Number.isFinite(parsed) ? parsed : trimmed;
                     }
-				} else if (field.input === 'checkboxes' || field.input === 'string_list') {
+				} else if (field.input === 'checkboxes') {
                     nextConfig[field.key] = this.normalizeGuardrailArrayValue(value);
                 } else {
                     nextConfig[field.key] = value;
@@ -159,139 +156,7 @@
                 };
             },
 
-            // Header-modification fields (header_conditions / header_actions)
-            // are lists of row objects stored directly in the canonical config
-            // shape; the row "mode" selects are derived from which keys exist.
-            guardrailHeaderRowField(field) {
-                return field && (field.input === 'header_conditions' || field.input === 'header_actions');
-            },
-
-            guardrailHeaderRows(field) {
-                const config = this.guardrailForm && this.guardrailForm.config;
-                const rows = config ? config[field.key] : null;
-                return Array.isArray(rows) ? rows : [];
-            },
-
-            setGuardrailHeaderRows(field, rows) {
-                const nextConfig = this.cloneGuardrailJSON(this.guardrailForm.config);
-                nextConfig[field.key] = rows;
-                this.guardrailForm = {
-                    ...this.guardrailForm,
-                    config: nextConfig
-                };
-            },
-
-            addGuardrailHeaderRow(field) {
-                const rows = this.guardrailHeaderRows(field).map((row) => ({ ...row }));
-                rows.push(field.input === 'header_actions' ? { action: 'set', header: '', value: '' } : { header: '' });
-                this.setGuardrailHeaderRows(field, rows);
-            },
-
-            removeGuardrailHeaderRow(field, index) {
-                const rows = this.guardrailHeaderRows(field).map((row) => ({ ...row }));
-                rows.splice(index, 1);
-                this.setGuardrailHeaderRows(field, rows);
-            },
-
-            setGuardrailHeaderRowValue(field, index, key, value) {
-                const rows = this.guardrailHeaderRows(field).map((row) => ({ ...row }));
-                if (!rows[index]) {
-                    return;
-                }
-                rows[index] = { ...rows[index], [key]: value };
-                this.setGuardrailHeaderRows(field, rows);
-            },
-
-            guardrailConditionMode(row) {
-                if (!row) return 'present';
-                if (row.matches !== undefined) return 'matches';
-                if (row.equals !== undefined) return 'equals';
-                if (row.present === false) return 'absent';
-                return 'present';
-            },
-
-            setGuardrailConditionMode(field, index, mode) {
-                const rows = this.guardrailHeaderRows(field).map((row) => ({ ...row }));
-                if (!rows[index]) {
-                    return;
-                }
-                const next = { header: rows[index].header || '' };
-                if (mode === 'matches') next.matches = '';
-                if (mode === 'equals') next.equals = '';
-                if (mode === 'absent') next.present = false;
-                rows[index] = next;
-                this.setGuardrailHeaderRows(field, rows);
-            },
-
-            guardrailConditionValueVisible(row) {
-                const mode = this.guardrailConditionMode(row);
-                return mode === 'equals' || mode === 'matches';
-            },
-
-            guardrailActionMode(row) {
-                if (row && row.action === 'remove') return 'remove';
-                if (row && row.from_header !== undefined) return 'copy';
-                return 'set';
-            },
-
-            setGuardrailActionMode(field, index, mode) {
-                const rows = this.guardrailHeaderRows(field).map((row) => ({ ...row }));
-                if (!rows[index]) {
-                    return;
-                }
-                const header = rows[index].header || '';
-                if (mode === 'remove') {
-                    rows[index] = { action: 'remove', header };
-                } else if (mode === 'copy') {
-                    rows[index] = { action: 'set', header, from_header: '' };
-                } else {
-                    rows[index] = { action: 'set', header, value: '' };
-                }
-                this.setGuardrailHeaderRows(field, rows);
-            },
-
-            guardrailActionValueKey(row) {
-                return this.guardrailActionMode(row) === 'copy' ? 'from_header' : 'value';
-            },
-
-            // sanitizeGuardrailConfig drops incomplete header rows (no header
-            // name) and empty optional keys so the payload matches the shape
-            // the backend validates. Explicit empty equals/matches predicates
-            // are meaningful and must be preserved.
-            sanitizeGuardrailConfig(type, config) {
-                this.guardrailTypeFields(type).forEach((field) => {
-					if (field.input === 'string_list') {
-						const values = this.normalizeGuardrailArrayValue(config[field.key]);
-						if (values.length > 0) config[field.key] = values;
-						else delete config[field.key];
-						return;
-					}
-                    if (!this.guardrailHeaderRowField(field)) {
-                        return;
-                    }
-                    const rows = Array.isArray(config[field.key]) ? config[field.key] : [];
-                    const cleaned = rows
-                        .filter((row) => row && String(row.header || '').trim())
-                        .map((row) => {
-                            const next = {};
-                            Object.keys(row).forEach((key) => {
-                                const value = row[key];
-                                const emptyConditionPredicate = field.input === 'header_conditions'
-                                    && (key === 'equals' || key === 'matches')
-                                    && value === '';
-                                if (!emptyConditionPredicate && (value === '' || value === null || value === undefined)) {
-                                    return;
-                                }
-                                next[key] = typeof value === 'string' ? value.trim() : value;
-                            });
-                            return next;
-                        });
-                    if (cleaned.length > 0) {
-                        config[field.key] = cleaned;
-                    } else {
-                        delete config[field.key];
-                    }
-                });
+            sanitizeGuardrailConfig(_type, config) {
                 return config;
             },
 
@@ -560,9 +425,6 @@
                     if (typeof this.fetchWorkflowGuardrails === 'function') {
                         this.fetchWorkflowGuardrails();
                     }
-                    if (typeof this.fetchWorkflowHeaderPolicies === 'function') {
-                        this.fetchWorkflowHeaderPolicies();
-                    }
                     this.guardrailNotice = 'Guardrail "' + name + '" saved.';
                     this.closeGuardrailForm();
                 } catch (e) {
@@ -631,9 +493,6 @@
                     await this.fetchGuardrails();
                     if (typeof this.fetchWorkflowGuardrails === 'function') {
                         this.fetchWorkflowGuardrails();
-                    }
-                    if (typeof this.fetchWorkflowHeaderPolicies === 'function') {
-                        this.fetchWorkflowHeaderPolicies();
                     }
                     if (this.guardrailFormOpen && this.guardrailFormOriginalName === name) {
                         this.closeGuardrailForm();

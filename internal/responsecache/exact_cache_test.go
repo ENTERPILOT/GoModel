@@ -182,13 +182,13 @@ func TestHashRequest_ResolvedModelChangesKey(t *testing.T) {
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
 		},
-	})
+	}, nil)
 	second := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{Provider: "anthropic", Model: "claude-opus-4-6"},
 		},
-	})
+	}, nil)
 
 	if first == second {
 		t.Fatal("resolved model should affect cache key")
@@ -200,10 +200,10 @@ func TestHashRequest_ModeChangesKey(t *testing.T) {
 
 	first := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
-	})
+	}, nil)
 	second := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModePassthrough,
-	})
+	}, nil)
 
 	if first == second {
 		t.Fatal("execution mode should affect cache key")
@@ -221,8 +221,8 @@ func TestHashRequest_StreamIncludeUsageChangesKey(t *testing.T) {
 		},
 	}
 
-	first := hashRequest("/v1/chat/completions", base, plan)
-	second := hashRequest("/v1/chat/completions", withUsage, plan)
+	first := hashRequest("/v1/chat/completions", base, plan, nil)
+	second := hashRequest("/v1/chat/completions", withUsage, plan, nil)
 
 	if first == second {
 		t.Fatal("stream_options.include_usage should affect the exact cache key")
@@ -240,8 +240,8 @@ func TestHashRequest_StreamModeChangesKey(t *testing.T) {
 		},
 	}
 
-	first := hashRequest("/v1/chat/completions", base, plan)
-	second := hashRequest("/v1/chat/completions", streaming, plan)
+	first := hashRequest("/v1/chat/completions", base, plan, nil)
+	second := hashRequest("/v1/chat/completions", streaming, plan, nil)
 
 	if first == second {
 		t.Fatal("stream mode should affect the exact cache key")

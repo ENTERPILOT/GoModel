@@ -86,6 +86,9 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/guardrails", h.ListGuardrails)
 	g.PUT("/guardrails", h.UpsertGuardrail)
 	g.DELETE("/guardrails", h.DeleteGuardrail)
+	g.GET("/header-policies", h.ListHeaderPolicies)
+	g.PUT("/header-policies", h.UpsertHeaderPolicy)
+	g.DELETE("/header-policies", h.DeleteHeaderPolicy)
 
 	g.GET("/workflows", h.ListWorkflows)
 	g.GET("/workflows/guardrails", h.ListWorkflowGuardrails)

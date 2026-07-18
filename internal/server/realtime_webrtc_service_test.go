@@ -73,7 +73,7 @@ func newRealtimeTestHandler(mock *realtimeWebRTCMock, usageLogger usage.LoggerIn
 	return handler
 }
 
-func TestForwardRealtimeHTTPAppliesHeaderMutation(t *testing.T) {
+func TestForwardRealtimeHTTPAppliesHeaderPlan(t *testing.T) {
 	var got http.Header
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = r.Header.Clone()
@@ -82,7 +82,7 @@ func TestForwardRealtimeHTTPAppliesHeaderMutation(t *testing.T) {
 	defer upstream.Close()
 
 	service := &realtimeService{httpClient: upstream.Client()}
-	ctx := core.WithHeaderMutation(t.Context(), &core.HeaderMutation{
+	ctx := core.WithHeaderPlan(t.Context(), &core.HeaderPlan{
 		Set: map[string]string{
 			"X-Order":       "operator-rule",
 			"X-Added":       "applied",

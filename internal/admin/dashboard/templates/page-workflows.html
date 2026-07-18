@@ -231,6 +231,7 @@
 
                     <div class="alert alert-warning" x-show="headerPolicyRefs.length === 0">
                         No named header policies are currently registered.
+                        <button type="button" class="table-action-btn" @click="navigate('header-policies')">Open Header Policies</button>
                     </div>
 
                     <div class="workflow-guardrail-list-editor" x-show="workflowForm.header_policies.length > 0">

@@ -15,14 +15,10 @@ import (
 // already been evaluated, so applying a plan is a pure egress operation.
 // Names are canonical MIME header keys.
 type HeaderPlan struct {
-	Set    map[string]string
-	Remove []string
+	Set          map[string]string
+	Remove       []string
+	SensitiveSet []string
 }
-
-// HeaderMutation is kept as a source-compatible alias for extensions built
-// against the initial header-modification preview. New code should use
-// HeaderPlan: a plan describes egress intent and is not an ingress mutation.
-type HeaderMutation = HeaderPlan
 
 // IsZero reports whether the mutation changes nothing.
 func (m *HeaderPlan) IsZero() bool {
@@ -37,6 +33,7 @@ func (m *HeaderPlan) Merge(next *HeaderPlan) {
 	}
 	for _, name := range next.Remove {
 		delete(m.Set, name)
+		m.SensitiveSet = removeHeaderName(m.SensitiveSet, name)
 		m.Remove = appendHeaderNameOnce(m.Remove, name)
 	}
 	for name, value := range next.Set {
@@ -45,6 +42,11 @@ func (m *HeaderPlan) Merge(next *HeaderPlan) {
 		}
 		m.Set[name] = value
 		m.Remove = removeHeaderName(m.Remove, name)
+		if slices.Contains(next.SensitiveSet, name) {
+			m.SensitiveSet = appendHeaderNameOnce(m.SensitiveSet, name)
+		} else {
+			m.SensitiveSet = removeHeaderName(m.SensitiveSet, name)
+		}
 	}
 }
 
@@ -163,9 +165,6 @@ type HeaderPolicyInput struct {
 	Path    string
 }
 
-// HeaderMutator is kept as a compatibility alias for the preview API.
-type HeaderMutator = HeaderPolicy
-
 type headerPlanKey struct{}
 
 // WithHeaderPlan returns a new context carrying the resolved primary-attempt
@@ -178,13 +177,6 @@ func WithHeaderPlan(ctx context.Context, plan *HeaderPlan) context.Context {
 	return context.WithValue(ctx, headerPlanKey{}, plan)
 }
 
-// WithHeaderMutation returns a new context carrying the merged outbound
-// header mutation computed by header-modification workflow steps. Empty
-// mutations leave the context unchanged.
-func WithHeaderMutation(ctx context.Context, mutation *HeaderMutation) context.Context {
-	return WithHeaderPlan(ctx, mutation)
-}
-
 // WithoutHeaderPlan prevents a request's primary-attempt plan from leaking
 // into an auxiliary call or a failover route.
 func WithoutHeaderPlan(ctx context.Context) context.Context {
@@ -194,13 +186,6 @@ func WithoutHeaderPlan(ctx context.Context) context.Context {
 	return context.WithValue(ctx, headerPlanKey{}, (*HeaderPlan)(nil))
 }
 
-// WithoutHeaderMutation returns a child context that preserves cancellation
-// and all other request metadata while preventing request-scoped header rules
-// from leaking into auxiliary provider calls.
-func WithoutHeaderMutation(ctx context.Context) context.Context {
-	return WithoutHeaderPlan(ctx)
-}
-
 // HeaderPlanFromContext retrieves the resolved primary-attempt plan.
 func HeaderPlanFromContext(ctx context.Context) *HeaderPlan {
 	if ctx == nil {
@@ -208,10 +193,4 @@ func HeaderPlanFromContext(ctx context.Context) *HeaderPlan {
 	}
 	plan, _ := ctx.Value(headerPlanKey{}).(*HeaderPlan)
 	return plan
-}
-
-// HeaderMutationFromContext retrieves the request's outbound header mutation,
-// or nil when no header-modification step matched.
-func HeaderMutationFromContext(ctx context.Context) *HeaderMutation {
-	return HeaderPlanFromContext(ctx)
 }

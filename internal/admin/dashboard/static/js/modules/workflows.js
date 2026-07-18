@@ -92,6 +92,7 @@
 	                    'BUDGETS_ENABLED',
 	                    'RATE_LIMITS_ENABLED',
 	                    'GUARDRAILS_ENABLED',
+	                    'HEADER_POLICIES_ENABLED',
 	                    'CACHE_ENABLED',
 	                    'REDIS_URL',
 	                    'SEMANTIC_CACHE_ENABLED',

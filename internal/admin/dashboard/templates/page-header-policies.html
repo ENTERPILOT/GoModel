@@ -1,0 +1,155 @@
+{{define "dashboard-page-header-policies"}}
+<template x-if="page==='header-policies'">
+<div>
+    <div class="page-header">
+        <div>
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'header-policies-help-copy', showLabel: 'Show header policies help', hideLabel: 'Hide header policies help', text: 'Reusable egress policies that inspect inbound request metadata and plan safe outbound provider-request header changes.' }">
+                <div class="inline-help-title-row">
+                    <h2>Outbound Header Policies</h2>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+        </div>
+    </div>
+
+    {{template "auth-banner" .}}
+
+    <div class="alert alert-warning" x-show="!headerPoliciesRuntimeEnabled()">
+        Runtime header modification is off because <code>HEADER_POLICIES_ENABLED</code> is disabled. You can still manage definitions here.
+    </div>
+    <div class="alert alert-warning" x-show="!authError && !headerPoliciesAvailable">Header policies are unavailable.</div>
+    <div class="alert alert-warning" x-show="!authError && headerPolicyError && !headerPolicyFormOpen" x-text="headerPolicyError"></div>
+    <div class="alert alert-success" x-show="!authError && headerPolicyNotice && !headerPolicyError" x-text="headerPolicyNotice"></div>
+
+    <div class="editor-modal-backdrop" x-cloak x-show="headerPolicyFormOpen" x-transition.opacity.duration.160ms aria-hidden="true"></div>
+    <div class="editor-modal-shell editor-modal-shell-wide" x-cloak x-show="headerPolicyFormOpen" x-transition.opacity.duration.160ms @click="closeHeaderPolicyForm()" @keydown.escape.window="headerPolicyFormOpen && !authDialogOpen && closeHeaderPolicyForm()">
+        <div class="model-editor settings-guardrails-editor" x-show="headerPolicyFormOpen" role="dialog" aria-modal="true" aria-label="Outbound header policy editor" @click.stop>
+            <form class="form" @submit.prevent="submitHeaderPolicyForm()">
+                <div class="editor-header">
+                    <div>
+                        <h3 x-text="headerPolicyFormMode === 'edit' ? 'Edit Header Policy' : 'Create Header Policy'"></h3>
+                        <p class="form-hint">Workflow references use the policy name, so existing names cannot be changed.</p>
+                    </div>
+                    <button type="button" class="dialog-close-btn" aria-label="Close header policy editor" @click="closeHeaderPolicyForm()">{{template "x-icon"}}</button>
+                </div>
+
+                <p class="form-error" x-show="headerPolicyError" x-text="headerPolicyError" role="alert" aria-live="assertive"></p>
+
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="form-field-label" for="header-policy-name">Name</label>
+                        <input id="header-policy-name" type="text" placeholder="pin-anthropic-beta" x-model="headerPolicyForm.name" :disabled="headerPolicyFormMode === 'edit'" data-modal-autofocus>
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="header-policy-description">Description</label>
+                        <input id="header-policy-description" type="text" placeholder="Why this policy exists" x-model="headerPolicyForm.description">
+                    </div>
+
+                    <fieldset class="form-field form-field-wide form-field-fieldset">
+                        <legend class="form-field-legend">HTTP methods</legend>
+                        <div class="workflow-feature-toggles">
+                            <template x-for="method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']" :key="method">
+                                <label class="workflow-feature-toggle">
+                                    <input type="checkbox" :checked="headerPolicyMethodSelected(method)" @change="toggleHeaderPolicyMethod(method, $event.target.checked)">
+                                    <span x-text="method"></span>
+                                </label>
+                            </template>
+                        </div>
+                        <small class="form-hint">Leave empty to match every method.</small>
+                    </fieldset>
+
+                    <div class="form-field form-field-wide">
+                        <label class="form-field-label" for="header-policy-paths">Request paths</label>
+                        <input id="header-policy-paths" type="text" placeholder="/v1/chat/completions, /p/anthropic/*" x-model="headerPolicyForm.paths">
+                        <small class="form-hint">Comma-separated GoModel request paths. A trailing <code>*</code> matches a prefix.</small>
+                    </div>
+
+                    <div class="form-field form-field-wide">
+                        <label class="form-field-label">Inbound header conditions</label>
+                        <div class="guardrail-header-rows">
+                            <template x-for="(row, index) in headerPolicyForm.when" :key="'condition-' + index">
+                                <div class="guardrail-header-row">
+                                    <input type="text" placeholder="Header (e.g. User-Agent)" x-model="row.header" :aria-label="'Condition ' + (index + 1) + ' header'">
+                                    <select class="form-select settings-select" :value="headerPolicyConditionMode(row)" :aria-label="'Condition ' + (index + 1) + ' operator'" @change="setHeaderPolicyConditionMode(index, $event.target.value)">
+                                        <option value="present">is present</option>
+                                        <option value="absent">is absent</option>
+                                        <option value="equals">equals</option>
+                                        <option value="matches">matches regex</option>
+                                    </select>
+                                    <input type="text" x-show="['equals', 'matches'].includes(headerPolicyConditionMode(row))" :placeholder="headerPolicyConditionMode(row) === 'matches' ? '^cline/' : 'expected value'" :value="row[headerPolicyConditionMode(row)] ?? ''" @input="setHeaderPolicyConditionValue(index, $event.target.value)" :aria-label="'Condition ' + (index + 1) + ' value'">
+                                    <span class="guardrail-header-row-spacer" x-show="!['equals', 'matches'].includes(headerPolicyConditionMode(row))" aria-hidden="true"></span>
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn" :aria-label="'Remove condition ' + (index + 1)" @click="removeHeaderPolicyCondition(index)">{{template "x-icon"}}</button>
+                                </div>
+                            </template>
+                            <button type="button" class="pagination-btn pagination-btn-with-icon" @click="addHeaderPolicyCondition()"><i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i><span>Add Condition</span></button>
+                        </div>
+                    </div>
+
+                    <div class="form-field form-field-wide">
+                        <label class="form-field-label">Outbound header actions</label>
+                        <div class="guardrail-header-rows">
+                            <template x-for="(row, index) in headerPolicyForm.actions" :key="'action-' + index">
+                                <div class="guardrail-header-row guardrail-action-row">
+                                    <select class="form-select settings-select" :value="headerPolicyActionMode(row)" :aria-label="'Action ' + (index + 1) + ' kind'" @change="setHeaderPolicyActionMode(index, $event.target.value)">
+                                        <option value="set">Set value</option>
+                                        <option value="copy">Copy from header</option>
+                                        <option value="remove">Remove</option>
+                                    </select>
+                                    <input type="text" placeholder="Header (e.g. Anthropic-Beta)" x-model="row.header" :aria-label="'Action ' + (index + 1) + ' header'">
+                                    <input type="text" x-show="headerPolicyActionMode(row) !== 'remove'" :placeholder="headerPolicyActionMode(row) === 'copy' ? 'source header name' : 'header value'" :value="headerPolicyActionMode(row) === 'copy' ? (row.from_header || '') : (row.value ?? '')" @input="setHeaderPolicyActionValue(index, $event.target.value)" :aria-label="'Action ' + (index + 1) + ' value'">
+                                    <span class="guardrail-header-row-spacer" x-show="headerPolicyActionMode(row) === 'remove'" aria-hidden="true"></span>
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn" :aria-label="'Remove action ' + (index + 1)" @click="removeHeaderPolicyAction(index)">{{template "x-icon"}}</button>
+                                </div>
+                            </template>
+                            <button type="button" class="pagination-btn pagination-btn-with-icon" @click="addHeaderPolicyAction()"><i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i><span>Add Action</span></button>
+                        </div>
+                        <small class="form-hint">Credential, transport, content-type, and content-encoding headers are rejected.</small>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="pagination-btn" @click="closeHeaderPolicyForm()">Cancel</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" :disabled="headerPolicyFormSubmitting"><i data-lucide="save" class="form-action-icon" aria-hidden="true"></i><span>Save Header Policy</span></button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="settings-guardrails-layout">
+        <section class="settings-panel settings-guardrails-list">
+            <div class="editor-header">
+                <div><h3>Policies</h3><p class="form-hint">Policies are resolved before cache lookup and applied only to the selected primary provider attempt.</p></div>
+                <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" :disabled="headerPolicyFormSubmitting || !headerPoliciesAvailable" @click="openHeaderPolicyCreate()"><i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i><span>Create Policy</span></button>
+            </div>
+            <div class="table-toolbar" x-show="headerPoliciesAvailable">
+                <div class="table-toolbar-main"><div class="filter-input-wrap"><i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i><input type="text" class="filter-input" placeholder="Filter by name or summary..." aria-label="Header policy filter" x-model="headerPolicyFilter"></div></div>
+                <div class="table-toolbar-actions" x-show="headerPolicies.length > 0 || String(headerPolicyFilter || '').trim()">
+                    <span class="model-count" x-text="String(headerPolicyFilter || '').trim() ? filteredHeaderPolicies.length + ' / ' + headerPolicies.length + ' policies' : headerPolicies.length + (headerPolicies.length === 1 ? ' policy' : ' policies')"></span>
+                </div>
+            </div>
+            <div class="table-wrapper" x-show="filteredHeaderPolicies.length > 0">
+                <table class="data-table settings-guardrails-table">
+                    <thead><tr><th>Name</th><th>Methods</th><th>Paths</th><th>Summary</th><th class="col-actions">Actions</th></tr></thead>
+                    <tbody>
+                        <template x-for="policy in filteredHeaderPolicies" :key="policy.name">
+                            <tr>
+                                <td class="mono font-size-md" x-text="policy.name"></td>
+                                <td x-text="(policy.methods || []).join(', ') || 'All'"></td>
+                                <td class="mono font-size-md" x-text="(policy.paths || []).join(', ') || 'All'"></td>
+                                <td><div class="settings-guardrail-summary" x-text="policy.summary || policy.description || 'No summary yet.'"></div><div class="settings-guardrail-description" x-show="policy.description" x-text="policy.description"></div></td>
+                                <td class="col-actions"><div class="alias-actions-cell">
+                                    <button type="button" class="table-action-btn table-icon-btn" :aria-label="'Edit header policy ' + policy.name" @click="openHeaderPolicyEdit(policy)">{{template "edit-icon"}}</button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn" :disabled="headerPolicyDeletingName === policy.name" :aria-label="'Delete header policy ' + policy.name" @click="deleteHeaderPolicy(policy)">{{template "x-icon"}}</button>
+                                </div></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <p class="empty-state" x-show="filteredHeaderPolicies.length === 0 && !headerPoliciesLoading && headerPoliciesAvailable && !headerPolicyError && !authError">No outbound header policies defined yet.</p>
+        </section>
+    </div>
+</div>
+</template>
+{{end}}

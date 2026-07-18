@@ -116,7 +116,7 @@ func TestClient_Do_Headers(t *testing.T) {
 	}
 }
 
-func TestBuildRequestAppliesHeaderMutationLastWithoutTouchingCredentials(t *testing.T) {
+func TestBuildRequestAppliesHeaderPlanLastWithoutTouchingCredentials(t *testing.T) {
 	client := New(
 		DefaultConfig("test", "http://localhost"),
 		func(req *http.Request) {
@@ -124,7 +124,7 @@ func TestBuildRequestAppliesHeaderMutationLastWithoutTouchingCredentials(t *test
 			req.Header.Set("X-Order", "provider-default")
 		},
 	)
-	ctx := core.WithHeaderMutation(t.Context(), &core.HeaderMutation{
+	ctx := core.WithHeaderPlan(t.Context(), &core.HeaderPlan{
 		Set: map[string]string{
 			"X-Order":       "operator-rule",
 			"X-Added":       "applied",

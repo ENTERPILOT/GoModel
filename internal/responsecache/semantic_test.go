@@ -76,14 +76,14 @@ func serveSemanticRequest(t *testing.T, m *semanticCacheMiddleware, body []byte,
 	return rec
 }
 
-func TestSemanticCacheEmbeddingDoesNotInheritHeaderMutation(t *testing.T) {
+func TestSemanticCacheEmbeddingDoesNotInheritHeaderPlan(t *testing.T) {
 	m, _, emb := newTestSemanticMiddleware(0.9, 20, false)
 	defer func() { _ = m.close() }()
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`)
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-	req = req.WithContext(core.WithHeaderMutation(req.Context(), &core.HeaderMutation{
+	req = req.WithContext(core.WithHeaderPlan(req.Context(), &core.HeaderPlan{
 		Set: map[string]string{"X-Outer-Rule": "must-not-leak"},
 	}))
 	c := e.NewContext(req, rec)
@@ -96,7 +96,7 @@ func TestSemanticCacheEmbeddingDoesNotInheritHeaderMutation(t *testing.T) {
 	if emb.ctx == nil {
 		t.Fatal("embedder context was not captured")
 	}
-	if mutation := core.HeaderMutationFromContext(emb.ctx); mutation != nil {
+	if mutation := core.HeaderPlanFromContext(emb.ctx); mutation != nil {
 		t.Fatalf("semantic embedder inherited outer header mutation: %+v", mutation)
 	}
 }
@@ -254,8 +254,8 @@ func TestComputeParamsHash_StreamIncludeUsageChangesHash(t *testing.T) {
 		},
 	}
 
-	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "")
-	second := computeParamsHash(withUsage, "/v1/chat/completions", plan, "", "")
+	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "", nil)
+	second := computeParamsHash(withUsage, "/v1/chat/completions", plan, "", "", nil)
 
 	if first == second {
 		t.Fatal("stream_options.include_usage should affect semantic params_hash")
@@ -273,8 +273,8 @@ func TestComputeParamsHash_StreamModeChangesHash(t *testing.T) {
 		},
 	}
 
-	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "")
-	second := computeParamsHash(streaming, "/v1/chat/completions", plan, "", "")
+	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "", nil)
+	second := computeParamsHash(streaming, "/v1/chat/completions", plan, "", "", nil)
 
 	if first == second {
 		t.Fatal("stream mode should affect semantic params_hash")

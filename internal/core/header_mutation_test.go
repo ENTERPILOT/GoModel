@@ -3,17 +3,18 @@ package core
 import (
 	"context"
 	"net/http"
+	"slices"
 	"testing"
 )
 
-func TestHeaderMutationApply(t *testing.T) {
+func TestHeaderPlanApply(t *testing.T) {
 	h := http.Header{
 		"X-Debug":  []string{"1"},
 		"X-Keep":   []string{"yes"},
 		"X-Multi":  []string{"a", "b"},
 		"X-Rewrit": []string{"old"},
 	}
-	mutation := &HeaderMutation{
+	mutation := &HeaderPlan{
 		Set:    map[string]string{"X-Rewrit": "new", "X-Added": "v", "Authorization": "Bearer evil", "Content-Length": "0"},
 		Remove: []string{"X-Debug", "Host"},
 	}
@@ -33,9 +34,15 @@ func TestHeaderMutationApply(t *testing.T) {
 	}
 }
 
-func TestHeaderMutationMerge(t *testing.T) {
-	first := &HeaderMutation{Set: map[string]string{"X-A": "1", "X-B": "1"}, Remove: []string{"X-C"}}
-	second := &HeaderMutation{Set: map[string]string{"X-B": "2", "X-C": "3"}, Remove: []string{"X-A"}}
+func TestHeaderPlanMerge(t *testing.T) {
+	first := &HeaderPlan{
+		Set:    map[string]string{"X-A": "1", "X-B": "1", "X-Secret": "copied"},
+		Remove: []string{"X-C"}, SensitiveSet: []string{"X-Secret"},
+	}
+	second := &HeaderPlan{
+		Set:    map[string]string{"X-B": "2", "X-C": "3", "X-Secret": "literal"},
+		Remove: []string{"X-A"},
+	}
 	first.Merge(second)
 
 	if _, ok := first.Set["X-A"]; ok {
@@ -47,6 +54,9 @@ func TestHeaderMutationMerge(t *testing.T) {
 	if first.Set["X-C"] != "3" {
 		t.Fatal("later set must clear earlier remove")
 	}
+	if slices.Contains(first.SensitiveSet, "X-Secret") {
+		t.Fatal("later non-sensitive set must clear earlier source sensitivity")
+	}
 	for _, name := range first.Remove {
 		if name == "X-C" {
 			t.Fatal("X-C should no longer be removed")
@@ -54,25 +64,34 @@ func TestHeaderMutationMerge(t *testing.T) {
 	}
 }
 
-func TestHeaderMutationContextRoundTrip(t *testing.T) {
+func TestHeaderPlanMergeRemovesSensitivityWithHeader(t *testing.T) {
+	plan := &HeaderPlan{Set: map[string]string{"X-Team": "secret"}, SensitiveSet: []string{"X-Team"}}
+	plan.Merge(&HeaderPlan{Remove: []string{"X-Team"}})
+
+	if len(plan.SensitiveSet) != 0 {
+		t.Fatalf("removed header retained audit sensitivity metadata: %v", plan.SensitiveSet)
+	}
+}
+
+func TestHeaderPlanContextRoundTrip(t *testing.T) {
 	ctx := context.WithValue(t.Context(), headerMutationContextMarker{}, "kept")
-	if HeaderMutationFromContext(ctx) != nil {
+	if HeaderPlanFromContext(ctx) != nil {
 		t.Fatal("expected nil mutation on fresh context")
 	}
-	if got := WithHeaderMutation(ctx, nil); got != ctx {
+	if got := WithHeaderPlan(ctx, nil); got != ctx {
 		t.Fatal("empty mutation must not modify context")
 	}
-	mutation := &HeaderMutation{Set: map[string]string{"X-A": "1"}}
-	got := HeaderMutationFromContext(WithHeaderMutation(ctx, mutation))
+	mutation := &HeaderPlan{Set: map[string]string{"X-A": "1"}}
+	got := HeaderPlanFromContext(WithHeaderPlan(ctx, mutation))
 	if got == nil || got.Set["X-A"] != "1" {
 		t.Fatalf("mutation not carried: %+v", got)
 	}
-	without := WithoutHeaderMutation(WithHeaderMutation(ctx, mutation))
-	if HeaderMutationFromContext(without) != nil {
-		t.Fatal("WithoutHeaderMutation must hide the request-scoped mutation")
+	without := WithoutHeaderPlan(WithHeaderPlan(ctx, mutation))
+	if HeaderPlanFromContext(without) != nil {
+		t.Fatal("WithoutHeaderPlan must hide the request-scoped mutation")
 	}
 	if got := without.Value(headerMutationContextMarker{}); got != "kept" {
-		t.Fatalf("WithoutHeaderMutation lost unrelated context value: %v", got)
+		t.Fatalf("WithoutHeaderPlan lost unrelated context value: %v", got)
 	}
 }
 

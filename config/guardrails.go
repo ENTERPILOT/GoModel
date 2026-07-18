@@ -23,8 +23,9 @@ type GuardrailRuleConfig struct {
 	// Name is a unique identifier for this guardrail instance (used in logs and errors)
 	Name string `yaml:"name"`
 
-	// Type selects the guardrail implementation: "system_prompt",
-	// "llm_based_altering", or "header_modification"
+	// Type selects the guardrail implementation: "system_prompt" or
+	// "llm_based_altering". "header_modification" remains accepted only as a
+	// deprecated migration input; use header_policies instead.
 	Type string `yaml:"type"`
 
 	// UserPath scopes internal auxiliary guardrail requests for workflow
@@ -84,9 +85,8 @@ type LLMBasedAlteringSettings struct {
 	MaxTokens int `yaml:"max_tokens"`
 }
 
-// HeaderModificationSettings holds the type-specific settings for an outbound
-// header policy. The legacy config location remains under guardrails so
-// existing deployments do not need a configuration migration.
+// HeaderModificationSettings is the deprecated guardrails representation of
+// an outbound header policy. New configuration uses HeaderPoliciesConfig.
 type HeaderModificationSettings struct {
 	// Methods optionally limits the policy to these HTTP methods.
 	Methods []string `yaml:"methods"`
@@ -105,32 +105,32 @@ type HeaderModificationSettings struct {
 // HeaderConditionConfig is one inbound-header predicate.
 type HeaderConditionConfig struct {
 	// Header is the inbound header name to inspect.
-	Header string `yaml:"header"`
+	Header string `json:"header" yaml:"header"`
 
 	// Equals matches when any inbound value equals this string exactly.
-	Equals *string `yaml:"equals"`
+	Equals *string `json:"equals,omitempty" yaml:"equals"`
 
 	// Matches matches when any inbound value matches this RE2 regular expression.
-	Matches *string `yaml:"matches"`
+	Matches *string `json:"matches,omitempty" yaml:"matches"`
 
 	// Present requires the header to exist (true) or be absent (false).
 	// Ignored when Equals or Matches is set; defaults to true otherwise.
-	Present *bool `yaml:"present"`
+	Present *bool `json:"present,omitempty" yaml:"present"`
 }
 
 // HeaderActionConfig is one outbound-header change.
 type HeaderActionConfig struct {
 	// Action is "set" (replace/add) or "remove".
-	Action string `yaml:"action"`
+	Action string `json:"action" yaml:"action"`
 
 	// Header is the outbound header to change. Credential and transport
 	// headers (Authorization, Cookie, Host, Content-Length, ...) are rejected.
-	Header string `yaml:"header"`
+	Header string `json:"header" yaml:"header"`
 
 	// Value is the literal value for "set".
-	Value string `yaml:"value"`
+	Value *string `json:"value,omitempty" yaml:"value"`
 
 	// FromHeader copies the first inbound value of this header for "set".
 	// When the inbound header is absent, the action is skipped.
-	FromHeader string `yaml:"from_header"`
+	FromHeader string `json:"from_header,omitempty" yaml:"from_header"`
 }

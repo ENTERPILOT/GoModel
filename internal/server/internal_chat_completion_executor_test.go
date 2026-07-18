@@ -79,7 +79,7 @@ func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *te
 	ctx := core.WithRequestSnapshot(context.Background(), &core.RequestSnapshot{
 		UserPath: "/team/alpha/guardrails/privacy",
 	})
-	ctx = core.WithHeaderMutation(ctx, &core.HeaderMutation{Set: map[string]string{"X-Outer-Rule": "must-not-leak"}})
+	ctx = core.WithHeaderPlan(ctx, &core.HeaderPlan{Set: map[string]string{"X-Outer-Rule": "must-not-leak"}})
 	resp, err := executor.ChatCompletion(ctx, &core.ChatRequest{
 		Model: "rewrite-model",
 		Messages: []core.Message{
@@ -105,7 +105,7 @@ func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *te
 	if origin := core.GetRequestOrigin(provider.capturedCtx); origin != core.RequestOriginGuardrail {
 		t.Fatalf("provider request origin = %q, want %q", origin, core.RequestOriginGuardrail)
 	}
-	if mutation := core.HeaderMutationFromContext(provider.capturedCtx); mutation != nil {
+	if mutation := core.HeaderPlanFromContext(provider.capturedCtx); mutation != nil {
 		t.Fatalf("internal provider call inherited outer header mutation: %+v", mutation)
 	}
 

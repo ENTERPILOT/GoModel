@@ -113,7 +113,7 @@ export GUARDRAILS_ENABLED=true
 | Field  | Required | Description                                                         |
 | ------ | -------- | ------------------------------------------------------------------- |
 | `name` | Yes      | Human-readable identifier. Supports spaces and unicode, but not `/`. |
-| `type` | Yes      | Definition type: `system_prompt`, `llm_based_altering`, or the outbound policy type `header_modification`. |
+| `type` | Yes      | Definition type: `system_prompt` or `llm_based_altering`. |
 | `user_path` | No  | Optional base user path for internal auxiliary guardrail requests. |
 | `order`| No       | Execution order. Default `0`. Same value = parallel, different = sequential. |
 
@@ -230,103 +230,11 @@ Guardrails are explicitly skipped for that internal request to avoid recursion.
     roles: ["user"]
 ```
 
-### `header_modification`
-
-Conditionally sets or removes **outbound provider-request headers** based on
-the inbound request headers. Use it to correct or steer the behavior of
-existing clients and agents without changing them — for example pinning an
-`Anthropic-Beta` feature flag for one coding agent, stripping internal debug
-headers before they leave the gateway, or renaming a header a client sends
-into the one a provider expects.
-
-Despite its legacy definition type, this is an **outbound header policy**, not
-a message guardrail. New workflow versions reference it in `header_policies`.
-The gateway resolves an immutable header plan after workflow selection and
-before cache lookup, then applies it while constructing the selected primary
-provider attempt. Translated, passthrough, realtime websocket, and WebRTC
-routes share the same protected-header enforcement.
-
-Header policies do not leak into internal LLM/embedder calls or into a
-different failover provider. Retries of the same primary provider reuse the
-same resolved plan. The effective plan is part of exact and semantic cache
-identity, including values copied with `from_header`.
-
-#### Settings
-
-| Field | Required | Description |
-| ----- | -------- | ----------- |
-| `methods` | No | HTTP methods to match, such as `POST`. Empty matches every method. |
-| `endpoints` | No | Public request paths to match. A trailing `*` matches a prefix, such as `/p/anthropic/*`. |
-| `when` | No | List of inbound-header conditions. All must match; empty means always apply. |
-| `actions` | Yes | List of outbound header changes, applied in order. |
-
-Each `when` condition names a `header` and one predicate: `matches` (RE2
-regex), `equals` (exact string), or `present: true/false` (existence check —
-the default when no predicate is given). An explicit `equals: ""` matches a
-header whose value is empty.
-
-Each action has an `action` (`set` or `remove`) and a `header`. A `set` takes
-either a literal `value` or `from_header`, which copies the first inbound
-value of another header (the action is skipped when that header is absent).
-
 <Note>
-  Credential headers (`Authorization`, `Cookie`, `X-Api-Key`, ...) and
-  transport headers (`Host`, `Content-Length`, `Connection`, ...) are rejected
-  as condition sources and action targets at authoring time. Payload metadata
-  headers (`Accept-Encoding`, `Content-Encoding`, and `Content-Type`) are also
-  reserved because changing them can break decompression or body parsing. The
-  runtime refuses to touch all of these as a second line of defense.
+  Outbound request-header changes are configured as [Header Policies](/advanced/header-policies),
+  not as message guardrails. Historical `header_modification` guardrail definitions remain readable
+  for migration, but new definitions use the dedicated configuration and admin API.
 </Note>
-
-#### Observability
-
-Every header rule that changes a request is recorded on the audit entry's
-request-revision chain — the same mechanism used for body rewriters. Only the
-delta is stored. When `LOGGING_LOG_HEADERS=true`, set headers include their
-final values after credential redaction. Redaction also recognizes custom
-credential-like names such as `X-Session-Token` and `X-Custom-Auth`. When
-header logging is disabled, only set header names are stored. Removed headers
-always contain names only. A request with no
-matching rules records nothing. Revisions describe the intended change and are
-not proof that execution reached provider egress. The dashboard request log
-shows each change as a **Rewritten** tab on the entry's detail drawer.
-
-For API-authored workflows, attach the named definition explicitly:
-
-```json
-{
-  "workflow_payload": {
-    "schema_version": 1,
-    "features": { "guardrails": false },
-    "header_policies": [{ "ref": "pin-anthropic-beta", "step": 10 }]
-  }
-}
-```
-
-Workflow versions created by the preview implementation may still contain a
-`header_modification` reference in `guardrails`. They remain readable and are
-migrated into the egress stage when compiled in memory.
-
-#### Example
-
-```yaml
-- name: "pin-anthropic-beta"
-  type: "header_modification"
-  order: 2
-  header_modification:
-    when:
-      - header: "User-Agent"
-        matches: "^cline/"
-    actions:
-      - action: "set"
-        header: "Anthropic-Beta"
-        value: "context-1m-2025-08-07"
-      - action: "set"
-        header: "X-Team"
-        from_header: "X-Client-Team"
-      - action: "remove"
-        header: "X-Internal-Debug"
-```
 
 ## Examples
 

@@ -130,4 +130,5 @@ curl -X POST http://localhost:8080/admin/workflows \
 - `scope_user_path` is normalized to canonical slash form
 - managed API keys can override the request user path header; workflow matching uses the effective request user path
 - budget enforcement runs only when the global budget feature and the matched workflow's `budget` feature are both enabled; see [Budgets](/features/budgets)
-- `header_policies` are an egress stage independent of the message `guardrails` feature flag; their resolved plan participates in response-cache identity and applies only to the selected primary provider route
+- `header_policies` are an egress stage independent of the message `guardrails` feature flag; their resolved plan participates in response-cache identity and applies only to the selected primary provider route; see [Header Policies](/advanced/header-policies)
+- `HEADER_POLICIES_ENABLED=false` is the global operational kill switch; workflow definitions remain stored and compilable while application is disabled

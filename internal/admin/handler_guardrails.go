@@ -58,6 +58,9 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 	if name == "" {
 		return handleError(c, core.NewInvalidRequestError("guardrail name is required", nil))
 	}
+	if strings.EqualFold(strings.ReplaceAll(strings.TrimSpace(req.Type), "-", "_"), "header_modification") {
+		return handleError(c, core.NewInvalidRequestError("header_modification is an outbound header policy; use /admin/header-policies", nil))
+	}
 
 	userPath, err := normalizeUserPathQueryParam("user_path", req.UserPath)
 	if err != nil {
@@ -66,6 +69,11 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 
 	h.mutationMu.Lock()
 	defer h.mutationMu.Unlock()
+	if h.headerPolicyDefs != nil {
+		if _, exists := h.headerPolicyDefs.Get(name); exists {
+			return handleError(c, core.NewInvalidRequestError("name is already used by a header policy: "+name, nil))
+		}
+	}
 
 	if err := h.guardrailDefs.Upsert(c.Request().Context(), guardrails.Definition{
 		Name:        name,
@@ -88,6 +96,8 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 }
 
 // DeleteGuardrail handles DELETE /admin/guardrails
+//
+//nolint:dupl // Keep this resource handler explicit and independent from header-policy lifecycle semantics.
 func (h *Handler) DeleteGuardrail(c *echo.Context) error {
 	if h.guardrailDefs == nil {
 		return handleError(c, featureUnavailableError("guardrails feature is unavailable"))

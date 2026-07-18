@@ -193,7 +193,7 @@ func isStreamingRequestGJSON(path string, body []byte) bool {
 	return result.Bool()
 }
 
-func hashRequest(path string, body []byte, workflow *core.Workflow, headerPlans ...*core.HeaderPlan) string {
+func hashRequest(path string, body []byte, workflow *core.Workflow, headerPlan *core.HeaderPlan) string {
 	h := sha256.New()
 	h.Write([]byte(path))
 	h.Write([]byte{0})
@@ -205,10 +205,8 @@ func hashRequest(path string, body []byte, workflow *core.Workflow, headerPlans 
 		h.Write([]byte(workflow.ResolvedQualifiedModel()))
 		h.Write([]byte{0})
 	}
-	if len(headerPlans) > 0 {
-		h.Write([]byte(headerPlans[0].CacheFingerprint()))
-		h.Write([]byte{0})
-	}
+	h.Write([]byte(headerPlan.CacheFingerprint()))
+	h.Write([]byte{0})
 	h.Write(cacheKeyRequestBody(path, body))
 	return hex.EncodeToString(h.Sum(nil))
 }

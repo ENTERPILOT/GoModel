@@ -14,6 +14,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/workflows"
 )
@@ -862,6 +863,49 @@ func TestCreateWorkflowRejectsUnknownGuardrail(t *testing.T) {
 	}
 	if body.Error.Code != nil {
 		t.Fatalf("error code = %v, want nil", *body.Error.Code)
+	}
+}
+
+func TestCreateWorkflowRejectsHeaderPolicyInGuardrailsWhenGuardrailsDisabled(t *testing.T) {
+	store := &workflowTestStore{versions: []workflows.Version{{
+		ID: "global", ScopeKey: "global", Active: true, Version: 1,
+		Payload: workflows.Payload{SchemaVersion: 1, Features: workflows.FeatureFlags{Cache: true, Audit: true, Usage: true}},
+	}}}
+	h := newWorkflowHandler(t, store, nil)
+	headerPolicies, err := headerpolicy.NewService(&headerPolicyTestStore{definitions: map[string]headerpolicy.Definition{
+		"pin-beta": {
+			Name:    "pin-beta",
+			Actions: []headerpolicy.Action{{Action: headerpolicy.ActionSet, Header: "Anthropic-Beta", Value: new("context-1m")}},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("headerpolicy.NewService() error = %v", err)
+	}
+	if err := headerPolicies.Refresh(t.Context()); err != nil {
+		t.Fatalf("headerPolicies.Refresh() error = %v", err)
+	}
+	h.headerPolicies = headerPolicies
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
+		"name":"misplaced header policy",
+		"workflow_payload":{
+			"schema_version":1,
+			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+			"guardrails":[{"ref":"pin-beta","step":10}]
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.CreateWorkflow(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("CreateWorkflow() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
+	if body.Error.Message != "header policy ref pin-beta must be placed in workflow_payload.header_policies, not guardrails" {
+		t.Fatalf("error message = %q", body.Error.Message)
 	}
 }
 

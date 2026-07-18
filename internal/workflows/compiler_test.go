@@ -2,10 +2,13 @@ package workflows
 
 import (
 	"errors"
+	"fmt"
+	"sort"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 )
 
 type compilerHeaderPolicy struct{ name string }
@@ -13,6 +16,29 @@ type compilerHeaderPolicy struct{ name string }
 func (p compilerHeaderPolicy) Name() string { return p.name }
 func (p compilerHeaderPolicy) ResolveHeaderPlan(core.HeaderPolicyInput) *core.HeaderPlan {
 	return &core.HeaderPlan{Set: map[string]string{"X-Test": "1"}}
+}
+
+type compilerHeaderCatalog map[string]core.HeaderPolicy
+
+func (c compilerHeaderCatalog) Names() []string {
+	names := make([]string, 0, len(c))
+	for name := range c {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (c compilerHeaderCatalog) BuildHeaderPolicies(steps []headerpolicy.Reference) ([]core.HeaderPolicy, error) {
+	policies := make([]core.HeaderPolicy, 0, len(steps))
+	for _, step := range steps {
+		policy, ok := c[step.Ref]
+		if !ok {
+			return nil, fmt.Errorf("unknown header policy ref: %q", step.Ref)
+		}
+		policies = append(policies, policy)
+	}
+	return policies, nil
 }
 
 func TestCompilerCompile_Guardrails(t *testing.T) {
@@ -63,12 +89,9 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 }
 
 func TestCompilerCompile_HeaderPoliciesAreSeparateFromMessagePipeline(t *testing.T) {
-	registry := guardrails.NewRegistry()
-	if err := registry.RegisterHeaderPolicy(compilerHeaderPolicy{name: "headers"}, guardrails.RuleDescriptor{Type: "header_modification", Content: "v1"}); err != nil {
-		t.Fatalf("RegisterHeaderPolicy() error = %v", err)
-	}
+	catalog := compilerHeaderCatalog{"headers": compilerHeaderPolicy{name: "headers"}}
 
-	compiled, err := NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
+	compiled, err := NewCompilerWithCatalogs(nil, catalog, core.DefaultWorkflowFeatures()).Compile(Version{
 		ID: "workflow-headers",
 		Payload: Payload{
 			SchemaVersion:  1,
@@ -88,12 +111,9 @@ func TestCompilerCompile_HeaderPoliciesAreSeparateFromMessagePipeline(t *testing
 }
 
 func TestCompilerCompile_LegacyHeaderGuardrailReferenceMigratesAtCompileTime(t *testing.T) {
-	registry := guardrails.NewRegistry()
-	if err := registry.RegisterHeaderPolicy(compilerHeaderPolicy{name: "headers"}, guardrails.RuleDescriptor{Type: "header_modification", Content: "v1"}); err != nil {
-		t.Fatalf("RegisterHeaderPolicy() error = %v", err)
-	}
+	catalog := compilerHeaderCatalog{"headers": compilerHeaderPolicy{name: "headers"}}
 
-	compiled, err := NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
+	compiled, err := NewCompilerWithCatalogs(nil, catalog, core.DefaultWorkflowFeatures()).Compile(Version{
 		ID: "workflow-legacy",
 		Payload: Payload{
 			SchemaVersion: 1,

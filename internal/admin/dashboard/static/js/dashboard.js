@@ -234,6 +234,7 @@ function dashboard() {
         "workflows",
         "audit-logs",
         "guardrails",
+        "header-policies",
         "mcp-servers",
         "auth-keys",
         "settings",
@@ -268,6 +269,9 @@ function dashboard() {
         typeof this.fetchGuardrailsPage === "function"
       ) {
         this.fetchGuardrailsPage();
+      }
+      if (page === "header-policies" && typeof this.fetchHeaderPolicies === "function") {
+        this.fetchHeaderPolicies();
       }
       if (
         page === "mcp-servers" &&
@@ -477,6 +481,7 @@ function dashboard() {
         this.failoverDraftsOpen ||
         (this.page === "workflows" && this.workflowFormOpen) ||
         (this.page === "guardrails" && this.guardrailFormOpen) ||
+        (this.page === "header-policies" && this.headerPolicyFormOpen) ||
         (this.page === "mcp-servers" &&
           (this.mcpServerFormOpen || this.mcpCatalogOpen)) ||
         (this.page === "auth-keys" && this.authKeyFormOpen) ||
@@ -787,6 +792,9 @@ function dashboard() {
         typeof this.fetchGuardrailsPage === "function"
       ) {
         requests.push(this.fetchGuardrailsPage());
+      }
+      if (this.page === "header-policies" && typeof this.fetchHeaderPolicies === "function") {
+        requests.push(this.fetchHeaderPolicies());
       }
       if (this.page === "usage" && typeof this.fetchUsagePage === "function") {
         requests.push(this.fetchUsagePage());
@@ -1241,6 +1249,12 @@ function dashboard() {
         ? dashboardGuardrailsModule
         : null,
       "dashboardGuardrailsModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardHeaderPoliciesModule === "function"
+        ? dashboardHeaderPoliciesModule
+        : null,
+      "dashboardHeaderPoliciesModule",
     ),
     resolveModuleFactory(
       typeof dashboardBudgetsModule === "function"

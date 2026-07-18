@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
@@ -15,6 +18,49 @@ type requestWorkflowPolicyResolverFunc func(selector core.WorkflowSelector) (*co
 
 func (f requestWorkflowPolicyResolverFunc) Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 	return f(selector)
+}
+
+func TestDeriveWorkflowWithPolicy_RealtimeAndMCPUseUserPathScope(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+		mode core.ExecutionMode
+	}{
+		{name: "realtime", path: "/v1/realtime", mode: core.ExecutionModeRealtime},
+		{name: "mcp", path: "/mcp/github", mode: core.ExecutionModeMCP},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			req = req.WithContext(core.WithEffectiveUserPath(req.Context(), "/team/alpha"))
+			c := e.NewContext(req, httptest.NewRecorder())
+			var matched core.WorkflowSelector
+			policy := &core.ResolvedWorkflowPolicy{
+				VersionID: "version-1",
+				Features:  core.WorkflowFeatures{Audit: true, Usage: false, Budget: false},
+			}
+			workflow, err := deriveWorkflowWithPolicy(c, nil, nil, requestWorkflowPolicyResolverFunc(func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+				matched = selector
+				return policy, nil
+			}))
+			if err != nil {
+				t.Fatalf("deriveWorkflowWithPolicy() error = %v", err)
+			}
+			if workflow == nil || workflow.Mode != tt.mode {
+				t.Fatalf("workflow = %+v, want mode %q", workflow, tt.mode)
+			}
+			if matched.Provider != "" || matched.Model != "" || matched.UserPath != "/team/alpha" {
+				t.Fatalf("selector = %+v, want user-path-only selector", matched)
+			}
+			if workflow.Policy != policy || workflow.UsageEnabled() || workflow.BudgetEnabled() {
+				t.Fatalf("matched workflow feature policy was not attached: %+v", workflow.Policy)
+			}
+		})
+	}
 }
 
 type countingBatchResolver struct {

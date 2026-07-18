@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/admin"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/server"
@@ -345,7 +345,7 @@ func TestDefaultWorkflowInput_TrimsConfiguredGuardrailRefs(t *testing.T) {
 }
 
 func TestDefaultWorkflowInput_CompilesHeaderRulesIntoEgressPolicies(t *testing.T) {
-	cfg := &config.Config{Guardrails: config.GuardrailsConfig{
+	cfg := &config.Config{HeaderPolicies: config.HeaderPoliciesConfig{Enabled: true}, Guardrails: config.GuardrailsConfig{
 		Enabled: true,
 		Rules:   []config.GuardrailRuleConfig{{Name: "pin-beta", Type: "header_modification", Order: 20}},
 	}}
@@ -358,6 +358,21 @@ func TestDefaultWorkflowInput_CompilesHeaderRulesIntoEgressPolicies(t *testing.T
 	}
 	if input.Payload.HeaderPolicies[0].Ref != "pin-beta" {
 		t.Fatalf("header policy ref = %q, want pin-beta", input.Payload.HeaderPolicies[0].Ref)
+	}
+}
+
+func TestDefaultWorkflowInput_KeepsHeaderPolicyBindingsWhenRuntimeDisabled(t *testing.T) {
+	cfg := &config.Config{HeaderPolicies: config.HeaderPoliciesConfig{
+		Enabled:  false,
+		Policies: []config.HeaderPolicyConfig{{Name: " pin-beta ", Step: 20}},
+	}}
+
+	input := defaultWorkflowInput(cfg, nil, nil)
+	if len(input.Payload.HeaderPolicies) != 1 {
+		t.Fatalf("header policies = %v, want configured binding", input.Payload.HeaderPolicies)
+	}
+	if got := input.Payload.HeaderPolicies[0]; got.Ref != "pin-beta" || got.Step != 20 {
+		t.Fatalf("header policy binding = %+v, want pin-beta at step 20", got)
 	}
 }
 
@@ -425,13 +440,14 @@ func TestConfigGuardrailDefinitions_TrimAndCanonicalizeRuleIdentity(t *testing.T
 	}
 }
 
-func TestConfigGuardrailDefinitions_HeaderModification(t *testing.T) {
+func TestConfigHeaderPolicyDefinitions_LegacyHeaderModification(t *testing.T) {
 	present := false
 	matches := "^cline/"
 	equalsEmpty := ""
-	definitions, err := configGuardrailDefinitions(config.GuardrailsConfig{
-		Enabled: true,
-		Rules: []config.GuardrailRuleConfig{
+	value := "context-1m"
+	definitions, _, err := configHeaderPolicyDefinitions(&config.Config{
+		HeaderPolicies: config.HeaderPoliciesConfig{Enabled: true},
+		Guardrails: config.GuardrailsConfig{Enabled: true, Rules: []config.GuardrailRuleConfig{
 			{
 				Name: "pin-beta",
 				Type: "header-modification",
@@ -444,29 +460,44 @@ func TestConfigGuardrailDefinitions_HeaderModification(t *testing.T) {
 						{Header: "X-Skip", Present: &present},
 					},
 					Actions: []config.HeaderActionConfig{
-						{Action: "set", Header: "anthropic-beta", Value: "context-1m"},
+						{Action: "set", Header: "anthropic-beta", Value: &value},
 						{Action: "remove", Header: "X-Debug"},
 						{Action: "set", Header: "X-Team", FromHeader: "X-Client-Team"},
 					},
 				},
 			},
-		},
+		}},
 	})
 	if err != nil {
-		t.Fatalf("configGuardrailDefinitions() error = %v", err)
+		t.Fatalf("configHeaderPolicyDefinitions() error = %v", err)
 	}
 	if len(definitions) != 1 {
-		t.Fatalf("len(configGuardrailDefinitions()) = %d, want 1", len(definitions))
+		t.Fatalf("len(configHeaderPolicyDefinitions()) = %d, want 1", len(definitions))
 	}
-	if definitions[0].Type != "header_modification" {
-		t.Fatalf("definitions[0].Type = %q, want header_modification", definitions[0].Type)
+	if definitions[0].Name != "pin-beta" || len(definitions[0].Paths) != 1 || definitions[0].Paths[0] != "/v1/*" {
+		t.Fatalf("definition = %#v", definitions[0])
 	}
-	// The seeded config must survive the guardrails service validation path.
-	raw := string(definitions[0].Config)
-	for _, want := range []string{`"methods":["POST"]`, `"endpoints":["/v1/*"]`, `"anthropic-beta"`, `"^cline/"`, `"equals":""`, `"from_header":"X-Client-Team"`, `"present":false`} {
-		if !strings.Contains(raw, want) {
-			t.Fatalf("seed config missing %s: %s", want, raw)
-		}
+	if len(definitions[0].When) != 3 || definitions[0].When[1].Equals == nil || *definitions[0].When[1].Equals != "" {
+		t.Fatalf("conditions = %#v", definitions[0].When)
+	}
+	if len(definitions[0].Actions) != 3 || definitions[0].Actions[2].FromHeader != "X-Client-Team" {
+		t.Fatalf("actions = %#v", definitions[0].Actions)
+	}
+}
+
+func TestRejectPolicyNameCollisions(t *testing.T) {
+	err := rejectPolicyNameCollisions(
+		[]guardrails.Definition{{Name: " shared "}},
+		[]headerpolicy.Definition{{Name: "shared"}},
+	)
+	if err == nil {
+		t.Fatal("rejectPolicyNameCollisions() error = nil, want collision error")
+	}
+	if err := rejectPolicyNameCollisions(
+		[]guardrails.Definition{{Name: "messages"}},
+		[]headerpolicy.Definition{{Name: "headers"}},
+	); err != nil {
+		t.Fatalf("rejectPolicyNameCollisions() unexpected error = %v", err)
 	}
 }
 

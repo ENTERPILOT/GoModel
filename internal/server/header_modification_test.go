@@ -13,24 +13,24 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-type stubHeaderMutator struct {
+type stubHeaderPolicy struct {
 	name     string
-	mutation *core.HeaderMutation
+	mutation *core.HeaderPlan
 	seen     http.Header
 }
 
-func (m *stubHeaderMutator) Name() string { return m.name }
+func (m *stubHeaderPolicy) Name() string { return m.name }
 
-func (m *stubHeaderMutator) ResolveHeaderPlan(input core.HeaderPolicyInput) *core.HeaderPlan {
+func (m *stubHeaderPolicy) ResolveHeaderPlan(input core.HeaderPolicyInput) *core.HeaderPlan {
 	m.seen = input.Headers
 	return m.mutation
 }
 
-type stubHeaderMutatorResolver struct {
-	mutators []core.HeaderMutator
+type stubHeaderPolicyResolver struct {
+	mutators []core.HeaderPolicy
 }
 
-func (r *stubHeaderMutatorResolver) HeaderPoliciesForContext(context.Context) []core.HeaderPolicy {
+func (r *stubHeaderPolicyResolver) HeaderPoliciesForContext(context.Context) []core.HeaderPolicy {
 	return r.mutators
 }
 
@@ -46,9 +46,9 @@ func runHeaderModificationMiddleware(t *testing.T, resolver HeaderPolicyResolver
 		c.Set(string(auditlog.LogEntryKey), entry)
 	}
 
-	var carried *core.HeaderMutation
+	var carried *core.HeaderPlan
 	handler := HeaderPolicyPlanningMiddleware(resolver, auditLogger)(func(c *echo.Context) error {
-		carried = core.HeaderMutationFromContext(c.Request().Context())
+		carried = core.HeaderPlanFromContext(c.Request().Context())
 		return nil
 	})
 	if err := handler(c); err != nil {
@@ -58,16 +58,16 @@ func runHeaderModificationMiddleware(t *testing.T, resolver HeaderPolicyResolver
 }
 
 func TestHeaderModificationMiddlewareMergesAndRecords(t *testing.T) {
-	first := &stubHeaderMutator{
+	first := &stubHeaderPolicy{
 		name:     "pin-beta",
-		mutation: &core.HeaderMutation{Set: map[string]string{"Anthropic-Beta": "context-1m"}},
+		mutation: &core.HeaderPlan{Set: map[string]string{"Anthropic-Beta": "context-1m"}},
 	}
-	skipped := &stubHeaderMutator{name: "no-match"}
-	second := &stubHeaderMutator{
+	skipped := &stubHeaderPolicy{name: "no-match"}
+	second := &stubHeaderPolicy{
 		name:     "strip-debug",
-		mutation: &core.HeaderMutation{Remove: []string{"X-Debug"}},
+		mutation: &core.HeaderPlan{Remove: []string{"X-Debug"}},
 	}
-	resolver := &stubHeaderMutatorResolver{mutators: []core.HeaderMutator{first, skipped, second}}
+	resolver := &stubHeaderPolicyResolver{mutators: []core.HeaderPolicy{first, skipped, second}}
 	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogHeaders: true}}
 	entry := &auditlog.LogEntry{}
 
@@ -109,10 +109,10 @@ func TestHeaderModificationMiddlewareMergesAndRecords(t *testing.T) {
 }
 
 func TestHeaderModificationMiddlewareRecordsNamesOnlyWhenHeaderLoggingDisabled(t *testing.T) {
-	resolver := &stubHeaderMutatorResolver{mutators: []core.HeaderMutator{
-		&stubHeaderMutator{
+	resolver := &stubHeaderPolicyResolver{mutators: []core.HeaderPolicy{
+		&stubHeaderPolicy{
 			name: "inject-secret",
-			mutation: &core.HeaderMutation{
+			mutation: &core.HeaderPlan{
 				Set:    map[string]string{"X-Custom-Auth": "literal-secret", "Anthropic-Beta": "context-1m"},
 				Remove: []string{"X-Internal-Debug"},
 			},
@@ -144,10 +144,10 @@ func TestHeaderModificationMiddlewareRecordsNamesOnlyWhenHeaderLoggingDisabled(t
 }
 
 func TestHeaderModificationMiddlewareRedactsValuesWhenHeaderLoggingEnabled(t *testing.T) {
-	resolver := &stubHeaderMutatorResolver{mutators: []core.HeaderMutator{
-		&stubHeaderMutator{
+	resolver := &stubHeaderPolicyResolver{mutators: []core.HeaderPolicy{
+		&stubHeaderPolicy{
 			name: "defense-in-depth",
-			mutation: &core.HeaderMutation{Set: map[string]string{
+			mutation: &core.HeaderPlan{Set: map[string]string{
 				"X-Api-Key": "secret",
 				"X-Feature": "visible",
 			}},
@@ -167,8 +167,27 @@ func TestHeaderModificationMiddlewareRedactsValuesWhenHeaderLoggingEnabled(t *te
 	}
 }
 
+func TestHeaderModificationMiddlewareRedactsValueCopiedFromSensitiveSource(t *testing.T) {
+	resolver := &stubHeaderPolicyResolver{mutators: []core.HeaderPolicy{
+		&stubHeaderPolicy{
+			name: "copy-session",
+			mutation: &core.HeaderPlan{
+				Set:          map[string]string{"X-Team": "secret-session-token"},
+				SensitiveSet: []string{"X-Team"},
+			},
+		},
+	}}
+	entry := &auditlog.LogEntry{}
+	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogHeaders: true}}
+	_, entry = runHeaderModificationMiddleware(t, resolver, auditLogger, entry)
+	values := entry.Data.RequestRevisions[0].Headers.Set.(map[string]string)
+	if values["X-Team"] != auditlog.RedactedHeaderValue {
+		t.Fatalf("copied sensitive value was recorded: %v", values)
+	}
+}
+
 func TestHeaderModificationMiddlewareNoMatchLeavesContextUntouched(t *testing.T) {
-	resolver := &stubHeaderMutatorResolver{mutators: []core.HeaderMutator{&stubHeaderMutator{name: "no-match"}}}
+	resolver := &stubHeaderPolicyResolver{mutators: []core.HeaderPolicy{&stubHeaderPolicy{name: "no-match"}}}
 	entry := &auditlog.LogEntry{}
 	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true}}
 
@@ -183,8 +202,8 @@ func TestHeaderModificationMiddlewareNoMatchLeavesContextUntouched(t *testing.T)
 }
 
 func TestHeaderModificationMiddlewareAuditDisabled(t *testing.T) {
-	resolver := &stubHeaderMutatorResolver{mutators: []core.HeaderMutator{
-		&stubHeaderMutator{name: "pin", mutation: &core.HeaderMutation{Set: map[string]string{"X-A": "1"}}},
+	resolver := &stubHeaderPolicyResolver{mutators: []core.HeaderPolicy{
+		&stubHeaderPolicy{name: "pin", mutation: &core.HeaderPlan{Set: map[string]string{"X-A": "1"}}},
 	}}
 	entry := &auditlog.LogEntry{}
 	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: false}}
@@ -205,11 +224,11 @@ func TestBuildPassthroughHeadersAppliesMutation(t *testing.T) {
 		"Accept":        []string{"application/json"},
 		"Authorization": []string{"Bearer secret"},
 	}
-	mutation := &core.HeaderMutation{
+	mutation := &core.HeaderPlan{
 		Set:    map[string]string{"Anthropic-Beta": "context-1m"},
 		Remove: []string{"X-Debug"},
 	}
-	ctx := core.WithHeaderMutation(context.Background(), mutation)
+	ctx := core.WithHeaderPlan(context.Background(), mutation)
 
 	dst := buildPassthroughHeaders(ctx, src)
 

@@ -101,6 +101,9 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/guardrails",
 		"PUT /admin/guardrails",
 		"DELETE /admin/guardrails",
+		"GET /admin/header-policies",
+		"PUT /admin/header-policies",
+		"DELETE /admin/header-policies",
 
 		"GET /admin/workflows",
 		"GET /admin/workflows/guardrails",

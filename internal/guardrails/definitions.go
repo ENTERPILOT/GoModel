@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 )
 
 // Definition is one persisted reusable guardrail instance.
@@ -120,13 +121,9 @@ func normalizeDefinition(def Definition) (Definition, error) {
 		}
 		def.Config = raw
 	case "header_modification":
-		cfg, err := decodeHeaderModificationDefinitionConfig(def.Config)
+		raw, err := headerpolicy.NormalizeLegacyConfig(def.Config)
 		if err != nil {
 			return Definition{}, err
-		}
-		raw, err := json.Marshal(cfg)
-		if err != nil {
-			return Definition{}, newValidationError("marshal guardrail config", err)
 		}
 		def.Config = raw
 	default:
@@ -350,11 +347,11 @@ func summarizeDefinition(def Definition) string {
 		}
 		return fmt.Sprintf("%s • %s • %s", target, strings.Join(runtimeCfg.Roles, ","), promptSummary)
 	case "header_modification":
-		cfg, err := decodeHeaderModificationDefinitionConfig(def.Config)
+		policy, err := headerpolicy.DefinitionFromLegacy(def.Name, def.Description, def.Config)
 		if err != nil {
 			return ""
 		}
-		return summarizeHeaderModification(cfg)
+		return headerpolicy.ViewFromDefinition(policy).Summary
 	default:
 		return ""
 	}
@@ -443,50 +440,6 @@ func TypeDefinitions() []TypeDefinition {
 					Input:       "textarea",
 					Help:        "Optional custom rewrite prompt. Leave empty to use the built-in LiteLLM-derived anonymization prompt.",
 					Placeholder: "Leave empty to use the built-in anonymization prompt.",
-				},
-			},
-		},
-		{
-			Type:        "header_modification",
-			Label:       "Outbound Header Policy",
-			Description: "Conditionally plans outbound provider-request headers. Runs as workflow egress policy, not as a message guardrail.",
-			Defaults: mustMarshalRaw(headerModificationDefinitionConfig{
-				When:    []headerModificationCondition{},
-				Actions: []headerModificationAction{{Action: headerActionSet}},
-			}),
-			Fields: []TypeField{
-				{
-					Key:   "methods",
-					Label: "HTTP methods",
-					Input: "checkboxes",
-					Help:  "Optional. Leave empty for every method.",
-					Options: []TypeOption{
-						{Value: "GET", Label: "GET"},
-						{Value: "POST", Label: "POST"},
-						{Value: "PUT", Label: "PUT"},
-						{Value: "DELETE", Label: "DELETE"},
-						{Value: "PATCH", Label: "PATCH"},
-					},
-				},
-				{
-					Key:         "endpoints",
-					Label:       "Endpoint paths",
-					Input:       "string_list",
-					Help:        "Optional comma-separated public paths. A trailing * matches a path prefix.",
-					Placeholder: "/v1/chat/completions, /p/anthropic/*",
-				},
-				{
-					Key:   "when",
-					Label: "Conditions",
-					Input: "header_conditions",
-					Help:  "All conditions must match the inbound request headers. Leave empty to always apply.",
-				},
-				{
-					Key:      "actions",
-					Label:    "Actions",
-					Input:    "header_actions",
-					Required: true,
-					Help:     "Applied to the outbound provider request in order. Credential, transport, and payload metadata headers are rejected.",
 				},
 			},
 		},
