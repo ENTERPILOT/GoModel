@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/cache/modelcache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modeldata"
+	"github.com/enterpilot/gomodel/internal/platformdir"
 )
 
 // InitResult holds the initialized provider infrastructure and cleanup functions.
@@ -204,13 +206,27 @@ func initCache(cfg *config.Config) (modelcache.Cache, error) {
 	if m.Local != nil {
 		cacheDir := m.Local.CacheDir
 		if cacheDir == "" {
-			cacheDir = ".cache"
+			cacheDir = defaultModelCacheDir()
 		}
 		cacheFile := filepath.Join(cacheDir, "models.json")
 		slog.Info("using local file cache", "path", cacheFile)
 		return modelcache.NewLocalCache(cacheFile), nil
 	}
 	return nil, fmt.Errorf("cache.model: must have either local or redis configured")
+}
+
+// defaultModelCacheDir keeps the historical ./.cache location whenever it
+// already exists (existing deployments, the Docker image); fresh binary
+// installs get the OS-conventional per-user cache directory instead.
+func defaultModelCacheDir() string {
+	if _, err := os.Stat(".cache"); err == nil {
+		return ".cache"
+	}
+	dir, err := platformdir.CacheDir()
+	if err != nil {
+		return ".cache"
+	}
+	return dir
 }
 
 // initializeProviders instantiates and registers all resolved providers.

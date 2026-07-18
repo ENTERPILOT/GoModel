@@ -7,9 +7,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"github.com/enterpilot/gomodel/internal/platformdir"
 )
 
 // Type constants for storage backends
@@ -19,8 +23,25 @@ const (
 	TypeMongoDB    = "mongodb"
 )
 
-// DefaultSQLitePath is the default file path for the SQLite database.
-const DefaultSQLitePath = "data/gomodel.db"
+// LegacySQLitePath is the historical default database location, relative to
+// the working directory. It stays the default whenever a ./data directory
+// exists (existing deployments, the Docker image), so upgrades never move
+// anyone's database.
+const LegacySQLitePath = "data/gomodel.db"
+
+// DefaultSQLitePath returns the database path used when none is configured:
+// LegacySQLitePath when a ./data directory already exists, otherwise the
+// OS-conventional per-user data directory (see platformdir.DataDir).
+func DefaultSQLitePath() string {
+	if _, err := os.Stat("data"); err == nil {
+		return LegacySQLitePath
+	}
+	dir, err := platformdir.DataDir()
+	if err != nil {
+		return LegacySQLitePath
+	}
+	return filepath.Join(dir, "gomodel.db")
+}
 
 // Config holds storage configuration
 type Config struct {
@@ -39,7 +60,7 @@ type Config struct {
 
 // SQLiteConfig holds SQLite-specific configuration
 type SQLiteConfig struct {
-	// Path is the database file path (default: data/gomodel.db)
+	// Path is the database file path (default: DefaultSQLitePath())
 	Path string
 }
 

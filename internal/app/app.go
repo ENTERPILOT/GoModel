@@ -1048,7 +1048,11 @@ func (a *App) logStartupInfo() {
 	}
 
 	// Storage configuration (shared by audit logging and usage tracking)
-	slog.Info("storage configured", "type", cfg.Storage.Type)
+	if backend := cfg.Storage.BackendConfig(); backend.Type == storage.TypeSQLite {
+		slog.Info("storage configured", "type", backend.Type, "path", backend.SQLite.Path)
+	} else {
+		slog.Info("storage configured", "type", backend.Type)
+	}
 
 	// Audit logging configuration
 	if cfg.Logging.Enabled {

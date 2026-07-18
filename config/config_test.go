@@ -9,6 +9,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // clearProviderEnvVars unsets all known provider-related environment variables.
@@ -136,8 +138,8 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Storage.Type != "sqlite" {
 		t.Errorf("expected Storage.Type=sqlite, got %s", cfg.Storage.Type)
 	}
-	if cfg.Storage.SQLite.Path != "data/gomodel.db" {
-		t.Errorf("expected Storage.SQLite.Path=data/gomodel.db, got %s", cfg.Storage.SQLite.Path)
+	if cfg.Storage.SQLite.Path != storage.DefaultSQLitePath() {
+		t.Errorf("expected Storage.SQLite.Path=%s, got %s", storage.DefaultSQLitePath(), cfg.Storage.SQLite.Path)
 	}
 	if cfg.Storage.PostgreSQL.MaxConns != 10 {
 		t.Errorf("expected Storage.PostgreSQL.MaxConns=10, got %d", cfg.Storage.PostgreSQL.MaxConns)

@@ -93,7 +93,7 @@ func buildDefaultConfig() *Config {
 		Storage: StorageConfig{
 			Type: "sqlite",
 			SQLite: SQLiteStorageConfig{
-				Path: storage.DefaultSQLitePath,
+				Path: storage.DefaultSQLitePath(),
 			},
 			PostgreSQL: PostgreSQLStorageConfig{
 				MaxConns: 10,

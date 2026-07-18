@@ -19,7 +19,9 @@ type StorageConfig struct {
 
 // SQLiteStorageConfig holds SQLite-specific storage configuration
 type SQLiteStorageConfig struct {
-	// Path is the database file path (default: data/gomodel.db)
+	// Path is the database file path. Default: ./data/gomodel.db when a
+	// ./data directory exists, otherwise the OS per-user data directory
+	// (e.g. ~/.local/share/gomodel/gomodel.db).
 	Path string `yaml:"path" env:"SQLITE_PATH"`
 }
 
@@ -60,7 +62,7 @@ func (c StorageConfig) BackendConfig() storage.Config {
 		cfg.Type = storage.TypeSQLite
 	}
 	if cfg.SQLite.Path == "" {
-		cfg.SQLite.Path = storage.DefaultSQLitePath
+		cfg.SQLite.Path = storage.DefaultSQLitePath()
 	}
 	return cfg
 }

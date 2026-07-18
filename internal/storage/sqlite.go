@@ -19,7 +19,7 @@ type sqliteStorage struct {
 // It enables WAL mode for better concurrent read/write performance.
 func NewSQLite(cfg SQLiteConfig) (SQLiteStorage, error) {
 	if cfg.Path == "" {
-		cfg.Path = DefaultSQLitePath
+		cfg.Path = DefaultSQLitePath()
 	}
 
 	// Ensure directory exists
