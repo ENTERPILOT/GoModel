@@ -124,7 +124,10 @@ func TestHeaderPlanCacheFingerprintIsStableAndValueSensitive(t *testing.T) {
 }
 
 func TestShouldRedactHeaderRecognizesCustomCredentialNames(t *testing.T) {
-	for _, name := range []string{"X-Session-Token", "X-Api-Token", "X-Custom-Auth", "X-Upstream-Secret"} {
+	for _, name := range []string{
+		"X-Session-Token", "X-Api-Token", "X-Custom-Auth", "X-Upstream-Secret", "X-ApiKey",
+		"X-Authentication", "X-ClientSecret", "X-GitHubToken", "X-SessionId",
+	} {
 		if !ShouldRedactHeader(name) {
 			t.Fatalf("%s should be redacted from audit logs", name)
 		}
@@ -134,5 +137,8 @@ func TestShouldRedactHeaderRecognizesCustomCredentialNames(t *testing.T) {
 	}
 	if ShouldRedactHeader("Anthropic-Beta") {
 		t.Fatal("Anthropic-Beta should remain visible when header logging is enabled")
+	}
+	if ShouldRedactHeader("X-Monkey") {
+		t.Fatal("X-Monkey must not be mistaken for a compact key header")
 	}
 }

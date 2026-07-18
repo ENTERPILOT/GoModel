@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -48,10 +49,17 @@ func (h *Handler) UpsertHeaderPolicy(c *echo.Context) error {
 			return handleError(c, core.NewInvalidRequestError("name is already used by a guardrail: "+definition.Name, nil))
 		}
 	}
+	previous, existed := h.headerPolicyDefs.Get(definition.Name)
 	if err := h.headerPolicyDefs.Upsert(c.Request().Context(), definition); err != nil {
 		return handleError(c, headerPolicyWriteError(err))
 	}
-	if err := h.refreshWorkflowsAfterGuardrailChange(c.Request().Context()); err != nil {
+	rollback := func(rollbackCtx context.Context) error {
+		if existed {
+			return h.headerPolicyDefs.Upsert(rollbackCtx, *previous)
+		}
+		return h.headerPolicyDefs.Delete(rollbackCtx, definition.Name)
+	}
+	if err := h.refreshWorkflowsOrRollback(c.Request().Context(), rollback); err != nil {
 		return handleError(c, err)
 	}
 	stored, ok := h.headerPolicyDefs.Get(definition.Name)
@@ -86,13 +94,20 @@ func (h *Handler) DeleteHeaderPolicy(c *echo.Context) error {
 	if len(references) > 0 {
 		return handleError(c, core.NewInvalidRequestError("header policy is used by active workflows: "+strings.Join(references, ", "), nil))
 	}
+	previous, existed := h.headerPolicyDefs.Get(name)
 	if err := h.headerPolicyDefs.Delete(c.Request().Context(), name); err != nil {
 		if errors.Is(err, headerpolicy.ErrNotFound) {
 			return handleError(c, core.NewNotFoundError("header policy not found: "+name))
 		}
 		return handleError(c, headerPolicyWriteError(err))
 	}
-	if err := h.refreshWorkflowsAfterGuardrailChange(c.Request().Context()); err != nil {
+	rollback := func(rollbackCtx context.Context) error {
+		if !existed {
+			return nil
+		}
+		return h.headerPolicyDefs.Upsert(rollbackCtx, *previous)
+	}
+	if err := h.refreshWorkflowsOrRollback(c.Request().Context(), rollback); err != nil {
 		return handleError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)

@@ -141,6 +141,36 @@ func TestNewServiceRejectsMultipleExecutors(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsRuntimeLegacyHeaderPolicyWrites(t *testing.T) {
+	definition := Definition{
+		Name: "headers", Type: "header_modification",
+		Config: rawConfig(t, map[string]any{"actions": []map[string]any{{"action": "remove", "header": "X-Debug"}}}),
+	}
+	for _, test := range []struct {
+		name  string
+		write func(*Service) error
+	}{
+		{name: "upsert", write: func(service *Service) error { return service.Upsert(t.Context(), definition) }},
+		{name: "upsert many", write: func(service *Service) error {
+			return service.UpsertDefinitions(t.Context(), []Definition{definition})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := newTestStore()
+			service, err := NewService(store)
+			if err != nil {
+				t.Fatalf("NewService() error = %v", err)
+			}
+			if err := test.write(service); err == nil {
+				t.Fatal("legacy header policy write error = nil")
+			}
+			if len(store.definitions) != 0 {
+				t.Fatalf("legacy write reached storage: %#v", store.definitions)
+			}
+		})
+	}
+}
+
 func TestServiceRefreshBuildsLLMBasedAlteringPipelineFromDefinitions(t *testing.T) {
 	store := newTestStore(
 		Definition{

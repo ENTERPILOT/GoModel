@@ -1036,6 +1036,40 @@ test('openWorkflowCreate drops blank guardrail steps instead of hydrating them a
     );
 });
 
+for (const guardrailsEnabled of [true, false]) {
+    test(`openWorkflowCreate migrates legacy header-policy steps when guardrails are ${guardrailsEnabled ? 'enabled' : 'disabled'}`, () => {
+        const module = createWorkflowsModule();
+        module.focusWorkflowForm = () => {};
+        module.headerPolicyRefs = ['pin-beta'];
+
+        module.openWorkflowCreate({
+            scope: {},
+            workflow_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: guardrailsEnabled,
+                    failover: true
+                },
+                guardrails: [
+                    { ref: 'message-safety', step: 10 },
+                    { ref: 'pin-beta', step: 20 }
+                ]
+            }
+        });
+
+        assert.equal(
+            JSON.stringify(module.workflowForm.guardrails),
+            JSON.stringify([{ ref: 'message-safety', step: 10 }])
+        );
+        assert.equal(
+            JSON.stringify(module.workflowForm.header_policies),
+            JSON.stringify([{ ref: 'pin-beta', step: 20 }])
+        );
+    });
+}
+
 test('workflowSourceGuardrails keeps step zero but drops negative and fractional steps from previews', () => {
     const module = createWorkflowsModule();
 

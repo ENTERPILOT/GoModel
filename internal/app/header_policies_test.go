@@ -58,8 +58,14 @@ func TestMigrateLegacyHeaderPoliciesPreservesDedicatedRow(t *testing.T) {
 	}
 	db.SetMaxOpenConns(1)
 	defer db.Close()
-	legacy, _ := guardrails.NewSQLiteStore(t.Context(), db)
-	target, _ := headerpolicy.NewSQLiteStore(t.Context(), db)
+	legacy, err := guardrails.NewSQLiteStore(t.Context(), db)
+	if err != nil {
+		t.Fatalf("guardrails.NewSQLiteStore() error = %v", err)
+	}
+	target, err := headerpolicy.NewSQLiteStore(t.Context(), db)
+	if err != nil {
+		t.Fatalf("headerpolicy.NewSQLiteStore() error = %v", err)
+	}
 	if err := target.Upsert(t.Context(), headerpolicy.Definition{
 		Name: "headers", Description: "dedicated",
 		Actions: []headerpolicy.Action{{Action: headerpolicy.ActionRemove, Header: "X-Debug"}},

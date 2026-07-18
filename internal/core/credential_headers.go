@@ -41,6 +41,23 @@ func ShouldRedactHeader(name string) bool {
 		case "auth", "credential", "credentials", "key", "secret", "session", "token":
 			return true
 		}
+		if compactCredentialPart(part) {
+			return true
+		}
+	}
+	return false
+}
+
+func compactCredentialPart(part string) bool {
+	for _, marker := range []string{"auth", "credential", "credentials", "secret", "session", "token"} {
+		if strings.HasPrefix(part, marker) || strings.HasSuffix(part, marker) {
+			return true
+		}
+	}
+	for _, suffix := range []string{"apikey", "accesskey", "clientkey", "consumerkey", "encryptionkey", "privatekey", "secretkey", "signingkey"} {
+		if strings.HasSuffix(part, suffix) {
+			return true
+		}
 	}
 	return false
 }

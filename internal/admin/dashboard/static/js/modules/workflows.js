@@ -594,7 +594,7 @@
                 const storedFeatures = workflow.workflow_payload && workflow.workflow_payload.features
                     ? this.workflowNormalizedFeatures(workflow.workflow_payload.features)
                     : this.workflowSourceFeatures(workflow);
-                const storedGuardrails = Array.isArray(workflow.workflow_payload && workflow.workflow_payload.guardrails)
+                let storedGuardrails = Array.isArray(workflow.workflow_payload && workflow.workflow_payload.guardrails)
                     ? workflow.workflow_payload.guardrails
                         .map((step) => ({
                             ref: String(step && step.ref || '').trim(),
@@ -602,7 +602,16 @@
                         }))
                         .filter((step) => Number.isInteger(step.step) && step.step >= 0)
                     : this.workflowSourceGuardrails(workflow);
-                const storedHeaderPolicies = this.workflowSourceHeaderPolicies(workflow);
+                let storedHeaderPolicies = this.workflowSourceHeaderPolicies(workflow);
+                const hasDedicatedHeaderPolicies = Array.isArray(workflow.workflow_payload && workflow.workflow_payload.header_policies);
+                if (!hasDedicatedHeaderPolicies && storedGuardrails.length > 0) {
+                    const knownHeaderPolicies = new Set((this.headerPolicyRefs || []).map((ref) => String(ref || '').trim()));
+                    const legacyHeaderPolicies = storedGuardrails.filter((step) => knownHeaderPolicies.has(step.ref));
+                    if (legacyHeaderPolicies.length > 0) {
+                        storedHeaderPolicies = legacyHeaderPolicies;
+                        storedGuardrails = storedGuardrails.filter((step) => !knownHeaderPolicies.has(step.ref));
+                    }
+                }
                 this.workflowForm = {
                     scope_provider: this.workflowScopeProviderValue(workflow.scope),
                     scope_model: String(workflow.scope && workflow.scope.scope_model || ''),

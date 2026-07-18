@@ -2,6 +2,7 @@ package headerpolicy
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -55,19 +56,44 @@ func TestPolicyCopiesPresentEmptyHeaderValue(t *testing.T) {
 }
 
 func TestPolicyMarksCopiedCredentialLikeSourceSensitive(t *testing.T) {
-	policy, err := NewPolicy(Definition{
-		Name:    "copy-token",
-		Actions: []Action{{Action: ActionSet, Header: "X-Team", FromHeader: "X-Session-Token"}},
-	})
-	if err != nil {
-		t.Fatalf("NewPolicy() error = %v", err)
+	for _, source := range []string{"X-Session-Token", "X-ApiKey", "X-ClientSecret"} {
+		t.Run(source, func(t *testing.T) {
+			policy, err := NewPolicy(Definition{
+				Name:    "copy-token",
+				Actions: []Action{{Action: ActionSet, Header: "X-Team", FromHeader: source}},
+			})
+			if err != nil {
+				t.Fatalf("NewPolicy() error = %v", err)
+			}
+			headers := make(http.Header)
+			headers.Set(source, "secret")
+			plan := policy.ResolveHeaderPlan(core.HeaderPolicyInput{Headers: headers})
+			if plan == nil || plan.Set["X-Team"] != "secret" {
+				t.Fatalf("plan = %#v", plan)
+			}
+			if len(plan.SensitiveSet) != 1 || plan.SensitiveSet[0] != "X-Team" {
+				t.Fatalf("plan.SensitiveSet = %v", plan.SensitiveSet)
+			}
+		})
 	}
-	plan := policy.ResolveHeaderPlan(core.HeaderPolicyInput{Headers: http.Header{"X-Session-Token": {"secret"}}})
-	if plan == nil || plan.Set["X-Team"] != "secret" {
-		t.Fatalf("plan = %#v", plan)
-	}
-	if len(plan.SensitiveSet) != 1 || plan.SensitiveSet[0] != "X-Team" {
-		t.Fatalf("plan.SensitiveSet = %v", plan.SensitiveSet)
+}
+
+func TestPolicyMarksCredentialLikeDestinationSensitive(t *testing.T) {
+	for _, action := range []Action{
+		{Action: ActionSet, Header: "X-Session-Token", Value: new("literal-secret")},
+		{Action: ActionSet, Header: "X-Session-Token", FromHeader: "X-Team"},
+	} {
+		policy, err := NewPolicy(Definition{Name: "credential-destination", Actions: []Action{action}})
+		if err != nil {
+			t.Fatalf("NewPolicy() error = %v", err)
+		}
+		plan := policy.ResolveHeaderPlan(core.HeaderPolicyInput{Headers: http.Header{"X-Team": {"platform"}}})
+		if plan == nil {
+			t.Fatal("ResolveHeaderPlan() = nil")
+		}
+		if len(plan.SensitiveSet) != 1 || plan.SensitiveSet[0] != "X-Session-Token" {
+			t.Fatalf("plan.SensitiveSet = %v", plan.SensitiveSet)
+		}
 	}
 }
 
@@ -107,10 +133,15 @@ func TestDefinitionFromLegacyRejectsTrailingJSON(t *testing.T) {
 }
 
 type memoryStore struct {
-	definitions map[string]Definition
+	definitions           map[string]Definition
+	failList              bool
+	failListAfterMutation bool
 }
 
 func (s *memoryStore) List(context.Context) ([]Definition, error) {
+	if s.failList {
+		return nil, errors.New("list failed")
+	}
 	result := make([]Definition, 0, len(s.definitions))
 	for _, definition := range s.definitions {
 		result = append(result, definition)
@@ -126,11 +157,17 @@ func (s *memoryStore) Get(_ context.Context, name string) (*Definition, error) {
 }
 func (s *memoryStore) Upsert(_ context.Context, definition Definition) error {
 	s.definitions[definition.Name] = definition
+	if s.failListAfterMutation {
+		s.failList = true
+	}
 	return nil
 }
 func (s *memoryStore) UpsertMany(_ context.Context, definitions []Definition) error {
 	for _, definition := range definitions {
 		s.definitions[definition.Name] = definition
+	}
+	if s.failListAfterMutation {
+		s.failList = true
 	}
 	return nil
 }
@@ -139,6 +176,9 @@ func (s *memoryStore) Delete(_ context.Context, name string) error {
 		return ErrNotFound
 	}
 	delete(s.definitions, name)
+	if s.failListAfterMutation {
+		s.failList = true
+	}
 	return nil
 }
 func (s *memoryStore) Close() error { return nil }
@@ -160,5 +200,55 @@ func TestServiceBuildHeaderPolicies(t *testing.T) {
 	}
 	if len(policies) != 1 {
 		t.Fatalf("policies = %#v", policies)
+	}
+}
+
+func TestServicePublishesCommittedMutationsWithoutPostWriteRefresh(t *testing.T) {
+	definition := Definition{Name: "headers", Actions: []Action{{Action: ActionRemove, Header: "X-Debug"}}}
+	tests := []struct {
+		name   string
+		seed   map[string]Definition
+		mutate func(context.Context, *Service) error
+		want   bool
+	}{
+		{
+			name: "upsert", seed: map[string]Definition{}, want: true,
+			mutate: func(ctx context.Context, service *Service) error { return service.Upsert(ctx, definition) },
+		},
+		{
+			name: "upsert many", seed: map[string]Definition{}, want: true,
+			mutate: func(ctx context.Context, service *Service) error {
+				return service.UpsertDefinitions(ctx, []Definition{definition})
+			},
+		},
+		{
+			name: "delete", seed: map[string]Definition{"headers": definition}, want: false,
+			mutate: func(ctx context.Context, service *Service) error { return service.Delete(ctx, "headers") },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &memoryStore{definitions: tt.seed}
+			service, err := NewService(store)
+			if err != nil {
+				t.Fatalf("NewService() error = %v", err)
+			}
+			if err := service.Refresh(t.Context()); err != nil {
+				t.Fatalf("initial Refresh() error = %v", err)
+			}
+			store.failListAfterMutation = true
+			if err := tt.mutate(t.Context(), service); err != nil {
+				t.Fatalf("mutation error = %v", err)
+			}
+			if _, ok := service.Get("headers"); ok != tt.want {
+				t.Fatalf("catalog contains headers = %v, want %v", ok, tt.want)
+			}
+			if err := service.Refresh(t.Context()); err == nil {
+				t.Fatal("Refresh() error = nil, want simulated list failure")
+			}
+			if _, ok := service.Get("headers"); ok != tt.want {
+				t.Fatalf("failed refresh changed catalog: contains headers = %v, want %v", ok, tt.want)
+			}
+		})
 	}
 }

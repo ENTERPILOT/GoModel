@@ -70,7 +70,9 @@ func (s *SQLiteStore) Upsert(ctx context.Context, definition Definition) error {
 	if definition.CreatedAt.IsZero() {
 		definition.CreatedAt = now
 	}
-	definition.UpdatedAt = now
+	if definition.UpdatedAt.IsZero() {
+		definition.UpdatedAt = now
+	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO header_policy_definitions (name, description, config, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -104,11 +106,14 @@ func (s *SQLiteStore) UpsertMany(ctx context.Context, definitions []Definition) 
 		if definition.CreatedAt.IsZero() {
 			definition.CreatedAt = now
 		}
+		if definition.UpdatedAt.IsZero() {
+			definition.UpdatedAt = now
+		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO header_policy_definitions (name, description, config, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET description = excluded.description, config = excluded.config, updated_at = excluded.updated_at
-		`, definition.Name, definition.Description, string(config), definition.CreatedAt.Unix(), now.Unix()); err != nil {
+		`, definition.Name, definition.Description, string(config), definition.CreatedAt.Unix(), definition.UpdatedAt.Unix()); err != nil {
 			return fmt.Errorf("upsert header policy %q: %w", definition.Name, err)
 		}
 	}

@@ -87,7 +87,7 @@ func (p *Policy) ResolveHeaderPlan(input core.HeaderPolicyInput) *core.HeaderPla
 		switch action.Action {
 		case ActionSet:
 			value := ""
-			sensitive := false
+			sensitive := core.ShouldRedactHeader(action.Header)
 			if action.Value != nil {
 				value = *action.Value
 			} else {
@@ -96,7 +96,7 @@ func (p *Policy) ResolveHeaderPlan(input core.HeaderPolicyInput) *core.HeaderPla
 					continue
 				}
 				value = values[0]
-				sensitive = core.ShouldRedactHeader(action.FromHeader)
+				sensitive = sensitive || core.ShouldRedactHeader(action.FromHeader)
 			}
 			if plan.Set == nil {
 				plan.Set = make(map[string]string)

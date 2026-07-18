@@ -18,6 +18,10 @@ type mongoDefinitionDocument struct {
 	UpdatedAt   time.Time           `bson:"updated_at"`
 }
 
+type mongoDefinitionIDFilter struct {
+	ID string `bson:"_id"`
+}
+
 // MongoDBStore persists header policies independently from guardrails.
 type MongoDBStore struct{ collection *mongo.Collection }
 
@@ -63,7 +67,7 @@ func (s *MongoDBStore) List(ctx context.Context) ([]Definition, error) {
 
 func (s *MongoDBStore) Get(ctx context.Context, name string) (*Definition, error) {
 	var doc mongoDefinitionDocument
-	if err := s.collection.FindOne(ctx, bson.M{"_id": normalizeDefinitionName(name)}).Decode(&doc); err != nil {
+	if err := s.collection.FindOne(ctx, mongoDefinitionIDFilter{ID: normalizeDefinitionName(name)}).Decode(&doc); err != nil {
 		return nil, storeNotFound(err, mongo.ErrNoDocuments)
 	}
 	definition, err := definitionFromMongo(doc)
@@ -82,15 +86,18 @@ func (s *MongoDBStore) Upsert(ctx context.Context, definition Definition) error 
 	if definition.CreatedAt.IsZero() {
 		definition.CreatedAt = now
 	}
+	if definition.UpdatedAt.IsZero() {
+		definition.UpdatedAt = now
+	}
 	update := bson.M{
 		"$set": bson.M{
 			"description": definition.Description,
 			"config":      persistedFromDefinition(definition),
-			"updated_at":  now,
+			"updated_at":  definition.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{"created_at": definition.CreatedAt},
 	}
-	if _, err := s.collection.UpdateOne(ctx, bson.M{"_id": definition.Name}, update, options.UpdateOne().SetUpsert(true)); err != nil {
+	if _, err := s.collection.UpdateOne(ctx, mongoDefinitionIDFilter{ID: definition.Name}, update, options.UpdateOne().SetUpsert(true)); err != nil {
 		return fmt.Errorf("upsert header policy: %w", err)
 	}
 	return nil
@@ -110,22 +117,36 @@ func (s *MongoDBStore) UpsertMany(ctx context.Context, definitions []Definition)
 		if definition.CreatedAt.IsZero() {
 			definition.CreatedAt = now
 		}
+		if definition.UpdatedAt.IsZero() {
+			definition.UpdatedAt = now
+		}
 		models = append(models, mongo.NewUpdateOneModel().
-			SetFilter(bson.M{"_id": definition.Name}).
+			SetFilter(mongoDefinitionIDFilter{ID: definition.Name}).
 			SetUpdate(bson.M{
-				"$set":         bson.M{"description": definition.Description, "config": persistedFromDefinition(definition), "updated_at": now},
+				"$set":         bson.M{"description": definition.Description, "config": persistedFromDefinition(definition), "updated_at": definition.UpdatedAt},
 				"$setOnInsert": bson.M{"created_at": definition.CreatedAt},
 			}).
 			SetUpsert(true))
 	}
-	if _, err := s.collection.BulkWrite(ctx, models, options.BulkWrite().SetOrdered(true)); err != nil {
+	session, err := s.collection.Database().Client().StartSession()
+	if err != nil {
+		return fmt.Errorf("start header policy upsert session: %w", err)
+	}
+	defer session.EndSession(ctx)
+	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
+		if _, err := s.collection.BulkWrite(sessionCtx, models, options.BulkWrite().SetOrdered(true)); err != nil {
+			return nil, fmt.Errorf("bulk upsert header policies: %w", err)
+		}
+		return nil, nil
+	})
+	if err != nil {
 		return fmt.Errorf("upsert header policies: %w", err)
 	}
 	return nil
 }
 
 func (s *MongoDBStore) Delete(ctx context.Context, name string) error {
-	result, err := s.collection.DeleteOne(ctx, bson.M{"_id": normalizeDefinitionName(name)})
+	result, err := s.collection.DeleteOne(ctx, mongoDefinitionIDFilter{ID: normalizeDefinitionName(name)})
 	if err != nil {
 		return fmt.Errorf("delete header policy: %w", err)
 	}

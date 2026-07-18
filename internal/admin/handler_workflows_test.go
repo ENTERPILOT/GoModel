@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -29,7 +30,10 @@ func WithGuardrailsRegistry(registry guardrails.Catalog) Option {
 }
 
 type workflowTestStore struct {
-	versions []workflows.Version
+	versions         []workflows.Version
+	listActiveCalls  int
+	failListActiveAt int
+	listActiveErr    error
 }
 
 type workflowErrorEnvelope struct {
@@ -42,6 +46,13 @@ type workflowErrorEnvelope struct {
 }
 
 func (s *workflowTestStore) ListActive(context.Context) ([]workflows.Version, error) {
+	s.listActiveCalls++
+	if s.failListActiveAt > 0 && s.listActiveCalls == s.failListActiveAt {
+		if s.listActiveErr != nil {
+			return nil, s.listActiveErr
+		}
+		return nil, errors.New("list active workflows failed")
+	}
 	result := make([]workflows.Version, 0, len(s.versions))
 	for _, version := range s.versions {
 		if version.Active {

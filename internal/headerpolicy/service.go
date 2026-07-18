@@ -85,7 +85,9 @@ func (s *Service) StartBackgroundRefresh(parent context.Context, interval time.D
 	return func() { once.Do(func() { cancel(); <-done }) }
 }
 
-// UpsertDefinitions seeds multiple definitions and refreshes the snapshot.
+// UpsertDefinitions validates and persists definitions, then publishes the
+// already-compiled prospective snapshot. A successful write is never followed
+// by a second fallible store read.
 func (s *Service) UpsertDefinitions(ctx context.Context, definitions []Definition) error {
 	if s == nil || len(definitions) == 0 {
 		return nil
@@ -103,10 +105,27 @@ func (s *Service) UpsertDefinitions(ctx context.Context, definitions []Definitio
 		seen[def.Name] = struct{}{}
 		normalized = append(normalized, def)
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	current, err := s.store.List(ctx)
+	if err != nil {
+		return serviceError("list header policies", err)
+	}
+	nextDefinitions := definitionsByName(current)
+	normalized = prepareUpserts(nextDefinitions, normalized, time.Now().UTC())
+	for _, definition := range normalized {
+		nextDefinitions[definition.Name] = definition
+	}
+	next, err := buildSnapshot(definitionsFromMap(nextDefinitions))
+	if err != nil {
+		return serviceError("load header policies", err)
+	}
 	if err := s.store.UpsertMany(ctx, normalized); err != nil {
 		return serviceError("upsert header policies", err)
 	}
-	return s.Refresh(ctx)
+	s.publish(next)
+	return nil
 }
 
 // Upsert validates and stores one definition.
@@ -115,10 +134,25 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	if err != nil {
 		return err
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	current, err := s.store.List(ctx)
+	if err != nil {
+		return serviceError("list header policies", err)
+	}
+	nextDefinitions := definitionsByName(current)
+	def = prepareUpserts(nextDefinitions, []Definition{def}, time.Now().UTC())[0]
+	nextDefinitions[def.Name] = def
+	next, err := buildSnapshot(definitionsFromMap(nextDefinitions))
+	if err != nil {
+		return serviceError("load header policies", err)
+	}
 	if err := s.store.Upsert(ctx, def); err != nil {
 		return serviceError("upsert header policy", err)
 	}
-	return s.Refresh(ctx)
+	s.publish(next)
+	return nil
 }
 
 // Delete removes one definition.
@@ -127,13 +161,27 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	if name == "" {
 		return newValidationError("header policy name is required", nil)
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	current, err := s.store.List(ctx)
+	if err != nil {
+		return serviceError("list header policies", err)
+	}
+	nextDefinitions := definitionsByName(current)
+	delete(nextDefinitions, name)
+	next, err := buildSnapshot(definitionsFromMap(nextDefinitions))
+	if err != nil {
+		return serviceError("load header policies", err)
+	}
 	if err := s.store.Delete(ctx, name); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return ErrNotFound
 		}
 		return serviceError("delete header policy", err)
 	}
-	return s.Refresh(ctx)
+	s.publish(next)
+	return nil
 }
 
 // List returns cloned definitions sorted by name.
@@ -203,6 +251,42 @@ func buildSnapshot(definitions []Definition) (snapshot, error) {
 	}
 	sort.Strings(next.order)
 	return next, nil
+}
+
+func (s *Service) publish(next snapshot) {
+	s.mu.Lock()
+	s.snapshot = next
+	s.mu.Unlock()
+}
+
+func definitionsByName(definitions []Definition) map[string]Definition {
+	result := make(map[string]Definition, len(definitions))
+	for _, definition := range definitions {
+		result[definition.Name] = cloneDefinition(definition)
+	}
+	return result
+}
+
+func definitionsFromMap(definitions map[string]Definition) []Definition {
+	result := make([]Definition, 0, len(definitions))
+	for _, definition := range definitions {
+		result = append(result, definition)
+	}
+	return result
+}
+
+func prepareUpserts(current map[string]Definition, definitions []Definition, now time.Time) []Definition {
+	result := make([]Definition, 0, len(definitions))
+	for _, definition := range definitions {
+		if existing, ok := current[definition.Name]; ok && !existing.CreatedAt.IsZero() {
+			definition.CreatedAt = existing.CreatedAt
+		} else {
+			definition.CreatedAt = now
+		}
+		definition.UpdatedAt = now
+		result = append(result, definition)
+	}
+	return result
 }
 
 func serviceError(message string, err error) error {

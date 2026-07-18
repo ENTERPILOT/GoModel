@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/headerpolicy"
+	"github.com/enterpilot/gomodel/internal/workflows"
 )
 
 type headerPolicyTestStore struct {
@@ -125,5 +128,73 @@ func TestGuardrailEndpointRejectsHeaderModificationType(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHeaderPolicyMutationRollsBackWhenWorkflowRefreshFails(t *testing.T) {
+	for _, operation := range []string{"upsert", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			policyStore := &headerPolicyTestStore{definitions: map[string]headerpolicy.Definition{
+				"pin-beta": {
+					Name:        "pin-beta",
+					Description: "original",
+					Actions:     []headerpolicy.Action{{Action: headerpolicy.ActionRemove, Header: "X-Debug"}},
+				},
+			}}
+			policies, err := headerpolicy.NewService(policyStore)
+			if err != nil {
+				t.Fatalf("headerpolicy.NewService() error = %v", err)
+			}
+			if err := policies.Refresh(t.Context()); err != nil {
+				t.Fatalf("policies.Refresh() error = %v", err)
+			}
+
+			workflowStore := &workflowTestStore{}
+			workflowService, err := workflows.NewService(
+				workflowStore,
+				workflows.NewCompilerWithCatalogs(nil, policies, core.DefaultWorkflowFeatures()),
+			)
+			if err != nil {
+				t.Fatalf("workflows.NewService() error = %v", err)
+			}
+			h := NewHandler(nil, nil, WithHeaderPolicyService(policies), WithWorkflows(workflowService))
+			e := echo.New()
+
+			var req *http.Request
+			var call func(*echo.Context) error
+			switch operation {
+			case "upsert":
+				workflowStore.failListActiveAt = 1
+				workflowStore.listActiveErr = errors.New("workflow store unavailable")
+				req = httptest.NewRequest(http.MethodPut, "/admin/header-policies", bytes.NewBufferString(`{
+					"name":"pin-beta","description":"replacement",
+					"actions":[{"action":"remove","header":"X-Trace"}]
+				}`))
+				call = h.UpsertHeaderPolicy
+			case "delete":
+				// Delete checks active references before refreshing the runtime snapshot.
+				workflowStore.failListActiveAt = 2
+				workflowStore.listActiveErr = errors.New("workflow store unavailable")
+				req = httptest.NewRequest(http.MethodDelete, "/admin/header-policies", bytes.NewBufferString(`{"name":"pin-beta"}`))
+				call = h.DeleteHeaderPolicy
+			}
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			if err := call(e.NewContext(req, rec)); err != nil {
+				t.Fatalf("handler error = %v", err)
+			}
+			if rec.Code < http.StatusInternalServerError {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+
+			stored, ok := policies.Get("pin-beta")
+			if !ok || stored.Description != "original" || len(stored.Actions) != 1 || stored.Actions[0].Header != "X-Debug" {
+				t.Fatalf("catalog was not rolled back: %#v, exists = %v", stored, ok)
+			}
+			persisted, ok := policyStore.definitions["pin-beta"]
+			if !ok || persisted.Description != "original" || len(persisted.Actions) != 1 || persisted.Actions[0].Header != "X-Debug" {
+				t.Fatalf("store was not rolled back: %#v, exists = %v", persisted, ok)
+			}
+		})
 	}
 }

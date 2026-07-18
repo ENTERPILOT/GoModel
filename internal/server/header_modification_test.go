@@ -148,8 +148,9 @@ func TestHeaderModificationMiddlewareRedactsValuesWhenHeaderLoggingEnabled(t *te
 		&stubHeaderPolicy{
 			name: "defense-in-depth",
 			mutation: &core.HeaderPlan{Set: map[string]string{
-				"X-Api-Key": "secret",
-				"X-Feature": "visible",
+				"X-Api-Key":       "secret",
+				"X-Feature":       "visible",
+				"X-Session-Token": "also-secret",
 			}},
 		},
 	}}
@@ -162,7 +163,7 @@ func TestHeaderModificationMiddlewareRedactsValuesWhenHeaderLoggingEnabled(t *te
 	if !ok {
 		t.Fatalf("set delta type = %T, want map[string]string", entry.Data.RequestRevisions[0].Headers.Set)
 	}
-	if values["X-Api-Key"] != "[REDACTED]" || values["X-Feature"] != "visible" {
+	if values["X-Api-Key"] != "[REDACTED]" || values["X-Session-Token"] != "[REDACTED]" || values["X-Feature"] != "visible" {
 		t.Fatalf("unexpected redacted values: %v", values)
 	}
 }

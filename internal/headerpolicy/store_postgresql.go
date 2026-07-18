@@ -71,11 +71,14 @@ func (s *PostgreSQLStore) Upsert(ctx context.Context, definition Definition) err
 	if definition.CreatedAt.IsZero() {
 		definition.CreatedAt = now
 	}
+	if definition.UpdatedAt.IsZero() {
+		definition.UpdatedAt = now
+	}
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO header_policy_definitions (name, description, config, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT(name) DO UPDATE SET description = excluded.description, config = excluded.config, updated_at = excluded.updated_at
-	`, definition.Name, definition.Description, config, definition.CreatedAt.Unix(), now.Unix())
+	`, definition.Name, definition.Description, config, definition.CreatedAt.Unix(), definition.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("upsert header policy: %w", err)
 	}
@@ -104,11 +107,14 @@ func (s *PostgreSQLStore) UpsertMany(ctx context.Context, definitions []Definiti
 		if definition.CreatedAt.IsZero() {
 			definition.CreatedAt = now
 		}
+		if definition.UpdatedAt.IsZero() {
+			definition.UpdatedAt = now
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO header_policy_definitions (name, description, config, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT(name) DO UPDATE SET description = excluded.description, config = excluded.config, updated_at = excluded.updated_at
-		`, definition.Name, definition.Description, config, definition.CreatedAt.Unix(), now.Unix()); err != nil {
+		`, definition.Name, definition.Description, config, definition.CreatedAt.Unix(), definition.UpdatedAt.Unix()); err != nil {
 			return fmt.Errorf("upsert header policy %q: %w", definition.Name, err)
 		}
 	}

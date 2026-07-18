@@ -168,6 +168,16 @@
                 };
             },
 
+            async headerPolicyResponseMessage(res, fallback) {
+                try {
+                    const payload = await res.json();
+                    if (payload && payload.error && payload.error.message) return payload.error.message;
+                } catch (_) {
+                    // Ignore invalid or empty responses and return the fallback.
+                }
+                return fallback;
+            },
+
             async fetchHeaderPolicies() {
                 this.headerPoliciesLoading = true;
                 this.headerPolicyError = '';
@@ -216,7 +226,7 @@
                     const handled = this.handleFetchResponse(res, 'save header policy', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) return;
                     if (!handled) {
-                        this.headerPolicyError = 'Failed to save header policy.';
+                        this.headerPolicyError = await this.headerPolicyResponseMessage(res, 'Failed to save header policy.');
                         return;
                     }
                     await this.fetchHeaderPolicies();
@@ -243,7 +253,7 @@
                     const handled = this.handleFetchResponse(res, 'delete header policy', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) return;
                     if (!handled) {
-                        this.headerPolicyError = 'Failed to delete header policy.';
+                        this.headerPolicyError = await this.headerPolicyResponseMessage(res, 'Failed to delete header policy.');
                         return;
                     }
                     await this.fetchHeaderPolicies();

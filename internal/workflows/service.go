@@ -566,8 +566,9 @@ func compiledWorkflowForVersion(compiled *CompiledWorkflow, version Version) *Co
 		return nil
 	}
 	next := &CompiledWorkflow{
-		Version:  version,
-		Pipeline: compiled.Pipeline,
+		Version:        version,
+		Pipeline:       compiled.Pipeline,
+		HeaderPolicies: append([]core.HeaderPolicy(nil), compiled.HeaderPolicies...),
 	}
 	if compiled.Policy != nil {
 		policy := *compiled.Policy

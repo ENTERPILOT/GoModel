@@ -4,12 +4,12 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function createModule(overrides = {}) {
+function createModule(overrides = {}, globals = {}) {
     const source = fs.readFileSync(path.join(__dirname, 'header-policies.js'), 'utf8');
     const context = {
         window: { confirm: () => true },
         console,
-        fetch: async () => ({ status: 200, json: async () => [] })
+        fetch: globals.fetch || (async () => ({ status: 200, json: async () => [] }))
     };
     vm.runInNewContext(source, context);
     return {
@@ -41,6 +41,27 @@ test('headerPolicyPayload emits the dedicated API shape and preserves empty lite
         actions: [{ action: 'set', header: 'X-Empty-Upstream', value: '' }]
     }));
 });
+
+for (const operation of ['save', 'delete']) {
+    test(`${operation} surfaces the API validation message`, async () => {
+        const response = {
+            status: 400,
+            statusText: 'Bad Request',
+            json: async () => ({ error: { message: 'header Content-Type cannot be used in header policies' } })
+        };
+        const module = createModule({}, { fetch: async () => response });
+        if (operation === 'save') {
+            module.headerPolicyForm = {
+                name: 'invalid', description: '', methods: [], paths: '', when: [],
+                actions: [{ action: 'set', header: 'Content-Type', value: 'text/plain' }]
+            };
+            await module.submitHeaderPolicyForm();
+        } else {
+            await module.deleteHeaderPolicy({ name: 'in-use' });
+        }
+        assert.equal(module.headerPolicyError, 'header Content-Type cannot be used in header policies');
+    });
+}
 
 test('openHeaderPolicyEdit hydrates the flattened definition shape', () => {
     const module = createModule();

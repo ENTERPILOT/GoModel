@@ -3,10 +3,12 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -157,7 +159,7 @@ func (h *Handler) DeactivateWorkflow(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *Handler) refreshWorkflowsAfterGuardrailChange(ctx context.Context) error {
+func (h *Handler) refreshWorkflows(ctx context.Context) error {
 	if h.workflows == nil {
 		return nil
 	}
@@ -165,6 +167,19 @@ func (h *Handler) refreshWorkflowsAfterGuardrailChange(ctx context.Context) erro
 		return err
 	}
 	return nil
+}
+
+func (h *Handler) refreshWorkflowsOrRollback(ctx context.Context, rollback func(context.Context) error) error {
+	refreshErr := h.refreshWorkflows(ctx)
+	if refreshErr == nil || rollback == nil {
+		return refreshErr
+	}
+	rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if rollbackErr := rollback(rollbackCtx); rollbackErr != nil {
+		return errors.Join(refreshErr, fmt.Errorf("roll back policy mutation: %w", rollbackErr))
+	}
+	return refreshErr
 }
 
 func (h *Handler) activeWorkflowGuardrailReferences(ctx context.Context, name string) ([]string, error) {
