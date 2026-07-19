@@ -1,4 +1,4 @@
-.PHONY: all build run clean tidy test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
+.PHONY: all build run demo clean tidy test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
 
 all: build
 
@@ -30,6 +30,10 @@ build:
 run:
 	LOG_LEVEL=$(LOG_LEVEL) SWAGGER_ENABLED=$(SWAGGER_ENABLED) go run -tags=swagger ./cmd/gomodel
 
+# Seed the local SQLite database and start GoModel with a populated dashboard.
+demo: seed-demo-data
+	$(MAKE) run
+
 # Clean build artifacts
 clean:
 	rm -rf bin/
@@ -46,7 +50,7 @@ infra:
 image:
 	docker compose --profile app up -d
 
-# Seed rolling demo usage/audit data into SQLite.
+# Seed rolling demo telemetry and dashboard configuration into SQLite.
 # Usage: SQLITE_PATH=data/gomodel.db make seed-demo-data
 seed-demo-data:
 	bash tools/seed-demo-data.sh

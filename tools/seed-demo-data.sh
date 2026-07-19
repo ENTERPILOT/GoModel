@@ -6,9 +6,11 @@ days="${DEMO_DAYS:-90}"
 end_date="${DEMO_END_DATE:-}"
 avg_requests="${DEMO_AVG_REQUESTS_PER_DAY:-850}"
 max_requests="${DEMO_MAX_REQUESTS_PER_DAY:-1600}"
+token_scale="${DEMO_TOKEN_SCALE:-3}"
 exact_cache_pct="${DEMO_EXACT_CACHE_PCT:-12}"
 semantic_cache_pct="${DEMO_SEMANTIC_CACHE_PCT:-7}"
 prompt_cache_pct="${DEMO_PROMPT_CACHE_PCT:-28}"
+rewrite_pct="${DEMO_REWRITE_PCT:-18}"
 prefix="${DEMO_SEED_PREFIX:-demo-generated}"
 
 usage() {
@@ -21,10 +23,12 @@ Environment:
   DEMO_END_DATE                   End date YYYY-MM-DD (default: today UTC)
   DEMO_AVG_REQUESTS_PER_DAY       Average daily request count (default: 850)
   DEMO_MAX_REQUESTS_PER_DAY       Upper slot cap per day (default: 1600)
+  DEMO_TOKEN_SCALE                Token volume multiplier (default: 3)
   DEMO_EXACT_CACHE_PCT            Local exact cache hit percentage (default: 12)
   DEMO_SEMANTIC_CACHE_PCT         Local semantic cache hit percentage (default: 7)
   DEMO_PROMPT_CACHE_PCT           Provider prompt-cache percentage (default: 28)
-  DEMO_SEED_PREFIX                Row ID/budget source prefix; reruns replace this prefix only (default: demo-generated)
+  DEMO_REWRITE_PCT                Eligible text requests with rewrite savings (default: 18)
+  DEMO_SEED_PREFIX                Generated row/source prefix; reruns replace this prefix only (default: demo-generated)
 EOF
 }
 
@@ -45,9 +49,11 @@ require_int() {
 require_int DEMO_DAYS "$days"
 require_int DEMO_AVG_REQUESTS_PER_DAY "$avg_requests"
 require_int DEMO_MAX_REQUESTS_PER_DAY "$max_requests"
+require_int DEMO_TOKEN_SCALE "$token_scale"
 require_int DEMO_EXACT_CACHE_PCT "$exact_cache_pct"
 require_int DEMO_SEMANTIC_CACHE_PCT "$semantic_cache_pct"
 require_int DEMO_PROMPT_CACHE_PCT "$prompt_cache_pct"
+require_int DEMO_REWRITE_PCT "$rewrite_pct"
 
 if (( days < 1 )); then
   echo "DEMO_DAYS must be at least 1" >&2
@@ -57,12 +63,20 @@ if (( max_requests < avg_requests )); then
   echo "DEMO_MAX_REQUESTS_PER_DAY must be >= DEMO_AVG_REQUESTS_PER_DAY" >&2
   exit 2
 fi
+if (( token_scale < 1 || token_scale > 10 )); then
+  echo "DEMO_TOKEN_SCALE must be between 1 and 10" >&2
+  exit 2
+fi
 if (( exact_cache_pct + semantic_cache_pct > 65 )); then
   echo "Exact + semantic cache percentages should stay realistic and <= 65" >&2
   exit 2
 fi
 if (( prompt_cache_pct > 85 )); then
   echo "DEMO_PROMPT_CACHE_PCT must be <= 85" >&2
+  exit 2
+fi
+if (( rewrite_pct > 60 )); then
+  echo "DEMO_REWRITE_PCT must be <= 60" >&2
   exit 2
 fi
 if [[ -n "$end_date" && ! "$end_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
@@ -83,9 +97,45 @@ mkdir -p "$(dirname "$db_path")"
 
 sqlite3 "$db_path" "PRAGMA journal_mode = WAL;" >/dev/null
 
-# Databases created before the labelling feature lack the labels column; add
-# it when missing (the error on fresh or already-migrated databases is benign).
+# Add columns introduced after the original demo seeder. Errors on fresh or
+# already-migrated databases are benign; the schema below handles fresh files.
 sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN labels JSON;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN rewrite_cost_saved REAL;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE mcp_servers ADD COLUMN display_name TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
+
+# make demo seeds before app startup, so migrate the rate-limit table here
+# when the database predates scoped user-path/provider/model rules.
+has_rate_limit_subject="$(sqlite3 "$db_path" "SELECT count(*) FROM pragma_table_info('rate_limits') WHERE name = 'subject';")"
+has_rate_limit_user_path="$(sqlite3 "$db_path" "SELECT count(*) FROM pragma_table_info('rate_limits') WHERE name = 'user_path';")"
+if [[ "$has_rate_limit_subject" == "0" && "$has_rate_limit_user_path" == "1" ]]; then
+  sqlite3 "$db_path" <<'SQL'
+.bail on
+.timeout 10000
+BEGIN IMMEDIATE;
+ALTER TABLE rate_limits RENAME TO rate_limits_pre_scope;
+CREATE TABLE rate_limits (
+  scope TEXT NOT NULL DEFAULT 'user_path',
+  subject TEXT NOT NULL,
+  period_seconds INTEGER NOT NULL,
+  max_requests INTEGER,
+  max_tokens INTEGER,
+  source TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (scope, subject, period_seconds)
+);
+INSERT INTO rate_limits (
+  scope, subject, period_seconds, max_requests, max_tokens, source, created_at, updated_at
+)
+SELECT
+  'user_path', user_path, period_seconds, max_requests, max_tokens, source, created_at, updated_at
+FROM rate_limits_pre_scope;
+DROP TABLE rate_limits_pre_scope;
+DROP INDEX IF EXISTS idx_rate_limits_user_path;
+COMMIT;
+SQL
+fi
 
 sqlite3 "$db_path" <<SQL
 .bail on
@@ -107,6 +157,8 @@ CREATE TABLE IF NOT EXISTS usage (
   input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
   total_tokens INTEGER NOT NULL DEFAULT 0,
+  rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0,
+  rewrite_cost_saved REAL,
   raw_data JSON,
   input_cost REAL,
   output_cost REAL,
@@ -156,6 +208,34 @@ CREATE TABLE IF NOT EXISTS budget_settings (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS rate_limits (
+  scope TEXT NOT NULL DEFAULT 'user_path',
+  subject TEXT NOT NULL,
+  period_seconds INTEGER NOT NULL,
+  max_requests INTEGER,
+  max_tokens INTEGER,
+  source TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (scope, subject, period_seconds)
+);
+
+CREATE TABLE IF NOT EXISTS mcp_servers (
+  name TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  transport TEXT NOT NULL DEFAULT 'http',
+  headers TEXT NOT NULL DEFAULT '{}',
+  description TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  allowed_tools TEXT NOT NULL DEFAULT '[]',
+  disallowed_tools TEXT NOT NULL DEFAULT '[]',
+  user_paths TEXT NOT NULL DEFAULT '[]',
+  tool_timeout_seconds INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage(timestamp);
 CREATE INDEX IF NOT EXISTS idx_usage_request_id ON usage(request_id);
 CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage(provider);
@@ -169,12 +249,16 @@ CREATE INDEX IF NOT EXISTS idx_audit_user_path ON audit_logs(user_path);
 CREATE INDEX IF NOT EXISTS idx_audit_cache_type ON audit_logs(cache_type);
 CREATE INDEX IF NOT EXISTS idx_budgets_user_path ON budgets(user_path);
 CREATE INDEX IF NOT EXISTS idx_budgets_period_seconds ON budgets(period_seconds);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_subject ON rate_limits(scope, subject);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_updated_at ON mcp_servers(updated_at DESC);
 
 BEGIN IMMEDIATE;
 
 DELETE FROM audit_logs WHERE id GLOB '${prefix}-*';
 DELETE FROM usage WHERE id GLOB '${prefix}-*';
 DELETE FROM budgets WHERE source = '${prefix}';
+DELETE FROM rate_limits WHERE source = '${prefix}';
 
 DROP TABLE IF EXISTS temp.demo_days;
 CREATE TEMP TABLE demo_days AS
@@ -261,6 +345,7 @@ SELECT
   abs(random()) % 10000 AS template_bucket,
   abs(random()) % 10000 AS cache_bucket,
   abs(random()) % 10000 AS prompt_bucket,
+  abs(random()) % 10000 AS rewrite_bucket,
   abs(random()) % 10000 AS label_bucket,
   abs(random()) % 86400 AS second_of_day,
   abs(random()) AS token_noise
@@ -293,8 +378,8 @@ WITH chosen AS (
 tokens AS (
   SELECT
     *,
-    input_min + (token_noise % input_span) AS input_tokens,
-    output_min + ((token_noise / 97) % output_span) AS output_tokens
+    (input_min + (token_noise % input_span)) * ${token_scale} AS input_tokens,
+    (output_min + ((token_noise / 97) % output_span)) * ${token_scale} AS output_tokens
   FROM chosen
 ),
 cache_decisions AS (
@@ -314,6 +399,18 @@ cache_decisions AS (
     END AS prompt_cache_hit
   FROM tokens
 ),
+rewrite_decisions AS (
+  SELECT
+    *,
+    CASE
+      WHEN cache_type IS NULL
+        AND label IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian', 'responses', 'messages')
+        AND rewrite_bucket < (${rewrite_pct} * 100)
+      THEN 1
+      ELSE 0
+    END AS rewrite_hit
+  FROM cache_decisions
+),
 prompt_parts AS (
   SELECT
     *,
@@ -325,11 +422,15 @@ prompt_parts AS (
       WHEN prompt_cache_hit = 1 AND provider = 'anthropic' THEN CAST(input_tokens * (8 + (prompt_bucket % 13)) / 100 AS INTEGER)
       ELSE 0
     END AS prompt_cache_write_tokens
-  FROM cache_decisions
+  FROM rewrite_decisions
 )
 SELECT
   *,
   input_tokens + output_tokens AS total_tokens,
+  CASE
+    WHEN rewrite_hit = 1 THEN CAST(input_tokens * (8 + ((token_noise / 17) % 23)) / 100 AS INTEGER)
+    ELSE 0
+  END AS rewrite_tokens_saved,
   strftime('%Y-%m-%dT%H:%M:%fZ', day || ' 00:00:00', '+' || second_of_day || ' seconds') AS timestamp,
   '${prefix}-usage-' || day_idx || '-' || slot_idx AS usage_id,
   '${prefix}-audit-' || day_idx || '-' || slot_idx AS audit_id,
@@ -340,7 +441,8 @@ FROM prompt_parts;
 INSERT INTO usage (
   id, request_id, provider_id, timestamp, model, provider, provider_name,
   endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens,
-  raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat
+  rewrite_tokens_saved, rewrite_cost_saved, raw_data,
+  input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat
 )
 SELECT
   usage_id,
@@ -366,7 +468,12 @@ SELECT
   input_tokens,
   output_tokens,
   total_tokens,
+  rewrite_tokens_saved,
   CASE
+    WHEN rewrite_tokens_saved > 0 THEN round(rewrite_tokens_saved * input_price / 1000000.0, 8)
+    ELSE NULL
+  END AS rewrite_cost_saved,
+  json_patch(CASE
     WHEN cache_type = 'exact' THEN json_object(
       'demo_seed', 1,
       'cache_story', 'exact local response cache hit',
@@ -395,7 +502,14 @@ SELECT
       'prompt_cached_tokens', prompt_cached_tokens
     )
     ELSE json_object('demo_seed', 1, 'cache_story', 'uncached provider request')
-  END AS raw_data,
+  END, CASE
+    WHEN rewrite_hit = 1 THEN json_object(
+      'rewrite_story', 'prompt context compressed before provider routing',
+      'rewrite_tokens_saved', rewrite_tokens_saved,
+      'rewriter', 'demo-context-compression'
+    )
+    ELSE json_object()
+  END) AS raw_data,
   round((CASE
     WHEN cache_type IS NOT NULL THEN 0
     WHEN prompt_cache_hit = 1 THEN ((input_tokens - prompt_cached_tokens) * input_price + prompt_cached_tokens * input_price * 0.25) / 1000000.0
@@ -479,6 +593,26 @@ SELECT
       WHEN prompt_cache_hit = 1 THEN 'Provider prompt cache telemetry'
       ELSE 'Uncached provider request'
     END,
+    'request_revisions', json(CASE
+      WHEN rewrite_hit = 1 THEN json_array(json_object(
+        'seq', 1,
+        'rewriter', 'demo-context-compression',
+        'bytes_before', 12000 + (token_noise % 28000),
+        'bytes_after', CAST((12000 + (token_noise % 28000)) * (62 + (rewrite_bucket % 24)) / 100 AS INTEGER),
+        'tokens_saved', rewrite_tokens_saved,
+        'body', json_object(
+          'model', provider_name || '/' || model,
+          'input', 'Compressed context for ' || user_path || ': retain gateway totals, cache behavior, budget risk, and action items.',
+          'metadata', json_object('demo', json('true'), 'rewritten', json('true'))
+        ),
+        'detail', json_object(
+          'strategy', 'context-compression',
+          'tokens_saved_estimate', rewrite_tokens_saved,
+          'preserved_sections', json_array('usage', 'cache', 'budget', 'actions')
+        )
+      ))
+      ELSE 'null'
+    END),
     'request_body', json(CASE
       WHEN label IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian') THEN json_object(
         'model', provider_name || '/' || model,
@@ -716,6 +850,88 @@ ON CONFLICT(key) DO UPDATE SET
   value = excluded.value,
   updated_at = excluded.updated_at;
 
+DROP TABLE IF EXISTS temp.demo_rate_limits;
+CREATE TEMP TABLE demo_rate_limits(
+  scope TEXT,
+  subject TEXT,
+  period_seconds INTEGER,
+  max_requests INTEGER,
+  max_tokens INTEGER
+);
+INSERT INTO demo_rate_limits VALUES
+  ('user_path', '/agents/team1', 60, 900, 12000000),
+  ('user_path', '/agents/team1', 0, 24, NULL),
+  ('user_path', '/agents/team2', 3600, 8000, 80000000),
+  ('user_path', '/engineering/ai', 86400, 30000, 420000000),
+  ('user_path', '/engineering/ai/bot', 0, 48, NULL),
+  ('user_path', '/sales', 60, 600, 5000000),
+  ('provider', 'openai', 60, 1500, 30000000),
+  ('provider', 'openai', 0, 80, NULL),
+  ('provider', 'groq', 60, 2400, 40000000),
+  ('provider', 'anthropic', 3600, 7500, 120000000),
+  ('provider', 'gemini', 86400, 40000, 600000000),
+  ('provider', 'bailian', 60, 1800, 25000000),
+  ('model', 'openai/gpt-5-nano-2025-08-07', 60, 800, 16000000),
+  ('model', 'anthropic/claude-haiku-4-5-20251001', 3600, 5000, 90000000),
+  ('model', 'qwen-flash', 60, 1200, 18000000);
+
+-- Do not take ownership of a rule the user already created for the same key.
+INSERT OR IGNORE INTO rate_limits (
+  scope, subject, period_seconds, max_requests, max_tokens, source, created_at, updated_at
+)
+SELECT
+  scope,
+  subject,
+  period_seconds,
+  max_requests,
+  max_tokens,
+  '${prefix}',
+  strftime('%s', 'now'),
+  strftime('%s', 'now')
+FROM demo_rate_limits;
+
+-- Disabled examples populate MCP management without making outbound calls.
+DELETE FROM mcp_servers
+WHERE name IN (
+  'demo-' || substr(lower(replace('${prefix}', '.', '-')), 1, 44) || '-docs',
+  'demo-' || substr(lower(replace('${prefix}', '.', '-')), 1, 44) || '-crm'
+);
+INSERT INTO mcp_servers (
+  name, display_name, url, transport, headers, description, enabled,
+  allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at
+)
+VALUES
+  (
+    'demo-' || substr(lower(replace('${prefix}', '.', '-')), 1, 44) || '-docs',
+    'Engineering Docs',
+    'https://mcp.demo.invalid/docs',
+    'http',
+    '{}',
+    'Disabled demo server scoped to engineering documentation workflows.',
+    0,
+    json_array('search_docs', 'read_page'),
+    '[]',
+    json_array('/engineering'),
+    20,
+    strftime('%s', 'now'),
+    strftime('%s', 'now')
+  ),
+  (
+    'demo-' || substr(lower(replace('${prefix}', '.', '-')), 1, 44) || '-crm',
+    'Sales CRM',
+    'https://mcp.demo.invalid/crm',
+    'sse',
+    '{}',
+    'Disabled demo server showing user-path and tool allow-list controls.',
+    0,
+    json_array('search_accounts', 'list_opportunities'),
+    json_array('delete_account'),
+    json_array('/sales'),
+    15,
+    strftime('%s', 'now'),
+    strftime('%s', 'now')
+  );
+
 COMMIT;
 
 SELECT 'seed_prefix', '${prefix}';
@@ -723,6 +939,9 @@ SELECT 'date_range', min(date(REPLACE(timestamp, 'T', ' '))), max(date(REPLACE(t
 SELECT 'usage_rows', count(*), coalesce(sum(total_tokens), 0) FROM usage WHERE id GLOB '${prefix}-*';
 SELECT 'audit_rows', count(*) FROM audit_logs WHERE id GLOB '${prefix}-*';
 SELECT 'budget_rows', count(*) FROM budgets WHERE source = '${prefix}';
+SELECT 'rate_limit_rows', count(*) FROM rate_limits WHERE source = '${prefix}';
+SELECT 'mcp_server_rows', count(*) FROM mcp_servers
+WHERE name GLOB 'demo-' || substr(lower(replace('${prefix}', '.', '-')), 1, 44) || '-*';
 SELECT 'cache_mix', coalesce(cache_type, CASE
   WHEN coalesce(json_extract(raw_data, '$.prompt_cached_tokens'), 0) > 0
     OR coalesce(json_extract(raw_data, '$.cached_tokens'), 0) > 0
@@ -735,9 +954,19 @@ WHERE id GLOB '${prefix}-*'
 GROUP BY 2
 ORDER BY 2;
 SELECT 'user_paths', count(DISTINCT user_path) FROM usage WHERE id GLOB '${prefix}-*';
+SELECT 'rewritten_requests', count(*), coalesce(sum(rewrite_tokens_saved), 0), round(coalesce(sum(rewrite_cost_saved), 0), 4)
+FROM usage
+WHERE id GLOB '${prefix}-*' AND rewrite_tokens_saved > 0;
 SELECT 'daily_requests_min_max', min(rows), max(rows), round(avg(rows), 1)
 FROM (
   SELECT date(REPLACE(timestamp, 'T', ' ')) AS day, count(*) AS rows
+  FROM usage
+  WHERE id GLOB '${prefix}-*'
+  GROUP BY day
+);
+SELECT 'daily_tokens_min_max', min(tokens), max(tokens), round(avg(tokens), 0)
+FROM (
+  SELECT date(REPLACE(timestamp, 'T', ' ')) AS day, sum(total_tokens) AS tokens
   FROM usage
   WHERE id GLOB '${prefix}-*'
   GROUP BY day
