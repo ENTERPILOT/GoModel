@@ -40,9 +40,11 @@ Makefile
 # Docker & Kubernetes
 # ===================
 Dockerfile
+Dockerfile.dev
 .dockerignore
 docker-compose.yaml
-helm/
+deploy/
+skaffold.yaml
 prometheus.yml
 
 # ===================

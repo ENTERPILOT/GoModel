@@ -1,0 +1,23 @@
+apiVersion: v2
+name: gomodel
+description: A high-performance, lightweight AI gateway that routes requests to multiple AI model providers through an OpenAI-compatible API.
+type: application
+# Chart version is independent of the application version and follows SemVer.
+version: 0.1.0
+# appVersion tracks the GoModel application release this chart was tested against.
+appVersion: "latest"
+home: https://github.com/ENTERPILOT/GoModel
+sources:
+  - https://github.com/ENTERPILOT/GoModel
+keywords:
+  - ai
+  - gateway
+  - llm
+  - openai
+  - proxy
+maintainers:
+  - name: GoModel Maintainers
+    url: https://github.com/ENTERPILOT/GoModel
+icon: https://raw.githubusercontent.com/ENTERPILOT/GoModel/main/docs/logo.png
+annotations:
+  category: AIMachineLearning

@@ -1,0 +1,253 @@
+# Default values for the GoModel Helm chart.
+# This is a YAML-formatted file. Values are documented for helm-docs.
+
+# -- Number of GoModel replicas. Must be 1 when `persistence.enabled` is true
+# (SQLite storage cannot be shared across pods).
+replicaCount: 1
+
+image:
+  # -- Container image repository. Official image is published to Docker Hub.
+  repository: enterpilot/gomodel
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+  # -- Image tag. Defaults to the chart's appVersion when empty.
+  tag: ""
+
+# -- Image pull secrets for private registries.
+imagePullSecrets: []
+# -- Override the chart name.
+nameOverride: ""
+# -- Override the fully qualified app name.
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a dedicated ServiceAccount.
+  create: true
+  # -- Automount the ServiceAccount token. Disabled by default (least privilege).
+  automount: false
+  # -- Annotations to add to the ServiceAccount.
+  annotations: {}
+  # -- ServiceAccount name. Generated when empty and create is true.
+  name: ""
+
+# -- Additional annotations for the pod.
+podAnnotations: {}
+# -- Additional labels for the pod.
+podLabels: {}
+
+# Pod-level security context. Matches the distroless nonroot image (UID/GID 65532).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context. The image supports a read-only root filesystem;
+# writable paths (/app/.cache, /app/data) are provided via mounted volumes.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  # -- Kubernetes Service type.
+  type: ClusterIP
+  # -- Service port.
+  port: 8080
+  # -- Fixed node port (30000-32767). Only used when `type` is `NodePort`; leave
+  # null to let Kubernetes allocate one. Handy for local kind port mappings.
+  nodePort: null
+  # -- Extra annotations for the Service.
+  annotations: {}
+
+ingress:
+  # -- Enable an Ingress resource.
+  enabled: false
+  # -- IngressClass name.
+  className: ""
+  # -- Ingress annotations.
+  annotations: {}
+  hosts:
+    - host: gomodel.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- TLS configuration.
+  tls: []
+  #  - secretName: gomodel-tls
+  #    hosts:
+  #      - gomodel.local
+
+# -- Resource requests and limits.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# Liveness probe hits GET /health -> 200 {"status":"ok"}.
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 15
+  timeoutSeconds: 3
+  failureThreshold: 3
+  successThreshold: 1
+
+# Readiness probe hits GET /health/ready. Returns 503 (not_ready) when primary
+# storage is unreachable, which removes the pod from Service endpoints.
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+  successThreshold: 1
+
+# Startup probe protects slow first boots without loosening the liveness probe.
+startupProbe:
+  enabled: true
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 30
+  successThreshold: 1
+
+autoscaling:
+  # -- Enable a HorizontalPodAutoscaler. Ignored when `persistence.enabled` is true.
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  # -- Target memory utilization percentage. Set to null to disable.
+  targetMemoryUtilizationPercentage: null
+
+podDisruptionBudget:
+  # -- Enable a PodDisruptionBudget.
+  enabled: false
+  # -- Minimum available pods. Mutually exclusive with maxUnavailable.
+  minAvailable: 1
+  # -- Maximum unavailable pods.
+  maxUnavailable: null
+
+# Persistence enables SQLite storage mode. When true, the workload is deployed as a
+# StatefulSet with a PersistentVolumeClaim mounted at /app/data, and replicaCount is
+# forced to 1 (SQLite cannot be shared). Leave disabled and use external Postgres/
+# MongoDB + Redis for a horizontally scalable, stateless deployment.
+persistence:
+  # -- Enable persistent SQLite storage (StatefulSet mode).
+  enabled: false
+  # -- Existing PVC name to use instead of a volumeClaimTemplate.
+  existingClaim: ""
+  # -- StorageClass for the volume. Empty uses the cluster default.
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  # -- Volume size.
+  size: 1Gi
+  # -- Annotations for the PVC.
+  annotations: {}
+
+metrics:
+  # -- Enable Prometheus metrics (sets METRICS_ENABLED=true and exposes /metrics).
+  enabled: false
+  serviceMonitor:
+    # -- Create a Prometheus Operator ServiceMonitor. Implies metrics.enabled.
+    enabled: false
+    # -- Namespace for the ServiceMonitor. Defaults to the release namespace.
+    namespace: ""
+    # -- Scrape interval.
+    interval: 30s
+    # -- Scrape timeout.
+    scrapeTimeout: 10s
+    # -- Extra labels for the ServiceMonitor (e.g. to match a Prometheus selector).
+    labels: {}
+    # -- Metric relabelings.
+    metricRelabelings: []
+    # -- Relabelings.
+    relabelings: []
+
+networkPolicy:
+  # -- Create a NetworkPolicy restricting ingress/egress.
+  enabled: false
+  # -- Extra ingress rules appended to the default (allow to the HTTP port).
+  extraIngress: []
+  # -- Extra egress rules appended to the defaults (DNS + HTTPS to providers).
+  extraEgress: []
+
+# -- The GoModel config.yaml rendered into a ConfigMap and mounted read-only at
+# /app/config/config.yaml. Supports ${ENV_VAR} expansion, so secret values should be
+# referenced by name here and supplied via `secrets` / `envFrom`. Leave empty to rely
+# purely on environment variables and built-in defaults.
+config: {}
+#  server:
+#    port: "8080"
+#  storage:
+#    type: postgresql
+#    postgresql:
+#      url: ${POSTGRES_URL}
+#  cache:
+#    model:
+#      redis:
+#        url: ${REDIS_URL}
+
+secrets:
+  # -- Use an existing Secret (referenced via envFrom) instead of a chart-managed one.
+  # Recommended for production / external secret managers.
+  existingSecret: ""
+  # -- GoModel master key (GOMODEL_MASTER_KEY). Strongly recommended; without it the
+  # gateway runs in UNSAFE mode.
+  masterKey: ""
+  # -- Provider API keys and connection URLs, rendered into the chart Secret and
+  # injected via envFrom. Keys are used verbatim as env var names.
+  # Example:
+  #   OPENAI_API_KEY: sk-...
+  #   ANTHROPIC_API_KEY: sk-ant-...
+  #   POSTGRES_URL: postgres://user:pass@host:5432/gomodel
+  #   REDIS_URL: redis://redis:6379
+  data: {}
+
+# -- Non-secret environment variables (env vars always win over config.yaml).
+env:
+  # PORT: "8080"
+  # LOG_LEVEL: info
+  # LOG_FORMAT: json
+
+# -- Extra environment variables using full valueFrom syntax.
+extraEnv: []
+#  - name: SOME_KEY
+#    valueFrom:
+#      secretKeyRef:
+#        name: my-secret
+#        key: some-key
+
+# -- Extra volumes.
+extraVolumes: []
+# -- Extra volume mounts.
+extraVolumeMounts: []
+
+# -- Deployment update strategy (stateless mode). Zero-downtime by default.
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+# -- Node selector.
+nodeSelector: {}
+# -- Tolerations.
+tolerations: []
+# -- Affinity rules.
+affinity: {}
+# -- Topology spread constraints.
+topologySpreadConstraints: []
+# -- Grace period for pod termination.
+terminationGracePeriodSeconds: 30

@@ -1,0 +1,12 @@
+# Patterns to ignore when building packages.
+.DS_Store
+.git/
+.gitignore
+*.tmpl
+*.tgz
+.helmignore
+ci/
+README.md.gotmpl
+# CI/development artifacts
+.github/
+tests/

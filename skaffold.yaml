@@ -1,0 +1,46 @@
+# Skaffold pipeline for local Kubernetes development on kind.
+#
+#   make kind-up      # one-time: create the kind cluster + deploy dependencies
+#   make dev-k8s      # build + deploy + watch + port-forward (skaffold dev)
+#   make deploy-k8s   # one-shot build + deploy (skaffold run)
+#   make undeploy-k8s # remove the release (skaffold delete)
+#
+# The in-cluster dependencies (Redis, PostgreSQL, MongoDB) are deployed by
+# `make kind-up` (deploy/local/deps.yaml), so they persist across app redeploys.
+# The gateway is reachable at http://localhost:8080 (Skaffold port-forward and,
+# as a fallback, the kind NodePort mapping 30080 -> 8080).
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: gomodel
+
+build:
+  # Build with the local Docker daemon and load the image into kind.
+  local:
+    push: false
+    useBuildkit: true
+  artifacts:
+    - image: gomodel
+      docker:
+        dockerfile: Dockerfile.dev
+
+manifests:
+  helm:
+    releases:
+      - name: gomodel
+        chartPath: deploy/helm/gomodel
+        valuesFiles:
+          - deploy/local/values.yaml
+        # Rewrite image.repository/tag to the Skaffold-built, kind-loaded image.
+        setValueTemplates:
+          image.repository: "{{.IMAGE_REPO_gomodel}}"
+          image.tag: "{{.IMAGE_TAG_gomodel}}"
+
+deploy:
+  helm: {}
+  # Allow time for the app's first boot against the in-cluster dependencies.
+  statusCheckDeadlineSeconds: 300
+
+# No portForward block: the gateway is exposed on http://localhost:8080 by the
+# kind NodePort mapping (30080 -> host 8080) from deploy/local/kind-cluster.yaml,
+# which is available whether or not `skaffold dev` is running.

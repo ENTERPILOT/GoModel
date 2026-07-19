@@ -1,0 +1,258 @@
+# Mock upstream LLM provider for local development.
+#
+# A tiny stdlib-only Python server that speaks the OpenAI API surface GoModel
+# needs: GET /v1/models, POST /v1/chat/completions (streaming + non-streaming)
+# and POST /v1/responses. It accepts any API key, so GoModel can route real
+# requests end-to-end without real provider credentials.
+#
+# Point the gateway at it via deploy/local/values.yaml:
+#   OPENAI_BASE_URL: http://mockllm:8080/v1
+#
+# Deployed by `make kind-up` alongside the other dependencies.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mockllm
+  labels:
+    app: mockllm
+    app.kubernetes.io/part-of: gomodel-dev
+data:
+  mockllm.py: |
+    #!/usr/bin/env python3
+    """Minimal OpenAI-compatible mock LLM server (stdlib only)."""
+    import json
+    import time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]
+
+
+    def now():
+        return int(time.time())
+
+
+    def last_user_text(req):
+        for msg in reversed(req.get("messages") or []):
+            if msg.get("role") == "user":
+                content = msg.get("content")
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            return item.get("text", "")
+        return "Hello"
+
+
+    def input_text(req):
+        value = req.get("input")
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            for item in reversed(value):
+                if isinstance(item, dict) and item.get("role") == "user":
+                    content = item.get("content")
+                    if isinstance(content, str):
+                        return content
+        return "Hello"
+
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *args):
+            pass
+
+        def _send_json(self, code, obj):
+            body = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _read_body(self):
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                return json.loads(raw or b"{}")
+            except json.JSONDecodeError:
+                return None
+
+        def do_GET(self):
+            if self.path.rstrip("/").endswith("/models"):
+                self._send_json(200, {
+                    "object": "list",
+                    "data": [
+                        {"id": m, "object": "model", "owned_by": "mock", "created": now()}
+                        for m in MODELS
+                    ],
+                })
+                return
+            self._send_json(404, {"error": {"message": "not found", "type": "invalid_request_error"}})
+
+        def do_POST(self):
+            req = self._read_body()
+            if req is None:
+                self._send_json(400, {"error": {"message": "invalid json", "type": "invalid_request_error"}})
+                return
+            path = self.path.rstrip("/")
+            if path.endswith("/chat/completions"):
+                self._chat(req)
+            elif path.endswith("/responses"):
+                self._responses(req)
+            else:
+                self._send_json(404, {"error": {"message": "not found", "type": "invalid_request_error"}})
+
+        def _chat(self, req):
+            model = req.get("model", "gpt-4o")
+            content = "Mock response to: " + last_user_text(req)
+            if req.get("stream"):
+                self._chat_stream(model, content)
+                return
+            self._send_json(200, {
+                "id": "chatcmpl-mock",
+                "object": "chat.completion",
+                "created": now(),
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+            })
+
+        def _start_stream(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+
+        def _sse(self, obj):
+            chunk = ("data: " + json.dumps(obj) + "\n\n").encode()
+            self.wfile.write(("%X\r\n" % len(chunk)).encode() + chunk + b"\r\n")
+            self.wfile.flush()
+
+        def _sse_done(self):
+            done = b"data: [DONE]\n\n"
+            self.wfile.write(("%X\r\n" % len(done)).encode() + done + b"\r\n")
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+
+        def _chat_stream(self, model, content):
+            self._start_stream()
+            words = content.split(" ")
+            for i, word in enumerate(words):
+                self._sse({
+                    "id": "chatcmpl-mock",
+                    "object": "chat.completion.chunk",
+                    "created": now(),
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"content": word if i == 0 else " " + word},
+                        "finish_reason": None,
+                    }],
+                })
+                time.sleep(0.02)
+            self._sse({
+                "id": "chatcmpl-mock",
+                "object": "chat.completion.chunk",
+                "created": now(),
+                "model": model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": len(words), "total_tokens": 10 + len(words)},
+            })
+            self._sse_done()
+
+        def _responses(self, req):
+            model = req.get("model", "gpt-4o")
+            content = "Mock response to: " + input_text(req)
+            if req.get("stream"):
+                self._responses_stream(model, content)
+                return
+            self._send_json(200, {
+                "id": "resp_mock",
+                "object": "response",
+                "created_at": now(),
+                "model": model,
+                "status": "completed",
+                "output": [{
+                    "id": "msg_mock",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": content, "annotations": []}],
+                }],
+                "usage": {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30},
+                "error": None,
+            })
+
+        def _responses_stream(self, model, content):
+            self._start_stream()
+            self._sse({"type": "response.created", "response": {"id": "resp_mock", "object": "response", "status": "in_progress", "model": model, "created_at": now()}})
+            for word in content.split(" "):
+                self._sse({"type": "response.output_text.delta", "delta": word + " "})
+                time.sleep(0.02)
+            self._sse({"type": "response.completed", "response": {"id": "resp_mock", "object": "response", "status": "completed", "model": model, "created_at": now(), "usage": {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30}}})
+            self._sse_done()
+
+
+    if __name__ == "__main__":
+        ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mockllm
+  labels:
+    app: mockllm
+    app.kubernetes.io/part-of: gomodel-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mockllm
+  template:
+    metadata:
+      labels:
+        app: mockllm
+    spec:
+      containers:
+        - name: mockllm
+          image: python:3.13-alpine
+          command: ["python3", "/config/mockllm.py"]
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: script
+              mountPath: /config
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: 8080
+            periodSeconds: 5
+            timeoutSeconds: 3
+      volumes:
+        - name: script
+          configMap:
+            name: mockllm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mockllm
+  labels:
+    app: mockllm
+    app.kubernetes.io/part-of: gomodel-dev
+spec:
+  selector:
+    app: mockllm
+  ports:
+    - port: 8080
+      targetPort: 8080

@@ -1,0 +1,28 @@
+# Ingress with TLS, NetworkPolicy, and Prometheus ServiceMonitor enabled.
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: gomodel.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: gomodel-tls
+      hosts:
+        - gomodel.example.com
+
+networkPolicy:
+  enabled: true
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+
+secrets:
+  masterKey: "test-master-key"

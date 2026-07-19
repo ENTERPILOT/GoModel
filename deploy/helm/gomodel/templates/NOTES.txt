@@ -1,0 +1,36 @@
+{{- include "gomodel.validate" . -}}
+GoModel has been deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+{{ if .Values.persistence.enabled -}}
+Mode: SQLite (StatefulSet, single replica, persistent volume at /app/data).
+{{- else -}}
+Mode: stateless Deployment ({{ include "gomodel.replicaCount" . }} replica(s)).
+Storage defaults to SQLite in an emptyDir (ephemeral). For a durable, scalable
+deployment, point `secrets.data.POSTGRES_URL` (or MONGODB_URL) and REDIS_URL at
+external services via values.
+{{- end }}
+
+1. Access the gateway:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  {{- range .paths }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
+  {{- end }}
+{{- end }}
+{{- else }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "gomodel.fullname" . }} 8080:{{ .Values.service.port }}
+  # then: curl http://127.0.0.1:8080{{ include "gomodel.basePath" . }}/health
+{{- end }}
+
+2. Health endpoints:
+   Liveness : {{ include "gomodel.basePath" . }}/health
+   Readiness: {{ include "gomodel.basePath" . }}/health/ready
+{{- if .Values.metrics.enabled }}
+   Metrics  : {{ include "gomodel.basePath" . }}/metrics
+{{- end }}
+
+{{ if and (not .Values.secrets.masterKey) (not .Values.secrets.existingSecret) -}}
+WARNING: No master key configured (secrets.masterKey / secrets.existingSecret).
+GoModel is running in UNSAFE MODE with no authentication. Set a master key before
+exposing this gateway to untrusted networks.
+{{- end }}

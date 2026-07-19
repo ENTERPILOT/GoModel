@@ -1,0 +1,22 @@
+# kind cluster for local GoModel development.
+# Create with: make kind-up  (or: kind create cluster --config deploy/local/kind-cluster.yaml)
+#
+# Access to the gateway is provided by Skaffold's port-forward (localhost:8080),
+# so no NodePort/Ingress is required for the default workflow. The extra port
+# mappings below are kept ready for an optional Ingress controller on 80/443.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: gomodel-dev
+nodes:
+  - role: control-plane
+    # Enable these mappings if you later add an ingress controller.
+    # kubeadmConfigPatches:
+    #   - |
+    #     kind: InitConfiguration
+    #     nodeRegistration:
+    #       kubeletExtraArgs:
+    #         node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP

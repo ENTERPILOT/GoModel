@@ -1,11 +1,9 @@
-{{- if .Values.autoscaling.enabled }}
-{{- if not (or .Values.autoscaling.targetCPUUtilizationPercentage .Values.autoscaling.targetMemoryUtilizationPercentage) }}
-{{- fail "autoscaling.targetCPUUtilizationPercentage or autoscaling.targetMemoryUtilizationPercentage must be set when autoscaling is enabled" }}
-{{- end }}
+{{- if and .Values.autoscaling.enabled (not (include "gomodel.persistent" .)) -}}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: {{ include "gomodel.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "gomodel.labels" . | nindent 4 }}
 spec:

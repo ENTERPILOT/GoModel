@@ -1,0 +1,28 @@
+# Stateless deployment backed by external Postgres + Redis (multi-replica).
+replicaCount: 2
+
+secrets:
+  masterKey: "test-master-key"
+  data:
+    OPENAI_API_KEY: "sk-test"
+    POSTGRES_URL: "postgres://gomodel:gomodel@postgres:5432/gomodel"
+    REDIS_URL: "redis://redis:6379"
+
+config:
+  server:
+    port: "8080"
+  storage:
+    type: postgresql
+    postgresql:
+      url: ${POSTGRES_URL}
+  cache:
+    model:
+      redis:
+        url: ${REDIS_URL}
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+metrics:
+  enabled: true

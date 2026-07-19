@@ -66,7 +66,7 @@ Releases are generated automatically from merged PRs, categorized by labels and 
 You can compress the whole repository for LLMs with the following command:
 
 ```
-$ repomix -i "./*.md,./**/*_test.go,./tests/,./**/*.md,./.claude/,./data/,./docs/,./helm/,./.cache/,./.github/,./cmd/gomodel/docs/" --style=markdown --remove-comments
+$ repomix -i "./*.md,./**/*_test.go,./tests/,./**/*.md,./.claude/,./data/,./docs/,./deploy/,./.cache/,./.github/,./cmd/gomodel/docs/" --style=markdown --remove-comments
 ```
 
 ## Log output
@@ -102,3 +102,32 @@ LOG_FORMAT=text make run   # force text output
 LOG_FORMAT=json make run   # force JSON output
 LOG_LEVEL=debug make run   # include debug logs
 ```
+
+## Running locally
+
+Several workflows are available depending on how close to production you want to be:
+
+| Workflow | Command | Notes |
+| --- | --- | --- |
+| Bare process | `make run` | Fastest; SQLite + local file cache by default |
+| Docker Compose (infra) | `make infra` | Redis, Postgres, MongoDB, Adminer |
+| Docker Compose (full) | `make image` | App + Prometheus on top of infra |
+| Local Kubernetes | `make kind-up && make dev-k8s` | kind + Skaffold + Helm chart |
+
+### Local Kubernetes (kind + Skaffold)
+
+Develop against a local kind cluster with a build → deploy → watch loop that uses
+the production Helm chart:
+
+```bash
+make kind-up     # create the kind cluster + dependencies + mock LLM (one time)
+make dev-k8s     # build, load into kind, deploy, watch (access on :8080)
+make undeploy-k8s
+make kind-down
+```
+
+`make kind-up` also deploys an in-cluster OpenAI-compatible mock upstream, so
+`/v1/chat/completions` works end-to-end without real provider credentials.
+
+See [dev/local-kubernetes.md](dev/local-kubernetes.md) for prerequisites,
+configuration, and troubleshooting.

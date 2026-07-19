@@ -1,0 +1,9 @@
+# SQLite-backed single-replica deployment with a persistent volume (StatefulSet mode).
+persistence:
+  enabled: true
+  size: 2Gi
+
+secrets:
+  masterKey: "test-master-key"
+  data:
+    ANTHROPIC_API_KEY: "sk-ant-test"

@@ -1,0 +1,68 @@
+# Helm values for local Kubernetes development.
+# Used by skaffold.yaml (deploy.helm) and layered on top of deploy/helm/gomodel/values.yaml.
+#
+# This deploys GoModel in the production-like STATELESS mode backed by the
+# in-cluster Redis + PostgreSQL from deploy/local/deps.yaml, so the real
+# storage/cache code paths are exercised locally.
+
+# Skaffold builds and tags the image; imageStrategy.helm rewrites these.
+image:
+  repository: gomodel
+  tag: dev
+  # Never pull: the image is built locally and loaded into kind.
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Expose the Service on a fixed NodePort so kind's extraPortMapping
+# (30080 -> host 8080) works even without Skaffold port-forwarding.
+service:
+  type: NodePort
+  port: 8080
+  nodePort: 30080
+
+# Relaxed limits for laptops; probes stay on to validate the real behavior.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+metrics:
+  enabled: true
+
+secrets:
+  # Dev-only master key. NEVER use this outside local development.
+  masterKey: "dev-master-key"
+  data:
+    POSTGRES_URL: "postgres://gomodel:gomodel@postgres:5432/gomodel"
+    REDIS_URL: "redis://redis:6379"
+    MONGODB_URL: "mongodb://mongodb:27017/gomodel"
+    # By default the OpenAI provider points at the in-cluster mock LLM
+    # (deploy/local/mockllm.yaml), so chat/completions work end-to-end without
+    # real credentials. The mock accepts any key. To call the real OpenAI API,
+    # set a real OPENAI_API_KEY and remove OPENAI_BASE_URL from `env` below.
+    OPENAI_API_KEY: "sk-mock"
+
+config:
+  server:
+    port: "8080"
+  storage:
+    type: postgresql
+    postgresql:
+      url: ${POSTGRES_URL}
+  cache:
+    model:
+      redis:
+        url: ${REDIS_URL}
+
+# Verbose logs for development.
+env:
+  LOG_LEVEL: debug
+  LOG_FORMAT: text
+  LOGGING_ENABLED: "true"
+  # Route the OpenAI provider to the in-cluster mock LLM. Remove to use the
+  # real OpenAI API (with a real OPENAI_API_KEY).
+  OPENAI_BASE_URL: "http://mockllm:8080/v1"

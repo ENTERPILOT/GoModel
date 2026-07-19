@@ -1,0 +1,34 @@
+# Development Dockerfile for the local Kubernetes (kind + Skaffold) workflow.
+# Optimized for fast, repeated native-arch rebuilds — it skips cross-compilation
+# and symbol stripping used by the production Dockerfile. Do NOT use for releases.
+FROM golang:1.26.4-alpine3.23 AS builder
+
+WORKDIR /app
+
+RUN apk add --no-cache ca-certificates
+
+# Cache dependencies separately from source for fast incremental builds.
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+# Build cache mounts keep incremental rebuilds quick under Skaffold.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 go build -o /gomodel ./cmd/gomodel
+
+RUN mkdir -p /app/.cache /app/data && touch /app/.cache/.keep /app/data/.keep
+
+# Same distroless runtime as production for parity.
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=builder /gomodel /gomodel
+COPY --from=builder /app/config/*.yaml /app/config/
+COPY --from=builder --chown=65532:65532 /app/.cache /app/.cache
+COPY --from=builder --chown=65532:65532 /app/data /app/data
+
+WORKDIR /app
+
+EXPOSE 8080
+
+ENTRYPOINT ["/gomodel"]

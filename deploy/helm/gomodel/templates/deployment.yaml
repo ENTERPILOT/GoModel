@@ -1,0 +1,32 @@
+{{- if not (include "gomodel.persistent" .) -}}
+{{- include "gomodel.validate" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gomodel.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gomodel.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ include "gomodel.replicaCount" . }}
+  {{- end }}
+  {{- with .Values.updateStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gomodel.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- include "gomodel.podAnnotations" . | nindent 8 }}
+      labels:
+        {{- include "gomodel.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "gomodel.podSpec" . | nindent 6 }}
+{{- end }}
