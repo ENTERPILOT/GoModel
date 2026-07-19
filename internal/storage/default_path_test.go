@@ -20,6 +20,18 @@ func TestDefaultSQLitePathUsesLegacyWhenDataDirExists(t *testing.T) {
 	}
 }
 
+func TestDefaultSQLitePathIgnoresDataFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "data"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	if got := DefaultSQLitePath(); got == LegacySQLitePath {
+		t.Errorf("DefaultSQLitePath() returned the legacy path although ./data is a regular file")
+	}
+}
+
 func TestDefaultSQLitePathUsesPlatformDirOtherwise(t *testing.T) {
 	t.Chdir(t.TempDir())
 

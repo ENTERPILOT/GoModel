@@ -33,7 +33,7 @@ const LegacySQLitePath = "data/gomodel.db"
 // LegacySQLitePath when a ./data directory already exists, otherwise the
 // OS-conventional per-user data directory (see platformdir.DataDir).
 func DefaultSQLitePath() string {
-	if _, err := os.Stat("data"); err == nil {
+	if info, err := os.Stat("data"); err == nil && info.IsDir() {
 		return LegacySQLitePath
 	}
 	dir, err := platformdir.DataDir()

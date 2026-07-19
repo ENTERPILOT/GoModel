@@ -219,7 +219,7 @@ func initCache(cfg *config.Config) (modelcache.Cache, error) {
 // already exists (existing deployments, the Docker image); fresh binary
 // installs get the OS-conventional per-user cache directory instead.
 func defaultModelCacheDir() string {
-	if _, err := os.Stat(".cache"); err == nil {
+	if info, err := os.Stat(".cache"); err == nil && info.IsDir() {
 		return ".cache"
 	}
 	dir, err := platformdir.CacheDir()
