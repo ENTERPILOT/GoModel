@@ -51,11 +51,11 @@ func TestNewLogHandlerFormatSelection(t *testing.T) {
 		format   string
 		wantJSON bool
 	}{
-		{name: "default is text without tty", isTTY: false, format: "", wantJSON: false},
-		{name: "default is text on tty", isTTY: true, format: "", wantJSON: false},
+		{name: "unset auto-detects json without tty", isTTY: false, format: "", wantJSON: true},
+		{name: "unset auto-detects text on tty", isTTY: true, format: "", wantJSON: false},
 		{name: "explicit json", isTTY: false, format: "json", wantJSON: true},
 		{name: "explicit json on tty", isTTY: true, format: "json", wantJSON: true},
-		{name: "explicit text", isTTY: false, format: "text", wantJSON: false},
+		{name: "explicit text without tty", isTTY: false, format: "text", wantJSON: false},
 		{name: "json trimmed and case-insensitive", isTTY: false, format: " JSON ", wantJSON: true},
 	}
 
@@ -91,8 +91,6 @@ func TestNewLogHandlerUsesConfiguredLevel(t *testing.T) {
 	}{
 		{name: "json handler", isTTY: false, format: "json"},
 		{name: "text handler", isTTY: true, format: "text"},
-		{name: "default is text on tty", isTTY: true, format: ""},
-		{name: "default is text without tty", isTTY: false, format: ""},
 	}
 
 	for _, tt := range tests {
