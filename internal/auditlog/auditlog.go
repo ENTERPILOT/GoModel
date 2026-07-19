@@ -136,10 +136,11 @@ type LogData struct {
 	// stores split this into audit_log_attempts; Mongo stores it embedded.
 	Attempts []AttemptSnapshot `json:"attempts,omitempty" bson:"attempts,omitempty"`
 
-	// RequestRevisions captures the ingress request-rewrite chain: one entry
-	// per registered rewriter that changed the body, in application order.
-	// RequestBody always remains the original client request; the last
-	// revision is what was forwarded downstream.
+	// RequestRevisions captures intended request-processing changes in
+	// application order: body rewrites and outbound header modifications.
+	// RequestBody always remains the original client request. A revision records
+	// what would be applied if execution reaches provider egress; it is not proof
+	// of egress.
 	RequestRevisions []RequestRevisionSnapshot `json:"request_revisions,omitempty" bson:"request_revisions,omitempty"`
 
 	// Request parameters
@@ -185,8 +186,11 @@ type FailoverSnapshot struct {
 	TargetModel string `json:"target_model,omitempty" bson:"target_model,omitempty"`
 }
 
-// RequestRevisionSnapshot records one ingress rewrite of the request body,
-// so operators can trace how a request changed on its way to the provider.
+// RequestRevisionSnapshot records one ingress change to the request — a body
+// rewrite or an outbound header modification — so operators can trace how a
+// request changed on its way to the provider. Only changed values are stored:
+// an absent Body means this revision did not change the body, and an absent
+// Headers means it did not change the outbound headers.
 type RequestRevisionSnapshot struct {
 	Seq         int    `json:"seq" bson:"seq"`
 	Rewriter    string `json:"rewriter" bson:"rewriter"`
@@ -206,6 +210,23 @@ type RequestRevisionSnapshot struct {
 	// Detail is an optional rewriter-provided structured summary of what
 	// changed (for example a compression block report).
 	Detail any `json:"detail,omitempty" bson:"detail,omitempty"`
+
+	// Headers records the outbound provider-request header changes made by
+	// this revision. Only the delta is stored; absent means unchanged.
+	Headers *HeaderRevisionSnapshot `json:"headers,omitempty" bson:"headers,omitempty"`
+}
+
+// HeaderRevisionSnapshot is the outbound header delta of one request revision.
+// Set is either a map of final values when LOGGING_LOG_HEADERS=true (with
+// credential values redacted), or a list of header names when value logging is
+// disabled. Removed always contains names only.
+type HeaderRevisionSnapshot struct {
+	// Set contains either map[string]string values or a []string of names,
+	// according to the LOGGING_LOG_HEADERS policy described above.
+	Set any `json:"set,omitempty" bson:"set,omitempty"`
+
+	// Removed contains the names of headers the revision removes.
+	Removed []string `json:"removed,omitempty" bson:"removed,omitempty"`
 }
 
 // AttemptSnapshot stores one external provider attempt made for a logical
@@ -333,9 +354,11 @@ func displayAuditProviderName(providerName, provider string) string {
 	return strings.TrimSpace(provider)
 }
 
-// RedactHeaders redacts credential headers (core.IsCredentialHeader) from a
+// RedactHeaders redacts known and likely credential headers from a
 // header map. Values are replaced with "[REDACTED]" to prevent leaking
 // secrets. The original map is not modified; a new map is returned.
+const RedactedHeaderValue = "[REDACTED]"
+
 func RedactHeaders(headers map[string]string) map[string]string {
 	if headers == nil {
 		return nil
@@ -343,8 +366,8 @@ func RedactHeaders(headers map[string]string) map[string]string {
 
 	result := make(map[string]string, len(headers))
 	for key, value := range headers {
-		if core.IsCredentialHeader(key) {
-			result[key] = "[REDACTED]"
+		if core.ShouldRedactHeader(key) {
+			result[key] = RedactedHeaderValue
 		} else {
 			result[key] = value
 		}

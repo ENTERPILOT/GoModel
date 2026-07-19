@@ -169,6 +169,21 @@
                             </div>
                             <p class="form-hint" x-show="workflowGuardrails(workflowPreview()).length === 0">No guardrails configured for this workflow.</p>
                         </div>
+
+                        <div class="workflow-guardrails">
+                            <div class="workflow-section-head">
+                                <h4>Outbound Header Policies</h4>
+                                <span class="provider-badge" x-text="workflowHeaderPolicies(workflowPreview()).length ? workflowHeaderPolicies(workflowPreview()).length + ' steps' : 'None'"></span>
+                            </div>
+                            <div class="workflow-guardrail-list" x-show="workflowHeaderPolicies(workflowPreview()).length > 0">
+                                <template x-for="(step, stepIndex) in workflowHeaderPolicies(workflowPreview())" :key="'draft-workflow-preview-header-policy-' + stepIndex">
+                                    <div class="workflow-guardrail-item">
+                                        <span class="mono font-size-md" x-text="step.ref"></span>
+                                        <span class="provider-badge" x-text="'step ' + step.step"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
                     </article>
                 </div>
 
@@ -203,6 +218,37 @@
                     </div>
 
                     <p class="form-hint" x-show="workflowForm.guardrails.length === 0">No guardrail steps configured yet.</p>
+                </div>
+
+                <div class="workflow-guardrail-editor">
+                    <div class="workflow-section-head">
+                        <div>
+                            <h4>Outbound Header Policies</h4>
+                            <p class="form-hint">Resolved before caching and applied to the selected primary provider attempt. They are not message guardrails.</p>
+                        </div>
+                        <button type="button" class="table-action-btn" @click="addWorkflowHeaderPolicyStep()">Add Policy</button>
+                    </div>
+
+                    <div class="alert alert-warning" x-show="headerPolicyRefs.length === 0">
+                        No named header policies are currently registered.
+                        <button type="button" class="table-action-btn" @click="navigate('header-policies')">Open Header Policies</button>
+                    </div>
+
+                    <div class="workflow-guardrail-list-editor" x-show="workflowForm.header_policies.length > 0">
+                        <template x-for="(step, index) in workflowForm.header_policies" :key="'workflow-form-header-policy-' + index">
+                            <div class="workflow-guardrail-row">
+                                <div class="form-field workflow-guardrail-field">
+                                    <label class="form-field-label" :for="'workflow-header-policy-ref-' + index">Header policy reference</label>
+                                    <input type="text" class="workflow-input" :id="'workflow-header-policy-ref-' + index" list="workflow-header-policy-options" placeholder="Policy ref" x-model="step.ref" :aria-label="'Header policy reference ' + (index + 1)">
+                                </div>
+                                <div class="form-field workflow-guardrail-step-field">
+                                    <label class="form-field-label" :for="'workflow-header-policy-step-' + index">Step</label>
+                                    <input type="number" class="workflow-step-input" :id="'workflow-header-policy-step-' + index" min="0" step="10" placeholder="Step" x-model.number="step.step" :aria-label="'Header policy step ' + (index + 1)">
+                                </div>
+                                <button type="button" class="table-action-btn table-action-btn-danger" @click="removeWorkflowHeaderPolicyStep(index)">Remove</button>
+                            </div>
+                        </template>
+                    </div>
                 </div>
 
                 <div class="form-actions">
@@ -255,6 +301,21 @@
                             <p class="form-hint" x-show="workflowGuardrails(workflow).length === 0">No guardrails configured for this workflow.</p>
                         </div>
 
+                        <div class="workflow-guardrails" x-show="workflowHeaderPolicies(workflow).length > 0">
+                            <div class="workflow-section-head">
+                                <h4>Outbound Header Policies</h4>
+                                <span class="provider-badge" x-text="workflowHeaderPolicies(workflow).length + ' steps'"></span>
+                            </div>
+                            <div class="workflow-guardrail-list">
+                                <template x-for="(step, stepIndex) in workflowHeaderPolicies(workflow)" :key="workflow.id + '-header-policy-' + stepIndex">
+                                    <div class="workflow-guardrail-item">
+                                        <span class="mono font-size-md" x-text="step.ref"></span>
+                                        <span class="provider-badge" x-text="'step ' + step.step"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
                         <div class="workflow-card-footer">
                             <div class="alias-actions-cell">
                                 <button type="button"
@@ -291,6 +352,11 @@
     <datalist id="workflow-guardrail-options">
         <template x-for="guardrailRef in guardrailRefs" :key="guardrailRef">
             <option :value="guardrailRef"></option>
+        </template>
+    </datalist>
+    <datalist id="workflow-header-policy-options">
+        <template x-for="policyRef in headerPolicyRefs" :key="policyRef">
+            <option :value="policyRef"></option>
         </template>
     </datalist>
 </div>

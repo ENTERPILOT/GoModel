@@ -16,6 +16,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/admin"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/server"
@@ -343,6 +344,38 @@ func TestDefaultWorkflowInput_TrimsConfiguredGuardrailRefs(t *testing.T) {
 	}
 }
 
+func TestDefaultWorkflowInput_CompilesHeaderRulesIntoEgressPolicies(t *testing.T) {
+	cfg := &config.Config{HeaderPolicies: config.HeaderPoliciesConfig{Enabled: true}, Guardrails: config.GuardrailsConfig{
+		Enabled: true,
+		Rules:   []config.GuardrailRuleConfig{{Name: "pin-beta", Type: "header_modification", Order: 20}},
+	}}
+	input := defaultWorkflowInput(cfg, []string{"pin-beta"}, []guardrails.Definition{{Name: "pin-beta", Type: "header_modification"}})
+	if input.Payload.Features.Guardrails {
+		t.Fatal("header-only workflow enabled the message guardrail feature")
+	}
+	if len(input.Payload.Guardrails) != 0 || len(input.Payload.HeaderPolicies) != 1 {
+		t.Fatalf("payload stages = guardrails:%v header_policies:%v", input.Payload.Guardrails, input.Payload.HeaderPolicies)
+	}
+	if input.Payload.HeaderPolicies[0].Ref != "pin-beta" {
+		t.Fatalf("header policy ref = %q, want pin-beta", input.Payload.HeaderPolicies[0].Ref)
+	}
+}
+
+func TestDefaultWorkflowInput_KeepsHeaderPolicyBindingsWhenRuntimeDisabled(t *testing.T) {
+	cfg := &config.Config{HeaderPolicies: config.HeaderPoliciesConfig{
+		Enabled:  false,
+		Policies: []config.HeaderPolicyConfig{{Name: " pin-beta ", Step: 20}},
+	}}
+
+	input := defaultWorkflowInput(cfg, nil, nil)
+	if len(input.Payload.HeaderPolicies) != 1 {
+		t.Fatalf("header policies = %v, want configured binding", input.Payload.HeaderPolicies)
+	}
+	if got := input.Payload.HeaderPolicies[0]; got.Ref != "pin-beta" || got.Step != 20 {
+		t.Fatalf("header policy binding = %+v, want pin-beta at step 20", got)
+	}
+}
+
 func TestConfigGuardrailDefinitions_DisabledIgnoresInvalidRules(t *testing.T) {
 	definitions, err := configGuardrailDefinitions(config.GuardrailsConfig{
 		Enabled: false,
@@ -404,6 +437,67 @@ func TestConfigGuardrailDefinitions_TrimAndCanonicalizeRuleIdentity(t *testing.T
 	}
 	if definitions[0].Type != "system_prompt" {
 		t.Fatalf("definitions[0].Type = %q, want system_prompt", definitions[0].Type)
+	}
+}
+
+func TestConfigHeaderPolicyDefinitions_LegacyHeaderModification(t *testing.T) {
+	present := false
+	matches := "^cline/"
+	equalsEmpty := ""
+	value := "context-1m"
+	definitions, _, err := configHeaderPolicyDefinitions(&config.Config{
+		HeaderPolicies: config.HeaderPoliciesConfig{Enabled: true},
+		Guardrails: config.GuardrailsConfig{Enabled: true, Rules: []config.GuardrailRuleConfig{
+			{
+				Name: "pin-beta",
+				Type: "header-modification",
+				HeaderModification: config.HeaderModificationSettings{
+					Methods:   []string{"POST"},
+					Endpoints: []string{"/v1/*"},
+					When: []config.HeaderConditionConfig{
+						{Header: "User-Agent", Matches: &matches},
+						{Header: "X-Empty", Equals: &equalsEmpty},
+						{Header: "X-Skip", Present: &present},
+					},
+					Actions: []config.HeaderActionConfig{
+						{Action: "set", Header: "anthropic-beta", Value: &value},
+						{Action: "remove", Header: "X-Debug"},
+						{Action: "set", Header: "X-Team", FromHeader: "X-Client-Team"},
+					},
+				},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("configHeaderPolicyDefinitions() error = %v", err)
+	}
+	if len(definitions) != 1 {
+		t.Fatalf("len(configHeaderPolicyDefinitions()) = %d, want 1", len(definitions))
+	}
+	if definitions[0].Name != "pin-beta" || len(definitions[0].Paths) != 1 || definitions[0].Paths[0] != "/v1/*" {
+		t.Fatalf("definition = %#v", definitions[0])
+	}
+	if len(definitions[0].When) != 3 || definitions[0].When[1].Equals == nil || *definitions[0].When[1].Equals != "" {
+		t.Fatalf("conditions = %#v", definitions[0].When)
+	}
+	if len(definitions[0].Actions) != 3 || definitions[0].Actions[2].FromHeader != "X-Client-Team" {
+		t.Fatalf("actions = %#v", definitions[0].Actions)
+	}
+}
+
+func TestRejectPolicyNameCollisions(t *testing.T) {
+	err := rejectPolicyNameCollisions(
+		[]guardrails.Definition{{Name: " shared "}},
+		[]headerpolicy.Definition{{Name: "shared"}},
+	)
+	if err == nil {
+		t.Fatal("rejectPolicyNameCollisions() error = nil, want collision error")
+	}
+	if err := rejectPolicyNameCollisions(
+		[]guardrails.Definition{{Name: "messages"}},
+		[]headerpolicy.Definition{{Name: "headers"}},
+	); err != nil {
+		t.Fatalf("rejectPolicyNameCollisions() unexpected error = %v", err)
 	}
 }
 

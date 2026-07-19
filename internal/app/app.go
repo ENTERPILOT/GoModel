@@ -28,6 +28,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/failover"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
@@ -65,6 +66,7 @@ type App struct {
 	pricingOverrides *pricingoverrides.Result
 	authKeys         *authkeys.Result
 	guardrails       *guardrails.Result
+	headerPolicies   *headerpolicy.Service
 	workflows        *workflows.Result
 	live             *live.Broker
 	server           *server.Server
@@ -428,19 +430,55 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if err != nil {
 		return fail("failed to prepare guardrail definitions", err)
 	}
+	seedHeaderPolicies, _, err := configHeaderPolicyDefinitions(appCfg)
+	if err != nil {
+		return fail("failed to prepare header policy definitions", err)
+	}
+
+	var headerPolicyResult *headerpolicy.Result
+	if sharedStorage != nil {
+		headerPolicyResult, err = headerpolicy.NewWithSharedStorage(ctx, sharedStorage, refreshInterval)
+	} else {
+		headerPolicyResult, err = headerpolicy.New(ctx, appCfg, refreshInterval)
+	}
+	if err != nil {
+		return fail("failed to initialize header policies", err)
+	}
+	closers = append(closers, headerPolicyResult.Close)
+	claimSharedStorage(headerPolicyResult.Storage)
+	if migrated, err := migrateLegacyHeaderPolicies(ctx, guardrailResult.Store, headerPolicyResult.Store); err != nil {
+		return fail("failed to migrate legacy header policies", err)
+	} else if migrated > 0 {
+		slog.Info("migrated legacy header policies to dedicated storage", "count", migrated)
+	}
+	if err := headerPolicyResult.Service.Refresh(ctx); err != nil {
+		return fail("failed to load migrated header policies", err)
+	}
+
+	guardrailDefinitions := append(guardrailResult.Service.List(), seedGuardrails...)
+	headerPolicyDefinitions := append(headerPolicyResult.Service.List(), seedHeaderPolicies...)
+	if err := rejectPolicyNameCollisions(guardrailDefinitions, headerPolicyDefinitions); err != nil {
+		return fail("failed to prepare policy definitions", err)
+	}
 	if err := guardrailResult.Service.UpsertDefinitions(ctx, seedGuardrails); err != nil {
 		return fail("failed to upsert guardrails", err)
 	}
+	headerPolicyService := headerPolicyResult.Service
+	if err := headerPolicyService.UpsertDefinitions(ctx, seedHeaderPolicies); err != nil {
+		return fail("failed to upsert header policies", err)
+	}
+	app.headerPolicies = headerPolicyService
 
 	// Build runtime execution dependencies. Policy is passed explicitly into the
 	// server; the live provider dependency remains the bare router.
 	var provider core.RoutableProvider = app.providers.Router
 	var translatedRequestPatcher server.TranslatedRequestPatcher
+	var headerPolicyResolver server.HeaderPolicyResolver
 	var batchRequestPreparers []server.BatchRequestPreparer
 	featureCaps := runtimeWorkflowFeatureCaps(appCfg)
 
 	var workflowResult *workflows.Result
-	workflowCompiler := workflows.NewCompilerWithFeatureCaps(guardrailResult.Service, featureCaps)
+	workflowCompiler := workflows.NewCompilerWithCatalogs(guardrailResult.Service, headerPolicyService, featureCaps)
 	if sharedStorage != nil {
 		workflowResult, err = workflows.NewWithSharedStorage(ctx, sharedStorage, workflowCompiler, refreshInterval)
 	} else {
@@ -476,6 +514,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// message reflects both bootstrap and managed auth modes.
 	app.logStartupInfo()
 
+	if appCfg.HeaderPolicies.Enabled {
+		headerPolicyResolver = workflowResult.Service
+		slog.Info("outbound header policies enabled", "count", len(headerPolicyService.Names()))
+	}
 	if featureCaps.Guardrails {
 		if app.guardrails != nil && app.guardrails.Service != nil {
 			translatedRequestPatcher = guardrails.NewWorkflowRequestPatcher(workflowResult.Service)
@@ -571,6 +613,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		FailoverResolver:                failover.NewResolverWithRuleProvider(appCfg.Failover, providerResult.Registry, failoverResult.Service),
 		WorkflowPolicyResolver:          workflowResult.Service,
 		TranslatedRequestPatcher:        translatedRequestPatcher,
+		HeaderPolicyResolver:            headerPolicyResolver,
 		BatchRequestPreparer:            batchRequestPreparer,
 		ExposedModelLister:              vm,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
@@ -632,6 +675,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			app.pricingOverrides.Service,
 			workflowResult.Service,
 			app.guardrails.Service,
+			app.headerPolicies,
 			budgetResult.Service,
 			rateLimitResult.Service,
 			taggingResult.Service,
@@ -1093,6 +1137,7 @@ func initAdmin(
 	pricingOverrideService *pricingoverrides.Service,
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
+	headerPolicyService *headerpolicy.Service,
 	budgetService *budget.Service,
 	rateLimitService *ratelimit.Service,
 	taggingService *tagging.Service,
@@ -1149,6 +1194,7 @@ func initAdmin(
 		admin.WithPricingOverrides(pricingOverrideService),
 		admin.WithWorkflows(workflowService),
 		admin.WithGuardrailService(guardrailService),
+		admin.WithHeaderPolicyService(headerPolicyService),
 		admin.WithBudgets(budgetService),
 		admin.WithRateLimits(rateLimitService),
 		admin.WithTagging(taggingService),
@@ -1183,6 +1229,11 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 		switch ruleType {
 		case "llm-based-altering":
 			ruleType = "llm_based_altering"
+		case "header-modification":
+			ruleType = "header_modification"
+		}
+		if ruleType == "header_modification" {
+			continue
 		}
 		if name == "" {
 			return nil, fmt.Errorf("guardrail rule #%d: name is required", i)
@@ -1224,6 +1275,47 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 	return definitions, nil
 }
 
+// headerModificationSeedConfig converts YAML header_modification settings into
+// the definition-config JSON shape validated by the guardrails service.
+func headerModificationSeedConfig(settings config.HeaderModificationSettings) map[string]any {
+	conditions := make([]map[string]any, 0, len(settings.When))
+	for _, condition := range settings.When {
+		entry := map[string]any{"header": condition.Header}
+		if condition.Equals != nil {
+			entry["equals"] = *condition.Equals
+		}
+		if condition.Matches != nil {
+			entry["matches"] = *condition.Matches
+		}
+		if condition.Present != nil {
+			entry["present"] = *condition.Present
+		}
+		conditions = append(conditions, entry)
+	}
+	actions := make([]map[string]any, 0, len(settings.Actions))
+	for _, action := range settings.Actions {
+		entry := map[string]any{"action": action.Action, "header": action.Header}
+		if action.Value != nil {
+			entry["value"] = *action.Value
+		}
+		if action.FromHeader != "" {
+			entry["from_header"] = action.FromHeader
+		}
+		actions = append(actions, entry)
+	}
+	seed := map[string]any{"actions": actions}
+	if len(settings.Methods) > 0 {
+		seed["methods"] = settings.Methods
+	}
+	if len(settings.Endpoints) > 0 {
+		seed["endpoints"] = settings.Endpoints
+	}
+	if len(conditions) > 0 {
+		seed["when"] = conditions
+	}
+	return seed
+}
+
 func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, configuredGuardrails []guardrails.Definition) workflows.CreateInput {
 	failoverEnabled := failoverFeatureEnabledGlobally(cfg)
 	budgetEnabled := cfg.Budgets.Enabled
@@ -1260,10 +1352,27 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 					continue
 				}
 			}
-			payload.Guardrails = append(payload.Guardrails, workflows.GuardrailStep{
-				Ref:  name,
-				Step: rule.Order,
-			})
+			if normalizeLegacyHeaderPolicyType(rule.Type) == "header_modification" {
+				continue
+			}
+			payload.Guardrails = append(payload.Guardrails, workflows.GuardrailStep{Ref: name, Step: rule.Order})
+		}
+	}
+	// Keep declarative bindings in the managed workflow even while the runtime
+	// kill switch is off, so re-enabling does not require recreating workflows.
+	for _, policy := range cfg.HeaderPolicies.Policies {
+		name := strings.TrimSpace(policy.Name)
+		if name != "" {
+			payload.HeaderPolicies = append(payload.HeaderPolicies, workflows.HeaderPolicyStep{Ref: name, Step: policy.Step})
+		}
+	}
+	// Historical header_modification rules keep their former GUARDRAILS_ENABLED
+	// activation behavior until operators migrate them to header_policies.
+	if cfg.Guardrails.Enabled {
+		for _, rule := range cfg.Guardrails.Rules {
+			if normalizeLegacyHeaderPolicyType(rule.Type) == "header_modification" {
+				payload.HeaderPolicies = append(payload.HeaderPolicies, workflows.HeaderPolicyStep{Ref: strings.TrimSpace(rule.Name), Step: rule.Order})
+			}
 		}
 	}
 	payload.Features.Guardrails = len(payload.Guardrails) > 0
@@ -1279,16 +1388,17 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 
 func dashboardRuntimeConfig(cfg *config.Config, usageEnabled bool) admin.DashboardConfigResponse {
 	return admin.DashboardConfigResponse{
-		FailoverEnabled:      dashboardEnabledValue(failoverFeatureEnabledGlobally(cfg)),
-		LoggingEnabled:       dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
-		UsageEnabled:         dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
-		BudgetsEnabled:       dashboardEnabledValue(cfg != nil && cfg.Budgets.Enabled),
-		RateLimitsEnabled:    dashboardEnabledValue(cfg != nil && cfg.RateLimits.Enabled),
-		GuardrailsEnabled:    dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
-		CacheEnabled:         dashboardEnabledValue(cacheAnalyticsConfigured(cfg, usageEnabled)),
-		RedisURL:             dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
-		SemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
-		LiveLogsEnabled:      dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
+		FailoverEnabled:       dashboardEnabledValue(failoverFeatureEnabledGlobally(cfg)),
+		LoggingEnabled:        dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
+		UsageEnabled:          dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
+		BudgetsEnabled:        dashboardEnabledValue(cfg != nil && cfg.Budgets.Enabled),
+		RateLimitsEnabled:     dashboardEnabledValue(cfg != nil && cfg.RateLimits.Enabled),
+		GuardrailsEnabled:     dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
+		HeaderPoliciesEnabled: dashboardEnabledValue(cfg != nil && cfg.HeaderPolicies.Enabled),
+		CacheEnabled:          dashboardEnabledValue(cacheAnalyticsConfigured(cfg, usageEnabled)),
+		RedisURL:              dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
+		SemanticCacheEnabled:  dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
+		LiveLogsEnabled:       dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
 	}
 }
 

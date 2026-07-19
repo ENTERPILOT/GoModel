@@ -191,6 +191,9 @@ func (s *realtimeService) forwardRealtimeHTTP(ctx context.Context, target *core.
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
+	// The resolved header plan applies at the final outbound boundary. Protected
+	// provider credentials and the signaling content type remain untouched.
+	core.HeaderPlanFromContext(ctx).Apply(req.Header)
 
 	// The fallback keeps hand-constructed services (tests, embedded wiring)
 	// working, but never with an unbounded client: signaling requests must

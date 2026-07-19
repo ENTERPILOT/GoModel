@@ -770,6 +770,10 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 		}
 	}
 
+	// Apply the resolved egress plan after provider defaults. Protected
+	// credentials, framing, and payload metadata remain provider-owned.
+	core.HeaderPlanFromContext(ctx).Apply(httpReq.Header)
+
 	return httpReq, nil
 }
 

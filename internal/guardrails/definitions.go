@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 )
 
 // Definition is one persisted reusable guardrail instance.
@@ -119,6 +120,12 @@ func normalizeDefinition(def Definition) (Definition, error) {
 			return Definition{}, newValidationError("marshal guardrail config", err)
 		}
 		def.Config = raw
+	case "header_modification":
+		raw, err := headerpolicy.NormalizeLegacyConfig(def.Config)
+		if err != nil {
+			return Definition{}, err
+		}
+		def.Config = raw
 	default:
 		return Definition{}, newValidationError(`unknown guardrail type: "`+def.Type+`"`, nil)
 	}
@@ -132,6 +139,8 @@ func normalizeDefinitionType(raw string) string {
 		return "system_prompt"
 	case "llm-based-altering":
 		return "llm_based_altering"
+	case "header-modification":
+		return "header_modification"
 	default:
 		return strings.ToLower(strings.TrimSpace(raw))
 	}
@@ -337,6 +346,12 @@ func summarizeDefinition(def Definition) string {
 			}
 		}
 		return fmt.Sprintf("%s • %s • %s", target, strings.Join(runtimeCfg.Roles, ","), promptSummary)
+	case "header_modification":
+		policy, err := headerpolicy.DefinitionFromLegacy(def.Name, def.Description, def.Config)
+		if err != nil {
+			return ""
+		}
+		return headerpolicy.ViewFromDefinition(policy).Summary
 	default:
 		return ""
 	}

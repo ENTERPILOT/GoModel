@@ -1124,7 +1124,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "MCP server name",
+                        "description": "MCP server slug",
                         "name": "name",
                         "in": "path",
                         "required": true
@@ -1174,7 +1174,7 @@ const docTemplate = `{
         },
         "/admin/mcp-servers/{name}/catalog": {
             "get": {
-                "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server name.",
+                "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.",
                 "produces": [
                     "application/json"
                 ],
@@ -1185,7 +1185,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "MCP server name",
+                        "description": "MCP server slug",
                         "name": "name",
                         "in": "path",
                         "required": true
@@ -1236,7 +1236,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "MCP server name",
+                        "description": "MCP server slug",
                         "name": "name",
                         "in": "path",
                         "required": true
@@ -2782,7 +2782,7 @@ const docTemplate = `{
         },
         "/mcp": {
             "get": {
-                "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {server}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset.",
+                "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {slug}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset of server slugs.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2828,7 +2828,7 @@ const docTemplate = `{
                 ]
             },
             "post": {
-                "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {server}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset.",
+                "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {slug}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset of server slugs.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2874,7 +2874,7 @@ const docTemplate = `{
                 ]
             },
             "delete": {
-                "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {server}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset.",
+                "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {slug}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset of server slugs.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2937,7 +2937,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Configured MCP server name",
+                        "description": "Configured MCP server slug",
                         "name": "server",
                         "in": "path",
                         "required": true
@@ -2998,7 +2998,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Configured MCP server name",
+                        "description": "Configured MCP server slug",
                         "name": "server",
                         "in": "path",
                         "required": true
@@ -3059,7 +3059,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Configured MCP server name",
+                        "description": "Configured MCP server slug",
                         "name": "server",
                         "in": "path",
                         "required": true
@@ -6142,6 +6142,9 @@ const docTemplate = `{
                 "resource_count": {
                     "type": "integer"
                 },
+                "slug": {
+                    "type": "string"
+                },
                 "status": {
                     "type": "string"
                 },
@@ -6499,6 +6502,9 @@ const docTemplate = `{
                     }
                 },
                 "name": {
+                    "type": "string"
+                },
+                "slug": {
                     "type": "string"
                 },
                 "tool_timeout_seconds": {
@@ -6916,6 +6922,21 @@ const docTemplate = `{
                 }
             }
         },
+        "auditlog.HeaderRevisionSnapshot": {
+            "type": "object",
+            "properties": {
+                "removed": {
+                    "description": "Removed contains the names of headers the revision removes.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "set": {
+                    "description": "Set contains either map[string]string values or a []string of names,\naccording to the LOGGING_LOG_HEADERS policy described above."
+                }
+            }
+        },
         "auditlog.LogData": {
             "type": "object",
             "properties": {
@@ -6969,7 +6990,7 @@ const docTemplate = `{
                     }
                 },
                 "request_revisions": {
-                    "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that changed the body, in application order.\nRequestBody always remains the original client request; the last\nrevision is what was forwarded downstream.",
+                    "description": "RequestRevisions captures intended request-processing changes in\napplication order: body rewrites and outbound header modifications.\nRequestBody always remains the original client request. A revision records\nwhat would be applied if execution reaches provider egress; it is not proof\nof egress.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/auditlog.RequestRevisionSnapshot"
@@ -7116,6 +7137,14 @@ const docTemplate = `{
                 },
                 "detail": {
                     "description": "Detail is an optional rewriter-provided structured summary of what\nchanged (for example a compression block report)."
+                },
+                "headers": {
+                    "description": "Headers records the outbound provider-request header changes made by\nthis revision. Only the delta is stored; absent means unchanged.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/auditlog.HeaderRevisionSnapshot"
+                        }
+                    ]
                 },
                 "rewriter": {
                     "type": "string"

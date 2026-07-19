@@ -54,6 +54,36 @@ func (p *modelCountingValidationProvider) ModelCount() int {
 	return p.modelCount
 }
 
+func TestDeriveWorkflowAppliesPathPolicyToRealtimeAndMCP(t *testing.T) {
+	for _, tt := range []struct {
+		path string
+		mode core.ExecutionMode
+	}{
+		{path: "/v1/realtime", mode: core.ExecutionModeRealtime},
+		{path: "/mcp/github", mode: core.ExecutionModeMCP},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			req = req.WithContext(core.WithEffectiveUserPath(req.Context(), "/team/alpha"))
+			c := e.NewContext(req, httptest.NewRecorder())
+			resolver := &staticWorkflowPolicyResolver{match: func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+				if selector.UserPath != "/team/alpha" || selector.Provider != "" || selector.Model != "" {
+					t.Fatalf("selector = %+v, want path-only", selector)
+				}
+				return &core.ResolvedWorkflowPolicy{VersionID: "workflow-1", Features: core.DefaultWorkflowFeatures()}, nil
+			}}
+			workflow, err := deriveWorkflowWithPolicy(c, nil, nil, resolver)
+			if err != nil {
+				t.Fatalf("deriveWorkflowWithPolicy() error = %v", err)
+			}
+			if workflow == nil || workflow.Mode != tt.mode || workflow.Policy == nil {
+				t.Fatalf("workflow = %+v, want mode %q with policy", workflow, tt.mode)
+			}
+		})
+	}
+}
+
 func TestModelValidation(t *testing.T) {
 	provider := &mockProvider{
 		supportedModels: []string{"gpt-4o-mini", "text-embedding-3-small", "openai/gpt-oss-120b"},

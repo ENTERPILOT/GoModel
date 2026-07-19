@@ -245,6 +245,25 @@ type contextCancelingStore struct {
 	cancelOnDeactivate context.CancelFunc
 }
 
+type projectionHeaderPolicy struct{ name string }
+
+func (p projectionHeaderPolicy) Name() string { return p.name }
+
+func (projectionHeaderPolicy) ResolveHeaderPlan(core.HeaderPolicyInput) *core.HeaderPlan { return nil }
+
+func TestCompiledWorkflowForVersionPreservesHeaderPolicies(t *testing.T) {
+	policy := projectionHeaderPolicy{name: "pin-beta"}
+	projected := compiledWorkflowForVersion(&CompiledWorkflow{
+		Version:        Version{ID: "preview"},
+		Policy:         &core.ResolvedWorkflowPolicy{VersionID: "preview"},
+		HeaderPolicies: []core.HeaderPolicy{policy},
+	}, Version{ID: "persisted", Version: 2})
+
+	if projected == nil || len(projected.HeaderPolicies) != 1 || projected.HeaderPolicies[0].Name() != "pin-beta" {
+		t.Fatalf("projected header policies = %#v", projected)
+	}
+}
+
 type refreshFailingStore struct {
 	staticStore
 	failListActive error

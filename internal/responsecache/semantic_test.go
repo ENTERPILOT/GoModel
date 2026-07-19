@@ -21,10 +21,21 @@ type mockEmbedder struct {
 	vector []float32
 	err    error
 	calls  int
+	ctx    context.Context
 }
 
-func (m *mockEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
+func TestComputeParamsHash_VariesOnResolvedHeaderPlan(t *testing.T) {
+	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`)
+	first := computeParamsHash(body, "/v1/chat/completions", nil, "", "embedder", &core.HeaderPlan{Set: map[string]string{"X-Tenant": "one"}})
+	second := computeParamsHash(body, "/v1/chat/completions", nil, "", "embedder", &core.HeaderPlan{Set: map[string]string{"X-Tenant": "two"}})
+	if first == second {
+		t.Fatal("semantic params hash did not vary on the effective header plan")
+	}
+}
+
+func (m *mockEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
 	m.calls++
+	m.ctx = ctx
 	return m.vector, m.err
 }
 
@@ -63,6 +74,31 @@ func serveSemanticRequest(t *testing.T, m *semanticCacheMiddleware, body []byte,
 		t.Fatalf("Handle error: %v", err)
 	}
 	return rec
+}
+
+func TestSemanticCacheEmbeddingDoesNotInheritHeaderPlan(t *testing.T) {
+	m, _, emb := newTestSemanticMiddleware(0.9, 20, false)
+	defer func() { _ = m.close() }()
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`)
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req = req.WithContext(core.WithHeaderPlan(req.Context(), &core.HeaderPlan{
+		Set: map[string]string{"X-Outer-Rule": "must-not-leak"},
+	}))
+	c := e.NewContext(req, rec)
+
+	if err := m.Handle(&echoExchange{c: c}, body, func() error {
+		return c.JSON(http.StatusOK, map[string]string{"answer": "42"})
+	}); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if emb.ctx == nil {
+		t.Fatal("embedder context was not captured")
+	}
+	if mutation := core.HeaderPlanFromContext(emb.ctx); mutation != nil {
+		t.Fatalf("semantic embedder inherited outer header mutation: %+v", mutation)
+	}
 }
 
 func TestSemanticCacheMiddleware_CacheHit(t *testing.T) {
@@ -218,8 +254,8 @@ func TestComputeParamsHash_StreamIncludeUsageChangesHash(t *testing.T) {
 		},
 	}
 
-	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "")
-	second := computeParamsHash(withUsage, "/v1/chat/completions", plan, "", "")
+	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "", nil)
+	second := computeParamsHash(withUsage, "/v1/chat/completions", plan, "", "", nil)
 
 	if first == second {
 		t.Fatal("stream_options.include_usage should affect semantic params_hash")
@@ -237,8 +273,8 @@ func TestComputeParamsHash_StreamModeChangesHash(t *testing.T) {
 		},
 	}
 
-	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "")
-	second := computeParamsHash(streaming, "/v1/chat/completions", plan, "", "")
+	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "", nil)
+	second := computeParamsHash(streaming, "/v1/chat/completions", plan, "", "", nil)
 
 	if first == second {
 		t.Fatal("stream mode should affect semantic params_hash")

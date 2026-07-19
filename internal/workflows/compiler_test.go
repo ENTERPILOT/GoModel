@@ -2,11 +2,44 @@ package workflows
 
 import (
 	"errors"
+	"fmt"
+	"sort"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 )
+
+type compilerHeaderPolicy struct{ name string }
+
+func (p compilerHeaderPolicy) Name() string { return p.name }
+func (p compilerHeaderPolicy) ResolveHeaderPlan(core.HeaderPolicyInput) *core.HeaderPlan {
+	return &core.HeaderPlan{Set: map[string]string{"X-Test": "1"}}
+}
+
+type compilerHeaderCatalog map[string]core.HeaderPolicy
+
+func (c compilerHeaderCatalog) Names() []string {
+	names := make([]string, 0, len(c))
+	for name := range c {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (c compilerHeaderCatalog) BuildHeaderPolicies(steps []headerpolicy.Reference) ([]core.HeaderPolicy, error) {
+	policies := make([]core.HeaderPolicy, 0, len(steps))
+	for _, step := range steps {
+		policy, ok := c[step.Ref]
+		if !ok {
+			return nil, fmt.Errorf("unknown header policy ref: %q", step.Ref)
+		}
+		policies = append(policies, policy)
+	}
+	return policies, nil
+}
 
 func TestCompilerCompile_Guardrails(t *testing.T) {
 	registry := guardrails.NewRegistry()
@@ -52,6 +85,50 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 	}
 	if compiled.Policy.GuardrailsHash == "" {
 		t.Fatal("compiled guardrails hash is empty")
+	}
+}
+
+func TestCompilerCompile_HeaderPoliciesAreSeparateFromMessagePipeline(t *testing.T) {
+	catalog := compilerHeaderCatalog{"headers": compilerHeaderPolicy{name: "headers"}}
+
+	compiled, err := NewCompilerWithCatalogs(nil, catalog, core.DefaultWorkflowFeatures()).Compile(Version{
+		ID: "workflow-headers",
+		Payload: Payload{
+			SchemaVersion:  1,
+			Features:       FeatureFlags{Guardrails: false},
+			HeaderPolicies: []HeaderPolicyStep{{Ref: "headers", Step: 10}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if compiled.Pipeline != nil {
+		t.Fatal("header policy was compiled into the message guardrail pipeline")
+	}
+	if len(compiled.HeaderPolicies) != 1 || compiled.HeaderPolicies[0].Name() != "headers" {
+		t.Fatalf("compiled header policies = %#v, want headers", compiled.HeaderPolicies)
+	}
+}
+
+func TestCompilerCompile_LegacyHeaderGuardrailReferenceMigratesAtCompileTime(t *testing.T) {
+	catalog := compilerHeaderCatalog{"headers": compilerHeaderPolicy{name: "headers"}}
+
+	compiled, err := NewCompilerWithCatalogs(nil, catalog, core.DefaultWorkflowFeatures()).Compile(Version{
+		ID: "workflow-legacy",
+		Payload: Payload{
+			SchemaVersion: 1,
+			Features:      FeatureFlags{Guardrails: true},
+			Guardrails:    []GuardrailStep{{Ref: "headers", Step: 10}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if compiled.Pipeline != nil {
+		t.Fatal("legacy header ref was left in the message guardrail pipeline")
+	}
+	if len(compiled.HeaderPolicies) != 1 {
+		t.Fatalf("len(HeaderPolicies) = %d, want 1", len(compiled.HeaderPolicies))
 	}
 }
 

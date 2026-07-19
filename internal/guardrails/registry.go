@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// StepReference points to one named guardrail and the step it should run at.
+// StepReference points to one named guardrail and its execution step.
 type StepReference struct {
 	Ref  string
 	Step int
@@ -17,7 +17,7 @@ type registryEntry struct {
 	descriptor RuleDescriptor
 }
 
-// Registry stores named guardrails so workflows can reference them by id.
+// Registry stores named message guardrails for workflow compilation.
 type Registry struct {
 	entries map[string]registryEntry
 }
@@ -27,7 +27,7 @@ func NewRegistry() *Registry {
 	return &Registry{entries: make(map[string]registryEntry)}
 }
 
-// Len returns the number of registered named guardrails.
+// Len returns the number of registered guardrails.
 func (r *Registry) Len() int {
 	if r == nil {
 		return 0
@@ -35,12 +35,11 @@ func (r *Registry) Len() int {
 	return len(r.entries)
 }
 
-// Names returns the registered guardrail names in sorted order.
+// Names returns registered names in sorted order.
 func (r *Registry) Names() []string {
-	if r == nil || len(r.entries) == 0 {
+	if r == nil {
 		return []string{}
 	}
-
 	names := make([]string, 0, len(r.entries))
 	for name := range r.entries {
 		names = append(names, name)
@@ -49,7 +48,7 @@ func (r *Registry) Names() []string {
 	return names
 }
 
-// Register adds one named guardrail and its hashing descriptor.
+// Register adds one named message guardrail and hashing descriptor.
 func (r *Registry) Register(g Guardrail, descriptor RuleDescriptor) error {
 	if r == nil {
 		return fmt.Errorf("registry is required")
@@ -65,14 +64,11 @@ func (r *Registry) Register(g Guardrail, descriptor RuleDescriptor) error {
 		return fmt.Errorf("duplicate guardrail registration: %q", name)
 	}
 	descriptor.Name = name
-	r.entries[name] = registryEntry{
-		guardrail:  g,
-		descriptor: descriptor,
-	}
+	r.entries[name] = registryEntry{guardrail: g, descriptor: descriptor}
 	return nil
 }
 
-// BuildPipeline resolves named guardrail references into an executable pipeline and hash.
+// BuildPipeline resolves named references into an executable pipeline and hash.
 func (r *Registry) BuildPipeline(steps []StepReference) (*Pipeline, string, error) {
 	if len(steps) == 0 {
 		return nil, "", nil
@@ -80,7 +76,6 @@ func (r *Registry) BuildPipeline(steps []StepReference) (*Pipeline, string, erro
 	if r == nil {
 		return nil, "", fmt.Errorf("guardrail registry is required")
 	}
-
 	pipeline := NewPipeline()
 	descriptors := make([]RuleDescriptor, 0, len(steps))
 	for _, step := range steps {

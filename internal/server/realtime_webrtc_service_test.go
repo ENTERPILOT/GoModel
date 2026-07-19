@@ -73,6 +73,53 @@ func newRealtimeTestHandler(mock *realtimeWebRTCMock, usageLogger usage.LoggerIn
 	return handler
 }
 
+func TestForwardRealtimeHTTPAppliesHeaderPlan(t *testing.T) {
+	var got http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	service := &realtimeService{httpClient: upstream.Client()}
+	ctx := core.WithHeaderPlan(t.Context(), &core.HeaderPlan{
+		Set: map[string]string{
+			"X-Order":       "operator-rule",
+			"X-Added":       "applied",
+			"Authorization": "Bearer attacker",
+			"Content-Type":  "text/plain",
+		},
+		Remove: []string{"X-Debug"},
+	})
+	target := &core.RealtimeHTTPTarget{
+		URL: upstream.URL,
+		Headers: http.Header{
+			"Authorization": {"Bearer provider-key"},
+			"X-Order":       {"provider-default"},
+			"X-Debug":       {"remove-me"},
+		},
+	}
+
+	resp, err := service.forwardRealtimeHTTP(ctx, target, strings.NewReader("offer"), "application/sdp", nil, realtimeRoute{providerType: "openai"})
+	if err != nil {
+		t.Fatalf("forwardRealtimeHTTP() error = %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if got.Get("X-Order") != "operator-rule" || got.Get("X-Added") != "applied" {
+		t.Fatalf("header mutation not applied: %v", got)
+	}
+	if got.Get("X-Debug") != "" {
+		t.Fatalf("X-Debug = %q, want removed", got.Get("X-Debug"))
+	}
+	if got.Get("Authorization") != "Bearer provider-key" {
+		t.Fatalf("Authorization = %q, want provider credential preserved", got.Get("Authorization"))
+	}
+	if got.Get("Content-Type") != "application/sdp" {
+		t.Fatalf("Content-Type = %q, want signaling media type preserved", got.Get("Content-Type"))
+	}
+}
+
 func TestRealtimeCalls_SDPHappyPath(t *testing.T) {
 	var upstreamReq struct {
 		contentType string

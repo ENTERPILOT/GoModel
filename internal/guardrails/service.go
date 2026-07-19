@@ -108,6 +108,9 @@ func (s *Service) UpsertDefinitions(ctx context.Context, definitions []Definitio
 
 	normalized := make([]Definition, 0, len(definitions))
 	for _, definition := range definitions {
+		if err := rejectLegacyHeaderPolicyWrite(definition); err != nil {
+			return err
+		}
 		normalizedDefinition, err := normalizeDefinition(definition)
 		if err != nil {
 			return err
@@ -180,6 +183,9 @@ func (s *Service) Get(name string) (*Definition, bool) {
 
 // Upsert validates and stores a guardrail definition, then swaps the snapshot on success.
 func (s *Service) Upsert(ctx context.Context, definition Definition) error {
+	if err := rejectLegacyHeaderPolicyWrite(definition); err != nil {
+		return err
+	}
 	normalized, err := normalizeDefinition(definition)
 	if err != nil {
 		return err
@@ -205,6 +211,13 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	s.snapshot = next
 	s.mu.Unlock()
 	return nil
+}
+
+func rejectLegacyHeaderPolicyWrite(definition Definition) error {
+	if normalizeDefinitionType(definition.Type) != "header_modification" {
+		return nil
+	}
+	return newValidationError("header_modification is an outbound header policy; use the header policy service", nil)
 }
 
 // Delete removes a guardrail definition from storage and swaps the snapshot on success.
@@ -277,6 +290,11 @@ func buildSnapshot(definitions []Definition, executor ChatCompletionExecutor) (s
 		registry:    NewRegistry(),
 	}
 	for _, definition := range definitions {
+		if normalizeDefinitionType(definition.Type) == "header_modification" {
+			// Startup migrates preview rows into dedicated header-policy storage.
+			// Ignore them here so the guardrail service can initialize first.
+			continue
+		}
 		normalized, err := normalizeDefinition(definition)
 		if err != nil {
 			return serviceSnapshot{}, fmt.Errorf("load guardrail %q: %w", definition.Name, err)

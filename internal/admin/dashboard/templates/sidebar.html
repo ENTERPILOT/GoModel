@@ -48,6 +48,10 @@
             <i data-lucide="shield-check" class="nav-icon" aria-hidden="true"></i>
             <span>Guardrails (experimental)</span>
         </a>
+        <a href="{{appURL "/admin/dashboard/header-policies"}}" class="nav-item" :class="{ active: page === 'header-policies' }" title="Outbound Header Policies" @click.prevent="navigate('header-policies')">
+            <i data-lucide="panel-top" class="nav-icon" aria-hidden="true"></i>
+            <span>Header Policies</span>
+        </a>
         <a href="{{appURL "/admin/dashboard/mcp-servers"}}" class="nav-item" :class="{ active: page === 'mcp-servers' }" title="MCP Servers" @click.prevent="navigate('mcp-servers')">
             <i data-lucide="plug" class="nav-icon" aria-hidden="true"></i>
             <span>MCP Servers</span>

@@ -113,7 +113,7 @@ export GUARDRAILS_ENABLED=true
 | Field  | Required | Description                                                         |
 | ------ | -------- | ------------------------------------------------------------------- |
 | `name` | Yes      | Human-readable identifier. Supports spaces and unicode, but not `/`. |
-| `type` | Yes      | Guardrail type: `system_prompt` or `llm_based_altering`.            |
+| `type` | Yes      | Definition type: `system_prompt` or `llm_based_altering`. |
 | `user_path` | No  | Optional base user path for internal auxiliary guardrail requests. |
 | `order`| No       | Execution order. Default `0`. Same value = parallel, different = sequential. |
 
@@ -229,6 +229,12 @@ Guardrails are explicitly skipped for that internal request to avoid recursion.
     model: "gpt-4o-mini"
     roles: ["user"]
 ```
+
+<Note>
+  Outbound request-header changes are configured as [Header Policies](/advanced/header-policies),
+  not as message guardrails. Historical `header_modification` guardrail definitions remain readable
+  for migration, but new definitions use the dedicated configuration and admin API.
+</Note>
 
 ## Examples
 

@@ -5262,6 +5262,29 @@ body.conversation-drawer-open {
   min-width: 0;
 }
 
+.guardrail-header-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.guardrail-header-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(120px, auto) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+
+.guardrail-action-row {
+  grid-template-columns: minmax(120px, auto) minmax(0, 1.1fr) minmax(0, 1fr) auto;
+}
+
+.guardrail-header-row .guardrail-header-row-spacer {
+  min-width: 0;
+}
+
 .settings-guardrail-type-pill {
   display: inline-flex;
   align-items: center;

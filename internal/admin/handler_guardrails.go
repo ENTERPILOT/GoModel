@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -58,6 +59,9 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 	if name == "" {
 		return handleError(c, core.NewInvalidRequestError("guardrail name is required", nil))
 	}
+	if strings.EqualFold(strings.ReplaceAll(strings.TrimSpace(req.Type), "-", "_"), "header_modification") {
+		return handleError(c, core.NewInvalidRequestError("header_modification is an outbound header policy; use /admin/header-policies", nil))
+	}
 
 	userPath, err := normalizeUserPathQueryParam("user_path", req.UserPath)
 	if err != nil {
@@ -66,6 +70,12 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 
 	h.mutationMu.Lock()
 	defer h.mutationMu.Unlock()
+	if h.headerPolicyDefs != nil {
+		if _, exists := h.headerPolicyDefs.Get(name); exists {
+			return handleError(c, core.NewInvalidRequestError("name is already used by a header policy: "+name, nil))
+		}
+	}
+	previous, existed := h.guardrailDefs.Get(name)
 
 	if err := h.guardrailDefs.Upsert(c.Request().Context(), guardrails.Definition{
 		Name:        name,
@@ -76,7 +86,13 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 	}); err != nil {
 		return handleError(c, guardrailWriteError(err))
 	}
-	if err := h.refreshWorkflowsAfterGuardrailChange(c.Request().Context()); err != nil {
+	rollback := func(rollbackCtx context.Context) error {
+		if existed {
+			return h.guardrailDefs.Upsert(rollbackCtx, *previous)
+		}
+		return h.guardrailDefs.Delete(rollbackCtx, name)
+	}
+	if err := h.refreshWorkflowsOrRollback(c.Request().Context(), rollback); err != nil {
 		return handleError(c, err)
 	}
 
@@ -88,6 +104,8 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 }
 
 // DeleteGuardrail handles DELETE /admin/guardrails
+//
+//nolint:dupl // Keep this resource handler explicit and independent from header-policy lifecycle semantics.
 func (h *Handler) DeleteGuardrail(c *echo.Context) error {
 	if h.guardrailDefs == nil {
 		return handleError(c, featureUnavailableError("guardrails feature is unavailable"))
@@ -112,6 +130,7 @@ func (h *Handler) DeleteGuardrail(c *echo.Context) error {
 	if len(referencingWorkflows) > 0 {
 		return handleError(c, core.NewInvalidRequestError("guardrail is used by active workflows: "+strings.Join(referencingWorkflows, ", "), nil))
 	}
+	previous, existed := h.guardrailDefs.Get(name)
 
 	if err := h.guardrailDefs.Delete(c.Request().Context(), name); err != nil {
 		if errors.Is(err, guardrails.ErrNotFound) {
@@ -119,7 +138,13 @@ func (h *Handler) DeleteGuardrail(c *echo.Context) error {
 		}
 		return handleError(c, guardrailWriteError(err))
 	}
-	if err := h.refreshWorkflowsAfterGuardrailChange(c.Request().Context()); err != nil {
+	rollback := func(rollbackCtx context.Context) error {
+		if !existed {
+			return nil
+		}
+		return h.guardrailDefs.Upsert(rollbackCtx, *previous)
+	}
+	if err := h.refreshWorkflowsOrRollback(c.Request().Context(), rollback); err != nil {
 		return handleError(c, err)
 	}
 

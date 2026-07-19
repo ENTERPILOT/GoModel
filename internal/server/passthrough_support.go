@@ -108,6 +108,8 @@ func buildPassthroughHeaders(ctx context.Context, src http.Header) http.Header {
 	if requestID != "" && strings.TrimSpace(dst.Get("X-Request-ID")) == "" {
 		dst.Set("X-Request-ID", requestID)
 	}
+	// Apply the resolved egress plan after safe client-header forwarding.
+	core.HeaderPlanFromContext(ctx).Apply(dst)
 	if len(dst) == 0 {
 		return nil
 	}

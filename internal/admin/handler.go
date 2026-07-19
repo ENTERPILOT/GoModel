@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/failover"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/headerpolicy"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -48,6 +49,8 @@ type Handler struct {
 	tagging             *tagging.Service
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
+	headerPolicies      headerpolicy.Catalog
+	headerPolicyDefs    *headerpolicy.Service
 	liveBroker          *live.Broker
 	runtimeConfig       DashboardConfigResponse
 	runtimeRefresher    RuntimeRefresher
@@ -62,17 +65,18 @@ type Handler struct {
 type Option func(*Handler)
 
 const (
-	DashboardConfigFailoverEnabled      = "FAILOVER_ENABLED"
-	DashboardConfigLoggingEnabled       = "LOGGING_ENABLED"
-	DashboardConfigUsageEnabled         = "USAGE_ENABLED"
-	DashboardConfigBudgetsEnabled       = "BUDGETS_ENABLED"
-	DashboardConfigRateLimitsEnabled    = "RATE_LIMITS_ENABLED"
-	DashboardConfigGuardrailsEnabled    = "GUARDRAILS_ENABLED"
-	DashboardConfigCacheEnabled         = "CACHE_ENABLED"
-	DashboardConfigRedisURL             = "REDIS_URL"
-	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
-	DashboardConfigPricingRecalculation = "USAGE_PRICING_RECALCULATION_ENABLED"
-	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
+	DashboardConfigFailoverEnabled       = "FAILOVER_ENABLED"
+	DashboardConfigLoggingEnabled        = "LOGGING_ENABLED"
+	DashboardConfigUsageEnabled          = "USAGE_ENABLED"
+	DashboardConfigBudgetsEnabled        = "BUDGETS_ENABLED"
+	DashboardConfigRateLimitsEnabled     = "RATE_LIMITS_ENABLED"
+	DashboardConfigGuardrailsEnabled     = "GUARDRAILS_ENABLED"
+	DashboardConfigHeaderPoliciesEnabled = "HEADER_POLICIES_ENABLED"
+	DashboardConfigCacheEnabled          = "CACHE_ENABLED"
+	DashboardConfigRedisURL              = "REDIS_URL"
+	DashboardConfigSemanticCacheEnabled  = "SEMANTIC_CACHE_ENABLED"
+	DashboardConfigPricingRecalculation  = "USAGE_PRICING_RECALCULATION_ENABLED"
+	DashboardConfigLiveLogsEnabled       = "DASHBOARD_LIVE_LOGS_ENABLED"
 )
 
 // statusClientClosedRequest is the de facto status used by proxies for client-aborted requests.
@@ -80,17 +84,18 @@ const statusClientClosedRequest = 499
 
 // DashboardConfigResponse is the allowlisted runtime config contract exposed to the dashboard UI.
 type DashboardConfigResponse struct {
-	FailoverEnabled      string `json:"FAILOVER_ENABLED,omitempty"`
-	LoggingEnabled       string `json:"LOGGING_ENABLED,omitempty"`
-	UsageEnabled         string `json:"USAGE_ENABLED,omitempty"`
-	BudgetsEnabled       string `json:"BUDGETS_ENABLED,omitempty"`
-	RateLimitsEnabled    string `json:"RATE_LIMITS_ENABLED,omitempty"`
-	GuardrailsEnabled    string `json:"GUARDRAILS_ENABLED,omitempty"`
-	CacheEnabled         string `json:"CACHE_ENABLED,omitempty"`
-	RedisURL             string `json:"REDIS_URL,omitempty"`
-	SemanticCacheEnabled string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
-	PricingRecalculation string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
-	LiveLogsEnabled      string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
+	FailoverEnabled       string `json:"FAILOVER_ENABLED,omitempty"`
+	LoggingEnabled        string `json:"LOGGING_ENABLED,omitempty"`
+	UsageEnabled          string `json:"USAGE_ENABLED,omitempty"`
+	BudgetsEnabled        string `json:"BUDGETS_ENABLED,omitempty"`
+	RateLimitsEnabled     string `json:"RATE_LIMITS_ENABLED,omitempty"`
+	GuardrailsEnabled     string `json:"GUARDRAILS_ENABLED,omitempty"`
+	HeaderPoliciesEnabled string `json:"HEADER_POLICIES_ENABLED,omitempty"`
+	CacheEnabled          string `json:"CACHE_ENABLED,omitempty"`
+	RedisURL              string `json:"REDIS_URL,omitempty"`
+	SemanticCacheEnabled  string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
+	PricingRecalculation  string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
+	LiveLogsEnabled       string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
 }
 
 type providerStatusSummaryResponse struct {
@@ -259,6 +264,15 @@ func WithGuardrailService(service *guardrails.Service) Option {
 	}
 }
 
+// WithHeaderPolicyService enables outbound header-policy administration and
+// workflow catalog resolution.
+func WithHeaderPolicyService(service *headerpolicy.Service) Option {
+	return func(h *Handler) {
+		h.headerPolicies = service
+		h.headerPolicyDefs = service
+	}
+}
+
 // WithLiveBroker enables realtime dashboard log previews.
 func WithLiveBroker(broker *live.Broker) Option {
 	return func(h *Handler) {
@@ -324,17 +338,18 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 
 func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
 	return DashboardConfigResponse{
-		FailoverEnabled:      strings.TrimSpace(values.FailoverEnabled),
-		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
-		UsageEnabled:         strings.TrimSpace(values.UsageEnabled),
-		BudgetsEnabled:       strings.TrimSpace(values.BudgetsEnabled),
-		RateLimitsEnabled:    strings.TrimSpace(values.RateLimitsEnabled),
-		GuardrailsEnabled:    strings.TrimSpace(values.GuardrailsEnabled),
-		CacheEnabled:         strings.TrimSpace(values.CacheEnabled),
-		RedisURL:             strings.TrimSpace(values.RedisURL),
-		SemanticCacheEnabled: strings.TrimSpace(values.SemanticCacheEnabled),
-		PricingRecalculation: strings.TrimSpace(values.PricingRecalculation),
-		LiveLogsEnabled:      strings.TrimSpace(values.LiveLogsEnabled),
+		FailoverEnabled:       strings.TrimSpace(values.FailoverEnabled),
+		LoggingEnabled:        strings.TrimSpace(values.LoggingEnabled),
+		UsageEnabled:          strings.TrimSpace(values.UsageEnabled),
+		BudgetsEnabled:        strings.TrimSpace(values.BudgetsEnabled),
+		RateLimitsEnabled:     strings.TrimSpace(values.RateLimitsEnabled),
+		GuardrailsEnabled:     strings.TrimSpace(values.GuardrailsEnabled),
+		HeaderPoliciesEnabled: strings.TrimSpace(values.HeaderPoliciesEnabled),
+		CacheEnabled:          strings.TrimSpace(values.CacheEnabled),
+		RedisURL:              strings.TrimSpace(values.RedisURL),
+		SemanticCacheEnabled:  strings.TrimSpace(values.SemanticCacheEnabled),
+		PricingRecalculation:  strings.TrimSpace(values.PricingRecalculation),
+		LiveLogsEnabled:       strings.TrimSpace(values.LiveLogsEnabled),
 	}
 }
 

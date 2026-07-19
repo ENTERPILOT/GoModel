@@ -57,9 +57,10 @@ func (s *Scope) UnmarshalJSON(data []byte) error {
 
 // Payload is the immutable persisted workflow JSON document.
 type Payload struct {
-	SchemaVersion int             `json:"schema_version" bson:"schema_version"`
-	Features      FeatureFlags    `json:"features" bson:"features"`
-	Guardrails    []GuardrailStep `json:"guardrails,omitempty" bson:"guardrails,omitempty"`
+	SchemaVersion  int                `json:"schema_version" bson:"schema_version"`
+	Features       FeatureFlags       `json:"features" bson:"features"`
+	Guardrails     []GuardrailStep    `json:"guardrails,omitempty" bson:"guardrails,omitempty"`
+	HeaderPolicies []HeaderPolicyStep `json:"header_policies,omitempty" bson:"header_policies,omitempty"`
 }
 
 // FeatureFlags configures gateway-owned behaviors for a request.
@@ -98,6 +99,13 @@ func (f FeatureFlags) runtimeFeatures() core.WorkflowFeatures {
 
 // GuardrailStep references one named guardrail and its execution step.
 type GuardrailStep struct {
+	Ref  string `json:"ref" bson:"ref"`
+	Step int    `json:"step" bson:"step"`
+}
+
+// HeaderPolicyStep references one named outbound header policy. Policies are
+// resolved before caching and applied only to the primary provider attempt.
+type HeaderPolicyStep struct {
 	Ref  string `json:"ref" bson:"ref"`
 	Step int    `json:"step" bson:"step"`
 }
@@ -202,6 +210,37 @@ func normalizePayload(payload Payload) (Payload, string, error) {
 	payload.Guardrails = payload.Guardrails[:0]
 	for _, item := range indexed {
 		payload.Guardrails = append(payload.Guardrails, item.step)
+	}
+
+	type indexedHeaderPolicy struct {
+		step  HeaderPolicyStep
+		index int
+	}
+	indexedPolicies := make([]indexedHeaderPolicy, 0, len(payload.HeaderPolicies))
+	seenPolicies := make(map[string]struct{}, len(payload.HeaderPolicies))
+	for i, policy := range payload.HeaderPolicies {
+		policy.Ref = strings.TrimSpace(policy.Ref)
+		if policy.Ref == "" {
+			return Payload{}, "", newValidationError("header policy ref is required", nil)
+		}
+		if _, exists := seenPolicies[policy.Ref]; exists {
+			return Payload{}, "", newValidationError("duplicate header policy ref: "+policy.Ref, nil)
+		}
+		seenPolicies[policy.Ref] = struct{}{}
+		indexedPolicies = append(indexedPolicies, indexedHeaderPolicy{step: policy, index: i})
+	}
+	sort.SliceStable(indexedPolicies, func(i, j int) bool {
+		if indexedPolicies[i].step.Step != indexedPolicies[j].step.Step {
+			return indexedPolicies[i].step.Step < indexedPolicies[j].step.Step
+		}
+		if indexedPolicies[i].step.Ref != indexedPolicies[j].step.Ref {
+			return indexedPolicies[i].step.Ref < indexedPolicies[j].step.Ref
+		}
+		return indexedPolicies[i].index < indexedPolicies[j].index
+	})
+	payload.HeaderPolicies = payload.HeaderPolicies[:0]
+	for _, item := range indexedPolicies {
+		payload.HeaderPolicies = append(payload.HeaderPolicies, item.step)
 	}
 
 	raw, err := json.Marshal(payload)

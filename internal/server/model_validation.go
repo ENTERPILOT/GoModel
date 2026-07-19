@@ -103,6 +103,20 @@ func deriveWorkflowWithPolicy(
 		}
 		return workflow, nil
 
+	case core.OperationRealtime:
+		workflow.Mode = core.ExecutionModeRealtime
+		if err := applyWorkflowPolicy(c.Request().Context(), workflow, policyResolver, core.NewWorkflowSelector("", "", userPath)); err != nil {
+			return nil, err
+		}
+		return workflow, nil
+
+	case core.OperationMCP:
+		workflow.Mode = core.ExecutionModeMCP
+		if err := applyWorkflowPolicy(c.Request().Context(), workflow, policyResolver, core.NewWorkflowSelector("", "", userPath)); err != nil {
+			return nil, err
+		}
+		return workflow, nil
+
 	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings:
 		workflow.Mode = core.ExecutionModeTranslated
 		resolution, parsed, err := ensureRequestModelResolution(c, provider, resolver)

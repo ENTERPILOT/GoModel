@@ -279,6 +279,30 @@ guardrails:
     #     skip_content_prefix: "### safe"
     #     # prompt: "Custom rewrite instructions here."
 
+header_policies:
+  enabled: true # env: HEADER_POLICIES_ENABLED; default true
+  policies:
+    # Named outbound policies are bound to the managed default workflow by step.
+    # Conditions all have to match; actions run in order. Credential, transport,
+    # content-type, and content-encoding headers cannot be read or changed.
+    # - name: "pin-anthropic-beta"
+    #   description: "Enable the long-context Anthropic beta for Cline clients"
+    #   step: 20
+    #   methods: ["POST"] # optional; empty matches every method
+    #   paths: ["/v1/chat/completions", "/p/anthropic/*"] # trailing * matches a prefix
+    #   when:
+    #     - header: "User-Agent"
+    #       matches: "^cline/" # RE2 regex; or use equals/present
+    #   actions:
+    #     - action: "set"
+    #       header: "Anthropic-Beta"
+    #       value: "context-1m-2025-08-07"
+    #     - action: "set"
+    #       header: "X-Team"
+    #       from_header: "X-Client-Team"
+    #     - action: "remove"
+    #       header: "X-Internal-Debug"
+
 failover:
   enabled: true # env: FAILOVER_ENABLED; default true
   manual_rules_path: "config/failover.example.json" # optional JSON map: {"primary-model": ["fallback-1", "provider/model"]}

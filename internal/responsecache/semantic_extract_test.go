@@ -49,8 +49,8 @@ func TestConversationInvariantFingerprint_InputString(t *testing.T) {
 func TestComputeParamsHash_IncludesReasoning(t *testing.T) {
 	low := []byte(`{"model":"m","reasoning":{"effort":"low"}}`)
 	high := []byte(`{"model":"m","reasoning":{"effort":"high"}}`)
-	h1 := computeParamsHash(low, "/v1/responses", nil, "", "embed")
-	h2 := computeParamsHash(high, "/v1/responses", nil, "", "embed")
+	h1 := computeParamsHash(low, "/v1/responses", nil, "", "embed", nil)
+	h2 := computeParamsHash(high, "/v1/responses", nil, "", "embed", nil)
 	if h1 == h2 {
 		t.Fatal("expected different params hashes when reasoning differs")
 	}

@@ -145,7 +145,7 @@
                         const parsed = Number(trimmed);
                         nextConfig[field.key] = Number.isFinite(parsed) ? parsed : trimmed;
                     }
-                } else if (field.input === 'checkboxes') {
+				} else if (field.input === 'checkboxes') {
                     nextConfig[field.key] = this.normalizeGuardrailArrayValue(value);
                 } else {
                     nextConfig[field.key] = value;
@@ -154,6 +154,10 @@
                     ...this.guardrailForm,
                     config: nextConfig
                 };
+            },
+
+            sanitizeGuardrailConfig(_type, config) {
+                return config;
             },
 
             syncGuardrailTypeSelectValue() {
@@ -372,7 +376,7 @@
                     type,
                     description: String(this.guardrailForm.description || '').trim() || undefined,
                     user_path: String(this.guardrailForm.user_path || '').trim() || undefined,
-                    config: this.cloneGuardrailJSON(this.guardrailForm.config)
+                    config: this.sanitizeGuardrailConfig(type, this.cloneGuardrailJSON(this.guardrailForm.config))
                 };
 
                 try {

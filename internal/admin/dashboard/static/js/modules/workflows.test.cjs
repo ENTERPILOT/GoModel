@@ -1036,6 +1036,40 @@ test('openWorkflowCreate drops blank guardrail steps instead of hydrating them a
     );
 });
 
+for (const guardrailsEnabled of [true, false]) {
+    test(`openWorkflowCreate migrates legacy header-policy steps when guardrails are ${guardrailsEnabled ? 'enabled' : 'disabled'}`, () => {
+        const module = createWorkflowsModule();
+        module.focusWorkflowForm = () => {};
+        module.headerPolicyRefs = ['pin-beta'];
+
+        module.openWorkflowCreate({
+            scope: {},
+            workflow_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: guardrailsEnabled,
+                    failover: true
+                },
+                guardrails: [
+                    { ref: 'message-safety', step: 10 },
+                    { ref: 'pin-beta', step: 20 }
+                ]
+            }
+        });
+
+        assert.equal(
+            JSON.stringify(module.workflowForm.guardrails),
+            JSON.stringify([{ ref: 'message-safety', step: 10 }])
+        );
+        assert.equal(
+            JSON.stringify(module.workflowForm.header_policies),
+            JSON.stringify([{ ref: 'pin-beta', step: 20 }])
+        );
+    });
+}
+
 test('workflowSourceGuardrails keeps step zero but drops negative and fractional steps from previews', () => {
     const module = createWorkflowsModule();
 
@@ -2453,5 +2487,33 @@ test('fetchWorkflowVersion aborts hung requests, clears the timeout, and cleans 
     assert.equal(
         Object.prototype.hasOwnProperty.call(module.workflowVersionRequests || {}, 'historical-timeout'),
         false
+    );
+});
+
+test('buildWorkflowRequest emits outbound header policies independently of guardrails', () => {
+    const module = createWorkflowsModule();
+    module.workflowForm.features.guardrails = false;
+    module.workflowForm.header_policies = [{ ref: 'pin-beta', step: 10 }];
+
+    const payload = module.buildWorkflowRequest();
+
+    assert.equal(payload.workflow_payload.features.guardrails, false);
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(payload.workflow_payload.header_policies)),
+        [{ ref: 'pin-beta', step: 10 }]
+    );
+});
+
+test('validateWorkflowRequest rejects duplicate outbound header policy refs', () => {
+    const module = createWorkflowsModule();
+    const payload = module.buildWorkflowRequest();
+    payload.workflow_payload.header_policies = [
+        { ref: 'pin-beta', step: 10 },
+        { ref: 'pin-beta', step: 20 }
+    ];
+
+    assert.equal(
+        module.validateWorkflowRequest(payload),
+        'Each header policy ref may appear only once in a workflow.'
     );
 });

@@ -116,6 +116,45 @@ func TestClient_Do_Headers(t *testing.T) {
 	}
 }
 
+func TestBuildRequestAppliesHeaderPlanLastWithoutTouchingCredentials(t *testing.T) {
+	client := New(
+		DefaultConfig("test", "http://localhost"),
+		func(req *http.Request) {
+			req.Header.Set("Authorization", "Bearer provider-key")
+			req.Header.Set("X-Order", "provider-default")
+		},
+	)
+	ctx := core.WithHeaderPlan(t.Context(), &core.HeaderPlan{
+		Set: map[string]string{
+			"X-Order":       "operator-rule",
+			"X-Added":       "applied",
+			"Authorization": "Bearer attacker",
+		},
+	})
+
+	req, err := client.buildRequest(ctx, Request{
+		Method:   http.MethodPost,
+		Endpoint: "/test",
+		Body:     map[string]string{"input": "hi"},
+		Headers:  http.Header{"X-Order": []string{"request-specific"}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest() error = %v", err)
+	}
+	if got := req.Header.Get("X-Order"); got != "operator-rule" {
+		t.Fatalf("X-Order = %q, want mutation to apply after provider and request headers", got)
+	}
+	if got := req.Header.Get("X-Added"); got != "applied" {
+		t.Fatalf("X-Added = %q, want applied", got)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer provider-key" {
+		t.Fatalf("Authorization = %q, want provider credential preserved", got)
+	}
+	if got := req.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want builder-owned media type preserved", got)
+	}
+}
+
 func TestClient_Do_ErrorParsing(t *testing.T) {
 	tests := []struct {
 		name       string
