@@ -30,9 +30,28 @@
   <img src="docs/2026-07-07_demo.gif" alt="GoModel AI gateway dashboard showing AI usage analytics, observability panel, token and costs tracking, and estimated cost monitoring" width="100%">
 </a>
 
-## Quick Start with Docker
+## Quick Start
 
-**Step 1:** Start GoModel container
+**Step 1:** Install and start GoModel
+
+**macOS / Linux**
+
+```bash
+curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+OPENAI_API_KEY="your-openai-key" gomodel
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://gomodel.enterpilot.io/install.ps1 | iex
+$env:OPENAI_API_KEY = "your-openai-key"; gomodel
+```
+
+The installer downloads the latest release binary, verifies its checksum, and
+puts `gomodel` on your PATH.
+
+**Docker**
 
 ```bash
 docker run --rm -p 8080:8080 \

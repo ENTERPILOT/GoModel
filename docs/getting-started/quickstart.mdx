@@ -11,18 +11,42 @@ route traffic across OpenAI, Anthropic, Gemini, DeepSeek, xAI, Groq, OpenRouter,
 Z.ai, Azure OpenAI, Oracle GenAI, Ollama, and more while keeping auth, audit logs, and
 admin visibility in one place.
 
-### 1. Start GoModel
+### 1. Install and start GoModel
 
-```bash
-docker run --rm -p 8080:8080 \
-  -e LOGGING_ENABLED=true \
-  -e LOGGING_LOG_BODIES=true \
-  -e LOG_FORMAT=text \
-  -e LOGGING_LOG_HEADERS=true \
-  -e GOMODEL_MASTER_KEY="change-me" \
-  -e OPENAI_API_KEY="sk-..." \
-  enterpilot/gomodel
-```
+<Tabs>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+    GOMODEL_MASTER_KEY="change-me" OPENAI_API_KEY="sk-..." gomodel
+    ```
+
+    The installer downloads the latest release binary for your platform,
+    verifies its SHA-256 checksum, and installs it to `/usr/local/bin` (or
+    `~/.local/bin` when that is not writable).
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    $env:GOMODEL_MASTER_KEY = "change-me"; $env:OPENAI_API_KEY = "sk-..."; gomodel
+    ```
+
+    The installer downloads the latest release, verifies its SHA-256
+    checksum, installs `gomodel.exe` to `%LOCALAPPDATA%\Programs\gomodel`,
+    and adds it to your user PATH (restart the terminal to pick it up).
+  </Tab>
+  <Tab title="Docker">
+    ```bash
+    docker run --rm -p 8080:8080 \
+      -e LOGGING_ENABLED=true \
+      -e LOGGING_LOG_BODIES=true \
+      -e LOG_FORMAT=text \
+      -e LOGGING_LOG_HEADERS=true \
+      -e GOMODEL_MASTER_KEY="change-me" \
+      -e OPENAI_API_KEY="sk-..." \
+      enterpilot/gomodel
+    ```
+  </Tab>
+</Tabs>
 
 <Note>
   Set at least one provider credential or base URL
