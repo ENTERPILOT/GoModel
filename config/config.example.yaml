@@ -142,7 +142,7 @@ storage:
     database: "gomodel"
 
 logging:
-  enabled: false
+  enabled: true
   log_bodies: true # WARNING: may contain sensitive data
   log_headers: true
   buffer_size: 1000

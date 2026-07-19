@@ -165,8 +165,8 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if !cfg.Logging.OnlyModelInteractions {
 		t.Error("expected Logging.OnlyModelInteractions=true")
 	}
-	if cfg.Logging.Enabled {
-		t.Error("expected Logging.Enabled=false")
+	if !cfg.Logging.Enabled {
+		t.Error("expected Logging.Enabled=true")
 	}
 	if !cfg.Usage.Enabled {
 		t.Error("expected Usage.Enabled=true")

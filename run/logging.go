@@ -35,16 +35,18 @@ func detectTTY(w io.Writer) bool {
 	return term.IsTerminal(int(file.Fd()))
 }
 
+// newLogHandler defaults to human-readable text output everywhere (colored
+// on a TTY, plain otherwise); JSON is opt-in via LOG_FORMAT=json for log
+// pipelines that parse structured output.
 func newLogHandler(w io.Writer, isTTY bool, format string, level slog.Level) slog.Handler {
-	format = strings.ToLower(strings.TrimSpace(format))
-	if (isTTY && format != "json") || format == "text" {
-		return tint.NewTextHandler(w, &tint.Options{
-			Level:      level,
-			TimeFormat: time.Kitchen,
-			NoColor:    !isTTY,
-		})
+	if strings.ToLower(strings.TrimSpace(format)) == "json" {
+		return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level})
 	}
-	return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level})
+	return tint.NewTextHandler(w, &tint.Options{
+		Level:      level,
+		TimeFormat: time.Kitchen,
+		NoColor:    !isTTY,
+	})
 }
 
 func parseLogLevel(raw string) (slog.Level, error) {

@@ -62,7 +62,7 @@ bodies, headers), see [Audit Logging](#audit-logging) below.
 
 | Variable     | Description                                                                                                                                                                       | Default              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `LOG_FORMAT` | `text` for colorized human output, `json` for structured logs. Unset auto-detects: text on a TTY, JSON otherwise. Force `json` in production / CloudWatch / Datadog / GCP setups. | _(auto-detect)_      |
+| `LOG_FORMAT` | `text` for human-readable output (colorized on a TTY), `json` for structured logs. Set `json` in production / CloudWatch / Datadog / GCP setups. | `text`               |
 | `LOG_LEVEL`  | Minimum log level: `debug`, `info`, `warn`, `error`. Aliases `dbg`, `inf`, `warning`, `err` are also accepted.                                                                    | `info`               |
 
 #### Cache
@@ -108,7 +108,7 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 
 | Variable                          | Description                                | Default |
 | --------------------------------- | ------------------------------------------ | ------- |
-| `LOGGING_ENABLED`                 | Enable audit logging                       | `false` |
+| `LOGGING_ENABLED`                 | Enable audit logging                       | `true`  |
 | `LOGGING_LOG_BODIES`              | Log request/response bodies                | `true`  |
 | `LOGGING_LOG_AUDIO_BODIES`        | Log audio endpoint inputs/outputs          | `false` |
 | `LOGGING_LOG_HEADERS`             | Log headers (sensitive ones auto-redacted) | `true`  |

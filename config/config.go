@@ -100,6 +100,7 @@ func buildDefaultConfig() *Config {
 			},
 		},
 		Logging: LogConfig{
+			Enabled:               true,
 			LogBodies:             true,
 			LogHeaders:            true,
 			BufferSize:            1000,
