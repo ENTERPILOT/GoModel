@@ -19,20 +19,12 @@ admin visibility in one place.
     curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
     GOMODEL_MASTER_KEY="change-me" OPENAI_API_KEY="sk-..." gomodel
     ```
-
-    The installer downloads the latest release binary for your platform,
-    verifies its SHA-256 checksum, and installs it to `/usr/local/bin` (or
-    `~/.local/bin` when that is not writable).
   </Tab>
   <Tab title="Windows">
     ```powershell
     irm https://gomodel.enterpilot.io/install.ps1 | iex
     $env:GOMODEL_MASTER_KEY = "change-me"; $env:OPENAI_API_KEY = "sk-..."; gomodel
     ```
-
-    The installer downloads the latest release, verifies its SHA-256
-    checksum, installs `gomodel.exe` to `%LOCALAPPDATA%\Programs\gomodel`,
-    and adds it to your user PATH (restart the terminal to pick it up).
   </Tab>
   <Tab title="Docker">
     ```bash

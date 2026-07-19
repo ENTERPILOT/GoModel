@@ -48,9 +48,6 @@ irm https://gomodel.enterpilot.io/install.ps1 | iex
 $env:OPENAI_API_KEY = "your-openai-key"; gomodel
 ```
 
-The installer downloads the latest release binary, verifies its checksum, and
-puts `gomodel` on your PATH.
-
 **Docker**
 
 ```bash
@@ -176,7 +173,3 @@ See the [Roadmap](./docs/about/roadmap.mdx) for commercial features and the publ
 ## Community
 
 Join our [Discord](https://discord.gg/gaEB9BQSPH) to connect with other GoModel users.
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=enterpilot/gomodel&type=date&legend=top-left)](https://www.star-history.com/#enterpilot/gomodel&type=date&legend=top-left)
