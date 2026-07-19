@@ -21,8 +21,7 @@ services:
       - POSTGRES_URL=postgres://gomodel:gomodel@postgres:5432/gomodel
       # MongoDB configuration (uncomment to use MongoDB instead)
       - MONGODB_URL=mongodb://mongodb:27017/gomodel
-      # Audit logging - all enabled with PostgreSQL
-      - LOGGING_ENABLED=true
+      # Audit logging is enabled by default; pick its storage backend below
       # - STORAGE_TYPE=postgresql
       - STORAGE_TYPE=mongodb
     depends_on:

@@ -128,8 +128,8 @@ Returns an empty array if usage tracking is disabled or no data exists for the p
 Returns time-bucketed request counts grouped into `2xx`/`4xx`/`5xx` status
 classes, an overall success-rate summary, and average request duration per
 provider. This powers the "Requests by Status" and "Provider Latency" charts on
-the dashboard's Overview page. Data comes from the audit log, so it requires
-`LOGGING_ENABLED=true`.
+the dashboard's Overview page. Data comes from the audit log (audit logging is enabled by default;
+`LOGGING_ENABLED`).
 
 **Query parameters:**
 
