@@ -62,8 +62,10 @@ expected=$(awk -v f="$archive" '$2 == f { print $1 }' "$tmpdir/checksums.txt")
 [ -n "$expected" ] || fail "no checksum for $archive in checksums.txt"
 if command -v sha256sum >/dev/null 2>&1; then
     actual=$(sha256sum "$tmpdir/$archive" | awk '{ print $1 }')
-else
+elif command -v shasum >/dev/null 2>&1; then
     actual=$(shasum -a 256 "$tmpdir/$archive" | awk '{ print $1 }')
+else
+    fail "sha256sum or shasum is required to verify the download"
 fi
 [ "$actual" = "$expected" ] || fail "checksum mismatch for $archive"
 say "Checksum verified."
@@ -79,7 +81,7 @@ if [ -z "$install_dir" ]; then
     fi
 fi
 mkdir -p "$install_dir" || fail "cannot create $install_dir"
-[ -w "$install_dir" ] || fail "$install_dir is not writable — rerun with GOMODEL_INSTALL_DIR set, or run: sudo install -m 755 $tmpdir/$BINARY /usr/local/bin/"
+[ -w "$install_dir" ] || fail "$install_dir is not writable — set GOMODEL_INSTALL_DIR to a writable directory, or rerun with sudo"
 install -m 755 "$tmpdir/$BINARY" "$install_dir/$BINARY"
 
 say ""

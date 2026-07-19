@@ -15,15 +15,30 @@ $ErrorActionPreference = 'Stop'
 $Repo = 'ENTERPILOT/GoModel'
 $Binary = 'gomodel'
 
-$arch = switch ($env:PROCESSOR_ARCHITECTURE) {
+# PROCESSOR_ARCHITEW6432 reports the real machine architecture when running
+# in a 32-bit PowerShell on a 64-bit Windows.
+$rawArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+$arch = switch ($rawArch) {
     'AMD64' { 'amd64' }
     'ARM64' { 'arm64' }
-    default { throw "unsupported architecture: $env:PROCESSOR_ARCHITECTURE" }
+    default { throw "unsupported architecture: $rawArch" }
 }
 
 $tag = $env:GOMODEL_VERSION
 if (-not $tag) {
-    $tag = (Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest").tag_name
+    # Resolve the latest tag from the releases/latest redirect, avoiding the
+    # GitHub API and its per-IP rate limit (same approach as install.sh).
+    $req = [System.Net.WebRequest]::Create("https://github.com/$Repo/releases/latest")
+    $req.AllowAutoRedirect = $false
+    $res = $req.GetResponse()
+    try {
+        $location = $res.Headers['Location']
+    }
+    finally {
+        $res.Close()
+    }
+    if (-not $location) { throw 'could not resolve the latest release' }
+    $tag = ($location -split '/')[-1]
 }
 if ($tag -notmatch '^v') { throw "unexpected release tag: $tag" }
 $version = $tag.TrimStart('v')
@@ -38,9 +53,11 @@ try {
     Invoke-WebRequest -Uri "$baseUrl/$archive" -OutFile (Join-Path $tmpDir $archive)
     Invoke-WebRequest -Uri "$baseUrl/checksums.txt" -OutFile (Join-Path $tmpDir 'checksums.txt')
 
-    $expected = (Get-Content (Join-Path $tmpDir 'checksums.txt') |
-        Where-Object { $_ -match [regex]::Escape($archive) } |
-        ForEach-Object { ($_ -split '\s+')[0] }) | Select-Object -First 1
+    $expected = $null
+    foreach ($line in Get-Content (Join-Path $tmpDir 'checksums.txt')) {
+        $parts = $line.Trim() -split '\s+'
+        if ($parts.Length -ge 2 -and $parts[1] -eq $archive) { $expected = $parts[0]; break }
+    }
     if (-not $expected) { throw "no checksum for $archive in checksums.txt" }
     $actual = (Get-FileHash (Join-Path $tmpDir $archive) -Algorithm SHA256).Hash.ToLower()
     if ($actual -ne $expected.ToLower()) { throw "checksum mismatch for $archive" }
@@ -58,8 +75,9 @@ try {
 
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if (($userPath -split ';') -notcontains $installDir) {
-        [Environment]::SetEnvironmentVariable('Path', "$userPath;$installDir", 'User')
-        Write-Host "Added $installDir to your user PATH — restart your terminal to pick it up."
+        $newPath = if ([string]::IsNullOrEmpty($userPath)) { $installDir } else { "$userPath;$installDir" }
+        [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+        Write-Host "Added $installDir to your user PATH - restart your terminal to pick it up."
     }
 
     Write-Host ''
