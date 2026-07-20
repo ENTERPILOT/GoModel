@@ -37,6 +37,32 @@ guardrails:
 
 That's it. Every request now gets the safety prompt prepended to its system instructions.
 
+## Manage from the Dashboard
+
+Guardrail definitions can also be created and edited from the admin
+dashboard instead of `config.yaml` — useful for iterating on rules without a
+redeploy, or for operators who don't manage this repo's config directly.
+
+<img
+  src="/advanced/guardrails.png"
+  alt="GoModel dashboard Guardrails page with a Guardrail Library summary card and an empty Instances list with a Create Guardrail button"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Open **Guardrails** in the sidebar and click **Create Guardrail** to add an
+instance: give it a name, pick a type (`system_prompt` or
+`llm_based_altering`), optionally scope it to a `user_path`, and fill in the
+type-specific settings described below. `config.yaml` entries are seeded into
+the same store at startup and stay in sync with it, so dashboard-created and
+config-declared guardrails appear side by side.
+
+<Note>
+  Runtime guardrail execution still depends on `GUARDRAILS_ENABLED`. With it
+  off, the page still lets you manage definitions — they just don't run on
+  live traffic yet.
+</Note>
+
 ## How It Works
 
 {/* Client Request → Extract messages → Guardrails Pipeline (order 0 → order 1 → ...) → Apply back → LLM Provider */}

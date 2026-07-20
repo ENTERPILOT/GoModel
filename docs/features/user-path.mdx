@@ -18,6 +18,16 @@ You can bind a user path to a managed API key in the admin dashboard:
 
 `API Keys -> Create API Key -> User Path`
 
+<img
+  src="/features/auth-keys-labels.png"
+  alt="GoModel dashboard API Keys page with a User Path column showing values like /agents/team1, /engineering/ai, and /sales/john"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+The **API Keys** page lists each key's bound `user_path` alongside its
+labels, so you can confirm which subtree a key resolves to at a glance.
+
 When a request uses that key, GoModel treats the key's `user_path` as the
 effective user path for the request.
 
