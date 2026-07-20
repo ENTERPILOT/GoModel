@@ -442,9 +442,16 @@ func TestDashboardRuntimeConfig_ExposesFailoverEnabled(t *testing.T) {
 		},
 	}
 
-	values := dashboardRuntimeConfig(cfg, false)
+	values := dashboardRuntimeConfig(cfg, false, false)
 	if got := values.FailoverEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigFailoverEnabled, got)
+	}
+}
+
+func TestDashboardRuntimeConfig_ExposesDemoMode(t *testing.T) {
+	values := dashboardRuntimeConfig(&config.Config{}, false, true)
+	if got := values.DemoMode; got != "on" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigDemoMode, got)
 	}
 }
 
@@ -455,7 +462,7 @@ func TestDashboardRuntimeConfig_FailoverDisabled(t *testing.T) {
 		},
 	}
 
-	values := dashboardRuntimeConfig(cfg, false)
+	values := dashboardRuntimeConfig(cfg, false, false)
 	if got := values.FailoverEnabled; got != "off" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigFailoverEnabled, got)
 	}
@@ -469,7 +476,7 @@ func TestDashboardRuntimeConfig_DefaultModeDoesNotEnableFailover(t *testing.T) {
 		},
 	}
 
-	values := dashboardRuntimeConfig(cfg, false)
+	values := dashboardRuntimeConfig(cfg, false, false)
 	if got := values.FailoverEnabled; got != "off" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigFailoverEnabled, got)
 	}
@@ -506,7 +513,7 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 		},
 	}
 
-	values := dashboardRuntimeConfig(cfg, true)
+	values := dashboardRuntimeConfig(cfg, true, false)
 	if got := values.LoggingEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLoggingEnabled, got)
 	}
@@ -559,7 +566,7 @@ func TestDashboardRuntimeConfig_HidesCacheAnalyticsWhenUsageDisabled(t *testing.
 		},
 	}
 
-	values := dashboardRuntimeConfig(cfg, false)
+	values := dashboardRuntimeConfig(cfg, false, false)
 	if got := values.UsageEnabled; got != "off" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigUsageEnabled, got)
 	}

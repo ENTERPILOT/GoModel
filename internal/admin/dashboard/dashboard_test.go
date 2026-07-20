@@ -77,6 +77,49 @@ func TestIndex_ReturnsHTML(t *testing.T) {
 	}
 }
 
+func TestIndex_DemoModeShowsWarning(t *testing.T) {
+	h, err := NewWithDemoMode("/", true)
+	if err != nil {
+		t.Fatalf("NewWithDemoMode() returned error: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.Index(c); err != nil {
+		t.Fatalf("Index() returned error: %v", err)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="demo-mode-banner"`) {
+		t.Error("expected demo mode banner in page HTML")
+	}
+	if !strings.Contains(body, "Do not enter sensitive or personal data. Demo data is reset regularly.") {
+		t.Error("expected demo mode data warning in page HTML")
+	}
+}
+
+func TestIndex_StandardModeHidesDemoWarning(t *testing.T) {
+	h, err := NewWithBasePath("/")
+	if err != nil {
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.Index(c); err != nil {
+		t.Fatalf("Index() returned error: %v", err)
+	}
+	if strings.Contains(rec.Body.String(), `class="demo-mode-banner"`) {
+		t.Error("did not expect demo mode banner in standard mode")
+	}
+}
+
 func TestIndex_UsesBasePathForGeneratedURLs(t *testing.T) {
 	h, err := NewWithBasePath("g/")
 	if err != nil {

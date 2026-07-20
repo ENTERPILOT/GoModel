@@ -83,6 +83,7 @@
 
 	            workflowRuntimeConfigKeys() {
 	                return [
+	                    'DEMO_MODE',
 	                    'FAILOVER_ENABLED',
 	                    'LOGGING_ENABLED',
 	                    'LOGGING_RETENTION_DAYS',

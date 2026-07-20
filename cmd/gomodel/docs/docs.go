@@ -5828,6 +5828,9 @@ const docTemplate = `{
                 "DASHBOARD_LIVE_LOGS_ENABLED": {
                     "type": "string"
                 },
+                "DEMO_MODE": {
+                    "type": "string"
+                },
                 "FAILOVER_ENABLED": {
                     "type": "string"
                 },

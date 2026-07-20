@@ -62,6 +62,7 @@ type Handler struct {
 type Option func(*Handler)
 
 const (
+	DashboardConfigDemoMode             = "DEMO_MODE"
 	DashboardConfigFailoverEnabled      = "FAILOVER_ENABLED"
 	DashboardConfigLoggingEnabled       = "LOGGING_ENABLED"
 	DashboardConfigLoggingRetentionDays = "LOGGING_RETENTION_DAYS"
@@ -81,6 +82,7 @@ const statusClientClosedRequest = 499
 
 // DashboardConfigResponse is the allowlisted runtime config contract exposed to the dashboard UI.
 type DashboardConfigResponse struct {
+	DemoMode             string `json:"DEMO_MODE,omitempty"`
 	FailoverEnabled      string `json:"FAILOVER_ENABLED,omitempty"`
 	LoggingEnabled       string `json:"LOGGING_ENABLED,omitempty"`
 	LoggingRetentionDays string `json:"LOGGING_RETENTION_DAYS,omitempty"`
@@ -326,6 +328,7 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 
 func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
 	return DashboardConfigResponse{
+		DemoMode:             strings.TrimSpace(values.DemoMode),
 		FailoverEnabled:      strings.TrimSpace(values.FailoverEnabled),
 		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
 		LoggingRetentionDays: strings.TrimSpace(values.LoggingRetentionDays),

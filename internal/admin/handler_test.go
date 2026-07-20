@@ -2250,6 +2250,7 @@ func TestBuildProviderStatusItem_ClassifyAndDisplayFallbacks(t *testing.T) {
 
 func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
+		DemoMode:             "on",
 		FailoverEnabled:      "on",
 		LoggingEnabled:       "on",
 		LoggingRetentionDays: "14",
@@ -2275,6 +2276,9 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	var body DashboardConfigResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if got := body.DemoMode; got != "on" {
+		t.Fatalf("DEMO_MODE = %q, want on", got)
 	}
 	if got := body.FailoverEnabled; got != "on" {
 		t.Fatalf("FAILOVER_ENABLED = %q, want on", got)

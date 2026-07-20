@@ -1284,6 +1284,7 @@ test('fetchWorkflowRuntimeConfig loads FAILOVER_ENABLED from the admin config en
             return Promise.resolve({
                 ok: true,
                 json: async () => ({
+                    DEMO_MODE: 'on',
                     FAILOVER_ENABLED: 'on',
                     LOGGING_ENABLED: 'on',
                     LOGGING_RETENTION_DAYS: 30,
@@ -1307,6 +1308,7 @@ test('fetchWorkflowRuntimeConfig loads FAILOVER_ENABLED from the admin config en
     assert.equal(
         JSON.stringify(module.workflowRuntimeConfig),
         JSON.stringify({
+            DEMO_MODE: 'on',
             FAILOVER_ENABLED: 'on',
             LOGGING_ENABLED: 'on',
             LOGGING_RETENTION_DAYS: '30',

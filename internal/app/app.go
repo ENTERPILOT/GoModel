@@ -91,6 +91,10 @@ type Config struct {
 	// rewriters, middleware, routes). The registry is snapshotted here; later
 	// registrations have no effect.
 	Extensions *ext.Registry
+
+	// DemoMode exposes a prominent dashboard warning for public demo instances.
+	// It does not change persistence or security behavior.
+	DemoMode bool
 }
 
 // applyExtensions snapshots a registered extension set into the server
@@ -637,7 +641,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			taggingResult.Service,
 			mcpResult,
 			app,
-			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard),
+			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, cfg.DemoMode),
 			app.live,
 			requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
@@ -1162,7 +1166,7 @@ func initAdmin(
 	var dashHandler *dashboard.Handler
 	if uiEnabled {
 		var err error
-		dashHandler, err = dashboard.NewWithBasePath(basePath)
+		dashHandler, err = dashboard.NewWithDemoMode(basePath, runtimeConfig.DemoMode == "on")
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize dashboard: %w", err)
 		}
@@ -1277,8 +1281,9 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 	}
 }
 
-func dashboardRuntimeConfig(cfg *config.Config, usageEnabled bool) admin.DashboardConfigResponse {
+func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode bool) admin.DashboardConfigResponse {
 	return admin.DashboardConfigResponse{
+		DemoMode:             dashboardEnabledValue(demoMode),
 		FailoverEnabled:      dashboardEnabledValue(failoverFeatureEnabledGlobally(cfg)),
 		LoggingEnabled:       dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
 		LoggingRetentionDays: dashboardLoggingRetentionDays(cfg),
