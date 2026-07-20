@@ -123,15 +123,34 @@
             : null;
 
         return {
-            auditRetentionText() {
+            _auditRetentionDays() {
                 const raw = this.workflowRuntimeConfig && this.workflowRuntimeConfig.LOGGING_RETENTION_DAYS;
-                if (raw === undefined || raw === null || String(raw).trim() === '') return '';
+                if (raw === undefined || raw === null || String(raw).trim() === '') return null;
 
                 const days = Number(raw);
-                if (!Number.isInteger(days) || days < 0) return '';
+                if (!Number.isInteger(days) || days < 0) return null;
+                return days;
+            },
+
+            auditRetentionText() {
+                const days = this._auditRetentionDays();
+                if (days === null) return '';
                 if (days === 0) return 'Audit logs are retained indefinitely.';
                 if (days === 1) return 'Audit logs are retained for 1 day.';
                 return 'Audit logs are retained for ' + days + ' days.';
+            },
+
+            auditRetentionPrefix() {
+                const days = this._auditRetentionDays();
+                if (days === null) return '';
+                return days === 0 ? 'Audit logs are retained ' : 'Audit logs are retained for ';
+            },
+
+            auditRetentionHighlight() {
+                const days = this._auditRetentionDays();
+                if (days === null) return '';
+                if (days === 0) return 'indefinitely';
+                return days === 1 ? '1 day' : days + ' days';
             },
 
             _auditQueryStr() {

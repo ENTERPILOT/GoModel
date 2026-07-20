@@ -3227,9 +3227,13 @@ textarea:focus {
 
 /* Audit Log Section */
 .audit-retention-note {
-  margin-top: 5px;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.audit-retention-highlight {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .audit-log-section {

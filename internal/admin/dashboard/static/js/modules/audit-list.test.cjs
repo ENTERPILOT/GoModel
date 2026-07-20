@@ -60,6 +60,34 @@ test('auditRetentionText hides missing or invalid retention values', () => {
     assert.equal(module.auditRetentionText(), '');
 });
 
+test('auditRetentionPrefix and auditRetentionHighlight split finite and indefinite retention', () => {
+    const module = createAuditListModule();
+
+    module.workflowRuntimeConfig = { LOGGING_RETENTION_DAYS: '30' };
+    assert.equal(module.auditRetentionPrefix(), 'Audit logs are retained for ');
+    assert.equal(module.auditRetentionHighlight(), '30 days');
+
+    module.workflowRuntimeConfig.LOGGING_RETENTION_DAYS = '1';
+    assert.equal(module.auditRetentionPrefix(), 'Audit logs are retained for ');
+    assert.equal(module.auditRetentionHighlight(), '1 day');
+
+    module.workflowRuntimeConfig.LOGGING_RETENTION_DAYS = '0';
+    assert.equal(module.auditRetentionPrefix(), 'Audit logs are retained ');
+    assert.equal(module.auditRetentionHighlight(), 'indefinitely');
+});
+
+test('auditRetentionPrefix and auditRetentionHighlight hide missing or invalid retention values', () => {
+    const module = createAuditListModule();
+
+    module.workflowRuntimeConfig = {};
+    assert.equal(module.auditRetentionPrefix(), '');
+    assert.equal(module.auditRetentionHighlight(), '');
+
+    module.workflowRuntimeConfig.LOGGING_RETENTION_DAYS = '-1';
+    assert.equal(module.auditRetentionPrefix(), '');
+    assert.equal(module.auditRetentionHighlight(), '');
+});
+
 test('auditRequestPane returns the shared request-pane contract', () => {
     const module = createAuditListModule();
     const entry = {
