@@ -3,7 +3,10 @@
 <template x-if="page==='audit-logs'">
 <div>
     <div class="page-header">
-        <h2>Audit Logs</h2>
+        <div>
+            <h2>Audit Logs</h2>
+            <p class="audit-retention-note" x-show="auditRetentionText()" x-text="auditRetentionText()"></p>
+        </div>
         <div class="page-header-controls">
             {{template "date-picker" .}}
         </div>

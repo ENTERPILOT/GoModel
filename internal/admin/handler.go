@@ -64,6 +64,7 @@ type Option func(*Handler)
 const (
 	DashboardConfigFailoverEnabled      = "FAILOVER_ENABLED"
 	DashboardConfigLoggingEnabled       = "LOGGING_ENABLED"
+	DashboardConfigLoggingRetentionDays = "LOGGING_RETENTION_DAYS"
 	DashboardConfigUsageEnabled         = "USAGE_ENABLED"
 	DashboardConfigBudgetsEnabled       = "BUDGETS_ENABLED"
 	DashboardConfigRateLimitsEnabled    = "RATE_LIMITS_ENABLED"
@@ -82,6 +83,7 @@ const statusClientClosedRequest = 499
 type DashboardConfigResponse struct {
 	FailoverEnabled      string `json:"FAILOVER_ENABLED,omitempty"`
 	LoggingEnabled       string `json:"LOGGING_ENABLED,omitempty"`
+	LoggingRetentionDays string `json:"LOGGING_RETENTION_DAYS,omitempty"`
 	UsageEnabled         string `json:"USAGE_ENABLED,omitempty"`
 	BudgetsEnabled       string `json:"BUDGETS_ENABLED,omitempty"`
 	RateLimitsEnabled    string `json:"RATE_LIMITS_ENABLED,omitempty"`
@@ -326,6 +328,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 	return DashboardConfigResponse{
 		FailoverEnabled:      strings.TrimSpace(values.FailoverEnabled),
 		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
+		LoggingRetentionDays: strings.TrimSpace(values.LoggingRetentionDays),
 		UsageEnabled:         strings.TrimSpace(values.UsageEnabled),
 		BudgetsEnabled:       strings.TrimSpace(values.BudgetsEnabled),
 		RateLimitsEnabled:    strings.TrimSpace(values.RateLimitsEnabled),

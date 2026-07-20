@@ -123,6 +123,17 @@
             : null;
 
         return {
+            auditRetentionText() {
+                const raw = this.workflowRuntimeConfig && this.workflowRuntimeConfig.LOGGING_RETENTION_DAYS;
+                if (raw === undefined || raw === null || String(raw).trim() === '') return '';
+
+                const days = Number(raw);
+                if (!Number.isInteger(days) || days < 0) return '';
+                if (days === 0) return 'Audit logs are retained indefinitely.';
+                if (days === 1) return 'Audit logs are retained for 1 day.';
+                return 'Audit logs are retained for ' + days + ' days.';
+            },
+
             _auditQueryStr() {
                 if (this.customStartDate && this.customEndDate) {
                     return 'start_date=' + this._formatDate(this.customStartDate) +

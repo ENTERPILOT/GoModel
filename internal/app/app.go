@@ -1281,6 +1281,7 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled bool) admin.Dashboa
 	return admin.DashboardConfigResponse{
 		FailoverEnabled:      dashboardEnabledValue(failoverFeatureEnabledGlobally(cfg)),
 		LoggingEnabled:       dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
+		LoggingRetentionDays: dashboardLoggingRetentionDays(cfg),
 		UsageEnabled:         dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
 		BudgetsEnabled:       dashboardEnabledValue(cfg != nil && cfg.Budgets.Enabled),
 		RateLimitsEnabled:    dashboardEnabledValue(cfg != nil && cfg.RateLimits.Enabled),
@@ -1290,6 +1291,13 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled bool) admin.Dashboa
 		SemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
 		LiveLogsEnabled:      dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
 	}
+}
+
+func dashboardLoggingRetentionDays(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", cfg.Logging.RetentionDays)
 }
 
 func usagePricingRecalculationConfigured(cfg *config.Config) bool {

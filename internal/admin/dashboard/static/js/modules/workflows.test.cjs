@@ -1286,6 +1286,7 @@ test('fetchWorkflowRuntimeConfig loads FAILOVER_ENABLED from the admin config en
                 json: async () => ({
                     FAILOVER_ENABLED: 'on',
                     LOGGING_ENABLED: 'on',
+                    LOGGING_RETENTION_DAYS: 30,
                     USAGE_ENABLED: 'off',
                     BUDGETS_ENABLED: 'on',
                     RATE_LIMITS_ENABLED: 'off',
@@ -1308,6 +1309,7 @@ test('fetchWorkflowRuntimeConfig loads FAILOVER_ENABLED from the admin config en
         JSON.stringify({
             FAILOVER_ENABLED: 'on',
             LOGGING_ENABLED: 'on',
+            LOGGING_RETENTION_DAYS: '30',
             USAGE_ENABLED: 'off',
             BUDGETS_ENABLED: 'on',
             RATE_LIMITS_ENABLED: 'off',

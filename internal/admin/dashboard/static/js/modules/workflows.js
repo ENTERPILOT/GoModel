@@ -85,6 +85,7 @@
 	                return [
 	                    'FAILOVER_ENABLED',
 	                    'LOGGING_ENABLED',
+	                    'LOGGING_RETENTION_DAYS',
 	                    'USAGE_ENABLED',
 	                    'BUDGETS_ENABLED',
 	                    'RATE_LIMITS_ENABLED',
