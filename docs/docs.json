@@ -59,8 +59,7 @@
                         "group": "Getting Started",
                         "icon": "rocket",
                         "pages": [
-                            "getting-started/quickstart",
-                            "getting-started/faq"
+                            "getting-started/quickstart"
                         ]
                     },
                     {
@@ -115,7 +114,8 @@
                             "about/technical-philosophy",
                             "about/roadmap",
                             "about/license",
-                            "about/benchmarks"
+                            "about/benchmarks",
+                            "about/faq"
                         ]
                     }
                 ]
