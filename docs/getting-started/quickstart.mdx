@@ -4,6 +4,8 @@ description: "GoModel AI gateway quick start: run an OpenAI-compatible LLM gatew
 icon: "rocket"
 ---
 
+import ProviderCredentialsNote from "/snippets/provider-credentials-note.mdx";
+
 ## Run GoModel in 30 Seconds
 
 GoModel is an OpenAI-compatible AI gateway. You can connect one endpoint and
@@ -19,12 +21,16 @@ admin visibility in one place.
     curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
     GOMODEL_MASTER_KEY="change-me" OPENAI_API_KEY="sk-..." gomodel
     ```
+
+    <ProviderCredentialsNote />
   </Tab>
   <Tab title="Windows">
     ```powershell
     irm https://gomodel.enterpilot.io/install.ps1 | iex
     $env:GOMODEL_MASTER_KEY = "change-me"; $env:OPENAI_API_KEY = "sk-..."; gomodel
     ```
+
+    <ProviderCredentialsNote />
   </Tab>
   <Tab title="Docker">
     ```bash
@@ -34,25 +40,13 @@ admin visibility in one place.
       -e OPENAI_API_KEY="sk-..." \
       enterpilot/gomodel
     ```
+
+    <ProviderCredentialsNote />
   </Tab>
   <Tab title="Live Demo" icon="monitor-play">
     [https://demo.enterpilot.io/admin/dashboard](https://demo.enterpilot.io/admin/dashboard)
-
-    <Warning>
-      Do not enter sensitive data. Demo data is reset regularly.
-    </Warning>
   </Tab>
 </Tabs>
-
-<Note>
-  Set at least one provider credential or base URL
-  (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
-  `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `KILO_API_KEY`,
-  `ZAI_API_KEY`, `AZURE_API_KEY` + `AZURE_BASE_URL`,
-  `ORACLE_API_KEY` + `ORACLE_BASE_URL`,
-  `OLLAMA_BASE_URL`) or GoModel will have no models to route. GoModel also
-  works well with additional OpenAI-compatible providers out of the box.
-</Note>
 
 ### 2. Send your first request
 
