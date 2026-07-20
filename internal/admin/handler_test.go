@@ -2252,6 +2252,7 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		FailoverEnabled:      "on",
 		LoggingEnabled:       "on",
+		LoggingRetentionDays: "14",
 		UsageEnabled:         "off",
 		BudgetsEnabled:       "on",
 		RateLimitsEnabled:    "off",
@@ -2280,6 +2281,9 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	}
 	if got := body.LoggingEnabled; got != "on" {
 		t.Fatalf("LOGGING_ENABLED = %q, want on", got)
+	}
+	if got := body.LoggingRetentionDays; got != "14" {
+		t.Fatalf("LOGGING_RETENTION_DAYS = %q, want 14", got)
 	}
 	if got := body.UsageEnabled; got != "off" {
 		t.Fatalf("USAGE_ENABLED = %q, want off", got)

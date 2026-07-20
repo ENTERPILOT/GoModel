@@ -479,7 +479,8 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	semanticOff := false
 	cfg := &config.Config{
 		Logging: config.LogConfig{
-			Enabled: true,
+			Enabled:       true,
+			RetentionDays: 14,
 		},
 		Usage: config.UsageConfig{
 			Enabled: true,
@@ -509,6 +510,9 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	if got := values.LoggingEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLoggingEnabled, got)
 	}
+	if got := values.LoggingRetentionDays; got != "14" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want 14", admin.DashboardConfigLoggingRetentionDays, got)
+	}
 	if got := values.UsageEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigUsageEnabled, got)
 	}
@@ -529,6 +533,13 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	}
 	if got := values.LiveLogsEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLiveLogsEnabled, got)
+	}
+}
+
+func TestDashboardRuntimeConfig_ExposesIndefiniteLoggingRetention(t *testing.T) {
+	values := dashboardRuntimeConfig(&config.Config{}, false)
+	if got := values.LoggingRetentionDays; got != "0" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want 0", admin.DashboardConfigLoggingRetentionDays, got)
 	}
 }
 

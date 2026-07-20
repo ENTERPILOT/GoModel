@@ -34,6 +34,32 @@ function loadConversationHelpers() {
     return context.window.DashboardConversationHelpers;
 }
 
+test('auditRetentionText describes finite and indefinite retention', () => {
+    const module = createAuditListModule();
+
+    module.workflowRuntimeConfig = { LOGGING_RETENTION_DAYS: '30' };
+    assert.equal(module.auditRetentionText(), 'Audit logs are retained for 30 days.');
+
+    module.workflowRuntimeConfig.LOGGING_RETENTION_DAYS = '1';
+    assert.equal(module.auditRetentionText(), 'Audit logs are retained for 1 day.');
+
+    module.workflowRuntimeConfig.LOGGING_RETENTION_DAYS = '0';
+    assert.equal(module.auditRetentionText(), 'Audit logs are retained indefinitely.');
+});
+
+test('auditRetentionText hides missing or invalid retention values', () => {
+    const module = createAuditListModule();
+
+    module.workflowRuntimeConfig = {};
+    assert.equal(module.auditRetentionText(), '');
+
+    module.workflowRuntimeConfig.LOGGING_RETENTION_DAYS = '-1';
+    assert.equal(module.auditRetentionText(), '');
+
+    module.workflowRuntimeConfig.LOGGING_RETENTION_DAYS = 'unknown';
+    assert.equal(module.auditRetentionText(), '');
+});
+
 test('auditRequestPane returns the shared request-pane contract', () => {
     const module = createAuditListModule();
     const entry = {

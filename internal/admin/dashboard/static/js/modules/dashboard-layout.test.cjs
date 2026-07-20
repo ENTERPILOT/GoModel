@@ -864,6 +864,14 @@ test("audit toolbar uses a full-width search row above the select row with a rig
 
   assert.match(
     indexTemplate,
+    /<h2>Audit Logs<\/h2>\s*<p class="audit-retention-note" x-show="auditRetentionText\(\)" x-text="auditRetentionText\(\)"><\/p>/,
+  );
+  const retentionRule = readCSSRule(css, ".audit-retention-note");
+  assert.match(retentionRule, /color:\s*var\(--text-muted\)/);
+  assert.match(retentionRule, /font-size:\s*13px/);
+
+  assert.match(
+    indexTemplate,
     /<div class="audit-filter-row audit-filter-row-search">[\s\S]*id="audit-filter-search"[\s\S]*<\/div>\s*<div class="audit-filter-row audit-filter-row-controls">[\s\S]*id="audit-filter-method"[\s\S]*id="audit-filter-status"[\s\S]*id="audit-filter-stream"[\s\S]*class="pagination-btn audit-clear-btn" @click="clearAuditFilters\(\)"/,
   );
   assert.match(

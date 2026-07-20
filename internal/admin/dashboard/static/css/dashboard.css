@@ -3187,6 +3187,12 @@ textarea:focus {
 }
 
 /* Audit Log Section */
+.audit-retention-note {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 .audit-log-section {
   background: var(--bg-surface);
   border: 1px solid var(--border);
