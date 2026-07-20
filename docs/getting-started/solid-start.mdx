@@ -1,0 +1,245 @@
+---
+title: "Solid Start"
+description: "Run GoModel in a production-ready way with a .env file, Docker, Docker Compose, or a native binary."
+icon: "shield-check"
+---
+
+This page shows a practical production baseline for GoModel. It assumes you
+will run GoModel behind HTTPS, keep secrets out of shell history, persist
+storage across restarts, and protect the gateway with a master key.
+
+## Production baseline
+
+Start with these decisions:
+
+| Area | Recommended default |
+| ---- | ------------------- |
+| Secrets | Put credentials in a `.env` file or your orchestrator's secret manager |
+| Authentication | Set `GOMODEL_MASTER_KEY` before exposing the gateway |
+| Logging | Use `LOG_FORMAT=json`; enable audit logging only with a retention policy |
+| Storage | Use SQLite for one instance, PostgreSQL or MongoDB for multiple instances |
+| Network | Terminate TLS at a reverse proxy or load balancer, then forward to GoModel |
+| Health checks | Use public `GET /health` from your proxy, load balancer, or process supervisor |
+
+<Warning>
+  Do not expose GoModel to the internet without `GOMODEL_MASTER_KEY`. When the
+  key is empty, API routes are intentionally unprotected for local development.
+</Warning>
+
+## Create a production .env file
+
+Create `/opt/gomodel/.env` on the host, or use another host path managed by
+your deployment system:
+
+```bash
+PORT=8080
+LOG_FORMAT=json
+LOG_LEVEL=info
+BODY_SIZE_LIMIT=10M
+GOMODEL_MASTER_KEY=replace-with-a-long-random-secret
+
+# Provider credentials. Set only the providers you use.
+OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
+# GEMINI_API_KEY=...
+# OPENROUTER_API_KEY=sk-or-...
+
+# Storage: SQLite is fine for a single GoModel instance.
+STORAGE_TYPE=sqlite
+SQLITE_PATH=/app/data/gomodel.db
+
+# Audit logs are optional. Keep bodies off unless you explicitly need them.
+LOGGING_ENABLED=true
+LOGGING_LOG_BODIES=false
+LOGGING_LOG_HEADERS=false
+LOGGING_RETENTION_DAYS=30
+
+# Usage tracking is enabled by default; keep a retention window.
+USAGE_ENABLED=true
+USAGE_RETENTION_DAYS=90
+
+# Keep admin endpoints and dashboard enabled only when they are protected by auth
+# and reachable through your intended network path.
+ADMIN_ENDPOINTS_ENABLED=true
+ADMIN_UI_ENABLED=true
+```
+
+`/opt/gomodel/.env` is a host file. Docker reads it through `--env-file` or
+Compose `env_file` before the container starts, then passes the values as
+environment variables. The file is not copied into the image. Keeping secrets on
+the host lets you rotate credentials without rebuilding or republishing the
+container image.
+
+`SQLITE_PATH` uses `/app/data/gomodel.db` for Docker because that path exists
+inside the GoModel image. The image runs from `/app`, creates `/app/data` as a
+writable directory for the nonroot container user, and the examples below mount
+the host directory `/opt/gomodel/data` into that container path. This keeps
+runtime state out of the image while preserving it on the host.
+
+Protect the file on the host:
+
+```bash
+sudo chown root:root /opt/gomodel/.env
+sudo chmod 600 /opt/gomodel/.env
+```
+
+<Tip>
+  SQLite uses sidecar files such as `gomodel.db-wal` and `gomodel.db-shm`, so
+  mount a directory, not only the `.db` file.
+</Tip>
+
+## Run with Docker
+
+Use Docker when you want the smallest operational surface. Mount durable
+storage and load secrets from the `.env` file:
+
+```bash
+sudo mkdir -p /opt/gomodel/data
+sudo chown 65532:65532 /opt/gomodel/data
+
+docker run -d --name gomodel \
+  --restart unless-stopped \
+  --env-file /opt/gomodel/.env \
+  -p 127.0.0.1:8080:8080 \
+  -v /opt/gomodel/data:/app/data \
+  enterpilot/gomodel
+```
+
+Bind to `127.0.0.1` when a reverse proxy on the same host terminates HTTPS. If
+GoModel sits behind a cloud load balancer or another container network, publish
+the port according to that network boundary instead.
+
+## Run with Docker Compose
+
+Use Compose when you also run Redis, PostgreSQL, MongoDB, Prometheus, or a
+reverse proxy on the same host.
+
+```yaml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    restart: unless-stopped
+    env_file:
+      - /opt/gomodel/.env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /opt/gomodel/data:/app/data
+```
+
+Start or update the service:
+
+```bash
+docker compose up -d
+docker compose logs -f gomodel
+```
+
+For multi-instance deployments, switch storage to PostgreSQL or MongoDB:
+
+```bash
+STORAGE_TYPE=postgresql
+POSTGRES_URL=postgres://gomodel:strong-password@postgres:5432/gomodel
+POSTGRES_MAX_CONNS=10
+```
+
+## Run as a native binary
+
+Use a native binary when you already manage services with systemd and want to
+avoid a container runtime.
+
+Build the binary:
+
+```bash
+make build
+sudo install -m 0755 bin/gomodel /usr/local/bin/gomodel
+```
+
+For a native binary, use a host filesystem path for SQLite:
+
+```bash
+# /opt/gomodel/.env
+PORT=8080
+LOG_FORMAT=json
+GOMODEL_MASTER_KEY=replace-with-a-long-random-secret
+OPENAI_API_KEY=sk-...
+STORAGE_TYPE=sqlite
+SQLITE_PATH=/var/lib/gomodel/gomodel.db
+LOGGING_ENABLED=true
+LOGGING_LOG_BODIES=false
+LOGGING_RETENTION_DAYS=30
+```
+
+Create a systemd service:
+
+```ini
+[Unit]
+Description=GoModel AI gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gomodel
+Group=gomodel
+WorkingDirectory=/opt/gomodel
+EnvironmentFile=/opt/gomodel/.env
+ExecStart=/usr/local/bin/gomodel
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable it:
+
+```bash
+sudo useradd --system --home /var/lib/gomodel --shell /usr/sbin/nologin gomodel
+sudo mkdir -p /var/lib/gomodel /opt/gomodel
+sudo chown gomodel:gomodel /var/lib/gomodel
+sudo systemctl daemon-reload
+sudo systemctl enable --now gomodel
+sudo journalctl -u gomodel -f
+```
+
+## Verify the deployment
+
+Check liveness:
+
+```bash
+curl -fsS http://127.0.0.1:8080/health
+```
+
+Check authenticated API access:
+
+```bash
+curl -fsS http://127.0.0.1:8080/v1/models \
+  -H "Authorization: Bearer replace-with-a-long-random-secret"
+```
+
+Send a smoke-test request:
+
+```bash
+curl -fsS http://127.0.0.1:8080/v1/chat/completions \
+  -H "Authorization: Bearer replace-with-a-long-random-secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Reply with ok."}]
+  }'
+```
+
+## Operational notes
+
+- Put HTTPS, rate limits, IP allowlists, and request timeouts in your reverse
+  proxy or load balancer.
+- Keep `PPROF_ENABLED=false` in production unless you expose it only on a
+  trusted internal network during an investigation.
+- Keep `LOGGING_LOG_BODIES=false` unless your data handling policy allows full
+  prompt and response capture.
+- Use [Configuration](/advanced/configuration) for the full environment
+  variable reference.
+- Use [Prometheus Metrics](/guides/prometheus-metrics) if you want metrics
+  scraping; it is currently experimental.
