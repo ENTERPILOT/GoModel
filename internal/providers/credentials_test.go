@@ -148,6 +148,64 @@ func TestCredentialsService_UpsertSucceedsWhenTheProviderRejectsTheKey(t *testin
 	}
 }
 
+// TestCredentialsService_UpsertKeepsThePreviousProviderLiveWhenTheEditIsUnresolvable
+// guards against unregistering a working, already-serving provider before
+// the replacement is known to be valid. An edit that breaks resolution (e.g.
+// stripping the only API key) must be rejected with the old provider still
+// registered and routable, not leave the name unregistered.
+func TestCredentialsService_UpsertKeepsThePreviousProviderLiveWhenTheEditIsUnresolvable(t *testing.T) {
+	ctx := t.Context()
+	factory := newCredentialsTestFactory(t)
+	registry := NewModelRegistry()
+	store := newFakeCredentialStore()
+
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
+	if err != nil {
+		t.Fatalf("NewCredentialsService() error = %v", err)
+	}
+
+	if err := svc.Upsert(ctx, ManagedProviderCredential{Name: "flaky", Type: "test", APIKeys: []string{"sk-good"}, Enabled: true}); err != nil {
+		t.Fatalf("initial Upsert() error = %v", err)
+	}
+	if !registry.Supports("flaky/test-model") {
+		t.Fatal("provider did not register on the initial (valid) Upsert")
+	}
+
+	// An edit that strips the only API key: the "test" registration doesn't
+	// allow keyless credentials, so this must fail to resolve.
+	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "flaky", Type: "test", Enabled: true})
+	if err == nil {
+		t.Fatal("Upsert() with an unresolvable edit error = nil, want an error")
+	}
+
+	if registry.ProviderByName("flaky") == nil {
+		t.Error("ProviderByName(flaky) = nil after a failed edit, want the previous working provider still registered")
+	}
+	if !registry.Supports("flaky/test-model") {
+		t.Error("Supports(flaky/test-model) = false after a failed edit, want the previous provider still routable")
+	}
+}
+
+func TestCredentialsService_UpsertRejectsNameContainingSlash(t *testing.T) {
+	ctx := t.Context()
+	factory := newCredentialsTestFactory(t)
+	registry := NewModelRegistry()
+	store := newFakeCredentialStore()
+
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
+	if err != nil {
+		t.Fatalf("NewCredentialsService() error = %v", err)
+	}
+
+	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "my/provider", Type: "test", APIKeys: []string{"sk-test"}, Enabled: true})
+	if err == nil {
+		t.Fatal("Upsert() with a '/' in the name error = nil, want a rejection")
+	}
+	if registry.ProviderCount() != 0 {
+		t.Errorf("ProviderCount() = %d, want 0 (nothing should register for a rejected name)", registry.ProviderCount())
+	}
+}
+
 func TestCredentialsService_UpsertRejectsUnresolvableCredential(t *testing.T) {
 	ctx := t.Context()
 	factory := newCredentialsTestFactory(t)

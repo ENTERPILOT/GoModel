@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ErrCredentialNotFound indicates a requested admin-managed provider
@@ -208,6 +209,12 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 	if strings.TrimSpace(cred.Type) == "" {
 		return fmt.Errorf("provider type is required")
 	}
+	// "/" is the model-selector qualifier delimiter ("name/model"); a name
+	// containing one would make the provider unreachable or ambiguous
+	// through that syntax.
+	if strings.Contains(name, "/") {
+		return fmt.Errorf("provider name %q must not contain '/'", name)
+	}
 	if !s.factory.knowsType(cred.Type) {
 		return fmt.Errorf("unknown provider type: %s", cred.Type)
 	}
@@ -217,14 +224,21 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 		return err
 	}
 
-	s.registry.UnregisterProvider(name)
 	if cred.Enabled {
-		if err := s.register(cred); err != nil {
-			// The row is persisted; only applying it to the running registry
-			// failed (bad credentials, unresolved fields). A later edit or
-			// restart picks the corrected row up.
+		// Resolve and construct the replacement adapter before touching the
+		// registry: if this credential doesn't resolve (e.g. an edit
+		// stripped the only API key), whatever is currently registered under
+		// this name -- possibly a working provider actively serving traffic
+		// -- must keep serving rather than being unregistered out from
+		// under a failed edit. The row is still persisted above, so a
+		// follow-up correction picks it straight up.
+		provider, cfg, err := s.buildProvider(cred)
+		if err != nil {
 			return fmt.Errorf("provider %q was saved but not applied: %w", name, err)
 		}
+		s.install(name, provider, cfg)
+	} else {
+		s.registry.UnregisterProvider(name)
 	}
 	// A Refresh error here means the provider's /models call itself failed
 	// (bad key, unreachable host, ...) -- registration still succeeded, and
@@ -260,22 +274,45 @@ func (s *CredentialsService) Delete(ctx context.Context, name string) error {
 // register resolves one credential row through the same pipeline declarative
 // providers use (env-placeholder rejection, API key de-duplication, resilience
 // merge) and registers the resulting adapter into the registry. It does not
-// refresh the model inventory; callers batch that after registering.
+// refresh the model inventory; callers batch that after registering. Only
+// used by Reload (initial population), where there is no previously-live
+// provider to protect, so build-then-install in one step is safe.
 func (s *CredentialsService) register(row ManagedProviderCredential) error {
+	provider, cfg, err := s.buildProvider(row)
+	if err != nil {
+		return err
+	}
+	s.install(strings.TrimSpace(row.Name), provider, cfg)
+	return nil
+}
+
+// buildProvider resolves one credential row through the same pipeline
+// declarative providers use (env-placeholder rejection, API key
+// de-duplication, resilience merge) and constructs the adapter, without
+// touching the registry. Callers that already have something live registered
+// under this name must build+validate first and only call install on
+// success, so a bad edit never displaces a working provider.
+func (s *CredentialsService) buildProvider(row ManagedProviderCredential) (core.Provider, ProviderConfig, error) {
 	name := strings.TrimSpace(row.Name)
 	raw := map[string]config.RawProviderConfig{name: row.toRawProviderConfig()}
 	resolved := filterEmptyProviders(normalizeProviderAPIKeys(raw), s.factory.discoveryConfigsSnapshot())
 	rawCfg, ok := resolved[name]
 	if !ok {
-		return fmt.Errorf("credentials did not resolve (missing API key or required fields)")
+		return nil, ProviderConfig{}, fmt.Errorf("credentials did not resolve (missing API key or required fields)")
 	}
 
 	cfg := buildProviderConfig(rawCfg, s.resilience)
 	provider, err := s.factory.Create(cfg)
 	if err != nil {
-		return err
+		return nil, ProviderConfig{}, err
 	}
+	return provider, cfg, nil
+}
 
+// install unregisters whatever is currently registered under name (a no-op
+// if nothing is) and registers provider in its place.
+func (s *CredentialsService) install(name string, provider core.Provider, cfg ProviderConfig) {
+	s.registry.UnregisterProvider(name)
 	s.registry.RegisterProviderWithNameAndType(provider, name, cfg.Type)
 	if len(cfg.Models) > 0 {
 		s.registry.SetProviderConfiguredModels(name, cfg.Models)
@@ -283,5 +320,4 @@ func (s *CredentialsService) register(row ManagedProviderCredential) error {
 	if len(cfg.ModelMetadataOverrides) > 0 {
 		s.registry.SetProviderMetadataOverrides(name, cfg.ModelMetadataOverrides)
 	}
-	return nil
 }

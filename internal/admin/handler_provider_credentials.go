@@ -173,6 +173,13 @@ func (h *Handler) UpsertProviderCredential(c *echo.Context) error {
 	if name == "" {
 		return handleError(c, core.NewInvalidRequestError("name is required", nil))
 	}
+	// "/" is the model-selector qualifier delimiter ("name/model"); a name
+	// containing one would make the provider unreachable or ambiguous
+	// through that syntax. CredentialsService.Upsert enforces this too, but
+	// checking here gets a clean 400 instead of a 502-wrapped service error.
+	if strings.Contains(name, "/") {
+		return handleError(c, core.NewInvalidRequestError("name must not contain '/'", nil))
+	}
 	providerType := strings.TrimSpace(req.Type)
 	if providerType == "" {
 		return handleError(c, core.NewInvalidRequestError("type is required", nil))
@@ -183,6 +190,13 @@ func (h *Handler) UpsertProviderCredential(c *echo.Context) error {
 	if h.providerCredentials.IsManaged(name) {
 		return handleError(c, core.NewInvalidRequestError("provider "+name+" is managed by config/env and is read-only", nil))
 	}
+
+	// Serialize provider-credential mutations: buildProviderCredentialUpsert
+	// reads the current stored row (to resolve "***" placeholders) and then
+	// writes it back, so two concurrent edits of the same name could
+	// otherwise interleave and leave the store and registry inconsistent.
+	h.mutationMu.Lock()
+	defer h.mutationMu.Unlock()
 
 	cred, err := h.buildProviderCredentialUpsert(c.Request().Context(), name, req)
 	if err != nil {
@@ -217,6 +231,8 @@ func (h *Handler) DeleteProviderCredential(c *echo.Context) error {
 	if h.providerCredentials == nil {
 		return handleError(c, featureUnavailableError("provider credentials feature is unavailable"))
 	}
+	h.mutationMu.Lock()
+	defer h.mutationMu.Unlock()
 	return deleteManagedResource(c, "provider", h.providerCredentials.IsManaged, h.providerCredentials.Delete, providers.ErrCredentialNotFound, providerCredentialWriteError)
 }
 

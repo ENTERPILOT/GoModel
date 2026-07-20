@@ -355,6 +355,22 @@ func TestUpsertProviderCredential_RejectsUnknownType(t *testing.T) {
 	}
 }
 
+func TestUpsertProviderCredential_RejectsNameContainingSlash(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"my/provider","type":"openai","api_keys":["sk-real"]}`)
+	if err := h.UpsertProviderCredential(c); err != nil {
+		t.Fatalf("UpsertProviderCredential() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	if _, ok := fake.rows["my/provider"]; ok {
+		t.Fatal("a name containing '/' should not have been persisted")
+	}
+}
+
 func TestDeleteProviderCredential(t *testing.T) {
 	fake := newProviderCredentialsAdminFake()
 	fake.rows["gone"] = providers.ManagedProviderCredential{Name: "gone", Type: "openai", APIKeys: []string{"sk"}, Enabled: true}

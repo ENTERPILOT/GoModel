@@ -85,6 +85,7 @@ func newCredentialsResult(ctx context.Context, storeConn storage.Storage, factor
 
 	service, err := NewCredentialsService(ctx, factory, registry, store, declaredNames, resilience)
 	if err != nil {
+		_ = store.Close()
 		return nil, err
 	}
 
