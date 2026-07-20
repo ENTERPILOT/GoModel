@@ -3,9 +3,13 @@
 <template x-if="page==='audit-logs'">
 <div>
     <div class="page-header">
-        <div>
+        <div class="inline-help-section" x-data="{ open: false, copyId: 'audit-retention-help-copy', showLabel: 'Show retention help', hideLabel: 'Hide retention help', text: 'If you want to change the retention period, set LOGGING_RETENTION_DAYS (env var) or logging.retention_days (config.yaml) and restart the gateway. Default is 30 days; 0 keeps audit logs forever.' }">
             <h2>Audit Logs</h2>
-            <p class="audit-retention-note" x-show="auditRetentionText()" x-text="auditRetentionText()"></p>
+            <div class="inline-help-title-row" x-show="auditRetentionText()">
+                <p class="audit-retention-note"><span x-text="auditRetentionPrefix()"></span><span class="audit-retention-highlight" x-text="auditRetentionHighlight()"></span>.</p>
+                {{template "inline-help-toggle" .}}
+            </div>
+            <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
         </div>
         <div class="page-header-controls">
             {{template "date-picker" .}}

@@ -864,11 +864,14 @@ test("audit toolbar uses a full-width search row above the select row with a rig
 
   assert.match(
     indexTemplate,
-    /<h2>Audit Logs<\/h2>\s*<p class="audit-retention-note" x-show="auditRetentionText\(\)" x-text="auditRetentionText\(\)"><\/p>/,
+    /copyId: 'audit-retention-help-copy'[\s\S]*If you want to change the retention period, set LOGGING_RETENTION_DAYS \(env var\) or logging\.retention_days \(config\.yaml\) and restart the gateway\. Default is 30 days; 0 keeps audit logs forever\.[\s\S]*<h2>Audit Logs<\/h2>[\s\S]*<div class="inline-help-title-row" x-show="auditRetentionText\(\)">[\s\S]*<p class="audit-retention-note"><span x-text="auditRetentionPrefix\(\)"><\/span><span class="audit-retention-highlight" x-text="auditRetentionHighlight\(\)"><\/span>\.<\/p>[\s\S]*{{template "inline-help-toggle" \.}}[\s\S]*<p :id="copyId" class="inline-help-copy" x-show="open" x-transition\.opacity\.duration\.200ms x-text="text"><\/p>/,
   );
   const retentionRule = readCSSRule(css, ".audit-retention-note");
   assert.match(retentionRule, /color:\s*var\(--text-muted\)/);
   assert.match(retentionRule, /font-size:\s*13px/);
+  const highlightRule = readCSSRule(css, ".audit-retention-highlight");
+  assert.match(highlightRule, /color:\s*var\(--text\)/);
+  assert.match(highlightRule, /font-weight:\s*600/);
 
   assert.match(
     indexTemplate,
