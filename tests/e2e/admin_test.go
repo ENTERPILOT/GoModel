@@ -229,6 +229,8 @@ func TestAdminDashboard_Enabled_E2E(t *testing.T) {
 		// document. The dashboard layout pins these markers.
 		assert.Contains(t, html, "<title>GoModel Dashboard</title>",
 			"dashboard HTML should carry the expected <title>")
+		assert.Contains(t, html, `<meta name="robots" content="noindex, nofollow, nosnippet, noimageindex">`,
+			"dashboard HTML should prevent search engine indexing")
 		assert.Contains(t, html, "css/dashboard.css",
 			"dashboard HTML should reference its stylesheet bundle")
 		assert.Contains(t, html, "js/dashboard.js",

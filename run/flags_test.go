@@ -36,6 +36,12 @@ func TestParseCLI_RejectsUnknownFlags(t *testing.T) {
 	}
 }
 
+func TestParseCLI_RejectsRemovedDemoFlag(t *testing.T) {
+	if _, err := parseCLI("gomodel", []string{"--demo"}, io.Discard); err == nil {
+		t.Fatal("parseCLI(--demo) error = nil, want error")
+	}
+}
+
 func TestParseCLI_RejectsPositionalArgs(t *testing.T) {
 	if _, err := parseCLI("gomodel", []string{"--health", "extra"}, io.Discard); err == nil {
 		t.Fatal("parseCLI(--health extra) error = nil, want error")

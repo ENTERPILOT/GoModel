@@ -32,7 +32,7 @@ run:
 
 # Seed the local SQLite database and start GoModel with a populated dashboard.
 demo: seed-demo-data
-	$(MAKE) run
+	$(MAKE) run GOMODEL_DEMO_MODE=true
 
 # Clean build artifacts
 clean:

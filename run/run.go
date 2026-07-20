@@ -140,9 +140,20 @@ func Run(ctx context.Context, opts Options) error {
 		return nil
 	}
 
+	demoMode, err := demoModeFromEnv()
+	if err != nil {
+		fmt.Fprintln(opts.Stderr, err)
+		return err
+	}
+
 	if err := configureLogging(opts.Stderr); err != nil {
 		fmt.Fprintf(opts.Stderr, "failed to configure logging: %v\n", err)
 		return err
+	}
+	if demoMode {
+		demoCtx, stopDemoWarnings := context.WithCancel(ctx)
+		defer stopDemoWarnings()
+		startDemoModeWarnings(demoCtx)
 	}
 
 	slog.Info("starting "+opts.ProductName,
@@ -169,6 +180,7 @@ func Run(ctx context.Context, opts Options) error {
 		AppConfig:  result,
 		Factory:    defaultProviderFactory(result.Config),
 		Extensions: opts.Extensions,
+		DemoMode:   demoMode,
 	})
 	if err != nil {
 		slog.Error("failed to initialize application", "error", err)

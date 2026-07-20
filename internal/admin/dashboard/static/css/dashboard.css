@@ -667,6 +667,45 @@ body.dashboard-modal-open {
   transition: width 0.2s;
 }
 
+.demo-mode-banner {
+  position: sticky;
+  top: 16px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warning) 14%, var(--bg-surface));
+  color: var(--text);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.demo-mode-banner-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  color: var(--warning);
+}
+
+.demo-mode-banner div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.demo-mode-banner strong {
+  flex-shrink: 0;
+  color: var(--warning);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .page-header {
   display: flex;
   align-items: center;
@@ -5352,6 +5391,14 @@ body.conversation-drawer-open {
     width: 100%;
     margin: 0 auto;
     padding: 20px;
+  }
+  .demo-mode-banner {
+    top: 10px;
+    align-items: flex-start;
+  }
+  .demo-mode-banner div {
+    display: grid;
+    gap: 2px;
   }
   .auth-dialog-shell {
     align-items: end;

@@ -26,11 +26,18 @@ type Handler struct {
 	indexTmpl *template.Template
 	staticFS  http.Handler
 	basePath  string
+	demoMode  bool
 }
 
 // NewWithBasePath creates a dashboard handler for an app mounted under basePath.
 // It parses templates and sets up the static file server.
 func NewWithBasePath(basePath string) (*Handler, error) {
+	return NewWithDemoMode(basePath, false)
+}
+
+// NewWithDemoMode creates a dashboard handler and controls whether the demo
+// warning is rendered in the main content area.
+func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
 	basePath = config.NormalizeBasePath(basePath)
 	assetVersions, err := buildFrontendAssetVersions()
 	if err != nil {
@@ -58,18 +65,20 @@ func NewWithBasePath(basePath string) (*Handler, error) {
 		indexTmpl: tmpl,
 		staticFS:  http.StripPrefix("/admin/static/", http.FileServer(http.FS(staticSub))),
 		basePath:  basePath,
+		demoMode:  demoMode,
 	}, nil
 }
 
 type templateData struct {
 	BasePath string
 	Version  string
+	DemoMode bool
 }
 
 // Index serves GET /admin/dashboard — the main dashboard page.
 func (h *Handler) Index(c *echo.Context) error {
 	var buf bytes.Buffer
-	if err := h.indexTmpl.ExecuteTemplate(&buf, "layout", templateData{BasePath: h.basePath, Version: version.Info()}); err != nil {
+	if err := h.indexTmpl.ExecuteTemplate(&buf, "layout", templateData{BasePath: h.basePath, Version: version.Info(), DemoMode: h.demoMode}); err != nil {
 		slog.Error("failed to render admin dashboard", "path", c.Request().URL.Path, "error", err)
 		return err
 	}
