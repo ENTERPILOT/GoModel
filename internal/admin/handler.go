@@ -52,6 +52,7 @@ type Handler struct {
 	runtimeConfig       DashboardConfigResponse
 	runtimeRefresher    RuntimeRefresher
 	configuredProviders []providers.SanitizedProviderConfig
+	providerCredentials ProviderCredentialsAdmin
 	requestHealth       RequestHealthSource
 
 	mutationMu sync.Mutex
@@ -203,6 +204,16 @@ func WithVirtualModels(service *virtualmodels.Service) Option {
 func WithMCPServers(service MCPServerAdmin) Option {
 	return func(h *Handler) {
 		h.mcpServers = service
+	}
+}
+
+// WithProviderCredentials enables admin management of model provider
+// credentials (the dashboard alternative to setting provider API keys as
+// env vars). Callers must not wrap a nil *providers.CredentialsService (a
+// typed nil would defeat the handlers' feature-unavailable check).
+func WithProviderCredentials(service ProviderCredentialsAdmin) Option {
+	return func(h *Handler) {
+		h.providerCredentials = service
 	}
 }
 

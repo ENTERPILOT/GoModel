@@ -144,6 +144,16 @@ func (f *ProviderFactory) discoveryConfigsSnapshot() map[string]DiscoveryConfig 
 	return snapshot
 }
 
+// knowsType reports whether a builder is registered for the given provider
+// type. Used to reject admin-managed credentials for an unknown type before
+// they reach Create's less specific error.
+func (f *ProviderFactory) knowsType(providerType string) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, ok := f.builders[providerType]
+	return ok
+}
+
 // RegisteredTypes returns a list of all registered provider types.
 func (f *ProviderFactory) RegisteredTypes() []string {
 	f.mu.RLock()

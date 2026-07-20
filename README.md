@@ -74,6 +74,8 @@ curl http://localhost:8080/v1/chat/completions \
 
 **That's it!** GoModel automatically detects which providers are available based on the credentials you supply.
 
+Prefer not to set API keys as env vars? Start GoModel with none configured — `gomodel` with no provider env vars still boots — then add provider credentials from the **Providers** page in the admin dashboard (`/admin/dashboard`). They apply immediately, no restart.
+
 ### Supported LLM Providers
 
 GoModel supports OpenAI, Anthropic, Google Gemini, Vertex AI, DeepSeek, Groq,
@@ -100,7 +102,7 @@ passthrough), credentials, and configuration notes.
    cp .env.template .env
    ```
 
-2. Add your API keys to `.env` (at least one required).
+2. Add your API keys to `.env` (optional — you can instead add them later from the admin dashboard's Providers page).
 
 3. Start the server:
 

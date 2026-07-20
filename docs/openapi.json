@@ -1472,7 +1472,7 @@
         "summary": "Delete one admin-managed MCP server",
         "parameters": [
           {
-            "description": "MCP server name",
+            "description": "MCP server slug",
             "name": "name",
             "in": "path",
             "required": true,
@@ -1550,14 +1550,14 @@
     },
     "/admin/mcp-servers/{name}/catalog": {
       "get": {
-        "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server name.",
+        "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.",
         "tags": [
           "admin"
         ],
         "summary": "Inspect one MCP server's current catalog",
         "parameters": [
           {
-            "description": "MCP server name",
+            "description": "MCP server slug",
             "name": "name",
             "in": "path",
             "required": true,
@@ -1628,7 +1628,7 @@
         "summary": "Force-redial one MCP server and return its fresh state",
         "parameters": [
           {
-            "description": "MCP server name",
+            "description": "MCP server slug",
             "name": "name",
             "in": "path",
             "required": true,
@@ -2033,6 +2033,276 @@
         "x-mint": {
           "metadata": {
             "sidebarTitle": "/admin/models/categories"
+          }
+        }
+      }
+    },
+    "/admin/provider-credentials": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List admin-managed model provider credentials",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/admin.providerCredentialViewResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/provider-credentials"
+          }
+        }
+      },
+      "put": {
+        "description": "Registers (or re-registers) the provider into the running gateway immediately, without a restart.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or update one admin-managed provider credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.upsertProviderCredentialRequest"
+              }
+            }
+          },
+          "description": "Provider credential definition",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.providerCredentialViewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/provider-credentials"
+          }
+        }
+      }
+    },
+    "/admin/provider-credentials/types": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List provider types the gateway can construct",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/provider-credentials/types"
+          }
+        }
+      }
+    },
+    "/admin/provider-credentials/{name}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete one admin-managed provider credential",
+        "parameters": [
+          {
+            "description": "Provider name",
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/provider-credentials/{name}"
           }
         }
       }
@@ -3693,7 +3963,7 @@
     },
     "/mcp": {
       "get": {
-        "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {server}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset.",
+        "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {slug}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset of server slugs.",
         "tags": [
           "mcp"
         ],
@@ -3774,7 +4044,7 @@
         }
       },
       "post": {
-        "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {server}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset.",
+        "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {slug}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset of server slugs.",
         "tags": [
           "mcp"
         ],
@@ -3855,7 +4125,7 @@
         }
       },
       "delete": {
-        "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {server}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset.",
+        "description": "Streamable-HTTP MCP endpoint aggregating every configured upstream MCP server visible to the caller. Tools and prompts are namespaced as {slug}_{name}. POST carries JSON-RPC messages, GET opens the server-notification SSE stream, DELETE ends the session. The X-MCP-Servers request header optionally narrows the visible servers to a comma-separated subset of server slugs.",
         "tags": [
           "mcp"
         ],
@@ -3945,7 +4215,7 @@
         "summary": "MCP gateway (single server)",
         "parameters": [
           {
-            "description": "Configured MCP server name",
+            "description": "Configured MCP server slug",
             "name": "server",
             "in": "path",
             "required": true,
@@ -4052,7 +4322,7 @@
         "summary": "MCP gateway (single server)",
         "parameters": [
           {
-            "description": "Configured MCP server name",
+            "description": "Configured MCP server slug",
             "name": "server",
             "in": "path",
             "required": true,
@@ -4159,7 +4429,7 @@
         "summary": "MCP gateway (single server)",
         "parameters": [
           {
-            "description": "Configured MCP server name",
+            "description": "Configured MCP server slug",
             "name": "server",
             "in": "path",
             "required": true,
@@ -7282,6 +7552,405 @@
         }
       }
     },
+    "/v1/messages/batches": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "List message batches",
+        "parameters": [
+          {
+            "description": "Pagination cursor",
+            "name": "after_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum items to return (1-100, default 20)",
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.MessageBatchList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/messages/batches"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Create a message batch (Anthropic Message Batches API)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/anthropicapi.BatchCreateRequest"
+              }
+            }
+          },
+          "description": "Anthropic Message Batches create request",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.MessageBatch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/messages/batches"
+          }
+        }
+      }
+    },
+    "/v1/messages/batches/{id}": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Get a message batch",
+        "parameters": [
+          {
+            "description": "Message batch ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.MessageBatch"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/messages/batches/{id}"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Delete an ended message batch",
+        "parameters": [
+          {
+            "description": "Message batch ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.DeletedMessageBatch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/messages/batches/{id}"
+          }
+        }
+      }
+    },
+    "/v1/messages/batches/{id}/cancel": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Cancel a message batch",
+        "parameters": [
+          {
+            "description": "Message batch ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.MessageBatch"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/messages/batches/{id}/cancel"
+          }
+        }
+      }
+    },
+    "/v1/messages/batches/{id}/results": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Get message batch results (JSONL)",
+        "parameters": [
+          {
+            "description": "Message batch ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSONL stream of batch results",
+            "content": {
+              "application/x-jsonl": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/x-jsonl": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/x-jsonl": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/x-jsonl": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/messages/batches/{id}/results"
+          }
+        }
+      }
+    },
     "/v1/messages/count_tokens": {
       "post": {
         "description": "Returns a provider-agnostic heuristic estimate of the input token count.",
@@ -8659,6 +9328,9 @@
           "LOGGING_ENABLED": {
             "type": "string"
           },
+          "LOGGING_RETENTION_DAYS": {
+            "type": "string"
+          },
           "RATE_LIMITS_ENABLED": {
             "type": "string"
           },
@@ -8982,6 +9654,9 @@
           "resource_count": {
             "type": "integer"
           },
+          "slug": {
+            "type": "string"
+          },
           "status": {
             "type": "string"
           },
@@ -9044,6 +9719,74 @@
             "type": "string"
           },
           "selector": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.providerCredentialViewResponse": {
+        "type": "object",
+        "properties": {
+          "api_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "api_mode": {
+            "type": "string"
+          },
+          "api_version": {
+            "type": "string"
+          },
+          "auth_type": {
+            "type": "string"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "gcp_scope": {
+            "type": "string"
+          },
+          "managed": {
+            "type": "boolean"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "service_account_file": {
+            "type": "string"
+          },
+          "service_account_json": {
+            "type": "string"
+          },
+          "service_account_json_base64": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "vertex_location": {
+            "type": "string"
+          },
+          "vertex_project": {
             "type": "string"
           }
         }
@@ -9348,6 +10091,9 @@
           "name": {
             "type": "string"
           },
+          "slug": {
+            "type": "string"
+          },
           "tool_timeout_seconds": {
             "type": "integer"
           },
@@ -9379,6 +10125,65 @@
           "pricing",
           "selector"
         ]
+      },
+      "admin.upsertProviderCredentialRequest": {
+        "type": "object",
+        "properties": {
+          "api_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "api_mode": {
+            "type": "string"
+          },
+          "api_version": {
+            "type": "string"
+          },
+          "auth_type": {
+            "type": "string"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "gcp_scope": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "service_account_file": {
+            "type": "string"
+          },
+          "service_account_json": {
+            "type": "string"
+          },
+          "service_account_json_base64": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "vertex_location": {
+            "type": "string"
+          },
+          "vertex_project": {
+            "type": "string"
+          }
+        }
       },
       "admin.upsertRateLimitRequest": {
         "type": "object",
@@ -9457,11 +10262,44 @@
           }
         }
       },
+      "anthropicapi.BatchCreateItem": {
+        "type": "object",
+        "properties": {
+          "custom_id": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
+      "anthropicapi.BatchCreateRequest": {
+        "type": "object",
+        "properties": {
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/anthropicapi.BatchCreateItem"
+            }
+          }
+        }
+      },
       "anthropicapi.CountTokensResponse": {
         "type": "object",
         "properties": {
           "input_tokens": {
             "type": "integer"
+          }
+        }
+      },
+      "anthropicapi.DeletedMessageBatch": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
           }
         }
       },
@@ -9505,6 +10343,81 @@
           },
           "role": {
             "type": "string"
+          }
+        }
+      },
+      "anthropicapi.MessageBatch": {
+        "type": "object",
+        "properties": {
+          "archived_at": {
+            "type": "string"
+          },
+          "cancel_initiated_at": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "ended_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "processing_status": {
+            "type": "string"
+          },
+          "request_counts": {
+            "$ref": "#/components/schemas/anthropicapi.MessageBatchRequestCounts"
+          },
+          "results_url": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.MessageBatchList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/anthropicapi.MessageBatch"
+            }
+          },
+          "first_id": {
+            "type": "string"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "last_id": {
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.MessageBatchRequestCounts": {
+        "type": "object",
+        "properties": {
+          "canceled": {
+            "type": "integer"
+          },
+          "errored": {
+            "type": "integer"
+          },
+          "expired": {
+            "type": "integer"
+          },
+          "processing": {
+            "type": "integer"
+          },
+          "succeeded": {
+            "type": "integer"
           }
         }
       },
@@ -10468,6 +11381,10 @@
           },
           "message": {
             "$ref": "#/components/schemas/core.ResponseMessage"
+          },
+          "stop_sequence": {
+            "description": "StopSequence is the matched stop sequence when the provider reports one\nnatively (Anthropic stop_reason \"stop_sequence\"). OpenAI's finish_reason\n\"stop\" conflates natural stops with stop-parameter hits, so this is an\nextension field: present only when the provider knows the answer, in the\nsame spirit as the relayed reasoning_content extension.",
+            "type": "string"
           }
         }
       },

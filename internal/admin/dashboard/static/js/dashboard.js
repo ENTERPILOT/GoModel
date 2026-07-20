@@ -235,6 +235,7 @@ function dashboard() {
         "audit-logs",
         "guardrails",
         "mcp-servers",
+        "providers-config",
         "auth-keys",
         "settings",
       ].includes(page)
@@ -274,6 +275,12 @@ function dashboard() {
         typeof this.fetchMcpServersPage === "function"
       ) {
         this.fetchMcpServersPage();
+      }
+      if (
+        page === "providers-config" &&
+        typeof this.fetchProviderCredentialsPage === "function"
+      ) {
+        this.fetchProviderCredentialsPage();
       }
       if (page === "budgets" && typeof this.fetchBudgetsPage === "function") {
         this.fetchBudgetsPage();
@@ -479,6 +486,7 @@ function dashboard() {
         (this.page === "guardrails" && this.guardrailFormOpen) ||
         (this.page === "mcp-servers" &&
           (this.mcpServerFormOpen || this.mcpCatalogOpen)) ||
+        (this.page === "providers-config" && this.providerCredentialFormOpen) ||
         (this.page === "auth-keys" && this.authKeyFormOpen) ||
         (this.page === "budgets" && this.budgetFormOpen) ||
         ((this.page === "rate-limits" || this.page === "models") &&
@@ -1259,6 +1267,12 @@ function dashboard() {
         ? dashboardMcpServersModule
         : null,
       "dashboardMcpServersModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardProvidersConfigModule === "function"
+        ? dashboardProvidersConfigModule
+        : null,
+      "dashboardProvidersConfigModule",
     ),
     resolveModuleFactory(
       typeof dashboardTaggingModule === "function"

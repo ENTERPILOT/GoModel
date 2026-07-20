@@ -285,6 +285,39 @@ func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, 
 	r.providerRuntime[providerName] = state
 }
 
+// UnregisterProvider removes every provider instance registered under name
+// (normally at most one) so a subsequent Refresh rebuilds the catalog without
+// it. It only drops the registration bookkeeping — model/inventory maps are
+// left for the caller's follow-up Refresh to rebuild wholesale, since
+// applyFetchedInventory already replaces modelsByProvider and r.models from
+// scratch rather than merging into them. Safe to call for a name that was
+// never registered.
+func (r *ModelRegistry) UnregisterProvider(providerName string) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	kept := make([]core.Provider, 0, len(r.providers))
+	for _, p := range r.providers {
+		if r.providerNames[p] != providerName {
+			kept = append(kept, p)
+			continue
+		}
+		delete(r.providerTypes, p)
+		delete(r.providerNames, p)
+	}
+	r.providers = kept
+
+	delete(r.providerRuntime, providerName)
+	delete(r.configMetadataOverrides, providerName)
+	delete(r.configuredProviderModels, providerName)
+	r.invalidateSortedCaches()
+}
+
 // GetProvider returns the provider for the given model, or nil if not found
 func (r *ModelRegistry) GetProvider(model string) core.Provider {
 	r.mu.RLock()

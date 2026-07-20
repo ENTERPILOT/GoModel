@@ -163,22 +163,7 @@ func (h *Handler) DeleteMCPServer(c *echo.Context) error {
 	if h.mcpServers == nil {
 		return handleError(c, featureUnavailableError("mcp gateway feature is unavailable"))
 	}
-
-	name := strings.TrimSpace(c.Param("name"))
-	if name == "" {
-		return handleError(c, core.NewInvalidRequestError("name is required", nil))
-	}
-	if h.mcpServers.IsManaged(name) {
-		return handleError(c, core.NewInvalidRequestError("mcp server "+name+" is managed by config/env and is read-only", nil))
-	}
-
-	if err := h.mcpServers.Delete(c.Request().Context(), name); err != nil {
-		if errors.Is(err, mcpgateway.ErrNotFound) {
-			return handleError(c, core.NewNotFoundError("mcp server not found: "+name))
-		}
-		return handleError(c, mcpServerWriteError(err))
-	}
-	return c.NoContent(http.StatusNoContent)
+	return deleteManagedResource(c, "mcp server", h.mcpServers.IsManaged, h.mcpServers.Delete, mcpgateway.ErrNotFound, mcpServerWriteError)
 }
 
 // ReconnectMCPServer handles POST /admin/mcp-servers/:name/reconnect. The
