@@ -35,11 +35,6 @@
     "navbar": {
         "links": [
             {
-                "label": "Live Demo",
-                "href": "https://demo.enterpilot.io/admin/dashboard",
-                "icon": "monitor-play"
-            },
-            {
                 "type": "github",
                 "href": "https://github.com/ENTERPILOT/GoModel"
             }
