@@ -43,11 +43,11 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `PORT`               | HTTP server port                                      | `8080`                 |
 | `BASE_PATH`          | Mount path prefix, for example `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | Authentication key for securing the gateway           | _(empty, unsafe mode)_ |
-| `GOMODEL_DEMO_MODEL` | Enable public demo warnings in logs and the dashboard  | `false`                |
+| `GOMODEL_DEMO_MODE`  | Enable public demo warnings in logs and the dashboard  | `false`                |
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
 | `USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
 
-Set `GOMODEL_DEMO_MODEL=true` for a public or shared demonstration instance.
+Set `GOMODEL_DEMO_MODE=true` for a public or shared demonstration instance.
 GoModel logs a warning at startup and every five minutes, renders a persistent
 warning at the top of the dashboard, and exposes `DEMO_MODE=on` through the
 allowlisted `/admin/runtime/config` response. Demo mode does not reset storage;

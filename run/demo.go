@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	envDemoMode             = "GOMODEL_DEMO_MODEL"
+	envDemoMode             = "GOMODEL_DEMO_MODE"
 	demoModeWarningInterval = 5 * time.Minute
 )
 
