@@ -544,7 +544,7 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 }
 
 func TestDashboardRuntimeConfig_ExposesIndefiniteLoggingRetention(t *testing.T) {
-	values := dashboardRuntimeConfig(&config.Config{}, false)
+	values := dashboardRuntimeConfig(&config.Config{}, false, false)
 	if got := values.LoggingRetentionDays; got != "0" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want 0", admin.DashboardConfigLoggingRetentionDays, got)
 	}
