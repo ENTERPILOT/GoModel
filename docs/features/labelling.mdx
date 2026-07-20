@@ -23,6 +23,17 @@ Assign labels when creating a key in the admin dashboard:
 
 `API Keys -> Create API Key -> Labels`
 
+<img
+  src="/features/auth-keys-labels.png"
+  alt="GoModel dashboard API Keys page with a Labels column showing chips like env:demo, team:engineering, and priority:high for each key"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+The **API Keys** page lists every managed key with its labels as chips next
+to its user path, so you can see attribution at a glance without opening
+each key. Click **Edit Labels** on a row to change them later.
+
 Or via the admin API:
 
 ```bash
@@ -56,6 +67,18 @@ background).
 Tagging rules name headers whose values carry labels. Manage them in the
 dashboard (`Settings -> Tagging based on headers`) or declare them as
 infrastructure-as-code:
+
+<img
+  src="/features/tagging-headers.png"
+  alt="GoModel dashboard Settings page Tagging based on headers form with two header rows (X-Team, X-Environment) and prefix, delimiter, and do-not-pass-upstream fields"
+  style={{ width: "100%", maxWidth: "1000px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Click **Add Header**, name the header your clients will send (for example
+`X-Team`), optionally set a prefix to trim and a delimiter, then **Save
+Tagging Settings**. Check **Do not pass upstream** for headers that should be
+stripped before the request reaches the provider.
 
 ```yaml config.yaml
 tagging:

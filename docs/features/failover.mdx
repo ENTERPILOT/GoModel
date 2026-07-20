@@ -7,7 +7,7 @@ keywords: ["failover", "fallback"]
 
 <img
   src="/features/failover.png"
-  alt="GoModel dashboard virtual model editor with weighted targets and the load-balancing strategy dropdown open"
+  alt="GoModel dashboard failover mapping editor for a model, showing an ordered fallback model list, Add fallback model and Generate automatically buttons"
   style={{ width: "100%", maxWidth: "795px", height: "auto" }}
   className="rounded-lg"
 />
@@ -57,6 +57,21 @@ compatibility inputs. They are accepted but ignored by runtime failover.
 
 The Dashboard can generate suggested mappings from model metadata, but
 suggestions must be saved as manual mappings before they affect traffic.
+
+Two ways to reach the generator in the dashboard:
+
+- Per model: open a model's row on the **Models** page and click the
+  shuffle icon to edit its failover mapping, then **Generate automatically**
+  to populate suggested fallback models before **Save**.
+- For everything at once: **Settings -> Failover -> Generate failover models
+  automatically** proposes mappings for every eligible model in one pass.
+
+<img
+  src="/features/failover-generate.png"
+  alt="GoModel dashboard Settings page Failover section with Generate failover models automatically and Remove all the failover models buttons"
+  style={{ width: "100%", maxWidth: "1000px", height: "auto" }}
+  className="rounded-lg"
+/>
 
 ## When It Runs
 

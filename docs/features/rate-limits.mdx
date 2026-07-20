@@ -61,9 +61,18 @@ In the dashboard:
 Rate Limits -> Create Rate Limit
 ```
 
+<img
+  src="/features/rate-limits.png"
+  alt="GoModel dashboard Rate Limits page listing user-path, provider, and model rules with live usage bars for requests, tokens, and concurrency"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
 Pick the scope (user path, provider, or model), the subject, a period, and the
 caps. Dashboard-created rules are marked `manual`. Rules loaded from YAML or
 environment variables are marked `config` and are read-only in the dashboard.
+Each row shows live usage against its limit; the reset icon clears just that
+rule's counters, and the trash icon deletes the rule (which also resets it).
 
 The Models page has a gauge button on every model row and provider header that
 opens the same limits for that subject in context: the model's own rules, the

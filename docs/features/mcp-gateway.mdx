@@ -65,6 +65,30 @@ Servers can be managed in the dashboard (**MCP Servers** page) or declared as
 infrastructure-as-code — declarative entries override same-slug dashboard
 rows and are read-only there:
 
+<img
+  src="/features/mcp-servers.png"
+  alt="GoModel dashboard MCP Servers page listing two servers with their transport, endpoint, status, tool count, and enabled toggle"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+### Add a server from the dashboard
+
+Open **MCP Servers** and click **Add MCP Server**. Fill in:
+
+- **Name** — human-facing; you can rename it later.
+- **Transport** — `http` (streamable HTTP, default) or `sse` (legacy).
+- **URL** — the upstream MCP endpoint.
+- **Headers** — upstream credentials (for example `Authorization: Bearer …`);
+  saved values are shown redacted afterward.
+- Optional **allowed/disallowed tools** and **user paths** to scope
+  visibility, the same fields available in `config.yaml`.
+
+Save to connect immediately. Use the row's refresh icon to force a
+**Reconnect**, the list icon to open the catalog inspector, and the pencil
+icon to edit. Rows added this way accept edits and deletes; rows sourced from
+`config.yaml` or `MCP_SERVERS` show as read-only here.
+
 Dashboard-managed servers have two identifiers:
 
 - **Name** is human-facing, accepts Unicode, and can be edited later.
