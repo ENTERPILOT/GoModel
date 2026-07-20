@@ -1,0 +1,93 @@
+---
+title: "FAQ"
+description: "Updating, pinning, and uninstalling GoModel; where the gateway stores its data and whether updates are safe."
+icon: "circle-question"
+---
+
+## How do I update GoModel?
+
+<Tabs>
+  <Tab title="macOS / Linux">
+    Re-run the installer — it always fetches the latest release and replaces
+    the binary in place:
+
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    ```
+  </Tab>
+  <Tab title="Docker">
+    ```bash
+    docker pull enterpilot/gomodel
+    ```
+
+    Then recreate the container. With Docker Compose:
+
+    ```bash
+    docker compose pull && docker compose up -d
+    ```
+  </Tab>
+</Tabs>
+
+Restart the gateway after updating; there is no in-place hot upgrade.
+
+## How do I check which version I'm running?
+
+```bash
+gomodel --version
+```
+
+The version is also printed on the first line of the startup log.
+
+## Can I install a specific version, or roll back?
+
+Yes — set `GOMODEL_VERSION` before running the installer:
+
+```bash
+GOMODEL_VERSION=v0.1.53 curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+```
+
+On Windows set `$env:GOMODEL_VERSION` first. With Docker, use a version tag
+(`enterpilot/gomodel:0.1.53`) instead of `latest`.
+
+## Is updating safe for my data?
+
+Yes. The database schema is migrated additively on startup, and updates never
+move or delete your database, configuration, or cache. Rolling back a version
+is equally safe for typical minor upgrades, though a database written by a
+much newer version may contain tables an older binary simply ignores.
+
+## Where does GoModel store its data?
+
+When a `./data` directory exists next to where you launch GoModel (existing
+deployments, the Docker image), the database stays at `./data/gomodel.db`.
+Otherwise the binary uses your OS's conventional per-user directories:
+
+| | Database | Model cache |
+| --- | --- | --- |
+| Linux | `~/.local/share/gomodel/` | `~/.cache/gomodel/` |
+| macOS | `~/Library/Application Support/gomodel/` | `~/Library/Caches/gomodel/` |
+| Windows | `%LocalAppData%\gomodel\` | `%LocalAppData%\gomodel\cache\` |
+
+The resolved database path is printed at startup (`storage configured`), and
+`GOMODEL_SQLITE_PATH` / `GOMODEL_CACHE_DIR` override it. Available from
+v0.1.54; older binaries always use `./data` relative to the working
+directory.
+
+## How do I uninstall?
+
+Remove the binary and, if you want a clean slate, the data directories:
+
+```bash
+rm "$(command -v gomodel)"
+rm -rf ~/.local/share/gomodel ~/.cache/gomodel   # Linux
+rm -rf ~/Library/"Application Support"/gomodel ~/Library/Caches/gomodel   # macOS
+```
+
+On Windows, delete `%LOCALAPPDATA%\Programs\gomodel` (and
+`%LOCALAPPDATA%\gomodel` for data), then remove the folder from your user
+PATH. For Docker, remove the container and image as usual.

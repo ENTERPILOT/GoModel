@@ -59,7 +59,8 @@
                         "group": "Getting Started",
                         "icon": "rocket",
                         "pages": [
-                            "getting-started/quickstart"
+                            "getting-started/quickstart",
+                            "getting-started/faq"
                         ]
                     },
                     {
