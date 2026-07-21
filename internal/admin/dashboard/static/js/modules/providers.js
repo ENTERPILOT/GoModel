@@ -326,7 +326,7 @@
                     (provider && (provider.type || (provider.config && provider.config.type))) || ''
                 ).trim().toLowerCase();
                 const slug = type ? PROVIDER_DOC_SLUGS[type] : '';
-                return slug ? PROVIDER_DOCS_BASE_URL + slug : '';
+                return slug ? PROVIDER_DOCS_BASE_URL + slug + '?utm_source=gomodel_dashboard' : '';
             },
 
             providerRetrySummary(provider) {

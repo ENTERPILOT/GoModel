@@ -104,7 +104,7 @@ test("demo notice scrolls normally while page date ranges stay sticky", () => {
   assert.match(layout, /<aside class="demo-mode-banner"/);
   assert.match(
     layout,
-    /href="https:\/\/gomodel\.enterpilot\.io\/\?utm_source=gomodel_dashboard&amp;utm_medium=demo_banner&amp;utm_campaign=public_demo"[^>]*>gomodel\.enterpilot\.io<\/a>/,
+    /href="https:\/\/gomodel\.enterpilot\.io\/\?utm_source=gomodel_dashboard"[^>]*>gomodel\.enterpilot\.io<\/a>/,
   );
   assert.doesNotMatch(layout, /href="https:\/\/gomodel\.enterpilot\.io\/docs"/);
   assert.doesNotMatch(layout, /href="https:\/\/github\.com\/ENTERPILOT\/GoModel"/);
