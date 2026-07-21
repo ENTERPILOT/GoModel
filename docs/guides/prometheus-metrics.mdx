@@ -114,7 +114,6 @@ PORT=8080
 GOMODEL_MASTER_KEY=your-secret-key
 METRICS_ENABLED=true
 METRICS_ENDPOINT=/metrics
-OPENAI_API_KEY=sk-...
 ```
 
 ### Development Setup (Metrics Disabled)
@@ -124,7 +123,6 @@ OPENAI_API_KEY=sk-...
 ```bash
 PORT=8080
 METRICS_ENABLED=false
-OPENAI_API_KEY=sk-...
 ```
 
 ### Custom Endpoint for Internal Monitoring
@@ -139,11 +137,6 @@ server:
 metrics:
   enabled: true
   endpoint: "/internal/prometheus" # Custom path
-
-providers:
-  openai:
-    type: "openai"
-    api_key: "${OPENAI_API_KEY}"
 ```
 
 ## Verification

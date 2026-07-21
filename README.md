@@ -38,30 +38,30 @@
 
 ```bash
 curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
-OPENAI_API_KEY="your-openai-key" gomodel
+gomodel
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
 irm https://gomodel.enterpilot.io/install.ps1 | iex
-$env:OPENAI_API_KEY = "your-openai-key"; gomodel
+gomodel
 ```
 
 **Docker**
 
 ```bash
-docker run --rm -p 8080:8080 \
-  -e LOG_FORMAT=text \
-  -e OPENAI_API_KEY="your-openai-key" \
-  enterpilot/gomodel
+docker run --rm -p 8080:8080 enterpilot/gomodel
 ```
 
-Full list of environment variables (including all available providers): [`.env.template`](./.env.template)
+**Step 2:** Add a provider
 
-⚠️ Avoid passing secrets with `-e` on the command line in production — they can leak through shell history and process lists. Use `docker run --env-file .env` to load API keys from a file instead.
+Open [http://localhost:8080/admin/dashboard/providers-config](http://localhost:8080/admin/dashboard/providers-config), select **Add Provider**, choose a provider type, and enter its credentials. The provider is available immediately without restarting GoModel.
 
-**Step 2:** Make your first API call
+**Step 3:** Make your first API call
+
+This example uses an OpenAI model. If you added another provider, replace the
+model ID with one shown on the dashboard's **Models** page.
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -72,9 +72,9 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-**That's it!** GoModel automatically detects which providers are available based on the credentials you supply.
+**That's it!** No provider environment variables or `config.yaml` are required.
 
-Prefer not to set API keys as env vars? Start GoModel with none configured — `gomodel` with no provider env vars still boots — then add provider credentials from the **Providers** page in the admin dashboard (`/admin/dashboard`). They apply immediately, no restart.
+For infrastructure-managed deployments, provider environment variables and `config.yaml` remain available as optional alternatives. See [`.env.template`](./.env.template) and [`config/config.example.yaml`](./config/config.example.yaml).
 
 ### Supported LLM Providers
 
@@ -96,19 +96,15 @@ passthrough), credentials, and configuration notes.
 
 **Prerequisites:** Go 1.26.4+
 
-1. Create a `.env` file:
-
-   ```bash
-   cp .env.template .env
-   ```
-
-2. Add your API keys to `.env` (optional — you can instead add them later from the admin dashboard's Providers page).
-
-3. Start the server:
+1. Start the server:
 
    ```bash
    make run
    ```
+
+2. Add a provider from the dashboard's **Providers** page. To manage settings
+   through environment variables instead, copy `.env.template` to `.env` and
+   uncomment only the values you need.
 
 ### Docker Compose
 
@@ -123,7 +119,7 @@ docker compose up -d
 
 ```bash
 cp .env.template .env
-# Add your API keys to .env
+# Provider API keys are optional; you can add providers from the dashboard.
 docker compose --profile app up -d
 # or: make image
 ```
@@ -138,7 +134,7 @@ docker compose --profile app up -d
 
 ```bash
 docker build -t gomodel .
-docker run --rm -p 8080:8080 --env-file .env gomodel
+docker run --rm -p 8080:8080 gomodel
 ```
 
 ---
@@ -155,7 +151,10 @@ the admin REST API and dashboard.
 
 ## Gateway Configuration
 
-GoModel is configured through environment variables and an optional `config.yaml`. Environment variables override YAML values. See the [Configuration reference](./docs/advanced/configuration.mdx) for the full list of settings organized by category, along with [`.env.template`](./.env.template) and [`config/config.example.yaml`](./config/config.example.yaml).
+Provider credentials can be managed from the dashboard. Environment variables
+and an optional `config.yaml` are available for declarative configuration, with
+environment variables overriding YAML values. See the [Configuration reference](./docs/advanced/configuration.mdx),
+[`.env.template`](./.env.template), and [`config/config.example.yaml`](./config/config.example.yaml).
 
 **Quick Start - Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.
 

@@ -1,6 +1,6 @@
 ---
 title: "Configuration"
-description: "How to configure GoModel using environment variables, .env files, and YAML."
+description: "Configure GoModel from the dashboard, environment variables, .env files, or YAML."
 icon: "sliders-horizontal"
 ---
 
@@ -28,7 +28,10 @@ Start here: [Quick Start](/getting-started/quickstart)
 
 </Tip>
 
-GoModel automatically discovers providers from well-known environment variables.
+Provider credentials do not require configuration files or environment
+variables. Add them from the dashboard's **Providers** page for the fastest
+setup, or use environment variables and YAML when you want declarative
+infrastructure configuration.
 
 ## Configuration Methods
 
@@ -237,7 +240,8 @@ These control timeouts for upstream API requests to LLM providers.
 
 #### Provider API Keys
 
-Set these to automatically register providers. No YAML configuration required.
+Optionally set these to automatically register providers from the environment.
+You can instead manage the same credentials from the dashboard.
 
 | Variable             | Provider                                           |
 | -------------------- | -------------------------------------------------- |
@@ -369,9 +373,22 @@ providers:
 
 ## Provider Configuration
 
-### Auto-Discovery from Environment Variables
+### Dashboard (recommended for getting started)
 
-The simplest way to add providers. GoModel checks for well-known API key environment variables and automatically registers providers:
+Start GoModel without provider configuration, then open
+`/admin/dashboard/providers-config` and select **Add Provider**. Choose the
+provider type, enter its credentials, and save it. GoModel registers the
+provider immediately and persists it in the configured storage backend.
+
+Providers declared through environment variables or `config.yaml` take
+precedence over dashboard-managed providers with the same name and are
+read-only in the dashboard.
+
+### Optional auto-discovery from environment variables
+
+GoModel checks for well-known API key environment variables and automatically
+registers providers. This is useful for container secrets and other
+infrastructure-managed deployments:
 
 ```bash
 export OPENAI_API_KEY="sk-..."      # Registers "openai" provider

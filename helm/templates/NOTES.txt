@@ -44,8 +44,9 @@ To get the application URL:
 
 {{- if eq (len $enabledProviders) 0 }}
 
-⚠️  WARNING: No providers enabled!
-    Provide an API key for at least one provider (e.g., providers.openai.apiKey)
+No providers configured yet.
+    Add one at /admin/dashboard/providers-config, or configure provider values
+    (for example, providers.openai.apiKey).
 {{- else }}
 
 Enabled providers: {{ join ", " $enabledProviders }}

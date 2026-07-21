@@ -11,15 +11,14 @@ key" — auth flows from cloud credentials, deployment-based URLs, region or
 project requirements, dual native + OpenAI-compatible API surfaces, or other
 quirks.
 
-## Configuring providers without env vars
+## Add providers from the dashboard
 
-Every credential below (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...) can
-instead be set from the **Providers** page in the admin dashboard
-(`/admin/dashboard`) — no restart required. This is the easiest way to run
-GoModel with zero provider env vars: start the gateway with none configured
-(the catalog starts empty; the gateway still boots and serves the dashboard),
-then add providers from the UI. A provider added this way registers into the
-running gateway immediately.
+Start GoModel without provider configuration, then open the
+**[Providers](http://localhost:8080/admin/dashboard/providers-config)** page
+and add credentials from the UI. Every credential in the table below can be
+stored this way, and the provider registers immediately without a restart.
+The model catalog starts empty until you add a provider, but the API and
+dashboard remain available.
 
 Providers declared via env vars or `config.yaml` always take precedence: a
 name configured either way is **read-only** in the dashboard (shown with a
@@ -37,7 +36,7 @@ Example model identifiers are illustrative and subject to change; consult
 provider catalogs for current models. Feature columns reflect gateway API
 support, not every individual model capability exposed by an upstream provider.
 
-| Provider | Credential | Example Model | Chat | `/responses` | Embed | Files | Batches | Passthru | Guide |
+| Provider | Optional environment config | Example Model | Chat | `/responses` | Embed | Files | Batches | Passthru | Guide |
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/providers/anthropic) |

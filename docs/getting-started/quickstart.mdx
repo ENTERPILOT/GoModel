@@ -4,9 +4,7 @@ description: "GoModel AI gateway quick start: run an OpenAI-compatible LLM gatew
 icon: "rocket"
 ---
 
-import ProviderCredentialsNote from "/snippets/provider-credentials-note.mdx";
-
-## Run GoModel in 30 Seconds
+## Start GoModel in 30 seconds
 
 GoModel is an OpenAI-compatible AI gateway. You can connect one endpoint and
 route traffic across OpenAI, Anthropic, Gemini, DeepSeek, xAI, Groq, OpenRouter, Kilo AI,
@@ -19,46 +17,52 @@ admin visibility in one place.
   <Tab title="macOS / Linux">
     ```bash
     curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
-    GOMODEL_MASTER_KEY="change-me" OPENAI_API_KEY="sk-..." gomodel
+    gomodel
     ```
-
-    <ProviderCredentialsNote />
   </Tab>
   <Tab title="Windows">
     ```powershell
     irm https://gomodel.enterpilot.io/install.ps1 | iex
-    $env:GOMODEL_MASTER_KEY = "change-me"; $env:OPENAI_API_KEY = "sk-..."; gomodel
+    gomodel
     ```
-
-    <ProviderCredentialsNote />
   </Tab>
   <Tab title="Docker">
     ```bash
-    docker run --rm -p 8080:8080 \
-      -e LOG_FORMAT=text \
-      -e GOMODEL_MASTER_KEY="change-me" \
-      -e OPENAI_API_KEY="sk-..." \
-      enterpilot/gomodel
+    docker run --rm -p 8080:8080 enterpilot/gomodel
     ```
-
-    <ProviderCredentialsNote />
   </Tab>
   <Tab title="Live Demo" icon="monitor-play">
     [https://demo.enterpilot.io/admin/dashboard](https://demo.enterpilot.io/admin/dashboard)
   </Tab>
 </Tabs>
 
-### 2. Send your first request
+GoModel starts with an empty model catalog when no providers are configured.
+The API and dashboard are still available.
+
+### 2. Add a provider in the dashboard
+
+Open [http://localhost:8080/admin/dashboard/providers-config](http://localhost:8080/admin/dashboard/providers-config),
+select **Add Provider**, choose a provider type, and enter its credentials.
+The provider and its models become available immediately without a restart.
+
+<Note>
+  Environment variables and `config.yaml` are optional alternatives for
+  infrastructure-managed deployments. See [Configuration](/advanced/configuration).
+</Note>
+
+### 3. Send your first request
 
 Use `curl` or the OpenAI SDKs for Python and JavaScript against the same
-OpenAI-compatible endpoint:
+OpenAI-compatible endpoint. These examples use `gpt-4o-mini`; replace it with
+a model ID exposed by the provider you added. The SDK examples use `unused`
+because those clients require a non-empty API key value even when GoModel
+authentication is disabled.
 
 <CodeGroup>
 
 ```bash curl
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer change-me" \
   -d '{
     "model": "gpt-4o-mini",
     "messages": [{"role": "user", "content": "Say hello in one sentence."}]
@@ -70,7 +74,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8080/v1",
-    api_key="change-me",
+    api_key="unused",
 )
 
 completion = client.chat.completions.create(
@@ -86,7 +90,7 @@ import OpenAI from "openai";
 
 const client = new OpenAI({
   baseURL: "http://localhost:8080/v1",
-  apiKey: "change-me",
+  apiKey: "unused",
 });
 
 const completion = await client.chat.completions.create({
@@ -99,7 +103,7 @@ console.log(completion.choices[0].message.content);
 
 </CodeGroup>
 
-### 3. Open the Admin Panel
+### 4. Explore the admin dashboard
 
 Open this URL in your browser:
 
@@ -107,9 +111,15 @@ Open this URL in your browser:
 
 <Tip>
   Dashboard UI is enabled by default (`ADMIN_UI_ENABLED=true`). Admin API
-  endpoints are at `/admin/*` and use the same bearer auth as the main
-  API.
+  endpoints are at `/admin/*` and use the same bearer auth as the main API when
+  authentication is configured.
 </Tip>
+
+<Warning>
+  The zero-configuration quick start has no authentication. Set
+  `GOMODEL_MASTER_KEY` before exposing GoModel beyond your local machine, then
+  send that value as a bearer token. See [Configuration](/advanced/configuration#server).
+</Warning>
 
 ## Verify Models
 
@@ -117,7 +127,7 @@ List currently available models:
 
 ```bash
 curl -s http://localhost:8080/v1/models \
-  -H "Authorization: Bearer change-me"
+  -H "Accept: application/json"
 ```
 
 Use one of those model IDs in your requests.
@@ -135,6 +145,7 @@ Use one of those model IDs in your requests.
 ## Next Steps
 
 - Update, pin a version, or uninstall: [FAQ](/about/faq)
+- Compare providers and configuration options: [Providers](/providers/overview)
 - Understand response caching: [Cache](/features/cache)
 - Add spend limits: [Budgets](/features/budgets)
 - Configure production settings: [Configuration](/advanced/configuration)

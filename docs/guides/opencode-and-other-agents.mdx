@@ -14,26 +14,24 @@ Flow:
 ## Before you start
 
 - Choose a GoModel master key, for example `change-me`.
-- Start GoModel with at least one upstream provider key.
+- Have credentials for at least one upstream provider ready.
 - Use GoModel standard `http://localhost:8080/v1` unless your client
   specifically requires a full endpoint URL.
 
 ## 1. Run GoModel
 
-Start GoModel with a master key and at least one upstream provider:
+Start GoModel with a master key:
 
 ```bash
 docker run --rm -p 8080:8080 \
   -e GOMODEL_MASTER_KEY="change-me" \
-  -e OPENAI_API_KEY="sk-..." \
   enterpilot/gomodel
 ```
 
-<Note>
-  You can swap `OPENAI_API_KEY` for another provider key if that is what your
-  target models use. The important part is that GoModel has at least one
-  upstream provider configured.
-</Note>
+Open [the Providers page](http://localhost:8080/admin/dashboard/providers-config),
+authenticate with `change-me`, select **Add Provider**, and enter the upstream
+credentials. You can use any provider that exposes the model your coding agent
+needs.
 
 ## 2. Confirm the OpenAI-compatible API with curl
 

@@ -20,12 +20,12 @@ helm repo update
 ### Install from local chart
 
 ```bash
-# Basic install with OpenAI (provider auto-enables when apiKey is set)
+# Basic install (add a provider from the dashboard after startup)
 helm install gomodel ./helm \
   -n gomodel --create-namespace \
-  --set providers.openai.apiKey="sk-..."
+  --set replicaCount=1
 
-# Multi-provider setup with Redis cache
+# Optional declarative multi-provider setup with Redis cache
 helm install gomodel ./helm \
   -n gomodel --create-namespace \
   --set providers.openai.apiKey="sk-..." \
@@ -39,6 +39,11 @@ helm install gomodel ./helm \
   --set providers.openai.enabled=true \
   --set providers.anthropic.enabled=true
 ```
+
+For the basic install, open `/admin/dashboard/providers-config` on the GoModel
+service and select **Add Provider**. Provider values and existing secrets remain
+available for infrastructure-managed deployments. The single replica keeps the
+dashboard-managed provider and request routing on the same GoModel instance.
 
 ## Configuration
 

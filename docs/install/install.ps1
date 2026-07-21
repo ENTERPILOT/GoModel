@@ -82,8 +82,8 @@ try {
 
     Write-Host ''
     Write-Host 'Get started:'
-    Write-Host '  $env:OPENAI_API_KEY = "sk-..."   # or any other provider key'
     Write-Host "  $Binary"
+    Write-Host '  Open http://localhost:8080/admin/dashboard/providers-config to add a provider.'
     Write-Host ''
     Write-Host 'Docs: https://gomodel.enterpilot.io'
 }

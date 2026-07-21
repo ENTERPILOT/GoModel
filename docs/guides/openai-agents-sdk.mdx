@@ -15,7 +15,7 @@ Flow:
 
 - Install GoModel.
 - Choose a GoModel master key, for example `change-me`.
-- Configure at least one upstream model provider.
+- Have credentials for at least one upstream model provider ready.
 - Install the OpenAI Agents SDK for Python or JavaScript.
 
 <Note>
@@ -25,18 +25,18 @@ Flow:
 
 ## 1. Run GoModel
 
-Start GoModel with a master key and an upstream provider key. This example uses
-OpenAI upstream:
+Start GoModel with a master key:
 
 ```bash
 docker run --rm -p 8080:8080 \
   -e GOMODEL_MASTER_KEY="change-me" \
-  -e OPENAI_API_KEY="sk-..." \
   enterpilot/gomodel
 ```
 
-If you use another provider, keep the same GoModel base URL and choose a model
-that your provider exposes through GoModel.
+Open [the Providers page](http://localhost:8080/admin/dashboard/providers-config),
+authenticate with `change-me`, select **Add Provider**, and enter the upstream
+credentials. This guide's examples use OpenAI, but you can choose another
+provider and one of its models.
 
 ## 2. Confirm the Responses endpoint
 

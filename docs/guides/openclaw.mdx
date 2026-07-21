@@ -36,14 +36,17 @@ Reference:
 
 ## 1. Run GoModel
 
-Start GoModel with at least one provider and a master key:
+Start GoModel with a master key:
 
 ```bash
 docker run --rm -p 8080:8080 \
   -e GOMODEL_MASTER_KEY="change-me" \
-  -e OPENAI_API_KEY="sk-..." \
   enterpilot/gomodel
 ```
+
+Open [the Providers page](http://localhost:8080/admin/dashboard/providers-config),
+authenticate with `change-me`, select **Add Provider**, and enter the
+credentials for OpenAI or another provider. No restart is required.
 
 Confirm your model list:
 

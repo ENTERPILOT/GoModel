@@ -15,33 +15,38 @@ Flow:
 
 - Install Codex on your machine.
 - Choose a GoModel master key, for example `change-me`.
-- Make sure GoModel has the upstream provider key for the models you want to use.
+- Have credentials ready for an upstream provider with the models you want to use.
 
 <Note>
   You can keep using Codex with a ChatGPT subscription sign-in, but GoModel
   still needs a gateway credential from Codex and an upstream provider key of
-  its own. In this guide, `OPENAI_API_KEY=change-me` is the GoModel master key
-  that Codex sends to GoModel, not your OpenAI Platform key.
+  its own. The upstream key can be stored in the GoModel dashboard. Later in
+  this guide, `OPENAI_API_KEY=change-me` is the GoModel master key that Codex
+  sends to GoModel, not your OpenAI Platform key.
 </Note>
 
 ## 1. Run GoModel
 
-Start GoModel with a master key and an OpenAI provider key:
+Start GoModel with a master key:
 
 ```bash
 docker run --rm -p 8080:8080 \
   -e GOMODEL_MASTER_KEY="change-me" \
-  -e OPENAI_API_KEY="sk-..." \
   enterpilot/gomodel
 ```
+
+Open [the Providers page](http://localhost:8080/admin/dashboard/providers-config),
+authenticate with `change-me`, select **Add Provider**, and enter the upstream
+credentials. The examples below use OpenAI, but the GoModel Responses API can
+also translate requests for other supported providers.
 
 ## 2. Confirm the Responses API with curl
 
 Before testing Codex itself, you can optionally verify that GoModel answers a
 normal Responses API request:
 
-This step is optional. If you are sure you have configured a valid
-`OPENAI_API_KEY` in GoModel, you can skip it and go straight to
+This step is optional. If you are sure you have configured a working provider
+in GoModel, you can skip it and go straight to
 [step 3](#3-configure-codex-to-use-gomodel).
 
 ```bash

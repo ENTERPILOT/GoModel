@@ -96,7 +96,7 @@ case ":$PATH:" in
 esac
 say ""
 say "Get started:"
-say "  export OPENAI_API_KEY=sk-...   # or any other provider key"
 say "  $BINARY"
+say "  Open http://localhost:8080/admin/dashboard/providers-config to add a provider."
 say ""
 say "Docs: https://gomodel.enterpilot.io"

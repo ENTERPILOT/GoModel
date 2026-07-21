@@ -7,9 +7,12 @@ Start GoModel first:
 ```bash
 docker run --rm -p 8080:8080 \
   -e GOMODEL_MASTER_KEY="change-me" \
-  -e OPENAI_API_KEY="sk-..." \
   enterpilot/gomodel
 ```
+
+Open http://localhost:8080/admin/dashboard/providers-config, authenticate with
+`change-me`, and add the provider used by the example. No provider environment
+variable is required.
 
 Then run one of the examples:
 

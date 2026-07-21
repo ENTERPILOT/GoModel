@@ -15,20 +15,21 @@ Flow:
 
 - Install Claude Code on your machine.
 - Choose a GoModel master key, for example `change-me`.
-- Make sure GoModel has an Anthropic upstream credential.
+- Have an Anthropic API key ready.
 
 <Note>
   Claude Code can be routed through GoModel whether or not you personally use a
   Claude Code subscription. For gateway mode, Claude Code talks to GoModel with
-  `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`. GoModel still needs its own
-  `ANTHROPIC_API_KEY` to reach Anthropic upstream.
+  `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`. GoModel still needs an
+  Anthropic API key to reach Anthropic upstream, but that key can be stored in
+  the dashboard rather than an environment variable.
 </Note>
 
-## How to get `ANTHROPIC_API_KEY`
+## How to get an Anthropic API key
 
 1. Open the Claude Console and sign in to your API account.
 2. Go to account settings in Console, then create an API key.
-3. Copy the key once and set it for GoModel as `ANTHROPIC_API_KEY`.
+3. Copy the key once. You will add it to GoModel from the dashboard.
 
 Anthropic's API docs state that API keys are created in Console account
 settings.
@@ -40,14 +41,17 @@ settings.
 
 ## 1. Run GoModel
 
-Start GoModel with a master key and an Anthropic provider key:
+Start GoModel with a master key:
 
 ```bash
 docker run --rm -p 8080:8080 \
   -e GOMODEL_MASTER_KEY="change-me" \
-  -e ANTHROPIC_API_KEY="sk-ant-..." \
   enterpilot/gomodel
 ```
+
+Open [the Providers page](http://localhost:8080/admin/dashboard/providers-config),
+authenticate with `change-me`, select **Add Provider**, choose `anthropic`, and
+enter the API key. The provider becomes available immediately.
 
 ## 2. Confirm Anthropic passthrough with curl
 
