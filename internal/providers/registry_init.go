@@ -61,7 +61,7 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 		// outages where /models is unreachable but inference still works.
 		// Individual providers are still marked stale by the per-provider
 		// recheck path as soon as a healthy alternative reappears.
-		r.applyProviderRuntimeUpdates(fetched.runtimeUpdates)
+		r.applyFetchedProviderRuntimeUpdates(&fetched)
 		if fetched.failedProviders == len(providers) {
 			return fmt.Errorf("failed to fetch models from any provider")
 		}
@@ -93,6 +93,7 @@ type fetchedInventory struct {
 	models           map[string]*ModelInfo
 	modelsByProvider map[string]map[string]*ModelInfo
 	runtimeUpdates   map[string]providerRuntimeState
+	sourceProviders  map[string]core.Provider
 	totalModels      int
 	failedProviders  int
 }
@@ -113,6 +114,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		models:           make(map[string]*ModelInfo),
 		modelsByProvider: make(map[string]map[string]*ModelInfo),
 		runtimeUpdates:   make(map[string]providerRuntimeState),
+		sourceProviders:  make(map[string]core.Provider),
 	}
 
 	names := make([]string, len(providers))
@@ -160,6 +162,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 
 	for i, provider := range providers {
 		providerName := names[i]
+		out.sourceProviders[providerName] = provider
 		configuredModels := configuredProviderModels[providerName]
 		resp := results[i].resp
 		configuredReason := results[i].configuredReason
@@ -301,6 +304,7 @@ func (r *ModelRegistry) applyFetchedInventory(
 	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
 
 	r.mu.Lock()
+	r.dropUnregisteredFetchedProvidersLocked(&fetched)
 	stale := make(map[string]bool, len(fetched.runtimeUpdates))
 	carriedForward := 0
 	for name := range fetched.runtimeUpdates {
@@ -340,6 +344,34 @@ func (r *ModelRegistry) applyFetchedInventory(
 	}
 	attrs = append(attrs, metadataStats.slogAttrs()...)
 	slog.Info("model registry initialized", attrs...)
+}
+
+// dropUnregisteredFetchedProvidersLocked prevents an inventory sweep that
+// started before a provider was removed or replaced from publishing that
+// provider instance's stale result afterward. Caller must hold r.mu for writing.
+func (r *ModelRegistry) dropUnregisteredFetchedProvidersLocked(fetched *fetchedInventory) {
+	for name := range fetched.modelsByProvider {
+		if !r.fetchedProviderStillRegisteredLocked(fetched, name) {
+			delete(fetched.modelsByProvider, name)
+		}
+	}
+	for name := range fetched.runtimeUpdates {
+		if !r.fetchedProviderStillRegisteredLocked(fetched, name) {
+			delete(fetched.runtimeUpdates, name)
+		}
+	}
+}
+
+// fetchedProviderStillRegisteredLocked verifies both the configured name and
+// the provider instance. A name-only check is insufficient when dashboard
+// credential edits replace a provider while its old model fetch is in flight.
+func (r *ModelRegistry) fetchedProviderStillRegisteredLocked(fetched *fetchedInventory, providerName string) bool {
+	provider, ok := fetched.sourceProviders[providerName]
+	if !ok || !r.providerRuntime[providerName].registered {
+		return false
+	}
+	currentName, ok := r.providerNames[provider]
+	return ok && currentName == providerName
 }
 
 func (r *ModelRegistry) enrichFetchedProviderModelMaps(
@@ -395,15 +427,16 @@ func fetchProviderInventory(
 	return resp, reason, fetchAt, err
 }
 
-func (r *ModelRegistry) applyProviderRuntimeUpdates(updates map[string]providerRuntimeState) {
-	if len(updates) == 0 {
+func (r *ModelRegistry) applyFetchedProviderRuntimeUpdates(fetched *fetchedInventory) {
+	if fetched == nil || len(fetched.runtimeUpdates) == 0 {
 		return
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.applyProviderRuntimeUpdatesLocked(updates)
+	r.dropUnregisteredFetchedProvidersLocked(fetched)
+	r.applyProviderRuntimeUpdatesLocked(fetched.runtimeUpdates)
 }
 
 func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]providerRuntimeState) {

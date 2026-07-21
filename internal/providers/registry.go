@@ -286,12 +286,10 @@ func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, 
 }
 
 // UnregisterProvider removes every provider instance registered under name
-// (normally at most one) so a subsequent Refresh rebuilds the catalog without
-// it. It only drops the registration bookkeeping — model/inventory maps are
-// left for the caller's follow-up Refresh to rebuild wholesale, since
-// applyFetchedInventory already replaces modelsByProvider and r.models from
-// scratch rather than merging into them. Safe to call for a name that was
-// never registered.
+// (normally at most one) and immediately removes its models from the live
+// catalog. Callers may still Refresh afterward to update the remaining
+// providers, but a failed or slow refresh must not leave deleted-provider
+// models visible. Safe to call for a name that was never registered.
 func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	providerName = strings.TrimSpace(providerName)
 	if providerName == "" {
@@ -315,6 +313,8 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	delete(r.providerRuntime, providerName)
 	delete(r.configMetadataOverrides, providerName)
 	delete(r.configuredProviderModels, providerName)
+	delete(r.modelsByProvider, providerName)
+	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
 	r.invalidateSortedCaches()
 }
 

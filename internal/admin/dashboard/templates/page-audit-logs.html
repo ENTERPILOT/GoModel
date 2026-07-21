@@ -1,8 +1,8 @@
 {{define "dashboard-page-audit-logs"}}
 <!-- Audit Logs Page -->
 <template x-if="page==='audit-logs'">
-<div>
-    <div class="page-header">
+<div class="page-with-sticky-date">
+    <div class="page-header date-range-page-header">
         <div class="inline-help-section" x-data="{ open: false, copyId: 'audit-retention-help-copy', showLabel: 'Show retention help', hideLabel: 'Hide retention help', text: 'If you want to change the retention period, set LOGGING_RETENTION_DAYS (env var) or logging.retention_days (config.yaml) and restart the gateway. Default is 30 days; 0 keeps audit logs forever.' }">
             <h2>Audit Logs</h2>
             <div class="inline-help-title-row" x-show="auditRetentionText()">
@@ -11,13 +11,15 @@
             </div>
             <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
         </div>
-        <div class="page-header-controls">
-            {{template "date-picker" .}}
-        </div>
     </div>
+    <div class="sticky-date-range">{{template "date-picker" .}}</div>
 
     <!-- Auth Error Banner -->
     {{template "auth-banner" .}}
+
+    <div class="alert alert-warning" x-show="!workflowAuditVisible() && !authError" role="status">
+        Audit logging is off. Live entries are temporary and disappear after refresh. Set <code>LOGGING_ENABLED=true</code> to persist them.
+    </div>
 
     <div class="audit-log-section">
         <div class="audit-log-toolbar">

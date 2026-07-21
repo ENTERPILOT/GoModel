@@ -99,6 +99,17 @@ func TestIndex_DemoModeShowsWarning(t *testing.T) {
 	if !strings.Contains(body, "Do not enter sensitive or personal data. Demo data is reset regularly.") {
 		t.Error("expected demo mode data warning in page HTML")
 	}
+	if !strings.Contains(body, `href="https://gomodel.enterpilot.io/?utm_source=gomodel_dashboard&amp;utm_medium=demo_banner&amp;utm_campaign=public_demo" target="_blank" rel="noopener noreferrer">gomodel.enterpilot.io</a>`) {
+		t.Error("expected demo mode website link in page HTML")
+	}
+	for _, unwanted := range []string{
+		`href="https://gomodel.enterpilot.io/docs"`,
+		`href="https://github.com/ENTERPILOT/GoModel"`,
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("unexpected demo mode link %s in page HTML", unwanted)
+		}
+	}
 }
 
 func TestIndex_StandardModeHidesDemoWarning(t *testing.T) {

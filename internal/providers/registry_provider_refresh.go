@@ -70,7 +70,7 @@ func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelec
 
 	if fetched.totalModels == 0 {
 		if fetched.failedProviders == len(providers) {
-			r.applyProviderRuntimeUpdates(fetched.runtimeUpdates)
+			r.applyFetchedProviderRuntimeUpdates(&fetched)
 			r.markFailedRefreshProvidersStale(fetched)
 			return 0, core.NewProviderError(providerSelector, http.StatusServiceUnavailable, "failed to refresh provider models", fetchedProviderRefreshError(fetched))
 		}
@@ -193,6 +193,7 @@ func (r *ModelRegistry) applyFetchedProviderInventory(providerTypes map[core.Pro
 	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
 
 	r.mu.Lock()
+	r.dropUnregisteredFetchedProvidersLocked(&fetched)
 	for providerName, providerModels := range fetched.modelsByProvider {
 		r.modelsByProvider[providerName] = providerModels
 		// A refresh that produced inventory is authoritative again.

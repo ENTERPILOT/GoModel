@@ -53,6 +53,13 @@ warning at the top of the dashboard, and exposes `DEMO_MODE=on` through the
 allowlisted `/admin/runtime/config` response. Demo mode does not reset storage;
 schedule that separately in the deployment.
 
+Demo mode also does not bypass authentication. A startup log mode of
+`managed_keys` means the configured storage still contains at least one managed
+gateway API key, so requests require a bearer token even when
+`GOMODEL_MASTER_KEY` is empty. Disabled or expired managed keys keep
+authentication enabled as a fail-closed safety measure. Delete every managed
+key to return to unauthenticated mode, or configure a master key for recovery.
+
 #### MCP Gateway
 
 See [MCP Gateway](/features/mcp-gateway) for the full feature guide.
@@ -123,6 +130,12 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | `LOGGING_BUFFER_SIZE`             | In-memory buffer before flush              | `1000`  |
 | `LOGGING_FLUSH_INTERVAL`          | Flush interval in seconds                  | `5`     |
 | `LOGGING_RETENTION_DAYS`          | Auto-delete after N days (0 = forever)     | `30`    |
+
+Realtime dashboard previews and persisted audit logs are separate features.
+With `DASHBOARD_LIVE_LOGS_ENABLED=true` and `LOGGING_ENABLED=false`, requests
+can appear live but are not written to storage and disappear after a page
+refresh. When audit logging is enabled, writes are asynchronous and can take up
+to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 
 <Warning>
   When `LOGGING_LOG_BODIES` is enabled, request and response bodies are stored

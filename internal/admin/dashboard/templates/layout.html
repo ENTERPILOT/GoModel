@@ -80,10 +80,13 @@
             {{if .DemoMode}}
             <aside class="demo-mode-banner" role="alert" aria-label="Demo mode notice">
                 <i data-lucide="triangle-alert" class="demo-mode-banner-icon" aria-hidden="true"></i>
-                <div>
+                <div class="demo-mode-banner-copy">
                     <strong>Public demo</strong>
                     <span>Do not enter sensitive or personal data. Demo data is reset regularly.</span>
                 </div>
+                <nav class="demo-mode-banner-links" aria-label="GoModel website">
+                    <a href="https://gomodel.enterpilot.io/?utm_source=gomodel_dashboard&amp;utm_medium=demo_banner&amp;utm_campaign=public_demo" target="_blank" rel="noopener noreferrer">gomodel.enterpilot.io</a>
+                </nav>
             </aside>
             {{end}}
             {{template "index" .}}

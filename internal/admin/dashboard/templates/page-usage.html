@@ -1,17 +1,17 @@
 {{define "dashboard-page-usage"}}
 <!-- Usage Page -->
 <template x-if="page==='usage'">
-<div>
-    <div class="page-header">
+<div class="page-with-sticky-date">
+    <div class="page-header date-range-page-header">
         <h2>Usage Analytics</h2>
         <div class="page-header-controls">
             <div class="usage-mode-toggle">
                 <button type="button" class="usage-mode-btn" :class="{active: usageMode==='tokens'}" @click="toggleUsageMode('tokens')">Tokens</button>
                 <button type="button" class="usage-mode-btn" :class="{active: usageMode==='costs'}" @click="toggleUsageMode('costs')">Costs</button>
             </div>
-            {{template "date-picker" .}}
         </div>
     </div>
+    <div class="sticky-date-range">{{template "date-picker" .}}</div>
 
     <!-- Auth Error Banner -->
     {{template "auth-banner" .}}

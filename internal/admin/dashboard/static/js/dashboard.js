@@ -140,7 +140,9 @@ function dashboard() {
       providers: [],
     },
     models: [],
-    modelsLoading: false,
+    // Start busy so a direct visit to the Models route can paint its loader
+    // before init() starts the first inventory request.
+    modelsLoading: true,
     categories: [],
     activeCategory: "all",
     hasCalendarModule: calendarModuleFactory !== null,
@@ -245,6 +247,16 @@ function dashboard() {
     },
 
     _applyRoute(page, sub) {
+      // Prepare the first bounded Models-page batch before Alpine mounts the
+      // page template. Otherwise navigating from another dashboard page would
+      // synchronously create every model row before a loader can paint.
+      if (
+        page === "models" &&
+        this.page !== "models" &&
+        typeof this.restartModelRendering === "function"
+      ) {
+        this.restartModelRendering();
+      }
       this.page = page;
 
       // Live token throughput is overview-only; tear it down when navigating
@@ -1122,9 +1134,35 @@ function dashboard() {
     },
 
     formatTokensShort(n) {
-      if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
-      if (n >= 1000) return (n / 1000).toFixed(1) + "K";
-      return String(n);
+      if (n == null || n === "") return "-";
+      const value = Number(n);
+      if (!Number.isFinite(value)) return "-";
+      const absolute = Math.abs(value);
+      const units = [
+        { threshold: 1000000000, suffix: "B" },
+        { threshold: 1000000, suffix: "M" },
+        { threshold: 1000, suffix: "K" },
+      ];
+      for (let index = 0; index < units.length; index += 1) {
+        let unit = units[index];
+        if (absolute >= unit.threshold) {
+          let compact = value / unit.threshold;
+          if (Math.abs(Number(compact.toFixed(1))) >= 1000 && index > 0) {
+            unit = units[index - 1];
+            compact = value / unit.threshold;
+          }
+          return (
+            compact.toFixed(1).replace(/\.0$/, "") + unit.suffix
+          );
+        }
+      }
+      return String(value);
+    },
+
+    tokenCountTitle(label, n) {
+      const value = n == null || n === "" ? NaN : Number(n);
+      const exact = Number.isFinite(value) ? this.formatNumber(value) : "-";
+      return String(label || "Tokens") + ": " + exact;
     },
 
     formatTimestamp(ts) {

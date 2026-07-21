@@ -7,6 +7,11 @@
             aliases: [],
             modelOverrideViews: [],
             displayModels: [],
+            displayModelGroups: [],
+            modelRenderLimit: 0,
+            modelRenderBatchSize: 75,
+            modelsRendering: false,
+            _modelRenderGeneration: 0,
             aliasLoading: false,
             aliasError: '',
             aliasNotice: '',
@@ -40,57 +45,63 @@
             },
 
             buildDisplayModels() {
-                const rows = this.models.map((model) => ({
-                    key: 'model:' + this.qualifiedModelName(model),
-                    display_name: this.qualifiedModelName(model),
-                    secondary_name: '',
-                    provider_name: model.provider_name || '',
-                    provider_type: model.provider_type || '',
-                    model: model.model,
-                    selector: model.selector || '',
-                    is_alias: false,
-                    alias: null,
-                    access: model && model.access ? model.access : null,
-                    kind_badge: '',
-                    masking_alias: null,
-                    has_virtual_model: false,
-                    alias_state_class: '',
-                    alias_state_text: ''
-                }));
+                const redirectsBySource = new Map();
+                if (this.virtualModelsAvailable) {
+                    for (const alias of this.aliases) {
+                        const aliasName = String(alias && alias.name || '').trim().toLowerCase();
+                        if (!aliasName || alias.enabled === false || !alias.valid) {
+                            continue;
+                        }
+                        redirectsBySource.set(aliasName, alias);
+                    }
+                }
+
+                const concreteModelsByKey = new Map();
+                const rows = this.models.map((model) => {
+                    const displayName = this.qualifiedModelName(model);
+                    let maskingAlias = null;
+                    for (const key of this.modelKeys(model)) {
+                        if (!concreteModelsByKey.has(key)) {
+                            concreteModelsByKey.set(key, model);
+                        }
+                        if (!maskingAlias && redirectsBySource.has(key)) {
+                            maskingAlias = redirectsBySource.get(key);
+                        }
+                    }
+                    const access = model && model.access ? model.access : null;
+                    return {
+                        key: 'model:' + displayName,
+                        display_name: displayName,
+                        secondary_name: '',
+                        provider_name: model.provider_name || '',
+                        provider_type: model.provider_type || '',
+                        model: model.model,
+                        selector: model.selector || '',
+                        is_alias: false,
+                        alias: null,
+                        access,
+                        kind_badge: '',
+                        masking_alias: maskingAlias,
+                        has_virtual_model: Boolean(maskingAlias || (access && access.override)),
+                        alias_state_class: '',
+                        alias_state_text: ''
+                    };
+                });
 
                 if (!this.virtualModelsAvailable) {
                     return rows;
                 }
 
-                const redirectsBySource = new Map();
                 for (const alias of this.aliases) {
-                    const aliasName = String(alias && alias.name || '').trim().toLowerCase();
-                    if (!aliasName || alias.enabled === false || !alias.valid) {
+                    const sourceModel = concreteModelsByKey.get(this.normalizedAliasName(alias && alias.name));
+                    if (alias && alias.enabled !== false && alias.valid && sourceModel) {
                         continue;
                     }
-                    redirectsBySource.set(aliasName, alias);
-                }
-
-                for (const row of rows) {
-                    for (const key of this.modelKeys(row)) {
-                        const redirect = redirectsBySource.get(key);
-                        if (!redirect) continue;
-                        row.masking_alias = redirect;
-                        row.has_virtual_model = true;
-                        break;
+                    let targetModel = null;
+                    for (const key of this.aliasKeys(alias)) {
+                        targetModel = concreteModelsByKey.get(key) || null;
+                        if (targetModel) break;
                     }
-                    // A real model row carries a virtual model when an access policy
-                    // override exists for its selector.
-                    if (row.access && row.access.override) {
-                        row.has_virtual_model = true;
-                    }
-                }
-
-                for (const alias of this.aliases) {
-                    if (alias && alias.enabled !== false && alias.valid && this.hasConcreteSourceModel(alias.name)) {
-                        continue;
-                    }
-                    const targetModel = this.findConcreteModelForAlias(alias);
                     if (!targetModel && this.activeCategory && this.activeCategory !== 'all') {
                         continue;
                     }
@@ -108,7 +119,7 @@
                         access: null,
                         kind_badge: 'Virtual Model',
                         masking_alias: null,
-                        source_model_exists: this.hasConcreteSourceModel(alias.name),
+                        source_model_exists: Boolean(sourceModel),
                         has_virtual_model: true,
                         alias_state_class: this.aliasStateClass(alias),
                         alias_state_text: this.aliasStateText(alias)
@@ -125,6 +136,14 @@
 
             syncDisplayModels() {
                 this.displayModels = this.buildDisplayModels();
+                this.displayModelGroups = this.groupDisplayModels(this.displayModels);
+                if (this.page === 'models') {
+                    this.restartModelRendering();
+                } else {
+                    this._modelRenderGeneration += 1;
+                    this.modelRenderLimit = this.displayModels.length;
+                    this.modelsRendering = false;
+                }
             },
 
             get filteredDisplayModels() {
@@ -147,7 +166,62 @@
             },
 
             get filteredDisplayModelGroups() {
-                return this.groupDisplayModels(this.filteredDisplayModels);
+                const filtered = this.filteredDisplayModels;
+                const limit = Math.max(0, Math.min(Number(this.modelRenderLimit || 0), filtered.length));
+                if (!this.modelFilter && limit >= this.displayModels.length) {
+                    return this.displayModelGroups;
+                }
+                return this.groupDisplayModels(filtered.slice(0, limit));
+            },
+
+            modelsBusy() {
+                return Boolean(this.modelsLoading || this.modelsRendering);
+            },
+
+            modelLoadingText() {
+                if (this.modelsLoading) {
+                    return this.displayModels.length > 0 ? 'Refreshing models...' : 'Loading models...';
+                }
+                const total = this.filteredDisplayModels.length;
+                const visible = Math.min(Number(this.modelRenderLimit || 0), total);
+                return 'Rendering models... ' + visible + ' / ' + total;
+            },
+
+            restartModelRendering() {
+                const total = this.filteredDisplayModels.length;
+                const batchSize = Math.max(1, Number(this.modelRenderBatchSize || 75));
+                const generation = Number(this._modelRenderGeneration || 0) + 1;
+                this._modelRenderGeneration = generation;
+                this.modelRenderLimit = Math.min(batchSize, total);
+                this.modelsRendering = this.modelRenderLimit < total;
+                if (this.modelsRendering) {
+                    this.scheduleModelRenderBatch(generation);
+                }
+            },
+
+            scheduleModelRenderBatch(generation) {
+                const scheduleTimeout = typeof global.setTimeout === 'function'
+                    ? global.setTimeout.bind(global)
+                    : (callback) => callback();
+                const afterPaint = (callback) => {
+                    if (typeof global.requestAnimationFrame === 'function') {
+                        global.requestAnimationFrame(() => scheduleTimeout(callback, 0));
+                        return;
+                    }
+                    scheduleTimeout(callback, 0);
+                };
+                afterPaint(() => {
+                    if (generation !== this._modelRenderGeneration || this.page !== 'models') {
+                        return;
+                    }
+                    const total = this.filteredDisplayModels.length;
+                    const batchSize = Math.max(1, Number(this.modelRenderBatchSize || 75));
+                    this.modelRenderLimit = Math.min(total, this.modelRenderLimit + batchSize);
+                    this.modelsRendering = this.modelRenderLimit < total;
+                    if (this.modelsRendering) {
+                        this.scheduleModelRenderBatch(generation);
+                    }
+                });
             },
 
             defaultVirtualModelForm() {
