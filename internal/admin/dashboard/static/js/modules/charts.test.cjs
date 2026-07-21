@@ -116,6 +116,9 @@ test('renderBarChart recreates the usage bar chart instance on refresh', () => {
 
     assert.equal(FakeChart.instances.length, 1);
     const firstChart = module.usageBarChart;
+    assert.equal(JSON.stringify(firstChart.data.labels), JSON.stringify(['gpt-5', 'gpt-4o']));
+    assert.equal(JSON.stringify(firstChart.data.datasets[0].data), JSON.stringify([-11, -5]));
+    assert.equal(JSON.stringify(firstChart.data.datasets[1].data), JSON.stringify([13, 7]));
 
     module.modelUsage = [
         { model: 'gpt-5', input_tokens: 21, output_tokens: 34, total_cost: 0.03 }
@@ -126,8 +129,166 @@ test('renderBarChart recreates the usage bar chart instance on refresh', () => {
     assert.equal(FakeChart.instances.length, 2);
     assert.equal(firstChart.destroyCalls, 1);
     assert.equal(JSON.stringify(module.usageBarChart.data.labels), JSON.stringify(['gpt-5']));
-    assert.equal(JSON.stringify(module.usageBarChart.data.datasets[0].data), JSON.stringify([55]));
+    assert.equal(JSON.stringify(module.usageBarChart.data.datasets[0].data), JSON.stringify([-21]));
+    assert.equal(JSON.stringify(module.usageBarChart.data.datasets[1].data), JSON.stringify([34]));
+    assert.equal(module.usageBarChart.options.indexAxis, 'y');
     assert.equal(JSON.stringify(firstChart.updateCalls), JSON.stringify([]));
+});
+
+test('renderBarChart splits input and output costs in costs mode', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'costs';
+    module.modelUsage = [
+        { model: 'gpt-4o', input_tokens: 5, output_tokens: 7, input_cost: 0.01, output_cost: 0.04, total_cost: 0.05 },
+        { model: 'gpt-5', input_tokens: 11, output_tokens: 13, input_cost: 0.02, output_cost: 0.06, total_cost: 0.08 }
+    ];
+
+    module.renderBarChart();
+
+    const chart = module.usageBarChart;
+    assert.equal(JSON.stringify(chart.data.labels), JSON.stringify(['gpt-5', 'gpt-4o']));
+    assert.equal(JSON.stringify(chart.data.datasets[0].data), JSON.stringify([-0.02, -0.01]));
+    assert.equal(JSON.stringify(chart.data.datasets[1].data), JSON.stringify([0.06, 0.04]));
+    assert.equal(chart.data.datasets[0].label, 'Input Cost');
+    assert.equal(chart.data.datasets[1].label, 'Output Cost');
+});
+
+test('renderBarChart stacked view piles input and output rightward as positive values', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'tokens';
+    module.modelUsageView = 'stacked';
+    module.modelUsage = [
+        { model: 'gpt-4o', input_tokens: 5, output_tokens: 7, total_cost: 0.01 },
+        { model: 'gpt-5', input_tokens: 11, output_tokens: 13, total_cost: 0.02 }
+    ];
+
+    module.renderBarChart();
+
+    const chart = module.usageBarChart;
+    assert.notEqual(chart, null);
+    assert.equal(JSON.stringify(chart.data.labels), JSON.stringify(['gpt-5', 'gpt-4o']));
+    assert.equal(JSON.stringify(chart.data.datasets[0].data), JSON.stringify([11, 5]));
+    assert.equal(JSON.stringify(chart.data.datasets[1].data), JSON.stringify([13, 7]));
+    assert.equal(chart.options.indexAxis, 'y');
+    assert.equal(chart.options.scales.x.stacked, true);
+});
+
+test('toggleUsageChartView switches between diverging and stacked chart views', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'tokens';
+    module.modelUsageView = 'chart';
+    module.modelUsage = [
+        { model: 'gpt-5', input_tokens: 10, output_tokens: 20, total_cost: 0.01 }
+    ];
+
+    module.renderBarChart();
+    const divergingChart = module.usageBarChart;
+    assert.equal(JSON.stringify(divergingChart.data.datasets[0].data), JSON.stringify([-10]));
+
+    module.toggleUsageChartView('model', 'stacked');
+
+    assert.equal(module.modelUsageView, 'stacked');
+    assert.equal(divergingChart.destroyCalls, 1);
+    assert.equal(JSON.stringify(module.usageBarChart.data.datasets[0].data), JSON.stringify([10]));
+});
+
+test('renderBarChart adds cache series and splits paid input when cache data is present', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'tokens';
+    module.modelUsage = [
+        {
+            model: 'gpt-5', input_tokens: 100, output_tokens: 20,
+            uncached_input_tokens: 30, cached_input_tokens: 60, cache_write_input_tokens: 10,
+            local_cached_input_tokens: 100, local_cached_output_tokens: 20, total_cost: 0.02
+        }
+    ];
+
+    module.renderBarChart();
+
+    const chart = module.usageBarChart;
+    assert.equal(chart.data.datasets.length, 5);
+    // Paid input = uncached + cache writes, on the left.
+    assert.equal(chart.data.datasets[0].label, 'Input Tokens');
+    assert.equal(JSON.stringify(chart.data.datasets[0].data), JSON.stringify([-40]));
+    assert.equal(chart.data.datasets[1].label, 'Output Tokens');
+    assert.equal(JSON.stringify(chart.data.datasets[1].data), JSON.stringify([20]));
+    // Prompt-cache reads join the input side; local cache splits per side.
+    assert.equal(chart.data.datasets[2].label, 'Prompt Cached');
+    assert.equal(JSON.stringify(chart.data.datasets[2].data), JSON.stringify([-60]));
+    assert.equal(chart.data.datasets[3].label, 'Locally Cached (Input)');
+    assert.equal(JSON.stringify(chart.data.datasets[3].data), JSON.stringify([-100]));
+    assert.equal(chart.data.datasets[4].label, 'Locally Cached (Output)');
+    assert.equal(JSON.stringify(chart.data.datasets[4].data), JSON.stringify([20]));
+});
+
+test('renderBarChart keeps two series when rows carry no cache data', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'tokens';
+    module.modelUsage = [
+        { model: 'gpt-5', input_tokens: 100, output_tokens: 20, total_cost: 0.02 }
+    ];
+
+    module.renderBarChart();
+
+    assert.equal(module.usageBarChart.data.datasets.length, 2);
+    assert.equal(JSON.stringify(module.usageBarChart.data.datasets[0].data), JSON.stringify([-100]));
+});
+
+test('renderBarChart costs mode splits estimated cached cost out of input cost', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'costs';
+    module.modelUsage = [
+        {
+            model: 'gpt-5', input_tokens: 100, output_tokens: 20,
+            cached_input_tokens: 60, local_cached_input_tokens: 100, local_cached_output_tokens: 20,
+            input_cost: 0.5, output_cost: 0.3, total_cost: 0.8, cached_input_cost: 0.125
+        }
+    ];
+
+    module.renderBarChart();
+
+    const chart = module.usageBarChart;
+    assert.equal(chart.data.datasets.length, 3);
+    assert.equal(chart.data.datasets[0].label, 'Input Cost');
+    assert.equal(JSON.stringify(chart.data.datasets[0].data), JSON.stringify([-0.375]));
+    assert.equal(chart.data.datasets[2].label, 'Prompt Cached Cost');
+    assert.equal(JSON.stringify(chart.data.datasets[2].data), JSON.stringify([-0.125]));
+    // Local cache hits cost nothing: no cost-mode series for them.
+    assert.ok(!chart.data.datasets.some((d) => d.label.startsWith('Locally Cached')));
+});
+
+test('renderBarChart folds models past the top 10 into a combined Other row', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'tokens';
+    module.modelUsage = Array.from({ length: 12 }, (_, i) => ({
+        model: 'model-' + i,
+        input_tokens: 100 - i,
+        output_tokens: 200 - i,
+        total_cost: 0.01
+    }));
+
+    module.renderBarChart();
+
+    const chart = module.usageBarChart;
+    assert.equal(chart.data.labels.length, 11);
+    assert.equal(chart.data.labels[10], 'Other');
+    // model-10 and model-11 fold together: inputs 90+89, outputs 190+189.
+    assert.equal(chart.data.datasets[0].data[10], -179);
+    assert.equal(chart.data.datasets[1].data[10], 379);
 });
 
 test('renderBarChart prefers provider_name in model labels when available', () => {
@@ -162,11 +323,12 @@ test('renderUserPathChart recreates the user path chart and uses usage mode valu
     assert.equal(FakeChart.instances.length, 1);
     const firstChart = module.usageUserPathChart;
     assert.equal(JSON.stringify(firstChart.data.labels), JSON.stringify(['/team/beta', '/team/alpha']));
-    assert.equal(JSON.stringify(firstChart.data.datasets[0].data), JSON.stringify([24, 12]));
+    assert.equal(JSON.stringify(firstChart.data.datasets[0].data), JSON.stringify([-11, -5]));
+    assert.equal(JSON.stringify(firstChart.data.datasets[1].data), JSON.stringify([13, 7]));
 
     module.usageMode = 'costs';
     module.userPathUsage = [
-        { user_path: '/team/alpha', input_tokens: 21, output_tokens: 34, total_tokens: 55, total_cost: 0.03 }
+        { user_path: '/team/alpha', input_tokens: 21, output_tokens: 34, total_tokens: 55, input_cost: 0.01, output_cost: 0.02, total_cost: 0.03 }
     ];
     module.renderUserPathChart();
 
@@ -174,7 +336,8 @@ test('renderUserPathChart recreates the user path chart and uses usage mode valu
     assert.equal(FakeChart.instances.length, 2);
     assert.equal(firstChart.destroyCalls, 1);
     assert.equal(JSON.stringify(module.usageUserPathChart.data.labels), JSON.stringify(['/team/alpha']));
-    assert.equal(JSON.stringify(module.usageUserPathChart.data.datasets[0].data), JSON.stringify([0.03]));
+    assert.equal(JSON.stringify(module.usageUserPathChart.data.datasets[0].data), JSON.stringify([-0.01]));
+    assert.equal(JSON.stringify(module.usageUserPathChart.data.datasets[1].data), JSON.stringify([0.02]));
 });
 
 test('user path usage chart hides when the only path is root', () => {
@@ -272,7 +435,7 @@ test('labelColor is deterministic and drawn from the shared palette', () => {
     assert.equal(module.labelChipStyle('x')['--label-color'], module.labelColor('x'));
 });
 
-test('renderLabelChart orders bars by selected metric and colors them per label', () => {
+test('renderLabelChart orders rows by selected metric and splits input and output', () => {
     FakeChart.instances = [];
     const { module } = createChartsContext();
     module.page = 'usage';
@@ -288,11 +451,9 @@ test('renderLabelChart orders bars by selected metric and colors them per label'
     assert.equal(FakeChart.instances.length, 1);
     const chart = module.usageLabelChart;
     assert.equal(JSON.stringify(chart.data.labels), JSON.stringify(['prod', 'alpha']));
-    assert.equal(JSON.stringify(chart.data.datasets[0].data), JSON.stringify([24, 12]));
-    assert.equal(
-        JSON.stringify(chart.data.datasets[0].backgroundColor),
-        JSON.stringify([module.labelColor('prod'), module.labelColor('alpha')])
-    );
+    assert.equal(JSON.stringify(chart.data.datasets[0].data), JSON.stringify([-11, -5]));
+    assert.equal(JSON.stringify(chart.data.datasets[1].data), JSON.stringify([13, 7]));
+    assert.equal(chart.options.indexAxis, 'y');
 
     module.labelUsage = [];
     module.renderLabelChart();

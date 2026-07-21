@@ -113,6 +113,7 @@ type ModelUsage struct {
 	InputCost    *float64 `json:"input_cost"`
 	OutputCost   *float64 `json:"output_cost"`
 	TotalCost    *float64 `json:"total_cost"`
+	GroupCacheFields
 }
 
 // UserPathUsage holds per-user-path token usage aggregates.
@@ -124,6 +125,7 @@ type UserPathUsage struct {
 	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
 	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
 	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+	GroupCacheFields
 }
 
 // LabelUsage holds per-label token usage aggregates. A request carrying
@@ -138,6 +140,41 @@ type LabelUsage struct {
 	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
 	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
 	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+	GroupCacheFields
+}
+
+// GroupCacheFields carries the cache-related figures shared by the chart
+// aggregate rows (per model, user path, or label).
+//
+// The *_input_tokens split is the provider prompt-cache breakdown of the
+// group's input, folded per row from raw_data exactly like the daily series
+// (local-cache hits excluded). LocalCachedInputTokens and
+// LocalCachedOutputTokens count the input and output tokens of rows served
+// from GoModel's local response cache within the same period and filters —
+// populated regardless of the query's cache mode, since uncached aggregates
+// exclude those rows by design. CachedInputCost is a read-time estimate
+// priced by the admin layer from current catalog pricing (see
+// EstimateCachedInputCost); storage layers never populate it.
+type GroupCacheFields struct {
+	UncachedInputTokens     int64    `json:"uncached_input_tokens,omitempty"`
+	CachedInputTokens       int64    `json:"cached_input_tokens,omitempty"`
+	CacheWriteInputTokens   int64    `json:"cache_write_input_tokens,omitempty"`
+	LocalCachedInputTokens  int64    `json:"local_cached_input_tokens,omitempty"`
+	LocalCachedOutputTokens int64    `json:"local_cached_output_tokens,omitempty"`
+	CachedInputCost         *float64 `json:"cached_input_cost,omitempty" extensions:"x-nullable"`
+
+	// CachedTokensByPricing breaks the group's prompt-cached tokens down by
+	// pricing identity so the admin layer can estimate CachedInputCost. Never
+	// serialized.
+	CachedTokensByPricing map[CachedPricingKey]int64 `json:"-" swaggerignore:"true"`
+}
+
+// CachedPricingKey identifies the catalog pricing row for a slice of a
+// group's prompt-cached tokens.
+type CachedPricingKey struct {
+	Model        string
+	Provider     string
+	ProviderName string
 }
 
 // DailyUsage holds usage statistics for a single period.

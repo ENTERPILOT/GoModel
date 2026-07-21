@@ -108,7 +108,34 @@ func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, params UsageQuer
 		return nil, fmt.Errorf("error iterating usage by model rows: %w", err)
 	}
 
+	stats, err := r.usageCacheStats(ctx, params, "user_path", nil, modelGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	applyModelCacheStats(result, stats)
+
 	return result, nil
+}
+
+// usageCacheStats runs the second streaming pass behind the chart aggregates
+// and folds cache figures per group. It always streams with cache mode "all"
+// so local-cache rows are counted even though the aggregates themselves
+// default to uncached-only.
+func (r *PostgreSQLReader) usageCacheStats(ctx context.Context, params UsageQueryParams, userPathExpr string, extraConditions []string, keysFor groupKeysFunc) (map[string]*GroupCacheStats, error) {
+	params.CacheMode = CacheModeAll
+	conditions, args, _, err := pgUsageConditionsWithUserPathExpr(params, userPathExpr, 1)
+	if err != nil {
+		return nil, err
+	}
+	conditions = append(conditions, extraConditions...)
+	where := sqlutil.BuildWhereClause(conditions)
+
+	rows, err := r.pool.Query(ctx, `SELECT model, provider, provider_name, user_path, labels::text, cache_type, input_tokens, output_tokens, raw_data FROM "usage"`+where, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage cache stats: %w", err)
+	}
+	defer rows.Close()
+	return foldUsageCacheRows(rows, keysFor)
 }
 
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
@@ -144,6 +171,12 @@ func (r *PostgreSQLReader) GetUsageByUserPath(ctx context.Context, params UsageQ
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating usage by user path rows: %w", err)
 	}
+
+	stats, err := r.usageCacheStats(ctx, params, userPathExpr, nil, userPathGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	applyUserPathCacheStats(result, stats)
 
 	return result, nil
 }
@@ -182,6 +215,12 @@ func (r *PostgreSQLReader) GetUsageByLabel(ctx context.Context, params UsageQuer
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating usage by label rows: %w", err)
 	}
+
+	stats, err := r.usageCacheStats(ctx, params, "user_path", []string{"jsonb_typeof(labels) = 'array'"}, labelGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	applyLabelCacheStats(result, stats)
 
 	return result, nil
 }

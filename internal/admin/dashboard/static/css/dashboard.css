@@ -2999,6 +2999,27 @@ textarea:focus {
   color: #fff;
 }
 
+/* Usage charts flow two per row; a section alone in its row (odd count,
+   or neighbors hidden by x-show) grows to fill the full width. */
+.usage-charts-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.usage-charts-grid .model-chart-section {
+  flex: 1 1 calc(50% - 24px);
+  min-width: 420px;
+  margin-bottom: 0;
+}
+
+@media (max-width: 520px) {
+  .usage-charts-grid .model-chart-section {
+    min-width: 0;
+  }
+}
+
 /* Usage by Model Chart Section */
 .model-chart-section {
   background: var(--bg-surface);

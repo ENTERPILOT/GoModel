@@ -278,7 +278,69 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 		return nil, fmt.Errorf("error iterating usage by model cursor: %w", err)
 	}
 
+	stats, err := r.usageCacheStats(ctx, params, modelGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	applyModelCacheStats(result, stats)
+
 	return result, nil
+}
+
+// usageCacheStats runs the second streaming pass behind the chart aggregates
+// and folds cache figures per group. It always streams with cache mode "all"
+// so local-cache rows are counted even though the aggregates themselves
+// default to uncached-only.
+func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryParams, keysFor groupKeysFunc) (map[string]*GroupCacheStats, error) {
+	params.CacheMode = CacheModeAll
+	matchFilters, err := mongoUsageMatchFilters(params)
+	if err != nil {
+		return nil, err
+	}
+	pipeline := bson.A{}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{
+		{Key: "model", Value: 1},
+		{Key: "provider", Value: 1},
+		{Key: "provider_name", Value: 1},
+		{Key: "user_path", Value: 1},
+		{Key: "labels", Value: 1},
+		{Key: "cache_type", Value: 1},
+		{Key: "input_tokens", Value: 1},
+		{Key: "output_tokens", Value: 1},
+		{Key: "raw_data", Value: 1},
+	}}})
+
+	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate usage cache stats: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	out := map[string]*GroupCacheStats{}
+	for cursor.Next(ctx) {
+		var row struct {
+			Model        string         `bson:"model"`
+			Provider     string         `bson:"provider"`
+			ProviderName string         `bson:"provider_name"`
+			UserPath     string         `bson:"user_path"`
+			Labels       []string       `bson:"labels"`
+			CacheType    string         `bson:"cache_type"`
+			InputTokens  int            `bson:"input_tokens"`
+			OutputTokens int            `bson:"output_tokens"`
+			RawData      map[string]any `bson:"raw_data"`
+		}
+		if err := cursor.Decode(&row); err != nil {
+			return nil, fmt.Errorf("failed to decode usage cache stat row: %w", err)
+		}
+		accumulateGroupCacheStats(out, keysFor, usageCacheStatRow(row))
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage cache stat cursor: %w", err)
+	}
+	return out, nil
 }
 
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
@@ -364,6 +426,12 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 		return nil, fmt.Errorf("error iterating usage by user path cursor: %w", err)
 	}
 
+	stats, err := r.usageCacheStats(ctx, params, userPathGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	applyUserPathCacheStats(result, stats)
+
 	return result, nil
 }
 
@@ -439,7 +507,7 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 	}
 	defer cursor.Close(ctx)
 
-	return decodeGroupedUsageRows(ctx, cursor, "usage by label", func(row mongoGroupedUsageRow) LabelUsage {
+	result, err := decodeGroupedUsageRows(ctx, cursor, "usage by label", func(row mongoGroupedUsageRow) LabelUsage {
 		return LabelUsage{
 			Label:        row.Key,
 			Requests:     row.Requests,
@@ -451,6 +519,17 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
 		}
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	stats, err := r.usageCacheStats(ctx, params, labelGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	applyLabelCacheStats(result, stats)
+
+	return result, nil
 }
 
 func mongoUsageGroupedProviderNameExpr() bson.D {

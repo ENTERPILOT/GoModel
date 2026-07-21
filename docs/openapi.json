@@ -13165,6 +13165,16 @@
       "usage.LabelUsage": {
         "type": "object",
         "properties": {
+          "cache_write_input_tokens": {
+            "type": "integer"
+          },
+          "cached_input_cost": {
+            "type": "number",
+            "nullable": true
+          },
+          "cached_input_tokens": {
+            "type": "integer"
+          },
           "input_cost": {
             "type": "number",
             "nullable": true
@@ -13174,6 +13184,12 @@
           },
           "label": {
             "type": "string"
+          },
+          "local_cached_input_tokens": {
+            "type": "integer"
+          },
+          "local_cached_output_tokens": {
+            "type": "integer"
           },
           "output_cost": {
             "type": "number",
@@ -13191,16 +13207,35 @@
           },
           "total_tokens": {
             "type": "integer"
+          },
+          "uncached_input_tokens": {
+            "type": "integer"
           }
         }
       },
       "usage.ModelUsage": {
         "type": "object",
         "properties": {
+          "cache_write_input_tokens": {
+            "type": "integer"
+          },
+          "cached_input_cost": {
+            "type": "number",
+            "nullable": true
+          },
+          "cached_input_tokens": {
+            "type": "integer"
+          },
           "input_cost": {
             "type": "number"
           },
           "input_tokens": {
+            "type": "integer"
+          },
+          "local_cached_input_tokens": {
+            "type": "integer"
+          },
+          "local_cached_output_tokens": {
             "type": "integer"
           },
           "model": {
@@ -13220,6 +13255,9 @@
           },
           "total_cost": {
             "type": "number"
+          },
+          "uncached_input_tokens": {
+            "type": "integer"
           }
         }
       },
@@ -13470,11 +13508,27 @@
       "usage.UserPathUsage": {
         "type": "object",
         "properties": {
+          "cache_write_input_tokens": {
+            "type": "integer"
+          },
+          "cached_input_cost": {
+            "type": "number",
+            "nullable": true
+          },
+          "cached_input_tokens": {
+            "type": "integer"
+          },
           "input_cost": {
             "type": "number",
             "nullable": true
           },
           "input_tokens": {
+            "type": "integer"
+          },
+          "local_cached_input_tokens": {
+            "type": "integer"
+          },
+          "local_cached_output_tokens": {
             "type": "integer"
           },
           "output_cost": {
@@ -13489,6 +13543,9 @@
             "nullable": true
           },
           "total_tokens": {
+            "type": "integer"
+          },
+          "uncached_input_tokens": {
             "type": "integer"
           },
           "user_path": {

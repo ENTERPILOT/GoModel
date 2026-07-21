@@ -1499,11 +1499,11 @@ test("usage charts can switch between chart and table views", () => {
 
   assert.match(
     indexTemplate,
-    /class="chart-view-toggle"[\s\S]*@click="toggleUsageChartView\('model', 'chart'\)"[\s\S]*@click="toggleUsageChartView\('model', 'table'\)"/,
+    /class="chart-view-toggle"[\s\S]*@click="toggleUsageChartView\('model', 'chart'\)"[\s\S]*@click="toggleUsageChartView\('model', 'stacked'\)"[\s\S]*@click="toggleUsageChartView\('model', 'table'\)"/,
   );
   assert.match(
     indexTemplate,
-    /<div class="bar-chart-wrap" x-show="modelUsageView === 'chart'">[\s\S]*<canvas id="usageBarChart"><\/canvas>/,
+    /<div class="bar-chart-wrap" x-show="_isChartView\(modelUsageView\)">[\s\S]*<canvas id="usageBarChart"><\/canvas>/,
   );
   assert.match(
     indexTemplate,
@@ -1511,7 +1511,7 @@ test("usage charts can switch between chart and table views", () => {
   );
   assert.match(
     indexTemplate,
-    /class="chart-view-toggle"[\s\S]*@click="toggleUsageChartView\('userPath', 'chart'\)"[\s\S]*@click="toggleUsageChartView\('userPath', 'table'\)"/,
+    /class="chart-view-toggle"[\s\S]*@click="toggleUsageChartView\('userPath', 'chart'\)"[\s\S]*@click="toggleUsageChartView\('userPath', 'stacked'\)"[\s\S]*@click="toggleUsageChartView\('userPath', 'table'\)"/,
   );
   assert.match(
     indexTemplate,
@@ -1519,7 +1519,7 @@ test("usage charts can switch between chart and table views", () => {
   );
   assert.match(
     indexTemplate,
-    /<div class="bar-chart-wrap" x-show="userPathUsageView === 'chart'">[\s\S]*<canvas id="usageUserPathChart"><\/canvas>/,
+    /<div class="bar-chart-wrap" x-show="_isChartView\(userPathUsageView\)">[\s\S]*<canvas id="usageUserPathChart"><\/canvas>/,
   );
   assert.match(
     indexTemplate,

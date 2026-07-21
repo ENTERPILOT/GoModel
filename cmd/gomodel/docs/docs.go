@@ -10100,6 +10100,16 @@ const docTemplate = `{
         "usage.LabelUsage": {
             "type": "object",
             "properties": {
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
                 "input_cost": {
                     "type": "number",
                     "x-nullable": true
@@ -10109,6 +10119,12 @@ const docTemplate = `{
                 },
                 "label": {
                     "type": "string"
+                },
+                "local_cached_input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_output_tokens": {
+                    "type": "integer"
                 },
                 "output_cost": {
                     "type": "number",
@@ -10126,16 +10142,35 @@ const docTemplate = `{
                 },
                 "total_tokens": {
                     "type": "integer"
+                },
+                "uncached_input_tokens": {
+                    "type": "integer"
                 }
             }
         },
         "usage.ModelUsage": {
             "type": "object",
             "properties": {
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
                 "input_cost": {
                     "type": "number"
                 },
                 "input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_output_tokens": {
                     "type": "integer"
                 },
                 "model": {
@@ -10155,6 +10190,9 @@ const docTemplate = `{
                 },
                 "total_cost": {
                     "type": "number"
+                },
+                "uncached_input_tokens": {
+                    "type": "integer"
                 }
             }
         },
@@ -10405,11 +10443,27 @@ const docTemplate = `{
         "usage.UserPathUsage": {
             "type": "object",
             "properties": {
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
                 "input_cost": {
                     "type": "number",
                     "x-nullable": true
                 },
                 "input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_output_tokens": {
                     "type": "integer"
                 },
                 "output_cost": {
@@ -10424,6 +10478,9 @@ const docTemplate = `{
                     "x-nullable": true
                 },
                 "total_tokens": {
+                    "type": "integer"
+                },
+                "uncached_input_tokens": {
                     "type": "integer"
                 },
                 "user_path": {
