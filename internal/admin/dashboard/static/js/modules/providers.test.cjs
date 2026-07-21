@@ -100,13 +100,13 @@ test('providerDocUrl links provider types with docs and stays empty otherwise', 
     const module = createProvidersModule();
 
     // Types with a dedicated docs page.
-    assert.equal(module.providerDocUrl({ type: 'anthropic' }), 'https://gomodel.enterpilot.io/docs/providers/anthropic');
-    assert.equal(module.providerDocUrl({ config: { type: 'bedrock' } }), 'https://gomodel.enterpilot.io/docs/providers/bedrock');
-    assert.equal(module.providerDocUrl({ type: 'bedrock-mantle' }), 'https://gomodel.enterpilot.io/docs/providers/bedrock-mantle');
+    assert.equal(module.providerDocUrl({ type: 'anthropic' }), 'https://gomodel.enterpilot.io/docs/providers/anthropic?utm_source=gomodel_dashboard');
+    assert.equal(module.providerDocUrl({ config: { type: 'bedrock' } }), 'https://gomodel.enterpilot.io/docs/providers/bedrock?utm_source=gomodel_dashboard');
+    assert.equal(module.providerDocUrl({ type: 'bedrock-mantle' }), 'https://gomodel.enterpilot.io/docs/providers/bedrock-mantle?utm_source=gomodel_dashboard');
     // Type slug differs from the docs slug.
-    assert.equal(module.providerDocUrl({ type: 'opencode_go' }), 'https://gomodel.enterpilot.io/docs/providers/opencode-go');
+    assert.equal(module.providerDocUrl({ type: 'opencode_go' }), 'https://gomodel.enterpilot.io/docs/providers/opencode-go?utm_source=gomodel_dashboard');
     // Resolves even when the (type) label is hidden because name === type.
-    assert.equal(module.providerDocUrl({ name: 'gemini', type: 'GEMINI' }), 'https://gomodel.enterpilot.io/docs/providers/gemini');
+    assert.equal(module.providerDocUrl({ name: 'gemini', type: 'GEMINI' }), 'https://gomodel.enterpilot.io/docs/providers/gemini?utm_source=gomodel_dashboard');
     // Types without a provider-specific doc → no link (no icon).
     assert.equal(module.providerDocUrl({ type: 'openai' }), '');
     assert.equal(module.providerDocUrl({ type: 'ollama' }), '');
