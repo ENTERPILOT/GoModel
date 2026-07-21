@@ -157,7 +157,7 @@ func TestListProviderCredentials_RedactsSecretsAndFlagsManaged(t *testing.T) {
 	if multiKey.Managed {
 		t.Fatal("multi-key.Managed = true, want false (admin-store row)")
 	}
-	if len(multiKey.APIKeys) != 1 || multiKey.APIKeys[0] != redactedCredentialValue {
+	if len(multiKey.APIKeys) != 1 || multiKey.APIKeys[0] != "***********" {
 		t.Fatalf("multi-key.APIKeys = %#v, want one redacted entry", multiKey.APIKeys)
 	}
 
@@ -165,7 +165,7 @@ func TestListProviderCredentials_RedactsSecretsAndFlagsManaged(t *testing.T) {
 	if vertex.Managed {
 		t.Fatal("local-vertex.Managed = true, want false (admin-store row)")
 	}
-	if vertex.ServiceAccountJSON != redactedCredentialValue {
+	if vertex.ServiceAccountJSON != "***********" {
 		t.Fatalf("local-vertex.ServiceAccountJSON = %q, want redacted", vertex.ServiceAccountJSON)
 	}
 }
@@ -302,6 +302,29 @@ func TestUpsertProviderCredential_RedactedKeyPreservesStoredValuePositionally(t 
 	stored := fake.rows["multi"]
 	if len(stored.APIKeys) != 2 || stored.APIKeys[0] != "sk-one" || stored.APIKeys[1] != "sk-new" {
 		t.Fatalf("stored.APIKeys = %#v, want [sk-one sk-new]", stored.APIKeys)
+	}
+}
+
+func TestUpsertProviderCredential_LongerRedactedKeyPreservesStoredValue(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	fake.rows["single"] = providers.ManagedProviderCredential{
+		Name:    "single",
+		Type:    "openai",
+		APIKeys: []string{"sk-secret"},
+		Enabled: true,
+	}
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"single","type":"openai","api_keys":["***********"]}`)
+	if err := h.UpsertProviderCredential(c); err != nil {
+		t.Fatalf("UpsertProviderCredential() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	stored := fake.rows["single"]
+	if len(stored.APIKeys) != 1 || stored.APIKeys[0] != "sk-secret" {
+		t.Fatalf("stored.APIKeys = %#v, want [sk-secret]", stored.APIKeys)
 	}
 }
 

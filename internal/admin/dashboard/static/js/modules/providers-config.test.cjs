@@ -48,7 +48,7 @@ test('fetchProviderCredentialsPage stores the returned list and marks unavailabl
 
 test('fetchProviderCredentialsPage stores rows and lazily loads types once', async () => {
     const rows = [
-        { name: 'my-openai', type: 'openai', api_keys: ['***'], enabled: true, managed: false },
+        { name: 'my-openai', type: 'openai', api_keys: ['***********'], enabled: true, managed: false },
         { name: 'config-anthropic', type: 'anthropic', enabled: true, managed: true }
     ];
     const requests = [];
@@ -137,7 +137,7 @@ test('submitProviderCredentialForm sends a normalized PUT payload on create', as
     assert.equal(module.providerCredentialFormOpen, false);
 });
 
-test('submitProviderCredentialForm preserves untouched API key positions as "***" on edit', async () => {
+test('submitProviderCredentialForm preserves untouched masked API key positions on edit', async () => {
     const requests = [];
     const module = createProvidersConfigModule({
         fetch: async (url, request) => {
@@ -154,7 +154,7 @@ test('submitProviderCredentialForm preserves untouched API key positions as "***
     const existing = {
         name: 'my-openai',
         type: 'openai',
-        api_keys: ['***', '***'],
+        api_keys: ['***********', '***********'],
         base_url: 'https://api.openai.com/v1',
         models: ['gpt-4o'],
         enabled: true,
@@ -163,14 +163,14 @@ test('submitProviderCredentialForm preserves untouched API key positions as "***
     module.providerCredentials = [existing];
     module.openProviderCredentialEdit(existing);
 
-    // Untouched: both rows stay "***". Only a newly added third key is real.
+    // Untouched: both rows stay masked. Only a newly added third key is real.
     module.providerCredentialForm.api_keys.push({ value: 'sk-new-key' });
 
     await module.submitProviderCredentialForm();
 
     assert.equal(requests.length, 1);
     const body = JSON.parse(requests[0].request.body);
-    assert.deepEqual(body.api_keys, ['***', '***', 'sk-new-key']);
+    assert.deepEqual(body.api_keys, ['***********', '***********', 'sk-new-key']);
     assert.equal(body.name, 'my-openai');
 });
 
@@ -297,9 +297,9 @@ test('filteredProviderCredentials matches name, type, and base URL', () => {
 
 test('providerCredentialAuthLabel infers auth mode from populated fields', () => {
     const module = createProvidersConfigModule();
-    assert.equal(module.providerCredentialAuthLabel({ api_keys: ['***'] }), '1 key');
-    assert.equal(module.providerCredentialAuthLabel({ api_keys: ['***', '***'] }), '2 keys');
-    assert.equal(module.providerCredentialAuthLabel({ service_account_json: '***' }), 'service account');
+    assert.equal(module.providerCredentialAuthLabel({ api_keys: ['***********'] }), '1 key');
+    assert.equal(module.providerCredentialAuthLabel({ api_keys: ['***********', '***********'] }), '2 keys');
+    assert.equal(module.providerCredentialAuthLabel({ service_account_json: '***********' }), 'service account');
     assert.equal(module.providerCredentialAuthLabel({ service_account_file: '/etc/gcp.json' }), 'service account');
     assert.equal(module.providerCredentialAuthLabel({ vertex_project: 'my-project' }), 'ADC');
     assert.equal(module.providerCredentialAuthLabel({}), 'keyless');
@@ -320,7 +320,7 @@ test('openProviderCredentialEdit prefills the form from a view row', () => {
     module.openProviderCredentialEdit({
         name: 'my-openai',
         type: 'openai',
-        api_keys: ['***'],
+        api_keys: ['***********'],
         base_url: 'https://api.openai.com/v1',
         models: ['gpt-4o', 'gpt-4o-mini'],
         enabled: false,
@@ -334,7 +334,7 @@ test('openProviderCredentialEdit prefills the form from a view row', () => {
     // Built inside the module's vm realm: compare structurally via JSON
     // rather than assert.deepEqual, which (under node:assert/strict) also
     // checks prototype identity and cross-realm plain objects fail that.
-    assert.equal(JSON.stringify(module.providerCredentialForm.api_keys), JSON.stringify([{ value: '***' }]));
+    assert.equal(JSON.stringify(module.providerCredentialForm.api_keys), JSON.stringify([{ value: '***********' }]));
     assert.equal(module.providerCredentialForm.models, 'gpt-4o, gpt-4o-mini');
     assert.equal(module.providerCredentialForm.enabled, false);
 });

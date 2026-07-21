@@ -111,7 +111,7 @@
                             <span>Add key</span>
                         </button>
                     </div>
-                    <small class="form-hint">Multiple keys rotate round-robin. Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored key. Not every provider type needs a key (e.g. Ollama, or Vertex/Bedrock using ADC).</small>
+                    <small class="form-hint">Multiple keys rotate round-robin. Saved values are shown as <code>***********</code>; leave the asterisks unchanged to keep the stored key. Not every provider type needs a key (e.g. Ollama, or Vertex/Bedrock using ADC).</small>
                 </div>
 
                 <div class="vm-status-row">
@@ -186,13 +186,13 @@
                         <div class="form-field">
                             <label class="form-field-label" for="provider-credential-service-account-json">Service Account JSON</label>
                             <textarea id="provider-credential-service-account-json" rows="4" class="mono" placeholder="Paste service account JSON" x-model="providerCredentialForm.service_account_json"></textarea>
-                            <small class="form-hint">Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored value, or clear it to remove.</small>
+                            <small class="form-hint">Saved values are shown as <code>***********</code>; leave the asterisks unchanged to keep the stored value, or clear it to remove.</small>
                         </div>
 
                         <div class="form-field">
                             <label class="form-field-label" for="provider-credential-service-account-json-base64">Service Account JSON (base64)</label>
                             <input id="provider-credential-service-account-json-base64" type="text" class="mono" x-model="providerCredentialForm.service_account_json_base64">
-                            <small class="form-hint">Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored value.</small>
+                            <small class="form-hint">Saved values are shown as <code>***********</code>; leave the asterisks unchanged to keep the stored value.</small>
                         </div>
 
                         <div class="form-field">

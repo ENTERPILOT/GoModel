@@ -27,14 +27,15 @@ type ProviderCredentialsAdmin interface {
 }
 
 // redactedCredentialValue replaces secret values (API keys, service account
-// JSON) in admin views. An upsert that sends the placeholder back keeps the
-// currently stored value, so the dashboard can round-trip a provider
-// definition without ever seeing its secrets again.
-const redactedCredentialValue = "***"
+// JSON) in admin views. An all-asterisk value of at least three characters is
+// accepted on upsert to keep the currently stored value, so older dashboard
+// clients that send "***" remain compatible.
+const redactedCredentialValue = "***********"
 
 // upsertProviderCredentialRequest is the admin upsert contract for one
-// provider credential. "***" in api_keys or the service-account fields
-// preserves the stored value at that position.
+// provider credential. A value containing only three or more asterisks in
+// api_keys or the service-account fields preserves the stored value at that
+// position.
 type upsertProviderCredentialRequest struct {
 	Name                     string   `json:"name"`
 	Type                     string   `json:"type"`
@@ -58,20 +59,20 @@ type upsertProviderCredentialRequest struct {
 // credential: its definition (secrets redacted) plus whether it is read-only
 // (config/env-declared).
 type providerCredentialViewResponse struct {
-	Name                     string    `json:"name"`
-	Type                     string    `json:"type"`
-	APIKeys                  []string  `json:"api_keys,omitempty"`
-	BaseURL                  string    `json:"base_url,omitempty"`
-	APIVersion               string    `json:"api_version,omitempty"`
-	Backend                  string    `json:"backend,omitempty"`
-	AuthType                 string    `json:"auth_type,omitempty"`
-	APIMode                  string    `json:"api_mode,omitempty"`
-	VertexProject            string    `json:"vertex_project,omitempty"`
-	VertexLocation           string    `json:"vertex_location,omitempty"`
-	ServiceAccountFile       string    `json:"service_account_file,omitempty"`
-	ServiceAccountJSON       string    `json:"service_account_json,omitempty"`
-	ServiceAccountJSONBase64 string    `json:"service_account_json_base64,omitempty"`
-	GCPScope                 string    `json:"gcp_scope,omitempty"`
+	Name                     string     `json:"name"`
+	Type                     string     `json:"type"`
+	APIKeys                  []string   `json:"api_keys,omitempty"`
+	BaseURL                  string     `json:"base_url,omitempty"`
+	APIVersion               string     `json:"api_version,omitempty"`
+	Backend                  string     `json:"backend,omitempty"`
+	AuthType                 string     `json:"auth_type,omitempty"`
+	APIMode                  string     `json:"api_mode,omitempty"`
+	VertexProject            string     `json:"vertex_project,omitempty"`
+	VertexLocation           string     `json:"vertex_location,omitempty"`
+	ServiceAccountFile       string     `json:"service_account_file,omitempty"`
+	ServiceAccountJSON       string     `json:"service_account_json,omitempty"`
+	ServiceAccountJSONBase64 string     `json:"service_account_json_base64,omitempty"`
+	GCPScope                 string     `json:"gcp_scope,omitempty"`
 	Models                   []string   `json:"models,omitempty"`
 	Enabled                  bool       `json:"enabled"`
 	Managed                  bool       `json:"managed"`
@@ -192,7 +193,7 @@ func (h *Handler) UpsertProviderCredential(c *echo.Context) error {
 	}
 
 	// Serialize provider-credential mutations: buildProviderCredentialUpsert
-	// reads the current stored row (to resolve "***" placeholders) and then
+	// reads the current stored row (to resolve redacted placeholders) and then
 	// writes it back, so two concurrent edits of the same name could
 	// otherwise interleave and leave the store and registry inconsistent.
 	h.mutationMu.Lock()
@@ -237,8 +238,9 @@ func (h *Handler) DeleteProviderCredential(c *echo.Context) error {
 }
 
 // buildProviderCredentialUpsert maps the request onto a validated
-// ManagedProviderCredential, resolving "***" placeholders against the stored
-// row so the dashboard never has to re-submit real secrets on every edit.
+// ManagedProviderCredential, resolving redacted placeholders against the
+// stored row so the dashboard never has to re-submit real secrets on every
+// edit.
 func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string, req upsertProviderCredentialRequest) (providers.ManagedProviderCredential, error) {
 	current, err := h.providerCredentials.Get(ctx, name)
 	if err != nil && !errors.Is(err, providers.ErrCredentialNotFound) {
@@ -303,7 +305,7 @@ func currentField(current *providers.ManagedProviderCredential, get func(provide
 	return get(*current)
 }
 
-// mergeRedactedList resolves "***" placeholders in an ordered secret list
+// mergeRedactedList resolves all-asterisk placeholders in an ordered secret list
 // (API key rotation) positionally against the stored list. A placeholder past
 // the end of the stored list has nothing to preserve and is rejected, the
 // same rule mergeRedactedMCPHeaders applies to headers.
@@ -313,7 +315,7 @@ func mergeRedactedList(incoming, stored []string) ([]string, error) {
 	}
 	merged := make([]string, len(incoming))
 	for i, value := range incoming {
-		if value != redactedCredentialValue {
+		if !isRedactedCredentialValue(value) {
 			merged[i] = value
 			continue
 		}
@@ -325,16 +327,24 @@ func mergeRedactedList(incoming, stored []string) ([]string, error) {
 	return merged, nil
 }
 
-// mergeRedactedValue resolves a single "***" placeholder against the stored
-// value.
+// mergeRedactedValue resolves a single all-asterisk placeholder against the
+// stored value.
 func mergeRedactedValue(incoming, stored string) (string, error) {
-	if incoming != redactedCredentialValue {
+	if !isRedactedCredentialValue(incoming) {
 		return incoming, nil
 	}
 	if stored == "" {
 		return "", core.NewInvalidRequestError("value is redacted but has no stored value to preserve; provide the real value", nil)
 	}
 	return stored, nil
+}
+
+// isRedactedCredentialValue recognizes both the current display mask and
+// legacy masks emitted by older dashboard versions. Requiring at least three
+// asterisks avoids treating a stray single character as an intentional
+// preserve-secret sentinel.
+func isRedactedCredentialValue(value string) bool {
+	return len(value) >= 3 && strings.Trim(value, "*") == ""
 }
 
 // providerCredentialView converts one stored row into the admin response

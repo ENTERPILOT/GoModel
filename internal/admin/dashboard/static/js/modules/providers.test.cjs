@@ -35,10 +35,20 @@ test('provider status summary and badge helpers map health states to stable clas
     assert.equal(module.providerStatusBadgeClass('unhealthy'), 'is-unhealthy');
     assert.equal(module.providerStatusRatioText(), '1/2');
     assert.equal(module.providerStatusHasIssues(), true);
-    assert.equal(module.providerStatusSummaryText(), '1 provider needs attention');
+    assert.equal(module.providerStatusSummaryText(), '1 needs attention');
 
     module.providerStatus.summary = { total: 2, healthy: 2, degraded: 0, unhealthy: 0, overall_status: 'healthy' };
     assert.equal(module.providerStatusHasIssues(), false);
+    assert.equal(module.providerStatusSummaryText(), 'All healthy');
+
+    module.providerStatus.summary = { total: 2, healthy: 0, degraded: 0, unhealthy: 2, overall_status: 'unhealthy' };
+    assert.equal(module.providerStatusSummaryText(), 'None healthy');
+
+    module.providerStatus.summary = { total: 3, healthy: 1, degraded: 2, unhealthy: 0, overall_status: 'degraded' };
+    assert.equal(module.providerStatusSummaryText(), '2 need attention');
+
+    module.providerStatus.summary = { total: 0, healthy: 0, degraded: 0, unhealthy: 0, overall_status: 'degraded' };
+    assert.equal(module.providerStatusSummaryText(), 'None configured');
 });
 
 test('provider helper methods format configured models and resilience summaries', () => {

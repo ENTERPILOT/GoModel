@@ -246,11 +246,11 @@
                 const summary = this.providerStatus && this.providerStatus.summary ? this.providerStatus.summary : {};
                 const total = Number(summary.total || 0);
                 const healthy = Number(summary.healthy || 0);
-                if (total === 0) return 'No configured providers';
-                if (healthy === total) return 'All configured providers are healthy';
-                if (healthy === 0) return 'No configured providers are healthy';
-                return String(total - healthy) + ' provider' + (total - healthy === 1 ? '' : 's') +
-                    ' need' + (total - healthy === 1 ? 's' : '') + ' attention';
+                if (total === 0) return 'None configured';
+                if (healthy === total) return 'All healthy';
+                if (healthy === 0) return 'None healthy';
+                const attention = total - healthy;
+                return String(attention) + (attention === 1 ? ' needs' : ' need') + ' attention';
             },
 
             scrollToProviderStatusSection() {

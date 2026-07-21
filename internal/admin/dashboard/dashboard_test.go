@@ -99,6 +99,23 @@ func TestIndex_DemoModeShowsWarning(t *testing.T) {
 	if !strings.Contains(body, "Do not enter sensitive or personal data. Demo data is reset regularly.") {
 		t.Error("expected demo mode data warning in page HTML")
 	}
+	links := []struct {
+		label string
+		href  string
+		text  string
+	}{
+		{label: "website", href: "https://gomodel.enterpilot.io/", text: "gomodel.enterpilot.io"},
+		{label: "docs", href: "https://gomodel.enterpilot.io/docs", text: "Docs"},
+		{label: "GitHub", href: "https://github.com/ENTERPILOT/GoModel", text: "GitHub"},
+	}
+	for _, link := range links {
+		if !strings.Contains(body, `href="`+link.href+`" target="_blank" rel="noopener noreferrer">`+link.text+`</a>`) {
+			t.Errorf("expected demo mode %s link in page HTML", link.label)
+		}
+	}
+	if got := strings.Count(body, `target="_blank" rel="noopener noreferrer"`); got < len(links) {
+		t.Errorf("demo mode external links with safe target attributes = %d, want at least %d", got, len(links))
+	}
 }
 
 func TestIndex_StandardModeHidesDemoWarning(t *testing.T) {

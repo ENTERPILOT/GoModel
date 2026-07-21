@@ -165,6 +165,29 @@ test('formatCost uses data placeholder for missing values', () => {
     assert.equal(app.formatCost('0.25'), '$0.25');
 });
 
+test('formatTokensShort uses K, M, and B suffixes for large token counts', () => {
+    const app = loadDashboardApp();
+
+    assert.equal(app.formatTokensShort(999), '999');
+    assert.equal(app.formatTokensShort(1000), '1K');
+    assert.equal(app.formatTokensShort(1250), '1.3K');
+    assert.equal(app.formatTokensShort(999950), '1M');
+    assert.equal(app.formatTokensShort(56672513), '56.7M');
+    assert.equal(app.formatTokensShort(12072437), '12.1M');
+    assert.equal(app.formatTokensShort(999950000), '1B');
+    assert.equal(app.formatTokensShort(2500000000), '2.5B');
+    assert.equal(app.formatTokensShort(null), '-');
+    assert.equal(app.formatTokensShort('not-a-number'), '-');
+});
+
+test('tokenCountTitle exposes the exact localized count and token type', () => {
+    const app = loadDashboardApp();
+
+    assert.equal(app.tokenCountTitle('Input tokens', 56672513), 'Input tokens: ' + (56672513).toLocaleString());
+    assert.equal(app.tokenCountTitle('Output tokens', 12072437), 'Output tokens: ' + (12072437).toLocaleString());
+    assert.equal(app.tokenCountTitle('Total tokens', null), 'Total tokens: -');
+});
+
 test('system theme media changes rerender all dashboard charts', () => {
     let mediaChangeHandler = null;
     const app = loadDashboardApp({

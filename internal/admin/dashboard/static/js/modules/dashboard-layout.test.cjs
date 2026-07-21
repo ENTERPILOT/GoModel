@@ -94,6 +94,36 @@ test("sidebar and main content share the flex layout without manual content offs
   assert.match(sidebarLogoRule, /color:\s*var\(--accent\)/);
 });
 
+test("demo notice scrolls normally while page date ranges stay sticky", () => {
+  const layout = readFixture("../../../templates/layout.html");
+  const overview = readFixture("../../../templates/page-overview.html");
+  const usage = readFixture("../../../templates/page-usage.html");
+  const audit = readFixture("../../../templates/page-audit-logs.html");
+  const css = readFixture("../../css/dashboard.css");
+
+  assert.match(layout, /<aside class="demo-mode-banner"/);
+  const demoRule = readCSSRule(css, ".demo-mode-banner");
+  assert.doesNotMatch(demoRule, /position:\s*sticky/);
+  assert.doesNotMatch(demoRule, /top:\s*\d/);
+
+  for (const page of [overview, usage, audit]) {
+    assert.match(page, /<div class="page-with-sticky-date">/);
+    assert.match(page, /class="page-header date-range-page-header"/);
+    assert.match(
+      page,
+      /<div class="sticky-date-range">{{template "date-picker" \.}}<\/div>/,
+    );
+  }
+
+  const stickyRule = readCSSRule(
+    css,
+    ".page-with-sticky-date > .sticky-date-range",
+  );
+  assert.match(stickyRule, /position:\s*sticky/);
+  assert.match(stickyRule, /top:\s*16px/);
+  assert.match(stickyRule, /z-index:\s*8/);
+});
+
 test("sidebar theme controls and collapse handle stay keyboard accessible", () => {
   const template = readDashboardShellTemplate();
 
@@ -241,18 +271,18 @@ test("overview page shows provider status summary and per-provider cards keyed b
   assert.doesNotMatch(indexTemplate, /class="provider-status-strip"/);
   assert.match(
     indexTemplate,
-    /class="card provider-status-flag" x-show="providerStatus\.summary\.total > 0"/,
+    /class="card provider-status-flag provider-status-overview-card" x-show="providerStatus\.summary\.total > 0"/,
   );
   assert.match(
     indexTemplate,
-    /class="card card-wide"[\s\S]*<div class="card-label">Tokens<\/div>[\s\S]*class="cache-token-part" title="Input tokens"[\s\S]*summary\.total_input_tokens[\s\S]*class="cache-token-marker">i<\/span>[\s\S]*class="cache-token-part" title="Output tokens"[\s\S]*summary\.total_output_tokens[\s\S]*class="cache-token-marker">o<\/span>[\s\S]*summaryTotalTokens\(\)[\s\S]*<div class="card-label">Total Requests<\/div>/,
+    /class="card card-wide"[\s\S]*<div class="card-label">Tokens<\/div>[\s\S]*tokenCountTitle\('Input tokens',[\s\S]*formatTokensShort\(summary\.total_input_tokens\)[\s\S]*class="cache-token-marker">i<\/span>[\s\S]*tokenCountTitle\('Output tokens',[\s\S]*formatTokensShort\(summary\.total_output_tokens\)[\s\S]*class="cache-token-marker">o<\/span>[\s\S]*tokenCountTitle\('Total tokens',[\s\S]*<div class="card-label">Total Requests<\/div>/,
   );
   assert.doesNotMatch(indexTemplate, /<div class="card-label">Input Tokens<\/div>/);
   assert.doesNotMatch(indexTemplate, /<div class="card-label">Output Tokens<\/div>/);
   assert.doesNotMatch(indexTemplate, /<div class="card-label">Total Tokens<\/div>/);
   assert.match(
     indexTemplate,
-    /class="card card-wide" x-show="cacheAnalyticsEnabled\(\)"[\s\S]*<div class="card-label">Local Cache<\/div>[\s\S]*class="cache-token-part" title="Input tokens"[\s\S]*class="cache-token-marker">i<\/span>[\s\S]*class="cache-token-part" title="Output tokens"[\s\S]*class="cache-token-marker">o<\/span>[\s\S]*cacheOverviewTotalTokens\(\)[\s\S]*class="card provider-status-flag"[\s\S]*<!-- Usage Chart -->/,
+    /class="card card-wide" x-show="cacheAnalyticsEnabled\(\)"[\s\S]*<div class="card-label">Local Cache<\/div>[\s\S]*tokenCountTitle\('Input tokens',[\s\S]*formatTokensShort\(cacheOverview\.summary\.total_input_tokens\)[\s\S]*class="cache-token-marker">i<\/span>[\s\S]*tokenCountTitle\('Output tokens',[\s\S]*formatTokensShort\(cacheOverview\.summary\.total_output_tokens\)[\s\S]*class="cache-token-marker">o<\/span>[\s\S]*tokenCountTitle\('Total tokens',[\s\S]*class="card provider-status-flag provider-status-overview-card"[\s\S]*<!-- Usage Chart -->/,
   );
   assert.doesNotMatch(indexTemplate, /Local Cache Input Tokens/);
   assert.doesNotMatch(indexTemplate, /Local Cache Output Tokens/);
@@ -261,6 +291,7 @@ test("overview page shows provider status summary and per-provider cards keyed b
     /<div class="card-label">Provider Status<\/div>[\s\S]*class="card-value provider-status-value"[\s\S]*providerStatusRatioText\(\)/,
   );
   assert.match(css, /\.card-wide\s*\{\s*grid-column:\s*span 2;/);
+  assert.match(css, /\.provider-status-overview-card\s*\{\s*grid-column:\s*span 1;/);
   assert.match(
     indexTemplate,
     /class="provider-status-card-link"[\s\S]*x-show="providerStatusHasIssues\(\)"[\s\S]*@click="scrollToProviderStatusSection\(\)"/,
@@ -865,6 +896,10 @@ test("audit toolbar uses a full-width search row above the select row with a rig
   assert.match(
     indexTemplate,
     /copyId: 'audit-retention-help-copy'[\s\S]*If you want to change the retention period, set LOGGING_RETENTION_DAYS \(env var\) or logging\.retention_days \(config\.yaml\) and restart the gateway\. Default is 30 days; 0 keeps audit logs forever\.[\s\S]*<h2>Audit Logs<\/h2>[\s\S]*<div class="inline-help-title-row" x-show="auditRetentionText\(\)">[\s\S]*<p class="audit-retention-note"><span x-text="auditRetentionPrefix\(\)"><\/span><span class="audit-retention-highlight" x-text="auditRetentionHighlight\(\)"><\/span>\.<\/p>[\s\S]*{{template "inline-help-toggle" \.}}[\s\S]*<p :id="copyId" class="inline-help-copy" x-show="open" x-transition\.opacity\.duration\.200ms x-text="text"><\/p>/,
+  );
+  assert.match(
+    indexTemplate,
+    /class="alert alert-warning" x-show="!workflowAuditVisible\(\) && !authError" role="status">\s*Audit logging is off\. Live entries are temporary and disappear after refresh\. Set <code>LOGGING_ENABLED=true<\/code> to persist them\./,
   );
   const retentionRule = readCSSRule(css, ".audit-retention-note");
   assert.match(retentionRule, /color:\s*var\(--text-muted\)/);

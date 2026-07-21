@@ -1,7 +1,7 @@
 {{define "dashboard-page-overview"}}
 <!-- Overview Page -->
 <template x-if="page==='overview'">
-<div>
+<div class="page-with-sticky-date">
     <!-- Live Token Throughput -->
     <div class="chart-container live-tokens">
         <div class="chart-container-header">
@@ -53,12 +53,10 @@
         </div>
     </div>
 
-    <div class="page-header">
+    <div class="page-header date-range-page-header">
         <h2>Usage Overview</h2>
-        <div class="page-header-controls">
-            {{template "date-picker" .}}
-        </div>
     </div>
+    <div class="sticky-date-range">{{template "date-picker" .}}</div>
 
     <!-- Auth Error Banner -->
     {{template "auth-banner" .}}
@@ -68,15 +66,15 @@
         <div class="card card-wide">
             <div class="card-label">Tokens</div>
             <div class="card-value cache-token-value">
-                <span class="cache-token-part" title="Input tokens">
-                    <span x-text="formatNumber(summary.total_input_tokens)">-</span><span class="cache-token-marker">i</span>
+                <span class="cache-token-part" :title="tokenCountTitle('Input tokens', summary.total_input_tokens)">
+                    <span x-text="formatTokensShort(summary.total_input_tokens)">-</span><span class="cache-token-marker">i</span>
                 </span>
                 <span class="cache-token-operator">+</span>
-                <span class="cache-token-part" title="Output tokens">
-                    <span x-text="formatNumber(summary.total_output_tokens)">-</span><span class="cache-token-marker">o</span>
+                <span class="cache-token-part" :title="tokenCountTitle('Output tokens', summary.total_output_tokens)">
+                    <span x-text="formatTokensShort(summary.total_output_tokens)">-</span><span class="cache-token-marker">o</span>
                 </span>
                 <span class="cache-token-operator">=</span>
-                <span x-text="formatNumber(summaryTotalTokens())" title="Total tokens">-</span>
+                <span class="cache-token-part" x-text="formatTokensShort(summaryTotalTokens())" :title="tokenCountTitle('Total tokens', summaryTotalTokens())">-</span>
             </div>
         </div>
         <div class="card">
@@ -94,15 +92,15 @@
         <div class="card card-wide" x-show="cacheAnalyticsEnabled()">
             <div class="card-label">Local Cache</div>
             <div class="card-value cache-token-value">
-                <span class="cache-token-part" title="Input tokens">
-                    <span x-text="formatNumber(cacheOverview.summary.total_input_tokens)">-</span><span class="cache-token-marker">i</span>
+                <span class="cache-token-part" :title="tokenCountTitle('Input tokens', cacheOverview.summary.total_input_tokens)">
+                    <span x-text="formatTokensShort(cacheOverview.summary.total_input_tokens)">-</span><span class="cache-token-marker">i</span>
                 </span>
                 <span class="cache-token-operator">+</span>
-                <span class="cache-token-part" title="Output tokens">
-                    <span x-text="formatNumber(cacheOverview.summary.total_output_tokens)">-</span><span class="cache-token-marker">o</span>
+                <span class="cache-token-part" :title="tokenCountTitle('Output tokens', cacheOverview.summary.total_output_tokens)">
+                    <span x-text="formatTokensShort(cacheOverview.summary.total_output_tokens)">-</span><span class="cache-token-marker">o</span>
                 </span>
                 <span class="cache-token-operator">=</span>
-                <span x-text="formatNumber(cacheOverviewTotalTokens())" title="Total tokens">-</span>
+                <span class="cache-token-part" x-text="formatTokensShort(cacheOverviewTotalTokens())" :title="tokenCountTitle('Total tokens', cacheOverviewTotalTokens())">-</span>
             </div>
         </div>
         <div class="card prompt-cache-card" title="Share of input tokens served from the provider prompt cache, over the selected period">
@@ -112,7 +110,7 @@
                 <span class="prompt-cache-gauge-value" x-text="promptCacheRateText()">-</span>
             </div>
         </div>
-        <div class="card provider-status-flag" x-show="providerStatus.summary.total > 0" :class="providerStatusSummaryClass()">
+        <div class="card provider-status-flag provider-status-overview-card" x-show="providerStatus.summary.total > 0" :class="providerStatusSummaryClass()">
             <div class="card-label">Provider Status</div>
             <div class="card-value provider-status-value" x-text="providerStatusRatioText()">-</div>
             <button type="button"

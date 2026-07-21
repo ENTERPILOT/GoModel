@@ -301,6 +301,7 @@ func (r *ModelRegistry) applyFetchedInventory(
 	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
 
 	r.mu.Lock()
+	r.dropUnregisteredFetchedProvidersLocked(&fetched)
 	stale := make(map[string]bool, len(fetched.runtimeUpdates))
 	carriedForward := 0
 	for name := range fetched.runtimeUpdates {
@@ -340,6 +341,22 @@ func (r *ModelRegistry) applyFetchedInventory(
 	}
 	attrs = append(attrs, metadataStats.slogAttrs()...)
 	slog.Info("model registry initialized", attrs...)
+}
+
+// dropUnregisteredFetchedProvidersLocked prevents an inventory sweep that
+// started before a provider was removed from publishing that provider's stale
+// result afterward. Caller must hold r.mu for writing.
+func (r *ModelRegistry) dropUnregisteredFetchedProvidersLocked(fetched *fetchedInventory) {
+	for name := range fetched.modelsByProvider {
+		if !r.providerRuntime[name].registered {
+			delete(fetched.modelsByProvider, name)
+		}
+	}
+	for name := range fetched.runtimeUpdates {
+		if !r.providerRuntime[name].registered {
+			delete(fetched.runtimeUpdates, name)
+		}
+	}
 }
 
 func (r *ModelRegistry) enrichFetchedProviderModelMaps(

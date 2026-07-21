@@ -193,6 +193,7 @@ func (r *ModelRegistry) applyFetchedProviderInventory(providerTypes map[core.Pro
 	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
 
 	r.mu.Lock()
+	r.dropUnregisteredFetchedProvidersLocked(&fetched)
 	for providerName, providerModels := range fetched.modelsByProvider {
 		r.modelsByProvider[providerName] = providerModels
 		// A refresh that produced inventory is authoritative again.
