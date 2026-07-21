@@ -34,7 +34,7 @@
         <div class="table-toolbar-main">
             <div class="filter-input-wrap">
                 <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
-                <input type="text" placeholder="Filter by provider, provider/model, alias, or owner..." aria-label="Filter models by provider, provider/model, alias, or owner" x-model="modelFilter" class="filter-input">
+                <input type="text" placeholder="Filter by provider, provider/model, alias, or owner..." aria-label="Filter models by provider, provider/model, alias, or owner" x-model="modelFilter" @input.debounce.150ms="restartModelRendering()" class="filter-input">
             </div>
         </div>
         <div class="table-toolbar-actions">
@@ -45,9 +45,9 @@
         </div>
     </div>
 
-    <div class="loading-state" x-show="modelsLoading && !authError" role="status" aria-live="polite">
+    <div class="loading-state models-loading-state" x-show="modelsBusy() && !authError" role="status" aria-live="polite">
         <span class="loading-spinner" aria-hidden="true"></span>
-        <span x-text="displayModels.length > 0 ? 'Refreshing models...' : 'Loading models...'"></span>
+        <span x-text="modelLoadingText()">Loading models...</span>
     </div>
 
     <div class="editor-modal-backdrop"

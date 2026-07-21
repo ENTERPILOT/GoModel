@@ -2105,6 +2105,20 @@ td.col-price {
   animation: loading-spin 0.8s linear infinite;
 }
 
+.models-loading-state {
+  position: sticky;
+  top: 16px;
+  z-index: 7;
+  width: fit-content;
+  min-height: 0;
+  margin: 0 auto 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
 @keyframes loading-spin {
   to {
     transform: rotate(360deg);

@@ -140,7 +140,9 @@ function dashboard() {
       providers: [],
     },
     models: [],
-    modelsLoading: false,
+    // Start busy so a direct visit to the Models route can paint its loader
+    // before init() starts the first inventory request.
+    modelsLoading: true,
     categories: [],
     activeCategory: "all",
     hasCalendarModule: calendarModuleFactory !== null,
@@ -245,6 +247,16 @@ function dashboard() {
     },
 
     _applyRoute(page, sub) {
+      // Prepare the first bounded Models-page batch before Alpine mounts the
+      // page template. Otherwise navigating from another dashboard page would
+      // synchronously create every model row before a loader can paint.
+      if (
+        page === "models" &&
+        this.page !== "models" &&
+        typeof this.restartModelRendering === "function"
+      ) {
+        this.restartModelRendering();
+      }
       this.page = page;
 
       // Live token throughput is overview-only; tear it down when navigating

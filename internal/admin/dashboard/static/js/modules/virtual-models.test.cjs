@@ -72,6 +72,92 @@ test('filteredDisplayModels returns stable rows when filter is empty', () => {
     assert.equal(first[0].key, 'model:openai/davinci-002');
 });
 
+test('buildDisplayModels indexes concrete selectors once for alias matching', () => {
+    const module = createAliasesModule();
+    module.models = Array.from({ length: 400 }, (_, index) => ({
+        provider_name: `provider-${index % 4}`,
+        provider_type: 'test',
+        selector: `provider-${index % 4}/model-${index}`,
+        model: {
+            id: `model-${index}`,
+            object: 'model',
+            owned_by: 'test'
+        }
+    }));
+    module.aliases = Array.from({ length: 80 }, (_, index) => ({
+        name: `alias-${index}`,
+        target_model: `provider-0/model-${index * 4}`,
+        enabled: true,
+        valid: true
+    }));
+    module.activeCategory = 'all';
+
+    const modelKeys = module.modelKeys.bind(module);
+    let modelKeyCalls = 0;
+    module.modelKeys = (model) => {
+        modelKeyCalls += 1;
+        return modelKeys(model);
+    };
+
+    const rows = module.buildDisplayModels();
+
+    assert.equal(rows.length, 480);
+    assert.equal(modelKeyCalls, module.models.length);
+});
+
+test('Models page renders large inventories in paint-separated batches', () => {
+    const frames = [];
+    const timers = [];
+    const module = createAliasesModule({
+        window: {
+            requestAnimationFrame(callback) {
+                frames.push(callback);
+            },
+            setTimeout(callback) {
+                timers.push(callback);
+            }
+        }
+    });
+    module.page = 'models';
+    module.modelsLoading = false;
+    module.modelRenderBatchSize = 50;
+    module.modelFilter = '';
+    module.activeCategory = 'all';
+    module.models = Array.from({ length: 130 }, (_, index) => ({
+        provider_name: `provider-${index % 3}`,
+        provider_type: 'test',
+        selector: `provider-${index % 3}/model-${index}`,
+        model: {
+            id: `model-${index}`,
+            object: 'model',
+            owned_by: 'test'
+        }
+    }));
+
+    module.syncDisplayModels();
+
+    assert.equal(module.modelRenderLimit, 50);
+    assert.equal(module.modelsRendering, true);
+    assert.equal(module.modelsBusy(), true);
+    assert.equal(
+        module.filteredDisplayModelGroups.reduce((count, group) => count + group.rows.length, 0),
+        50
+    );
+    assert.equal(module.modelLoadingText(), 'Rendering models... 50 / 130');
+
+    frames.shift()();
+    timers.shift()();
+    assert.equal(module.modelRenderLimit, 100);
+    assert.equal(module.modelsRendering, true);
+
+    frames.shift()();
+    timers.shift()();
+    assert.equal(module.modelRenderLimit, 130);
+    assert.equal(module.modelsRendering, false);
+    assert.equal(module.modelsBusy(), false);
+    assert.strictEqual(module.filteredDisplayModelGroups, module.displayModelGroups);
+});
+
 test('qualifiedModelName prefers selector when available', () => {
     const module = createAliasesModule();
     const model = {

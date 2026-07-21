@@ -1165,11 +1165,11 @@ test("model category tables lazy mount only the active table body", () => {
   );
   assert.match(
     modelsBlock,
-    /class="loading-state" x-show="modelsLoading && !authError" role="status" aria-live="polite"/,
+    /class="loading-state models-loading-state" x-show="modelsBusy\(\) && !authError" role="status" aria-live="polite"/,
   );
   assert.match(
     modelsBlock,
-    /x-text="displayModels\.length > 0 \? 'Refreshing models\.\.\.' : 'Loading models\.\.\.'"/,
+    /class="loading-spinner"[\s\S]*x-text="modelLoadingText\(\)"/,
   );
   assert.match(
     modelsBlock,
@@ -1177,8 +1177,11 @@ test("model category tables lazy mount only the active table body", () => {
   );
   assert.match(
     modelsBlock,
-    /placeholder="Filter by provider, provider\/model, alias, or owner\.\.\." aria-label="Filter models by provider, provider\/model, alias, or owner" x-model="modelFilter" class="filter-input"/,
+    /placeholder="Filter by provider, provider\/model, alias, or owner\.\.\." aria-label="Filter models by provider, provider\/model, alias, or owner" x-model="modelFilter" @input\.debounce\.150ms="restartModelRendering\(\)" class="filter-input"/,
   );
+  const modelLoadingRule = readCSSRule(css, ".models-loading-state");
+  assert.match(modelLoadingRule, /position:\s*sticky/);
+  assert.match(modelLoadingRule, /top:\s*16px/);
   assert.match(
     modelsBlock,
     /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn"[\s\S]*aria-label="New virtual model alias"[\s\S]*title="Alias"[\s\S]*@click="openVirtualModelCreate\(\)"[\s\S]*data-lucide="plus" class="alias-create-icon"[\s\S]*<span>New(?:&nbsp;| )virtual(?:&nbsp;| )model<\/span>/,

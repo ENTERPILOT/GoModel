@@ -67,6 +67,20 @@ function loadDashboardApp(overrides = {}) {
     return context.dashboard();
 }
 
+test('Models route starts bounded rendering before Alpine mounts the page', () => {
+    const app = loadDashboardApp();
+    const pagesSeen = [];
+    app.page = 'overview';
+    app.restartModelRendering = function() {
+        pagesSeen.push(this.page);
+    };
+
+    app._applyRoute('models', null);
+
+    assert.deepEqual(pagesSeen, ['overview']);
+    assert.equal(app.page, 'models');
+});
+
 test('qualifiedModelDisplay keeps provider identity for nested provider model IDs', () => {
     const app = loadDashboardApp();
 
