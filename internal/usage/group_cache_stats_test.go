@@ -150,6 +150,87 @@ func TestSQLiteGroupCacheStatsFollowFilters(t *testing.T) {
 	}
 }
 
+func TestSQLiteLocalOnlyGroupsMaterializeRows(t *testing.T) {
+	db, ctx := seedGroupCacheStatsFixture(t)
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+	// A model served exclusively from the local cache in the period: the
+	// uncached aggregate pass never produces a row for it.
+	err = store.WriteBatch(ctx, []*UsageEntry{{
+		ID: "usage-local-only", RequestID: "req-4", ProviderID: "p-1",
+		Timestamp: time.Date(2026, 4, 7, 11, 0, 0, 0, time.UTC),
+		Model:     "cache-only-model", Provider: "openai", Endpoint: "/v1/chat/completions",
+		UserPath: "/team/cached", Labels: []string{"cache-only"}, CacheType: CacheTypeSemantic,
+		InputTokens: 50, OutputTokens: 5,
+	}})
+	if err != nil {
+		t.Fatalf("failed to seed local-only entry: %v", err)
+	}
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create sqlite reader: %v", err)
+	}
+
+	models, err := reader.GetUsageByModel(ctx, UsageQueryParams{})
+	if err != nil {
+		t.Fatalf("GetUsageByModel returned error: %v", err)
+	}
+	var localOnly *ModelUsage
+	for i := range models {
+		if models[i].Model == "cache-only-model" {
+			localOnly = &models[i]
+		}
+	}
+	if localOnly == nil {
+		t.Fatalf("expected a synthetic row for the local-only model, got %#v", models)
+	}
+	if localOnly.InputTokens != 0 || localOnly.OutputTokens != 0 {
+		t.Fatalf("synthetic row must carry no provider tokens: %+v", localOnly)
+	}
+	if localOnly.LocalCachedInputTokens != 50 || localOnly.LocalCachedOutputTokens != 5 {
+		t.Fatalf("unexpected local tokens on synthetic row: %+v", localOnly.GroupCacheFields)
+	}
+	if localOnly.ProviderName != "openai" {
+		t.Fatalf("expected grouped provider name, got %q", localOnly.ProviderName)
+	}
+
+	labels, err := reader.GetUsageByLabel(ctx, UsageQueryParams{})
+	if err != nil {
+		t.Fatalf("GetUsageByLabel returned error: %v", err)
+	}
+	for _, l := range labels {
+		if l.Label == "cache-only" {
+			if l.Requests != 1 || l.LocalCachedInputTokens != 50 {
+				t.Fatalf("unexpected synthetic label row: %+v", l)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected a synthetic cache-only label row, got %#v", labels)
+}
+
+func TestSQLiteCacheStatsSkippedOutsideUncachedMode(t *testing.T) {
+	db, ctx := seedGroupCacheStatsFixture(t)
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create sqlite reader: %v", err)
+	}
+
+	for _, mode := range []string{CacheModeAll, CacheModeCached} {
+		got, err := reader.GetUsageByModel(ctx, UsageQueryParams{CacheMode: mode})
+		if err != nil {
+			t.Fatalf("GetUsageByModel(%s) returned error: %v", mode, err)
+		}
+		for _, row := range got {
+			if row.CachedInputTokens != 0 || row.LocalCachedInputTokens != 0 || row.LocalCachedOutputTokens != 0 {
+				t.Fatalf("cache fields must stay zero in %s mode (local tokens are already inside the sums): %+v", mode, row.GroupCacheFields)
+			}
+		}
+	}
+}
+
 type mapPricingResolver map[string]*core.ModelPricing
 
 func (r mapPricingResolver) ResolvePricing(model, providerType string) *core.ModelPricing {
@@ -161,30 +242,52 @@ func TestEstimateCachedInputCost(t *testing.T) {
 	resolver := mapPricingResolver{
 		"gpt-5/openai": {CachedInputPerMtok: &rate},
 	}
+	want := func(v float64) *float64 { return &v }
 
-	cost := EstimateCachedInputCost(map[CachedPricingKey]int64{
-		{Model: "gpt-5", Provider: "openai"}:    2_000_000,
-		{Model: "unpriced", Provider: "openai"}: 1_000_000,
-	}, resolver)
-	if cost == nil {
-		t.Fatalf("expected an estimated cost, got nil")
-	}
-	if *cost != 1.0 {
-		t.Fatalf("expected $1.00 estimate, got %v", *cost)
+	tests := []struct {
+		name      string
+		byPricing map[CachedPricingKey]int64
+		resolver  PricingResolver
+		want      *float64
+	}{
+		{
+			name: "prices known models and skips unpriced ones",
+			byPricing: map[CachedPricingKey]int64{
+				{Model: "gpt-5", Provider: "openai"}:    2_000_000,
+				{Model: "unpriced", Provider: "openai"}: 1_000_000,
+			},
+			resolver: resolver,
+			want:     want(1.0),
+		},
+		{
+			name:     "nil for empty breakdown",
+			resolver: resolver,
+		},
+		{
+			name: "nil when nothing is priced",
+			byPricing: map[CachedPricingKey]int64{
+				{Model: "unpriced", Provider: "openai"}: 100,
+			},
+			resolver: resolver,
+		},
+		{
+			name: "nil without a resolver",
+			byPricing: map[CachedPricingKey]int64{
+				{Model: "gpt-5", Provider: "openai"}: 100,
+			},
+		},
 	}
 
-	if got := EstimateCachedInputCost(nil, resolver); got != nil {
-		t.Fatalf("expected nil for empty breakdown, got %v", *got)
-	}
-	if got := EstimateCachedInputCost(map[CachedPricingKey]int64{
-		{Model: "unpriced", Provider: "openai"}: 100,
-	}, resolver); got != nil {
-		t.Fatalf("expected nil when nothing is priced, got %v", *got)
-	}
-	if got := EstimateCachedInputCost(map[CachedPricingKey]int64{
-		{Model: "gpt-5", Provider: "openai"}: 100,
-	}, nil); got != nil {
-		t.Fatalf("expected nil without a resolver, got %v", *got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := EstimateCachedInputCost(tt.byPricing, tt.resolver)
+			if (got == nil) != (tt.want == nil) {
+				t.Fatalf("EstimateCachedInputCost = %v, want %v", got, tt.want)
+			}
+			if got != nil && *got != *tt.want {
+				t.Fatalf("EstimateCachedInputCost = %v, want %v", *got, *tt.want)
+			}
+		})
 	}
 }
 

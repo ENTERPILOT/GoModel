@@ -106,16 +106,23 @@ func (r *SQLiteReader) GetUsageByModel(ctx context.Context, params UsageQueryPar
 	if err != nil {
 		return nil, err
 	}
-	applyModelCacheStats(result, stats)
+	result = applyModelCacheStats(result, stats)
 
 	return result, nil
 }
 
 // usageCacheStats runs the second streaming pass behind the chart aggregates
-// and folds cache figures per group. It always streams with cache mode "all"
-// so local-cache rows are counted even though the aggregates themselves
-// default to uncached-only.
+// and folds cache figures per group. For uncached-mode requests (the
+// default) it streams with cache mode "all" so local-cache rows are counted
+// even though the aggregates exclude them.
 func (r *SQLiteReader) usageCacheStats(ctx context.Context, params UsageQueryParams, userPathExpr string, extraConditions []string, keysFor groupKeysFunc) (map[string]*GroupCacheStats, error) {
+	// The cache fields describe uncached-mode aggregates: for cached/all
+	// modes the local tokens are already inside the aggregate sums (and the
+	// provider split would not partition them), so the pass is skipped and
+	// the fields stay zero.
+	if normalizeCacheMode(params.CacheMode) != CacheModeUncached {
+		return nil, nil
+	}
 	params.CacheMode = CacheModeAll
 	conditions, args, err := sqliteUsageConditionsWithUserPathExpr(params, userPathExpr)
 	if err != nil {
@@ -170,7 +177,7 @@ func (r *SQLiteReader) GetUsageByUserPath(ctx context.Context, params UsageQuery
 	if err != nil {
 		return nil, err
 	}
-	applyUserPathCacheStats(result, stats)
+	result = applyUserPathCacheStats(result, stats)
 
 	return result, nil
 }
@@ -213,7 +220,7 @@ func (r *SQLiteReader) GetUsageByLabel(ctx context.Context, params UsageQueryPar
 	if err != nil {
 		return nil, err
 	}
-	applyLabelCacheStats(result, stats)
+	result = applyLabelCacheStats(result, stats)
 
 	return result, nil
 }

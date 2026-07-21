@@ -437,13 +437,20 @@
                 const sorted = this._usageRowsBySelectedValue(items);
                 const costs = this.usageMode === 'costs';
                 const num = (v) => Number(v) || 0;
+                // The cached cost is an estimate at current prices while
+                // input_cost is the recorded charge, so cap the cached
+                // segment at the recorded input cost — the two segments then
+                // always sum to it and the bar never exceeds recorded totals.
+                const promptOf = (row) => {
+                    if (!costs) return num(row.cached_input_tokens);
+                    return Math.min(num(row.cached_input_cost), num(row.input_cost));
+                };
                 const inputOf = (row) => {
-                    if (costs) return Math.max(0, num(row.input_cost) - num(row.cached_input_cost));
+                    if (costs) return num(row.input_cost) - promptOf(row);
                     const split = num(row.uncached_input_tokens) + num(row.cached_input_tokens) + num(row.cache_write_input_tokens);
                     return split > 0 ? num(row.uncached_input_tokens) + num(row.cache_write_input_tokens) : num(row.input_tokens);
                 };
                 const outputOf = (row) => num(costs ? row.output_cost : row.output_tokens);
-                const promptOf = (row) => num(costs ? row.cached_input_cost : row.cached_input_tokens);
                 const localInputOf = (row) => costs ? 0 : num(row.local_cached_input_tokens);
                 const localOutputOf = (row) => costs ? 0 : num(row.local_cached_output_tokens);
 

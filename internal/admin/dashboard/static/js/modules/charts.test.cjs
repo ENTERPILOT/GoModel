@@ -269,6 +269,29 @@ test('renderBarChart costs mode splits estimated cached cost out of input cost',
     assert.ok(!chart.data.datasets.some((d) => d.label.startsWith('Locally Cached')));
 });
 
+test('renderBarChart caps the estimated cached cost at the recorded input cost', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'costs';
+    // Estimated cached cost (current prices) exceeds the recorded charge.
+    module.modelUsage = [
+        {
+            model: 'gpt-5', input_tokens: 100, output_tokens: 20,
+            cached_input_tokens: 60,
+            input_cost: 0.125, output_cost: 0.25, total_cost: 0.375, cached_input_cost: 0.5
+        }
+    ];
+
+    module.renderBarChart();
+
+    const chart = module.usageBarChart;
+    // Segments always sum to the recorded input cost.
+    assert.equal(JSON.stringify(chart.data.datasets[0].data), JSON.stringify([-0]));
+    assert.equal(chart.data.datasets[2].label, 'Prompt Cached Cost');
+    assert.equal(JSON.stringify(chart.data.datasets[2].data), JSON.stringify([-0.125]));
+});
+
 test('renderBarChart folds models past the top 10 into a combined Other row', () => {
     FakeChart.instances = [];
     const { module } = createChartsContext();

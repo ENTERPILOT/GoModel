@@ -10,14 +10,28 @@ import (
 
 // GroupCacheStats aggregates the cache figures for one chart group (a model,
 // user path, or label) during the second streaming pass the aggregate SQL
-// cannot produce (it needs per-row raw_data).
+// cannot produce (it needs per-row raw_data). The identity fields capture the
+// group's coordinates from the first folded row so groups served entirely
+// from the local cache — which the uncached aggregate pass never surfaces —
+// can still materialize a row.
 type GroupCacheStats struct {
+	Model        string
+	Provider     string
+	ProviderName string
+	UserPath     string
+
 	UncachedInputTokens     int64
 	CachedInputTokens       int64
 	CacheWriteInputTokens   int64
 	LocalCachedInputTokens  int64
 	LocalCachedOutputTokens int64
+	LocalRequests           int
 	CachedTokensByPricing   map[CachedPricingKey]int64
+}
+
+// hasLocalTokens reports whether the group saw any local-cache traffic.
+func (s *GroupCacheStats) hasLocalTokens() bool {
+	return s.LocalCachedInputTokens > 0 || s.LocalCachedOutputTokens > 0
 }
 
 // usageCacheStatRow is one streamed usage row for the group cache fold. The
@@ -89,12 +103,22 @@ func accumulateGroupCacheStats(out map[string]*GroupCacheStats, keysFor groupKey
 	for _, key := range keys {
 		stats := out[key]
 		if stats == nil {
-			stats = &GroupCacheStats{}
+			name := strings.TrimSpace(row.ProviderName)
+			if name == "" {
+				name = row.Provider
+			}
+			stats = &GroupCacheStats{
+				Model:        row.Model,
+				Provider:     row.Provider,
+				ProviderName: name,
+				UserPath:     usageUserPathGroupKey(row.UserPath),
+			}
 			out[key] = stats
 		}
 		if local {
 			stats.LocalCachedInputTokens += int64(row.InputTokens)
 			stats.LocalCachedOutputTokens += int64(row.OutputTokens)
+			stats.LocalRequests++
 			continue
 		}
 		stats.UncachedInputTokens += uncached
@@ -169,25 +193,66 @@ func (f *GroupCacheFields) assign(stats *GroupCacheStats) {
 	f.CachedTokensByPricing = stats.CachedTokensByPricing
 }
 
-// applyModelCacheStats merges the fold onto matching by-model rows.
-func applyModelCacheStats(rows []ModelUsage, stats map[string]*GroupCacheStats) {
+// applyModelCacheStats merges the fold onto matching by-model rows and
+// materializes rows for local-only groups the uncached aggregates never
+// produced (their cost fields stay nil and provider token counts zero).
+func applyModelCacheStats(rows []ModelUsage, stats map[string]*GroupCacheStats) []ModelUsage {
+	seen := map[string]bool{}
 	for i := range rows {
-		rows[i].assign(stats[usageModelGroupKey(rows[i].Model, rows[i].Provider, rows[i].ProviderName)])
+		key := usageModelGroupKey(rows[i].Model, rows[i].Provider, rows[i].ProviderName)
+		seen[key] = true
+		rows[i].assign(stats[key])
 	}
+	for key, s := range stats {
+		if seen[key] || !s.hasLocalTokens() {
+			continue
+		}
+		row := ModelUsage{Model: s.Model, Provider: s.Provider, ProviderName: s.ProviderName}
+		row.assign(s)
+		rows = append(rows, row)
+	}
+	return rows
 }
 
-// applyUserPathCacheStats merges the fold onto matching by-user-path rows.
-func applyUserPathCacheStats(rows []UserPathUsage, stats map[string]*GroupCacheStats) {
+// applyUserPathCacheStats merges the fold onto matching by-user-path rows,
+// materializing local-only groups like applyModelCacheStats.
+func applyUserPathCacheStats(rows []UserPathUsage, stats map[string]*GroupCacheStats) []UserPathUsage {
+	seen := map[string]bool{}
 	for i := range rows {
-		rows[i].assign(stats[usageUserPathGroupKey(rows[i].UserPath)])
+		key := usageUserPathGroupKey(rows[i].UserPath)
+		seen[key] = true
+		rows[i].assign(stats[key])
 	}
+	for key, s := range stats {
+		if seen[key] || !s.hasLocalTokens() {
+			continue
+		}
+		row := UserPathUsage{UserPath: s.UserPath}
+		row.assign(s)
+		rows = append(rows, row)
+	}
+	return rows
 }
 
-// applyLabelCacheStats merges the fold onto matching by-label rows.
-func applyLabelCacheStats(rows []LabelUsage, stats map[string]*GroupCacheStats) {
+// applyLabelCacheStats merges the fold onto matching by-label rows,
+// materializing local-only groups like applyModelCacheStats. Synthetic rows
+// count their local-cache requests so a label row never shows tokens with
+// zero requests.
+func applyLabelCacheStats(rows []LabelUsage, stats map[string]*GroupCacheStats) []LabelUsage {
+	seen := map[string]bool{}
 	for i := range rows {
+		seen[rows[i].Label] = true
 		rows[i].assign(stats[rows[i].Label])
 	}
+	for key, s := range stats {
+		if seen[key] || !s.hasLocalTokens() {
+			continue
+		}
+		row := LabelUsage{Label: key, Requests: s.LocalRequests}
+		row.assign(s)
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 // EstimateCachedInputCost prices a group's prompt-cached input tokens with
