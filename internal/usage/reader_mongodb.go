@@ -278,7 +278,129 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 		return nil, fmt.Errorf("error iterating usage by model cursor: %w", err)
 	}
 
+	stats, err := r.usageCacheStats(ctx, params, false, modelGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	result = applyModelCacheStats(result, stats)
+
 	return result, nil
+}
+
+// usageCacheStats runs the second streaming pass behind the chart aggregates
+// and folds cache figures per group. For uncached-mode requests (the
+// default) it streams with cache mode "all" so local-cache rows are counted
+// even though the aggregates exclude them.
+func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryParams, canonicalUserPath bool, keysFor groupKeysFunc) (map[string]*GroupCacheStats, error) {
+	// The cache fields describe uncached-mode aggregates: for cached/all
+	// modes the local tokens are already inside the aggregate sums (and the
+	// provider split would not partition them), so the pass is skipped and
+	// the fields stay zero.
+	if normalizeCacheMode(params.CacheMode) != CacheModeUncached {
+		return nil, nil
+	}
+	pipeline, err := mongoUsageCacheStatsPipeline(params, canonicalUserPath)
+	if err != nil {
+		return nil, err
+	}
+
+	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate usage cache stats: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	out := map[string]*GroupCacheStats{}
+	for cursor.Next(ctx) {
+		var row struct {
+			Model        string         `bson:"model"`
+			Provider     string         `bson:"provider"`
+			ProviderName string         `bson:"provider_name"`
+			UserPath     string         `bson:"user_path"`
+			Labels       []string       `bson:"labels"`
+			CacheType    string         `bson:"cache_type"`
+			InputTokens  int            `bson:"input_tokens"`
+			OutputTokens int            `bson:"output_tokens"`
+			RawData      map[string]any `bson:"raw_data"`
+		}
+		if err := cursor.Decode(&row); err != nil {
+			return nil, fmt.Errorf("failed to decode usage cache stat row: %w", err)
+		}
+		accumulateGroupCacheStats(out, keysFor, usageCacheStatRow(row))
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage cache stat cursor: %w", err)
+	}
+	return out, nil
+}
+
+// mongoCanonicalUserPathField is the synthetic field holding the canonical
+// (trimmed, root-normalized) user path the user-path aggregate groups by.
+const mongoCanonicalUserPathField = "_gomodel_user_path"
+
+// mongoCanonicalUserPathAddFieldsStage materializes the canonical user path
+// mongoCanonicalUserPathAddFieldsStage creates a MongoDB aggregation stage that adds the canonical user path to each document.
+func mongoCanonicalUserPathAddFieldsStage() bson.D {
+	return bson.D{{Key: "$addFields", Value: bson.D{
+		{Key: mongoCanonicalUserPathField, Value: mongoUsageGroupedUserPathExpr()},
+	}}}
+}
+
+// mongoCanonicalUserPathMatchStage narrows to the subtree of userPath,
+// mongoCanonicalUserPathMatchStage builds a MongoDB match stage for a user-path subtree on the canonical user-path field.
+func mongoCanonicalUserPathMatchStage(userPath string) bson.D {
+	return bson.D{{Key: "$match", Value: bson.D{{Key: mongoCanonicalUserPathField, Value: bson.D{
+		{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
+	}}}}}
+}
+
+// mongoUsageCacheStatsPipeline builds the fold's aggregation pipeline. The
+// fold must select the same row set as the aggregate it decorates:
+// GetUsageByUserPath filters against the canonical path expression it groups
+// by, so with canonicalUserPath the user-path filter moves onto the
+// materialized canonical field; the model/label aggregates filter the raw
+// field, and so do their folds. Cache mode is always widened to "all" so
+// mongoUsageCacheStatsPipeline builds a MongoDB aggregation pipeline for cache statistics,
+// including local-cache rows and optionally filtering by canonical user path. It returns an
+// error if the usage filters or user path cannot be normalized.
+func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath bool) (bson.A, error) {
+	params.CacheMode = CacheModeAll
+	matchParams := params
+	if canonicalUserPath {
+		matchParams.UserPath = ""
+	}
+	matchFilters, err := mongoUsageMatchFilters(matchParams)
+	if err != nil {
+		return nil, err
+	}
+	pipeline := bson.A{}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	if canonicalUserPath {
+		userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+		if err != nil {
+			return nil, err
+		}
+		if userPath != "" {
+			pipeline = append(pipeline,
+				mongoCanonicalUserPathAddFieldsStage(),
+				mongoCanonicalUserPathMatchStage(userPath),
+			)
+		}
+	}
+	pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{
+		{Key: "model", Value: 1},
+		{Key: "provider", Value: 1},
+		{Key: "provider_name", Value: 1},
+		{Key: "user_path", Value: 1},
+		{Key: "labels", Value: 1},
+		{Key: "cache_type", Value: 1},
+		{Key: "input_tokens", Value: 1},
+		{Key: "output_tokens", Value: 1},
+		{Key: "raw_data", Value: 1},
+	}}})
+	return pipeline, nil
 }
 
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
@@ -294,23 +416,18 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
 
-	const canonicalUserPathField = "_gomodel_user_path"
-	pipeline = append(pipeline, bson.D{{Key: "$addFields", Value: bson.D{
-		{Key: canonicalUserPathField, Value: mongoUsageGroupedUserPathExpr()},
-	}}})
+	pipeline = append(pipeline, mongoCanonicalUserPathAddFieldsStage())
 
 	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
 	if err != nil {
 		return nil, err
 	}
 	if userPath != "" {
-		pipeline = append(pipeline, bson.D{{Key: "$match", Value: bson.D{{Key: canonicalUserPathField, Value: bson.D{
-			{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
-		}}}}})
+		pipeline = append(pipeline, mongoCanonicalUserPathMatchStage(userPath))
 	}
 
 	pipeline = append(pipeline, bson.D{{Key: "$group", Value: bson.D{
-		{Key: "_id", Value: "$" + canonicalUserPathField},
+		{Key: "_id", Value: "$" + mongoCanonicalUserPathField},
 		{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
 		{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
 		{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},
@@ -363,6 +480,12 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating usage by user path cursor: %w", err)
 	}
+
+	stats, err := r.usageCacheStats(ctx, params, true, userPathGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	result = applyUserPathCacheStats(result, stats)
 
 	return result, nil
 }
@@ -439,7 +562,7 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 	}
 	defer cursor.Close(ctx)
 
-	return decodeGroupedUsageRows(ctx, cursor, "usage by label", func(row mongoGroupedUsageRow) LabelUsage {
+	result, err := decodeGroupedUsageRows(ctx, cursor, "usage by label", func(row mongoGroupedUsageRow) LabelUsage {
 		return LabelUsage{
 			Label:        row.Key,
 			Requests:     row.Requests,
@@ -451,8 +574,20 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
 		}
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	stats, err := r.usageCacheStats(ctx, params, false, labelGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	result = applyLabelCacheStats(result, stats)
+
+	return result, nil
 }
 
+// mongoUsageGroupedProviderNameExpr builds the MongoDB expression used to derive a grouped provider name, preferring a trimmed provider name and falling back to the trimmed provider value.
 func mongoUsageGroupedProviderNameExpr() bson.D {
 	trimmedProviderName := bson.D{{Key: "$trim", Value: bson.D{
 		{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$provider_name", ""}}}},

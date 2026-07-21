@@ -4,14 +4,16 @@
 <div class="page-with-sticky-date">
     <div class="page-header date-range-page-header">
         <h2>Usage Analytics</h2>
-        <div class="page-header-controls">
-            <div class="usage-mode-toggle">
-                <button type="button" class="usage-mode-btn" :class="{active: usageMode==='tokens'}" @click="toggleUsageMode('tokens')">Tokens</button>
-                <button type="button" class="usage-mode-btn" :class="{active: usageMode==='costs'}" @click="toggleUsageMode('costs')">Costs</button>
-            </div>
-        </div>
     </div>
-    <div class="sticky-date-range">{{template "date-picker" .}}</div>
+    <!-- The mode toggle lives in the sticky bar so it stays reachable while
+         scrolling, like the date range it changes the meaning of. -->
+    <div class="sticky-date-range usage-sticky-controls">
+        <div class="usage-mode-toggle" role="group" aria-label="Usage mode">
+            <button type="button" class="usage-mode-btn" :class="{active: usageMode==='tokens'}" @click="toggleUsageMode('tokens')">Tokens</button>
+            <button type="button" class="usage-mode-btn" :class="{active: usageMode==='costs'}" @click="toggleUsageMode('costs')">Costs</button>
+        </div>
+        {{template "date-picker" .}}
+    </div>
 
     <!-- Auth Error Banner -->
     {{template "auth-banner" .}}
@@ -72,20 +74,26 @@
         </div>
     </div>
 
+    <!-- Usage charts: two per row, a chart alone in its row stretches to full width -->
+    <div class="usage-charts-grid">
+
     <!-- Usage by Model Chart -->
     <div class="model-chart-section" x-show="modelUsage.length > 0">
         <div class="model-chart-header">
             <h3 x-text="usageMode === 'tokens' ? 'Token Usage by Model' : 'Cost by Model'"></h3>
             <div class="chart-view-toggle" role="group" aria-label="Model usage view">
                 <button type="button" class="chart-view-btn" :class="{active: modelUsageView === 'chart'}" :aria-pressed="modelUsageView === 'chart' ? 'true' : 'false'" aria-label="Show model usage chart" title="Chart" @click="toggleUsageChartView('model', 'chart')">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-8"/></svg>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M12 8h7M12 12H7M12 16h4"/></svg>
+                </button>
+                <button type="button" class="chart-view-btn" :class="{active: modelUsageView === 'stacked'}" :aria-pressed="modelUsageView === 'stacked' ? 'true' : 'false'" aria-label="Show model usage stacked chart" title="Stacked" @click="toggleUsageChartView('model', 'stacked')">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M5 8h6m2 0h4M5 12h9m2 0h3M5 16h4m2 0h2"/></svg>
                 </button>
                 <button type="button" class="chart-view-btn" :class="{active: modelUsageView === 'table'}" :aria-pressed="modelUsageView === 'table' ? 'true' : 'false'" aria-label="Show model usage table" title="Table" @click="toggleUsageChartView('model', 'table')">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 6v12M15 6v12"/></svg>
                 </button>
             </div>
         </div>
-        <div class="bar-chart-wrap" x-show="modelUsageView === 'chart'">
+        <div class="bar-chart-wrap" x-show="_isChartView(modelUsageView)">
             <canvas id="usageBarChart"></canvas>
         </div>
         <template x-if="modelUsageView === 'table'">
@@ -97,6 +105,8 @@
                             <th>Provider</th>
                             <th class="col-price">Input Tokens</th>
                             <th class="col-price">Output Tokens</th>
+                            <th class="col-price" title="Provider prompt-cache reads included in the input tokens">Prompt Cached</th>
+                            <th class="col-price" title="Tokens served from GoModel's local response cache (excluded from the other columns)">Local Cached</th>
                             <th class="col-price">Total Tokens</th>
                             <th class="col-price">Input Cost</th>
                             <th class="col-price">Output Cost</th>
@@ -110,6 +120,8 @@
                                 <td><span class="provider-badge" x-text="providerDisplayValue(row) || '-'"></span></td>
                                 <td class="col-price" x-text="formatNumber(row.input_tokens)"></td>
                                 <td class="col-price" x-text="formatNumber(row.output_tokens)"></td>
+                                <td class="col-price" x-text="formatNumber(row.cached_input_tokens || 0)" :title="row.cached_input_cost != null ? ('~' + formatCost(row.cached_input_cost) + ' at current cached-input pricing') : ''"></td>
+                                <td class="col-price" x-text="formatNumber((row.local_cached_input_tokens || 0) + (row.local_cached_output_tokens || 0))" :title="formatNumber(row.local_cached_input_tokens || 0) + ' input + ' + formatNumber(row.local_cached_output_tokens || 0) + ' output'"></td>
                                 <td class="col-price" x-text="formatNumber(usageRowTotalTokens(row))"></td>
                                 <td class="col-price" x-text="formatCost(row.input_cost)"></td>
                                 <td class="col-price" x-text="formatCost(row.output_cost)"></td>
@@ -128,14 +140,17 @@
             <h3 x-text="usageMode === 'costs' ? 'Cost by User Path' : 'Usage by User Path'"></h3>
             <div class="chart-view-toggle" role="group" aria-label="User path usage view">
                 <button type="button" class="chart-view-btn" :class="{active: userPathUsageView === 'chart'}" :aria-pressed="userPathUsageView === 'chart' ? 'true' : 'false'" aria-label="Show user path usage chart" title="Chart" @click="toggleUsageChartView('userPath', 'chart')">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-8"/></svg>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M12 8h7M12 12H7M12 16h4"/></svg>
+                </button>
+                <button type="button" class="chart-view-btn" :class="{active: userPathUsageView === 'stacked'}" :aria-pressed="userPathUsageView === 'stacked' ? 'true' : 'false'" aria-label="Show user path usage stacked chart" title="Stacked" @click="toggleUsageChartView('userPath', 'stacked')">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M5 8h6m2 0h4M5 12h9m2 0h3M5 16h4m2 0h2"/></svg>
                 </button>
                 <button type="button" class="chart-view-btn" :class="{active: userPathUsageView === 'table'}" :aria-pressed="userPathUsageView === 'table' ? 'true' : 'false'" aria-label="Show user path usage table" title="Table" @click="toggleUsageChartView('userPath', 'table')">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 6v12M15 6v12"/></svg>
                 </button>
             </div>
         </div>
-        <div class="bar-chart-wrap" x-show="userPathUsageView === 'chart'">
+        <div class="bar-chart-wrap" x-show="_isChartView(userPathUsageView)">
             <canvas id="usageUserPathChart"></canvas>
         </div>
         <template x-if="userPathUsageView === 'table'">
@@ -146,6 +161,8 @@
                             <th>User Path</th>
                             <th class="col-price">Input Tokens</th>
                             <th class="col-price">Output Tokens</th>
+                            <th class="col-price" title="Provider prompt-cache reads included in the input tokens">Prompt Cached</th>
+                            <th class="col-price" title="Tokens served from GoModel's local response cache (excluded from the other columns)">Local Cached</th>
                             <th class="col-price">Total Tokens</th>
                             <th class="col-price">Input Cost</th>
                             <th class="col-price">Output Cost</th>
@@ -158,6 +175,8 @@
                                 <td class="mono font-size-md" x-text="row.user_path || '/'"></td>
                                 <td class="col-price" x-text="formatNumber(row.input_tokens)"></td>
                                 <td class="col-price" x-text="formatNumber(row.output_tokens)"></td>
+                                <td class="col-price" x-text="formatNumber(row.cached_input_tokens || 0)" :title="row.cached_input_cost != null ? ('~' + formatCost(row.cached_input_cost) + ' at current cached-input pricing') : ''"></td>
+                                <td class="col-price" x-text="formatNumber((row.local_cached_input_tokens || 0) + (row.local_cached_output_tokens || 0))" :title="formatNumber(row.local_cached_input_tokens || 0) + ' input + ' + formatNumber(row.local_cached_output_tokens || 0) + ' output'"></td>
                                 <td class="col-price" x-text="formatNumber(usageRowTotalTokens(row))"></td>
                                 <td class="col-price" x-text="formatCost(row.input_cost)"></td>
                                 <td class="col-price" x-text="formatCost(row.output_cost)"></td>
@@ -182,14 +201,17 @@
             </div>
             <div class="chart-view-toggle" role="group" aria-label="Label usage view">
                 <button type="button" class="chart-view-btn" :class="{active: labelUsageView === 'chart'}" :aria-pressed="labelUsageView === 'chart' ? 'true' : 'false'" aria-label="Show label usage chart" title="Chart" @click="toggleUsageChartView('label', 'chart')">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-8"/></svg>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M12 8h7M12 12H7M12 16h4"/></svg>
+                </button>
+                <button type="button" class="chart-view-btn" :class="{active: labelUsageView === 'stacked'}" :aria-pressed="labelUsageView === 'stacked' ? 'true' : 'false'" aria-label="Show label usage stacked chart" title="Stacked" @click="toggleUsageChartView('label', 'stacked')">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M5 8h6m2 0h4M5 12h9m2 0h3M5 16h4m2 0h2"/></svg>
                 </button>
                 <button type="button" class="chart-view-btn" :class="{active: labelUsageView === 'table'}" :aria-pressed="labelUsageView === 'table' ? 'true' : 'false'" aria-label="Show label usage table" title="Table" @click="toggleUsageChartView('label', 'table')">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 6v12M15 6v12"/></svg>
                 </button>
             </div>
         </div>
-        <div class="bar-chart-wrap" x-show="labelUsageView === 'chart'">
+        <div class="bar-chart-wrap" x-show="_isChartView(labelUsageView)">
             <canvas id="usageLabelChart"></canvas>
         </div>
         <template x-if="labelUsageView === 'table'">
@@ -201,6 +223,8 @@
                             <th class="col-price">Requests</th>
                             <th class="col-price">Input Tokens</th>
                             <th class="col-price">Output Tokens</th>
+                            <th class="col-price" title="Provider prompt-cache reads included in the input tokens">Prompt Cached</th>
+                            <th class="col-price" title="Tokens served from GoModel's local response cache (excluded from the other columns)">Local Cached</th>
                             <th class="col-price">Total Tokens</th>
                             <th class="col-price">Input Cost</th>
                             <th class="col-price">Output Cost</th>
@@ -218,6 +242,8 @@
                                 <td class="col-price" x-text="formatNumber(row.requests)"></td>
                                 <td class="col-price" x-text="formatNumber(row.input_tokens)"></td>
                                 <td class="col-price" x-text="formatNumber(row.output_tokens)"></td>
+                                <td class="col-price" x-text="formatNumber(row.cached_input_tokens || 0)" :title="row.cached_input_cost != null ? ('~' + formatCost(row.cached_input_cost) + ' at current cached-input pricing') : ''"></td>
+                                <td class="col-price" x-text="formatNumber((row.local_cached_input_tokens || 0) + (row.local_cached_output_tokens || 0))" :title="formatNumber(row.local_cached_input_tokens || 0) + ' input + ' + formatNumber(row.local_cached_output_tokens || 0) + ' output'"></td>
                                 <td class="col-price" x-text="formatNumber(usageRowTotalTokens(row))"></td>
                                 <td class="col-price" x-text="formatCost(row.input_cost)"></td>
                                 <td class="col-price" x-text="formatCost(row.output_cost)"></td>
@@ -228,6 +254,8 @@
                 </table>
             </div>
         </template>
+    </div>
+
     </div>
 
     <!-- Request Log Section -->

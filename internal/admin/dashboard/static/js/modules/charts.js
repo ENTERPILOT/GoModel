@@ -1,4 +1,8 @@
 (function(global) {
+    /**
+     * Create chart configuration, data-preparation, and rendering helpers for the dashboard.
+     * @return {Object} The dashboard chart helper and lifecycle methods.
+     */
     function dashboardChartsModule() {
         return {
             // --- Shared overview chart styling, so the line (Daily Token Usage)
@@ -104,63 +108,97 @@
                 };
             },
 
-            _barChartConfig(colors, labels, values, palette) {
+            // Horizontal input/output bars: one row per entity (model, user
+            // path, label). In the default diverging view the input-side
+            // series (paid input, prompt-cached reads) grow left from zero
+            // and the output-side series (output, locally-cached tokens) grow
+            // right; in the stacked view everything piles rightward from zero
+            // as segments of one bar. Series reuse the overview chart's
+            // token palette (paid browns, translucent cache blues) so they
+            // read consistently across the dashboard; the legend (and, when
+            // diverging, the left/right split) carries identity, not color
+            // alone. Cache series appear only when they have data.
+            _horizontalUsageChartConfig(colors, labels, series, stacked) {
+                const resolve = (expr) => (typeof this._resolveLiveTokenColor === 'function' ? this._resolveLiveTokenColor(expr) : expr);
+                const costs = this.usageMode === 'costs';
+                const fmtShort = (v) => costs ? '$' + Math.abs(v).toFixed(2) : this.formatTokensShort(Math.abs(v));
+                const fmtExact = (v) => costs ? '$' + Math.abs(v).toFixed(4) : Math.abs(v).toLocaleString();
+                const inputSide = (values) => values.map((v) => stacked ? Math.abs(v) : -Math.abs(v));
+                const bar = (label, data, color) => ({
+                    label: label,
+                    data: data,
+                    backgroundColor: color,
+                    borderColor: 'transparent',
+                    borderWidth: 0,
+                    borderRadius: 4,
+                    maxBarThickness: 22
+                });
+                const hasData = (values) => (values || []).some((v) => Math.abs(v) > 0);
+                const datasets = [
+                    bar(costs ? 'Input Cost' : 'Input Tokens', inputSide(series.inputs), resolve('var(--token-input)')),
+                    bar(costs ? 'Output Cost' : 'Output Tokens', series.outputs, resolve('var(--token-output)'))
+                ];
+                if (hasData(series.prompts)) {
+                    datasets.push(bar(costs ? 'Prompt Cached Cost' : 'Prompt Cached', inputSide(series.prompts), resolve('var(--token-prompt)')));
+                }
+                // Local cache hits carry both sides, so each joins its own
+                // half of the axis (they pile together in the stacked view).
+                if (!costs && hasData(series.localIns)) {
+                    datasets.push(bar('Locally Cached (Input)', inputSide(series.localIns), resolve('var(--token-local)')));
+                }
+                if (!costs && hasData(series.localOuts)) {
+                    datasets.push(bar('Locally Cached (Output)', series.localOuts, resolve('var(--token-local)')));
+                }
                 return {
                     type: 'bar',
                     data: {
                         labels: labels,
-                        datasets: [{
-                            data: values,
-                            backgroundColor: labels.map((_, i) => palette[i % palette.length]),
-                            borderColor: 'transparent',
-                            borderWidth: 0,
-                            borderRadius: 4
-                        }]
+                        datasets: datasets
                     },
                     options: {
+                        indexAxis: 'y',
                         responsive: true,
                         maintainAspectRatio: false,
                         animation: { duration: 0 },
                         layout: { padding: { top: 8 } },
                         scales: {
                             x: {
-                                grid: { display: false },
-                                ticks: {
-                                    color: colors.text,
-                                    font: { size: 11, family: "'SF Mono', Menlo, Consolas, monospace" },
-                                    maxRotation: 45,
-                                    minRotation: 0
-                                }
-                            },
-                            y: {
-                                grid: { color: colors.grid },
+                                stacked: true,
+                                beginAtZero: true,
+                                // Emphasize the zero divider between the diverging halves.
+                                grid: stacked
+                                    ? { color: colors.grid }
+                                    : { color: (ctx) => (ctx.tick && ctx.tick.value === 0 ? colors.text : colors.grid) },
                                 border: { display: false },
                                 ticks: {
                                     color: colors.text,
-                                    font: { size: 11, family: "'SF Mono', Menlo, Consolas, monospace" },
-                                    callback: (v) => {
-                                        if (this.usageMode === 'costs') return '$' + v.toFixed(2);
-                                        return this.formatTokensShort(v);
-                                    }
+                                    font: this._chartTickFont(),
+                                    callback: (v) => fmtShort(v)
+                                }
+                            },
+                            y: {
+                                stacked: true,
+                                grid: { display: false },
+                                border: { display: false },
+                                ticks: {
+                                    color: colors.text,
+                                    font: this._chartTickFont(),
+                                    autoSkip: false
                                 }
                             }
                         },
                         plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                backgroundColor: colors.tooltipBg,
-                                borderColor: colors.tooltipBorder,
-                                borderWidth: 1,
-                                titleColor: colors.tooltipText,
-                                bodyColor: colors.tooltipText,
-                                callbacks: {
-                                    label: (c) => {
-                                        const val = c.parsed.y;
-                                        if (this.usageMode === 'costs') return '$' + val.toFixed(4);
-                                        return this.formatTokensShort(val);
-                                    }
+                            legend: {
+                                labels: { color: colors.text, font: { size: 12 } }
+                            },
+                            tooltip: this._chartTooltip(colors, {
+                                label: (c) => c.dataset.label + ': ' + fmtExact(c.parsed.x),
+                                footer: (items) => {
+                                    let total = 0;
+                                    items.forEach((it) => { total += Math.abs(Number(it.parsed.x)) || 0; });
+                                    return 'Total: ' + fmtExact(total);
                                 }
-                            }
+                            })
                         }
                     }
                 };
@@ -356,27 +394,6 @@
                 return ((row && row.input_tokens) || 0) + ((row && row.output_tokens) || 0);
             },
 
-            _barDataFrom(items, labelFor) {
-                const sorted = this._usageRowsBySelectedValue(items);
-
-                const top = sorted.slice(0, 10);
-                const rest = sorted.slice(10);
-
-                const labels = top.map(labelFor);
-                const values = top.map((row) => this._usageAggregateValue(row));
-
-                if (rest.length > 0) {
-                    labels.push('Other');
-                    let otherVal = 0;
-                    rest.forEach((row) => {
-                        otherVal += this._usageAggregateValue(row);
-                    });
-                    values.push(otherVal);
-                }
-
-                return { labels, values };
-            },
-
             _usageRowsBySelectedValue(items) {
                 return [...(items || [])].sort((a, b) => {
                     if (this.usageMode === 'costs') {
@@ -410,18 +427,79 @@
                 return onlyPath !== '' && onlyPath !== '/';
             },
 
-            _barData() {
-                return this._barDataFrom(this.modelUsage, (m) => typeof this.qualifiedModelDisplay === 'function'
-                    ? this.qualifiedModelDisplay(m)
-                    : m.model);
+            // Per-row series split for the diverging charts. Rows keep the
+            // selected-metric ordering; past the top 10 they fold into a
+            // single "Other" row.
+            //
+            // Tokens mode mirrors the overview chart's accounting: the Input
+            // series is paid input (uncached + cache writes; full input when
+            // the split is absent), prompt-cache reads and locally-cached
+            // tokens are their own series. Costs mode splits the estimated
+            // prompt-cached read cost out of the input cost; local cache hits
+            // cost nothing, so they have no cost series.
+            _divergingDataFrom(items, labelFor) {
+                const sorted = this._usageRowsBySelectedValue(items);
+                const costs = this.usageMode === 'costs';
+                const num = (v) => Number(v) || 0;
+                // The cached cost is an estimate at current prices while
+                // input_cost is the recorded charge, so cap the cached
+                // segment at the recorded input cost — the two segments then
+                // always sum to it and the bar never exceeds recorded totals.
+                const promptOf = (row) => {
+                    if (!costs) return num(row.cached_input_tokens);
+                    return Math.min(num(row.cached_input_cost), num(row.input_cost));
+                };
+                const inputOf = (row) => {
+                    if (costs) return num(row.input_cost) - promptOf(row);
+                    const split = num(row.uncached_input_tokens) + num(row.cached_input_tokens) + num(row.cache_write_input_tokens);
+                    return split > 0 ? num(row.uncached_input_tokens) + num(row.cache_write_input_tokens) : num(row.input_tokens);
+                };
+                const outputOf = (row) => num(costs ? row.output_cost : row.output_tokens);
+                const localInputOf = (row) => costs ? 0 : num(row.local_cached_input_tokens);
+                const localOutputOf = (row) => costs ? 0 : num(row.local_cached_output_tokens);
+
+                const top = sorted.slice(0, 10);
+                const rest = sorted.slice(10);
+
+                const labels = top.map(labelFor);
+                const inputs = top.map(inputOf);
+                const outputs = top.map(outputOf);
+                const prompts = top.map(promptOf);
+                const localIns = top.map(localInputOf);
+                const localOuts = top.map(localOutputOf);
+
+                if (rest.length > 0) {
+                    labels.push('Other');
+                    const sum = (of) => rest.reduce((total, row) => total + of(row), 0);
+                    inputs.push(sum(inputOf));
+                    outputs.push(sum(outputOf));
+                    prompts.push(sum(promptOf));
+                    localIns.push(sum(localInputOf));
+                    localOuts.push(sum(localOutputOf));
+                }
+
+                return { labels, inputs, outputs, prompts, localIns, localOuts };
             },
 
-            _userPathBarData() {
-                return this._barDataFrom(this.userPathUsage || [], (u) => u.user_path || '/');
+            // A view value that renders on the canvas (as opposed to the table).
+            _isChartView(view) {
+                return (view || 'chart') === 'chart' || view === 'stacked';
             },
 
-            _labelBarData() {
-                return this._barDataFrom(this.labelUsage || [], (l) => l.label);
+            // Shared by the three usage charts: build the diverging or stacked
+            // config, grow the wrapper with the row count so horizontal bars
+            // stay readable instead of squeezing into a fixed height, and
+            // mount the chart.
+            _createUsageBarChart(canvas, items, labelFor, view) {
+                const series = this._divergingDataFrom(items, labelFor);
+                const config = this._horizontalUsageChartConfig(this.chartColors(), series.labels, series, view === 'stacked');
+
+                const wrap = canvas.parentElement;
+                if (wrap) {
+                    wrap.style.height = Math.max(200, series.labels.length * 32 + 72) + 'px';
+                }
+
+                return new Chart(canvas, config);
             },
 
             // Deterministic label -> palette color so a label keeps one color
@@ -438,22 +516,6 @@
 
             labelChipStyle(label) {
                 return { '--label-color': this.labelColor(label) };
-            },
-
-            // The synthetic "Other" bar gets a neutral tone instead of a
-            // hashed identity color.
-            _labelBarPalette(labels) {
-                return labels.map((label) => label === 'Other' ? '#a8a29a' : this.labelColor(label));
-            },
-
-            barLegendItems() {
-                const { labels, values } = this._barData();
-                const colors = this._barColors();
-                return labels.map((label, i) => ({
-                    label,
-                    color: colors[i % colors.length],
-                    value: this.usageMode === 'costs' ? '$' + values[i].toFixed(4) : this.formatTokensShort(values[i])
-                }));
             },
 
             toggleUsageChartView(target, view) {
@@ -478,7 +540,7 @@
             renderBarChart(retries) {
                 if (retries === undefined) retries = 3;
                 this.$nextTick(() => {
-                    if (this.modelUsage.length === 0 || this.page !== 'usage' || (this.modelUsageView || 'chart') !== 'chart') {
+                    if (this.modelUsage.length === 0 || this.page !== 'usage' || !this._isChartView(this.modelUsageView)) {
                         if (this.usageBarChart) {
                             this.usageBarChart.destroy();
                             this.usageBarChart = null;
@@ -494,24 +556,21 @@
                         return;
                     }
 
-                    const colors = this.chartColors();
-                    const { labels, values } = this._barData();
-                    const palette = this._barColors();
-                    const config = this._barChartConfig(colors, labels, values, palette);
-
                     if (this.usageBarChart) {
                         this.usageBarChart.destroy();
                         this.usageBarChart = null;
                     }
 
-                    this.usageBarChart = new Chart(canvas, config);
+                    this.usageBarChart = this._createUsageBarChart(canvas, this.modelUsage, (m) => typeof this.qualifiedModelDisplay === 'function'
+                        ? this.qualifiedModelDisplay(m)
+                        : m.model, this.modelUsageView);
                 });
             },
 
             renderUserPathChart(retries) {
                 if (retries === undefined) retries = 3;
                 this.$nextTick(() => {
-                    if (!this.userPathUsageChartVisible() || this.page !== 'usage' || (this.userPathUsageView || 'chart') !== 'chart') {
+                    if (!this.userPathUsageChartVisible() || this.page !== 'usage' || !this._isChartView(this.userPathUsageView)) {
                         if (this.usageUserPathChart) {
                             this.usageUserPathChart.destroy();
                             this.usageUserPathChart = null;
@@ -527,24 +586,19 @@
                         return;
                     }
 
-                    const colors = this.chartColors();
-                    const { labels, values } = this._userPathBarData();
-                    const palette = this._barColors();
-                    const config = this._barChartConfig(colors, labels, values, palette);
-
                     if (this.usageUserPathChart) {
                         this.usageUserPathChart.destroy();
                         this.usageUserPathChart = null;
                     }
 
-                    this.usageUserPathChart = new Chart(canvas, config);
+                    this.usageUserPathChart = this._createUsageBarChart(canvas, this.userPathUsage || [], (u) => u.user_path || '/', this.userPathUsageView);
                 });
             },
 
             renderLabelChart(retries) {
                 if (retries === undefined) retries = 3;
                 this.$nextTick(() => {
-                    if ((this.labelUsage || []).length === 0 || this.page !== 'usage' || (this.labelUsageView || 'chart') !== 'chart') {
+                    if ((this.labelUsage || []).length === 0 || this.page !== 'usage' || !this._isChartView(this.labelUsageView)) {
                         if (this.usageLabelChart) {
                             this.usageLabelChart.destroy();
                             this.usageLabelChart = null;
@@ -560,17 +614,12 @@
                         return;
                     }
 
-                    const colors = this.chartColors();
-                    const { labels, values } = this._labelBarData();
-                    const palette = this._labelBarPalette(labels);
-                    const config = this._barChartConfig(colors, labels, values, palette);
-
                     if (this.usageLabelChart) {
                         this.usageLabelChart.destroy();
                         this.usageLabelChart = null;
                     }
 
-                    this.usageLabelChart = new Chart(canvas, config);
+                    this.usageLabelChart = this._createUsageBarChart(canvas, this.labelUsage || [], (l) => l.label, this.labelUsageView);
                 });
             }
         };

@@ -102,7 +102,41 @@ func (r *SQLiteReader) GetUsageByModel(ctx context.Context, params UsageQueryPar
 		return nil, fmt.Errorf("error iterating usage by model rows: %w", err)
 	}
 
+	stats, err := r.usageCacheStats(ctx, params, "user_path", nil, modelGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	result = applyModelCacheStats(result, stats)
+
 	return result, nil
+}
+
+// usageCacheStats runs the second streaming pass behind the chart aggregates
+// and folds cache figures per group. For uncached-mode requests (the
+// default) it streams with cache mode "all" so local-cache rows are counted
+// even though the aggregates exclude them.
+func (r *SQLiteReader) usageCacheStats(ctx context.Context, params UsageQueryParams, userPathExpr string, extraConditions []string, keysFor groupKeysFunc) (map[string]*GroupCacheStats, error) {
+	// The cache fields describe uncached-mode aggregates: for cached/all
+	// modes the local tokens are already inside the aggregate sums (and the
+	// provider split would not partition them), so the pass is skipped and
+	// the fields stay zero.
+	if normalizeCacheMode(params.CacheMode) != CacheModeUncached {
+		return nil, nil
+	}
+	params.CacheMode = CacheModeAll
+	conditions, args, err := sqliteUsageConditionsWithUserPathExpr(params, userPathExpr)
+	if err != nil {
+		return nil, err
+	}
+	conditions = append(conditions, extraConditions...)
+	where := sqlutil.BuildWhereClause(conditions)
+
+	rows, err := r.db.QueryContext(ctx, `SELECT model, provider, provider_name, user_path, labels, cache_type, input_tokens, output_tokens, raw_data FROM usage`+where, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage cache stats: %w", err)
+	}
+	defer rows.Close()
+	return foldUsageCacheRows(rows, keysFor)
 }
 
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
@@ -138,6 +172,12 @@ func (r *SQLiteReader) GetUsageByUserPath(ctx context.Context, params UsageQuery
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating usage by user path rows: %w", err)
 	}
+
+	stats, err := r.usageCacheStats(ctx, params, userPathExpr, nil, userPathGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	result = applyUserPathCacheStats(result, stats)
 
 	return result, nil
 }
@@ -175,6 +215,12 @@ func (r *SQLiteReader) GetUsageByLabel(ctx context.Context, params UsageQueryPar
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating usage by label rows: %w", err)
 	}
+
+	stats, err := r.usageCacheStats(ctx, params, "user_path", []string{"labels IS NOT NULL"}, labelGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	result = applyLabelCacheStats(result, stats)
 
 	return result, nil
 }

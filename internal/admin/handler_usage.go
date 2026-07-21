@@ -135,7 +135,11 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Router       /admin/usage/models [get]
 func (h *Handler) UsageByModel(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.ModelUsage, error) {
-		return h.usageReader.GetUsageByModel(ctx, params)
+		rows, err := h.usageReader.GetUsageByModel(ctx, params)
+		for i := range rows {
+			rows[i].CachedInputCost = usage.EstimateCachedInputCost(rows[i].CachedTokensByPricing, h.pricingResolver)
+		}
+		return rows, err
 	})
 }
 
@@ -159,7 +163,11 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Router       /admin/usage/user-paths [get]
 func (h *Handler) UsageByUserPath(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.UserPathUsage, error) {
-		return h.usageReader.GetUsageByUserPath(ctx, params)
+		rows, err := h.usageReader.GetUsageByUserPath(ctx, params)
+		for i := range rows {
+			rows[i].CachedInputCost = usage.EstimateCachedInputCost(rows[i].CachedTokensByPricing, h.pricingResolver)
+		}
+		return rows, err
 	})
 }
 
@@ -186,7 +194,11 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 // @Router       /admin/usage/labels [get]
 func (h *Handler) UsageByLabel(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.LabelUsage, error) {
-		return h.usageReader.GetUsageByLabel(ctx, params)
+		rows, err := h.usageReader.GetUsageByLabel(ctx, params)
+		for i := range rows {
+			rows[i].CachedInputCost = usage.EstimateCachedInputCost(rows[i].CachedTokensByPricing, h.pricingResolver)
+		}
+		return rows, err
 	})
 }
 
