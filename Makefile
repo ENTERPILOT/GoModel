@@ -1,4 +1,4 @@
-.PHONY: all build run demo clean tidy test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
+.PHONY: all build run demo clean tidy mod-check test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
 
 all: build
 
@@ -42,6 +42,12 @@ clean:
 tidy:
 	go mod tidy
 
+# Verify dependencies are tidy and match downloaded module checksums without
+# mutating the working tree. CI and release builds use this target.
+mod-check:
+	go mod tidy -diff
+	go mod verify
+
 # Docker Compose: Redis, PostgreSQL, MongoDB, Adminer (no app image build)
 infra:
 	docker compose up -d
@@ -57,11 +63,11 @@ seed-demo-data:
 
 # Run unit tests only
 test:
-	go test ./cmd/... ./internal/... ./config/... -v
+	go test ./cmd/... ./config/... ./ext/... ./internal/... ./run/... -v
 
 # Run unit tests with race detection and coverage
 test-race:
-	go test -v -race -coverprofile=coverage.out ./cmd/... ./internal/... ./config/...
+	go test -v -race -coverprofile=coverage.out ./cmd/... ./config/... ./ext/... ./internal/... ./run/...
 
 # Run dashboard JavaScript unit tests
 test-dashboard:
@@ -124,12 +130,12 @@ docs-openapi:
 
 # Run linter
 lint:
-	golangci-lint run --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./internal/... ./tests/...
+	golangci-lint run --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/...
 
 # Run linter with auto-fix. Mirrors `lint`: same tags, same packages, so the
 # autofix pass cannot silently skip the tag-gated files under tests/.
 lint-fix:
-	golangci-lint run --fix --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./internal/... ./tests/...
+	golangci-lint run --fix --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/...
 
 # Report modernizations go fix would apply, without touching the tree.
 # Exits non-zero when the tree has drifted; run `make fix` to apply.
