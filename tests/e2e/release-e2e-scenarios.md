@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 172 end-to-end curl scenarios for release validation.
+This file contains 196 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -108,6 +108,12 @@ Stateful note:
   (`config_test.go`, `bedrock_mantle_test.go`) plus a one-off manual check that
   a `BEDROCK_MANTLE_*`-prefixed provider registers distinctly from `BEDROCK_*`
   at startup without colliding or crashing
+- `S192`-`S196` exercise the dashboard-managed provider-credentials store
+  (`/admin/provider-credentials` CRUD, `/types`, secret redaction, hot
+  register/unregister into the routing catalog, config/env read-only negatives,
+  PostgreSQL/MongoDB parity, admin-auth gating); each registers
+  `$QA_SUFFIX`-scoped provider names against unreachable base URLs and deletes
+  them, so they are self-contained and rerunnable in any order
 - For stateful partial reruns, prefer a contiguous range that includes the
   prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
   `--keep-artifacts`
@@ -4570,4 +4576,187 @@ curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/messages/batches" \
 cat "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.message | test("single provider per batch")' "$BODY_FILE" >/dev/null
+```
+
+## 26. Dashboard-managed provider credentials
+
+These scenarios cover the admin provider-credentials store
+(`/admin/provider-credentials` GET/PUT/DELETE + `/types`) that lets an operator
+register, edit, disable, and remove model providers from the dashboard without
+env vars or a restart. Each scenario registers `$QA_SUFFIX`-scoped provider
+names, asserts secret redaction and hot-registration into the live routing
+catalog, and deletes what it created, so they are self-contained and rerunnable
+in any order. Managed (config/env-declared) providers stay read-only, which the
+negatives assert. The store is exercised on SQLite (`$BASE_URL`), and its
+PostgreSQL/MongoDB parity plus the auth-enabled gateway are covered by their own
+scenarios below.
+
+### S192 Provider-credential CRUD with secret redaction and hot-registration
+
+Creates an `openai`-type store provider with an API key and an inline model,
+confirms the secret is redacted on read while the entry stays `managed:false`,
+that the inline model hot-registers into `/admin/models` under the new
+provider, and that re-submitting the all-asterisk mask preserves the stored key.
+
+```bash
+PC_NAME="qa-cred-$QA_SUFFIX"
+BODY_FILE="$QA_RUN_DIR/s192.body.json"
+
+curl -fsS -X PUT "$BASE_URL/admin/provider-credentials" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$PC_NAME\",\"type\":\"openai\",\"api_keys\":[\"sk-qa-secret-$QA_SUFFIX\"],\"base_url\":\"https://example.invalid/v1\",\"models\":[\"qa-cred-model-$QA_SUFFIX\"]}" \
+  > "$BODY_FILE"
+jq -e --arg n "$PC_NAME" --arg m "qa-cred-model-$QA_SUFFIX" '
+  .name == $n and .type == "openai" and .managed == false and .enabled == true
+  and (.api_keys | length == 1 and .[0] == "***********")
+  and (.base_url == "https://example.invalid/v1")
+  and (.models | index($m) != null)
+' "$BODY_FILE" >/dev/null
+
+curl -fsS "$BASE_URL/admin/provider-credentials" \
+  | jq -e --arg n "$PC_NAME" 'any(.[]?; .name == $n and .managed == false and (.api_keys[0] == "***********"))' >/dev/null
+
+curl -fsS "$BASE_URL/admin/models" \
+  | jq -e --arg n "$PC_NAME" --arg m "qa-cred-model-$QA_SUFFIX" 'any(.[]?; .provider_name == $n and .model.id == $m)' >/dev/null
+
+# Re-submitting the mask preserves the stored key (older dashboards send "***").
+curl -fsS -X PUT "$BASE_URL/admin/provider-credentials" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$PC_NAME\",\"type\":\"openai\",\"api_keys\":[\"***********\"],\"base_url\":\"https://example.invalid/v1\",\"models\":[\"qa-cred-model-$QA_SUFFIX\"]}" \
+  | jq -e --arg n "$PC_NAME" '.name == $n and (.api_keys[0] == "***********")' >/dev/null
+
+curl -fsS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/provider-credentials/$PC_NAME" \
+  | jq -R -e '. == "204"' >/dev/null
+curl -fsS "$BASE_URL/admin/provider-credentials" \
+  | jq -e --arg n "$PC_NAME" 'all(.[]?; .name != $n)' >/dev/null
+curl -fsS "$BASE_URL/admin/models" \
+  | jq -e --arg m "qa-cred-model-$QA_SUFFIX" 'all(.[]?; .model.id != $m)' >/dev/null
+```
+
+### S193 Disabling a stored provider unregisters it from routing
+
+A keyless `ollama`-type provider with an inline model registers into
+`/admin/models`; setting `enabled:false` keeps the stored row but drops it from
+the routing catalog, and re-enabling restores it.
+
+```bash
+PC_NAME="qa-cred-off-$QA_SUFFIX"
+PC_MODEL="qa-cred-off-model-$QA_SUFFIX"
+
+curl -fsS -X PUT "$BASE_URL/admin/provider-credentials" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$PC_NAME\",\"type\":\"ollama\",\"base_url\":\"http://127.0.0.1:59999\",\"models\":[\"$PC_MODEL\"]}" \
+  | jq -e --arg n "$PC_NAME" '.name == $n and .enabled == true' >/dev/null
+curl -fsS "$BASE_URL/admin/models" \
+  | jq -e --arg m "$PC_MODEL" 'any(.[]?; .model.id == $m)' >/dev/null
+
+curl -fsS -X PUT "$BASE_URL/admin/provider-credentials" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$PC_NAME\",\"type\":\"ollama\",\"base_url\":\"http://127.0.0.1:59999\",\"models\":[\"$PC_MODEL\"],\"enabled\":false}" \
+  | jq -e --arg n "$PC_NAME" '.name == $n and .enabled == false' >/dev/null
+curl -fsS "$BASE_URL/admin/provider-credentials" \
+  | jq -e --arg n "$PC_NAME" 'any(.[]?; .name == $n and .enabled == false)' >/dev/null
+curl -fsS "$BASE_URL/admin/models" \
+  | jq -e --arg m "$PC_MODEL" 'all(.[]?; .model.id != $m)' >/dev/null
+
+curl -fsS -X PUT "$BASE_URL/admin/provider-credentials" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$PC_NAME\",\"type\":\"ollama\",\"base_url\":\"http://127.0.0.1:59999\",\"models\":[\"$PC_MODEL\"],\"enabled\":true}" \
+  | jq -e '.enabled == true' >/dev/null
+curl -fsS "$BASE_URL/admin/models" \
+  | jq -e --arg m "$PC_MODEL" 'any(.[]?; .model.id == $m)' >/dev/null
+
+curl -fsS -o /dev/null -X DELETE "$BASE_URL/admin/provider-credentials/$PC_NAME"
+```
+
+### S194 Provider-credential validation and read-only negatives
+
+Covers the guardrails: a config/env-declared provider is read-only for both
+PUT and DELETE, an unknown type and a name containing `/` are rejected, a
+redacted API key with no stored value to preserve is rejected, and deleting an
+absent provider returns 404.
+
+```bash
+MANAGED_NAME=$(curl -fsS "$BASE_URL/admin/provider-credentials" | jq -er 'map(select(.managed)) | .[0].name')
+MANAGED_TYPE=$(curl -fsS "$BASE_URL/admin/provider-credentials" | jq -er --arg n "$MANAGED_NAME" '.[] | select(.name == $n) | .type')
+HEADERS_FILE="$QA_RUN_DIR/s194.headers"
+BODY_FILE="$QA_RUN_DIR/s194.body"
+
+# Managed provider PUT is read-only (400).
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/provider-credentials" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$MANAGED_NAME\",\"type\":\"$MANAGED_TYPE\"}"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("managed by config/env and is read-only"))' "$BODY_FILE" >/dev/null
+
+# Managed provider DELETE is read-only (400).
+curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/provider-credentials/$MANAGED_NAME" \
+  | jq -R -e '. == "400"' >/dev/null
+
+# Unknown provider type (400).
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/provider-credentials" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-cred-badtype-$QA_SUFFIX\",\"type\":\"definitely-not-a-provider\"}"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.message | test("unknown provider type")' "$BODY_FILE" >/dev/null
+
+# Name containing '/' (400).
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/provider-credentials" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"qa/slash","type":"openai"}'
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.message | test("must not contain")' "$BODY_FILE" >/dev/null
+
+# Redacted API key with no stored value to preserve (400).
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/provider-credentials" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-cred-noval-$QA_SUFFIX\",\"type\":\"openai\",\"api_keys\":[\"***********\"]}"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.message | test("redacted")' "$BODY_FILE" >/dev/null
+
+# Deleting an absent provider (404).
+curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/provider-credentials/qa-cred-absent-$QA_SUFFIX" \
+  | jq -R -e '. == "404"' >/dev/null
+```
+
+### S195 Provider-credential store parity on PostgreSQL and MongoDB
+
+The provider-credentials store round-trips on both non-SQLite backends: create,
+list with redaction, and delete.
+
+```bash
+PC_NAME="qa-cred-parity-$QA_SUFFIX"
+
+for URL in "$PG_BASE_URL" "$MONGO_BASE_URL"; do
+  curl -fsS -X PUT "$URL/admin/provider-credentials" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$PC_NAME\",\"type\":\"openai\",\"api_keys\":[\"sk-qa-parity-$QA_SUFFIX\"],\"models\":[\"qa-cred-parity-model-$QA_SUFFIX\"]}" \
+    | jq -e --arg n "$PC_NAME" '.name == $n and .managed == false and (.api_keys[0] == "***********")' >/dev/null
+
+  curl -fsS "$URL/admin/provider-credentials" \
+    | jq -e --arg n "$PC_NAME" 'any(.[]?; .name == $n and .managed == false and (.api_keys[0] == "***********"))' >/dev/null
+
+  curl -fsS -o /dev/null -w '%{http_code}' -X DELETE "$URL/admin/provider-credentials/$PC_NAME" \
+    | jq -R -e '. == "204"' >/dev/null
+  curl -fsS "$URL/admin/provider-credentials" \
+    | jq -e --arg n "$PC_NAME" 'all(.[]?; .name != $n)' >/dev/null
+done
+```
+
+### S196 Provider-credentials require admin auth; declared providers are managed
+
+On the auth-enabled gateway the endpoints reject unauthenticated reads (401) and
+serve authenticated ones, the `/types` catalog lists constructible provider
+types, and env/config-declared providers surface as read-only `managed:true`
+rows.
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/provider-credentials" \
+  | jq -R -e '. == "401"' >/dev/null
+
+curl -fsS -H "$ADMIN_AUTH_HEADER" "$AUTH_BASE_URL/admin/provider-credentials/types" \
+  | jq -e 'type == "array" and (index("openai") != null) and (index("anthropic") != null)' >/dev/null
+
+curl -fsS -H "$ADMIN_AUTH_HEADER" "$AUTH_BASE_URL/admin/provider-credentials" \
+  | jq -e 'type == "array" and any(.[]?; .managed == true)' >/dev/null
 ```
