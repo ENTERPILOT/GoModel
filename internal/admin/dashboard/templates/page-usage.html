@@ -4,14 +4,16 @@
 <div class="page-with-sticky-date">
     <div class="page-header date-range-page-header">
         <h2>Usage Analytics</h2>
-        <div class="page-header-controls">
-            <div class="usage-mode-toggle">
-                <button type="button" class="usage-mode-btn" :class="{active: usageMode==='tokens'}" @click="toggleUsageMode('tokens')">Tokens</button>
-                <button type="button" class="usage-mode-btn" :class="{active: usageMode==='costs'}" @click="toggleUsageMode('costs')">Costs</button>
-            </div>
-        </div>
     </div>
-    <div class="sticky-date-range">{{template "date-picker" .}}</div>
+    <!-- The mode toggle lives in the sticky bar so it stays reachable while
+         scrolling, like the date range it changes the meaning of. -->
+    <div class="sticky-date-range usage-sticky-controls">
+        <div class="usage-mode-toggle" role="group" aria-label="Usage mode">
+            <button type="button" class="usage-mode-btn" :class="{active: usageMode==='tokens'}" @click="toggleUsageMode('tokens')">Tokens</button>
+            <button type="button" class="usage-mode-btn" :class="{active: usageMode==='costs'}" @click="toggleUsageMode('costs')">Costs</button>
+        </div>
+        {{template "date-picker" .}}
+    </div>
 
     <!-- Auth Error Banner -->
     {{template "auth-banner" .}}

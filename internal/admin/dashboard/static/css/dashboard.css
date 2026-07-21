@@ -1029,6 +1029,16 @@ body.dashboard-modal-open {
   justify-self: end;
 }
 
+/* Usage page: the Tokens/Costs toggle shares the sticky bar with the date
+   picker so both stay reachable while scrolling. */
+.usage-sticky-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 /* Interval Picker */
 .interval-picker {
   display: inline-flex;

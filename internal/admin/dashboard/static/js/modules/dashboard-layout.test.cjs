@@ -112,7 +112,7 @@ test("demo notice scrolls normally while page date ranges stay sticky", () => {
   assert.doesNotMatch(demoRule, /position:\s*sticky/);
   assert.doesNotMatch(demoRule, /top:\s*\d/);
 
-  for (const page of [overview, usage, audit]) {
+  for (const page of [overview, audit]) {
     assert.match(page, /<div class="page-with-sticky-date">/);
     assert.match(page, /class="page-header date-range-page-header"/);
     assert.match(
@@ -120,6 +120,15 @@ test("demo notice scrolls normally while page date ranges stay sticky", () => {
       /<div class="sticky-date-range">{{template "date-picker" \.}}<\/div>/,
     );
   }
+
+  // The usage page's sticky bar also hosts the Tokens/Costs mode toggle so
+  // it stays reachable while scrolling.
+  assert.match(usage, /<div class="page-with-sticky-date">/);
+  assert.match(usage, /class="page-header date-range-page-header"/);
+  assert.match(
+    usage,
+    /<div class="sticky-date-range usage-sticky-controls">[\s\S]*class="usage-mode-toggle"[\s\S]*{{template "date-picker" \.}}[\s\S]*<\/div>/,
+  );
 
   const stickyRule = readCSSRule(
     css,
