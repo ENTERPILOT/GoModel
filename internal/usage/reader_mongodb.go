@@ -299,51 +299,10 @@ func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryPa
 	if normalizeCacheMode(params.CacheMode) != CacheModeUncached {
 		return nil, nil
 	}
-	params.CacheMode = CacheModeAll
-	pipeline := bson.A{}
-	// The fold must select the same row set as the aggregate it decorates.
-	// GetUsageByUserPath filters against the canonical (trimmed,
-	// root-normalized) path expression it groups by, so its fold does too;
-	// the model/label aggregates filter the raw field, and so do theirs.
-	matchParams := params
-	if canonicalUserPath {
-		matchParams.UserPath = ""
-	}
-	matchFilters, err := mongoUsageMatchFilters(matchParams)
+	pipeline, err := mongoUsageCacheStatsPipeline(params, canonicalUserPath)
 	if err != nil {
 		return nil, err
 	}
-	if len(matchFilters) > 0 {
-		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
-	}
-	if canonicalUserPath {
-		userPath, err := normalizeUsageUserPathFilter(params.UserPath)
-		if err != nil {
-			return nil, err
-		}
-		if userPath != "" {
-			const canonicalUserPathField = "_gomodel_user_path"
-			pipeline = append(pipeline,
-				bson.D{{Key: "$addFields", Value: bson.D{
-					{Key: canonicalUserPathField, Value: mongoUsageGroupedUserPathExpr()},
-				}}},
-				bson.D{{Key: "$match", Value: bson.D{{Key: canonicalUserPathField, Value: bson.D{
-					{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
-				}}}}},
-			)
-		}
-	}
-	pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{
-		{Key: "model", Value: 1},
-		{Key: "provider", Value: 1},
-		{Key: "provider_name", Value: 1},
-		{Key: "user_path", Value: 1},
-		{Key: "labels", Value: 1},
-		{Key: "cache_type", Value: 1},
-		{Key: "input_tokens", Value: 1},
-		{Key: "output_tokens", Value: 1},
-		{Key: "raw_data", Value: 1},
-	}}})
 
 	cursor, err := r.collection.Aggregate(ctx, pipeline)
 	if err != nil {
@@ -375,6 +334,73 @@ func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryPa
 	return out, nil
 }
 
+// mongoCanonicalUserPathField is the synthetic field holding the canonical
+// (trimmed, root-normalized) user path the user-path aggregate groups by.
+const mongoCanonicalUserPathField = "_gomodel_user_path"
+
+// mongoCanonicalUserPathAddFieldsStage materializes the canonical user path
+// on each document.
+func mongoCanonicalUserPathAddFieldsStage() bson.D {
+	return bson.D{{Key: "$addFields", Value: bson.D{
+		{Key: mongoCanonicalUserPathField, Value: mongoUsageGroupedUserPathExpr()},
+	}}}
+}
+
+// mongoCanonicalUserPathMatchStage narrows to the subtree of userPath,
+// matched against the canonical field (which must already be materialized).
+func mongoCanonicalUserPathMatchStage(userPath string) bson.D {
+	return bson.D{{Key: "$match", Value: bson.D{{Key: mongoCanonicalUserPathField, Value: bson.D{
+		{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
+	}}}}}
+}
+
+// mongoUsageCacheStatsPipeline builds the fold's aggregation pipeline. The
+// fold must select the same row set as the aggregate it decorates:
+// GetUsageByUserPath filters against the canonical path expression it groups
+// by, so with canonicalUserPath the user-path filter moves onto the
+// materialized canonical field; the model/label aggregates filter the raw
+// field, and so do their folds. Cache mode is always widened to "all" so
+// local-cache rows are counted.
+func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath bool) (bson.A, error) {
+	params.CacheMode = CacheModeAll
+	matchParams := params
+	if canonicalUserPath {
+		matchParams.UserPath = ""
+	}
+	matchFilters, err := mongoUsageMatchFilters(matchParams)
+	if err != nil {
+		return nil, err
+	}
+	pipeline := bson.A{}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	if canonicalUserPath {
+		userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+		if err != nil {
+			return nil, err
+		}
+		if userPath != "" {
+			pipeline = append(pipeline,
+				mongoCanonicalUserPathAddFieldsStage(),
+				mongoCanonicalUserPathMatchStage(userPath),
+			)
+		}
+	}
+	pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{
+		{Key: "model", Value: 1},
+		{Key: "provider", Value: 1},
+		{Key: "provider_name", Value: 1},
+		{Key: "user_path", Value: 1},
+		{Key: "labels", Value: 1},
+		{Key: "cache_type", Value: 1},
+		{Key: "input_tokens", Value: 1},
+		{Key: "output_tokens", Value: 1},
+		{Key: "raw_data", Value: 1},
+	}}})
+	return pipeline, nil
+}
+
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
 func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQueryParams) ([]UserPathUsage, error) {
 	pipeline := bson.A{}
@@ -388,23 +414,18 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
 
-	const canonicalUserPathField = "_gomodel_user_path"
-	pipeline = append(pipeline, bson.D{{Key: "$addFields", Value: bson.D{
-		{Key: canonicalUserPathField, Value: mongoUsageGroupedUserPathExpr()},
-	}}})
+	pipeline = append(pipeline, mongoCanonicalUserPathAddFieldsStage())
 
 	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
 	if err != nil {
 		return nil, err
 	}
 	if userPath != "" {
-		pipeline = append(pipeline, bson.D{{Key: "$match", Value: bson.D{{Key: canonicalUserPathField, Value: bson.D{
-			{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
-		}}}}})
+		pipeline = append(pipeline, mongoCanonicalUserPathMatchStage(userPath))
 	}
 
 	pipeline = append(pipeline, bson.D{{Key: "$group", Value: bson.D{
-		{Key: "_id", Value: "$" + canonicalUserPathField},
+		{Key: "_id", Value: "$" + mongoCanonicalUserPathField},
 		{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
 		{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
 		{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},

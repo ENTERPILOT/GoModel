@@ -169,3 +169,61 @@ func TestMongoUsageLogRowDecodesRewriteSavings(t *testing.T) {
 		})
 	}
 }
+
+// The user-path fold must select the same row set as the user-path aggregate:
+// the raw-field filter is cleared and the subtree match runs against the
+// materialized canonical (trimmed, root-normalized) path instead — via the
+// same shared stages the aggregate itself uses.
+func TestMongoUsageCacheStatsPipelineCanonicalUserPath(t *testing.T) {
+	params := UsageQueryParams{UserPath: "/team/alpha", Model: "gpt-5"}
+
+	pipeline, err := mongoUsageCacheStatsPipeline(params, true)
+	if err != nil {
+		t.Fatalf("mongoUsageCacheStatsPipeline returned error: %v", err)
+	}
+	if len(pipeline) != 4 {
+		t.Fatalf("expected 4 stages (match, addFields, canonical match, project), got %d: %#v", len(pipeline), pipeline)
+	}
+
+	// Stage 1: base filters with the raw user_path condition cleared — the
+	// model filter stays, the subtree match moves to the canonical stage.
+	wantBase, err := mongoUsageMatchFilters(UsageQueryParams{Model: "gpt-5", CacheMode: CacheModeAll})
+	if err != nil {
+		t.Fatalf("mongoUsageMatchFilters returned error: %v", err)
+	}
+	if !reflect.DeepEqual(pipeline[0], bson.D{{Key: "$match", Value: wantBase}}) {
+		t.Fatalf("unexpected base match stage: %#v", pipeline[0])
+	}
+
+	// Stages 2-3: identical canonical stages to the aggregate's own.
+	if !reflect.DeepEqual(pipeline[1], mongoCanonicalUserPathAddFieldsStage()) {
+		t.Fatalf("unexpected addFields stage: %#v", pipeline[1])
+	}
+	if !reflect.DeepEqual(pipeline[2], mongoCanonicalUserPathMatchStage("/team/alpha")) {
+		t.Fatalf("unexpected canonical match stage: %#v", pipeline[2])
+	}
+}
+
+// Model/label folds keep filtering the raw user_path field, matching their
+// aggregates; no canonical stages are inserted.
+func TestMongoUsageCacheStatsPipelineRawUserPath(t *testing.T) {
+	params := UsageQueryParams{UserPath: "/team/alpha"}
+
+	pipeline, err := mongoUsageCacheStatsPipeline(params, false)
+	if err != nil {
+		t.Fatalf("mongoUsageCacheStatsPipeline returned error: %v", err)
+	}
+	if len(pipeline) != 2 {
+		t.Fatalf("expected 2 stages (match, project), got %d: %#v", len(pipeline), pipeline)
+	}
+
+	wantParams := params
+	wantParams.CacheMode = CacheModeAll
+	want, err := mongoUsageMatchFilters(wantParams)
+	if err != nil {
+		t.Fatalf("mongoUsageMatchFilters returned error: %v", err)
+	}
+	if !reflect.DeepEqual(pipeline[0], bson.D{{Key: "$match", Value: want}}) {
+		t.Fatalf("unexpected match stage: %#v", pipeline[0])
+	}
+}
