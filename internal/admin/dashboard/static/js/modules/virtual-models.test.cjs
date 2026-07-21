@@ -158,6 +158,39 @@ test('Models page renders large inventories in paint-separated batches', () => {
     assert.strictEqual(module.filteredDisplayModelGroups, module.displayModelGroups);
 });
 
+test('Leaving the Models page stops queued render batches', () => {
+    const frames = [];
+    const timers = [];
+    const module = createAliasesModule({
+        window: {
+            requestAnimationFrame(callback) {
+                frames.push(callback);
+            },
+            setTimeout(callback) {
+                timers.push(callback);
+            }
+        }
+    });
+    module.page = 'models';
+    module.modelsLoading = false;
+    module.modelRenderBatchSize = 50;
+    module.models = Array.from({ length: 130 }, (_, index) => ({
+        provider_name: 'provider',
+        provider_type: 'test',
+        selector: `provider/model-${index}`,
+        model: { id: `model-${index}`, object: 'model', owned_by: 'test' }
+    }));
+
+    module.syncDisplayModels();
+    module.page = 'usage';
+    frames.shift()();
+    timers.shift()();
+
+    assert.equal(module.modelRenderLimit, 50);
+    assert.equal(frames.length, 0);
+    assert.equal(timers.length, 0);
+});
+
 test('qualifiedModelName prefers selector when available', () => {
     const module = createAliasesModule();
     const model = {

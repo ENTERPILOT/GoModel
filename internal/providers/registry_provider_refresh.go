@@ -70,7 +70,7 @@ func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelec
 
 	if fetched.totalModels == 0 {
 		if fetched.failedProviders == len(providers) {
-			r.applyProviderRuntimeUpdates(fetched.runtimeUpdates)
+			r.applyFetchedProviderRuntimeUpdates(&fetched)
 			r.markFailedRefreshProvidersStale(fetched)
 			return 0, core.NewProviderError(providerSelector, http.StatusServiceUnavailable, "failed to refresh provider models", fetchedProviderRefreshError(fetched))
 		}
