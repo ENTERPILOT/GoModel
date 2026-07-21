@@ -11,6 +11,26 @@ key" — auth flows from cloud credentials, deployment-based URLs, region or
 project requirements, dual native + OpenAI-compatible API surfaces, or other
 quirks.
 
+## Configuring providers without env vars
+
+Every credential below (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...) can
+instead be set from the **Providers** page in the admin dashboard
+(`/admin/dashboard`) — no restart required. This is the easiest way to run
+GoModel with zero provider env vars: start the gateway with none configured
+(the catalog starts empty; the gateway still boots and serves the dashboard),
+then add providers from the UI. A provider added this way registers into the
+running gateway immediately.
+
+Providers declared via env vars or `config.yaml` always take precedence: a
+name configured either way is **read-only** in the dashboard (shown with a
+"Config" badge), the same rule GoModel already applies to MCP servers,
+virtual models, and rate limits. API keys and service-account secrets are
+masked (`***`) once saved — editing a provider re-sends `***` for anything you
+didn't change, and the gateway keeps the stored value. Disabling a provider
+(rather than deleting it) unregisters it from routing but keeps its
+configuration on file. The same multi-key rotation env vars support
+(`api_keys`, an ordered list) is available from the dashboard form.
+
 ## Supported providers
 
 Example model identifiers are illustrative and subject to change; consult

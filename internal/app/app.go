@@ -48,26 +48,27 @@ import (
 // App represents the main application with all its dependencies.
 // It provides centralized lifecycle management for all components.
 type App struct {
-	config           *config.Config
-	providers        *providers.InitResult
-	audit            *auditlog.Result
-	usage            *usage.Result
-	budgets          *budget.Result
-	rateLimits       *ratelimit.Result
-	batch            *batch.Result
-	fileStore        *filestore.Result
-	responseStore    *responsestore.Result
-	conversations    *conversationstore.Result
-	virtualModels    *virtualmodels.Result
-	failover         *failover.Result
-	tagging          *tagging.Result
-	mcpGateway       *mcpgateway.Result
-	pricingOverrides *pricingoverrides.Result
-	authKeys         *authkeys.Result
-	guardrails       *guardrails.Result
-	workflows        *workflows.Result
-	live             *live.Broker
-	server           *server.Server
+	config              *config.Config
+	providers           *providers.InitResult
+	audit               *auditlog.Result
+	usage               *usage.Result
+	budgets             *budget.Result
+	rateLimits          *ratelimit.Result
+	batch               *batch.Result
+	fileStore           *filestore.Result
+	responseStore       *responsestore.Result
+	conversations       *conversationstore.Result
+	virtualModels       *virtualmodels.Result
+	failover            *failover.Result
+	tagging             *tagging.Result
+	mcpGateway          *mcpgateway.Result
+	providerCredentials *providers.CredentialsResult
+	pricingOverrides    *pricingoverrides.Result
+	authKeys            *authkeys.Result
+	guardrails          *guardrails.Result
+	workflows           *workflows.Result
+	live                *live.Broker
+	server              *server.Server
 
 	shutdownMu  sync.Mutex
 	shutdown    bool
@@ -333,6 +334,39 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	for name := range cfg.AppConfig.RawProviders {
 		declaredProviders = append(declaredProviders, name)
 	}
+
+	// Provider credentials store: the dashboard alternative to setting
+	// provider API keys as env vars. Declared (config.yaml/env) provider
+	// names are read-only here; admin-managed rows are hot-registered into
+	// the same registry/factory providers.Init already built, so a provider
+	// added from the dashboard routes traffic without a restart.
+	//
+	// The "managed" (read-only) name set must be broader than declaredProviders
+	// above: that slice only covers YAML `providers:` keys, but a provider can
+	// also be declared purely through env vars with no config.yaml entry at
+	// all (e.g. OLLAMA_BASE_URL alone registers "ollama"). Every name
+	// providers.Init actually resolved and registered -- from either source --
+	// must be read-only here, or the dashboard could unregister and replace a
+	// live env-only provider out from under the operator.
+	managedProviderNames := make([]string, 0, len(declaredProviders)+len(providerResult.ConfiguredProviders))
+	managedProviderNames = append(managedProviderNames, declaredProviders...)
+	for _, resolved := range providerResult.ConfiguredProviders {
+		managedProviderNames = append(managedProviderNames, resolved.Name)
+	}
+
+	var providerCredentialsResult *providers.CredentialsResult
+	if sharedStorage != nil {
+		providerCredentialsResult, err = providers.NewCredentialsStoreWithSharedStorage(ctx, sharedStorage, providerResult.Factory, providerResult.Registry, managedProviderNames, appCfg.Resilience)
+	} else {
+		providerCredentialsResult, err = providers.NewCredentialsStore(ctx, appCfg, providerResult.Factory, providerResult.Registry, managedProviderNames)
+	}
+	if err != nil {
+		return fail("failed to initialize provider credentials store", err)
+	}
+	app.providerCredentials = providerCredentialsResult
+	closers = append(closers, app.providerCredentials.Close)
+	claimSharedStorage(providerCredentialsResult.Storage)
+
 	var virtualModelsResult *virtualmodels.Result
 	if sharedStorage != nil {
 		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry, declaredProviders)
@@ -640,6 +674,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			rateLimitResult.Service,
 			taggingResult.Service,
 			mcpResult,
+			app.providerCredentials,
 			app,
 			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, cfg.DemoMode),
 			app.live,
@@ -913,6 +948,14 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	// 3c. Close provider credentials subsystem.
+	if a.providerCredentials != nil {
+		if err := a.providerCredentials.Close(); err != nil {
+			slog.Error("provider credentials close error", "error", err)
+			errs = append(errs, fmt.Errorf("provider credentials close: %w", err))
+		}
+	}
+
 	// 4. Close virtual models subsystem (aliases + access overrides).
 	if a.virtualModels != nil {
 		if err := a.virtualModels.Close(); err != nil {
@@ -1101,6 +1144,7 @@ func initAdmin(
 	rateLimitService *ratelimit.Service,
 	taggingService *tagging.Service,
 	mcpResult *mcpgateway.Result,
+	providerCredentialsResult *providers.CredentialsResult,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	liveBroker *live.Broker,
@@ -1139,6 +1183,10 @@ func initAdmin(
 	if mcpResult != nil && mcpResult.Service != nil {
 		mcpOption = admin.WithMCPServers(mcpResult.Service)
 	}
+	var providerCredentialsOption admin.Option
+	if providerCredentialsResult != nil && providerCredentialsResult.Service != nil {
+		providerCredentialsOption = admin.WithProviderCredentials(providerCredentialsResult.Service)
+	}
 
 	adminHandler := admin.NewHandler(
 		reader,
@@ -1157,6 +1205,7 @@ func initAdmin(
 		admin.WithRateLimits(rateLimitService),
 		admin.WithTagging(taggingService),
 		mcpOption,
+		providerCredentialsOption,
 		admin.WithRuntimeRefresher(runtimeRefresher),
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 		admin.WithLiveBroker(liveBroker),

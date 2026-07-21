@@ -174,6 +174,45 @@ func TestInit_AllowsStartupWhenProviderIsUnavailable(t *testing.T) {
 	}
 }
 
+// TestInit_SucceedsWithNoProvidersConfigured verifies GoModel can boot with
+// zero env var/config.yaml providers (e.g. all credentials come from the
+// dashboard's provider-credentials store instead), rather than failing
+// startup as it did before that store existed.
+func TestInit_SucceedsWithNoProvidersConfigured(t *testing.T) {
+	ctx := t.Context()
+	factory := NewProviderFactory()
+
+	result, err := Init(ctx, &config.LoadResult{
+		Config: &config.Config{
+			Cache: config.CacheConfig{
+				Model: config.ModelCacheConfig{
+					RefreshInterval: 1,
+					Local: &config.LocalCacheConfig{
+						CacheDir: t.TempDir(),
+					},
+				},
+			},
+		},
+		RawProviders: map[string]config.RawProviderConfig{},
+	}, factory)
+	if err != nil {
+		t.Fatalf("Init() error = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		_ = result.Close()
+	})
+
+	if got := result.Registry.ProviderCount(); got != 0 {
+		t.Fatalf("ProviderCount() = %d, want 0", got)
+	}
+	if got := result.Registry.ModelCount(); got != 0 {
+		t.Fatalf("ModelCount() = %d, want 0", got)
+	}
+	if result.Router == nil {
+		t.Fatal("Router = nil, want a usable (empty) router")
+	}
+}
+
 func TestInit_NormalizesNilContext(t *testing.T) {
 	nilInitContext := func() context.Context {
 		return nil

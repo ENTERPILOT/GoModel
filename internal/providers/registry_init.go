@@ -43,6 +43,15 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 		configuredProviderModelsMode,
 	)
 
+	if len(providers) == 0 {
+		// Nothing is registered (e.g. the last admin-managed provider was just
+		// unregistered or disabled). That is a valid end state, not a failed
+		// sweep: apply the now-empty inventory instead of erroring and leaving
+		// the removed provider's stale models routable.
+		r.applyFetchedInventory(providerTypes, fetched, 0)
+		return nil
+	}
+
 	if fetched.totalModels == 0 {
 		// Deliberately keep the previous inventory fresh (no swap, no stale
 		// marking): when the whole sweep failed there is no healthy provider

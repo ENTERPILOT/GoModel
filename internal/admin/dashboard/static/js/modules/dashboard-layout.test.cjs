@@ -917,7 +917,7 @@ test("audit toolbar uses a full-width search row above the select row with a rig
   assert.match(selectRule, /cursor:\s*pointer/);
 
   const disabledSelectRule = readCSSRule(css, ".usage-log-select:disabled");
-  assert.match(disabledSelectRule, /cursor:\s*default/);
+  assert.match(disabledSelectRule, /cursor:\s*not-allowed/);
 
   const controlsRule = readCSSRule(
     css,

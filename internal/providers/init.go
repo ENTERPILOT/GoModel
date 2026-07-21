@@ -110,12 +110,16 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		return nil, err
 	}
 	if count == 0 {
-		modelCache.Close()
-		return nil, fmt.Errorf("no providers were successfully registered")
+		// No env var or config.yaml providers resolved. This is a supported
+		// startup state, not a failure: the gateway comes up with an empty
+		// catalog and operators add provider credentials from the dashboard
+		// (see CredentialsService), which registers them into this same
+		// registry without a restart.
+		slog.Warn("no providers configured via env vars or config.yaml; add provider credentials from the dashboard")
+	} else {
+		slog.Info("starting non-blocking model registry initialization...")
+		registry.InitializeAsync(ctx)
 	}
-
-	slog.Info("starting non-blocking model registry initialization...")
-	registry.InitializeAsync(ctx)
 
 	slog.Info("model registry configured",
 		"cached_models", registry.ModelCount(),

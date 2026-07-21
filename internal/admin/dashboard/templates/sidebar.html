@@ -16,6 +16,10 @@
             <i data-lucide="layout-dashboard" class="nav-icon" aria-hidden="true"></i>
             <span>Overview</span>
         </a>
+        <a href="{{appURL "/admin/dashboard/providers-config"}}" class="nav-item" :class="{ active: page === 'providers-config' }" title="Providers" @click.prevent="navigate('providers-config')">
+            <i data-lucide="server-cog" class="nav-icon" aria-hidden="true"></i>
+            <span>Providers</span>
+        </a>
         <a href="{{appURL "/admin/dashboard/models"}}" class="nav-item" :class="{ active: page === 'models' }" title="Models" @click.prevent="navigate('models')">
             <i data-lucide="box" class="nav-icon" aria-hidden="true"></i>
             <span>Models</span>

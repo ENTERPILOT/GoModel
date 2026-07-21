@@ -1,0 +1,282 @@
+{{define "dashboard-page-providers-config"}}
+<!-- Providers Page -->
+<template x-if="page==='providers-config'">
+<div>
+    <div class="page-header">
+        <div>
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'providers-config-help-copy', showLabel: 'Show model providers help', hideLabel: 'Hide model providers help', text: 'Configure LLM provider credentials here instead of setting API keys as environment variables. Providers declared in config.yaml or env vars are read-only (Config badge) and cannot be edited or deleted from the dashboard. Keys are masked after saving.' }">
+                <div class="inline-help-title-row">
+                    <h2>Providers</h2>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+        </div>
+        <div class="page-header-controls">
+            <button type="button"
+                    class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                    x-show="providerCredentialsAvailable && !authError"
+                    :disabled="providerCredentialFormSubmitting"
+                    @click="openProviderCredentialCreate()">
+                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                <span>Add Provider</span>
+            </button>
+        </div>
+    </div>
+
+    {{template "auth-banner" .}}
+
+    <div class="alert alert-warning" x-show="!providerCredentialsAvailable && !authError">
+        Provider credential management is unavailable.
+    </div>
+    <p class="form-error" x-show="providerCredentialError && !authError && !providerCredentialFormOpen" x-text="providerCredentialError" role="alert" aria-live="assertive"></p>
+    <div class="alert alert-success" x-show="providerCredentialNotice && !providerCredentialFormOpen" x-text="providerCredentialNotice" role="status" aria-live="polite"></div>
+    <div class="loading-state" x-show="providerCredentialsLoading && !authError">
+        <div class="loading-spinner"></div>
+        <span>Loading providers...</span>
+    </div>
+
+    <div class="table-toolbar" x-show="(providerCredentials.length > 0 || providerCredentialFilter) && providerCredentialsAvailable && !authError">
+        <div class="table-toolbar-main">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text"
+                       id="provider-credential-filter"
+                       class="filter-input"
+                       placeholder="Filter by name, type, or base URL..."
+                       aria-label="Filter providers by name, type, or base URL"
+                       x-model="providerCredentialFilter">
+            </div>
+        </div>
+    </div>
+
+    <div class="editor-modal-backdrop"
+         x-cloak
+         x-show="providerCredentialFormOpen"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="editor-modal-shell"
+         x-cloak
+         x-show="providerCredentialFormOpen"
+         x-transition.opacity.duration.160ms
+         @click="closeProviderCredentialForm()"
+         @keydown.escape.window="providerCredentialFormOpen && !authDialogOpen && closeProviderCredentialForm()">
+        <div class="model-editor" x-show="providerCredentialFormOpen" x-ref="providerCredentialEditor" role="dialog" aria-modal="true" aria-label="Provider credential editor" @click.stop>
+            <form class="form" @submit.prevent="submitProviderCredentialForm()">
+                <div class="editor-header">
+                    <div>
+                        <h3 x-text="providerCredentialFormMode === 'edit' ? 'Edit Provider' : 'Add Provider'"></h3>
+                        <p class="form-hint">The name is the stable identity used for routing and cannot change once created.</p>
+                    </div>
+                    <button type="button" class="dialog-close-btn" aria-label="Close provider editor" @click="closeProviderCredentialForm()">
+                        {{template "x-icon"}}
+                    </button>
+                </div>
+
+                <p class="form-error" x-show="providerCredentialError" x-text="providerCredentialError" role="alert" aria-live="assertive"></p>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="provider-credential-type">Type</label>
+                    <select id="provider-credential-type" class="form-select" x-model="providerCredentialForm.type" :disabled="providerCredentialFormMode === 'edit'" @change="onProviderCredentialTypeChange()" data-modal-autofocus>
+                        <option value="" disabled>Select a provider type&hellip;</option>
+                        <template x-for="type in providerCredentialTypeOptions()" :key="type">
+                            <option :value="type" x-text="type"></option>
+                        </template>
+                    </select>
+                    <small class="form-hint">Determines which fields the gateway uses to build requests.</small>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="provider-credential-name">Name</label>
+                    <input id="provider-credential-name" type="text" class="mono" placeholder="my-openai" x-model="providerCredentialForm.name" :disabled="providerCredentialFormMode === 'edit'">
+                    <small class="form-hint" x-show="providerCredentialFormMode === 'create'">Suggested from the selected type; used to route requests to this provider instance and editable before saving.</small>
+                    <small class="form-hint" x-show="providerCredentialFormMode === 'edit'">Immutable once created.</small>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field-label">API Keys</label>
+                    <div class="vm-target-list">
+                        <template x-for="(key, index) in providerCredentialForm.api_keys" :key="index">
+                            <div class="vm-target-row">
+                                <input type="text" class="mono vm-target-model" placeholder="sk-..." x-model="key.value" aria-label="API key value">
+                                <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn vm-target-remove" @click="removeApiKeyRow(index)" aria-label="Remove API key" title="Remove API key">
+                                    {{template "trash-icon"}}
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="failover-target-actions">
+                        <button type="button" class="pagination-btn pagination-btn-with-icon" @click="addApiKeyRow()">
+                            <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                            <span>Add key</span>
+                        </button>
+                    </div>
+                    <small class="form-hint">Multiple keys rotate round-robin. Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored key. Not every provider type needs a key (e.g. Ollama, or Vertex/Bedrock using ADC).</small>
+                </div>
+
+                <div class="vm-status-row">
+                    <div class="vm-status-toggle">
+                        <button type="button" class="alias-toggle"
+                                :class="{ enabled: providerCredentialForm.enabled }"
+                                :aria-label="(providerCredentialForm.enabled ? 'Disable' : 'Enable') + ' provider'"
+                                @click="providerCredentialForm.enabled = !providerCredentialForm.enabled">
+                            <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                            <span x-text="providerCredentialForm.enabled ? 'Enabled' : 'Disabled'"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <details class="mcp-server-advanced"
+                         :open="providerCredentialAdvancedOpen"
+                         @toggle="providerCredentialAdvancedOpen = $event.target.open">
+                    <summary>
+                        <span class="mcp-server-advanced-summary-copy">
+                            <span class="mcp-server-advanced-title">Advanced settings</span>
+                            <span class="form-hint">Base URL, models, API version, auth mode, and Vertex/Bedrock/service-account fields</span>
+                        </span>
+                    </summary>
+
+                    <div class="mcp-server-advanced-fields">
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-base-url">Base URL</label>
+                            <input id="provider-credential-base-url" type="text" class="mono" placeholder="Optional endpoint override" x-model="providerCredentialForm.base_url">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-models">Models (optional, comma-separated)</label>
+                            <input id="provider-credential-models" type="text" class="mono" placeholder="gpt-4o, gpt-4o-mini" x-model="providerCredentialForm.models">
+                            <small class="form-hint">Leave empty to auto-discover models from the provider's <code>/models</code> endpoint where supported.</small>
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-api-version">API Version</label>
+                            <input id="provider-credential-api-version" type="text" class="mono" placeholder="Optional, e.g. Azure API version" x-model="providerCredentialForm.api_version">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-backend">Backend</label>
+                            <input id="provider-credential-backend" type="text" class="mono" placeholder="Optional backend selector" x-model="providerCredentialForm.backend">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-auth-type">Auth Type</label>
+                            <input id="provider-credential-auth-type" type="text" class="mono" placeholder="Optional auth mode override" x-model="providerCredentialForm.auth_type">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-api-mode">API Mode</label>
+                            <input id="provider-credential-api-mode" type="text" class="mono" placeholder="Optional, e.g. auto, openai, standard" x-model="providerCredentialForm.api_mode">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-vertex-project">Vertex Project</label>
+                            <input id="provider-credential-vertex-project" type="text" class="mono" x-model="providerCredentialForm.vertex_project">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-vertex-location">Vertex Location</label>
+                            <input id="provider-credential-vertex-location" type="text" class="mono" x-model="providerCredentialForm.vertex_location">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-service-account-file">Service Account File</label>
+                            <input id="provider-credential-service-account-file" type="text" class="mono" placeholder="/path/to/service-account.json" x-model="providerCredentialForm.service_account_file">
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-service-account-json">Service Account JSON</label>
+                            <textarea id="provider-credential-service-account-json" rows="4" class="mono" placeholder="Paste service account JSON" x-model="providerCredentialForm.service_account_json"></textarea>
+                            <small class="form-hint">Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored value, or clear it to remove.</small>
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-service-account-json-base64">Service Account JSON (base64)</label>
+                            <input id="provider-credential-service-account-json-base64" type="text" class="mono" x-model="providerCredentialForm.service_account_json_base64">
+                            <small class="form-hint">Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored value.</small>
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-field-label" for="provider-credential-gcp-scope">GCP Scope</label>
+                            <input id="provider-credential-gcp-scope" type="text" class="mono" x-model="providerCredentialForm.gcp_scope">
+                        </div>
+                    </div>
+                </details>
+
+                <div class="form-actions">
+                    <button type="button" class="pagination-btn" @click="closeProviderCredentialForm()">Cancel</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" :disabled="providerCredentialFormSubmitting">
+                        <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="providerCredentialFormSubmitting ? 'Saving...' : 'Save'"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="table-wrapper" x-show="filteredProviderCredentials.length > 0 && providerCredentialsAvailable && !authError">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Base URL</th>
+                    <th>Auth</th>
+                    <th>Models</th>
+                    <th>Enabled</th>
+                    <th>Updated</th>
+                    <th class="col-actions">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="row in filteredProviderCredentials" :key="row.name">
+                    <tr>
+                        <td>
+                            <span class="font-size-md" x-text="row.name"></span>
+                            <span class="alias-kind-badge" x-show="row.managed" title="Declared in configuration (config.yaml or env vars); read-only in the dashboard">Config</span>
+                        </td>
+                        <td><span class="budget-source mono" x-text="row.type"></span></td>
+                        <td class="mono font-size-md" :title="row.base_url || ''" x-text="row.base_url || '—'"></td>
+                        <td x-text="providerCredentialAuthLabel(row)"></td>
+                        <td x-text="providerCredentialModelsLabel(row)"></td>
+                        <td>
+                            <span class="auth-key-status-badge"
+                                  :class="row.enabled ? 'auth-key-status-active' : 'auth-key-status-inactive'"
+                                  x-text="row.enabled ? 'Enabled' : 'Disabled'"></span>
+                        </td>
+                        <td x-text="formatTimestamp(row.updated_at)"></td>
+                        <td class="col-actions">
+                            <div class="alias-actions-cell">
+                                <button type="button" class="table-action-btn table-icon-btn"
+                                    x-show="!row.managed"
+                                    :aria-label="'Edit provider ' + row.name"
+                                    :title="'Edit provider ' + row.name"
+                                    @click="openProviderCredentialEdit(row)">
+                                    {{template "edit-icon"}}
+                                </button>
+                                <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                    x-show="!row.managed"
+                                    :disabled="providerCredentialDeletingName === row.name"
+                                    :aria-label="providerCredentialDeletingName === row.name ? 'Deleting provider ' + row.name : 'Delete provider ' + row.name"
+                                    :title="providerCredentialDeletingName === row.name ? 'Deleting provider ' + row.name : 'Delete provider ' + row.name"
+                                    @click="deleteProviderCredential(row.name)">
+                                    {{template "x-icon"}}
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="empty-state"
+       x-show="providerCredentials.length === 0 && !providerCredentialFilter && !providerCredentialsLoading && !authError && !providerCredentialError && providerCredentialsAvailable">
+        No dashboard-managed providers yet. Add one here, or declare providers in <code>config.yaml</code> / environment variables.
+    </p>
+    <p class="empty-state"
+       x-show="providerCredentials.length > 0 && filteredProviderCredentials.length === 0 && providerCredentialFilter && !providerCredentialsLoading && !authError && providerCredentialsAvailable">
+        No providers match your filter.
+    </p>
+</div>
+</template>
+{{end}}
