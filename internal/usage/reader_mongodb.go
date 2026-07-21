@@ -278,7 +278,7 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 		return nil, fmt.Errorf("error iterating usage by model cursor: %w", err)
 	}
 
-	stats, err := r.usageCacheStats(ctx, params, modelGroupKeys)
+	stats, err := r.usageCacheStats(ctx, params, false, modelGroupKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +291,7 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 // and folds cache figures per group. For uncached-mode requests (the
 // default) it streams with cache mode "all" so local-cache rows are counted
 // even though the aggregates exclude them.
-func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryParams, keysFor groupKeysFunc) (map[string]*GroupCacheStats, error) {
+func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryParams, canonicalUserPath bool, keysFor groupKeysFunc) (map[string]*GroupCacheStats, error) {
 	// The cache fields describe uncached-mode aggregates: for cached/all
 	// modes the local tokens are already inside the aggregate sums (and the
 	// provider split would not partition them), so the pass is skipped and
@@ -300,13 +300,38 @@ func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryPa
 		return nil, nil
 	}
 	params.CacheMode = CacheModeAll
-	matchFilters, err := mongoUsageMatchFilters(params)
+	pipeline := bson.A{}
+	// The fold must select the same row set as the aggregate it decorates.
+	// GetUsageByUserPath filters against the canonical (trimmed,
+	// root-normalized) path expression it groups by, so its fold does too;
+	// the model/label aggregates filter the raw field, and so do theirs.
+	matchParams := params
+	if canonicalUserPath {
+		matchParams.UserPath = ""
+	}
+	matchFilters, err := mongoUsageMatchFilters(matchParams)
 	if err != nil {
 		return nil, err
 	}
-	pipeline := bson.A{}
 	if len(matchFilters) > 0 {
 		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	if canonicalUserPath {
+		userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+		if err != nil {
+			return nil, err
+		}
+		if userPath != "" {
+			const canonicalUserPathField = "_gomodel_user_path"
+			pipeline = append(pipeline,
+				bson.D{{Key: "$addFields", Value: bson.D{
+					{Key: canonicalUserPathField, Value: mongoUsageGroupedUserPathExpr()},
+				}}},
+				bson.D{{Key: "$match", Value: bson.D{{Key: canonicalUserPathField, Value: bson.D{
+					{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
+				}}}}},
+			)
+		}
 	}
 	pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{
 		{Key: "model", Value: 1},
@@ -433,7 +458,7 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 		return nil, fmt.Errorf("error iterating usage by user path cursor: %w", err)
 	}
 
-	stats, err := r.usageCacheStats(ctx, params, userPathGroupKeys)
+	stats, err := r.usageCacheStats(ctx, params, true, userPathGroupKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +555,7 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 		return nil, err
 	}
 
-	stats, err := r.usageCacheStats(ctx, params, labelGroupKeys)
+	stats, err := r.usageCacheStats(ctx, params, false, labelGroupKeys)
 	if err != nil {
 		return nil, err
 	}

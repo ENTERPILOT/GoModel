@@ -231,6 +231,67 @@ func TestSQLiteCacheStatsSkippedOutsideUncachedMode(t *testing.T) {
 	}
 }
 
+// Err completes the inputSegmentRows interface for the shared pgx-style
+// fixture; the fake never fails mid-iteration.
+func (f *fakePgxRows) Err() error { return nil }
+
+// TestFoldUsageCacheRowsScansNullableColumns drives the SQL-backend scan
+// path through the same pgx-style row interface the PostgreSQL reader uses,
+// covering nil provider_name/user_path/labels/cache_type/raw_data columns,
+// label expansion, and the local-vs-provider row split.
+func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
+	str := func(s string) *string { return &s }
+	rows := &fakePgxRows{rows: [][]any{
+		// model, provider, provider_name, user_path, labels, cache_type, input, output, raw_data
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`)},
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, str(CacheTypeExact), 100, 20, nil},
+		{"gpt-4o", "openai", nil, nil, nil, nil, 40, 10, nil},
+	}}
+
+	stats, err := foldUsageCacheRows(rows, modelGroupKeys)
+	if err != nil {
+		t.Fatalf("foldUsageCacheRows returned error: %v", err)
+	}
+
+	gpt5 := stats[usageModelGroupKey("gpt-5", "openai", " primary ")]
+	if gpt5 == nil {
+		t.Fatalf("expected gpt-5 stats, got %#v", stats)
+	}
+	if gpt5.CachedInputTokens != 60 || gpt5.UncachedInputTokens != 40 {
+		t.Fatalf("unexpected gpt-5 split: %+v", gpt5)
+	}
+	if gpt5.LocalCachedInputTokens != 100 || gpt5.LocalCachedOutputTokens != 20 || gpt5.LocalRequests != 1 {
+		t.Fatalf("unexpected gpt-5 local stats: %+v", gpt5)
+	}
+	if gpt5.ProviderName != "primary" {
+		t.Fatalf("expected trimmed provider name identity, got %q", gpt5.ProviderName)
+	}
+	key := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary"}
+	if gpt5.CachedTokensByPricing[key] != 60 {
+		t.Fatalf("unexpected pricing breakdown: %#v", gpt5.CachedTokensByPricing)
+	}
+
+	gpt4o := stats[usageModelGroupKey("gpt-4o", "openai", "")]
+	if gpt4o == nil || gpt4o.UncachedInputTokens != 40 || gpt4o.CachedInputTokens != 0 {
+		t.Fatalf("unexpected gpt-4o stats: %+v", gpt4o)
+	}
+
+	// The same rows folded per label: only the labelled row contributes.
+	labelRows := &fakePgxRows{rows: [][]any{
+		{"gpt-5", "openai", nil, nil, str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`)},
+	}}
+	labelStats, err := foldUsageCacheRows(labelRows, labelGroupKeys)
+	if err != nil {
+		t.Fatalf("foldUsageCacheRows returned error: %v", err)
+	}
+	if labelStats["prod"] == nil || labelStats["batch"] == nil {
+		t.Fatalf("expected stats under both labels, got %#v", labelStats)
+	}
+	if labelStats["prod"].CachedInputTokens != 60 || labelStats["batch"].CachedInputTokens != 60 {
+		t.Fatalf("expected the row's cached tokens under each label, got %#v", labelStats)
+	}
+}
+
 type mapPricingResolver map[string]*core.ModelPricing
 
 func (r mapPricingResolver) ResolvePricing(model, providerType string) *core.ModelPricing {
