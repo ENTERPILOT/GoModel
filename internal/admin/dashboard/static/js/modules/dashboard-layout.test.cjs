@@ -102,6 +102,12 @@ test("demo notice scrolls normally while page date ranges stay sticky", () => {
   const css = readFixture("../../css/dashboard.css");
 
   assert.match(layout, /<aside class="demo-mode-banner"/);
+  assert.match(
+    layout,
+    /href="https:\/\/gomodel\.enterpilot\.io\/"[^>]*>gomodel\.enterpilot\.io<\/a>/,
+  );
+  assert.doesNotMatch(layout, /href="https:\/\/gomodel\.enterpilot\.io\/docs"/);
+  assert.doesNotMatch(layout, /href="https:\/\/github\.com\/ENTERPILOT\/GoModel"/);
   const demoRule = readCSSRule(css, ".demo-mode-banner");
   assert.doesNotMatch(demoRule, /position:\s*sticky/);
   assert.doesNotMatch(demoRule, /top:\s*\d/);

@@ -99,22 +99,16 @@ func TestIndex_DemoModeShowsWarning(t *testing.T) {
 	if !strings.Contains(body, "Do not enter sensitive or personal data. Demo data is reset regularly.") {
 		t.Error("expected demo mode data warning in page HTML")
 	}
-	links := []struct {
-		label string
-		href  string
-		text  string
-	}{
-		{label: "website", href: "https://gomodel.enterpilot.io/", text: "gomodel.enterpilot.io"},
-		{label: "docs", href: "https://gomodel.enterpilot.io/docs", text: "Docs"},
-		{label: "GitHub", href: "https://github.com/ENTERPILOT/GoModel", text: "GitHub"},
+	if !strings.Contains(body, `href="https://gomodel.enterpilot.io/" target="_blank" rel="noopener noreferrer">gomodel.enterpilot.io</a>`) {
+		t.Error("expected demo mode website link in page HTML")
 	}
-	for _, link := range links {
-		if !strings.Contains(body, `href="`+link.href+`" target="_blank" rel="noopener noreferrer">`+link.text+`</a>`) {
-			t.Errorf("expected demo mode %s link in page HTML", link.label)
+	for _, unwanted := range []string{
+		`href="https://gomodel.enterpilot.io/docs"`,
+		`href="https://github.com/ENTERPILOT/GoModel"`,
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("unexpected demo mode link %s in page HTML", unwanted)
 		}
-	}
-	if got := strings.Count(body, `target="_blank" rel="noopener noreferrer"`); got < len(links) {
-		t.Errorf("demo mode external links with safe target attributes = %d, want at least %d", got, len(links))
 	}
 }
 
