@@ -69,6 +69,14 @@ support, not every individual model capability exposed by an upstream provider.
 
 - **Z.ai GLM Coding Plan** — set
   `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+- **MiniMax regions and current text models** — the default global endpoint is
+  `https://api.minimax.io/v1`; accounts on the China platform should set
+  `MINIMAX_BASE_URL=https://api.minimaxi.com/v1`. The current text model IDs
+  are `MiniMax-M3` (1,000,000-token context; text, image, and video input) and
+  `MiniMax-M2.7` (204,800-token context; text input). Per-million-token USD
+  pricing is $0.60 input, $2.40 output, and $0.12 cached input for M3, and
+  $0.30 input, $1.20 output, $0.06 cached input, and $0.375 cache writes for
+  M2.7. M3 supports adaptive or disabled thinking; M2.7 always thinks.
 - **Amazon Bedrock Mantle** — GPT-5.6 Sol, Terra, and Luna accept only the
   Responses API on Mantle. GoModel sends `/v1/responses` requests directly to
   AWS and selects the required `/openai/v1/responses` upstream path.
