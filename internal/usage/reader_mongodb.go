@@ -339,7 +339,7 @@ func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryPa
 const mongoCanonicalUserPathField = "_gomodel_user_path"
 
 // mongoCanonicalUserPathAddFieldsStage materializes the canonical user path
-// on each document.
+// mongoCanonicalUserPathAddFieldsStage creates a MongoDB aggregation stage that adds the canonical user path to each document.
 func mongoCanonicalUserPathAddFieldsStage() bson.D {
 	return bson.D{{Key: "$addFields", Value: bson.D{
 		{Key: mongoCanonicalUserPathField, Value: mongoUsageGroupedUserPathExpr()},
@@ -347,7 +347,7 @@ func mongoCanonicalUserPathAddFieldsStage() bson.D {
 }
 
 // mongoCanonicalUserPathMatchStage narrows to the subtree of userPath,
-// matched against the canonical field (which must already be materialized).
+// mongoCanonicalUserPathMatchStage builds a MongoDB match stage for a user-path subtree on the canonical user-path field.
 func mongoCanonicalUserPathMatchStage(userPath string) bson.D {
 	return bson.D{{Key: "$match", Value: bson.D{{Key: mongoCanonicalUserPathField, Value: bson.D{
 		{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
@@ -360,7 +360,9 @@ func mongoCanonicalUserPathMatchStage(userPath string) bson.D {
 // by, so with canonicalUserPath the user-path filter moves onto the
 // materialized canonical field; the model/label aggregates filter the raw
 // field, and so do their folds. Cache mode is always widened to "all" so
-// local-cache rows are counted.
+// mongoUsageCacheStatsPipeline builds a MongoDB aggregation pipeline for cache statistics,
+// including local-cache rows and optionally filtering by canonical user path. It returns an
+// error if the usage filters or user path cannot be normalized.
 func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath bool) (bson.A, error) {
 	params.CacheMode = CacheModeAll
 	matchParams := params
@@ -585,6 +587,7 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 	return result, nil
 }
 
+// mongoUsageGroupedProviderNameExpr builds the MongoDB expression used to derive a grouped provider name, preferring a trimmed provider name and falling back to the trimmed provider value.
 func mongoUsageGroupedProviderNameExpr() bson.D {
 	trimmedProviderName := bson.D{{Key: "$trim", Value: bson.D{
 		{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$provider_name", ""}}}},

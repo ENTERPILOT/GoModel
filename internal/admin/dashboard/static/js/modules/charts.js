@@ -1,4 +1,8 @@
 (function(global) {
+    /**
+     * Create chart configuration, data-preparation, and rendering helpers for the dashboard.
+     * @return {Object} The dashboard chart helper and lifecycle methods.
+     */
     function dashboardChartsModule() {
         return {
             // --- Shared overview chart styling, so the line (Daily Token Usage)

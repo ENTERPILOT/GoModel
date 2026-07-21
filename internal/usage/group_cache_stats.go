@@ -54,7 +54,7 @@ type usageCacheStatRow struct {
 type groupKeysFunc func(row usageCacheStatRow) []string
 
 // usageModelGroupKey mirrors the SQL grouping (model, provider,
-// COALESCE(NULLIF(TRIM(provider_name), ”), provider)).
+// usageModelGroupKey builds a grouping key from the model, provider, and provider name, using the provider when the trimmed provider name is empty.
 func usageModelGroupKey(model, provider, providerName string) string {
 	name := strings.TrimSpace(providerName)
 	if name == "" {
@@ -64,7 +64,7 @@ func usageModelGroupKey(model, provider, providerName string) string {
 }
 
 // usageUserPathGroupKey mirrors usageGroupedUserPathSQL: blank paths collapse
-// to the tracked root.
+// usageUserPathGroupKey normalizes a user path, using "/" when the path is empty or contains only whitespace.
 func usageUserPathGroupKey(userPath string) string {
 	path := strings.TrimSpace(userPath)
 	if path == "" {
@@ -73,19 +73,24 @@ func usageUserPathGroupKey(userPath string) string {
 	return path
 }
 
+// modelGroupKeys returns the model and provider grouping key for a usage cache-stat row.
 func modelGroupKeys(row usageCacheStatRow) []string {
 	return []string{usageModelGroupKey(row.Model, row.Provider, row.ProviderName)}
 }
 
+// userPathGroupKeys returns the grouping key for a usage row's user path.
 func userPathGroupKeys(row usageCacheStatRow) []string {
 	return []string{usageUserPathGroupKey(row.UserPath)}
 }
 
+// labelGroupKeys returns the labels associated with a usage cache statistic row as grouping keys.
 func labelGroupKeys(row usageCacheStatRow) []string {
 	return row.Labels
 }
 
-// accumulateGroupCacheStats folds one row into every group it belongs to.
+// accumulateGroupCacheStats folds a usage row into each group identified by the grouping function.
+// Local-cache rows update local token and request totals; other rows update uncached, cached, and
+// cache-write token totals and record cached tokens by pricing identity.
 func accumulateGroupCacheStats(out map[string]*GroupCacheStats, keysFor groupKeysFunc, row usageCacheStatRow) {
 	keys := keysFor(row)
 	if len(keys) == 0 {
@@ -140,7 +145,8 @@ func accumulateGroupCacheStats(out map[string]*GroupCacheStats, keysFor groupKey
 // foldUsageCacheRows folds streamed SQL rows (model, provider, provider_name,
 // user_path, labels JSON, cache_type, input_tokens, output_tokens, raw_data)
 // into per-group cache stats. Shared by the SQL backends; MongoDB folds its
-// decoded documents with accumulateGroupCacheStats directly.
+// foldUsageCacheRows aggregates streamed usage cache-stat rows by the keys produced by keysFor.
+// It returns an error if scanning the rows fails or the result set reports an error.
 func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[string]*GroupCacheStats, error) {
 	out := map[string]*GroupCacheStats{}
 	for rows.Next() {
@@ -195,7 +201,8 @@ func (f *GroupCacheFields) assign(stats *GroupCacheStats) {
 
 // applyModelCacheStats merges the fold onto matching by-model rows and
 // materializes rows for local-only groups the uncached aggregates never
-// produced (their cost fields stay nil and provider token counts zero).
+// applyModelCacheStats merges grouped cache statistics into model usage rows and adds
+// rows for model groups with local-cache activity that are absent from the input.
 func applyModelCacheStats(rows []ModelUsage, stats map[string]*GroupCacheStats) []ModelUsage {
 	seen := map[string]bool{}
 	for i := range rows {
@@ -215,7 +222,7 @@ func applyModelCacheStats(rows []ModelUsage, stats map[string]*GroupCacheStats) 
 }
 
 // applyUserPathCacheStats merges the fold onto matching by-user-path rows,
-// materializing local-only groups like applyModelCacheStats.
+// applyUserPathCacheStats merges cache statistics into user-path usage rows and adds rows for user paths with only local-cache activity.
 func applyUserPathCacheStats(rows []UserPathUsage, stats map[string]*GroupCacheStats) []UserPathUsage {
 	seen := map[string]bool{}
 	for i := range rows {
@@ -237,7 +244,7 @@ func applyUserPathCacheStats(rows []UserPathUsage, stats map[string]*GroupCacheS
 // applyLabelCacheStats merges the fold onto matching by-label rows,
 // materializing local-only groups like applyModelCacheStats. Synthetic rows
 // count their local-cache requests so a label row never shows tokens with
-// zero requests.
+// applyLabelCacheStats merges cache statistics into label usage rows and adds rows for labels with local-cache activity.
 func applyLabelCacheStats(rows []LabelUsage, stats map[string]*GroupCacheStats) []LabelUsage {
 	seen := map[string]bool{}
 	for i := range rows {
@@ -260,7 +267,9 @@ func applyLabelCacheStats(rows []LabelUsage, stats map[string]*GroupCacheStats) 
 // estimate: models without a cached-input rate contribute nothing, and it
 // reflects today's prices, not the prices at request time — the same
 // trade-off as pricing recalculation. Returns nil when nothing could be
-// priced.
+// EstimateCachedInputCost estimates cached-input cost using the applicable pricing.
+// It returns a pointer to the estimate when at least one token bucket can be priced,
+// or nil when no pricing is available.
 func EstimateCachedInputCost(byPricing map[CachedPricingKey]int64, resolver PricingResolver) *float64 {
 	if resolver == nil || len(byPricing) == 0 {
 		return nil
