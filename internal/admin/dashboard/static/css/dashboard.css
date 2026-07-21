@@ -3394,7 +3394,8 @@ textarea:focus {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 999px;
+  margin-right: -9px;
+  border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
   background: color-mix(in srgb, var(--accent) 12%, var(--bg));
   color: var(--accent);
