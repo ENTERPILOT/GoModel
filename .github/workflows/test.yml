@@ -166,7 +166,7 @@ jobs:
           cache: true
 
       - name: Verify module integrity
-        run: go mod verify
+        run: make mod-check
 
       - name: Build
         run: go build -v ./cmd/gomodel
