@@ -69,8 +69,8 @@ func TestValidateConversationMetadata(t *testing.T) {
 	})
 
 	t.Run("too many pairs", func(t *testing.T) {
-		metadata := make(map[string]string, maxConversationMetadataPairs+1)
-		for i := 0; i <= maxConversationMetadataPairs; i++ {
+		metadata := make(map[string]string, MaxConversationMetadataPairs+1)
+		for i := 0; i <= MaxConversationMetadataPairs; i++ {
 			metadata[string(rune('a'+i))] = "v"
 		}
 		err := ValidateConversationMetadata(metadata)

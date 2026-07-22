@@ -3,6 +3,7 @@ package conversationstore
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -90,16 +91,20 @@ func (s *MemoryStore) Create(_ context.Context, conversation *StoredConversation
 		return fmt.Errorf("conversation id is required")
 	}
 
-	c, size, err := cloneConversationWithSize(conversation)
+	c, err := cloneConversation(conversation)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	prepareStoredConversationForMemory(c, now, s.ttl)
+	c, size, err := cloneConversationWithSize(c)
 	if err != nil {
 		return err
 	}
 	if err := s.checkByteBudget(size); err != nil {
 		return err
 	}
-
-	now := time.Now().UTC()
-	prepareStoredConversationForMemory(c, now, s.ttl)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -122,60 +127,57 @@ func (s *MemoryStore) Create(_ context.Context, conversation *StoredConversation
 func (s *MemoryStore) Get(_ context.Context, id string) (*StoredConversation, error) {
 	now := time.Now().UTC()
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cleanupExpiredLocked(now)
 	conversation, ok := s.items[id]
 	if !ok {
-		s.mu.Unlock()
 		return nil, ErrNotFound
 	}
 	if conversationExpired(conversation, now) {
 		s.removeLocked(id)
-		s.mu.Unlock()
 		return nil, ErrNotFound
 	}
-	s.mu.Unlock()
+	// Clone while the lock is held so future store changes cannot accidentally
+	// expose an internal snapshot or reintroduce a read/write race.
 	return cloneConversation(conversation)
 }
 
-// Update replaces an existing conversation snapshot.
-func (s *MemoryStore) Update(_ context.Context, conversation *StoredConversation) error {
-	if conversation == nil || conversation.Conversation == nil || conversation.Conversation.ID == "" {
-		return fmt.Errorf("conversation id is required")
-	}
-	c, size, err := cloneConversationWithSize(conversation)
-	if err != nil {
-		return err
-	}
-	if err := s.checkByteBudget(size); err != nil {
-		return err
-	}
-
+// MergeMetadata overlays metadata while holding the same lock that protects
+// item appends, so a metadata update cannot restore a stale item slice.
+func (s *MemoryStore) MergeMetadata(_ context.Context, id string, metadata map[string]string) (*StoredConversation, error) {
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked(now)
-	existing, exists := s.items[c.Conversation.ID]
-	if !exists {
-		return ErrNotFound
+	existing, exists := s.items[id]
+	if !exists || conversationExpired(existing, now) {
+		if exists {
+			s.removeLocked(id)
+		}
+		return nil, ErrNotFound
 	}
-	if conversationExpired(existing, now) {
-		s.removeLocked(c.Conversation.ID)
-		return ErrNotFound
+
+	candidate, err := cloneConversation(existing)
+	if err != nil {
+		return nil, err
 	}
-	if c.StoredAt.IsZero() {
-		c.StoredAt = existing.StoredAt
+	if candidate.Conversation.Metadata == nil {
+		candidate.Conversation.Metadata = make(map[string]string, len(metadata))
 	}
-	if c.ExpiresAt.IsZero() {
-		c.ExpiresAt = existing.ExpiresAt
+	maps.Copy(candidate.Conversation.Metadata, metadata)
+	if len(candidate.Conversation.Metadata) > core.MaxConversationMetadataPairs {
+		return nil, ErrMetadataLimitExceeded
 	}
-	prepareStoredConversationForMemory(c, now, s.ttl)
-	if conversationExpired(c, now) {
-		s.removeLocked(c.Conversation.ID)
-		return ErrNotFound
+	_, size, err := cloneConversationWithSize(candidate)
+	if err != nil {
+		return nil, err
 	}
-	s.putLocked(c.Conversation.ID, c, size)
-	s.enforceBoundsLocked(c.Conversation.ID)
-	return nil
+	if err := s.checkByteBudget(size); err != nil {
+		return nil, err
+	}
+	s.putLocked(id, candidate, size)
+	s.enforceBoundsLocked(id)
+	return cloneConversation(candidate)
 }
 
 // AppendItems atomically appends items to an existing conversation snapshot.
@@ -183,11 +185,9 @@ func (s *MemoryStore) AppendItems(_ context.Context, id string, items []json.Raw
 	if len(items) == 0 {
 		return nil
 	}
-	var added int64
-	for _, item := range items {
-		added += int64(len(item))
+	if duplicateItemID(nil, items) != "" {
+		return ErrDuplicateItem
 	}
-
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -200,19 +200,66 @@ func (s *MemoryStore) AppendItems(_ context.Context, id string, items []json.Raw
 		s.removeLocked(id)
 		return ErrNotFound
 	}
-	// Reject growth past the byte budget before mutating, mirroring Create and
-	// Update; otherwise bound enforcement would have to drop the very
-	// conversation the caller believes was just persisted.
-	if s.maxBytes > 0 && s.sizes[id]+added > s.maxBytes {
-		return fmt.Errorf("conversation snapshot would grow to %d bytes, exceeding the in-memory store budget of %d bytes", s.sizes[id]+added, s.maxBytes)
+	if duplicateItemID(conversation.Items, items) != "" {
+		return ErrDuplicateItem
+	}
+	candidate, err := cloneConversation(conversation)
+	if err != nil {
+		return err
 	}
 	for _, item := range items {
-		conversation.Items = append(conversation.Items, core.CloneRawJSON(item))
+		candidate.Items = append(candidate.Items, core.CloneRawJSON(item))
 	}
-	s.sizes[id] += added
-	s.totalBytes += added
+	candidate, size, err := cloneConversationWithSize(candidate)
+	if err != nil {
+		return err
+	}
+	// Reject growth past the byte budget before mutating, mirroring Create;
+	// otherwise bound enforcement would have to drop the very
+	// conversation the caller believes was just persisted.
+	if err := s.checkByteBudget(size); err != nil {
+		return err
+	}
+	s.putLocked(id, candidate, size)
 	s.enforceBoundsLocked(id)
 	return nil
+}
+
+// DeleteItem removes one item while holding the append lock.
+func (s *MemoryStore) DeleteItem(_ context.Context, id, targetItemID string) (*StoredConversation, error) {
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupExpiredLocked(now)
+	existing, exists := s.items[id]
+	if !exists || conversationExpired(existing, now) {
+		if exists {
+			s.removeLocked(id)
+		}
+		return nil, ErrNotFound
+	}
+
+	index := -1
+	for i, raw := range existing.Items {
+		if itemID(raw) == targetItemID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return nil, ErrItemNotFound
+	}
+	candidate, err := cloneConversation(existing)
+	if err != nil {
+		return nil, err
+	}
+	candidate.Items = append(candidate.Items[:index], candidate.Items[index+1:]...)
+	_, size, err := cloneConversationWithSize(candidate)
+	if err != nil {
+		return nil, err
+	}
+	s.putLocked(id, candidate, size)
+	return cloneConversation(candidate)
 }
 
 // Delete removes one conversation snapshot by id.

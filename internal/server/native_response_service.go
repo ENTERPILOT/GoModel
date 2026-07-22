@@ -465,12 +465,37 @@ func responseRetrieveParamsFromRequest(c *echo.Context) (core.ResponseRetrievePa
 }
 
 func responseInputItemsParamsFromRequest(c *echo.Context) (core.ResponseInputItemsParams, error) {
+	common, err := cursorListParamsFromRequest(c)
+	if err != nil {
+		return core.ResponseInputItemsParams{}, err
+	}
+	return core.ResponseInputItemsParams{
+		After:   common.after,
+		Include: common.include,
+		Limit:   common.limit,
+		Order:   common.order,
+	}, nil
+}
+
+type cursorListParams struct {
+	after   string
+	include []string
+	limit   int
+	order   string
+}
+
+const (
+	defaultCursorListLimit = 20
+	maxCursorListLimit     = 100
+)
+
+func cursorListParamsFromRequest(c *echo.Context) (cursorListParams, error) {
 	query := c.Request().URL.Query()
-	params := core.ResponseInputItemsParams{
-		After:   strings.TrimSpace(query.Get("after")),
-		Include: appendQueryArray(query["include"], query["include[]"]),
-		Limit:   20,
-		Order:   "desc",
+	params := cursorListParams{
+		after:   strings.TrimSpace(query.Get("after")),
+		include: appendQueryArray(query["include"], query["include[]"]),
+		limit:   defaultCursorListLimit,
+		order:   "desc",
 	}
 	if raw := strings.TrimSpace(query.Get("limit")); raw != "" {
 		limit, err := strconv.Atoi(raw)
@@ -479,18 +504,18 @@ func responseInputItemsParamsFromRequest(c *echo.Context) (core.ResponseInputIte
 		}
 		switch {
 		case limit <= 0:
-			params.Limit = 20
-		case limit > 100:
-			params.Limit = 100
+			params.limit = defaultCursorListLimit
+		case limit > maxCursorListLimit:
+			params.limit = maxCursorListLimit
 		default:
-			params.Limit = limit
+			params.limit = limit
 		}
 	}
 	if raw := strings.TrimSpace(query.Get("order")); raw != "" {
 		if raw != "asc" && raw != "desc" {
 			return params, core.NewInvalidRequestError("order must be asc or desc", nil).WithParam("order")
 		}
-		params.Order = raw
+		params.order = raw
 	}
 	return params, nil
 }
@@ -532,10 +557,10 @@ func paginateStoredResponseInputItems(items []json.RawMessage, params core.Respo
 
 	limit := params.Limit
 	if limit <= 0 {
-		limit = 20
+		limit = defaultCursorListLimit
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > maxCursorListLimit {
+		limit = maxCursorListLimit
 	}
 
 	remaining := max(count-start, 0)

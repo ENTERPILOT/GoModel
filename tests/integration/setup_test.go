@@ -191,6 +191,8 @@ func resetPostgreSQLStorage(t *testing.T) {
 		"model_overrides",
 		"aliases",
 		"batches",
+		"response_snapshots",
+		"conversation_snapshots",
 	}
 	for _, table := range tables {
 		_, err := pool.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", table))
@@ -218,6 +220,8 @@ func resetMongoDBStorage(t *testing.T) {
 		"model_overrides",
 		"aliases",
 		"batches",
+		"response_snapshots",
+		"conversation_snapshots",
 	}
 	for _, collection := range collections {
 		err := db.Collection(collection).Drop(ctx)

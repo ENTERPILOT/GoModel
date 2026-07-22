@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage"
 )
 
@@ -33,6 +36,12 @@ type MongoDBStore struct {
 	stopCleanup chan struct{}
 	closeOnce   sync.Once
 }
+
+const (
+	mongoMutationMaxAttempts    = 64
+	mongoMutationInitialBackoff = time.Millisecond
+	mongoMutationMaxBackoff     = 20 * time.Millisecond
+)
 
 // NewMongoDBStore creates collection indexes if needed and starts the hourly
 // expired-snapshot sweep.
@@ -111,50 +120,147 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*StoredConversation,
 	return stored, nil
 }
 
-// Update replaces an existing, unexpired conversation snapshot including its
-// items. Zero StoredAt or ExpiresAt values preserve the stored retention fields.
-func (s *MongoDBStore) Update(ctx context.Context, conversation *StoredConversation) error {
-	now := time.Now().UTC()
-	normalized, data, _, err := prepareStoredConversationForStorage(conversation, now, s.ttl, false)
-	if err != nil {
-		return err
+// MergeMetadata uses an optimistic compare-and-swap on the serialized
+// snapshot. Items live in a separate field, so they are never rewritten.
+func (s *MongoDBStore) MergeMetadata(ctx context.Context, id string, metadata map[string]string) (*StoredConversation, error) {
+	for attempt := range mongoMutationMaxAttempts {
+		var doc mongoConversationDocument
+		// id is encoded by the driver as a BSON string value; it cannot add
+		// query keys or operators. lgtm[go/sql-injection]
+		if err := s.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&doc); err != nil {
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return nil, ErrNotFound
+			}
+			return nil, fmt.Errorf("query conversation snapshot: %w", err)
+		}
+		now := time.Now().UTC()
+		if doc.ExpiresAt > 0 && doc.ExpiresAt <= now.Unix() {
+			return nil, ErrNotFound
+		}
+		stored, err := decodeStoredConversation([]byte(doc.Data), nil, doc.StoredAt, doc.ExpiresAt)
+		if err != nil {
+			return nil, err
+		}
+		if stored.Conversation.Metadata == nil {
+			stored.Conversation.Metadata = make(map[string]string, len(metadata))
+		}
+		maps.Copy(stored.Conversation.Metadata, metadata)
+		if len(stored.Conversation.Metadata) > core.MaxConversationMetadataPairs {
+			return nil, ErrMetadataLimitExceeded
+		}
+		_, data, _, err := prepareStoredConversationForStorage(stored, now, s.ttl, false)
+		if err != nil {
+			return nil, err
+		}
+		filter := storage.MongoUnexpiredFilter(id, now)
+		filter["data"] = doc.Data
+		// Filter/update keys and operators are fixed above; all variable data is
+		// encoded as BSON scalar/array values. lgtm[go/sql-injection]
+		result, err := s.collection.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"data": string(data)}})
+		if err != nil {
+			return nil, fmt.Errorf("merge conversation metadata: %w", err)
+		}
+		if result.MatchedCount == 1 {
+			return s.Get(ctx, id)
+		}
+		if err := waitForMongoMutationRetry(ctx, attempt); err != nil {
+			return nil, fmt.Errorf("merge conversation metadata: %w", err)
+		}
 	}
-	set := bson.M{
-		"data":  string(data),
-		"items": itemsToStrings(normalized.Items),
-	}
-	if !normalized.StoredAt.IsZero() {
-		set["stored_at"] = normalized.StoredAt.Unix()
-	}
-	if !normalized.ExpiresAt.IsZero() {
-		set["expires_at"] = normalized.ExpiresAt.Unix()
-	}
-	result, err := s.collection.UpdateOne(ctx, storage.MongoUnexpiredFilter(normalized.Conversation.ID, now), bson.M{"$set": set})
-	if err != nil {
-		return fmt.Errorf("update conversation snapshot: %w", err)
-	}
-	if result.MatchedCount == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return nil, fmt.Errorf("merge conversation metadata: concurrent updates did not settle")
 }
 
-// AppendItems atomically appends items to an existing, unexpired conversation
-// via $push, so two concurrently completing turns cannot overwrite each
-// other's exchange.
+// AppendItems atomically appends items to an existing, unexpired conversation.
+// Items are stored as JSON strings, so an optimistic compare-and-swap keeps id
+// uniqueness and the append in the same atomic operation.
 func (s *MongoDBStore) AppendItems(ctx context.Context, id string, items []json.RawMessage) error {
 	if len(items) == 0 {
 		return nil
 	}
-	update := bson.M{"$push": bson.M{"items": bson.M{"$each": itemsToStrings(items)}}}
-	result, err := s.collection.UpdateOne(ctx, storage.MongoUnexpiredFilter(id, time.Now()), update)
-	if err != nil {
-		return fmt.Errorf("append conversation items: %w", err)
+	if duplicateItemID(nil, items) != "" {
+		return ErrDuplicateItem
 	}
-	if result.MatchedCount == 0 {
-		return ErrNotFound
+	for attempt := range mongoMutationMaxAttempts {
+		var doc mongoConversationDocument
+		// id is encoded by the driver as a BSON string value; it cannot add
+		// query keys or operators. lgtm[go/sql-injection]
+		if err := s.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&doc); err != nil {
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("query conversation snapshot: %w", err)
+		}
+		now := time.Now()
+		if doc.ExpiresAt > 0 && doc.ExpiresAt <= now.Unix() {
+			return ErrNotFound
+		}
+		if duplicateItemID(itemsFromStrings(doc.Items), items) != "" {
+			return ErrDuplicateItem
+		}
+		filter := storage.MongoUnexpiredFilter(id, now)
+		filter["items"] = doc.Items
+		update := bson.M{"$push": bson.M{"items": bson.M{"$each": itemsToStrings(items)}}}
+		// Filter/update keys and operators are fixed above; all variable data is
+		// encoded as BSON scalar/array values. lgtm[go/sql-injection]
+		result, err := s.collection.UpdateOne(ctx, filter, update)
+		if err != nil {
+			return fmt.Errorf("append conversation items: %w", err)
+		}
+		if result.MatchedCount == 1 {
+			return nil
+		}
+		if err := waitForMongoMutationRetry(ctx, attempt); err != nil {
+			return fmt.Errorf("append conversation items: %w", err)
+		}
 	}
-	return nil
+	return fmt.Errorf("append conversation items: concurrent updates did not settle")
+}
+
+// DeleteItem uses an optimistic compare-and-swap because MongoDB stores each
+// raw item as a JSON string to preserve its exact shape.
+func (s *MongoDBStore) DeleteItem(ctx context.Context, id, targetItemID string) (*StoredConversation, error) {
+	for attempt := range mongoMutationMaxAttempts {
+		var doc mongoConversationDocument
+		// id is encoded by the driver as a BSON string value; it cannot add
+		// query keys or operators. lgtm[go/sql-injection]
+		if err := s.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&doc); err != nil {
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return nil, ErrNotFound
+			}
+			return nil, fmt.Errorf("query conversation snapshot: %w", err)
+		}
+		now := time.Now()
+		if doc.ExpiresAt > 0 && doc.ExpiresAt <= now.Unix() {
+			return nil, ErrNotFound
+		}
+		index := -1
+		for i, raw := range doc.Items {
+			if itemID(json.RawMessage(raw)) == targetItemID {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return nil, ErrItemNotFound
+		}
+		updatedItems := append([]string(nil), doc.Items[:index]...)
+		updatedItems = append(updatedItems, doc.Items[index+1:]...)
+		filter := storage.MongoUnexpiredFilter(id, now)
+		filter["items"] = doc.Items
+		// Filter/update keys and operators are fixed above; all variable data is
+		// encoded as BSON scalar/array values. lgtm[go/sql-injection]
+		result, err := s.collection.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"items": updatedItems}})
+		if err != nil {
+			return nil, fmt.Errorf("delete conversation item: %w", err)
+		}
+		if result.MatchedCount == 1 {
+			return s.Get(ctx, id)
+		}
+		if err := waitForMongoMutationRetry(ctx, attempt); err != nil {
+			return nil, fmt.Errorf("delete conversation item: %w", err)
+		}
+	}
+	return nil, fmt.Errorf("delete conversation item: concurrent updates did not settle")
 }
 
 // Delete removes one unexpired conversation snapshot by id.
@@ -195,6 +301,25 @@ func itemsFromStrings(items []string) []json.RawMessage {
 		decoded[i] = json.RawMessage(item)
 	}
 	return decoded
+}
+
+func waitForMongoMutationRetry(ctx context.Context, attempt int) error {
+	if attempt >= mongoMutationMaxAttempts-1 {
+		return nil
+	}
+	shift := min(attempt, 5)
+	delay := min(mongoMutationInitialBackoff<<shift, mongoMutationMaxBackoff)
+	// Half of the delay is fixed and half randomized. Writers that collide on
+	// one snapshot therefore stop retrying in lockstep under heavy contention.
+	delay = delay/2 + time.Duration(rand.Int64N(max(int64(delay/2), 1)))
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (s *MongoDBStore) cleanup() {

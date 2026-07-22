@@ -1,6 +1,6 @@
 ---
 title: "Conversations API"
-description: "Create, retrieve, update, and delete OpenAI-compatible conversations through GoModel."
+description: "Manage OpenAI-compatible conversations and their items through GoModel."
 icon: "messages-square"
 tag: "Beta"
 ---
@@ -22,8 +22,12 @@ provider configuration.
 | --- | --- |
 | `POST /v1/conversations` | Creates a conversation. Accepts optional `items` and `metadata`. |
 | `GET /v1/conversations/{id}` | Returns a stored conversation. |
-| `POST /v1/conversations/{id}` | Replaces the conversation `metadata` in full. |
+| `POST /v1/conversations/{id}` | Merges supplied keys into the conversation `metadata`. |
 | `DELETE /v1/conversations/{id}` | Deletes a stored conversation. |
+| `POST /v1/conversations/{id}/items` | Adds up to 20 items and returns the added items as a list. |
+| `GET /v1/conversations/{id}/items` | Lists items with `after`, `include`, `limit`, and `order`. |
+| `GET /v1/conversations/{id}/items/{item_id}` | Returns one conversation item. |
+| `DELETE /v1/conversations/{id}/items/{item_id}` | Deletes one item and returns the conversation. |
 
 ## Conversation object
 
@@ -47,22 +51,48 @@ compatible:
 - `metadata` — at most 16 key-value pairs; keys up to 64 characters; values up
   to 512 characters.
 
-The `items` array is accepted and stored with the conversation. It is not yet
-exposed through a conversation items listing endpoint.
+Item payloads follow the Responses API input/output item union. GoModel
+normalizes convenient message strings, assigns stable item IDs, and preserves
+new or provider-specific item fields so they can be listed and replayed later.
+
+Item lists default to newest-first (`order=desc`) with 20 items per page. Use
+the returned `last_id` as the next request's `after` cursor. `limit` accepts up
+to 100 items. The optional `include` parameter accepts the same values as the
+OpenAI Conversations API, including `reasoning.encrypted_content` and
+`message.output_text.logprobs`. GoModel stores complete item payloads, so
+optional fields remain available for later requests while only the fields named
+by `include` are returned.
 
 ## Storage and retention
 
-Conversations are held in an in-memory store. They survive across requests but
-not process restarts. Retention is bounded: conversations expire after 30 days
-and the store keeps at most 10,000 conversations, evicting the oldest first.
+The normal GoModel application stores conversations in the configured shared
+storage backend (`sqlite`, `postgresql`, or `mongodb`), so they survive process
+restarts. Conversation snapshots expire after 30 days.
+
+An in-memory fallback is used only when embedding the HTTP server without an
+application storage configuration, such as lightweight tests. That fallback
+also expires entries after 30 days and keeps at most 10,000 conversations,
+evicting the oldest first.
 
 ## Errors
 
 GoModel returns OpenAI-compatible errors:
 
-- `400 invalid_request_error` — invalid body, missing `metadata` on update, or a
-  limit exceeded (the `param` field names the offending field).
-- `404 not_found_error` — the conversation ID does not exist.
+- `400 invalid_request_error` — invalid body, missing `metadata` on update, an
+  invalid item, or a limit exceeded (the `param` field names the offending field).
+- `404 not_found_error` — the conversation or requested item does not exist.
+- `404 invalid_request_error` with `param: "after"` — the pagination cursor does
+  not identify an item in the conversation.
+
+Conversation persistence is part of a successful `/v1/responses` turn. If the
+provider succeeds but the completed exchange cannot be stored, a non-streaming
+request returns `500`; a streaming request ends without emitting
+`response.completed`. GoModel does not currently deduplicate a client retry of
+that failed request, so retrying can invoke the provider and incur its cost
+again. The failed exchange is absent from conversation history, so inspecting
+history cannot reliably determine whether the provider call already ran. Avoid
+automatic retries, or coordinate them through an independent durable
+idempotency mechanism when duplicate calls have material cost or side effects.
 
 ## Examples
 
@@ -84,7 +114,7 @@ curl http://localhost:8080/v1/conversations/conv_abc123 \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
-Update its metadata (replaces all metadata):
+Update its metadata (existing keys not supplied here are retained):
 
 ```bash
 curl http://localhost:8080/v1/conversations/conv_abc123 \
@@ -93,6 +123,36 @@ curl http://localhost:8080/v1/conversations/conv_abc123 \
   -d '{
     "metadata": { "topic": "billing" }
   }'
+```
+
+Add advanced Responses items:
+
+```bash
+curl 'http://localhost:8080/v1/conversations/conv_abc123/items?include=reasoning.encrypted_content' \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {
+        "type": "function_call",
+        "call_id": "call_lookup_1",
+        "name": "lookup_order",
+        "arguments": "{\"order_id\":\"A-42\"}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_lookup_1",
+        "output": "{\"status\":\"shipped\"}"
+      }
+    ]
+  }'
+```
+
+List the next page in chronological order:
+
+```bash
+curl 'http://localhost:8080/v1/conversations/conv_abc123/items?order=asc&limit=10&after=msg_abc123' \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
 Delete it:

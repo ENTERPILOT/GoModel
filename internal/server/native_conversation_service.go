@@ -45,6 +45,10 @@ func (s *conversationService) CreateConversation(c *echo.Context) error {
 			fmt.Sprintf("items supports at most %d entries", core.MaxConversationInitialItems), nil,
 		).WithParam("items"))
 	}
+	items, normalizeErr := normalizeConversationItems(req.Items)
+	if normalizeErr != nil {
+		return handleError(c, normalizeErr)
+	}
 	if verr := core.ValidateConversationMetadata(req.Metadata); verr != nil {
 		return handleError(c, verr)
 	}
@@ -58,7 +62,7 @@ func (s *conversationService) CreateConversation(c *echo.Context) error {
 	}
 	stored := &conversationstore.StoredConversation{
 		Conversation: conversation,
-		Items:        cloneRawConversationItems(req.Items),
+		Items:        cloneRawConversationItems(items),
 		UserPath:     core.UserPathFromContext(ctx),
 		RequestID:    requestID,
 		StoredAt:     now,
@@ -85,8 +89,8 @@ func (s *conversationService) GetConversation(c *echo.Context) error {
 	return c.JSON(http.StatusOK, stored.Conversation)
 }
 
-// UpdateConversation handles POST /v1/conversations/{id}. The metadata in the
-// request replaces the conversation's metadata in full, matching OpenAI.
+// UpdateConversation handles POST /v1/conversations/{id}. Supplied metadata is
+// merged into the existing metadata, matching OpenAI.
 func (s *conversationService) UpdateConversation(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
 	auditConversationEntry(c)
@@ -110,14 +114,15 @@ func (s *conversationService) UpdateConversation(c *echo.Context) error {
 		return handleError(c, verr)
 	}
 
-	stored, err := s.loadStoredConversation(ctx, id)
+	stored, err := s.conversationStore.MergeMetadata(ctx, id, *req.Metadata)
 	if err != nil {
-		return handleError(c, err)
-	}
-	stored.Conversation.Metadata = normalizedConversationMetadata(*req.Metadata)
-	if err := s.conversationStore.Update(ctx, stored); err != nil {
-		if errors.Is(err, conversationstore.ErrNotFound) {
+		switch {
+		case errors.Is(err, conversationstore.ErrNotFound):
 			return handleError(c, conversationNotFound(id))
+		case errors.Is(err, conversationstore.ErrMetadataLimitExceeded):
+			return handleError(c, core.NewInvalidRequestError(
+				fmt.Sprintf("metadata supports at most %d key-value pairs after update", core.MaxConversationMetadataPairs), err,
+			).WithParam("metadata").WithCode("metadata_max_properties_exceeded"))
 		}
 		return handleError(c, core.NewProviderError("conversation_store", http.StatusInternalServerError, "failed to update conversation", err))
 	}

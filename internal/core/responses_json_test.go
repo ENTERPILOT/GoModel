@@ -707,6 +707,28 @@ func TestResponsesInputElementMarshalJSON_MergesRawUnknownItemExtras(t *testing.
 	}
 }
 
+func TestResponsesOutputItemJSONPreservesReasoningFields(t *testing.T) {
+	raw := []byte(`{"id":"rs_123","type":"reasoning","summary":[],"encrypted_content":"opaque","provider_trace":{"id":"trace_1"}}`)
+	var item ResponsesOutputItem
+	if err := json.Unmarshal(raw, &item); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	body, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(round trip) error = %v", err)
+	}
+	if _, ok := decoded["summary"].([]any); !ok || decoded["encrypted_content"] != "opaque" {
+		t.Fatalf("round-tripped item = %#v, want reasoning fields", decoded)
+	}
+	if trace, ok := decoded["provider_trace"].(map[string]any); !ok || trace["id"] != "trace_1" {
+		t.Fatalf("provider_trace = %#v, want trace_1", decoded["provider_trace"])
+	}
+}
+
 func TestResponsesRequestJSON_PreservesVariantSpecificUnknownFields(t *testing.T) {
 	var req ResponsesRequest
 	if err := json.Unmarshal([]byte(`{

@@ -282,7 +282,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		}
 		stream := result.Stream
 		if turn := conversationTurnFromContext(ctx); turn != nil {
-			stream = streaming.NewObservedSSEStream(stream, turn.streamObserver(ctx))
+			stream = turn.persistingStream(ctx, stream)
 		}
 		return s.handleStreamingReadCloser(
 			c,
@@ -312,13 +312,17 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		result.Meta.ProviderName,
 	)
 
-	if err := s.storeResponseSnapshot(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID); err != nil {
-		s.recordResponseSnapshotStoreFailure(workflow, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID, err)
-	}
 	if turn := conversationTurnFromContext(ctx); turn != nil {
 		// Detach cancellation so a client disconnect after provider success
 		// cannot lose the completed turn, mirroring the streaming observer.
-		turn.appendResponse(context.WithoutCancel(ctx), result.Response)
+		if err := turn.appendResponse(context.WithoutCancel(ctx), result.Response); err != nil {
+			return handleError(c, core.NewProviderError(
+				"conversation_store", http.StatusInternalServerError, "failed to append conversation turn", err,
+			))
+		}
+	}
+	if err := s.storeResponseSnapshot(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID); err != nil {
+		s.recordResponseSnapshotStoreFailure(workflow, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID, err)
 	}
 
 	return c.JSON(http.StatusOK, result.Response)

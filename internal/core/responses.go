@@ -205,6 +205,10 @@ type ResponsesOutputItem struct {
 	Name      string                 `json:"name,omitempty"`
 	Arguments string                 `json:"arguments,omitempty"`
 	Content   []ResponsesContentItem `json:"content,omitempty"`
+	// Preserve fields belonging to newer or variant-specific output items, such
+	// as reasoning.summary, reasoning.encrypted_content, hosted-tool payloads,
+	// and provider extensions. Conversation replay depends on these fields.
+	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
 // ResponsesContentItem represents a content item in the output.

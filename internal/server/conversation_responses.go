@@ -1,10 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/goccy/go-json"
 
@@ -86,7 +86,9 @@ func mergeConversationInput(history []json.RawMessage, input any) ([]any, error)
 	merged := make([]any, 0, len(history))
 	for _, raw := range history {
 		var item map[string]any
-		if err := json.Unmarshal(raw, &item); err != nil {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&item); err != nil {
 			return nil, core.NewProviderError("conversation_store", 500, "stored conversation item is not valid JSON", err)
 		}
 		delete(item, "id")
@@ -121,75 +123,86 @@ func mergeConversationInput(history []json.RawMessage, input any) ([]any, error)
 	}
 }
 
-// appendExchange records the completed turn: the request input normalized as
-// stored input items, followed by the response output. Failures only log —
-// the client already has its response, so the turn must not fail after the fact.
-func (t *conversationTurn) appendExchange(ctx context.Context, responseID string, output []json.RawMessage) {
+// appendExchange records the completed turn and returns the output items with
+// their final persisted IDs. The caller can therefore expose exactly the IDs a
+// later conversation item retrieve or delete request can address.
+func (t *conversationTurn) appendExchange(ctx context.Context, responseID string, output []json.RawMessage) ([]json.RawMessage, error) {
 	items := normalizedResponseInputItems(responseID, &core.ResponsesRequest{Input: t.input})
+	inputCount := len(items)
 	items = append(items, output...)
 	if len(items) == 0 {
-		return
+		return nil, nil
 	}
-	if err := t.store.AppendItems(ctx, t.id, items); err != nil {
-		slog.Warn("conversation append failed", "conversation_id", t.id, "error", err)
+	items = normalizeConversationItemIDs(nil, items)
+	err := t.store.AppendItems(ctx, t.id, items)
+	for range 3 {
+		if !errors.Is(err, conversationstore.ErrDuplicateItem) {
+			break
+		}
+		stored, getErr := t.store.Get(ctx, t.id)
+		if getErr != nil {
+			err = getErr
+			break
+		}
+		items = normalizeConversationItemIDs(stored.Items, items)
+		err = t.store.AppendItems(ctx, t.id, items)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return items[inputCount:], nil
 }
 
-// appendResponse records a completed non-streaming response on the turn.
-func (t *conversationTurn) appendResponse(ctx context.Context, resp *core.ResponsesResponse) {
+func normalizeConversationItemIDs(existing, added []json.RawMessage) []json.RawMessage {
+	ids := make(map[string]struct{}, len(existing)+len(added))
+	for _, raw := range existing {
+		if id := responseInputItemID(raw); id != "" {
+			ids[id] = struct{}{}
+		}
+	}
+	result := make([]json.RawMessage, 0, len(added))
+	for _, raw := range added {
+		item, err := decodeRawJSONObject(raw)
+		if err != nil {
+			result = append(result, core.CloneRawJSON(raw))
+			continue
+		}
+		id := rawJSONString(item, "id")
+		if _, duplicate := ids[id]; id == "" || duplicate {
+			id = generatedConversationItemID(rawJSONString(item, "type"))
+			_ = setRawJSONValue(item, "id", id)
+		}
+		ids[id] = struct{}{}
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			result = append(result, core.CloneRawJSON(raw))
+			continue
+		}
+		result = append(result, encoded)
+	}
+	return result
+}
+
+// appendResponse records a completed non-streaming response and updates its
+// output IDs to the IDs committed to the conversation store.
+func (t *conversationTurn) appendResponse(ctx context.Context, resp *core.ResponsesResponse) error {
 	if resp == nil {
-		return
+		return nil
 	}
 	output := make([]json.RawMessage, 0, len(resp.Output))
 	for _, item := range resp.Output {
 		raw, err := json.Marshal(item)
 		if err != nil {
-			slog.Warn("conversation append failed: marshal output", "conversation_id", t.id, "error", err)
-			return
+			return fmt.Errorf("marshal conversation output: %w", err)
 		}
 		output = append(output, raw)
 	}
-	t.appendExchange(ctx, resp.ID, output)
-}
-
-// streamObserver returns a streaming.Observer that captures the final
-// response.completed event and appends the exchange when the stream closes.
-// The context is detached from the request so the append survives the client
-// connection ending right after the final event.
-func (t *conversationTurn) streamObserver(ctx context.Context) *conversationStreamObserver {
-	return &conversationStreamObserver{turn: t, ctx: context.WithoutCancel(ctx)}
-}
-
-type conversationStreamObserver struct {
-	turn     *conversationTurn
-	ctx      context.Context
-	response map[string]any
-}
-
-func (o *conversationStreamObserver) OnJSONEvent(payload map[string]any) {
-	eventType, _ := payload["type"].(string)
-	if eventType != "response.completed" && eventType != "response.done" {
-		return
+	persistedOutput, err := t.appendExchange(ctx, resp.ID, output)
+	if err != nil {
+		return err
 	}
-	if response, ok := payload["response"].(map[string]any); ok {
-		o.response = response
+	for index := range min(len(resp.Output), len(persistedOutput)) {
+		resp.Output[index].ID = responseInputItemID(persistedOutput[index])
 	}
-}
-
-func (o *conversationStreamObserver) OnStreamClose() {
-	if o.response == nil {
-		return
-	}
-	responseID, _ := o.response["id"].(string)
-	outputItems, _ := o.response["output"].([]any)
-	output := make([]json.RawMessage, 0, len(outputItems))
-	for _, item := range outputItems {
-		raw, err := json.Marshal(item)
-		if err != nil {
-			slog.Warn("conversation append failed: marshal streamed output", "conversation_id", o.turn.id, "error", err)
-			return
-		}
-		output = append(output, raw)
-	}
-	o.turn.appendExchange(o.ctx, responseID, output)
+	return nil
 }
