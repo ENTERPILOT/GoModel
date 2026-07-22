@@ -139,6 +139,34 @@ test('list normalization splits comma tools and newline user paths', () => {
     assert.equal(JSON.stringify(module.normalizeMcpUserPaths('/\n /team/alpha \n\n')), JSON.stringify(['/', '/team/alpha']));
 });
 
+test('fetchMcpServersPage waits for runtime config and skips the disabled endpoint', async () => {
+    let configLoaded = false;
+    let fetchCalls = 0;
+    const module = createMcpServersModule({
+        fetch: async () => {
+            fetchCalls++;
+            return { status: 200, json: async () => [] };
+        }
+    });
+    Object.assign(module, {
+        ensureWorkflowRuntimeConfig: async () => {
+            configLoaded = true;
+        },
+        mcpServersPageVisible: () => {
+            assert.equal(configLoaded, true);
+            return false;
+        }
+    });
+
+    await module.fetchMcpServersPage();
+
+    assert.equal(fetchCalls, 0);
+    assert.equal(module.mcpServersAvailable, false);
+    assert.equal(module.mcpServers.length, 0);
+    assert.equal(module.mcpServersLoading, false);
+    assert.equal(module.mcpServerError, '');
+});
+
 test('fetchMcpServersPage marks the feature unavailable on 404 and 503', async () => {
     for (const status of [404, 503]) {
         const module = createMcpServersModule({

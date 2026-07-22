@@ -384,6 +384,12 @@ function dashboard() {
         : true;
     },
 
+    mcpServersPageVisible() {
+      return typeof this.workflowRuntimeBooleanFlag === "function"
+        ? this.workflowRuntimeBooleanFlag("MCP_ENABLED", true)
+        : true;
+    },
+
     setTheme(t) {
       this.theme = t;
       localStorage.setItem("gomodel_theme", t);
@@ -713,8 +719,9 @@ function dashboard() {
       ) {
         requests.push(this.fetchRateLimitsPage());
       }
-      // Fetched on every page, not just mcp-servers: the overview MCP card
-      // needs the server list to render its connected/total summary.
+      // Considered on every page, not just mcp-servers: the overview MCP card
+      // needs the server list to render its connected/total summary. The MCP
+      // module waits for runtime config and skips the request when disabled.
       if (typeof this.fetchMcpServersPage === "function") {
         requests.push(this.fetchMcpServersPage());
       }

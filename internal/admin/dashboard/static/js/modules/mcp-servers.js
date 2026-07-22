@@ -292,6 +292,20 @@
             },
 
             async fetchMcpServersPage() {
+                // dashboardDataFetches starts feature-backed requests in
+                // parallel, so wait for the shared runtime-config request
+                // before deciding whether the MCP admin API is available.
+                if (typeof this.ensureWorkflowRuntimeConfig === 'function') {
+                    await this.ensureWorkflowRuntimeConfig();
+                }
+                if (typeof this.mcpServersPageVisible === 'function' && !this.mcpServersPageVisible()) {
+                    this.mcpServersAvailable = false;
+                    this.mcpServers = [];
+                    this.mcpServerError = '';
+                    this.mcpServersLoading = false;
+                    return;
+                }
+
                 this.mcpServersLoading = true;
                 this.mcpServerError = '';
                 try {

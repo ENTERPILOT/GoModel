@@ -1344,6 +1344,7 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode bool) adm
 		RedisURL:             dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
 		SemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
 		LiveLogsEnabled:      dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
+		MCPEnabled:           dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
 	}
 }
 

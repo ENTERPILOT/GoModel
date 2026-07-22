@@ -81,6 +81,17 @@ test('Models route starts bounded rendering before Alpine mounts the page', () =
     assert.equal(app.page, 'models');
 });
 
+test('MCP navigation follows the exposed MCP_ENABLED runtime flag', () => {
+    const app = loadDashboardApp();
+    app.workflowRuntimeBooleanFlag = (name, defaultValue) => {
+        assert.equal(name, 'MCP_ENABLED');
+        assert.equal(defaultValue, true);
+        return false;
+    };
+
+    assert.equal(app.mcpServersPageVisible(), false);
+});
+
 test('qualifiedModelDisplay keeps provider identity for nested provider model IDs', () => {
     const app = loadDashboardApp();
 
