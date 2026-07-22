@@ -44,7 +44,10 @@ func paginateConversationItems(items []json.RawMessage, params core.Conversation
 	}
 	limit := params.Limit
 	if limit <= 0 {
-		limit = 20
+		limit = defaultCursorListLimit
+	}
+	if limit > maxCursorListLimit {
+		limit = maxCursorListLimit
 	}
 	remaining := max(count-start, 0)
 	hasMore := remaining > limit

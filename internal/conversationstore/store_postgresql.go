@@ -170,20 +170,21 @@ func (s *PostgreSQLStore) AppendItems(ctx context.Context, id string, items []js
 // DeleteItem atomically removes the first matching item from the JSONB array.
 func (s *PostgreSQLStore) DeleteItem(ctx context.Context, id, targetItemID string) (*StoredConversation, error) {
 	cmd, err := s.pool.Exec(ctx, `
-		WITH target AS (
-			SELECT c.id, element.ordinality - 1 AS item_index
-			FROM conversation_snapshots c
-			CROSS JOIN LATERAL jsonb_array_elements(c.items) WITH ORDINALITY AS element(value, ordinality)
-			WHERE c.id = $1
-			  AND (c.expires_at = 0 OR c.expires_at > $3)
-			  AND element.value ->> 'id' = $2
+		UPDATE conversation_snapshots c
+		SET items = c.items - (
+			SELECT (element.ordinality - 1)::int
+			FROM jsonb_array_elements(c.items) WITH ORDINALITY AS element(value, ordinality)
+			WHERE element.value ->> 'id' = $2
 			ORDER BY element.ordinality
 			LIMIT 1
 		)
-		UPDATE conversation_snapshots c
-		SET items = c.items - target.item_index::int
-		FROM target
-		WHERE c.id = target.id
+		WHERE c.id = $1
+		  AND (c.expires_at = 0 OR c.expires_at > $3)
+		  AND EXISTS (
+			SELECT 1
+			FROM jsonb_array_elements(c.items) AS element(value)
+			WHERE element.value ->> 'id' = $2
+		  )
 	`, id, targetItemID, time.Now().Unix())
 	if err != nil {
 		return nil, fmt.Errorf("delete conversation item: %w", err)

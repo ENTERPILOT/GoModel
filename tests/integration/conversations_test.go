@@ -117,8 +117,41 @@ func testConversationsComplexStateTransitions(t *testing.T, dbType string) {
 	require.Equal(t, 1, statusCounts[http.StatusOK], statusCounts)
 	require.Equal(t, collisionWriters-1, statusCounts[http.StatusBadRequest], statusCounts)
 
+	// Delete adjacent items concurrently. PostgreSQL must calculate each JSONB
+	// array index after acquiring the latest row version, or the second writer
+	// can remove the item that shifted into a stale index.
+	conversationJSONRequest(t, fixture, http.MethodPost, "/v1/conversations/"+conversationID+"/items", map[string]any{
+		"items": []any{
+			map[string]any{"id": "delete_race_a", "type": "future_race", "marker": "a"},
+			map[string]any{"id": "delete_race_b", "type": "future_race", "marker": "b"},
+			map[string]any{"id": "delete_race_guard", "type": "future_race", "marker": "guard"},
+		},
+	}, http.StatusOK)
+	start = make(chan struct{})
+	concurrentDeletes := make(chan conversationHTTPResult, 2)
+	for _, itemID := range []string{"delete_race_a", "delete_race_b"} {
+		wg.Go(func() {
+			<-start
+			concurrentDeletes <- rawConversationRequest(fixture, http.MethodDelete,
+				"/v1/conversations/"+conversationID+"/items/"+itemID, nil)
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(concurrentDeletes)
+	for result := range concurrentDeletes {
+		require.NoError(t, result.err)
+		require.Equal(t, http.StatusOK, result.status, string(result.body))
+	}
+	conversationJSONRequest(t, fixture, http.MethodGet,
+		"/v1/conversations/"+conversationID+"/items/delete_race_a", nil, http.StatusNotFound)
+	conversationJSONRequest(t, fixture, http.MethodGet,
+		"/v1/conversations/"+conversationID+"/items/delete_race_b", nil, http.StatusNotFound)
+	conversationJSONRequest(t, fixture, http.MethodGet,
+		"/v1/conversations/"+conversationID+"/items/delete_race_guard", nil, http.StatusOK)
+
 	ascending := collectConversationItemIDs(t, fixture, conversationID, "asc", 7)
-	require.Len(t, ascending, 4+itemWriters+1)
+	require.Len(t, ascending, 4+itemWriters+1+1)
 	require.Len(t, uniqueStrings(ascending), len(ascending))
 	descending := collectConversationItemIDs(t, fixture, conversationID, "desc", 100)
 	reversed := slices.Clone(ascending)

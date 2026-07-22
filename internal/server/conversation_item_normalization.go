@@ -78,7 +78,7 @@ func normalizeConversationItem(item rawJSONObject, param string) *core.GatewayEr
 			return core.NewInvalidRequestError("function_call requires call_id and name", nil).WithParam(param)
 		}
 		arguments, exists := item["arguments"]
-		if !exists {
+		if !exists || !rawJSONValuePresent(item, "arguments") {
 			return core.NewInvalidRequestError("function_call requires arguments", nil).WithParam(param)
 		}
 		var argumentString string
@@ -94,7 +94,7 @@ func normalizeConversationItem(item rawJSONObject, param string) *core.GatewayEr
 		if rawJSONString(item, "call_id") == "" {
 			return core.NewInvalidRequestError("function_call_output requires call_id", nil).WithParam(param)
 		}
-		if _, exists := item["output"]; !exists {
+		if !rawJSONValuePresent(item, "output") {
 			return core.NewInvalidRequestError("function_call_output requires output", nil).WithParam(param)
 		}
 		if rawJSONString(item, "status") == "" {

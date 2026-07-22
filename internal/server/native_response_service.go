@@ -484,12 +484,17 @@ type cursorListParams struct {
 	order   string
 }
 
+const (
+	defaultCursorListLimit = 20
+	maxCursorListLimit     = 100
+)
+
 func cursorListParamsFromRequest(c *echo.Context) (cursorListParams, error) {
 	query := c.Request().URL.Query()
 	params := cursorListParams{
 		after:   strings.TrimSpace(query.Get("after")),
 		include: appendQueryArray(query["include"], query["include[]"]),
-		limit:   20,
+		limit:   defaultCursorListLimit,
 		order:   "desc",
 	}
 	if raw := strings.TrimSpace(query.Get("limit")); raw != "" {
@@ -499,9 +504,9 @@ func cursorListParamsFromRequest(c *echo.Context) (cursorListParams, error) {
 		}
 		switch {
 		case limit <= 0:
-			params.limit = 20
-		case limit > 100:
-			params.limit = 100
+			params.limit = defaultCursorListLimit
+		case limit > maxCursorListLimit:
+			params.limit = maxCursorListLimit
 		default:
 			params.limit = limit
 		}
@@ -552,10 +557,10 @@ func paginateStoredResponseInputItems(items []json.RawMessage, params core.Respo
 
 	limit := params.Limit
 	if limit <= 0 {
-		limit = 20
+		limit = defaultCursorListLimit
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > maxCursorListLimit {
+		limit = maxCursorListLimit
 	}
 
 	remaining := max(count-start, 0)

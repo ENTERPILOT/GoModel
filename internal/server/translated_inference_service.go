@@ -282,7 +282,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		}
 		stream := result.Stream
 		if turn := conversationTurnFromContext(ctx); turn != nil {
-			stream = streaming.NewObservedSSEStream(stream, turn.streamObserver(ctx))
+			stream = turn.persistingStream(ctx, stream)
 		}
 		return s.handleStreamingReadCloser(
 			c,

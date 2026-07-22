@@ -195,6 +195,29 @@ func TestResponsesWithConversation_StreamingAppendsTurn(t *testing.T) {
 	}
 }
 
+func TestResponsesWithConversation_StreamingAppendFailureSuppressesCompletion(t *testing.T) {
+	provider := conversationTestProvider(t)
+	provider.streamData = strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_failed_persist"}}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_failed_persist","output":[{"id":"msg_failed_persist","type":"message","role":"assistant","content":[{"type":"output_text","text":"not saved"}]}]}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	store := &appendFailingConversationStore{
+		MemoryStore: conversationstore.NewMemoryStore(),
+		err:         errors.New("append unavailable"),
+	}
+	srv := New(provider, &Config{ConversationStore: store})
+	convID := createTestConversation(t, srv, `{}`)
+
+	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"hello","conversation":"`+convID+`","stream":true}`)
+	if strings.Contains(rec.Body.String(), "response.completed") {
+		t.Fatalf("stream body = %s, must not report completion when persistence fails", rec.Body.String())
+	}
+}
+
 func TestResponsesWithConversation_PreservesReasoningFieldsOnReplay(t *testing.T) {
 	provider := conversationTestProvider(t)
 	var response core.ResponsesResponse

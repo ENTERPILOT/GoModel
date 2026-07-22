@@ -276,6 +276,64 @@ func TestConversationCreateRejectsNonObjectItems(t *testing.T) {
 	}
 }
 
+func TestConversationCreateRejectsNullRequiredFunctionFields(t *testing.T) {
+	tests := []struct {
+		name string
+		item string
+	}{
+		{
+			name: "function call arguments",
+			item: `{"type":"function_call","call_id":"call_1","name":"lookup","arguments":null}`,
+		},
+		{
+			name: "function call output",
+			item: `{"type":"function_call_output","call_id":"call_1","output":null}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := New(&mockProvider{}, nil)
+			req := httptest.NewRequest(http.MethodPost, "/v1/conversations",
+				strings.NewReader(`{"items":[`+tt.item+`]}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d (%s), want 400", rec.Code, rec.Body.String())
+			}
+			var envelope core.OpenAIErrorEnvelope
+			if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+				t.Fatalf("decode error: %v", err)
+			}
+			if envelope.Error.Param == nil || *envelope.Error.Param != "items[0]" {
+				t.Fatalf("param = %v, want items[0]", envelope.Error.Param)
+			}
+		})
+	}
+}
+
+func TestPaginateConversationItemsCapsDirectLimit(t *testing.T) {
+	items := make([]json.RawMessage, maxCursorListLimit+1)
+	for index := range items {
+		items[index] = json.RawMessage(fmt.Sprintf(
+			`{"id":"msg_%03d","type":"message","role":"user","content":"item %d"}`,
+			index, index,
+		))
+	}
+
+	page, err := paginateConversationItems(items, core.ConversationItemListParams{
+		Limit: maxCursorListLimit + 1,
+		Order: "asc",
+	})
+	if err != nil {
+		t.Fatalf("paginate: %v", err)
+	}
+	if len(page.Data) != maxCursorListLimit || !page.HasMore {
+		t.Fatalf("page has %d items and has_more=%v, want %d and true", len(page.Data), page.HasMore, maxCursorListLimit)
+	}
+}
+
 func TestConversationItemListEmptyUsesNullCursors(t *testing.T) {
 	srv := New(&mockProvider{}, nil)
 	created := createConversation(t, srv, `{}`)

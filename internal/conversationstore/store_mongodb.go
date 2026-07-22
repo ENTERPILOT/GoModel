@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -35,6 +36,12 @@ type MongoDBStore struct {
 	stopCleanup chan struct{}
 	closeOnce   sync.Once
 }
+
+const (
+	mongoMutationMaxAttempts    = 64
+	mongoMutationInitialBackoff = time.Millisecond
+	mongoMutationMaxBackoff     = 20 * time.Millisecond
+)
 
 // NewMongoDBStore creates collection indexes if needed and starts the hourly
 // expired-snapshot sweep.
@@ -116,7 +123,7 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*StoredConversation,
 // MergeMetadata uses an optimistic compare-and-swap on the serialized
 // snapshot. Items live in a separate field, so they are never rewritten.
 func (s *MongoDBStore) MergeMetadata(ctx context.Context, id string, metadata map[string]string) (*StoredConversation, error) {
-	for range 8 {
+	for attempt := range mongoMutationMaxAttempts {
 		var doc mongoConversationDocument
 		// id is encoded by the driver as a BSON string value; it cannot add
 		// query keys or operators. lgtm[go/sql-injection]
@@ -156,6 +163,9 @@ func (s *MongoDBStore) MergeMetadata(ctx context.Context, id string, metadata ma
 		if result.MatchedCount == 1 {
 			return s.Get(ctx, id)
 		}
+		if err := waitForMongoMutationRetry(ctx, attempt); err != nil {
+			return nil, fmt.Errorf("merge conversation metadata: %w", err)
+		}
 	}
 	return nil, fmt.Errorf("merge conversation metadata: concurrent updates did not settle")
 }
@@ -170,7 +180,7 @@ func (s *MongoDBStore) AppendItems(ctx context.Context, id string, items []json.
 	if duplicateItemID(nil, items) != "" {
 		return ErrDuplicateItem
 	}
-	for range 64 {
+	for attempt := range mongoMutationMaxAttempts {
 		var doc mongoConversationDocument
 		// id is encoded by the driver as a BSON string value; it cannot add
 		// query keys or operators. lgtm[go/sql-injection]
@@ -199,6 +209,9 @@ func (s *MongoDBStore) AppendItems(ctx context.Context, id string, items []json.
 		if result.MatchedCount == 1 {
 			return nil
 		}
+		if err := waitForMongoMutationRetry(ctx, attempt); err != nil {
+			return fmt.Errorf("append conversation items: %w", err)
+		}
 	}
 	return fmt.Errorf("append conversation items: concurrent updates did not settle")
 }
@@ -206,7 +219,7 @@ func (s *MongoDBStore) AppendItems(ctx context.Context, id string, items []json.
 // DeleteItem uses an optimistic compare-and-swap because MongoDB stores each
 // raw item as a JSON string to preserve its exact shape.
 func (s *MongoDBStore) DeleteItem(ctx context.Context, id, targetItemID string) (*StoredConversation, error) {
-	for range 8 {
+	for attempt := range mongoMutationMaxAttempts {
 		var doc mongoConversationDocument
 		// id is encoded by the driver as a BSON string value; it cannot add
 		// query keys or operators. lgtm[go/sql-injection]
@@ -242,6 +255,9 @@ func (s *MongoDBStore) DeleteItem(ctx context.Context, id, targetItemID string) 
 		}
 		if result.MatchedCount == 1 {
 			return s.Get(ctx, id)
+		}
+		if err := waitForMongoMutationRetry(ctx, attempt); err != nil {
+			return nil, fmt.Errorf("delete conversation item: %w", err)
 		}
 	}
 	return nil, fmt.Errorf("delete conversation item: concurrent updates did not settle")
@@ -285,6 +301,25 @@ func itemsFromStrings(items []string) []json.RawMessage {
 		decoded[i] = json.RawMessage(item)
 	}
 	return decoded
+}
+
+func waitForMongoMutationRetry(ctx context.Context, attempt int) error {
+	if attempt >= mongoMutationMaxAttempts-1 {
+		return nil
+	}
+	shift := min(attempt, 5)
+	delay := min(mongoMutationInitialBackoff<<shift, mongoMutationMaxBackoff)
+	// Half of the delay is fixed and half randomized. Writers that collide on
+	// one snapshot therefore stop retrying in lockstep under heavy contention.
+	delay = delay/2 + time.Duration(rand.Int64N(max(int64(delay/2), 1)))
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (s *MongoDBStore) cleanup() {
