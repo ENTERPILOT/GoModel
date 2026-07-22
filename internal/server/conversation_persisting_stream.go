@@ -29,28 +29,25 @@ type conversationStreamObserver struct {
 	err       error
 }
 
-func (o *conversationStreamObserver) OnJSONEvent(payload map[string]any) {
-	eventType, _ := payload["type"].(string)
-	if o.attempted || (eventType != "response.completed" && eventType != "response.done") {
+type conversationStreamEvent struct {
+	Type     string                      `json:"type"`
+	Response *conversationStreamResponse `json:"response"`
+}
+
+type conversationStreamResponse struct {
+	ID     string            `json:"id"`
+	Output []json.RawMessage `json:"output"`
+}
+
+func (o *conversationStreamObserver) OnEvent(event conversationStreamEvent) {
+	if o.attempted || (event.Type != "response.completed" && event.Type != "response.done") {
 		return
 	}
-	response, ok := payload["response"].(map[string]any)
-	if !ok {
+	if event.Response == nil {
 		return
 	}
 	o.attempted = true
-	responseID, _ := response["id"].(string)
-	outputItems, _ := response["output"].([]any)
-	output := make([]json.RawMessage, 0, len(outputItems))
-	for _, item := range outputItems {
-		raw, err := json.Marshal(item)
-		if err != nil {
-			o.err = fmt.Errorf("marshal streamed conversation output: %w", err)
-			return
-		}
-		output = append(output, raw)
-	}
-	if _, err := o.turn.appendExchange(o.ctx, responseID, output); err != nil {
+	if _, err := o.turn.appendExchange(o.ctx, event.Response.ID, event.Response.Output); err != nil {
 		o.err = fmt.Errorf("append streamed conversation turn: %w", err)
 	}
 }
@@ -128,11 +125,11 @@ func (s *conversationPersistingStream) readEvent() ([]byte, error) {
 func (s *conversationPersistingStream) observeEvent(event []byte) {
 	payload, ok := conversationSSEPayload(event)
 	if ok {
-		s.observer.OnJSONEvent(payload)
+		s.observer.OnEvent(payload)
 	}
 }
 
-func conversationSSEPayload(event []byte) (map[string]any, bool) {
+func conversationSSEPayload(event []byte) (conversationStreamEvent, bool) {
 	lines := bytes.Split(event, []byte("\n"))
 	dataLines := make([][]byte, 0, len(lines))
 	for _, line := range lines {
@@ -147,15 +144,15 @@ func conversationSSEPayload(event []byte) (map[string]any, bool) {
 		dataLines = append(dataLines, data)
 	}
 	if len(dataLines) == 0 {
-		return nil, false
+		return conversationStreamEvent{}, false
 	}
 	data := bytes.Join(dataLines, []byte("\n"))
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
-		return nil, false
+		return conversationStreamEvent{}, false
 	}
-	var payload map[string]any
+	var payload conversationStreamEvent
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil, false
+		return conversationStreamEvent{}, false
 	}
 	return payload, true
 }

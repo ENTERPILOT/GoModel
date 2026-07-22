@@ -89,8 +89,10 @@ provider succeeds but the completed exchange cannot be stored, a non-streaming
 request returns `500`; a streaming request ends without emitting
 `response.completed`. GoModel does not currently deduplicate a client retry of
 that failed request, so retrying can invoke the provider and incur its cost
-again. Applications where duplicate calls have material cost or side effects
-should inspect the conversation history before retrying.
+again. The failed exchange is absent from conversation history, so inspecting
+history cannot reliably determine whether the provider call already ran. Avoid
+automatic retries, or coordinate them through an independent durable
+idempotency mechanism when duplicate calls have material cost or side effects.
 
 ## Examples
 

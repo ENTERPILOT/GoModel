@@ -61,7 +61,7 @@ func TestConversationPersistingStreamSuppressesEntireFragmentedCompletion(t *tes
 func TestConversationPersistingStreamPreservesFragmentedSuccessfulStream(t *testing.T) {
 	const streamData = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_fragmented\"}}\r\n\r\n" +
 		"data: {\"type\":\"response.completed\",\r\n" +
-		"data: \"response\":{\"id\":\"resp_fragmented\",\"output\":[]}}\r\n\r\n" +
+		"data: \"response\":{\"id\":\"resp_fragmented\",\"output\":[{\"id\":\"future_1\",\"type\":\"future_item\",\"future_counter\":9007199254740993,\"future_payload\":{\"preserved\":true}}]}}\r\n\r\n" +
 		"data: [DONE]\r\n\r\n"
 
 	ctx := context.Background()
@@ -90,7 +90,17 @@ func TestConversationPersistingStreamPreservesFragmentedSuccessfulStream(t *test
 	if err != nil {
 		t.Fatalf("get conversation: %v", err)
 	}
-	if len(stored.Items) != 1 {
-		t.Fatalf("stored items = %d, want one input item", len(stored.Items))
+	if len(stored.Items) != 2 {
+		t.Fatalf("stored items = %d, want input and output items", len(stored.Items))
+	}
+	output, err := decodeRawJSONObject(stored.Items[1])
+	if err != nil {
+		t.Fatalf("decode stored output: %v", err)
+	}
+	if got := string(output["future_counter"]); got != "9007199254740993" {
+		t.Fatalf("stored future_counter = %s, want exact large integer", got)
+	}
+	if got := string(output["future_payload"]); got != `{"preserved":true}` {
+		t.Fatalf("stored future_payload = %s, want unknown field preserved", got)
 	}
 }
