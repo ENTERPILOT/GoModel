@@ -37,8 +37,10 @@
   GoModel saves you money and nerves.
 </p>
 <p>
-  **Money** - because you can remember the responses on this layer (caching), track your spending and do tricks like prompt compression and intelligent routing.<br />
-  **Nerves** - because we strive to achieve good quality and reliability. Our ambition is to be the last AI gateway you will need - the most reliable, resource-optimal, feature-rich and fast.
+  <strong>Money</strong> - because you can remember the responses on this layer (caching), track your spending and do tricks like prompt compression and intelligent routing.
+</p>
+<p>
+  <strong>Nerves</strong> - because we strive to achieve good quality and reliability. Our ambition is to be the last AI gateway you will need - the most reliable, resource-optimal, feature-rich and fast.
 </p>
 
 ## Quick Start
