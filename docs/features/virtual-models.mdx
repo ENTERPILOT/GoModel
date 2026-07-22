@@ -27,6 +27,12 @@ Create and manage both in the admin dashboard at `Models -> New virtual model`.
 Fill **Target model** to make a redirect; leave it empty to make an access
 policy on the **Source** selector.
 
+The dashboard does not persist empty, ineffective access policies. If a saved
+policy has no target, user paths, or description and its enabled state matches
+the inherited/default access state, GoModel removes the stored row. It retains
+an otherwise empty policy when that row still overrides a disabled default or
+an inherited user-path restriction.
+
 The rest of this page covers redirects.
 
 ## Use stable names

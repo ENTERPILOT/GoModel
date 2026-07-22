@@ -80,7 +80,6 @@
                         is_alias: false,
                         alias: null,
                         access,
-                        kind_badge: '',
                         masking_alias: maskingAlias,
                         has_virtual_model: Boolean(maskingAlias || (access && access.override)),
                         alias_state_class: '',
@@ -117,7 +116,6 @@
                         is_alias: true,
                         alias,
                         access: null,
-                        kind_badge: 'Virtual Model',
                         masking_alias: null,
                         source_model_exists: Boolean(sourceModel),
                         has_virtual_model: true,
@@ -488,14 +486,19 @@
                     }
                 }
 
+                const virtualRows = [];
                 const groups = new Map();
                 for (const row of rows) {
+                    if (row && row.is_alias) {
+                        virtualRows.push(row);
+                        continue;
+                    }
                     const providerName = String(row && row.provider_name || '').trim();
                     const providerType = String(row && row.provider_type || '').trim();
-                    const key = providerName || providerType || 'unassigned';
+                    const key = 'provider-group:' + (providerName || providerType || 'unassigned');
                     if (!groups.has(key)) {
                         groups.set(key, {
-                            key: 'provider-group:' + key,
+                            key,
                             provider_name: providerName,
                             provider_type: providerType,
                             display_name: this.providerGroupDisplayName(providerName, providerType),
@@ -516,7 +519,7 @@
                     group.rows.push(row);
                 }
 
-                return Array.from(groups.values())
+                const result = Array.from(groups.values())
                     .map((group) => {
                         const access = this.providerGroupAccess(group.provider_name, group.provider_type, overridesBySelector);
                         return {
@@ -527,6 +530,21 @@
                         };
                     })
                     .sort((a, b) => String(a.display_name || '').localeCompare(String(b.display_name || '')));
+                if (virtualRows.length > 0) {
+                    result.unshift({
+                        key: 'virtual-model-group',
+                        is_virtual_models: true,
+                        provider_name: '',
+                        provider_type: '',
+                        display_name: 'Virtual models',
+                        type_label: '',
+                        rows: virtualRows,
+                        access: { selector: '' },
+                        access_summary: '',
+                        item_count_label: this.providerGroupItemCountLabel(virtualRows)
+                    });
+                }
+                return result;
             },
 
             providerGroupDisplayName(providerName, providerType) {
@@ -733,19 +751,6 @@
                     classes.push('model-access-disabled-row');
                 }
                 return classes.join(' ');
-            },
-
-            // rowVirtualBadge returns the small badge label shown on a real model row
-            // that carries a virtual model (empty for plain rows and alias rows, which
-            // already show their own Virtual Model badge).
-            rowVirtualBadge(row) {
-                if (!row || row.is_alias || !row.has_virtual_model) {
-                    return '';
-                }
-                if (row.masking_alias) {
-                    return 'Redirect';
-                }
-                return 'Override';
             },
 
             aliasRowCanRemove(row) {
@@ -1281,36 +1286,59 @@
                 if (!source) {
                     return;
                 }
-                await this.removeVirtualModelSource(source, row.key, 'Remove the virtual model alias "' + source + '"?');
+                await this.mutateVirtualModelRow({
+                    rowKey: row.key,
+                    confirmMessage: 'Remove the virtual model alias "' + source + '"?',
+                    method: 'DELETE',
+                    payload: { source },
+                    operation: 'virtual model',
+                    failureMessage: 'Failed to remove virtual model.',
+                    notice: 'Virtual model removed.',
+                    ignoreNotFound: true
+                });
             },
 
             async removeRedirectRow(row) {
                 if (!this.rowRedirectCanRemove(row) || this.rowDeletingKey) {
                     return;
                 }
-                const source = String(row.masking_alias.name || '').trim();
+                const alias = row.masking_alias;
+                const source = String(alias.name || '').trim();
                 if (!source) {
                     return;
                 }
-                await this.removeVirtualModelSource(source, row.key, 'Remove the redirect for "' + source + '"?');
+                await this.mutateVirtualModelRow({
+                    rowKey: row.key,
+                    confirmMessage: 'Remove the redirect for "' + source + '"? Other virtual model settings will be preserved.',
+                    method: 'PUT',
+                    payload: {
+                        source,
+                        user_paths: Array.isArray(alias.user_paths) ? alias.user_paths : [],
+                        description: String(alias.description || '').trim(),
+                        enabled: alias.enabled !== false
+                    },
+                    operation: 'virtual model redirect',
+                    failureMessage: 'Failed to remove redirect.',
+                    notice: 'Redirect removed. Other virtual model settings were preserved.'
+                });
             },
 
-            async removeVirtualModelSource(source, rowKey, confirmMessage) {
+            async mutateVirtualModelRow(options) {
                 if (this.rowDeletingKey) {
                     return;
                 }
-                if (!this.confirmAction(confirmMessage)) {
+                if (!this.confirmAction(options.confirmMessage)) {
                     return;
                 }
 
-                this.rowDeletingKey = rowKey;
+                this.rowDeletingKey = options.rowKey;
                 this.aliasError = '';
                 this.aliasNotice = '';
 
                 try {
                     const request = this.adminRequestOptions({
-                        method: 'DELETE',
-                        body: JSON.stringify({ source })
+                        method: options.method,
+                        body: JSON.stringify(options.payload)
                     });
                     const res = await fetch('/admin/virtual-models', request);
                     if (res.status === 503) {
@@ -1318,15 +1346,15 @@
                         this.aliasError = 'Virtual models feature is unavailable.';
                         return;
                     }
-                    if (res.status !== 404) {
-                        const handled = this.handleFetchResponse(res, 'virtual model', request);
+                    if (!(options.ignoreNotFound && res.status === 404)) {
+                        const handled = this.handleFetchResponse(res, options.operation, request);
                         if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                             return;
                         }
                         if (!handled) {
                             this.aliasError = res.status === 401
                                 ? 'Authentication required.'
-                                : await this.aliasResponseMessage(res, 'Failed to remove virtual model.');
+                                : await this.aliasResponseMessage(res, options.failureMessage);
                             return;
                         }
                     }
@@ -1334,10 +1362,10 @@
 
                     await Promise.all([this.fetchModels(), this.fetchVirtualModels()]);
                     this.syncDisplayModels();
-                    this.aliasNotice = 'Virtual model removed.';
+                    this.aliasNotice = options.notice;
                 } catch (e) {
-                    console.error('Failed to delete virtual model:', e);
-                    this.aliasError = 'Failed to remove virtual model.';
+                    console.error(options.failureMessage, e);
+                    this.aliasError = options.failureMessage;
                 } finally {
                     this.rowDeletingKey = '';
                 }
@@ -1593,12 +1621,15 @@
                             : await this.aliasResponseMessage(res, 'Failed to save virtual model.');
                         return;
                     }
+                    const policyPruned = !isRedirect && res.status === 204;
                     this.setVirtualModelsAvailable(true);
 
                     await Promise.all([this.fetchModels(), this.fetchVirtualModels()]);
                     this.syncDisplayModels();
                     this.closeVirtualModelForm();
-                    this.aliasNotice = isRedirect ? 'Alias saved.' : 'Model access saved.';
+                    this.aliasNotice = isRedirect
+                        ? 'Alias saved.'
+                        : (policyPruned ? 'Model access reset to inherited/default.' : 'Model access saved.');
                 } catch (e) {
                     console.error('Failed to save virtual model:', e);
                     this.vmFormError = 'Failed to save virtual model.';

@@ -71,6 +71,7 @@ func (h *Handler) ListVirtualModels(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        virtual_model  body      upsertVirtualModelRequest  true  "Virtual model definition"
 // @Success      200            {object}  virtualmodels.View
+// @Success      204            "No-op access policy removed"
 // @Failure      400            {object}  core.GatewayError
 // @Failure      401            {object}  core.GatewayError
 // @Failure      502            {object}  core.GatewayError

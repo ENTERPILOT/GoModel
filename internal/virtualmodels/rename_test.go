@@ -77,6 +77,29 @@ func TestService_RenamePreservesDisabledState(t *testing.T) {
 	}
 }
 
+func TestService_RenameToNoopPolicyDeletesOldSource(t *testing.T) {
+	t.Parallel()
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	if err := svc.Upsert(ctx, VirtualModel{
+		Source:  "fast",
+		Targets: []Target{{Provider: "openai", Model: "gpt-4o"}},
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("Upsert(redirect) error = %v", err)
+	}
+	if err := svc.Rename(ctx, "fast", VirtualModel{Source: "gpt-4o", Enabled: true}); err != nil {
+		t.Fatalf("Rename(no-op policy) error = %v", err)
+	}
+	if _, ok := svc.Get("fast"); ok {
+		t.Fatal("Rename(no-op policy) retained the old source")
+	}
+	if _, ok := svc.Get("gpt-4o"); ok {
+		t.Fatal("Rename(no-op policy) stored the new no-op source")
+	}
+}
+
 func TestService_RenameRejectsExistingTarget(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)

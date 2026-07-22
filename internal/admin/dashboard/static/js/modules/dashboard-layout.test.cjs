@@ -624,6 +624,34 @@ test("auth key expirations render as a UTC date with the full UTC timestamp in t
   assert.match(paginationBtnWithIconRule, /gap:\s*8px/);
 });
 
+test("auth key row actions stay inline and use titled icon buttons", () => {
+  const indexTemplate = readDashboardTemplateSource();
+  const css = readFixture("../../css/dashboard.css");
+  const powerIconTemplate = readFixture("../../../templates/power-icon.html");
+
+  assert.match(indexTemplate, /<th aria-label="Actions"><\/th>/);
+  assert.match(
+    indexTemplate,
+    /class="auth-key-actions-cell"[\s\S]*class="auth-key-row-actions"[\s\S]*class="table-action-btn table-icon-btn"[\s\S]*:aria-label="'Edit labels for API key ' \+ key\.name"[\s\S]*:title="'Edit labels for API key ' \+ key\.name"[\s\S]*@click="openAuthKeyLabelsEditor\(key\)"[\s\S]*{{template "edit-icon"}}/,
+  );
+  assert.match(
+    indexTemplate,
+    /class="table-action-btn table-action-btn-danger table-icon-btn"[\s\S]*:disabled="authKeyDeactivatingID === key\.id"[\s\S]*:aria-label="authKeyDeactivatingID === key\.id \? 'Deactivating API key ' \+ key\.name : 'Deactivate API key ' \+ key\.name"[\s\S]*:title="authKeyDeactivatingID === key\.id \? 'Deactivating API key ' \+ key\.name : 'Deactivate API key ' \+ key\.name"[\s\S]*@click="deactivateAuthKey\(key\)"[\s\S]*{{template "power-icon"}}/,
+  );
+  assert.match(
+    powerIconTemplate,
+    /{{define "power-icon"}}[\s\S]*class="table-icon-svg"[\s\S]*<path d="M12 2v10"><\/path>[\s\S]*{{end}}/,
+  );
+
+  const actionCellRule = readCSSRule(css, ".auth-key-actions-cell");
+  assert.match(actionCellRule, /white-space:\s*nowrap/);
+
+  const rowActionsRule = readCSSRule(css, ".auth-key-row-actions");
+  assert.match(rowActionsRule, /display:\s*inline-flex/);
+  assert.match(rowActionsRule, /align-items:\s*center/);
+  assert.match(rowActionsRule, /gap:\s*6px/);
+});
+
 test("workflow guardrail warning links directly to the top-level guardrails page", () => {
   const indexTemplate = readDashboardTemplateSource();
 
@@ -1251,7 +1279,7 @@ test("alias rows use a shared icon-only edit action", () => {
 
   assert.match(
     modelTableTemplate,
-    /class="table-action-btn table-action-btn-danger table-icon-btn"[\s\S]*x-show="virtualModelsAvailable && aliasRowCanRemove\(row\)"[\s\S]*@click="removeAliasRow\(row\)"[\s\S]*{{template "trash-icon"}}[\s\S]*class="table-action-btn table-icon-btn"[\s\S]*:aria-label="'Edit alias ' \+ row\.alias\.name"[\s\S]*@click="openVirtualModelEditAlias\(row\.alias\)"[\s\S]*{{template "edit-icon"}}/,
+    /class="table-action-btn table-action-btn-danger table-icon-btn"[\s\S]*x-show="virtualModelsAvailable && aliasRowCanRemove\(row\)"[\s\S]*@click="removeAliasRow\(row\)"[\s\S]*{{template "trash-icon"}}[\s\S]*class="table-action-btn table-icon-btn table-action-btn-active"[\s\S]*:aria-label="'Edit alias ' \+ row\.alias\.name"[\s\S]*@click="openVirtualModelEditAlias\(row\.alias\)"[\s\S]*{{template "edit-icon"}}/,
   );
   assert.match(
     modelTableTemplate,
@@ -1263,12 +1291,31 @@ test("alias rows use a shared icon-only edit action", () => {
   );
   assert.match(
     modelTableTemplate,
-    /Redirects to <span class="mono font-size-md" x-text="aliasTargetLabel\(row\.masking_alias\)"><\/span>/,
+    /Redirects to <span class="mono font-size-md" x-text="aliasTargetLabel\(row\.masking_alias\)"><\/span>[\s\S]*class="model-redirect-remove-btn mono"[\s\S]*x-show="virtualModelsAvailable && rowRedirectCanRemove\(row\)"[\s\S]*@click="removeRedirectRow\(row\)">\[remove\]<\/button>/,
   );
   assert.match(
     modelTableTemplate,
-    /x-show="modelPricingOverridesAvailable"[\s\S]*@click="openModelPricingOverrideEdit\(row\)"[\s\S]*{{template "dollar-icon"}}[\s\S]*class="table-action-btn table-action-btn-danger table-icon-btn"[\s\S]*x-show="virtualModelsAvailable && rowRedirectCanRemove\(row\)"[\s\S]*@click="removeRedirectRow\(row\)"[\s\S]*{{template "trash-icon"}}/,
+    /class="model-kind-icon" x-show="row\.is_alias"[\s\S]*aria-label="Virtual model"[\s\S]*class="model-kind-icon-svg"/,
   );
+  assert.match(
+    modelTableTemplate,
+    /class="model-kind-icon" x-show="!row\.is_alias && row\.masking_alias"[\s\S]*aria-label="Redirect"[\s\S]*class="model-kind-icon-svg"/,
+  );
+  assert.match(
+    modelTableTemplate,
+    /x-show="modelPricingOverridesAvailable"[\s\S]*@click="openModelPricingOverrideEdit\(row\)"[\s\S]*{{template "dollar-icon"}}/,
+  );
+  assert.match(
+    modelTableTemplate,
+    /@click="openRateLimitInspectorForModel\(row\)"[\s\S]*{{template "gauge-icon"}}[\s\S]*class="table-action-btn table-icon-btn table-action-btn-active"[\s\S]*x-show="virtualModelsAvailable && row\.masking_alias && row\.masking_alias\.name"[\s\S]*@click="openVirtualModelEditAlias\(row\.masking_alias\)"[\s\S]*{{template "edit-icon"}}/,
+  );
+  assert.doesNotMatch(
+    modelTableTemplate,
+    /class="table-action-btn table-action-btn-danger table-icon-btn"[\s\S]*@click="removeRedirectRow\(row\)"/,
+  );
+  const redirectRemoveRule = readCSSRule(css, ".model-redirect-remove-btn");
+  assert.match(redirectRemoveRule, /font-size:\s*11px/);
+  assert.match(redirectRemoveRule, /color:\s*var\(--danger\)/);
   assert.doesNotMatch(css, /\.data-table tr\.masked-model-row td/);
   assert.match(indexTemplate, /{{template "model-table-body" \.}}/);
   assert.match(

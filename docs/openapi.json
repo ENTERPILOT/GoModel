@@ -3761,6 +3761,9 @@
               }
             }
           },
+          "204": {
+            "description": "No-op access policy removed"
+          },
           "400": {
             "description": "Bad Request",
             "content": {

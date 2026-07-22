@@ -2835,6 +2835,9 @@ const docTemplate = `{
                             "$ref": "#/definitions/virtualmodels.View"
                         }
                     },
+                    "204": {
+                        "description": "No-op access policy removed"
+                    },
                     "400": {
                         "description": "Bad Request",
                         "schema": {

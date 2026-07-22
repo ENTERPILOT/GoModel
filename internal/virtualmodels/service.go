@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/modelselectors"
 )
 
 // Service is the single native engine over the virtual_models store. It serves
@@ -266,8 +267,10 @@ func (s *Service) redirectViewResolution(vm VirtualModel) (resolved, providerTyp
 	return resolved, providerType, valid
 }
 
-// Upsert validates and stores one virtual model, then refreshes the in-memory
-// snapshot with rollback on refresh failure.
+// Upsert validates and stores one virtual model, replacing any existing row at
+// the same source even when its kind changes. A policy with no metadata whose
+// access state is identical to what it would inherit is deleted instead of
+// persisting a redundant row.
 func (s *Service) Upsert(ctx context.Context, vm VirtualModel) error {
 	if s == nil {
 		return fmt.Errorf("virtual models service is required")
@@ -285,17 +288,44 @@ func (s *Service) Upsert(ctx context.Context, vm VirtualModel) error {
 	defer s.refreshMu.Unlock()
 
 	current := s.snapshot()
-	if err := s.ensureSourceKind(current, normalized.Source, normalized.IsRedirect()); err != nil {
+	previous, canonical, existed := current.lookupCanonicalSource(normalized.Source)
+	if existed {
+		normalized.Source = canonical
+		if normalized.CreatedAt.IsZero() {
+			normalized.CreatedAt = previous.CreatedAt
+		}
+		if previous.Managed {
+			return managedSourceError(canonical)
+		}
+	}
+
+	baseRows := current.rows()
+	if existed {
+		baseRows = removeRow(baseRows, canonical)
+	}
+	redundant, err := s.policyIsRedundant(normalized, baseRows)
+	if err != nil {
 		return err
+	}
+	if redundant {
+		if !existed {
+			return nil
+		}
+		if err := s.store.Delete(ctx, canonical); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("delete redundant virtual model policy: %w", err)
+		}
+		return s.commitRefresh(ctx, map[string]*VirtualModel{canonical: &previous})
 	}
 	if err := s.validateRedirectTarget(current, normalized); err != nil {
 		return err
 	}
-	if _, err := buildSnapshot(upsertRow(current.rows(), normalized), s.defaultEnabled); err != nil {
+	if _, err := buildSnapshot(upsertRow(baseRows, normalized), s.defaultEnabled); err != nil {
 		return fmt.Errorf("validate virtual models: %w", err)
 	}
 
-	previous, existed := current.bySource[normalized.Source]
 	if err := s.store.Upsert(ctx, normalized); err != nil {
 		return fmt.Errorf("upsert virtual model: %w", err)
 	}
@@ -345,7 +375,21 @@ func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel)
 	if err := s.validateRedirectTarget(current, normalized); err != nil {
 		return err
 	}
-	rows := upsertRow(removeRow(current.rows(), oldSource), normalized)
+	baseRows := removeRow(current.rows(), oldSource)
+	redundant, err := s.policyIsRedundant(normalized, baseRows)
+	if err != nil {
+		return err
+	}
+	if redundant {
+		if err := s.store.Delete(ctx, oldSource); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("delete no-op renamed policy: %w", err)
+		}
+		return s.commitRefresh(ctx, map[string]*VirtualModel{oldSource: &previous})
+	}
+	rows := upsertRow(baseRows, normalized)
 	if _, err := buildSnapshot(rows, s.defaultEnabled); err != nil {
 		return fmt.Errorf("validate virtual models: %w", err)
 	}
@@ -404,25 +448,63 @@ func (s *Service) Delete(ctx context.Context, source string) error {
 	return s.commitRefresh(ctx, map[string]*VirtualModel{source: &previous})
 }
 
+func (s *Service) policyIsRedundant(policy VirtualModel, fallbackRows []VirtualModel) (bool, error) {
+	if policy.IsRedirect() {
+		return false, nil
+	}
+	fallback, err := buildSnapshot(fallbackRows, s.defaultEnabled)
+	if err != nil {
+		return false, fmt.Errorf("validate inherited virtual models: %w", err)
+	}
+	return policyIsNoop(policy, fallback), nil
+}
+
+// policyIsNoop reports whether an otherwise empty policy changes effective
+// access compared with the snapshot that would remain without that policy.
+func policyIsNoop(policy VirtualModel, fallback snapshot) bool {
+	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" {
+		return false
+	}
+
+	matches := func(enabled bool, userPaths []string) bool {
+		return policy.Enabled == enabled && len(userPaths) == 0
+	}
+	selector := core.ModelSelector{Provider: policy.ProviderName, Model: policy.Model}
+
+	switch scopeKindFor(policy.Source, policy.ProviderName, policy.Model) {
+	case modelselectors.ScopeGlobal:
+		return matches(fallback.defaultEnable, nil)
+	case modelselectors.ScopeProvider:
+		state := fallback.effectiveState(selector)
+		if !matches(state.Enabled, state.UserPaths) {
+			return false
+		}
+		// Provider-wide policies outrank model-wide policies. Removing one can
+		// therefore expose any model-wide rule for this provider.
+		for _, modelPolicy := range fallback.modelWide {
+			if !matches(modelPolicy.Enabled, modelPolicy.UserPaths) {
+				return false
+			}
+		}
+		return true
+	default:
+		state := fallback.effectiveState(selector)
+		return matches(state.Enabled, state.UserPaths)
+	}
+}
+
 func (s *Service) normalizeForUpsert(vm VirtualModel) (VirtualModel, error) {
 	if vm.IsRedirect() {
 		normalized, _, err := normalizeRedirect(vm)
 		return normalized, err
 	}
-	return normalizePolicyInput(s.catalog, vm)
-}
-
-// ensureSourceKind rejects an upsert that would clobber an existing row of the
-// other kind. Source is a single namespace.
-func (s *Service) ensureSourceKind(current snapshot, source string, wantRedirect bool) error {
-	existing, ok := current.bySource[source]
-	if !ok {
-		return nil
+	normalized, err := normalizePolicyInput(s.catalog, vm)
+	if err != nil {
+		return VirtualModel{}, err
 	}
-	if existing.IsRedirect() == wantRedirect {
-		return nil
-	}
-	return crossKindError(source, wantRedirect)
+	normalized.Strategy = ""
+	normalized.Description = strings.TrimSpace(normalized.Description)
+	return normalized, nil
 }
 
 // validateRedirectTarget enforces redirect rules for an admin write: the

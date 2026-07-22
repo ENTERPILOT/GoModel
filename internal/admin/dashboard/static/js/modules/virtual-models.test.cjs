@@ -798,6 +798,33 @@ test('submitVirtualModelForm sends a policy payload when target_model is empty',
     assert.equal(Object.prototype.hasOwnProperty.call(body, 'target_model'), false);
 });
 
+test('submitVirtualModelForm reports when an empty policy is pruned', async() => {
+    const module = createAliasesModule({
+        context: {
+            fetch: async() => ({ ok: true, status: 204, json: async() => ({}) })
+        }
+    });
+    stubRequests(module);
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+    module.syncDisplayModels = () => {};
+    module.vmFormOpen = true;
+    module.vmFormMode = 'edit';
+    module.vmForm = {
+        source: 'openai/gpt-4o',
+        target_model: '',
+        targets: [],
+        user_paths: '',
+        description: '',
+        enabled: true
+    };
+
+    await module.submitVirtualModelForm();
+
+    assert.equal(module.vmFormOpen, false);
+    assert.equal(module.aliasNotice, 'Model access reset to inherited/default.');
+});
+
 test('deleteVirtualModel removes the editor source', async() => {
     const requests = [];
     const module = createAliasesModule({
@@ -832,7 +859,6 @@ test('displayRowClass renders real models carrying a virtual model as alias-like
         access: { effective_enabled: true }
     };
     assert.equal(module.displayRowClass(overrideRow), 'alias-row is-valid');
-    assert.equal(module.rowVirtualBadge(overrideRow), 'Override');
 
     const redirectRow = {
         is_alias: false,
@@ -841,16 +867,13 @@ test('displayRowClass renders real models carrying a virtual model as alias-like
         access: { effective_enabled: true }
     };
     assert.equal(module.displayRowClass(redirectRow), 'alias-row is-valid masked-model-row');
-    assert.equal(module.rowVirtualBadge(redirectRow), 'Redirect');
     assert.equal(module.rowRedirectCanRemove(redirectRow), true);
 
     const plainRow = { is_alias: false, has_virtual_model: false, access: { effective_enabled: true } };
     assert.equal(module.displayRowClass(plainRow), '');
-    assert.equal(module.rowVirtualBadge(plainRow), '');
 
     const aliasRow = { is_alias: true, alias: { enabled: true, valid: true } };
     assert.equal(module.displayRowClass(aliasRow), 'alias-row is-valid');
-    assert.equal(module.rowVirtualBadge(aliasRow), '');
     assert.equal(module.aliasRowCanRemove({
         is_alias: true,
         source_model_exists: true,
@@ -939,16 +962,13 @@ test('buildDisplayModels combines source-backed redirects with the concrete mode
     const nestedTargetAlias = module.displayModels.find((row) => row.key === 'alias:anthropic/claude-fable-5');
     const nestedTargetModel = module.displayModels.find((row) => row.key === 'model:openrouter/anthropic/claude-fable-5');
 
-    assert.equal(aliasOnly.kind_badge, 'Virtual Model');
     assert.equal(aliasOnly.source_model_exists, false);
     assert.equal(module.aliasRowCanRemove(aliasOnly), true);
     assert.equal(modelBackedAliasRow, undefined);
     assert.equal(modelBacked.masking_alias.name, 'gpt-4o');
-    assert.equal(module.rowVirtualBadge(modelBacked), 'Redirect');
     assert.equal(module.rowRedirectCanRemove(modelBacked), true);
     assert.equal(nestedTargetAlias, undefined);
     assert.equal(nestedTargetModel.masking_alias.name, 'anthropic/claude-fable-5');
-    assert.equal(module.rowVirtualBadge(nestedTargetModel), 'Redirect');
     assert.equal(module.rowRedirectCanRemove(nestedTargetModel), true);
 
     // The masking redirect on a real-model row is editable through the alias
@@ -1002,7 +1022,7 @@ test('removeAliasRow confirms and deletes an alias-only virtual model', async() 
     assert.equal(module.rowDeletingKey, '');
 });
 
-test('removeRedirectRow confirms and deletes a source-backed redirect', async() => {
+test('removeRedirectRow confirms and removes only a source-backed redirect', async() => {
     const requests = [];
     const confirms = [];
     const fetched = [];
@@ -1029,16 +1049,28 @@ test('removeRedirectRow confirms and deletes a source-backed redirect', async() 
         key: 'model:openai/gpt-4o',
         is_alias: false,
         display_name: 'openai/gpt-4o',
-        masking_alias: { name: 'openai/gpt-4o' }
+        masking_alias: {
+            name: 'openai/gpt-4o',
+            description: 'Team model',
+            user_paths: ['/team'],
+            enabled: true
+        }
     });
 
-    assert.deepEqual(confirms, ['Remove the redirect for "openai/gpt-4o"?']);
+    assert.deepEqual(confirms, [
+        'Remove the redirect for "openai/gpt-4o"? Other virtual model settings will be preserved.'
+    ]);
     assert.equal(requests.length, 1);
     assert.equal(requests[0].url, '/admin/virtual-models');
-    assert.equal(requests[0].request.method, 'DELETE');
-    assert.deepEqual(JSON.parse(requests[0].request.body), { source: 'openai/gpt-4o' });
+    assert.equal(requests[0].request.method, 'PUT');
+    assert.deepEqual(JSON.parse(requests[0].request.body), {
+        source: 'openai/gpt-4o',
+        user_paths: ['/team'],
+        description: 'Team model',
+        enabled: true
+    });
     assert.deepEqual(fetched, ['models', 'virtual', 'sync']);
-    assert.equal(module.aliasNotice, 'Virtual model removed.');
+    assert.equal(module.aliasNotice, 'Redirect removed. Other virtual model settings were preserved.');
     assert.equal(module.rowDeletingKey, '');
 });
 
@@ -1152,6 +1184,56 @@ test('filteredDisplayModelGroups groups rows by provider_name and applies provid
     assert.equal(backup.access.selector, 'openai-backup/');
     assert.equal(backup.access.effective_enabled, true);
     assert.deepEqual(Array.from(backup.access.user_paths), ['/non-existing']);
+});
+
+test('filteredDisplayModelGroups keeps alias-only virtual models in a first group', () => {
+    const module = createAliasesModule();
+    module.models = [
+        {
+            provider_name: 'alpha',
+            provider_type: 'test',
+            selector: 'alpha/model-a',
+            model: { id: 'model-a', object: 'model' }
+        },
+        {
+            provider_name: 'zulu',
+            provider_type: 'test',
+            selector: 'zulu/model-z',
+            model: { id: 'model-z', object: 'model' }
+        }
+    ];
+    module.aliases = [
+        {
+            name: 'smart',
+            target_provider: 'zulu',
+            target_model: 'model-z',
+            enabled: true,
+            valid: true
+        },
+        {
+            name: 'model-a',
+            target_provider: 'zulu',
+            target_model: 'model-z',
+            enabled: true,
+            valid: true
+        }
+    ];
+    module.virtualModelsAvailable = true;
+    module.modelFilter = '';
+    module.activeCategory = 'all';
+    module.syncDisplayModels();
+
+    const groups = module.filteredDisplayModelGroups;
+
+    assert.equal(groups[0].key, 'virtual-model-group');
+    assert.equal(groups[0].display_name, 'Virtual models');
+    assert.deepEqual(Array.from(groups[0].rows, (row) => row.display_name), ['smart']);
+    assert.equal(groups[0].provider_name, '');
+    assert.equal(groups[0].access.selector, '');
+    assert.deepEqual(Array.from(groups, (group) => group.display_name), ['Virtual models', 'alpha', 'zulu']);
+
+    const overriddenModel = groups[1].rows.find((row) => row.display_name === 'alpha/model-a');
+    assert.equal(overriddenModel.masking_alias.name, 'model-a');
 });
 
 test('filteredDisplayModelGroups lets provider-wide overrides replace global paths', () => {

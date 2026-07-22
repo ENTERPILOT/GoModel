@@ -2260,6 +2260,26 @@ td.col-price {
   color: var(--text-muted);
 }
 
+.model-redirect-remove-btn {
+  appearance: none;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--danger);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.model-redirect-remove-btn:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.model-redirect-remove-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .provider-group-row td {
   background: color-mix(in srgb, var(--accent) 6%, var(--bg));
   padding-top: 12px;
@@ -2322,6 +2342,24 @@ td.col-price {
   letter-spacing: 0.2px;
   text-transform: uppercase;
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.model-kind-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--accent);
+}
+
+.model-kind-icon-svg {
+  width: 14px;
+  height: 14px;
 }
 
 .inline-link {
@@ -6565,6 +6603,16 @@ body.conversation-drawer-open {
   color: var(--text-muted);
   font-size: 13px;
   max-width: 220px;
+}
+
+.auth-key-actions-cell {
+  white-space: nowrap;
+}
+
+.auth-key-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .auth-key-status-badge {
