@@ -719,8 +719,9 @@ function dashboard() {
       ) {
         requests.push(this.fetchRateLimitsPage());
       }
-      // Fetched on every page, not just mcp-servers: the overview MCP card
-      // needs the server list to render its connected/total summary.
+      // Considered on every page, not just mcp-servers: the overview MCP card
+      // needs the server list to render its connected/total summary. The MCP
+      // module waits for runtime config and skips the request when disabled.
       if (typeof this.fetchMcpServersPage === "function") {
         requests.push(this.fetchMcpServersPage());
       }
