@@ -5,14 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 // Gateway-managed conversations live in the local conversation store; upstream
@@ -208,67 +205,4 @@ func (t *conversationTurn) appendResponse(ctx context.Context, resp *core.Respon
 		resp.Output[index].ID = responseInputItemID(persistedOutput[index])
 	}
 	return nil
-}
-
-// persistingStream commits the turn before releasing the provider's terminal
-// event to the client. A storage failure therefore interrupts the SSE stream
-// instead of reporting response.completed with history that was not saved.
-func (t *conversationTurn) persistingStream(ctx context.Context, stream io.ReadCloser) io.ReadCloser {
-	observer := &conversationStreamObserver{turn: t, ctx: context.WithoutCancel(ctx)}
-	return &conversationPersistingStream{
-		ReadCloser: streaming.NewObservedSSEStream(stream, observer),
-		observer:   observer,
-	}
-}
-
-type conversationStreamObserver struct {
-	turn      *conversationTurn
-	ctx       context.Context
-	attempted bool
-	err       error
-}
-
-func (o *conversationStreamObserver) OnJSONEvent(payload map[string]any) {
-	eventType, _ := payload["type"].(string)
-	if o.attempted || (eventType != "response.completed" && eventType != "response.done") {
-		return
-	}
-	response, ok := payload["response"].(map[string]any)
-	if !ok {
-		return
-	}
-	o.attempted = true
-	responseID, _ := response["id"].(string)
-	outputItems, _ := response["output"].([]any)
-	output := make([]json.RawMessage, 0, len(outputItems))
-	for _, item := range outputItems {
-		raw, err := json.Marshal(item)
-		if err != nil {
-			o.err = fmt.Errorf("marshal streamed conversation output: %w", err)
-			return
-		}
-		output = append(output, raw)
-	}
-	if _, err := o.turn.appendExchange(o.ctx, responseID, output); err != nil {
-		o.err = fmt.Errorf("append streamed conversation turn: %w", err)
-	}
-}
-
-func (o *conversationStreamObserver) OnStreamClose() {
-	if o.err != nil {
-		slog.Warn("conversation stream persistence failed", "conversation_id", o.turn.id, "error", o.err)
-	}
-}
-
-type conversationPersistingStream struct {
-	io.ReadCloser
-	observer *conversationStreamObserver
-}
-
-func (s *conversationPersistingStream) Read(p []byte) (int, error) {
-	n, err := s.ReadCloser.Read(p)
-	if s.observer.err != nil {
-		return 0, s.observer.err
-	}
-	return n, err
 }
