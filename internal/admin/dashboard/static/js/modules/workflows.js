@@ -95,7 +95,8 @@
 	                    'REDIS_URL',
 	                    'SEMANTIC_CACHE_ENABLED',
 	                    'USAGE_PRICING_RECALCULATION_ENABLED',
-	                    'DASHBOARD_LIVE_LOGS_ENABLED'
+	                    'DASHBOARD_LIVE_LOGS_ENABLED',
+	                    'MCP_ENABLED'
 	                ];
 	            },
 

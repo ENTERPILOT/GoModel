@@ -2263,6 +2263,7 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		SemanticCacheEnabled: "off",
 		PricingRecalculation: "on",
 		LiveLogsEnabled:      "on",
+		MCPEnabled:           "off",
 	}))
 	c, rec := newHandlerContext("/admin/runtime/config")
 
@@ -2315,6 +2316,9 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	}
 	if got := body.LiveLogsEnabled; got != "on" {
 		t.Fatalf("DASHBOARD_LIVE_LOGS_ENABLED = %q, want on", got)
+	}
+	if got := body.MCPEnabled; got != "off" {
+		t.Fatalf("MCP_ENABLED = %q, want off", got)
 	}
 	if rec.Body.String() == "" || strings.Contains(rec.Body.String(), "UNRELATED_FLAG") {
 		t.Fatal("UNRELATED_FLAG should not be exposed")

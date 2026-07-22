@@ -76,6 +76,7 @@ const (
 	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
 	DashboardConfigPricingRecalculation = "USAGE_PRICING_RECALCULATION_ENABLED"
 	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
+	DashboardConfigMCPEnabled           = "MCP_ENABLED"
 )
 
 // statusClientClosedRequest is the de facto status used by proxies for client-aborted requests.
@@ -96,6 +97,7 @@ type DashboardConfigResponse struct {
 	SemanticCacheEnabled string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
 	PricingRecalculation string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
 	LiveLogsEnabled      string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
+	MCPEnabled           string `json:"MCP_ENABLED,omitempty"`
 }
 
 type providerStatusSummaryResponse struct {
@@ -352,6 +354,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		SemanticCacheEnabled: strings.TrimSpace(values.SemanticCacheEnabled),
 		PricingRecalculation: strings.TrimSpace(values.PricingRecalculation),
 		LiveLogsEnabled:      strings.TrimSpace(values.LiveLogsEnabled),
+		MCPEnabled:           strings.TrimSpace(values.MCPEnabled),
 	}
 }
 

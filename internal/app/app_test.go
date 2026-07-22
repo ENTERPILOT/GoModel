@@ -501,6 +501,9 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 		Admin: config.AdminConfig{
 			LiveLogsEnabled: true,
 		},
+		MCP: config.MCPConfig{
+			Enabled: true,
+		},
 		Cache: config.CacheConfig{
 			Response: config.ResponseCacheConfig{
 				Simple: &config.SimpleCacheConfig{
@@ -541,12 +544,24 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	if got := values.LiveLogsEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLiveLogsEnabled, got)
 	}
+	if got := values.MCPEnabled; got != "on" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigMCPEnabled, got)
+	}
 }
 
 func TestDashboardRuntimeConfig_ExposesIndefiniteLoggingRetention(t *testing.T) {
 	values := dashboardRuntimeConfig(&config.Config{}, false, false)
 	if got := values.LoggingRetentionDays; got != "0" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want 0", admin.DashboardConfigLoggingRetentionDays, got)
+	}
+}
+
+func TestDashboardRuntimeConfig_HidesMCPWhenDisabled(t *testing.T) {
+	values := dashboardRuntimeConfig(&config.Config{
+		MCP: config.MCPConfig{Enabled: false},
+	}, false, false)
+	if got := values.MCPEnabled; got != "off" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigMCPEnabled, got)
 	}
 }
 

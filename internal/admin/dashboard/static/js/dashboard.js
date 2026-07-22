@@ -384,6 +384,12 @@ function dashboard() {
         : true;
     },
 
+    mcpServersPageVisible() {
+      return typeof this.workflowRuntimeBooleanFlag === "function"
+        ? this.workflowRuntimeBooleanFlag("MCP_ENABLED", true)
+        : true;
+    },
+
     setTheme(t) {
       this.theme = t;
       localStorage.setItem("gomodel_theme", t);
