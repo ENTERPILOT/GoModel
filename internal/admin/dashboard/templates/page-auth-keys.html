@@ -183,7 +183,7 @@
                     <th>Status</th>
                     <th>Expires</th>
                     <th>Created</th>
-                    <th></th>
+                    <th aria-label="Actions"></th>
                 </tr>
             </thead>
             <tbody>
@@ -210,15 +210,24 @@
                         <td :title="key.expires_at ? formatTimestampUTC(key.expires_at) : ''"
                             x-text="key.expires_at ? formatDateUTC(key.expires_at) : '\u2014'"></td>
                         <td x-text="formatTimestamp(key.created_at)"></td>
-                        <td>
-                            <button type="button" class="table-action-btn"
-                                x-show="key.active"
-                                @click="openAuthKeyLabelsEditor(key)">Edit Labels</button>
-                            <button type="button" class="table-action-btn table-action-btn-danger"
-                                x-show="key.active"
-                                :disabled="authKeyDeactivatingID === key.id"
-                                @click="deactivateAuthKey(key)"
-                                x-text="authKeyDeactivatingID === key.id ? 'Deactivating...' : 'Deactivate'"></button>
+                        <td class="auth-key-actions-cell">
+                            <div class="auth-key-row-actions">
+                                <button type="button" class="table-action-btn table-icon-btn"
+                                    x-show="key.active"
+                                    :aria-label="'Edit labels for API key ' + key.name"
+                                    :title="'Edit labels for API key ' + key.name"
+                                    @click="openAuthKeyLabelsEditor(key)">
+                                    {{template "edit-icon"}}
+                                </button>
+                                <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                    x-show="key.active"
+                                    :disabled="authKeyDeactivatingID === key.id"
+                                    :aria-label="authKeyDeactivatingID === key.id ? 'Deactivating API key ' + key.name : 'Deactivate API key ' + key.name"
+                                    :title="authKeyDeactivatingID === key.id ? 'Deactivating API key ' + key.name : 'Deactivate API key ' + key.name"
+                                    @click="deactivateAuthKey(key)">
+                                    {{template "power-icon"}}
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 </template>

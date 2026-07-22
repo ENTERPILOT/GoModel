@@ -177,11 +177,3 @@ func selectorString(providerName, model string) string {
 func scopeKindFor(selector, providerName, model string) modelselectors.ScopeKind {
 	return modelselectors.ScopeKindFor(selector, providerName, model)
 }
-
-func crossKindError(source string, wantRedirect bool) error {
-	other := "an access policy"
-	if !wantRedirect {
-		other = "an alias"
-	}
-	return newValidationError(fmt.Sprintf("source %q is already used by %s", source, other), nil)
-}

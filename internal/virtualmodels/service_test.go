@@ -110,30 +110,35 @@ func TestService_EnabledPolicyEmptyUserPathsAllowsAll(t *testing.T) {
 	}
 }
 
-func TestService_RejectsCrossKindClobber(t *testing.T) {
+func TestService_UpsertReplacesRedirectWithPolicy(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	if err := svc.Upsert(ctx, VirtualModel{Source: "gpt-fast", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true}); err != nil {
+	if err := svc.Upsert(ctx, VirtualModel{
+		Source:      "gpt-fast",
+		Targets:     []Target{{Provider: "openai", Model: "gpt-4o"}},
+		Description: "Team model",
+		UserPaths:   []string{"/team"},
+		Enabled:     true,
+	}); err != nil {
 		t.Fatalf("Upsert(redirect) error = %v", err)
 	}
-	// A policy with the same source must be rejected, not silently clobber it.
-	err := svc.Upsert(ctx, VirtualModel{Source: "gpt-fast", UserPaths: []string{"/team"}})
-	if err == nil {
-		t.Fatalf("Upsert(policy over redirect) error = nil, want rejection")
-	}
-	if !IsValidationError(err) {
-		t.Fatalf("Upsert(policy over redirect) error = %v, want validation error", err)
+	if err := svc.Upsert(ctx, VirtualModel{
+		Source:      "gpt-fast",
+		Description: "Team model",
+		UserPaths:   []string{"/team"},
+		Enabled:     true,
+	}); err != nil {
+		t.Fatalf("Upsert(policy over redirect) error = %v", err)
 	}
 
-	// The redirect must survive intact.
-	got, getErr := svc.store.Get(ctx, "gpt-fast")
-	if getErr != nil {
-		t.Fatalf("store.Get() error = %v", getErr)
+	got, ok := svc.Get("gpt-fast")
+	if !ok {
+		t.Fatal("Get(gpt-fast) = missing")
 	}
-	if !got.IsRedirect() {
-		t.Fatalf("redirect was clobbered: %#v", got)
+	if got.IsRedirect() || got.Description != "Team model" || len(got.UserPaths) != 1 || got.UserPaths[0] != "/team" {
+		t.Fatalf("replacement policy = %#v", got)
 	}
 }
 
@@ -491,6 +496,85 @@ func TestService_DeleteMissingReturnsErrNotFound(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.Delete(context.Background(), "nope"); err != ErrNotFound {
 		t.Fatalf("Delete(missing) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestService_UpsertPrunesOnlyRedundantPolicies(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("matching default", func(t *testing.T) {
+		svc := newTestService(t)
+		if err := svc.Upsert(ctx, VirtualModel{
+			Source:      "openai/gpt-4o",
+			Description: "temporary note",
+			Enabled:     true,
+		}); err != nil {
+			t.Fatalf("Upsert(existing policy) error = %v", err)
+		}
+		if err := svc.Upsert(ctx, VirtualModel{Source: "openai/gpt-4o", Enabled: true}); err != nil {
+			t.Fatalf("Upsert() error = %v", err)
+		}
+		if _, ok := svc.Get("openai/gpt-4o"); ok {
+			t.Fatal("Upsert() stored a policy matching the default")
+		}
+	})
+
+	t.Run("different from default", func(t *testing.T) {
+		svc, err := NewService(newSQLiteVMStore(t), testCatalog(), false)
+		if err != nil {
+			t.Fatalf("NewService() error = %v", err)
+		}
+		if err := svc.Upsert(ctx, VirtualModel{Source: "openai/gpt-4o", Enabled: true}); err != nil {
+			t.Fatalf("Upsert() error = %v", err)
+		}
+		if _, ok := svc.Get("openai/gpt-4o"); !ok {
+			t.Fatal("Upsert() dropped an explicit enable over a disabled default")
+		}
+	})
+
+	t.Run("overrides inherited paths", func(t *testing.T) {
+		svc := newTestService(t)
+		if err := svc.Upsert(ctx, VirtualModel{Source: "/", UserPaths: []string{"/team"}, Enabled: true}); err != nil {
+			t.Fatalf("Upsert(global policy) error = %v", err)
+		}
+		if err := svc.Upsert(ctx, VirtualModel{Source: "openai/gpt-4o", Enabled: true}); err != nil {
+			t.Fatalf("Upsert() error = %v", err)
+		}
+		if _, ok := svc.Get("openai/gpt-4o"); !ok {
+			t.Fatal("Upsert() dropped an allow-all policy overriding inherited paths")
+		}
+	})
+}
+
+func TestService_UpsertReplacesPolicyWithRedirect(t *testing.T) {
+	t.Parallel()
+	catalog := testCatalog()
+	catalog.supported["openai/gpt-4o-mini"] = core.Model{ID: "openai/gpt-4o-mini", Object: "model", OwnedBy: "openai"}
+	svc, err := NewService(newSQLiteVMStore(t), catalog, true)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	ctx := context.Background()
+	if err := svc.Upsert(ctx, VirtualModel{
+		Source:    "openai/gpt-4o",
+		UserPaths: []string{"/team"},
+		Enabled:   true,
+	}); err != nil {
+		t.Fatalf("Upsert(policy) error = %v", err)
+	}
+
+	err = svc.Upsert(ctx, VirtualModel{
+		Source:  "openai/gpt-4o",
+		Targets: []Target{{Provider: "openai", Model: "gpt-4o-mini"}},
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Upsert(redirect over policy) error = %v", err)
+	}
+	vm, ok := svc.Get("openai/gpt-4o")
+	if !ok || !vm.IsRedirect() {
+		t.Fatalf("Upsert() result = %#v, found=%v; want redirect", vm, ok)
 	}
 }
 

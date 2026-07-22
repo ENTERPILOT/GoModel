@@ -149,6 +149,7 @@ func newVMHandler(t *testing.T, items ...virtualmodels.VirtualModel) *Handler {
 	t.Helper()
 	catalog := newVMTestCatalog()
 	catalog.add("openai/gpt-4o", "openai")
+	catalog.add("openai/gpt-4o-mini", "openai")
 	service := newVMService(t, catalog, newVMTestStore(items...), true)
 	return NewHandler(nil, nil, WithVirtualModels(service))
 }
@@ -262,6 +263,63 @@ func TestUpsertAndDeleteRedirectVirtualModel(t *testing.T) {
 	}
 }
 
+func TestUpsertVirtualModelRemovesRedirectAndPreservesPolicyFields(t *testing.T) {
+	h := newVMHandler(t)
+	e := echo.New()
+
+	putBody := `{"source":"gpt-4o","target_model":"openai/gpt-4o","description":"Team model","user_paths":["/team"],"enabled":true}`
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(putBody))
+	putReq.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(putReq, putRec)); err != nil {
+		t.Fatalf("UpsertVirtualModel() error = %v", err)
+	}
+
+	policyBody := `{"source":"gpt-4o","description":"Team model","user_paths":["/team"],"enabled":true}`
+	policyReq := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(policyBody))
+	policyReq.Header.Set("Content-Type", "application/json")
+	policyRec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(policyReq, policyRec)); err != nil {
+		t.Fatalf("UpsertVirtualModel(policy) error = %v", err)
+	}
+	if policyRec.Code != http.StatusOK {
+		t.Fatalf("policy status = %d, want 200 body=%s", policyRec.Code, policyRec.Body.String())
+	}
+
+	vm, ok := h.virtualModels.Get("gpt-4o")
+	if !ok {
+		t.Fatal("policy replacement removed the virtual model")
+	}
+	if vm.IsRedirect() {
+		t.Fatalf("policy replacement left targets %#v", vm.Targets)
+	}
+	if vm.Description != "Team model" || !vm.Enabled {
+		t.Fatalf("policy replacement changed fields: %#v", vm)
+	}
+	if len(vm.UserPaths) != 1 || vm.UserPaths[0] != "/team" {
+		t.Fatalf("policy replacement user paths = %#v, want [/team]", vm.UserPaths)
+	}
+}
+
+func TestUpsertVirtualModelEmptyEditDropsNoopRecord(t *testing.T) {
+	h := newVMHandler(t, redirectVM("gpt-4o", "openai/gpt-4o", true))
+	e := echo.New()
+
+	putBody := `{"source":"gpt-4o","enabled":true}`
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(putBody))
+	putReq.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(putReq, putRec)); err != nil {
+		t.Fatalf("UpsertVirtualModel(empty edit) error = %v", err)
+	}
+	if putRec.Code != http.StatusNoContent {
+		t.Fatalf("put status = %d, want 204 body=%s", putRec.Code, putRec.Body.String())
+	}
+	if _, ok := h.virtualModels.Get("gpt-4o"); ok {
+		t.Fatal("empty edit retained a no-op virtual model")
+	}
+}
+
 func TestUpsertVirtualModelRenamesViaOldSource(t *testing.T) {
 	h := newVMHandler(t, redirectVM("smart", "openai/gpt-4o", false))
 	e := echo.New()
@@ -338,6 +396,41 @@ func TestUpsertPolicyVirtualModelAcceptsEmptyUserPaths(t *testing.T) {
 	}
 	if view.Enabled {
 		t.Fatalf("view.Enabled = true, want false (disabled policy)")
+	}
+}
+
+func TestUpsertRedirectVirtualModelReplacesAccessPolicy(t *testing.T) {
+	h := newVMHandler(t, virtualmodels.VirtualModel{
+		Source:       "openai/gpt-4o",
+		ProviderName: "openai",
+		Model:        "gpt-4o",
+		UserPaths:    []string{"/team"},
+		Enabled:      true,
+	})
+	e := echo.New()
+
+	body := `{"source":"openai/gpt-4o","target_model":"openai/gpt-4o-mini","description":"fallback","enabled":true}`
+	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel(policy to redirect) error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var view virtualmodels.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if view.Kind != virtualmodels.KindRedirect || len(view.Targets) != 1 {
+		t.Fatalf("view = %#v, want one-target redirect", view)
+	}
+	if len(view.UserPaths) != 0 {
+		t.Fatalf("view.UserPaths = %v, want none after full replacement", view.UserPaths)
+	}
+	if got := view.Targets[0].Provider + "/" + view.Targets[0].Model; got != "openai/gpt-4o-mini" {
+		t.Fatalf("target = %q, want openai/gpt-4o-mini", got)
 	}
 }
 
