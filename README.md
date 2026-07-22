@@ -24,10 +24,6 @@
 
 <p align="center">
   GoModel is the fastest and the most resource-efficient AI Gateway (<a href="https://gomodel.enterpilot.io/docs/about/benchmarks?utm_source=readme">the self-reproducible benchmarks</a>). It's an alternative to LiteLLM (which was hacked recently) and Portkey (which is no longer maintained on GitHub).
-
-  GoModel saves you money and nerves.<br />
-  Money - because you can remember the responses on this layer (caching), track your spending and do tricks like prompt compression and intelligent routing.<br />
-  Nerves - because we strive to achieve good quality and reliability. Our ambition is to be the last AI gateway you will need - the most reliable, resource-optimal, feature-rich and fast.
 </p>
 
 <a href="https://demo.enterpilot.io/admin/dashboard?utm_source=readme">
@@ -35,6 +31,14 @@
 </a>
 <p align="center">
   (click on the animation ↑ to see the live demo)
+</p>
+
+<p>
+  GoModel saves you money and nerves.
+</p>
+<p>
+  **Money** - because you can remember the responses on this layer (caching), track your spending and do tricks like prompt compression and intelligent routing.<br />
+  **Nerves** - because we strive to achieve good quality and reliability. Our ambition is to be the last AI gateway you will need - the most reliable, resource-optimal, feature-rich and fast.
 </p>
 
 ## Quick Start
