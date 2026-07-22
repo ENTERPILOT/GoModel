@@ -372,9 +372,6 @@ func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel)
 	if _, taken := current.bySource[normalized.Source]; taken {
 		return newValidationError(fmt.Sprintf("virtual model %q already exists; choose a different source", normalized.Source), nil)
 	}
-	if err := s.validateRedirectTarget(current, normalized); err != nil {
-		return err
-	}
 	baseRows := removeRow(current.rows(), oldSource)
 	redundant, err := s.policyIsRedundant(normalized, baseRows)
 	if err != nil {
@@ -388,6 +385,9 @@ func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel)
 			return fmt.Errorf("delete no-op renamed policy: %w", err)
 		}
 		return s.commitRefresh(ctx, map[string]*VirtualModel{oldSource: &previous})
+	}
+	if err := s.validateRedirectTarget(current, normalized); err != nil {
+		return err
 	}
 	rows := upsertRow(baseRows, normalized)
 	if _, err := buildSnapshot(rows, s.defaultEnabled); err != nil {

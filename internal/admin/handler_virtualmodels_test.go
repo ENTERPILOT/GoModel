@@ -426,6 +426,9 @@ func TestUpsertRedirectVirtualModelReplacesAccessPolicy(t *testing.T) {
 	if view.Kind != virtualmodels.KindRedirect || len(view.Targets) != 1 {
 		t.Fatalf("view = %#v, want one-target redirect", view)
 	}
+	if len(view.UserPaths) != 0 {
+		t.Fatalf("view.UserPaths = %v, want none after full replacement", view.UserPaths)
+	}
 	if got := view.Targets[0].Provider + "/" + view.Targets[0].Model; got != "openai/gpt-4o-mini" {
 		t.Fatalf("target = %q, want openai/gpt-4o-mini", got)
 	}
