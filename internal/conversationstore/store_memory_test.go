@@ -24,7 +24,7 @@ func storedConversation(id string, storedAt time.Time) *StoredConversation {
 	}
 }
 
-func TestMemoryStoreCreateGetUpdateDelete(t *testing.T) {
+func TestMemoryStoreCreateGetDelete(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
 
@@ -38,18 +38,6 @@ func TestMemoryStoreCreateGetUpdateDelete(t *testing.T) {
 	}
 	if got.Conversation.ID != "conv_1" {
 		t.Fatalf("id = %q, want conv_1", got.Conversation.ID)
-	}
-
-	got.Conversation.Metadata = map[string]string{"k": "v"}
-	if err := store.Update(ctx, got); err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	updated, err := store.Get(ctx, "conv_1")
-	if err != nil {
-		t.Fatalf("Get() after update error = %v", err)
-	}
-	if updated.Conversation.Metadata["k"] != "v" {
-		t.Fatalf("metadata[k] = %q, want v", updated.Conversation.Metadata["k"])
 	}
 
 	if err := store.Delete(ctx, "conv_1"); err != nil {
@@ -72,18 +60,55 @@ func TestMemoryStoreCreateRejectsDuplicate(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreUpdateMissingReturnsNotFound(t *testing.T) {
-	ctx := context.Background()
-	store := NewMemoryStore()
-
-	if err := store.Update(ctx, storedConversation("conv_missing", time.Time{})); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Update() error = %v, want ErrNotFound", err)
-	}
-}
-
 func TestMemoryStoreDeleteMissingReturnsNotFound(t *testing.T) {
 	if err := NewMemoryStore().Delete(context.Background(), "conv_missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Delete() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMemoryStoreConcurrentAppendRejectsDuplicateItemID(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	if err := store.Create(ctx, storedConversation("conv_duplicate_items", time.Time{})); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	item := json.RawMessage(`{"id":"msg_shared","type":"message","role":"user","content":[]}`)
+	const writers = 32
+	start := make(chan struct{})
+	errs := make(chan error, writers)
+	var wg sync.WaitGroup
+	for range writers {
+		wg.Go(func() {
+			<-start
+			errs <- store.AppendItems(ctx, "conv_duplicate_items", []json.RawMessage{item})
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	succeeded := 0
+	duplicates := 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, ErrDuplicateItem):
+			duplicates++
+		default:
+			t.Fatalf("AppendItems() unexpected error = %v", err)
+		}
+	}
+	if succeeded != 1 || duplicates != writers-1 {
+		t.Fatalf("append results = %d success, %d duplicate; want 1/%d", succeeded, duplicates, writers-1)
+	}
+	got, err := store.Get(ctx, "conv_duplicate_items")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(got.Items) != 1 {
+		t.Fatalf("stored items = %d, want 1", len(got.Items))
 	}
 }
 
@@ -198,6 +223,61 @@ func TestMemoryStoreAppendItems(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreMergeMetadataAndDeleteItem(t *testing.T) {
+	store := NewMemoryStore()
+	conv := storedConversation("conv_items", time.Time{})
+	conv.Conversation.Metadata = map[string]string{"existing": "kept"}
+	conv.Items = []json.RawMessage{
+		json.RawMessage(`{"id":"msg_1","type":"message"}`),
+		json.RawMessage(`{"id":"msg_2","type":"message"}`),
+	}
+	if err := store.Create(context.Background(), conv); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	merged, err := store.MergeMetadata(context.Background(), "conv_items", map[string]string{"new": "value"})
+	if err != nil {
+		t.Fatalf("MergeMetadata() error = %v", err)
+	}
+	if merged.Conversation.Metadata["existing"] != "kept" || merged.Conversation.Metadata["new"] != "value" || len(merged.Items) != 2 {
+		t.Fatalf("merged = %+v, want merged metadata and preserved items", merged)
+	}
+
+	updated, err := store.DeleteItem(context.Background(), "conv_items", "msg_1")
+	if err != nil {
+		t.Fatalf("DeleteItem() error = %v", err)
+	}
+	if len(updated.Items) != 1 || itemID(updated.Items[0]) != "msg_2" {
+		t.Fatalf("items = %s, want msg_2 only", updated.Items)
+	}
+	if _, err := store.DeleteItem(context.Background(), "conv_items", "missing"); !errors.Is(err, ErrItemNotFound) {
+		t.Fatalf("DeleteItem(missing) error = %v, want ErrItemNotFound", err)
+	}
+}
+
+func TestMemoryStoreMergeMetadataRejectsOversizedResult(t *testing.T) {
+	store := NewMemoryStore()
+	conv := storedConversation("conv_metadata_limit", time.Time{})
+	conv.Conversation.Metadata = make(map[string]string, core.MaxConversationMetadataPairs)
+	for index := range core.MaxConversationMetadataPairs {
+		conv.Conversation.Metadata[fmt.Sprintf("key_%d", index)] = "value"
+	}
+	if err := store.Create(context.Background(), conv); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if _, err := store.MergeMetadata(context.Background(), conv.Conversation.ID, map[string]string{"extra": "value"}); !errors.Is(err, ErrMetadataLimitExceeded) {
+		t.Fatalf("MergeMetadata() error = %v, want ErrMetadataLimitExceeded", err)
+	}
+	got, err := store.Get(context.Background(), conv.Conversation.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(got.Conversation.Metadata) != core.MaxConversationMetadataPairs {
+		t.Fatalf("metadata size = %d, want %d", len(got.Conversation.Metadata), core.MaxConversationMetadataPairs)
+	}
+}
+
 func TestMemoryStoreAppendItems_ConcurrentAppendsAllSurvive(t *testing.T) {
 	store := NewMemoryStore()
 	conv := &StoredConversation{Conversation: &core.Conversation{ID: "conv_race", Object: "conversation"}}
@@ -285,7 +365,7 @@ func TestMemoryStoreAppendItemsCountsTowardByteBudget(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2000))
+	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2100))
 	if err := store.Create(ctx, storedConversation("conv_old", now.Add(-time.Minute))); err != nil {
 		t.Fatalf("Create(conv_old) error = %v", err)
 	}
@@ -310,8 +390,15 @@ func TestMemoryStoreAppendItemsCountsTowardByteBudget(t *testing.T) {
 	if len(grown.Items) != 1 {
 		t.Fatalf("conv_grow items = %d, want 1", len(grown.Items))
 	}
-	if store.totalBytes > 2000 {
-		t.Fatalf("totalBytes = %d, want <= 2000", store.totalBytes)
+	if store.totalBytes > 2100 {
+		t.Fatalf("totalBytes = %d, want <= 2100", store.totalBytes)
+	}
+	_, exactSize, err := cloneConversationWithSize(grown)
+	if err != nil {
+		t.Fatalf("measure grown conversation: %v", err)
+	}
+	if store.sizes["conv_grow"] != exactSize {
+		t.Fatalf("recorded size = %d, exact serialized size = %d", store.sizes["conv_grow"], exactSize)
 	}
 }
 
@@ -319,7 +406,7 @@ func TestMemoryStoreAppendItemsRejectsOversizeGrowth(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2000))
+	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2100))
 	if err := store.Create(ctx, storedConversation("conv_other", now.Add(-time.Minute))); err != nil {
 		t.Fatalf("Create(conv_other) error = %v", err)
 	}
@@ -350,7 +437,7 @@ func TestMemoryStoreAppendItemsNeverEvictsAppendedConversation(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2000))
+	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2100))
 	// conv_grow is the OLDEST entry — without protection, oldest-first
 	// eviction would drop it right after its own successful append.
 	if err := store.Create(ctx, storedConversation("conv_grow", now.Add(-time.Minute))); err != nil {

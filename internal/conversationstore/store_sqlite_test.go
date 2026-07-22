@@ -3,6 +3,7 @@ package conversationstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -126,38 +127,81 @@ func TestSQLiteConversationAppendItemsMissingReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestSQLiteConversationUpdateReplacesItemsAndPreservesRetention(t *testing.T) {
+func TestSQLiteConversationAppendItemsRejectsDuplicateID(t *testing.T) {
 	store := newSQLiteTestStore(t)
 	ctx := context.Background()
-
-	if err := store.Create(ctx, testStoredConversation("conv-1")); err != nil {
+	conv := testStoredConversation("conv-duplicate-items")
+	conv.Items = []json.RawMessage{json.RawMessage(`{"id":"msg_existing","type":"message"}`)}
+	if err := store.Create(ctx, conv); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	created, err := store.Get(ctx, "conv-1")
+
+	err := store.AppendItems(ctx, conv.Conversation.ID, []json.RawMessage{
+		json.RawMessage(`{"id":"msg_existing","type":"message","content":"duplicate"}`),
+	})
+	if !errors.Is(err, ErrDuplicateItem) {
+		t.Fatalf("append duplicate err = %v, want ErrDuplicateItem", err)
+	}
+	got, err := store.Get(ctx, conv.Conversation.ID)
 	if err != nil {
-		t.Fatalf("get created: %v", err)
+		t.Fatalf("get: %v", err)
+	}
+	if len(got.Items) != 1 {
+		t.Fatalf("stored items = %d, want unchanged length 1", len(got.Items))
+	}
+}
+
+func TestSQLiteConversationMergeMetadataAndDeleteItem(t *testing.T) {
+	store := newSQLiteTestStore(t)
+	ctx := context.Background()
+	conv := testStoredConversation("conv-items")
+	conv.Conversation.Metadata = map[string]string{"existing": "kept"}
+	conv.Items = []json.RawMessage{
+		json.RawMessage(`{"id":"msg_1","type":"message"}`),
+		json.RawMessage(`{"id":"msg_2","type":"message"}`),
+	}
+	if err := store.Create(ctx, conv); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	merged, err := store.MergeMetadata(ctx, "conv-items", map[string]string{"new": "value"})
+	if err != nil {
+		t.Fatalf("merge metadata: %v", err)
+	}
+	if merged.Conversation.Metadata["existing"] != "kept" || merged.Conversation.Metadata["new"] != "value" || len(merged.Items) != 2 {
+		t.Fatalf("merged = %+v, want merged metadata and preserved items", merged)
+	}
+	updated, err := store.DeleteItem(ctx, "conv-items", "msg_1")
+	if err != nil {
+		t.Fatalf("delete item: %v", err)
+	}
+	if len(updated.Items) != 1 || itemID(updated.Items[0]) != "msg_2" {
+		t.Fatalf("items = %s, want msg_2 only", updated.Items)
+	}
+	if _, err := store.DeleteItem(ctx, "conv-items", "missing"); !errors.Is(err, ErrItemNotFound) {
+		t.Fatalf("delete missing item error = %v, want ErrItemNotFound", err)
+	}
+}
+
+func TestSQLiteConversationMergeMetadataRejectsOversizedResult(t *testing.T) {
+	store := newSQLiteTestStore(t)
+	conv := testStoredConversation("conv_sqlite_metadata_limit")
+	conv.Conversation.Metadata = make(map[string]string, core.MaxConversationMetadataPairs)
+	for index := range core.MaxConversationMetadataPairs {
+		conv.Conversation.Metadata[fmt.Sprintf("key_%d", index)] = "value"
+	}
+	if err := store.Create(context.Background(), conv); err != nil {
+		t.Fatalf("Create() error = %v", err)
 	}
 
-	updated := testStoredConversation("conv-1")
-	updated.Conversation.Metadata = map[string]string{"topic": "changed"}
-	updated.Items = []json.RawMessage{json.RawMessage(`{"type":"message","content":"replaced"}`)}
-	if err := store.Update(ctx, updated); err != nil {
-		t.Fatalf("update: %v", err)
+	if _, err := store.MergeMetadata(context.Background(), conv.Conversation.ID, map[string]string{"extra": "value"}); !errors.Is(err, ErrMetadataLimitExceeded) {
+		t.Fatalf("MergeMetadata() error = %v, want ErrMetadataLimitExceeded", err)
 	}
-
-	got, err := store.Get(ctx, "conv-1")
+	got, err := store.Get(context.Background(), conv.Conversation.ID)
 	if err != nil {
-		t.Fatalf("get updated: %v", err)
+		t.Fatalf("Get() error = %v", err)
 	}
-	if got.Conversation.Metadata["topic"] != "changed" {
-		t.Fatalf("metadata = %v, want topic=changed", got.Conversation.Metadata)
-	}
-	if len(got.Items) != 1 || !strings.Contains(string(got.Items[0]), "replaced") {
-		t.Fatalf("items = %v, want replaced item only", got.Items)
-	}
-	if !got.StoredAt.Equal(created.StoredAt) || !got.ExpiresAt.Equal(created.ExpiresAt) {
-		t.Fatalf("retention changed: stored %v→%v expires %v→%v",
-			created.StoredAt, got.StoredAt, created.ExpiresAt, got.ExpiresAt)
+	if len(got.Conversation.Metadata) != core.MaxConversationMetadataPairs {
+		t.Fatalf("metadata size = %d, want %d", len(got.Conversation.Metadata), core.MaxConversationMetadataPairs)
 	}
 }
 

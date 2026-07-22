@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage"
 )
 
@@ -93,29 +94,37 @@ func (s *PostgreSQLStore) Get(ctx context.Context, id string) (*StoredConversati
 	`, id), pgx.ErrNoRows)
 }
 
-// Update replaces an existing, unexpired conversation snapshot including its
-// items. Zero StoredAt or ExpiresAt values preserve the stored retention columns.
-func (s *PostgreSQLStore) Update(ctx context.Context, conversation *StoredConversation) error {
-	now := time.Now().UTC()
-	normalized, data, items, err := prepareStoredConversationForStorage(conversation, now, s.ttl, false)
+// MergeMetadata overlays metadata inside the snapshot JSON without touching
+// the item array, which is updated independently by Responses turns.
+func (s *PostgreSQLStore) MergeMetadata(ctx context.Context, id string, metadata map[string]string) (*StoredConversation, error) {
+	patch, err := json.Marshal(metadata)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("marshal conversation metadata: %w", err)
 	}
 	cmd, err := s.pool.Exec(ctx, `
-		UPDATE conversation_snapshots SET
-			data = $1,
-			items = $2::jsonb,
-			stored_at = CASE WHEN $3 = 0 THEN stored_at ELSE $3 END,
-			expires_at = CASE WHEN $4 = 0 THEN expires_at ELSE $4 END
-		WHERE id = $5 AND (expires_at = 0 OR expires_at > $6)
-	`, string(data), string(items), storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt), normalized.Conversation.ID, now.Unix())
+		UPDATE conversation_snapshots SET data = jsonb_set(
+			data::jsonb,
+			'{conversation,metadata}',
+			COALESCE(data::jsonb #> '{conversation,metadata}', '{}'::jsonb) || $2::jsonb
+		)::text
+		WHERE id = $1 AND (expires_at = 0 OR expires_at > $3)
+		AND (
+			SELECT COUNT(*)
+			FROM jsonb_object_keys(
+				COALESCE(data::jsonb #> '{conversation,metadata}', '{}'::jsonb) || $2::jsonb
+			)
+		) <= $4
+	`, id, string(patch), time.Now().Unix(), core.MaxConversationMetadataPairs)
 	if err != nil {
-		return fmt.Errorf("update conversation snapshot: %w", err)
+		return nil, fmt.Errorf("merge conversation metadata: %w", err)
 	}
 	if cmd.RowsAffected() == 0 {
-		return ErrNotFound
+		if _, getErr := s.Get(ctx, id); getErr != nil {
+			return nil, getErr
+		}
+		return nil, ErrMetadataLimitExceeded
 	}
-	return nil
+	return s.Get(ctx, id)
 }
 
 // AppendItems atomically appends items to an existing, unexpired conversation
@@ -125,6 +134,9 @@ func (s *PostgreSQLStore) AppendItems(ctx context.Context, id string, items []js
 	if len(items) == 0 {
 		return nil
 	}
+	if duplicateItemID(nil, items) != "" {
+		return ErrDuplicateItem
+	}
 	appended, err := json.Marshal(items)
 	if err != nil {
 		return fmt.Errorf("marshal conversation items: %w", err)
@@ -132,14 +144,57 @@ func (s *PostgreSQLStore) AppendItems(ctx context.Context, id string, items []js
 	cmd, err := s.pool.Exec(ctx, `
 		UPDATE conversation_snapshots SET items = items || $2::jsonb
 		WHERE id = $1 AND (expires_at = 0 OR expires_at > $3)
+		AND NOT EXISTS (
+			SELECT 1
+			FROM jsonb_array_elements(items) AS existing(value)
+			JOIN jsonb_array_elements($2::jsonb) AS added(value)
+			  ON existing.value ->> 'id' = added.value ->> 'id'
+		)
 	`, id, string(appended), time.Now().Unix())
 	if err != nil {
 		return fmt.Errorf("append conversation items: %w", err)
 	}
 	if cmd.RowsAffected() == 0 {
+		stored, getErr := s.Get(ctx, id)
+		if getErr != nil {
+			return getErr
+		}
+		if duplicateItemID(stored.Items, items) != "" {
+			return ErrDuplicateItem
+		}
 		return ErrNotFound
 	}
 	return nil
+}
+
+// DeleteItem atomically removes the first matching item from the JSONB array.
+func (s *PostgreSQLStore) DeleteItem(ctx context.Context, id, targetItemID string) (*StoredConversation, error) {
+	cmd, err := s.pool.Exec(ctx, `
+		WITH target AS (
+			SELECT c.id, element.ordinality - 1 AS item_index
+			FROM conversation_snapshots c
+			CROSS JOIN LATERAL jsonb_array_elements(c.items) WITH ORDINALITY AS element(value, ordinality)
+			WHERE c.id = $1
+			  AND (c.expires_at = 0 OR c.expires_at > $3)
+			  AND element.value ->> 'id' = $2
+			ORDER BY element.ordinality
+			LIMIT 1
+		)
+		UPDATE conversation_snapshots c
+		SET items = c.items - target.item_index::int
+		FROM target
+		WHERE c.id = target.id
+	`, id, targetItemID, time.Now().Unix())
+	if err != nil {
+		return nil, fmt.Errorf("delete conversation item: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		if _, getErr := s.Get(ctx, id); getErr != nil {
+			return nil, getErr
+		}
+		return nil, ErrItemNotFound
+	}
+	return s.Get(ctx, id)
 }
 
 // Delete removes one unexpired conversation snapshot by id.

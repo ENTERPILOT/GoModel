@@ -1,8 +1,8 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
-	"maps"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -69,8 +69,8 @@ func normalizedResponseInputAny(responseID string, index int, item any) json.Raw
 }
 
 func normalizedResponseInputRaw(responseID string, index int, raw json.RawMessage) json.RawMessage {
-	var item map[string]any
-	if err := json.Unmarshal(raw, &item); err != nil {
+	item, err := decodeRawJSONObject(raw)
+	if err != nil {
 		var decoded string
 		text := strings.TrimSpace(string(raw))
 		if stringErr := json.Unmarshal(raw, &decoded); stringErr == nil {
@@ -88,112 +88,79 @@ func normalizedResponseInputRaw(responseID string, index int, raw json.RawMessag
 			},
 		})
 	}
-	if item == nil {
-		return nil
-	}
-
-	itemType := strings.TrimSpace(stringFromMap(item, "type"))
+	itemType := rawJSONString(item, "type")
 	if itemType == "" {
 		itemType = "message"
-		item["type"] = itemType
+		_ = setRawJSONValue(item, "type", itemType)
 	}
 
 	switch itemType {
 	case "message":
-		if strings.TrimSpace(stringFromMap(item, "role")) == "" {
-			item["role"] = "user"
+		if rawJSONString(item, "role") == "" {
+			_ = setRawJSONValue(item, "role", "user")
 		}
-		item["content"] = normalizeResponseInputContent(item["content"])
+		normalizedContent, contentErr := normalizeResponseInputContentRaw(item["content"])
+		if contentErr == nil {
+			item["content"] = normalizedContent
+		}
 	case "function_call", "function_call_output":
 		// The decoded request has already normalized call_id/id aliases.
 	default:
 		// Unknown item types are preserved with an ID attached for pagination.
 	}
 
-	if strings.TrimSpace(stringFromMap(item, "id")) == "" {
-		item["id"] = generatedResponseInputItemID(responseID, index, itemType, stringFromMap(item, "call_id"))
+	if rawJSONString(item, "id") == "" {
+		_ = setRawJSONValue(item, "id", generatedResponseInputItemID(responseID, index, itemType, rawJSONString(item, "call_id")))
 	}
 
 	return mustRawJSON(item)
 }
 
-func normalizeResponseInputContent(content any) any {
-	switch value := content.(type) {
-	case nil:
-		return []map[string]any{}
-	case string:
-		return []map[string]any{{"type": "input_text", "text": value}}
-	case []core.ContentPart:
-		items := make([]map[string]any, 0, len(value))
-		for _, part := range value {
-			items = append(items, normalizeContentPart(part))
-		}
-		return items
-	case []any:
-		items := make([]any, 0, len(value))
-		for _, part := range value {
-			items = append(items, normalizeResponseInputContentPartAny(part))
-		}
-		return items
-	default:
-		return content
+func normalizeResponseInputContentRaw(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return json.RawMessage("[]"), nil
 	}
-}
-
-func normalizeContentPart(part core.ContentPart) map[string]any {
-	switch strings.TrimSpace(part.Type) {
-	case "text", "input_text":
-		return map[string]any{"type": "input_text", "text": part.Text}
-	case "image_url", "input_image":
-		item := map[string]any{"type": "input_image"}
-		if part.ImageURL != nil {
-			item["image_url"] = part.ImageURL.URL
-			if detail := strings.TrimSpace(part.ImageURL.Detail); detail != "" {
-				item["detail"] = detail
-			}
+	if trimmed[0] == '"' {
+		var text string
+		if err := json.Unmarshal(trimmed, &text); err != nil {
+			return nil, err
 		}
-		return item
-	case "input_audio":
-		item := map[string]any{"type": "input_audio"}
-		if part.InputAudio != nil {
-			item["input_audio"] = map[string]any{
-				"data":   part.InputAudio.Data,
-				"format": part.InputAudio.Format,
-			}
-		}
-		return item
-	default:
-		return map[string]any{"type": part.Type, "text": part.Text}
+		return json.Marshal([]map[string]any{{"type": "input_text", "text": text}})
 	}
-}
-
-func normalizeResponseInputContentPartAny(part any) any {
-	item, ok := part.(map[string]any)
-	if !ok {
-		return part
+	if trimmed[0] != '[' {
+		return core.CloneRawJSON(trimmed), nil
 	}
 
-	partType := strings.TrimSpace(stringFromMap(item, "type"))
-	switch partType {
-	case "text":
-		normalized := cloneAnyMap(item)
-		normalized["type"] = "input_text"
-		return normalized
-	case "image_url":
-		normalized := cloneAnyMap(item)
-		normalized["type"] = "input_image"
-		if image, ok := normalized["image_url"].(map[string]any); ok {
-			if url, ok := image["url"]; ok {
-				normalized["image_url"] = url
-			}
-			if detail, ok := image["detail"]; ok {
-				normalized["detail"] = detail
+	var parts []json.RawMessage
+	if err := json.Unmarshal(trimmed, &parts); err != nil {
+		return nil, err
+	}
+	for index, rawPart := range parts {
+		part, err := decodeRawJSONObject(rawPart)
+		if err != nil {
+			continue
+		}
+		switch rawJSONString(part, "type") {
+		case "text":
+			_ = setRawJSONValue(part, "type", "input_text")
+		case "image_url", "input_image":
+			_ = setRawJSONValue(part, "type", "input_image")
+			if image, imageErr := decodeRawJSONObject(part["image_url"]); imageErr == nil {
+				if url, exists := image["url"]; exists {
+					part["image_url"] = core.CloneRawJSON(url)
+				}
+				if detail, exists := image["detail"]; exists {
+					part["detail"] = core.CloneRawJSON(detail)
+				}
 			}
 		}
-		return normalized
-	default:
-		return item
+		parts[index], err = json.Marshal(part)
+		if err != nil {
+			return nil, err
+		}
 	}
+	return json.Marshal(parts)
 }
 
 func generatedResponseInputItemID(responseID string, index int, itemType, callID string) string {
@@ -218,18 +185,4 @@ func mustRawJSON(value any) json.RawMessage {
 		return nil
 	}
 	return raw
-}
-
-func stringFromMap(item map[string]any, key string) string {
-	value, _ := item[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func cloneAnyMap(src map[string]any) map[string]any {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make(map[string]any, len(src))
-	maps.Copy(dst, src)
-	return dst
 }

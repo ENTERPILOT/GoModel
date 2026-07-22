@@ -27,8 +27,12 @@ For request and response details, see the dedicated guides:
 | `/v1/responses/compact`           | POST   | Compact a Responses conversation (provider-native where supported)                                           |
 | `/v1/conversations`               | POST   | Create a conversation (gateway-managed)                                                                      |
 | `/v1/conversations/{id}`          | GET    | Retrieve a conversation                                                                                      |
-| `/v1/conversations/{id}`          | POST   | Replace conversation metadata in full                                                                        |
+| `/v1/conversations/{id}`          | POST   | Merge conversation metadata                                                                                  |
 | `/v1/conversations/{id}`          | DELETE | Delete a conversation                                                                                        |
+| `/v1/conversations/{id}/items`    | POST   | Add items to a conversation                                                                                  |
+| `/v1/conversations/{id}/items`    | GET    | List conversation items with cursor pagination                                                              |
+| `/v1/conversations/{id}/items/{item_id}` | GET | Retrieve a conversation item                                                                         |
+| `/v1/conversations/{id}/items/{item_id}` | DELETE | Delete a conversation item and return the conversation                                                |
 | `/v1/embeddings`                  | POST   | Text embeddings                                                                                              |
 | `/v1/models`                      | GET    | List available models                                                                                        |
 | `/v1/audio/speech`                | POST   | Text-to-speech, returning binary audio                                                                       |

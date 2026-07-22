@@ -21,8 +21,10 @@ const (
 	// MaxConversationInitialItems caps the items array accepted by
 	// POST /v1/conversations.
 	MaxConversationInitialItems = 20
+	// MaxConversationMetadataPairs caps the final metadata object after create
+	// or update.
+	MaxConversationMetadataPairs = 16
 
-	maxConversationMetadataPairs       = 16
 	maxConversationMetadataKeyLength   = 64
 	maxConversationMetadataValueLength = 512
 )
@@ -58,6 +60,32 @@ type ConversationUpdateRequest struct {
 	Metadata *map[string]string `json:"metadata" binding:"required"`
 }
 
+// ConversationItemCreateRequest is accepted by
+// POST /v1/conversations/{id}/items.
+type ConversationItemCreateRequest struct {
+	Items []json.RawMessage `json:"items" binding:"required" swaggertype:"array,object"`
+}
+
+// ConversationItemListResponse is returned when creating or listing
+// conversation items. Data stays raw so new OpenAI item variants can pass
+// through the gateway without waiting for a typed Go model.
+type ConversationItemListResponse struct {
+	Object  string            `json:"object"`
+	Data    []json.RawMessage `json:"data" swaggertype:"array,object"`
+	FirstID *string           `json:"first_id" extensions:"x-nullable"`
+	LastID  *string           `json:"last_id" extensions:"x-nullable"`
+	HasMore bool              `json:"has_more"`
+}
+
+// ConversationItemListParams contains query parameters accepted by
+// GET /v1/conversations/{id}/items.
+type ConversationItemListParams struct {
+	After   string
+	Include []string
+	Limit   int
+	Order   string
+}
+
 // DecodeConversationCreateRequest parses a conversation create body. An empty
 // body is treated as an empty request (a conversation with no items/metadata).
 func DecodeConversationCreateRequest(data []byte) (*ConversationCreateRequest, error) {
@@ -84,13 +112,25 @@ func DecodeConversationUpdateRequest(data []byte) (*ConversationUpdateRequest, e
 	return req, nil
 }
 
+// DecodeConversationItemCreateRequest parses a conversation item batch.
+func DecodeConversationItemCreateRequest(data []byte) (*ConversationItemCreateRequest, error) {
+	req := &ConversationItemCreateRequest{}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return req, nil
+	}
+	if err := json.Unmarshal(data, req); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
 // ValidateConversationMetadata enforces the OpenAI metadata limits (at most 16
 // pairs, keys up to 64 characters, values up to 512 characters). It returns nil
 // when the metadata is acceptable.
 func ValidateConversationMetadata(metadata map[string]string) *GatewayError {
-	if len(metadata) > maxConversationMetadataPairs {
+	if len(metadata) > MaxConversationMetadataPairs {
 		return NewInvalidRequestError(
-			fmt.Sprintf("metadata supports at most %d key-value pairs", maxConversationMetadataPairs), nil,
+			fmt.Sprintf("metadata supports at most %d key-value pairs", MaxConversationMetadataPairs), nil,
 		).WithParam("metadata")
 	}
 	for key, value := range metadata {

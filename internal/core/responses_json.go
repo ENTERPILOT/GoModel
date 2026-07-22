@@ -14,6 +14,7 @@ import (
 var (
 	responsesRequestFields        = jsonFieldNames(ResponsesRequest{})
 	responsesUtilityRequestFields = jsonFieldNames(ResponseInputTokensRequest{})
+	responsesOutputItemFields     = jsonFieldNames(ResponsesOutputItem{})
 )
 
 // responsesExtrasAndInput finishes a responses-shaped decode: it captures
@@ -316,6 +317,31 @@ func (e ResponsesInputElement) MarshalJSON() ([]byte, error) {
 			Type: e.Type,
 		}, e.ExtraFields)
 	}
+}
+
+// UnmarshalJSON preserves variant-specific Responses output item fields. This
+// is required for lossless Responses passthrough and for replaying reasoning
+// and hosted-tool items from a gateway-managed conversation.
+func (i *ResponsesOutputItem) UnmarshalJSON(data []byte) error {
+	type alias ResponsesOutputItem
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	extraFields, err := extractUnknownJSONFields(data, responsesOutputItemFields...)
+	if err != nil {
+		return err
+	}
+	*i = ResponsesOutputItem(decoded)
+	i.ExtraFields = extraFields
+	return nil
+}
+
+// MarshalJSON emits typed output fields together with every unknown field
+// retained during decoding.
+func (i ResponsesOutputItem) MarshalJSON() ([]byte, error) {
+	type alias ResponsesOutputItem
+	return marshalWithUnknownJSONFields(alias(i), i.ExtraFields)
 }
 
 // cloneRawMessage returns a detached, whitespace-trimmed copy of a raw JSON

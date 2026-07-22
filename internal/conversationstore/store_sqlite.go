@@ -11,6 +11,7 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage"
 )
 
@@ -94,35 +95,41 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*StoredConversation, 
 	`, id), sql.ErrNoRows)
 }
 
-// Update replaces an existing, unexpired conversation snapshot including its
-// items. Zero StoredAt or ExpiresAt values preserve the stored retention columns.
-func (s *SQLiteStore) Update(ctx context.Context, conversation *StoredConversation) error {
-	now := time.Now().UTC()
-	normalized, data, items, err := prepareStoredConversationForStorage(conversation, now, s.ttl, false)
+// MergeMetadata atomically overlays metadata in the snapshot JSON while
+// leaving the independently stored item array untouched.
+func (s *SQLiteStore) MergeMetadata(ctx context.Context, id string, metadata map[string]string) (*StoredConversation, error) {
+	patch, err := json.Marshal(metadata)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("marshal conversation metadata: %w", err)
 	}
-	storedAt := storage.UnixOrZero(normalized.StoredAt)
-	expiresAt := storage.UnixOrZero(normalized.ExpiresAt)
+	now := time.Now().Unix()
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE conversation_snapshots SET
-			data = ?,
-			items = ?,
-			stored_at = CASE WHEN ? = 0 THEN stored_at ELSE ? END,
-			expires_at = CASE WHEN ? = 0 THEN expires_at ELSE ? END
+		UPDATE conversation_snapshots SET data = json_set(
+			data,
+			'$.conversation.metadata',
+			json_patch(COALESCE(json_extract(data, '$.conversation.metadata'), json('{}')), json(?))
+		)
 		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
-	`, string(data), string(items), storedAt, storedAt, expiresAt, expiresAt, normalized.Conversation.ID, now.Unix())
+		AND (
+			SELECT COUNT(*) FROM json_each(
+				json_patch(COALESCE(json_extract(data, '$.conversation.metadata'), json('{}')), json(?))
+			)
+		) <= ?
+	`, string(patch), id, now, string(patch), core.MaxConversationMetadataPairs)
 	if err != nil {
-		return fmt.Errorf("update conversation snapshot: %w", err)
+		return nil, fmt.Errorf("merge conversation metadata: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("read update rows affected: %w", err)
+		return nil, fmt.Errorf("read metadata merge rows affected: %w", err)
 	}
 	if affected == 0 {
-		return ErrNotFound
+		if _, getErr := s.Get(ctx, id); getErr != nil {
+			return nil, getErr
+		}
+		return nil, ErrMetadataLimitExceeded
 	}
-	return nil
+	return s.Get(ctx, id)
 }
 
 // AppendItems atomically appends items to an existing, unexpired conversation.
@@ -132,20 +139,33 @@ func (s *SQLiteStore) AppendItems(ctx context.Context, id string, items []json.R
 	if len(items) == 0 {
 		return nil
 	}
+	if duplicateItemID(nil, items) != "" {
+		return ErrDuplicateItem
+	}
 
 	var expr strings.Builder
 	expr.WriteString("json_insert(items")
-	args := make([]any, 0, len(items)+2)
+	args := make([]any, 0, len(items)+3)
 	for _, item := range items {
 		expr.WriteString(", '$[#]', json(?)")
 		args = append(args, string(item))
 	}
 	expr.WriteString(")")
-	args = append(args, id, time.Now().Unix())
+	added, err := json.Marshal(items)
+	if err != nil {
+		return fmt.Errorf("marshal conversation items: %w", err)
+	}
+	args = append(args, id, time.Now().Unix(), string(added))
 
 	result, err := s.db.ExecContext(ctx,
 		"UPDATE conversation_snapshots SET items = "+expr.String()+
-			" WHERE id = ? AND (expires_at = 0 OR expires_at > ?)", args...)
+			` WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
+			AND NOT EXISTS (
+				SELECT 1
+				FROM json_each(items) AS existing
+				JOIN json_each(json(?)) AS added
+				  ON json_extract(existing.value, '$.id') = json_extract(added.value, '$.id')
+			)`, args...)
 	if err != nil {
 		return fmt.Errorf("append conversation items: %w", err)
 	}
@@ -154,9 +174,48 @@ func (s *SQLiteStore) AppendItems(ctx context.Context, id string, items []json.R
 		return fmt.Errorf("read append rows affected: %w", err)
 	}
 	if affected == 0 {
+		stored, getErr := s.Get(ctx, id)
+		if getErr != nil {
+			return getErr
+		}
+		if duplicateItemID(stored.Items, items) != "" {
+			return ErrDuplicateItem
+		}
 		return ErrNotFound
 	}
 	return nil
+}
+
+// DeleteItem atomically removes the first item with the requested id.
+func (s *SQLiteStore) DeleteItem(ctx context.Context, id, targetItemID string) (*StoredConversation, error) {
+	now := time.Now().Unix()
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE conversation_snapshots
+		SET items = json_remove(items, '$[' || (
+			SELECT key FROM json_each(items)
+			WHERE json_extract(value, '$.id') = ?
+			LIMIT 1
+		) || ']')
+		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
+		AND EXISTS (
+			SELECT 1 FROM json_each(items)
+			WHERE json_extract(value, '$.id') = ?
+		)
+	`, targetItemID, id, now, targetItemID)
+	if err != nil {
+		return nil, fmt.Errorf("delete conversation item: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("read item delete rows affected: %w", err)
+	}
+	if affected == 0 {
+		if _, getErr := s.Get(ctx, id); getErr != nil {
+			return nil, getErr
+		}
+		return nil, ErrItemNotFound
+	}
+	return s.Get(ctx, id)
 }
 
 // Delete removes one unexpired conversation snapshot by id.

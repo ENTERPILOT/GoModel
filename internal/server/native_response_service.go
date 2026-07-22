@@ -465,12 +465,32 @@ func responseRetrieveParamsFromRequest(c *echo.Context) (core.ResponseRetrievePa
 }
 
 func responseInputItemsParamsFromRequest(c *echo.Context) (core.ResponseInputItemsParams, error) {
+	common, err := cursorListParamsFromRequest(c)
+	if err != nil {
+		return core.ResponseInputItemsParams{}, err
+	}
+	return core.ResponseInputItemsParams{
+		After:   common.after,
+		Include: common.include,
+		Limit:   common.limit,
+		Order:   common.order,
+	}, nil
+}
+
+type cursorListParams struct {
+	after   string
+	include []string
+	limit   int
+	order   string
+}
+
+func cursorListParamsFromRequest(c *echo.Context) (cursorListParams, error) {
 	query := c.Request().URL.Query()
-	params := core.ResponseInputItemsParams{
-		After:   strings.TrimSpace(query.Get("after")),
-		Include: appendQueryArray(query["include"], query["include[]"]),
-		Limit:   20,
-		Order:   "desc",
+	params := cursorListParams{
+		after:   strings.TrimSpace(query.Get("after")),
+		include: appendQueryArray(query["include"], query["include[]"]),
+		limit:   20,
+		order:   "desc",
 	}
 	if raw := strings.TrimSpace(query.Get("limit")); raw != "" {
 		limit, err := strconv.Atoi(raw)
@@ -479,18 +499,18 @@ func responseInputItemsParamsFromRequest(c *echo.Context) (core.ResponseInputIte
 		}
 		switch {
 		case limit <= 0:
-			params.Limit = 20
+			params.limit = 20
 		case limit > 100:
-			params.Limit = 100
+			params.limit = 100
 		default:
-			params.Limit = limit
+			params.limit = limit
 		}
 	}
 	if raw := strings.TrimSpace(query.Get("order")); raw != "" {
 		if raw != "asc" && raw != "desc" {
 			return params, core.NewInvalidRequestError("order must be asc or desc", nil).WithParam("order")
 		}
-		params.Order = raw
+		params.order = raw
 	}
 	return params, nil
 }
