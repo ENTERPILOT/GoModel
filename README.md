@@ -235,6 +235,10 @@ GoModel is configured through environment variables and an optional `config.yaml
 
 See the [Roadmap](https://gomodel.enterpilot.io/docs/about/roadmap?utm_source=readme) for commercial features and the public 0.2.0 milestone.
 
+## Sponsors
+
+<a href="https://github.com/Neiko2002"><img src="https://github.com/Neiko2002.png" alt="Neiko2002" width="64"></a>
+
 ## Community
 
 Join our [Discord](https://discord.gg/gaEB9BQSPH) to connect with other GoModel users.
