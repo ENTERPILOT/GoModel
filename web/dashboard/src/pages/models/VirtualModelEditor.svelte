@@ -1,7 +1,6 @@
 <script>
   // Unified virtual-model editor modal (redirect/alias, load balancer, or
   // access policy).
-  import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
@@ -9,7 +8,7 @@
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { qualifiedModelName } from "./virtualModelsLogic.js";
-  import TableIcon from "./TableIcon.svelte";
+  import VmTargetRow from "./VmTargetRow.svelte";
 
   const vm = virtualModels;
 </script>
@@ -80,74 +79,20 @@
       <!-- Every target renders the same; two or more turn the redirect into a load balancer. -->
       <div class="form-field">
         <span class="form-field-label">Targets</span>
-        <div class="vm-target-row">
-          <input
-            id="virtual-model-target"
-            type="text"
-            list="virtual-model-target-options"
-            class="mono vm-target-model"
-            placeholder="openai/gpt-4o"
-            bind:value={vm.vmForm.target_model}
-            disabled={vm.vmFormManaged}
-            aria-label="Target model"
-          />
-          {#if vm.vmFormShowWeights()}
-            <input
-              type="number"
-              min="1"
-              step="1"
-              class="mono vm-target-weight"
-              placeholder="weight"
-              bind:value={vm.vmForm.target_weight}
-              disabled={vm.vmFormManaged}
-              required
-              aria-label="Target weight"
-            />
-          {/if}
-          {#if vm.vmFormHasPrimaryTarget()}
-            <TableActionButton
-              label="Remove target"
-              class="table-action-btn-danger table-icon-btn vm-target-remove"
-              onclick={() => vm.removePrimaryTarget()}
-              disabled={vm.vmFormManaged}
-            >
-              <TableIcon name="trash" />
-            </TableActionButton>
-          {/if}
-        </div>
+        <VmTargetRow
+          id="virtual-model-target"
+          bind:model={vm.vmForm.target_model}
+          bind:weight={vm.vmForm.target_weight}
+          showRemove={vm.vmFormHasPrimaryTarget()}
+          onremove={() => vm.removePrimaryTarget()}
+        />
         {#each vm.vmForm.targets as target, index (index)}
-          <div class="vm-target-row">
-            <input
-              type="text"
-              list="virtual-model-target-options"
-              class="mono vm-target-model"
-              placeholder="groq/llama"
-              bind:value={target.model}
-              disabled={vm.vmFormManaged}
-              aria-label="Target model"
-            />
-            {#if vm.vmFormShowWeights()}
-              <input
-                type="number"
-                min="1"
-                step="1"
-                class="mono vm-target-weight"
-                placeholder="weight"
-                bind:value={target.weight}
-                disabled={vm.vmFormManaged}
-                required
-                aria-label="Target weight"
-              />
-            {/if}
-            <TableActionButton
-              label="Remove target"
-              class="table-action-btn-danger table-icon-btn vm-target-remove"
-              onclick={() => vm.removeVmTarget(index)}
-              disabled={vm.vmFormManaged}
-            >
-              <TableIcon name="trash" />
-            </TableActionButton>
-          </div>
+          <VmTargetRow
+            placeholder="groq/llama"
+            bind:model={target.model}
+            bind:weight={target.weight}
+            onremove={() => vm.removeVmTarget(index)}
+          />
         {/each}
         <div>
           <button
