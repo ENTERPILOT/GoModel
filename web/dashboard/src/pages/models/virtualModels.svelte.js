@@ -2,6 +2,7 @@
 // for the Models page.
 
 import { errorMessage, getJSON, sendJSON } from "$lib/api/client.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import {
   GLOBAL_OVERRIDE_SELECTOR,
@@ -42,8 +43,8 @@ class VirtualModelsStore {
   modelsRendering = $state(false);
   #renderGeneration = 0;
   aliasLoading = $state(false);
+  // Load failures only; mutation feedback goes through the flash store.
   aliasError = $state("");
-  aliasNotice = $state("");
   rowTogglingKey = $state("");
   rowDeletingKey = $state("");
 
@@ -281,7 +282,7 @@ class VirtualModelsStore {
       return;
     }
     if (rowIsManaged(row)) {
-      this.aliasNotice = "This virtual model is managed by configuration and is read-only.";
+      flash.success("This virtual model is managed by configuration and is read-only.");
       return;
     }
     if (row.is_alias) {
@@ -298,8 +299,6 @@ class VirtualModelsStore {
     }
 
     this.rowTogglingKey = row.key;
-    this.aliasError = "";
-    this.aliasNotice = "";
 
     const payload = buildAliasTogglePayload(alias);
     try {
@@ -308,25 +307,26 @@ class VirtualModelsStore {
       });
       if (result.status === 503) {
         this.virtualModelsAvailable = false;
-        this.aliasError = "Virtual models feature is unavailable.";
+        flash.error("Virtual models feature is unavailable.");
         return;
       }
       if (result.stale) {
         return;
       }
       if (!result.ok) {
-        this.aliasError =
+        flash.error(
           result.status === 401
             ? "Authentication required."
-            : errorMessage(result, "Failed to update alias state.");
+            : errorMessage(result, "Failed to update alias state."),
+        );
         return;
       }
 
-      await this.fetchVirtualModels();
-      this.aliasNotice = payload.enabled ? "Alias enabled." : "Alias disabled.";
+      flash.success(payload.enabled ? "Alias enabled." : "Alias disabled.");
+      void this.fetchVirtualModels();
     } catch (e) {
       console.error("Failed to toggle alias state:", e);
-      this.aliasError = "Failed to update alias state.";
+      flash.error("Failed to update alias state.");
     } finally {
       this.rowTogglingKey = "";
     }
@@ -345,8 +345,6 @@ class VirtualModelsStore {
     );
 
     this.rowTogglingKey = row.key;
-    this.aliasError = "";
-    this.aliasNotice = "";
 
     try {
       const result = await sendJSON("/admin/virtual-models", method, payload, {
@@ -354,7 +352,7 @@ class VirtualModelsStore {
       });
       if (result.status === 503) {
         this.virtualModelsAvailable = false;
-        this.aliasError = "Virtual models feature is unavailable.";
+        flash.error("Virtual models feature is unavailable.");
         return;
       }
       if (!(method === "DELETE" && result.status === 404)) {
@@ -362,19 +360,20 @@ class VirtualModelsStore {
           return;
         }
         if (!result.ok) {
-          this.aliasError =
+          flash.error(
             result.status === 401
               ? "Authentication required."
-              : errorMessage(result, "Failed to update model access.");
+              : errorMessage(result, "Failed to update model access."),
+          );
           return;
         }
       }
 
-      await Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
-      this.aliasNotice = desired ? "Model enabled." : "Model disabled.";
+      flash.success(desired ? "Model enabled." : "Model disabled.");
+      void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error("Failed to toggle model access:", e);
-      this.aliasError = "Failed to update model access.";
+      flash.error("Failed to update model access.");
     } finally {
       this.rowTogglingKey = "";
     }
@@ -443,8 +442,6 @@ class VirtualModelsStore {
     }
 
     this.rowDeletingKey = options.rowKey;
-    this.aliasError = "";
-    this.aliasNotice = "";
 
     try {
       const result = await sendJSON("/admin/virtual-models", options.method, options.payload, {
@@ -452,7 +449,7 @@ class VirtualModelsStore {
       });
       if (result.status === 503) {
         this.virtualModelsAvailable = false;
-        this.aliasError = "Virtual models feature is unavailable.";
+        flash.error("Virtual models feature is unavailable.");
         return;
       }
       if (!(options.ignoreNotFound && result.status === 404)) {
@@ -460,20 +457,21 @@ class VirtualModelsStore {
           return;
         }
         if (!result.ok) {
-          this.aliasError =
+          flash.error(
             result.status === 401
               ? "Authentication required."
-              : errorMessage(result, options.failureMessage);
+              : errorMessage(result, options.failureMessage),
+          );
           return;
         }
       }
       this.virtualModelsAvailable = true;
 
-      await Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
-      this.aliasNotice = options.notice;
+      flash.success(options.notice);
+      void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error(options.failureMessage, e);
-      this.aliasError = options.failureMessage;
+      flash.error(options.failureMessage);
     } finally {
       this.rowDeletingKey = "";
     }
@@ -532,8 +530,6 @@ class VirtualModelsStore {
     this.vmFormError = "";
     this.vmFormHelpOpen = false;
     this.vmFormUserPathsHelpOpen = false;
-    this.aliasNotice = "";
-    this.aliasError = "";
     this.vmSubmitting = false;
     this.vmDeleting = false;
     this.vmFormHasExisting = false;
@@ -702,8 +698,6 @@ class VirtualModelsStore {
     }
 
     this.vmFormError = "";
-    this.aliasError = "";
-    this.aliasNotice = "";
 
     // In create mode warn about clobbering an existing virtual model (alias or
     // access policy) on the same source, or masking a concrete model. Edit
@@ -799,13 +793,15 @@ class VirtualModelsStore {
       const policyPruned = !isRedirect && result.status === 204;
       this.virtualModelsAvailable = true;
 
-      await Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
       this.closeVirtualModelForm();
-      this.aliasNotice = isRedirect
-        ? "Alias saved."
-        : policyPruned
-          ? "Model access reset to inherited/default."
-          : "Model access saved.";
+      flash.success(
+        isRedirect
+          ? "Alias saved."
+          : policyPruned
+            ? "Model access reset to inherited/default."
+            : "Model access saved.",
+      );
+      void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error("Failed to save virtual model:", e);
       this.vmFormError = "Failed to save virtual model.";
@@ -834,8 +830,6 @@ class VirtualModelsStore {
 
     this.vmDeleting = true;
     this.vmFormError = "";
-    this.aliasError = "";
-    this.aliasNotice = "";
 
     try {
       const result = await sendJSON("/admin/virtual-models", "DELETE", { source }, {
@@ -860,9 +854,9 @@ class VirtualModelsStore {
       }
       this.virtualModelsAvailable = true;
 
-      await Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
       this.closeVirtualModelForm();
-      this.aliasNotice = "Virtual model removed.";
+      flash.success("Virtual model removed.");
+      void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error("Failed to delete virtual model:", e);
       this.vmFormError = "Failed to remove virtual model.";

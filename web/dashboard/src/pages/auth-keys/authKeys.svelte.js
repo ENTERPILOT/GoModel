@@ -3,6 +3,7 @@
 // the client).
 
 import { getJSON, sendJSON } from "$lib/api/client.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import {
   authKeyErrorMessage,
@@ -19,8 +20,9 @@ class AuthKeysStore {
   keys = $state([]);
   available = $state(true);
   loading = $state(false);
+  // Load and in-form errors only; row-action feedback goes through the
+  // flash store.
   error = $state("");
-  notice = $state("");
 
   formOpen = $state(false);
   formSubmitting = $state(false);
@@ -67,7 +69,6 @@ class AuthKeysStore {
     }
     this.formOpen = true;
     this.error = "";
-    this.notice = "";
     if (!this.issuedValue) {
       this.copyState.reset();
       this.form = defaultAuthKeyForm();
@@ -104,7 +105,6 @@ class AuthKeysStore {
     }
 
     this.error = "";
-    this.notice = "";
     this.formSubmitting = true;
     try {
       const result = await sendJSON("/admin/auth-keys", "POST", built.payload, {
@@ -134,7 +134,7 @@ class AuthKeysStore {
       this.formOpen = true;
       this.copyState.reset();
       this.form = defaultAuthKeyForm();
-      await this.fetchKeys();
+      void this.fetchKeys();
     } catch (e) {
       console.error("Failed to issue auth key:", e);
       this.error = "Failed to create API key.";
@@ -171,7 +171,6 @@ class AuthKeysStore {
     }
     editor.submitting = true;
     editor.error = "";
-    this.notice = "";
     const payload = { labels: parseAuthKeyLabels(editor.value) };
 
     try {
@@ -198,10 +197,10 @@ class AuthKeysStore {
         console.error("Failed to update auth key labels:", result.status, editor.error);
         return;
       }
-      await this.fetchKeys();
-      this.notice = 'Labels updated for key "' + editor.name + '".';
+      flash.success('Labels updated for key "' + editor.name + '".');
       editor.submitting = false;
       this.closeLabelsEditor();
+      void this.fetchKeys();
     } catch (e) {
       console.error("Failed to update auth key labels:", e);
       editor.error = "Failed to update labels.";
@@ -219,8 +218,6 @@ class AuthKeysStore {
     }
 
     this.deactivatingID = key.id;
-    this.error = "";
-    this.notice = "";
     try {
       const result = await sendJSON(
         "/admin/auth-keys/" + encodeURIComponent(key.id) + "/deactivate",
@@ -230,7 +227,7 @@ class AuthKeysStore {
       );
       if (result.status === 503) {
         this.available = false;
-        this.error = "Auth keys feature is unavailable.";
+        flash.error("Auth keys feature is unavailable.");
         return;
       }
       if (result.stale) {
@@ -238,18 +235,19 @@ class AuthKeysStore {
       }
       if (!result.ok) {
         if (result.status === 401) {
-          this.error = "Authentication required.";
+          flash.error("Authentication required.");
           return;
         }
-        this.error = authKeyErrorMessage(result.data, "Failed to deactivate key.");
-        console.error("Failed to deactivate auth key:", result.status, this.error);
+        const message = authKeyErrorMessage(result.data, "Failed to deactivate key.");
+        console.error("Failed to deactivate auth key:", result.status, message);
+        flash.error(message);
         return;
       }
-      await this.fetchKeys();
-      this.notice = 'Key "' + key.name + '" deactivated.';
+      flash.success('Key "' + key.name + '" deactivated.');
+      void this.fetchKeys();
     } catch (e) {
       console.error("Failed to deactivate auth key:", e);
-      this.error = "Failed to deactivate key.";
+      flash.error("Failed to deactivate key.");
     } finally {
       this.deactivatingID = "";
     }

@@ -27,22 +27,4 @@
       </button>
     </div>
   </div>
-  {#if budgetsStore.notice}
-    <div
-      class="alert alert-success settings-refresh-alert"
-      role="status"
-      aria-live="polite"
-    >
-      {budgetsStore.notice}
-    </div>
-  {/if}
-  {#if budgetsStore.error}
-    <div
-      class="alert alert-warning settings-refresh-alert"
-      role="alert"
-      aria-live="assertive"
-    >
-      {budgetsStore.error}
-    </div>
-  {/if}
 {/if}

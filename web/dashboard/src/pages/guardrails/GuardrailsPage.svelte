@@ -74,9 +74,6 @@
   {#if !auth.authError && store.error && !store.formOpen}
     <div class="alert alert-warning">{store.error}</div>
   {/if}
-  {#if !auth.authError && store.notice && !store.error}
-    <div class="alert alert-success">{store.notice}</div>
-  {/if}
 
   <GuardrailEditor />
   <GuardrailList />

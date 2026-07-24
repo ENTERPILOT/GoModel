@@ -40,9 +40,6 @@
   {#if wf.error && !auth.authError}
     <div class="alert alert-warning">{wf.error}</div>
   {/if}
-  {#if wf.notice}
-    <div class="alert alert-success">{wf.notice}</div>
-  {/if}
 
   {#if wf.available}
     <div class="table-toolbar">

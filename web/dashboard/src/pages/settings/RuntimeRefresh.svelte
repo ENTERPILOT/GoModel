@@ -4,20 +4,18 @@
   // workflows, then renders the per-step report. A successful refresh bumps
   // auth.refreshTick so every page refetches.
   import { auth } from "$lib/stores/auth.svelte.js";
+  import { flash } from "$lib/stores/flash.svelte.js";
   import { sendJSON } from "$lib/api/client.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import {
     runtimeRefreshSummary,
     runtimeRefreshSucceeded,
-    runtimeRefreshWarnings,
     runtimeRefreshSteps,
     runtimeRefreshStepLabel,
   } from "./runtime-refresh-logic.js";
 
   let loading = $state(false);
-  let notice = $state("");
-  let error = $state("");
   let report = $state(null);
 
   async function refreshRuntime() {
@@ -25,8 +23,6 @@
       return;
     }
     loading = true;
-    notice = "";
-    error = "";
     report = null;
     try {
       const result = await sendJSON("/admin/runtime/refresh", "POST", undefined, {
@@ -36,18 +32,21 @@
         return;
       }
       if (!result.ok) {
-        notice = "Runtime refresh failed.";
-        error = notice;
+        flash.error("Runtime refresh failed.");
         return;
       }
       report =
         result.data && typeof result.data === "object" ? result.data : null;
-      notice = runtimeRefreshSummary(report);
+      // The per-step report stays rendered below; the summary is transient.
+      if (runtimeRefreshSucceeded(report)) {
+        flash.success(runtimeRefreshSummary(report));
+      } else {
+        flash.error(runtimeRefreshSummary(report));
+      }
       auth.refresh();
     } catch (e) {
       console.error("Failed to refresh runtime:", e);
-      notice = "Runtime refresh failed.";
-      error = notice;
+      flash.error("Runtime refresh failed.");
     } finally {
       loading = false;
     }
@@ -78,26 +77,6 @@
   </div>
 </div>
 <div>
-  {#if notice && runtimeRefreshSucceeded(report)}
-    <div
-      class="alert alert-success settings-refresh-alert"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      {notice}
-    </div>
-  {/if}
-  {#if error || (notice && runtimeRefreshWarnings(report))}
-    <div
-      class="alert alert-warning settings-refresh-alert"
-      role="alert"
-      aria-live="assertive"
-      aria-atomic="true"
-    >
-      {error || notice}
-    </div>
-  {/if}
   {#if runtimeRefreshSteps(report).length > 0}
     <ul class="runtime-refresh-steps" role="status" aria-live="polite">
       {#each runtimeRefreshSteps(report) as step (step.name)}

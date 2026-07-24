@@ -69,17 +69,11 @@
   {#if !virtualModels.virtualModelsAvailable && !authError}
     <div class="alert alert-warning">Virtual models feature is unavailable.</div>
   {/if}
-  {#if virtualModels.aliasError && !authError && !virtualModels.vmFormOpen}
+  {#if virtualModels.aliasError && !authError}
     <div class="alert alert-warning">{virtualModels.aliasError}</div>
-  {/if}
-  {#if virtualModels.aliasNotice}
-    <div class="alert alert-success">{virtualModels.aliasNotice}</div>
   {/if}
   {#if pricingOverrides.modelPricingOverrideError && !authError && !pricingOverrides.modelPricingOverrideFormOpen}
     <div class="alert alert-warning">{pricingOverrides.modelPricingOverrideError}</div>
-  {/if}
-  {#if pricingOverrides.modelPricingOverrideNotice && !pricingOverrides.modelPricingOverrideError}
-    <div class="alert alert-success">{pricingOverrides.modelPricingOverrideNotice}</div>
   {/if}
 
   <!-- Category Tabs -->

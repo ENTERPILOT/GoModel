@@ -2,6 +2,7 @@
 // the Settings page). Talks to the /admin/budgets endpoints.
 
 import { errorMessage, getJSON, sendJSON } from "$lib/api/client.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
 import { confirmDialog } from "$lib/stores/confirm.svelte.js";
@@ -27,8 +28,8 @@ class BudgetsStore {
   loading = $state(false);
   filter = $state("");
   sortBy = $state("user_path");
+  // Load failures only; mutation feedback goes through the flash store.
   error = $state("");
-  notice = $state("");
 
   formOpen = $state(false);
   formSubmitting = $state(false);
@@ -104,8 +105,6 @@ class BudgetsStore {
   openForm(item) {
     this.editing = !!item;
     this.formError = "";
-    this.error = "";
-    this.notice = "";
     if (item) {
       const periodSeconds = Number(item.period_seconds || 0);
       this.form = {
@@ -168,8 +167,6 @@ class BudgetsStore {
     }
     this.formSubmitting = true;
     this.formError = "";
-    this.error = "";
-    this.notice = "";
     try {
       const result = await sendJSON(
         "/admin/budgets",
@@ -190,8 +187,9 @@ class BudgetsStore {
         return;
       }
       this.closeForm();
-      await this.fetchBudgets();
-      this.notice = "Budget saved.";
+      // Flash before the refetch so feedback is instant.
+      flash.success("Budget saved.");
+      void this.fetchBudgets();
     } catch (e) {
       console.error("Failed to save budget:", e);
       this.formError = "Unable to save budget.";
@@ -235,8 +233,6 @@ class BudgetsStore {
       return;
     }
     this.resettingKey = key;
-    this.error = "";
-    this.notice = "";
     try {
       const result = await sendJSON(
         "/admin/budgets/reset-one",
@@ -246,21 +242,21 @@ class BudgetsStore {
       );
       if (result.status === 503) {
         this.budgetsAvailable = false;
-        this.error = "Budget management is unavailable.";
+        flash.error("Budget management is unavailable.");
         return;
       }
       if (result.stale) {
         return;
       }
       if (!result.ok) {
-        this.error = errorMessage(result, "Unable to reset budget.");
+        flash.error(errorMessage(result, "Unable to reset budget."));
         return;
       }
-      await this.fetchBudgets();
-      this.notice = "Budget reset.";
+      flash.success("Budget reset.");
+      void this.fetchBudgets();
     } catch (e) {
       console.error("Failed to reset budget:", e);
-      this.error = "Unable to reset budget.";
+      flash.error("Unable to reset budget.");
     } finally {
       this.resettingKey = "";
     }
@@ -279,8 +275,6 @@ class BudgetsStore {
       return;
     }
     this.deletingKey = key;
-    this.error = "";
-    this.notice = "";
     try {
       const result = await sendJSON(
         "/admin/budgets",
@@ -290,21 +284,21 @@ class BudgetsStore {
       );
       if (result.status === 503) {
         this.budgetsAvailable = false;
-        this.error = "Budget management is unavailable.";
+        flash.error("Budget management is unavailable.");
         return;
       }
       if (result.stale) {
         return;
       }
       if (!result.ok) {
-        this.error = errorMessage(result, "Unable to delete budget.");
+        flash.error(errorMessage(result, "Unable to delete budget."));
         return;
       }
       this.budgets = normalizeBudgetListPayload(result.data);
-      this.notice = "Budget deleted.";
+      flash.success("Budget deleted.");
     } catch (e) {
       console.error("Failed to delete budget:", e);
-      this.error = "Unable to delete budget.";
+      flash.error("Unable to delete budget.");
     } finally {
       this.deletingKey = "";
     }
@@ -331,7 +325,6 @@ class BudgetsStore {
       return;
     }
     this.resetAllLoading = true;
-    this.notice = "";
     try {
       const result = await sendJSON(
         "/admin/budgets/reset",
@@ -347,10 +340,10 @@ class BudgetsStore {
         return;
       }
       confirmDialog.close();
+      flash.success("Budgets reset.");
       if (router.page === "budgets") {
-        await this.fetchBudgets();
+        void this.fetchBudgets();
       }
-      this.notice = "Budgets reset.";
     } catch (e) {
       console.error("Failed to reset budgets:", e);
       confirmDialog.error = "Unable to reset budgets.";
