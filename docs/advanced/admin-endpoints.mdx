@@ -30,14 +30,28 @@ variables, defaults, and the equivalent `admin:` YAML block.
 
 ## Authentication
 
-The admin REST API endpoints (`/admin/*`) are protected by the same `GOMODEL_MASTER_KEY` authentication as the main API routes. Include the key as a Bearer token:
+The admin REST API endpoints (`/admin/*`) accept two credentials as a Bearer token:
+
+- **`GOMODEL_MASTER_KEY`** — always has admin access.
+- **A managed API key with dashboard access** — managed keys are created *without* dashboard access by default, so a key handed out for model traffic cannot read the audit log, issue new keys, or change gateway settings. Requests made with a managed key that lacks access return `403` with error code `dashboard_access_denied`.
 
 ```bash
 curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   http://localhost:8080/admin/usage/summary
 ```
 
-The dashboard UI pages (`/admin/dashboard`) and static assets (`/admin/static/*`) **skip authentication** so the dashboard is accessible without configuring API keys in the browser.
+Grant or revoke dashboard access per key on the dashboard's API Keys page, at creation time (`"dashboard_access": true` on `POST /admin/auth-keys`), or later:
+
+```bash
+curl -X PUT http://localhost:8080/admin/auth-keys/<key-id>/dashboard-access \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"dashboard_access": true}'
+```
+
+Dashboard access only gates `/admin/*`. Model endpoints and the self-service [`GET /v1/usage`](/advanced/usage-api) endpoint stay available to every managed key.
+
+The dashboard UI pages (`/admin/dashboard`) and static assets (`/admin/static/*`) **skip authentication** so the dashboard shell is accessible without configuring API keys in the browser — the data it loads still requires a key with dashboard access.
 
 <Warning>
   If your GoModel instance is publicly accessible, be aware that the dashboard

@@ -1,7 +1,14 @@
 // Pure logic for the API Keys page.
 
 export function defaultAuthKeyForm() {
-  return { name: "", description: "", user_path: "", labels: "", expires_at: "" };
+  return {
+    name: "",
+    description: "",
+    user_path: "",
+    labels: "",
+    dashboard_access: false,
+    expires_at: "",
+  };
 }
 
 // parseAuthKeyLabels splits a comma-separated label string into a trimmed,
@@ -86,6 +93,7 @@ export function buildCreateAuthKeyPayload(form) {
     description: String(source.description || "").trim() || undefined,
     user_path: userPath || undefined,
     labels: labels.length ? labels : undefined,
+    dashboard_access: source.dashboard_access ? true : undefined,
   };
   if (source.expires_at) {
     payload.expires_at = source.expires_at + "T23:59:59Z";

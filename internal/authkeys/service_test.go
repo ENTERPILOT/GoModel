@@ -53,6 +53,17 @@ func (s *testStore) UpdateLabels(_ context.Context, id string, labels []string, 
 	return nil
 }
 
+func (s *testStore) UpdateDashboardAccess(_ context.Context, id string, allowed bool, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return ErrNotFound
+	}
+	key.DashboardAccess = allowed
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
+	return nil
+}
+
 func (s *testStore) Deactivate(_ context.Context, id string, now time.Time) error {
 	if s.deactivateErr != nil {
 		return s.deactivateErr
@@ -322,6 +333,75 @@ func TestServiceUpdateLabelsAppliesImmediatelyToAuthenticate(t *testing.T) {
 	}
 	if authenticated.Labels != nil {
 		t.Fatalf("Authenticate().Labels after clear = %v, want nil", authenticated.Labels)
+	}
+}
+
+func TestServiceDashboardAccessLifecycle(t *testing.T) {
+	service, err := NewService(newTestStore())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	issued, err := service.Create(context.Background(), CreateInput{
+		Name:            "ops",
+		DashboardAccess: true,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if !issued.DashboardAccess {
+		t.Fatal("Create().DashboardAccess = false, want true")
+	}
+
+	authenticated, err := service.Authenticate(context.Background(), issued.Value)
+	if err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
+	}
+	if !authenticated.DashboardAccess {
+		t.Fatal("Authenticate().DashboardAccess = false, want true")
+	}
+
+	view, err := service.UpdateDashboardAccess(context.Background(), issued.ID, false)
+	if err != nil {
+		t.Fatalf("UpdateDashboardAccess() error = %v", err)
+	}
+	if view.DashboardAccess {
+		t.Fatal("UpdateDashboardAccess(revoke).DashboardAccess = true, want false")
+	}
+
+	authenticated, err = service.Authenticate(context.Background(), issued.Value)
+	if err != nil {
+		t.Fatalf("Authenticate() after revoke error = %v", err)
+	}
+	if authenticated.DashboardAccess {
+		t.Fatal("Authenticate().DashboardAccess after revoke = true, want false")
+	}
+
+	if _, err := service.UpdateDashboardAccess(context.Background(), "missing", true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateDashboardAccess(missing) error = %v, want %v", err, ErrNotFound)
+	}
+}
+
+func TestServiceCreateDefaultsToNoDashboardAccess(t *testing.T) {
+	service, err := NewService(newTestStore())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	issued, err := service.Create(context.Background(), CreateInput{Name: "plain"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if issued.DashboardAccess {
+		t.Fatal("Create().DashboardAccess = true, want false by default")
+	}
+
+	authenticated, err := service.Authenticate(context.Background(), issued.Value)
+	if err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
+	}
+	if authenticated.DashboardAccess {
+		t.Fatal("Authenticate().DashboardAccess = true, want false by default")
 	}
 }
 

@@ -51,7 +51,7 @@
       </div>
       {#if auth.authError}
         <p class="auth-dialog-error" role="alert">
-          Enter a valid API key to continue.
+          {auth.authErrorMessage || "Enter a valid API key to continue."}
         </p>
       {/if}
       <p class="auth-dialog-hint">

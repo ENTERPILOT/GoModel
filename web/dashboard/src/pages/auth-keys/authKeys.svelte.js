@@ -28,6 +28,7 @@ class AuthKeysStore {
   formSubmitting = $state(false);
   issuedValue = $state("");
   deactivatingID = $state("");
+  dashboardAccessID = $state("");
   form = $state(defaultAuthKeyForm());
   labelsEditor = $state(emptyLabelsEditor());
 
@@ -206,6 +207,50 @@ class AuthKeysStore {
       editor.error = "Failed to update labels.";
     } finally {
       editor.submitting = false;
+    }
+  }
+
+  async toggleDashboardAccess(key) {
+    if (!key || !key.active || this.dashboardAccessID) {
+      return;
+    }
+    const grant = !key.dashboard_access;
+
+    this.dashboardAccessID = key.id;
+    try {
+      const result = await sendJSON(
+        "/admin/auth-keys/" + encodeURIComponent(key.id) + "/dashboard-access",
+        "PUT",
+        { dashboard_access: grant },
+        { label: "update API key dashboard access" },
+      );
+      if (result.status === 503) {
+        this.available = false;
+        flash.error("Auth keys feature is unavailable.");
+        return;
+      }
+      if (result.stale) {
+        return;
+      }
+      if (!result.ok) {
+        if (result.status === 401) {
+          flash.error("Authentication required.");
+          return;
+        }
+        const message = authKeyErrorMessage(result.data, "Failed to update dashboard access.");
+        console.error("Failed to update auth key dashboard access:", result.status, message);
+        flash.error(message);
+        return;
+      }
+      flash.success(
+        'Dashboard access ' + (grant ? "granted to" : "revoked for") + ' key "' + key.name + '".',
+      );
+      void this.fetchKeys();
+    } catch (e) {
+      console.error("Failed to update auth key dashboard access:", e);
+      flash.error("Failed to update dashboard access.");
+    } finally {
+      this.dashboardAccessID = "";
     }
   }
 

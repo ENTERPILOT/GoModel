@@ -18,6 +18,8 @@ class AuthStore {
   apiKey = $state("");
   needsAuth = $state(false);
   authError = $state(false);
+  // Optional specific error text for the auth dialog; empty = generic copy.
+  authErrorMessage = $state("");
   dialogOpen = $state(false);
   generation = $state(0);
   // Incremented whenever the whole dashboard should re-fetch (key change,
@@ -61,6 +63,7 @@ class AuthStore {
     if (!apiKey) {
       this.apiKey = "";
       this.authError = true;
+      this.authErrorMessage = "";
       this.needsAuth = true;
       this.openDialog();
       return false;
@@ -69,6 +72,7 @@ class AuthStore {
     this.save();
     this.generation++;
     this.authError = false;
+    this.authErrorMessage = "";
     this.needsAuth = false;
     this.closeDialog();
     this.refresh();
@@ -79,9 +83,11 @@ class AuthStore {
     this.refreshTick++;
   }
 
-  // handleUnauthorized reports whether the 401 belongs to the current key.
-  // Stale responses (older generation) are ignored silently.
-  handleUnauthorized(requestGeneration) {
+  // handleUnauthorized reports whether the 401/403 belongs to the current
+  // key. Stale responses (older generation) are ignored silently. An optional
+  // message replaces the generic dialog error text (e.g. a valid key that
+  // lacks dashboard access).
+  handleUnauthorized(requestGeneration, message = "") {
     if (
       typeof requestGeneration === "number" &&
       requestGeneration < this.generation
@@ -89,6 +95,7 @@ class AuthStore {
       return false;
     }
     this.authError = true;
+    this.authErrorMessage = message;
     this.needsAuth = true;
     this.openDialog();
     return true;
