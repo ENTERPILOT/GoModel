@@ -88,7 +88,9 @@
   const visible = $derived(
     kind === "userPath" ? userPathUsageChartVisible(rows) : rows.length > 0,
   );
-  const title = $derived(costs ? meta.costsTitle : meta.tokensTitle);
+  // Named `heading` (not `title`) so the title() snippet below doesn't
+  // shadow it — inside that snippet, `title` refers to the snippet itself.
+  const heading = $derived(costs ? meta.costsTitle : meta.tokensTitle);
   const series = $derived(divergingDataFrom(rows, labelFor, costs));
   const tableRows = $derived(usageRowsBySelectedValue(rows, costs));
 
@@ -150,13 +152,13 @@
     <div class="model-chart-header">
       {#if kind === "label"}
         <InlineHelpSection copyId={helpCopyId} label="label usage help" text={helpText}>
-          {#snippet title()}<h3>{title}</h3>{/snippet}
+          {#snippet title()}<h3>{heading}</h3>{/snippet}
           {#snippet extra()}
             {#if loading}<Spinner size={14} label="Loading {meta.noun}" />{/if}
           {/snippet}
         </InlineHelpSection>
       {:else}
-        <h3>{title}</h3>
+        <h3>{heading}</h3>
         {#if loading}<Spinner size={14} label="Loading {meta.noun}" />{/if}
       {/if}
       {@render viewToggle()}
