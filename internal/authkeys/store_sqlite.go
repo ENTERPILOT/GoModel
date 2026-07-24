@@ -29,6 +29,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 			description TEXT NOT NULL DEFAULT '',
 			user_path TEXT,
 			labels JSON,
+			dashboard_access INTEGER NOT NULL DEFAULT 0,
 			redacted_value TEXT NOT NULL,
 			secret_hash TEXT NOT NULL UNIQUE,
 			enabled INTEGER NOT NULL DEFAULT 1,
@@ -45,6 +46,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	migrations := []string{
 		`ALTER TABLE auth_keys ADD COLUMN user_path TEXT`,
 		`ALTER TABLE auth_keys ADD COLUMN labels JSON`,
+		`ALTER TABLE auth_keys ADD COLUMN dashboard_access INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, migration := range migrations {
 		if _, err := db.Exec(migration); err != nil && !isSQLiteDuplicateColumnError(err) {
@@ -65,7 +67,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 
 func (s *SQLiteStore) List(ctx context.Context) ([]AuthKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
+		SELECT id, name, description, user_path, labels, dashboard_access, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
 		FROM auth_keys
 		ORDER BY created_at DESC, id ASC
 	`)
@@ -82,9 +84,9 @@ func (s *SQLiteStore) List(ctx context.Context) ([]AuthKey, error) {
 
 func (s *SQLiteStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO auth_keys (id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, key.ID, key.Name, key.Description, sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID), key.RedactedValue, key.SecretHash, boolToSQLite(key.Enabled), sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
+		INSERT INTO auth_keys (id, name, description, user_path, labels, dashboard_access, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, key.ID, key.Name, key.Description, sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID), boolToSQLite(key.DashboardAccess), key.RedactedValue, key.SecretHash, boolToSQLite(key.Enabled), sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
 	}
@@ -104,6 +106,26 @@ func (s *SQLiteStore) UpdateLabels(ctx context.Context, id string, labels []stri
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("read update labels rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *SQLiteStore) UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE auth_keys
+		SET dashboard_access = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, boolToSQLite(allowed), now.Unix(), normalizeID(id))
+	if err != nil {
+		return fmt.Errorf("update auth key dashboard access: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read update dashboard access rows affected: %w", err)
 	}
 	if affected == 0 {
 		return ErrNotFound
@@ -140,6 +162,7 @@ func scanSQLiteAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	var key AuthKey
 	var userPath sql.NullString
 	var labelsJSON sql.NullString
+	var dashboardAccess int
 	var enabled int
 	var expiresAt sql.NullInt64
 	var deactivatedAt sql.NullInt64
@@ -151,6 +174,7 @@ func scanSQLiteAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&key.Description,
 		&userPath,
 		&labelsJSON,
+		&dashboardAccess,
 		&key.RedactedValue,
 		&key.SecretHash,
 		&enabled,
@@ -166,6 +190,7 @@ func scanSQLiteAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	}
 	key.UserPath = sqlutil.StringFromNullable(userPath)
 	key.Labels = sqlutil.StringsFromJSON(labelsJSON.String, key.ID)
+	key.DashboardAccess = dashboardAccess != 0
 	key.Enabled = enabled != 0
 	key.ExpiresAt = sqlutil.TimeFromUnix(expiresAt)
 	key.DeactivatedAt = sqlutil.TimeFromUnix(deactivatedAt)

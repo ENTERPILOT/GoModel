@@ -431,14 +431,16 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/batches/:id/cancel", handler.CancelBatch)
 	e.GET("/v1/batches/:id/results", handler.BatchResults)
 
-	// Admin API routes (behind ADMIN_ENDPOINTS_ENABLED flag)
+	// Admin API routes (behind ADMIN_ENDPOINTS_ENABLED flag). Managed keys
+	// need dashboard access to pass the gate; the master key always does.
 	if cfg != nil && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
-		cfg.AdminHandler.RegisterRoutes(e.Group("/admin"))
+		adminGate := AdminAccessMiddleware()
+		cfg.AdminHandler.RegisterRoutes(e.Group("/admin", adminGate))
 
 		// Legacy alias under /admin/api/v1/* — accepted until adminLegacySunset
 		// to give operators a window to migrate. Responses carry Deprecation,
 		// Sunset, and Link headers per RFC 8594 / draft-ietf-httpapi-deprecation-header.
-		legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware)
+		legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware, adminGate)
 		cfg.AdminHandler.RegisterRoutes(legacy)
 		// DashboardConfig moved within /admin from /dashboard/config to
 		// /runtime/config; preserve the historical legacy path explicitly.

@@ -43,6 +43,15 @@ async function request(path, options, { label = path, parse = true } = {}) {
     } catch {
       data = null;
     }
+    // A valid key without dashboard access is as unusable as a wrong key:
+    // reopen the auth dialog with a message explaining why.
+    if (res.status === 403 && data?.error?.code === "dashboard_access_denied") {
+      auth.handleUnauthorized(
+        generation,
+        "This API key does not have dashboard access. Use the master key or a key with dashboard access.",
+      );
+      return { ok: false, stale, status: res.status, data, res };
+    }
     if (!stale) {
       console.error(`Failed to fetch ${label}: ${res.status} ${res.statusText}`);
     }

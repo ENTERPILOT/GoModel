@@ -12,14 +12,16 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/validation"
 )
 
 type createAuthKeyRequest struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description,omitempty"`
-	UserPath    string     `json:"user_path,omitempty"`
-	Labels      []string   `json:"labels,omitempty"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Name            string     `json:"name"`
+	Description     string     `json:"description,omitempty"`
+	UserPath        string     `json:"user_path,omitempty"`
+	Labels          []string   `json:"labels,omitempty"`
+	DashboardAccess bool       `json:"dashboard_access,omitempty"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 }
 
 func (h *Handler) ListAuthKeys(c *echo.Context) error {
@@ -50,11 +52,12 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 	}
 
 	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
-		Name:        req.Name,
-		Description: req.Description,
-		UserPath:    userPath,
-		Labels:      req.Labels,
-		ExpiresAt:   req.ExpiresAt,
+		Name:            req.Name,
+		Description:     req.Description,
+		UserPath:        userPath,
+		Labels:          req.Labels,
+		DashboardAccess: req.DashboardAccess,
+		ExpiresAt:       req.ExpiresAt,
 	})
 	if err != nil {
 		return handleError(c, authKeyWriteError(err))
@@ -78,6 +81,34 @@ type updateAuthKeyLabelsRequest struct {
 // UpdateAuthKeyLabels handles PUT /admin/auth-keys/:id/labels. The request
 // labels replace the key's labels; an empty list clears them.
 func (h *Handler) UpdateAuthKeyLabels(c *echo.Context) error {
+	var req updateAuthKeyLabelsRequest
+	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
+		return h.authKeys.UpdateLabels(ctx, id, req.Labels)
+	})
+}
+
+type updateAuthKeyDashboardAccessRequest struct {
+	// Pointer so an omitted or null value is rejected instead of being
+	// treated as an implicit revoke.
+	DashboardAccess *bool `json:"dashboard_access"`
+}
+
+// UpdateAuthKeyDashboardAccess handles PUT /admin/auth-keys/:id/dashboard-access.
+// It grants or revokes the key's access to the admin API and dashboard.
+func (h *Handler) UpdateAuthKeyDashboardAccess(c *echo.Context) error {
+	var req updateAuthKeyDashboardAccessRequest
+	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
+		if req.DashboardAccess == nil {
+			return nil, validation.NewError("dashboard_access is required", nil)
+		}
+		return h.authKeys.UpdateDashboardAccess(ctx, id, *req.DashboardAccess)
+	})
+}
+
+// updateAuthKey handles the shared shape of the PUT /admin/auth-keys/:id/*
+// endpoints: bind the request into req, run the update, and render the
+// updated view.
+func (h *Handler) updateAuthKey(c *echo.Context, req any, update func(ctx context.Context, id string) (*authkeys.View, error)) error {
 	if h.authKeys == nil {
 		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
 	}
@@ -87,12 +118,11 @@ func (h *Handler) UpdateAuthKeyLabels(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("auth key id is required", nil))
 	}
 
-	var req updateAuthKeyLabelsRequest
-	if err := c.Bind(&req); err != nil {
+	if err := c.Bind(req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
-	view, err := h.authKeys.UpdateLabels(c.Request().Context(), id, req.Labels)
+	view, err := update(c.Request().Context(), id)
 	if err != nil {
 		if errors.Is(err, authkeys.ErrNotFound) {
 			return handleError(c, core.NewNotFoundError("auth key not found: "+id))

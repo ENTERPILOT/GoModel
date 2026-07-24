@@ -33,6 +33,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 			description TEXT NOT NULL DEFAULT '',
 			user_path TEXT,
 			labels JSONB,
+			dashboard_access BOOLEAN NOT NULL DEFAULT FALSE,
 			redacted_value TEXT NOT NULL,
 			secret_hash TEXT NOT NULL UNIQUE,
 			enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -49,6 +50,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	migrations := []string{
 		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS user_path TEXT`,
 		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS labels JSONB`,
+		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS dashboard_access BOOLEAN NOT NULL DEFAULT FALSE`,
 	}
 	for _, migration := range migrations {
 		if _, err := pool.Exec(ctx, migration); err != nil {
@@ -68,7 +70,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 
 func (s *PostgreSQLStore) List(ctx context.Context) ([]AuthKey, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
+		SELECT id, name, description, user_path, labels, dashboard_access, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
 		FROM auth_keys
 		ORDER BY created_at DESC, id ASC
 	`)
@@ -85,9 +87,9 @@ func (s *PostgreSQLStore) List(ctx context.Context) ([]AuthKey, error) {
 
 func (s *PostgreSQLStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO auth_keys (id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-	`, key.ID, key.Name, key.Description, sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID), key.RedactedValue, key.SecretHash, key.Enabled, sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
+		INSERT INTO auth_keys (id, name, description, user_path, labels, dashboard_access, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+	`, key.ID, key.Name, key.Description, sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID), key.DashboardAccess, key.RedactedValue, key.SecretHash, key.Enabled, sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
 	}
@@ -103,6 +105,22 @@ func (s *PostgreSQLStore) UpdateLabels(ctx context.Context, id string, labels []
 	`, sqlutil.NullableJSONStrings(labels, id), now.Unix(), normalizeID(id))
 	if err != nil {
 		return fmt.Errorf("update auth key labels: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgreSQLStore) UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error {
+	cmd, err := s.pool.Exec(ctx, `
+		UPDATE auth_keys
+		SET dashboard_access = $1,
+			updated_at = $2
+		WHERE id = $3
+	`, allowed, now.Unix(), normalizeID(id))
+	if err != nil {
+		return fmt.Errorf("update auth key dashboard access: %w", err)
 	}
 	if cmd.RowsAffected() == 0 {
 		return ErrNotFound
@@ -145,6 +163,7 @@ func scanPostgreSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&key.Description,
 		&userPath,
 		&labelsJSON,
+		&key.DashboardAccess,
 		&key.RedactedValue,
 		&key.SecretHash,
 		&key.Enabled,

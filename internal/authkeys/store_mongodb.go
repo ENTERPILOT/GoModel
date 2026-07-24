@@ -11,18 +11,19 @@ import (
 )
 
 type mongoAuthKeyDocument struct {
-	ID            string     `bson:"_id"`
-	Name          string     `bson:"name"`
-	Description   string     `bson:"description,omitempty"`
-	UserPath      string     `bson:"user_path,omitempty"`
-	Labels        []string   `bson:"labels,omitempty"`
-	RedactedValue string     `bson:"redacted_value"`
-	SecretHash    string     `bson:"secret_hash"`
-	Enabled       bool       `bson:"enabled"`
-	ExpiresAt     *time.Time `bson:"expires_at,omitempty"`
-	DeactivatedAt *time.Time `bson:"deactivated_at,omitempty"`
-	CreatedAt     time.Time  `bson:"created_at"`
-	UpdatedAt     time.Time  `bson:"updated_at"`
+	ID              string     `bson:"_id"`
+	Name            string     `bson:"name"`
+	Description     string     `bson:"description,omitempty"`
+	UserPath        string     `bson:"user_path,omitempty"`
+	Labels          []string   `bson:"labels,omitempty"`
+	DashboardAccess bool       `bson:"dashboard_access,omitempty"`
+	RedactedValue   string     `bson:"redacted_value"`
+	SecretHash      string     `bson:"secret_hash"`
+	Enabled         bool       `bson:"enabled"`
+	ExpiresAt       *time.Time `bson:"expires_at,omitempty"`
+	DeactivatedAt   *time.Time `bson:"deactivated_at,omitempty"`
+	CreatedAt       time.Time  `bson:"created_at"`
+	UpdatedAt       time.Time  `bson:"updated_at"`
 }
 
 type mongoAuthKeyIDFilter struct {
@@ -77,18 +78,19 @@ func (s *MongoDBStore) List(ctx context.Context) ([]AuthKey, error) {
 
 func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.collection.InsertOne(ctx, mongoAuthKeyDocument{
-		ID:            key.ID,
-		Name:          key.Name,
-		Description:   key.Description,
-		UserPath:      key.UserPath,
-		Labels:        key.Labels,
-		RedactedValue: key.RedactedValue,
-		SecretHash:    key.SecretHash,
-		Enabled:       key.Enabled,
-		ExpiresAt:     key.ExpiresAt,
-		DeactivatedAt: key.DeactivatedAt,
-		CreatedAt:     key.CreatedAt.UTC(),
-		UpdatedAt:     key.UpdatedAt.UTC(),
+		ID:              key.ID,
+		Name:            key.Name,
+		Description:     key.Description,
+		UserPath:        key.UserPath,
+		Labels:          key.Labels,
+		DashboardAccess: key.DashboardAccess,
+		RedactedValue:   key.RedactedValue,
+		SecretHash:      key.SecretHash,
+		Enabled:         key.Enabled,
+		ExpiresAt:       key.ExpiresAt,
+		DeactivatedAt:   key.DeactivatedAt,
+		CreatedAt:       key.CreatedAt.UTC(),
+		UpdatedAt:       key.UpdatedAt.UTC(),
 	})
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
@@ -110,6 +112,21 @@ func (s *MongoDBStore) UpdateLabels(ctx context.Context, id string, labels []str
 	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, update)
 	if err != nil {
 		return fmt.Errorf("update auth key labels: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *MongoDBStore) UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error {
+	update := bson.D{{Key: "$set", Value: bson.D{
+		{Key: "dashboard_access", Value: allowed},
+		{Key: "updated_at", Value: now.UTC()},
+	}}}
+	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, update)
+	if err != nil {
+		return fmt.Errorf("update auth key dashboard access: %w", err)
 	}
 	if result.MatchedCount == 0 {
 		return ErrNotFound
@@ -144,18 +161,19 @@ func (s *MongoDBStore) Close() error {
 
 func authKeyFromMongo(doc mongoAuthKeyDocument) AuthKey {
 	return AuthKey{
-		ID:            doc.ID,
-		Name:          doc.Name,
-		Description:   doc.Description,
-		UserPath:      doc.UserPath,
-		Labels:        doc.Labels,
-		RedactedValue: doc.RedactedValue,
-		SecretHash:    doc.SecretHash,
-		Enabled:       doc.Enabled,
-		ExpiresAt:     timePtrUTC(doc.ExpiresAt),
-		DeactivatedAt: timePtrUTC(doc.DeactivatedAt),
-		CreatedAt:     doc.CreatedAt.UTC(),
-		UpdatedAt:     doc.UpdatedAt.UTC(),
+		ID:              doc.ID,
+		Name:            doc.Name,
+		Description:     doc.Description,
+		UserPath:        doc.UserPath,
+		Labels:          doc.Labels,
+		DashboardAccess: doc.DashboardAccess,
+		RedactedValue:   doc.RedactedValue,
+		SecretHash:      doc.SecretHash,
+		Enabled:         doc.Enabled,
+		ExpiresAt:       timePtrUTC(doc.ExpiresAt),
+		DeactivatedAt:   timePtrUTC(doc.DeactivatedAt),
+		CreatedAt:       doc.CreatedAt.UTC(),
+		UpdatedAt:       doc.UpdatedAt.UTC(),
 	}
 }
 

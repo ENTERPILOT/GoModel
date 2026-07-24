@@ -100,6 +100,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/auth-keys",
 		"POST /admin/auth-keys",
 		"PUT /admin/auth-keys/:id/labels",
+		"PUT /admin/auth-keys/:id/dashboard-access",
 		"POST /admin/auth-keys/:id/deactivate",
 
 		"GET /admin/guardrails/types",

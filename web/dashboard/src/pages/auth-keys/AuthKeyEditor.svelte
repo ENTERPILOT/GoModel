@@ -133,6 +133,27 @@
             />
           </div>
           <div class="form-field">
+            <InlineHelpSection copyId="auth-key-dashboard-access-help-copy" label="API key dashboard access help">
+              {#snippet title()}
+                <label class="form-field-label" for="auth-key-dashboard-access">Dashboard access</label>
+              {/snippet}
+              {#snippet help()}
+                When off, this key is denied the dashboard and every /admin API
+                endpoint. Model endpoints and GET /v1/usage stay available to
+                the key. The master key always has dashboard access.
+              {/snippet}
+            </InlineHelpSection>
+            <label class="auth-key-dashboard-toggle">
+              <input
+                id="auth-key-dashboard-access"
+                type="checkbox"
+                aria-describedby="auth-key-dashboard-access-help-copy"
+                bind:checked={store.form.dashboard_access}
+              />
+              <span>Allow this key to use the dashboard and /admin API</span>
+            </label>
+          </div>
+          <div class="form-field">
             <label class="form-field-label" for="auth-key-description">Description (optional)</label>
             <textarea
               id="auth-key-description"
@@ -166,6 +187,14 @@
   /* Styles owned by this component (moved from dashboard.css). */
   .auth-key-form-fields > :global(.form-field) {
     margin-bottom: 4px;
+  }
+
+  .auth-key-dashboard-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
   }
 
   .auth-key-issued-banner {

@@ -31,9 +31,10 @@ type snapshot struct {
 
 // AuthenticationResult describes one successful managed auth key lookup.
 type AuthenticationResult struct {
-	ID       string
-	UserPath string
-	Labels   []string
+	ID              string
+	UserPath        string
+	Labels          []string
+	DashboardAccess bool
 }
 
 // Service keeps managed auth keys cached in memory for request authentication.
@@ -175,17 +176,18 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 
 	now := time.Now().UTC()
 	key := AuthKey{
-		ID:            uuid.NewString(),
-		Name:          normalized.Name,
-		Description:   normalized.Description,
-		UserPath:      normalized.UserPath,
-		Labels:        normalized.Labels,
-		RedactedValue: redactedValue,
-		SecretHash:    secretHash,
-		Enabled:       true,
-		ExpiresAt:     normalized.ExpiresAt,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:              uuid.NewString(),
+		Name:            normalized.Name,
+		Description:     normalized.Description,
+		UserPath:        normalized.UserPath,
+		Labels:          normalized.Labels,
+		DashboardAccess: normalized.DashboardAccess,
+		RedactedValue:   redactedValue,
+		SecretHash:      secretHash,
+		Enabled:         true,
+		ExpiresAt:       normalized.ExpiresAt,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	if err := s.store.Create(ctx, key); err != nil {
@@ -223,9 +225,41 @@ func (s *Service) UpdateLabels(ctx context.Context, id string, labels []string) 
 		}
 		return nil, fmt.Errorf("update auth key labels: %w", err)
 	}
-	s.applyLabelsUpdate(id, labels, now)
+	s.applyKeyUpdate(id, now, func(key *AuthKey) {
+		key.Labels = labels
+	})
 	s.refreshBestEffort(ctx, "update-labels")
+	return s.viewByID(id)
+}
 
+// UpdateDashboardAccess grants or revokes a managed auth key's admin API and
+// dashboard access, updates the in-memory snapshot immediately, best-effort
+// reconciles from storage, and returns the updated admin-facing view.
+func (s *Service) UpdateDashboardAccess(ctx context.Context, id string, allowed bool) (*View, error) {
+	if s == nil {
+		return nil, fmt.Errorf("auth key service is required")
+	}
+	id = normalizeID(id)
+	if id == "" {
+		return nil, newValidationError("auth key id is required", nil)
+	}
+
+	now := time.Now().UTC()
+	if err := s.store.UpdateDashboardAccess(ctx, id, allowed, now); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update auth key dashboard access: %w", err)
+	}
+	s.applyKeyUpdate(id, now, func(key *AuthKey) {
+		key.DashboardAccess = allowed
+	})
+	s.refreshBestEffort(ctx, "update-dashboard-access")
+	return s.viewByID(id)
+}
+
+// viewByID returns the admin-facing view of one cached key.
+func (s *Service) viewByID(id string) (*View, error) {
 	s.mu.RLock()
 	key, exists := s.snapshot.byID[id]
 	s.mu.RUnlock()
@@ -331,9 +365,10 @@ func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 		return AuthenticationResult{}, ErrInvalidToken
 	}
 	return AuthenticationResult{
-		ID:       key.ID,
-		UserPath: strings.TrimSpace(key.UserPath),
-		Labels:   key.Labels,
+		ID:              key.ID,
+		UserPath:        strings.TrimSpace(key.UserPath),
+		Labels:          key.Labels,
+		DashboardAccess: key.DashboardAccess,
 	}, nil
 }
 
@@ -369,7 +404,8 @@ func (s *Service) applyUpsert(key AuthKey, now time.Time) {
 	s.snapshot = next
 }
 
-func (s *Service) applyLabelsUpdate(id string, labels []string, now time.Time) {
+// applyKeyUpdate mutates one cached key in a cloned snapshot and swaps it in.
+func (s *Service) applyKeyUpdate(id string, now time.Time, mutate func(*AuthKey)) {
 	if s == nil {
 		return
 	}
@@ -382,7 +418,7 @@ func (s *Service) applyLabelsUpdate(id string, labels []string, now time.Time) {
 		s.snapshot = next
 		return
 	}
-	key.Labels = labels
+	mutate(&key)
 	key.UpdatedAt = now.UTC()
 	next.byID[id] = key
 	next.bySecretHash[key.SecretHash] = key

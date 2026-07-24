@@ -18,11 +18,12 @@ import (
 )
 
 type mockAuthenticator struct {
-	enabled     bool
-	tokenToID   map[string]string
-	tokenPath   map[string]string
-	tokenLabels map[string][]string
-	err         error
+	enabled        bool
+	tokenToID      map[string]string
+	tokenPath      map[string]string
+	tokenLabels    map[string][]string
+	tokenDashboard map[string]bool
+	err            error
 }
 
 func (m mockAuthenticator) Enabled() bool {
@@ -38,9 +39,10 @@ func (m mockAuthenticator) Authenticate(_ context.Context, token string) (authke
 		return authkeys.AuthenticationResult{}, assert.AnError
 	}
 	return authkeys.AuthenticationResult{
-		ID:       id,
-		UserPath: m.tokenPath[token],
-		Labels:   m.tokenLabels[token],
+		ID:              id,
+		UserPath:        m.tokenPath[token],
+		Labels:          m.tokenLabels[token],
+		DashboardAccess: m.tokenDashboard[token],
 	}, nil
 }
 

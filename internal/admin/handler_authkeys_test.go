@@ -51,6 +51,17 @@ func (s *authKeyTestStore) UpdateLabels(_ context.Context, id string, labels []s
 	return nil
 }
 
+func (s *authKeyTestStore) UpdateDashboardAccess(_ context.Context, id string, allowed bool, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return authkeys.ErrNotFound
+	}
+	key.DashboardAccess = allowed
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
+	return nil
+}
+
 func (s *authKeyTestStore) Deactivate(_ context.Context, id string, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {
@@ -200,6 +211,68 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	}
 	if len(views) != 1 || views[0].Active {
 		t.Fatalf("list response after deactivate = %#v, want one inactive key", views)
+	}
+}
+
+func TestUpdateAuthKeyDashboardAccess(t *testing.T) {
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	e := echo.New()
+
+	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"ops","dashboard_access":true}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	if err := h.CreateAuthKey(e.NewContext(createReq, createRec)); err != nil {
+		t.Fatalf("CreateAuthKey() error = %v", err)
+	}
+	var issued authkeys.IssuedKey
+	if err := json.Unmarshal(createRec.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("unmarshal create response: %v", err)
+	}
+	if !issued.DashboardAccess {
+		t.Fatal("issued.DashboardAccess = false, want true")
+	}
+
+	updateAccess := func(id, body string) (*httptest.ResponseRecorder, error) {
+		req := httptest.NewRequest(http.MethodPut, "/admin/auth-keys/"+id+"/dashboard-access", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		ctx := e.NewContext(req, rec)
+		ctx.SetPathValues(echo.PathValues{{Name: "id", Value: id}})
+		return rec, h.UpdateAuthKeyDashboardAccess(ctx)
+	}
+
+	rec, err := updateAccess(issued.ID, `{"dashboard_access":false}`)
+	if err != nil {
+		t.Fatalf("UpdateAuthKeyDashboardAccess() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("UpdateAuthKeyDashboardAccess() status = %d, want 200", rec.Code)
+	}
+	var view authkeys.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("unmarshal update response: %v", err)
+	}
+	if view.DashboardAccess {
+		t.Fatal("view.DashboardAccess = true, want false after revoke")
+	}
+
+	rec, err = updateAccess("missing", `{"dashboard_access":true}`)
+	if err != nil {
+		t.Fatalf("UpdateAuthKeyDashboardAccess(missing) error = %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("UpdateAuthKeyDashboardAccess(missing) status = %d, want 404", rec.Code)
+	}
+
+	// Omitted or null values must be rejected, not treated as a revoke.
+	for _, body := range []string{`{}`, `{"dashboard_access":null}`} {
+		rec, err = updateAccess(issued.ID, body)
+		if err != nil {
+			t.Fatalf("UpdateAuthKeyDashboardAccess(%s) error = %v", body, err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("UpdateAuthKeyDashboardAccess(%s) status = %d, want 400", body, rec.Code)
+		}
 	}
 }
 

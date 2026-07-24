@@ -79,6 +79,28 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 	}
 }
 
+// AdminAccessMiddleware denies admin API requests authenticated with a
+// managed key that lacks dashboard access. Master-key requests and requests
+// that skipped authentication (the no-master-key lockout recovery path) pass
+// through unchanged.
+func AdminAccessMiddleware() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			if allowed, isManagedKey := managedDashboardAccess(c.Request().Context()); isManagedKey && !allowed {
+				const message = "API key does not have dashboard access"
+				auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message)
+				gatewayErr := (&core.GatewayError{
+					Type:       core.ErrorTypeAuthentication,
+					Message:    message,
+					StatusCode: http.StatusForbidden,
+				}).WithCode("dashboard_access_denied")
+				return writeGatewayError(c, gatewayErr)
+			}
+			return next(c)
+		}
+	}
+}
+
 // requestAuthToken extracts the caller's credential from the request. The
 // primary scheme is "Authorization: Bearer <token>"; the Anthropic-native
 // "x-api-key: <token>" header is accepted as a fallback so Anthropic SDK
@@ -98,10 +120,25 @@ func requestAuthToken(r *http.Request) (token, errMessage string) {
 	return "", "missing credentials: send 'Authorization: Bearer <token>' or 'x-api-key: <token>'"
 }
 
+// managedDashboardAccessKey marks requests authenticated with a managed key.
+// Its bool value is the key's dashboard access. Requests authenticated with
+// the master key (or with auth skipped) never carry it, so they are not
+// subject to the admin gate.
+type managedDashboardAccessKey struct{}
+
+// managedDashboardAccess reports whether the request was authenticated with a
+// managed key and, if so, whether that key grants admin API and dashboard
+// access.
+func managedDashboardAccess(ctx context.Context) (allowed, isManagedKey bool) {
+	allowed, isManagedKey = ctx.Value(managedDashboardAccessKey{}).(bool)
+	return allowed, isManagedKey
+}
+
 // applyAuthKeyResult enriches the request context and audit entry with the
 // authenticated managed key's identity, labels, and bound user path.
 func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResult, userPathHeaderName string) {
 	ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
+	ctx = context.WithValue(ctx, managedDashboardAccessKey{}, authResult.DashboardAccess)
 	if len(authResult.Labels) > 0 {
 		// Key labels join any labels the tagging middleware already
 		// extracted from request headers; duplicates collapse.

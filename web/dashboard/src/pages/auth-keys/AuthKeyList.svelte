@@ -17,6 +17,15 @@
         <th>User Path</th>
         <th>Labels</th>
         <th>Token</th>
+        <th>
+          <span
+            class="auth-key-th-help"
+            title="Keys without dashboard access are denied the dashboard and every /admin API endpoint. Model endpoints and GET /v1/usage stay available to all keys."
+          >
+            Dashboard Access
+            <Icon name="info" width="13" height="13" />
+          </span>
+        </th>
         <th>Status</th>
         <th>Expires</th>
         <th>Created</th>
@@ -47,6 +56,13 @@
           <td>
             <span
               class="auth-key-status-badge"
+              class:auth-key-status-active={key.dashboard_access}
+              class:auth-key-status-inactive={!key.dashboard_access}
+            >{key.dashboard_access ? "Allowed" : "Denied"}</span>
+          </td>
+          <td>
+            <span
+              class="auth-key-status-badge"
               class:auth-key-status-active={key.active}
               class:auth-key-status-inactive={!key.active}
             >{key.active ? "Active" : "Inactive"}</span>
@@ -58,6 +74,14 @@
           <td class="auth-key-actions-cell">
             <div class="auth-key-row-actions">
               {#if key.active}
+                <TableActionButton
+                  label={(key.dashboard_access ? "Revoke dashboard access for API key " : "Grant dashboard access to API key ") + key.name}
+                  class="table-icon-btn"
+                  onclick={() => store.toggleDashboardAccess(key)}
+                  disabled={Boolean(store.dashboardAccessID)}
+                >
+                  <Icon name={key.dashboard_access ? "shield-off" : "shield-check"} class="table-icon-svg" />
+                </TableActionButton>
                 <TableActionButton
                   label={"Edit labels for API key " + key.name}
                   class="table-icon-btn"
@@ -97,6 +121,13 @@
 
   .auth-key-actions-cell {
     white-space: nowrap;
+  }
+
+  .auth-key-th-help {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: help;
   }
 
   .auth-key-row-actions {
