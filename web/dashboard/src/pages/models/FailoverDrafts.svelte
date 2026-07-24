@@ -138,3 +138,106 @@
     </div>
   </div>
 </Modal>
+
+<style>
+/* Styles owned by this component (moved from dashboard.css). */
+.failover-drafts-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+.failover-draft-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+  }
+
+.failover-draft-counter {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+.failover-draft-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+
+.failover-draft-toolbar :global(.filter-input-wrap) {
+    min-width: 0;
+  }
+
+.failover-draft-toolbar :global(.filter-input) {
+    min-width: 0;
+  }
+
+.failover-draft-toggle-all {
+    flex: 0 0 auto;
+  }
+
+.failover-draft-alert {
+    margin: 0;
+  }
+
+.failover-draft-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: min(52vh, 430px);
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+.failover-draft-row {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    cursor: pointer;
+  }
+
+.failover-draft-row:hover {
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+    background: var(--bg-surface-hover);
+  }
+
+.failover-draft-row :global(input) {
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+  }
+
+.failover-draft-copy {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+  }
+
+.failover-draft-source, .failover-draft-targets {
+    overflow-wrap: anywhere;
+  }
+
+.failover-draft-targets {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+.failover-drafts-empty {
+    min-height: 96px;
+    display: flex;
+    align-items: center;
+  }
+
+.failover-draft-actions {
+    margin-top: 0;
+  }
+</style>

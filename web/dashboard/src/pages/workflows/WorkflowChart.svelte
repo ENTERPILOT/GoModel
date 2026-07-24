@@ -178,3 +178,416 @@
     </div>
   {/if}
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  /* ═══════════════════════════════════════════════════════════════
+     Workflow Pipeline Visualization
+     ═══════════════════════════════════════════════════════════════ */
+  .workflow-pipeline {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 18px 20px 20px;
+    margin-bottom: 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .workflow-pipeline-has-meta {
+    padding-top: 42px;
+  }
+
+  .workflow-pipeline-meta {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    min-width: 0;
+    max-width: calc(100% - 28px);
+    padding: 2px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .workflow-pipeline-meta-copy {
+    appearance: none;
+    cursor: pointer;
+    text-align: left;
+    overflow: hidden;
+    transition:
+      background-color 0.15s,
+      border-color 0.15s,
+      color 0.15s,
+      box-shadow 0.15s;
+  }
+
+  .workflow-pipeline-meta-copy:hover, .workflow-pipeline-meta-copy:focus-visible {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+    color: color-mix(in srgb, var(--accent) 74%, var(--text));
+  }
+
+  .workflow-pipeline-meta-copy:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  .workflow-pipeline-meta-label {
+    flex: 0 0 auto;
+    font-weight: 700;
+  }
+
+  .workflow-pipeline-meta-placeholder {
+    flex: 0 0 auto;
+    max-width: 3ch;
+    margin-left: 4px;
+    overflow: hidden;
+    opacity: 1;
+    transition:
+      max-width 0.18s ease,
+      margin-left 0.18s ease,
+      opacity 0.15s ease;
+  }
+
+  .workflow-pipeline-meta-value {
+    flex: 0 1 auto;
+    max-width: 0;
+    margin-left: 0;
+    overflow: hidden;
+    opacity: 0;
+    text-overflow: clip;
+    transition:
+      max-width 0.22s ease,
+      margin-left 0.18s ease,
+      opacity 0.15s ease;
+  }
+
+  .workflow-pipeline-meta-copy:hover .workflow-pipeline-meta-placeholder, .workflow-pipeline-meta-copy:focus-visible .workflow-pipeline-meta-placeholder, .workflow-pipeline-meta-copied .workflow-pipeline-meta-placeholder, .workflow-pipeline-meta-error .workflow-pipeline-meta-placeholder {
+    max-width: 0;
+    margin-left: 0;
+    opacity: 0;
+  }
+
+  .workflow-pipeline-meta-copy:hover .workflow-pipeline-meta-value, .workflow-pipeline-meta-copy:focus-visible .workflow-pipeline-meta-value, .workflow-pipeline-meta-copied .workflow-pipeline-meta-value, .workflow-pipeline-meta-error .workflow-pipeline-meta-value {
+    max-width: 42ch;
+    margin-left: 4px;
+    opacity: 1;
+  }
+
+  .workflow-pipeline-meta-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 0;
+    height: 14px;
+    margin-left: 0;
+    overflow: hidden;
+    opacity: 0;
+    line-height: 0;
+    transform: translateX(4px) translateY(1px) scale(0.84);
+    transition:
+      width 0.18s ease,
+      margin-left 0.18s ease,
+      opacity 0.15s ease,
+      transform 0.18s ease;
+  }
+
+  .workflow-pipeline-meta-icon :global(svg) {
+    width: 14px;
+    height: 14px;
+    stroke: currentcolor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .workflow-pipeline-meta-copied, .workflow-pipeline-meta-copied:hover, .workflow-pipeline-meta-copied:focus-visible {
+    background: color-mix(in srgb, var(--success) 12%, var(--bg));
+    border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+    color: var(--success);
+  }
+
+  .workflow-pipeline-meta-copied .workflow-pipeline-meta-icon {
+    width: 14px;
+    margin-left: 6px;
+    opacity: 1;
+    transform: translateY(1px);
+  }
+
+  .workflow-pipeline-meta-error, .workflow-pipeline-meta-error:hover, .workflow-pipeline-meta-error:focus-visible {
+    background: color-mix(in srgb, var(--danger) 10%, var(--bg));
+    border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
+    color: var(--danger);
+  }
+
+  /* ─── Main pipeline row ─── */
+  .workflow-pipeline-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+  }
+
+  .workflow-node-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text-muted);
+  }
+
+  .workflow-node-icon :global(svg) {
+    width: 15px;
+    height: 15px;
+    stroke: currentcolor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .workflow-node-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--text);
+    white-space: nowrap;
+    line-height: 1.2;
+  }
+
+  .workflow-node-sub {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+    font-family: var(--font-mono, ui-monospace, monospace);
+  }
+
+  .workflow-node-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: var(--radius);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  /* ─── Endpoint nodes (Client / Response) ─── */
+  .workflow-node-endpoint {
+    flex-direction: row;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    min-width: auto;
+    gap: 7px;
+    border-color: var(--border);
+    background: var(--bg-surface);
+  }
+
+  .workflow-node-icon-endpoint {
+    width: auto;
+    height: auto;
+    justify-content: flex-start;
+    padding: 0;
+    background: transparent;
+    border-radius: var(--radius);
+    color: var(--text-muted);
+  }
+
+  .workflow-node-icon-endpoint :global(svg) {
+    width: 14px;
+    height: 14px;
+  }
+
+  .workflow-node-endpoint .workflow-node-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  /* ─── Shared node variants ─── */
+  .workflow-node-feature {
+    border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+  }
+
+  .workflow-node-feature .workflow-node-icon {
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+    color: var(--accent);
+  }
+
+  .workflow-node-feature .workflow-node-label {
+    color: var(--accent);
+  }
+
+  .workflow-node-feature .workflow-node-sub {
+    color: color-mix(in srgb, var(--accent) 70%, var(--text-muted));
+  }
+
+  /* ─── Auth node ─── */
+  /* ─── AI node ─── */
+  .workflow-node-ai {
+    min-width: 96px;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    gap: 6px;
+  }
+
+  /* ─── Async section ─── */
+  /*
+   * Async nodes fire after the response is returned to the client.
+   * They drop below the main row via an L-turn from Response, then
+   * flow right-to-left: Audit Log on the right, Usage on the left.
+   *
+   * [Client] ──→ [Cache?] ──── [AI] ──────── [Response]
+   *                                               │
+   *                                               │ (dashed drop)
+   *                                               │
+   *                         [Usage] ← ─ ─ [Audit Log]
+   */
+  /* Container — full-width branch lane below the main row */
+  .workflow-async-section {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0;
+    min-width: 0;
+    margin-top: 10px;
+  }
+
+  /* L-turn connector: centered horizontal leg plus vertical rise back to Response */
+  .workflow-async-turn {
+    flex: 0 0 60px;
+    position: relative; /* for arrowhead + vertical rise */
+    height: 2px;
+    background: repeating-linear-gradient(
+      to left,
+      color-mix(in srgb, var(--text-muted) 45%, var(--border)) 0,
+      color-mix(in srgb, var(--text-muted) 45%, var(--border)) 5px,
+      transparent 5px,
+      transparent 9px
+    );
+  }
+
+  /* Left-pointing arrowhead at the end of the horizontal L-turn line */
+  .workflow-async-turn::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 7px;
+    height: 9px;
+    background: color-mix(in srgb, var(--text-muted) 40%, var(--border));
+    clip-path: polygon(100% 0, 0 50%, 100% 100%);
+  }
+
+  /* Vertical dashed rise that connects the inline turn back up to Response */
+  .workflow-async-turn::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 1px;
+    height: 16px;
+    border-right: 2px dashed
+      color-mix(in srgb, var(--text-muted) 40%, var(--border));
+  }
+
+  /* RTL async row — Audit Log right, Usage left */
+  .workflow-async-row {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    margin-right: 7px;
+  }
+
+  /* Dashed left-pointing connector between async nodes */
+  .workflow-conn-async {
+    flex: 0 0 24px;
+    background: repeating-linear-gradient(
+      to left,
+      color-mix(in srgb, var(--text-muted) 45%, var(--border)) 0,
+      color-mix(in srgb, var(--text-muted) 45%, var(--border)) 5px,
+      transparent 5px,
+      transparent 9px
+    );
+    width: 24px;
+  }
+
+  /* Left-pointing arrowhead (overrides workflow-conn::after right-pointing default) */
+  .workflow-conn-async::after {
+    background: color-mix(in srgb, var(--text-muted) 45%, var(--border));
+    left: -1px;
+    right: auto;
+    clip-path: polygon(100% 0, 0 50%, 100% 100%);
+  }
+
+  /* Async nodes — horizontal inline pills */
+  .workflow-node-async {
+    flex-direction: row;
+    padding: 7px 12px;
+    border-radius: var(--radius);
+    border-style: dashed;
+    min-width: auto;
+    gap: 7px;
+  }
+
+  .workflow-node-async .workflow-node-icon {
+    width: 12px;
+    height: 12px;
+    border-radius: var(--radius);
+  }
+
+  .workflow-node-async .workflow-node-icon :global(svg) {
+    width: 12px;
+    height: 12px;
+  }
+
+  .workflow-node-async .workflow-node-label {
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  /* "ASYNC" label inline on the right of the branch */
+  .workflow-async-label {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    opacity: 0.55;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+</style>

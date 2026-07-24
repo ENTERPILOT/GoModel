@@ -67,3 +67,38 @@
 
   <UsageLog />
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  /* Usage page: the Tokens/Costs toggle shares the sticky bar with the date
+     picker so both stay reachable while scrolling. */
+  .usage-sticky-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  /* Usage Mode Toggle */
+  /* Usage charts flow two per row; a section alone in its row (odd count,
+     or neighbors hidden by x-show) grows to fill the full width. */
+  .usage-charts-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+
+  .usage-charts-grid :global(.model-chart-section) {
+    flex: 1 1 calc(50% - 24px);
+    min-width: 420px;
+    margin-bottom: 0;
+  }
+
+  @media (max-width: 520px) {
+    .usage-charts-grid :global(.model-chart-section) {
+        min-width: 0;
+      }
+  }
+</style>

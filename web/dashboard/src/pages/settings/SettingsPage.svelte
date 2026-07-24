@@ -46,3 +46,13 @@
 
   <p class="settings-version-footer mono">{appVersion()}</p>
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .settings-version-footer {
+    margin-top: 24px;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: right;
+  }
+</style>

@@ -192,3 +192,10 @@
     </form>
   </div>
 </Modal>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .budget-override-dialog {
+    max-width: 460px;
+  }
+</style>

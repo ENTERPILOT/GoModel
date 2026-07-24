@@ -156,3 +156,74 @@
     {/if}
   </td>
 </tr>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .model-name-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .model-name-primary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .model-name-secondary {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .model-redirect-remove-btn {
+    appearance: none;
+    margin-left: 4px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--danger);
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .model-redirect-remove-btn:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+
+  .model-redirect-remove-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .model-kind-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--accent);
+  }
+
+  .model-kind-icon-svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .model-row-actions {
+    text-align: right;
+    width: 170px;
+  }
+
+  @media (max-width: 768px) {
+    .model-name-primary {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+  }
+</style>

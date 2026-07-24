@@ -9,10 +9,17 @@ follow these rules so the pages compose into one coherent app.
    request/response field, query parameter, and behavioral rule exactly as
    the Go backend implements it — `internal/admin/*.go` is the source of
    truth. Do not invent endpoints or payload fields.
-2. **Reuse the existing CSS.** `src/styles/dashboard.css` is the shared
-   global stylesheet, loaded globally (no scoping, so class names stay
-   stable). Use its existing class names for standard elements. Only add
-   *scoped* `<style>` blocks for genuinely new UI (e.g. a new loading state).
+2. **CSS lives with its owner.** Component-specific styles are scoped
+   `<style>` blocks in the owning component; `src/styles/dashboard.css`
+   holds only the shared design system (tokens, reset, typography, buttons,
+   forms, tables, alerts, layout, keyframes) plus rules that target
+   child-component DOM (e.g. a class passed as a prop into `Icon` or
+   `LoadingState` renders in the child's markup, where the parent's scope
+   hash cannot match — those must stay global). Reuse existing shared class
+   names for standard elements. Cascade gotcha: scoping adds specificity,
+   so when moving a rule out of dashboard.css move its state/media/theme
+   variants with it, and check the shipped computed style doesn't change —
+   a scoped rule can win ties it used to lose.
 3. **Svelte 5 runes only.** `$state`, `$derived`, `$effect`, `$props`,
    snippets/`{@render}`. No legacy `$:` reactivity, no svelte/store.
 4. **Files:** page code lives in `src/pages/<page>/`. The entry component is

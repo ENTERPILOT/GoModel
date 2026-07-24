@@ -47,3 +47,15 @@
     </p>
   {/if}
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .inline-help-toggle.is-open {
+    color: var(--text);
+    background: transparent;
+  }
+
+  .inline-help-toggle.is-open :global(.inline-help-toggle-icon) {
+    transform: rotate(540deg);
+  }
+</style>

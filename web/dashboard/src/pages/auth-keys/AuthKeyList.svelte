@@ -81,3 +81,27 @@
     </tbody>
   </table>
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  /* Read-only chip variant (e.g. API key labels) — same look, no affordance. */
+  .usage-label-chip-static, .usage-label-chip-static:hover {
+    cursor: default;
+    background: color-mix(in srgb, var(--label-color, var(--accent)) 14%, var(--bg));
+  }
+
+  .auth-key-redacted {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .auth-key-actions-cell {
+    white-space: nowrap;
+  }
+
+  .auth-key-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+</style>

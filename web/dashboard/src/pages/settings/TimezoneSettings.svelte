@@ -54,3 +54,31 @@
     >
   {/if}
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .settings-panel-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  /* margin-bottom dropped: the heading sits in an inline-help-title-row,
+     whose global margin-bottom: 0 always outranked the 6px declared here. */
+  .settings-panel-header :global(h3) {
+    font-size: 18px;
+  }
+
+  .settings-form-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 420px);
+    gap: 16px;
+  }
+
+  @media (max-width: 768px) {
+    .settings-form-grid {
+        grid-template-columns: 1fr;
+      }
+  }
+</style>

@@ -79,3 +79,50 @@
     </div>
   </div>
 </Modal>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  /* MCP catalog inspector: read-only lists of tools, prompts, and resources. */
+  .mcp-catalog-section {
+    margin-top: 18px;
+  }
+
+  .mcp-catalog-section :global(.form-field-label) {
+    margin-bottom: 8px;
+  }
+
+  .mcp-catalog-subtitle {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .mcp-catalog-list {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .mcp-catalog-item-name {
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  .mcp-catalog-item-aggregated {
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+
+  .mcp-catalog-item-description {
+    margin: 2px 0 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 400;
+  }
+</style>

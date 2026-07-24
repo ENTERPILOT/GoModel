@@ -157,3 +157,76 @@
   <FailoverEditor />
   <FailoverDrafts />
 </div>
+
+<style>
+/* Styles owned by this component (moved from dashboard.css). */
+/* Category Tabs */
+.category-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 16px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+
+.category-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+.category-tab:hover {
+    color: var(--text);
+    background: var(--bg-surface-hover);
+  }
+
+.category-tab.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+.category-tab .tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 5px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 9px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+.category-tab:not(.active) .tab-count {
+    background: var(--bg);
+  }
+
+@media (max-width: 768px) {
+  /* Category tabs mobile */
+  .category-tabs {
+          gap: 4px;
+        }
+
+  .category-tab {
+          padding: 5px 10px;
+          font-size: 12px;
+        }
+}
+</style>

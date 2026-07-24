@@ -137,3 +137,242 @@
     </div>
   {/if}
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .conversation-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: 50;
+  }
+
+  .conversation-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .conversation-drawer-header :global(h3) {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .conversation-meta {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  .conversation-drawer-footer {
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
+    padding: 10px 16px;
+    background: var(--bg-surface);
+  }
+
+  .conversation-thread {
+    padding: 14px 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .conversation-live-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 16px 20px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .chat-message {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    max-width: 94%;
+    background: var(--bg);
+  }
+
+  .chat-message.is-anchor {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+
+  .chat-message.role-user {
+    align-self: flex-start;
+  }
+
+  .chat-message.role-assistant {
+    align-self: flex-end;
+    background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+  }
+
+  .chat-message.role-system {
+    align-self: center;
+    width: 100%;
+    max-width: 100%;
+    background: color-mix(in srgb, var(--warning) 10%, var(--bg));
+  }
+
+  .chat-message.role-error {
+    align-self: flex-end;
+    border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+    background: color-mix(in srgb, var(--danger) 10%, var(--bg));
+  }
+
+  .chat-message.role-error .chat-role {
+    color: color-mix(in srgb, var(--danger) 75%, var(--text-muted));
+  }
+
+  .chat-message-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+
+  .chat-role {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-muted);
+  }
+
+  .chat-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .chat-content {
+    font-family:
+      Inter,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      Roboto,
+      sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    color: var(--text);
+  }
+
+  /* Tool call footer on assistant bubbles */
+  .chat-tool-calls {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .chat-tool-call {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  .chat-tool-call-name::before {
+    content: "\26A1 ";
+  }
+
+  /* Function call / result notes between bubbles */
+  .chat-function-note {
+    align-self: center;
+    max-width: 94%;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--border) 40%, transparent);
+    border: 1px dashed var(--border);
+  }
+
+  .chat-function-note.is-anchor {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  }
+
+  .chat-function-note-inner {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .chat-function-label {
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .chat-function-detail {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chat-function-note.role-function-call {
+    align-self: flex-end;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  }
+
+  .chat-function-note.role-function-result {
+    align-self: flex-start;
+    background: color-mix(in srgb, var(--success) 8%, transparent);
+    border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+  }
+
+  .chat-function-note.is-anchor.role-function-call, .chat-function-note.is-anchor.role-function-result {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  }
+
+  /* Collapsible function notes */
+  .chat-function-note-details {
+    width: 100%;
+  }
+
+  .chat-function-note-details > :global(summary) {
+    list-style: none;
+    cursor: pointer;
+  }
+
+  .chat-function-note-details > :global(summary::-webkit-details-marker) {
+    display: none;
+  }
+
+  .chat-function-expanded {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text);
+    max-height: 200px;
+    overflow: auto;
+  }
+
+  @media (max-width: 768px) {
+    .chat-message {
+        max-width: 100%;
+      }
+  }
+</style>

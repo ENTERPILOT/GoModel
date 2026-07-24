@@ -108,3 +108,33 @@
     </ul>
   {/if}
 </div>
+
+<style>
+/* Styles owned by this component (moved from dashboard.css). */
+.settings-refresh-icon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+  }
+
+.runtime-refresh-steps {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+    padding-left: 18px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+.runtime-refresh-step.is-ok {
+    color: var(--success);
+  }
+
+.runtime-refresh-step.is-partial {
+    color: var(--warning);
+  }
+
+.runtime-refresh-step.is-failed {
+    color: var(--danger);
+  }
+</style>

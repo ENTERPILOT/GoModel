@@ -16,3 +16,14 @@
     </button>
   </div>
 {/if}
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .auth-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+</style>

@@ -116,3 +116,28 @@
     </tbody>
   </table>
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  /* MCP servers: secondary line under a table cell (prompt/resource counts,
+     inline last_error for degraded servers). */
+  .mcp-server-sub-counts {
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The server table has seven information-dense columns. Preserve readable
+     cells on narrow screens and let the table scroll instead of clipping it. */
+  .mcp-server-table-wrapper {
+    overflow-x: auto;
+  }
+
+  .mcp-server-table-wrapper :global(.data-table) {
+    min-width: 860px;
+  }
+</style>

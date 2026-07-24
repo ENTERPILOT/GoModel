@@ -246,10 +246,109 @@
 </div>
 
 <style>
-  .usage-log-loading {
+.usage-log-loading {
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 120px;
   }
+
+/* Usage Log Section */
+.usage-log-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+.usage-log-section :global(h3) {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+/* The request log carries many columns (labels included); scroll sideways on
+   narrow windows instead of clipping the trailing cost columns. */
+.usage-log-section :global(.table-wrapper) {
+  overflow-x: auto;
+}
+
+.usage-log-toolbar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.usage-filter-row {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+  align-items: center;
+}
+
+.usage-filter-row-search :global(.filter-input-wrap) {
+  grid-column: 1 / -1;
+}
+
+.usage-filter-row-options {
+  grid-template-columns: 1fr;
+}
+
+.usage-log-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.usage-log-checkbox :global(input) {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.usage-ts {
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.usage-log-row-cached :global(td) {
+  opacity: 0.75;
+  font-style: italic;
+}
+
+.usage-log-row-cached .usage-log-cache-cell {
+  font-weight: 700;
+}
+
+/* Caveat warning icon */
+.caveat-icon {
+  color: var(--warning);
+  cursor: help;
+  font-size: 14px;
+  margin-left: 4px;
+}
+
+@media (max-width: 768px) {
+  /* Usage page mobile */
+  .usage-log-toolbar {
+        gap: 10px;
+      }
+
+  .usage-filter-row {
+        grid-template-columns: 1fr;
+      }
+
+  .usage-filter-row-search :global(.filter-input-wrap) {
+        grid-column: 1;
+      }
+
+  .usage-log-table {
+        display: block;
+        overflow-x: auto;
+      }
+}
 </style>

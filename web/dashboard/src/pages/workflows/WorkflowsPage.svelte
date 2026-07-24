@@ -76,3 +76,19 @@
     {/each}
   </datalist>
 </div>
+
+<style>
+/* Styles owned by this component (moved from dashboard.css). */
+/* Workflows */
+.workflow-page-note {
+    margin-top: 6px;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+.workflows-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+</style>

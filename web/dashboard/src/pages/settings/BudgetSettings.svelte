@@ -268,3 +268,64 @@
     {/if}
   </div>
 {/if}
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .budget-settings-section {
+    width: 100%;
+  }
+
+  .budget-settings-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .budget-settings-row {
+    display: grid;
+    grid-template-columns: 96px minmax(170px, 1fr) minmax(110px, 140px) minmax(110px, 140px) minmax(220px, 280px);
+    align-items: start;
+    gap: 12px;
+  }
+
+  .budget-settings-period {
+    align-self: end;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0;
+    min-height: 35px;
+    padding-bottom: 9px;
+    text-transform: uppercase;
+  }
+
+  .budget-settings-spacer {
+    min-height: 1px;
+  }
+
+  .budget-settings-help-cell {
+    align-self: start;
+    min-width: 0;
+    min-height: 35px;
+  }
+
+  .budget-settings-help-cell :global(.inline-help-copy) {
+    margin: 22px 0 0;
+    max-width: 280px;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  @media (max-width: 768px) {
+    .budget-settings-grid {
+        grid-template-columns: 1fr;
+      }
+
+    .budget-settings-row {
+        grid-template-columns: 1fr;
+      }
+
+    .budget-settings-spacer {
+        display: none;
+      }
+  }
+</style>

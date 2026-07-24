@@ -62,3 +62,32 @@
     />
   </div>
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  /* Page-level filter bar under the Usage Analytics header. Every widget on the
+     page (cards, charts, request log) follows these filters. */
+  .usage-page-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .usage-page-filters :global(.usage-log-select) {
+    flex: 0 1 auto;
+  }
+
+  .usage-page-filters-user-path {
+    flex: 1 1 220px;
+    min-width: 180px;
+    max-width: 360px;
+  }
+
+  @media (max-width: 768px) {
+    .usage-page-filters :global(.usage-log-select), .usage-page-filters-user-path {
+        flex: 1 1 100%;
+        max-width: none;
+      }
+  }
+</style>

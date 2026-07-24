@@ -81,4 +81,8 @@
     justify-content: center;
     padding: 32px 0;
   }
+/* --- API Keys page --- */
+.auth-keys-help-notice {
+  margin-bottom: 20px;
+}
 </style>

@@ -69,3 +69,27 @@
     </form>
   </div>
 </Modal>
+
+<style>
+/* Styles owned by this component (moved from dashboard.css). */
+.auth-dialog-input-shell {
+    position: relative;
+  }
+
+.auth-dialog-input {
+    width: 100%;
+    padding: 11px 12px 11px 38px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+  }
+
+.auth-dialog-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+</style>

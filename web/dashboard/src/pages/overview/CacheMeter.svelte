@@ -61,3 +61,106 @@
     {/each}
   </div>
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .cache-meter-header {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-bottom: 16px;
+  }
+
+  .cache-meter-header :global(h3) {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .cache-meter-subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .cache-meter-bar {
+    display: flex;
+    width: 100%;
+    height: 28px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--bg-surface-hover);
+  }
+
+  .cache-meter-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-width: 3px;
+    overflow: hidden;
+    transition: width 0.3s ease;
+  }
+
+  .cache-meter-segment-label {
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    /* Keeps white legible on the lighter brown slice in dark mode. */
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  }
+
+  .cache-meter-segment + .cache-meter-segment {
+    box-shadow: -1px 0 0 var(--bg-surface);
+  }
+
+  .cache-meter-bar.is-empty {
+    height: auto;
+    min-height: 28px;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    background: var(--bg-surface-hover);
+  }
+
+  .cache-meter-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 24px;
+    margin-top: 16px;
+  }
+
+  .cache-meter-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .cache-meter-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  .cache-meter-legend-label {
+    color: var(--text);
+  }
+
+  .cache-meter-legend-pct {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .cache-meter-legend-tokens {
+    color: var(--text-muted);
+  }
+
+  .cache-meter-empty {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+</style>

@@ -244,4 +244,33 @@
     justify-content: center;
     padding: 2rem 0;
   }
+/* Audit Log Section */
+.audit-retention-note {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.audit-retention-highlight {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.audit-log-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+.audit-log-summary {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.audit-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 </style>

@@ -108,3 +108,27 @@
     <p class="empty-state">No budgets match your filter.</p>
   {/if}
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .budget-sort-control {
+    align-items: center;
+    gap: 8px;
+  }
+
+  .budget-sort-control :global(label) {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .budget-sort-select {
+    background-color: var(--bg-surface);
+    min-width: 132px;
+  }
+
+  .budget-sort-select:hover {
+    background-color: var(--bg-surface-hover);
+  }
+</style>

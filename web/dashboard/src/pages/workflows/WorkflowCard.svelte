@@ -108,3 +108,85 @@
     </div>
   {/if}
 </article>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .workflow-card {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+
+  .workflow-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .workflow-card-footer {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .workflow-card-head :global(h3) {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .workflow-card-badges, .workflow-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .workflow-card-meta-footer {
+    justify-content: flex-start;
+  }
+
+  .workflow-card-footer :global(.alias-actions-cell) {
+    align-self: flex-end;
+  }
+
+  .workflow-card-description {
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  .workflow-guardrails {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .workflow-guardrail-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .workflow-guardrail-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+  }
+
+  @media (max-width: 768px) {
+    .workflow-card-head, .workflow-card-footer, .workflow-card-badges, .workflow-card-meta, .workflow-guardrail-item {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+  }
+</style>

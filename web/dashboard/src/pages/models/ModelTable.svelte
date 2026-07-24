@@ -98,3 +98,56 @@
     {/each}
   </table>
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .provider-group-row :global(td) {
+    background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .provider-group-row:hover :global(td) {
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  }
+
+  .provider-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .provider-group-meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .provider-group-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .provider-group-type, .provider-group-count, .provider-group-summary {
+    color: var(--text-muted);
+  }
+
+  .provider-group-type, .provider-group-count {
+    font-size: 12px;
+  }
+
+  .provider-group-summary {
+    font-size: 12px;
+  }
+
+  @media (max-width: 768px) {
+    .provider-group-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+  }
+</style>

@@ -105,3 +105,71 @@
     </button>
   </div>
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .audit-log-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .audit-filter-row {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .audit-filter-select {
+    grid-column: span 2;
+    min-width: 0;
+  }
+
+  .audit-filter-row-search :global(.filter-input-wrap) {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
+
+  .audit-filter-row-controls .audit-filter-select {
+    grid-column: span 2;
+  }
+
+  .audit-filter-row-controls :global(.pagination-btn) {
+    grid-column: 11 / -1;
+    justify-self: end;
+    min-width: 108px;
+  }
+
+  /* Colors come from the shared .pagination-btn styles: the stylesheet
+     originally declared a white variant here, but the later .pagination-btn
+     base rule always overrode it, so the shipped button is the plain one.
+     Scoping would resurrect the dead declarations — keep only the live ones. */
+  .audit-clear-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-weight: 600;
+  }
+
+  .audit-clear-btn :global(.table-icon-svg) {
+    width: 12px;
+    height: 12px;
+  }
+
+  @media (max-width: 768px) {
+    /* Audit page mobile */
+    .audit-log-toolbar {
+        gap: 8px;
+      }
+
+    .audit-filter-row {
+        grid-template-columns: 1fr;
+      }
+
+    .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.pagination-btn) {
+        grid-column: auto;
+      }
+  }
+</style>

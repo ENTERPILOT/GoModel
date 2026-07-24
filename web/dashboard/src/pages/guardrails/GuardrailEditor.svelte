@@ -226,4 +226,23 @@
   .guardrails-editor-wide {
     width: min(1080px, 100%);
   }
+.form-field-fieldset {
+  border: 0;
+  margin: 0;
+  min-inline-size: 0;
+  padding: 0;
+}
+
+.form-field-legend {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding: 0;
+  text-transform: uppercase;
+}
+
+.settings-guardrails-editor {
+  min-width: 0;
+}
 </style>

@@ -294,3 +294,329 @@
     </div>
   {/if}
 </details>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .audit-alias-badge {
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+    border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+    color: var(--accent-strong, var(--accent));
+  }
+
+  .audit-entry {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  .audit-entry-summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 14px;
+    position: relative;
+    cursor: pointer;
+  }
+
+  .audit-entry-summary-live-in-progress {
+    background: color-mix(in srgb, var(--info) 7%, var(--bg));
+  }
+
+  .audit-entry-summary-live-in-progress::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--info);
+    pointer-events: none;
+    animation: audit-live-summary-stripe-blink 1.2s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .audit-entry-summary-live-in-progress::before {
+        animation: none;
+        opacity: 0.78;
+      }
+  }
+
+  .audit-entry-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .audit-entry-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .audit-entry-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    min-height: 28px;
+  }
+
+  .audit-conversation-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-right: -9px;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+    color: var(--accent);
+    cursor: pointer;
+    transition:
+      transform 0.1s ease-out,
+      background 0.1s ease-out,
+      color 0.1s ease-out;
+  }
+
+  .audit-conversation-trigger:hover {
+    background: color-mix(in srgb, var(--accent) 20%, var(--bg));
+    transform: translateX(1px);
+  }
+
+  .audit-conversation-trigger :global(svg) {
+    width: 14px;
+    height: 14px;
+  }
+
+  .audit-path {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .audit-method-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 46px;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    background: var(--bg-surface);
+  }
+
+  .audit-method-badge {
+    min-width: 52px;
+    color: var(--text-muted);
+  }
+
+  .audit-provider-model {
+    height: 24px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+    background: var(--bg-surface);
+    color: var(--text-muted);
+    white-space: nowrap;
+    max-width: 420px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .audit-entry-details {
+    border-top: 1px solid var(--border);
+    padding: 12px;
+    background: var(--bg-surface);
+    overflow: hidden;
+  }
+
+  .audit-request-response {
+    margin-top: 4px;
+  }
+
+  /* Request / Response(s) are presented as tabs; the tab strip carries the
+     direction icon, title, attempt type and status, and the active panel shows
+     that pane's content. */
+  .audit-pane-tablist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .audit-pane-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-bottom-color: transparent;
+    border-radius: 6px 6px 0 0;
+    margin-bottom: -1px;
+    margin-right: 12px;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition:
+      color 0.15s,
+      border-color 0.15s,
+      background-color 0.15s;
+  }
+
+  .audit-pane-tab:not(.audit-pane-tab-active):hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+  }
+
+  /* Active tab reads as a card: bordered top + sides with slightly rounded top
+     corners, and a background-colored bottom edge that blends into the content
+     area (covering the tablist underline). */
+  .audit-pane-tab-active {
+    color: var(--text);
+    border-color: var(--border);
+    border-bottom-color: var(--bg);
+    background: var(--bg);
+  }
+
+  .audit-pane-tab-label {
+    font-weight: 600;
+  }
+
+  .audit-pane-tabpanel {
+    min-width: 0;
+  }
+
+  /* Direction icon: request (→) vs response (←), distinct hues so the two panes
+     are scannable at a glance without relying on success/error color. */
+  .audit-pane-icon {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    color: var(--text-muted);
+  }
+
+  .audit-pane-icon :global(svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+  .audit-pane-seq {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  /* Attempt type rendered as a pill, accented so failover/retry stand out. */
+  .audit-pane-kind {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  /* Share of the request body removed by a rewrite (e.g. token compression),
+     shown on the Rewritten tab next to the rewriter pill. Same blue family as
+     the cached tokens in the charts (both derive from --info); the prompt-cache
+     variables carry the per-theme tone mix that keeps the text readable. */
+  .audit-savings-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border: 1px solid color-mix(in srgb, var(--prompt-cache-color) 45%, var(--border));
+    border-radius: 999px;
+    background: var(--prompt-cache-color-bg);
+    color: var(--prompt-cache-color);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .audit-entry-metadata {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  .audit-entry-metadata-label {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .audit-entry-context {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* Collapsed-row attempt indicator: one pip per provider attempt, colored by
+     outcome, so failover/retry is visible without expanding the record. */
+  .audit-attempt-track {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+  }
+
+  .audit-attempt-track-pips {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .audit-attempt-pip {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: var(--text-muted);
+  }
+
+  .audit-attempt-pip.audit-attempt-success {
+    background: var(--success);
+  }
+
+  .audit-attempt-pip.audit-attempt-error {
+    background: var(--danger);
+  }
+
+  .audit-attempt-track-count {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  @media (max-width: 768px) {
+    .audit-entry-summary {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+    .audit-entry-right {
+        width: 100%;
+        justify-content: space-between;
+      }
+
+    .audit-entry-metadata {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+  }
+</style>

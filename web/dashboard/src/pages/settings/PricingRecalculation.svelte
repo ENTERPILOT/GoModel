@@ -172,3 +172,54 @@
     {/if}
   </div>
 {/if}
+
+<style>
+/* Styles owned by this component (moved from dashboard.css). */
+.pricing-recalculate-section {
+    width: 100%;
+  }
+
+.pricing-recalculate-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 320px) minmax(260px, 360px);
+    align-items: end;
+    justify-content: start;
+    gap: 12px;
+    width: 100%;
+  }
+
+.pricing-recalculate-date-field {
+    grid-column: 1 / -1;
+    max-width: 320px;
+    width: 100%;
+  }
+
+.pricing-recalculate-filter-field {
+    max-width: 360px;
+    width: 100%;
+  }
+
+.pricing-recalculate-date-field :global(.date-picker) {
+    width: 100%;
+  }
+
+.pricing-recalculate-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+@media (max-width: 768px) {
+  .pricing-recalculate-grid {
+          grid-template-columns: 1fr;
+        }
+
+  .pricing-recalculate-actions {
+          width: 100%;
+        }
+
+  .pricing-recalculate-actions :global(.pagination-btn) {
+          width: 100%;
+        }
+}
+</style>

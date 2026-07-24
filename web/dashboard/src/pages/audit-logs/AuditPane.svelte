@@ -212,3 +212,145 @@
     <p class="audit-size-warning">{pane.tooLargeMessage}</p>
   {/if}
 </section>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  /* Request and response panes place Headers (1/3) in the first column and
+     Body (2/3) in the second; full-width rows span both columns, and a pane
+     with only one of the two stretches it to fill. */
+  .audit-pane-split {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 10px 14px;
+    align-items: start;
+  }
+
+  .audit-pane-split-single {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .audit-pane-split .audit-pane-block-headers, .audit-pane-split .audit-pane-block-body {
+    margin-top: 0;
+  }
+
+  .audit-pane-split .audit-pane-block-error, .audit-pane-split .audit-pane-empty, .audit-pane-split .audit-size-warning {
+    grid-column: 1 / -1;
+  }
+
+  .audit-pane-block {
+    min-width: 0;
+  }
+
+  .audit-pane-block + .audit-pane-block {
+    margin-top: 10px;
+  }
+
+  .audit-pane-block > :global(h5) {
+    margin-bottom: 6px;
+  }
+
+  .audit-pane-block-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .audit-pane-block-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .audit-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    padding: 4px 8px;
+    background-color: var(--bg-surface);
+    border: 1px solid color-mix(in srgb, var(--border) 70%, var(--text) 30%);
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    transition:
+      background-color 0.15s,
+      border-color 0.15s,
+      color 0.15s;
+  }
+
+  .audit-copy-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--bg-surface) 80%, var(--text) 20%);
+    border-color: color-mix(in srgb, var(--border) 45%, var(--text) 55%);
+  }
+
+  .audit-copy-btn.copy-feedback-btn-copied {
+    background: color-mix(in srgb, var(--success) 18%, var(--bg-surface));
+  }
+
+  .audit-json {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-sizing: border-box;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    max-width: 100%;
+    padding: 10px;
+    max-height: 220px;
+    overflow-x: auto;
+    overflow-y: auto;
+    white-space: pre;
+    color: var(--text);
+  }
+
+  .audit-pane-error-message {
+    color: var(--danger);
+  }
+
+  .audit-pane-clickable-preview {
+    cursor: pointer;
+  }
+
+  .audit-pane-clickable-preview:hover {
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+  }
+
+  .audit-json-body {
+    white-space: pre;
+    overflow-wrap: normal;
+  }
+
+  .audit-pane-empty {
+    text-align: left;
+    padding: 8px 0 0;
+  }
+
+  .audit-pane-pending {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .audit-pane-streaming {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding-left: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-muted);
+  }
+
+  .audit-size-warning {
+    margin-top: 8px;
+    color: var(--warning);
+    font-size: 12px;
+  }
+</style>

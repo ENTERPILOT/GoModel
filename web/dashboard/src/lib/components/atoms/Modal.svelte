@@ -64,3 +64,68 @@
     {@render children?.()}
   </div>
 {/if}
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .auth-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.48);
+    z-index: 80;
+  }
+
+  .editor-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.48);
+    z-index: 80;
+  }
+
+  .auth-dialog-shell {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+  }
+
+  .editor-modal-shell {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    overflow-y: auto;
+  }
+
+  .editor-modal-shell > :global(*) {
+    width: min(760px, 100%);
+    max-height: min(calc(100vh - 40px), 960px);
+    margin: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+  }
+
+  .editor-modal-shell.editor-modal-shell-wide > :global(*) {
+    width: min(1080px, 100%);
+  }
+
+  @media (max-width: 768px) {
+    .auth-dialog-shell {
+        align-items: end;
+        padding: 12px;
+      }
+
+    .editor-modal-shell {
+        align-items: end;
+        padding: 12px;
+      }
+
+    .editor-modal-shell > :global(*) {
+        max-height: calc(100vh - 24px);
+      }
+  }
+</style>

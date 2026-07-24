@@ -176,3 +176,70 @@
     </form>
   </div>
 </Modal>
+
+<style>
+/* Styles owned by this component (moved from dashboard.css). */
+.pricing-override-rows {
+    display: grid;
+    gap: 12px;
+  }
+
+.pricing-override-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(130px, 180px) 32px;
+    gap: 12px;
+    align-items: end;
+  }
+
+.pricing-override-row-actions {
+    display: flex;
+    justify-content: flex-start;
+  }
+
+.pricing-override-tier-note {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+.pricing-preview {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+.pricing-preview-header, .pricing-preview-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(90px, auto) minmax(130px, 0.8fr);
+    gap: 12px;
+    align-items: center;
+    padding: 10px 12px;
+  }
+
+.pricing-preview-header {
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+.pricing-preview-row {
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+.pricing-preview-row-empty {
+    grid-template-columns: 1fr;
+    color: var(--text-muted);
+  }
+
+@media (max-width: 768px) {
+  .pricing-override-row, .pricing-preview-header, .pricing-preview-row {
+          grid-template-columns: 1fr;
+        }
+}
+</style>

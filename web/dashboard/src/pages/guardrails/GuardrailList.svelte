@@ -141,3 +141,48 @@
     {/if}
   </section>
 </div>
+
+<style>
+/* Styles owned by this component (moved from dashboard.css). */
+.settings-guardrails-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+
+.settings-guardrails-list {
+    min-width: 0;
+  }
+
+.settings-guardrail-type-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+.settings-guardrail-summary {
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+.settings-guardrail-description {
+    margin-top: 6px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+@media (max-width: 768px) {
+  .settings-guardrails-layout {
+          grid-template-columns: 1fr;
+        }
+}
+</style>

@@ -249,4 +249,77 @@
   .workflow-editor {
     width: min(1080px, 100%);
   }
+.alert-inline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.workflow-guardrail-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workflow-guardrail-list-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workflow-guardrail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.workflow-guardrail-row {
+  justify-content: stretch;
+}
+
+.workflow-guardrail-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workflow-guardrail-step-field {
+  flex: 0 0 120px;
+}
+
+.workflow-editor {
+  margin-bottom: 0;
+}
+
+.workflow-input {
+  max-width: none;
+  width: 100%;
+}
+
+.workflow-step-input {
+  max-width: 120px;
+}
+
+@media (max-width: 768px) {
+  .workflow-guardrail-row {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+  .workflow-step-input {
+      max-width: none;
+      width: 100%;
+    }
+
+  .workflow-guardrail-field, .workflow-guardrail-step-field {
+      flex-basis: auto;
+      width: 100%;
+    }
+}
 </style>

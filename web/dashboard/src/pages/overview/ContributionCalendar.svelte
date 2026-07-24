@@ -109,3 +109,198 @@
     style="left: {tooltip.x}px; top: {tooltip.y - 40}px"
   >{tooltip.text}</div>
 {/if}
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  /* Contribution Calendar */
+  .contribution-calendar-section {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-top: 24px;
+  }
+
+  .contribution-calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .contribution-calendar-header :global(h3) {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .contribution-calendar-grid-wrapper {
+    display: flex;
+    gap: 8px;
+  }
+
+  .contribution-calendar-day-labels {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 22px;
+  }
+
+  .contribution-calendar-day-labels :global(span) {
+    height: 13px;
+    font-size: 10px;
+    line-height: 13px;
+    color: var(--text-muted);
+    text-align: right;
+    min-width: 28px;
+  }
+
+  .contribution-calendar-scroll {
+    flex: 1;
+    overflow-x: auto;
+    min-width: 0;
+    --contribution-week-size: 13px;
+    --contribution-week-gap: 2px;
+  }
+
+  .contribution-calendar-months {
+    display: grid;
+    grid-auto-columns: var(--contribution-week-size);
+    grid-auto-flow: column;
+    gap: var(--contribution-week-gap);
+    margin-bottom: 6px;
+    height: 16px;
+  }
+
+  .contribution-calendar-month-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .contribution-calendar-grid {
+    display: flex;
+    gap: var(--contribution-week-gap);
+  }
+
+  .contribution-calendar-week {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .contribution-calendar-cell {
+    width: var(--contribution-week-size);
+    height: var(--contribution-week-size);
+    border-radius: 2px;
+    background: var(--cal-level-0);
+  }
+
+  .contribution-calendar-cell.level-1 {
+    background: var(--cal-level-1);
+  }
+
+  .contribution-calendar-cell.level-2 {
+    background: var(--cal-level-2);
+  }
+
+  .contribution-calendar-cell.level-3 {
+    background: var(--cal-level-3);
+  }
+
+  .contribution-calendar-cell.level-4 {
+    background: var(--cal-level-4);
+  }
+
+  .contribution-calendar-cell.level-5 {
+    background: var(--cal-level-5);
+  }
+
+  .contribution-calendar-cell.level-6 {
+    background: var(--cal-level-6);
+  }
+
+  .contribution-calendar-cell.level-7 {
+    background: var(--cal-level-7);
+  }
+
+  .contribution-calendar-cell.level-8 {
+    background: var(--cal-level-8);
+  }
+
+  .contribution-calendar-cell.level-9 {
+    background: var(--cal-level-9);
+  }
+
+  .contribution-calendar-cell.level-10 {
+    background: var(--cal-level-10);
+  }
+
+  .contribution-calendar-cell.empty {
+    background: transparent;
+  }
+
+  .contribution-calendar-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+    gap: 12px;
+  }
+
+  .contribution-calendar-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .contribution-calendar-summary {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .contribution-calendar-legend {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .contribution-calendar-legend .contribution-calendar-cell {
+    width: 11px;
+    height: 11px;
+    cursor: default;
+  }
+
+  .contribution-calendar-tooltip {
+    position: fixed;
+    z-index: 200;
+    background: var(--bg-surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    white-space: nowrap;
+    pointer-events: none;
+    transform: translateX(-50%);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  @media (max-width: 768px) {
+    /* Contribution calendar mobile */
+    .contribution-calendar-day-labels {
+        display: none;
+      }
+
+    .contribution-calendar-section {
+        padding: 16px;
+      }
+
+    .contribution-calendar-footer {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+  }
+</style>

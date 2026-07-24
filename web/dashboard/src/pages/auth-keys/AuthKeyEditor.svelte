@@ -161,3 +161,45 @@
     </form>
   </div>
 </Modal>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .auth-key-form-fields > :global(.form-field) {
+    margin-bottom: 4px;
+  }
+
+  .auth-key-issued-banner {
+    background: color-mix(in srgb, var(--success) 8%, var(--bg-surface));
+    border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border));
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+
+  .auth-key-issued-warning {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: color-mix(in srgb, var(--success) 80%, var(--text));
+  }
+
+  .auth-key-issued-value-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .auth-key-issued-token {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    padding: 8px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    word-break: break-all;
+  }
+</style>

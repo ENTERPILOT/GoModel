@@ -218,3 +218,64 @@
     </div>
   {/if}
 </div>
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .tagging-settings-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .tagging-settings-row {
+    display: grid;
+    grid-template-columns: minmax(170px, 1fr) minmax(150px, 1fr) minmax(80px, 110px) auto minmax(90px, auto);
+    align-items: end;
+    gap: 12px;
+  }
+
+  .tagging-do-not-pass {
+    align-items: center;
+    color: var(--text);
+    display: flex;
+    font-size: 13px;
+    gap: 6px;
+    min-height: 35px;
+    white-space: nowrap;
+  }
+
+  .tagging-row-trailer {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    min-height: 35px;
+  }
+
+  /* Font size comes from the global .settings-refresh-section p rule (14px),
+     which always outranked the 13px declared here — dropped to keep the
+     shipped look now that scoping would flip the outcome. */
+  .tagging-settings-empty {
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  .tagging-settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  @media (max-width: 768px) {
+    .tagging-settings-row {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+      }
+
+    .tagging-settings-actions {
+        width: 100%;
+      }
+
+    .tagging-settings-actions :global(.pagination-btn) {
+        width: 100%;
+      }
+  }
+</style>

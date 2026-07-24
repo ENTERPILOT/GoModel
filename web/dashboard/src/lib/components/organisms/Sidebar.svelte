@@ -149,3 +149,293 @@
   aria-label={sidebar.collapsed ? "Expand sidebar" : "Collapse sidebar"}
   aria-expanded={!sidebar.collapsed}
 ></button>
+
+<style>
+/* Styles owned by this component (moved from dashboard.css). */
+.sidebar-header {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+.sidebar-logo {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    color: var(--accent);
+  }
+
+.sidebar-logo :global(svg) {
+    width: 100%;
+    height: 100%;
+  }
+
+.sidebar-header :global(h1) {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+
+.sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px;
+    flex: 1;
+  }
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+
+.nav-item:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text);
+  }
+
+.nav-item.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+.sidebar-footer {
+    padding: 16px;
+    border-top: 1px solid var(--border);
+  }
+
+.api-key-section {
+    display: grid;
+    gap: 8px;
+  }
+
+.api-key-open-btn {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    color: var(--accent);
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background-color 0.15s,
+      border-color 0.15s;
+  }
+
+.api-key-open-btn:hover {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 78%, var(--text));
+    color: color-mix(in srgb, var(--accent) 78%, var(--text));
+  }
+
+.api-key-open-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+    outline-offset: 2px;
+  }
+
+/* Theme toggle — compact pill */
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px;
+    margin-bottom: 10px;
+  }
+
+.theme-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 24px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+.theme-btn :global(svg) {
+    width: 14px;
+    height: 14px;
+  }
+
+.theme-btn:hover {
+    color: var(--text);
+  }
+
+.theme-btn.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+.theme-btn:focus-visible, .theme-toggle-mobile:focus-visible, .sidebar-toggle:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+    outline-offset: 2px;
+  }
+
+/* Theme toggle — single button for mobile */
+.theme-toggle-mobile {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+.theme-toggle-mobile:hover {
+    color: var(--text);
+  }
+
+.theme-toggle-mobile :global(svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+/* Sidebar toggle handle */
+.sidebar-toggle {
+    flex: 0 0 6px;
+    position: sticky;
+    top: 0;
+    width: 6px;
+    height: 100vh;
+    padding: 0;
+    background: transparent;
+    border: none;
+    cursor: w-resize;
+    z-index: 11;
+    transition: background 0.15s;
+  }
+
+.sidebar-toggle:hover {
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+  }
+
+.sidebar-toggle.collapsed {
+    cursor: e-resize;
+  }
+
+/* Collapsed sidebar (desktop) */
+.sidebar.sidebar-collapsed {
+    flex-basis: 60px;
+    width: 60px;
+  }
+
+.sidebar.sidebar-collapsed .sidebar-header {
+    justify-content: center;
+    padding: 16px;
+  }
+
+.sidebar.sidebar-collapsed .sidebar-header :global(h1), .sidebar.sidebar-collapsed :global(.badge) {
+    display: none;
+  }
+
+.sidebar.sidebar-collapsed .sidebar-nav .nav-item {
+    justify-content: center;
+    padding: 10px;
+  }
+
+.sidebar.sidebar-collapsed .sidebar-nav .nav-item :global(span) {
+    display: none;
+  }
+
+.sidebar.sidebar-collapsed .sidebar-footer {
+    padding: 8px;
+  }
+
+.sidebar.sidebar-collapsed .sidebar-footer .api-key-section {
+    display: none;
+  }
+
+.sidebar.sidebar-collapsed .sidebar-footer .theme-toggle {
+    display: none;
+  }
+
+.sidebar.sidebar-collapsed .sidebar-footer .theme-toggle-mobile {
+    display: flex;
+    margin: 0 auto;
+  }
+
+@media (max-width: 768px) {
+  .sidebar-header {
+          justify-content: center;
+          padding: 16px;
+        }
+
+  .sidebar-header :global(h1) {
+          display: none;
+        }
+
+  .sidebar-nav .nav-item {
+          justify-content: center;
+          padding: 10px;
+        }
+
+  .sidebar-nav .nav-item :global(span) {
+          display: none;
+        }
+
+  .sidebar-footer {
+          display: grid;
+          gap: 8px;
+          padding: 8px;
+        }
+
+  .sidebar-footer .api-key-section {
+          display: grid;
+        }
+
+  .sidebar.sidebar-collapsed .sidebar-footer .api-key-section { display: grid; }
+
+  .sidebar-footer .api-key-open-btn {
+          width: 36px;
+          height: 36px;
+          min-height: 36px;
+          justify-self: center;
+          padding: 0;
+        }
+
+  .sidebar-footer .api-key-open-btn :global(span) {
+          display: none;
+        }
+
+  .sidebar-footer .theme-toggle {
+          display: none;
+        }
+
+  .sidebar-footer .theme-toggle-mobile {
+          display: flex;
+          margin: 0 auto;
+        }
+
+  .sidebar-toggle {
+          display: none;
+        }
+}
+</style>

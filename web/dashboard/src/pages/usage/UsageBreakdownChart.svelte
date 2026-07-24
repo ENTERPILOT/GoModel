@@ -252,4 +252,59 @@
     justify-content: center;
     min-height: 120px;
   }
+.chart-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.chart-view-btn {
+  width: 30px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.chart-view-btn:hover {
+  color: var(--text);
+}
+
+.chart-view-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.chart-view-btn :global(svg) {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.usage-chart-table-wrapper {
+  margin-top: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.usage-chart-data-table {
+  min-width: max-content;
+}
+
+.usage-chart-data-table :global(th), .usage-chart-data-table :global(td) {
+  white-space: nowrap;
+}
 </style>

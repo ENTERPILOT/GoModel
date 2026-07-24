@@ -14,3 +14,94 @@
     </nav>
   </aside>
 {/if}
+
+<style>
+  /* Styles owned by this component (moved from dashboard.css). */
+  .demo-mode-banner {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border));
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--warning) 14%, var(--bg-surface));
+    color: var(--text);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 70%, transparent);
+  }
+
+  .demo-mode-banner-icon {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    color: var(--warning);
+  }
+
+  .demo-mode-banner-copy {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    font-size: 13px;
+  }
+
+  .demo-mode-banner :global(strong) {
+    flex-shrink: 0;
+    color: var(--warning);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .demo-mode-banner-links {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .demo-mode-banner-links :global(a) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 4px 8px;
+    border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--border));
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .demo-mode-banner-links :global(a:hover) {
+    border-color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 16%, transparent);
+    color: var(--text);
+  }
+
+  .demo-mode-banner-links :global(a:focus-visible) {
+    outline: 2px solid color-mix(in srgb, var(--warning) 42%, transparent);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 768px) {
+    .demo-mode-banner {
+        align-items: flex-start;
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+    .demo-mode-banner-copy {
+        display: grid;
+        gap: 2px;
+      }
+
+    .demo-mode-banner-links {
+        grid-column: 2;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+      }
+  }
+</style>
