@@ -1,0 +1,363 @@
+// Budgets page state (the budgets-page portion; budget settings live with
+// the Settings page). Talks to the /admin/budgets endpoints.
+
+import { errorMessage, getJSON, sendJSON } from "$lib/api/client.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { router } from "$lib/stores/router.svelte.js";
+import { confirmDialog } from "$lib/stores/confirm.svelte.js";
+import {
+  budgetDeleteBody,
+  budgetInputUserPath,
+  budgetKey,
+  budgetPeriodFromSeconds,
+  budgetPeriodLabel,
+  budgetPeriodSeconds,
+  budgetPutBody,
+  budgetResetOneBody,
+  buildBudgetFormPayload,
+  defaultBudgetForm,
+  filterAndSortBudgets,
+  findExistingBudget,
+  normalizeBudgetListPayload,
+} from "./budgets-helpers.js";
+
+class BudgetsStore {
+  budgets = $state([]);
+  budgetsAvailable = $state(true);
+  loading = $state(false);
+  filter = $state("");
+  sortBy = $state("user_path");
+  error = $state("");
+  notice = $state("");
+
+  formOpen = $state(false);
+  formSubmitting = $state(false);
+  formError = $state("");
+  editing = $state(false);
+  form = $state(defaultBudgetForm());
+
+  overrideDialogOpen = $state(false);
+  overridePendingPayload = $state(null);
+  overrideExistingBudget = $state(null);
+
+  resettingKey = $state("");
+  deletingKey = $state("");
+  resetAllLoading = $state(false);
+
+  #fetchPromise = null;
+
+  managementEnabled() {
+    return runtimeConfig.budgetsVisible();
+  }
+
+  filteredBudgets() {
+    return filterAndSortBudgets(this.budgets, this.filter, this.sortBy);
+  }
+
+  // fetchBudgetsPage waits for the runtime flags before touching a disabled
+  // endpoint and dedupes concurrent page-activation fetches.
+  async fetchBudgetsPage() {
+    await runtimeConfig.ensureLoaded();
+    if (!this.managementEnabled()) {
+      this.budgets = [];
+      this.budgetsAvailable = false;
+      this.error = "";
+      return;
+    }
+    if (this.#fetchPromise) {
+      return this.#fetchPromise;
+    }
+    this.#fetchPromise = this.fetchBudgets().finally(() => {
+      this.#fetchPromise = null;
+    });
+    return this.#fetchPromise;
+  }
+
+  async fetchBudgets() {
+    this.loading = true;
+    this.error = "";
+    try {
+      const result = await getJSON("/admin/budgets", { label: "budgets" });
+      if (result.status === 503) {
+        this.budgetsAvailable = false;
+        this.budgets = [];
+        return;
+      }
+      if (result.stale) {
+        return;
+      }
+      this.budgetsAvailable = true;
+      if (!result.ok) {
+        this.error = "Unable to load budgets.";
+        return;
+      }
+      this.budgets = normalizeBudgetListPayload(result.data);
+    } catch (e) {
+      console.error("Failed to fetch budgets:", e);
+      this.budgets = [];
+      this.error = "Unable to load budgets.";
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  openForm(item) {
+    this.editing = !!item;
+    this.formError = "";
+    this.error = "";
+    this.notice = "";
+    if (item) {
+      const periodSeconds = Number(item.period_seconds || 0);
+      this.form = {
+        user_path: String(item.user_path || ""),
+        period: budgetPeriodFromSeconds(periodSeconds),
+        period_seconds: periodSeconds,
+        amount: String(item.amount || ""),
+        source: String(item.source || "manual"),
+      };
+    } else {
+      this.form = defaultBudgetForm();
+    }
+    this.formOpen = true;
+  }
+
+  // syncPeriodSeconds mirrors the standard-period seconds into the form when
+  // a preset period is picked (custom keeps the user-entered value).
+  syncPeriodSeconds() {
+    const seconds = budgetPeriodSeconds(String(this.form.period || "").trim());
+    if (seconds > 0) {
+      this.form.period_seconds = seconds;
+    }
+  }
+
+  setFormUserPath(value) {
+    this.form.user_path = budgetInputUserPath(value);
+  }
+
+  closeForm() {
+    this.closeOverrideDialog();
+    this.formOpen = false;
+    this.formSubmitting = false;
+    this.formError = "";
+    this.editing = false;
+    this.form = defaultBudgetForm();
+  }
+
+  async submitForm() {
+    if (this.formSubmitting) {
+      return;
+    }
+    const { payload, error } = buildBudgetFormPayload(this.form);
+    if (!payload) {
+      this.formError = error;
+      return;
+    }
+    if (!this.editing) {
+      const existing = findExistingBudget(this.budgets, payload);
+      if (existing) {
+        this.openOverrideDialog(existing, payload);
+        return;
+      }
+    }
+    await this.saveBudgetPayload(payload);
+  }
+
+  async saveBudgetPayload(payload) {
+    if (this.formSubmitting || !payload) {
+      return;
+    }
+    this.formSubmitting = true;
+    this.formError = "";
+    this.error = "";
+    this.notice = "";
+    try {
+      const result = await sendJSON(
+        "/admin/budgets",
+        "PUT",
+        budgetPutBody(payload),
+        { label: "budget" },
+      );
+      if (result.status === 503) {
+        this.budgetsAvailable = false;
+        this.formError = "Budget management is unavailable.";
+        return;
+      }
+      if (result.stale) {
+        return;
+      }
+      if (!result.ok) {
+        this.formError = errorMessage(result, "Unable to save budget.");
+        return;
+      }
+      this.closeForm();
+      await this.fetchBudgets();
+      this.notice = "Budget saved.";
+    } catch (e) {
+      console.error("Failed to save budget:", e);
+      this.formError = "Unable to save budget.";
+    } finally {
+      this.formSubmitting = false;
+    }
+  }
+
+  openOverrideDialog(existing, payload) {
+    this.overrideExistingBudget = existing || null;
+    this.overridePendingPayload = payload || null;
+    this.overrideDialogOpen = true;
+  }
+
+  closeOverrideDialog() {
+    this.overrideDialogOpen = false;
+    this.overridePendingPayload = null;
+    this.overrideExistingBudget = null;
+  }
+
+  async confirmOverride() {
+    if (!this.overridePendingPayload) {
+      this.closeOverrideDialog();
+      return;
+    }
+    const payload = this.overridePendingPayload;
+    this.closeOverrideDialog();
+    await this.saveBudgetPayload(payload);
+  }
+
+  async resetBudget(item) {
+    if (!item) {
+      return;
+    }
+    const key = budgetKey(item);
+    if (this.resettingKey === key) {
+      return;
+    }
+    const label = String(item.user_path || "") + " " + budgetPeriodLabel(item);
+    if (!confirm('Reset budget "' + label + '"?')) {
+      return;
+    }
+    this.resettingKey = key;
+    this.error = "";
+    this.notice = "";
+    try {
+      const result = await sendJSON(
+        "/admin/budgets/reset-one",
+        "POST",
+        budgetResetOneBody(item),
+        { label: "budget reset" },
+      );
+      if (result.status === 503) {
+        this.budgetsAvailable = false;
+        this.error = "Budget management is unavailable.";
+        return;
+      }
+      if (result.stale) {
+        return;
+      }
+      if (!result.ok) {
+        this.error = errorMessage(result, "Unable to reset budget.");
+        return;
+      }
+      await this.fetchBudgets();
+      this.notice = "Budget reset.";
+    } catch (e) {
+      console.error("Failed to reset budget:", e);
+      this.error = "Unable to reset budget.";
+    } finally {
+      this.resettingKey = "";
+    }
+  }
+
+  async deleteBudget(item) {
+    if (!item) {
+      return;
+    }
+    const key = budgetKey(item);
+    if (this.deletingKey === key) {
+      return;
+    }
+    const label = String(item.user_path || "") + " " + budgetPeriodLabel(item);
+    if (!confirm('Delete budget "' + label + '"? This cannot be undone.')) {
+      return;
+    }
+    this.deletingKey = key;
+    this.error = "";
+    this.notice = "";
+    try {
+      const result = await sendJSON(
+        "/admin/budgets",
+        "DELETE",
+        budgetDeleteBody(item),
+        { label: "budget delete" },
+      );
+      if (result.status === 503) {
+        this.budgetsAvailable = false;
+        this.error = "Budget management is unavailable.";
+        return;
+      }
+      if (result.stale) {
+        return;
+      }
+      if (!result.ok) {
+        this.error = errorMessage(result, "Unable to delete budget.");
+        return;
+      }
+      this.budgets = normalizeBudgetListPayload(result.data);
+      this.notice = "Budget deleted.";
+    } catch (e) {
+      console.error("Failed to delete budget:", e);
+      this.error = "Unable to delete budget.";
+    } finally {
+      this.deletingKey = "";
+    }
+  }
+
+  // Reset-all budgets: typed-confirmation dialog ("type reset"). The
+  // trigger lives on the Settings page; the flow is exported here with the
+  // rest of the budget logic so it can be reused from anywhere.
+  openResetDialog() {
+    confirmDialog.open({
+      title: "Reset Budgets",
+      titleId: "budgetResetDialogTitle",
+      inputId: "budget-reset-confirmation",
+      requiredText: "reset",
+      confirmLabel: "Reset All Budgets",
+      icon: "rotate-ccw",
+      dialogClass: "budget-reset-dialog",
+      onConfirm: () => this.resetAllBudgets(),
+    });
+  }
+
+  async resetAllBudgets() {
+    if (this.resetAllLoading) {
+      return;
+    }
+    this.resetAllLoading = true;
+    this.notice = "";
+    try {
+      const result = await sendJSON(
+        "/admin/budgets/reset",
+        "POST",
+        { confirmation: "reset" },
+        { label: "budget reset" },
+      );
+      if (result.stale) {
+        return;
+      }
+      if (!result.ok) {
+        confirmDialog.error = "Unable to reset budgets.";
+        return;
+      }
+      confirmDialog.close();
+      if (router.page === "budgets") {
+        await this.fetchBudgets();
+      }
+      this.notice = "Budgets reset.";
+    } catch (e) {
+      console.error("Failed to reset budgets:", e);
+      confirmDialog.error = "Unable to reset budgets.";
+    } finally {
+      this.resetAllLoading = false;
+    }
+  }
+}
+
+export const budgetsStore = new BudgetsStore();

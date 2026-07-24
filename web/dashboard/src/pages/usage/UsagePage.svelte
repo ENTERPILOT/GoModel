@@ -1,0 +1,69 @@
+<script>
+  // Usage Analytics page. Route sub "costs" selects the costs mode
+  // (deep link /admin/dashboard/usage/costs).
+  import DatePicker from "$lib/components/molecules/DatePicker.svelte";
+  import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
+  import { auth } from "$lib/stores/auth.svelte.js";
+  import { router } from "$lib/stores/router.svelte.js";
+  import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
+  import { usagePage } from "./usage.svelte.js";
+  import FacetFilters from "./FacetFilters.svelte";
+  import UsageStatCards from "./UsageStatCards.svelte";
+  import UsageBreakdownChart from "./UsageBreakdownChart.svelte";
+  import UsageLog from "./UsageLog.svelte";
+
+  const PAGE = "usage";
+
+  // Re-fetch when the page becomes active or the API key changes. Live
+  // request-log previews stream in via the shared liveLogs singleton
+  // (ensureLiveLogs is a no-op when the stream is already running).
+  $effect(() => {
+    void auth.refreshTick;
+    if (router.page === PAGE) {
+      usagePage.fetchUsagePage();
+      liveLogs.ensureLiveLogs();
+    }
+  });
+
+  // Keep the mode in sync with the route (deep links, back/forward).
+  $effect(() => {
+    if (router.page === PAGE) {
+      usagePage.usageMode = router.sub === "costs" ? "costs" : "tokens";
+    }
+  });
+</script>
+
+<div class="page-with-sticky-date">
+  <div class="page-header date-range-page-header">
+    <h2>Usage Analytics</h2>
+  </div>
+  <!-- The mode toggle lives in the sticky bar so it stays reachable while
+       scrolling, like the date range it changes the meaning of. -->
+  <div class="sticky-date-range usage-sticky-controls">
+    <SegmentedControl
+      ariaLabel="Usage mode"
+      options={[
+        { value: "tokens", label: "Tokens" },
+        { value: "costs", label: "Costs" },
+      ]}
+      value={usagePage.usageMode}
+      onchange={(mode) => usagePage.toggleUsageMode(mode)}
+    />
+    <DatePicker onchange={() => usagePage.fetchUsagePage()} />
+  </div>
+
+  <!-- Page-level data filters: every widget below follows them -->
+  <FacetFilters />
+
+  <!-- Period totals for the active filters -->
+  <UsageStatCards />
+
+  <!-- Usage charts: two per row, a chart alone in its row stretches to full width -->
+  <div class="usage-charts-grid">
+    <UsageBreakdownChart kind="model" />
+    <UsageBreakdownChart kind="userPath" />
+    <UsageBreakdownChart kind="label" />
+  </div>
+
+  <UsageLog />
+</div>

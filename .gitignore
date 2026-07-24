@@ -37,3 +37,6 @@
 
 # Superpower design docs and plans (never commit)
 /docs/superpowers/
+
+# Dashboard frontend
+/web/dashboard/node_modules/

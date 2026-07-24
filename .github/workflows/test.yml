@@ -89,8 +89,19 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install frontend dependencies
+        run: cd web/dashboard && npm ci --no-audit --no-fund
+
       - name: Run dashboard JavaScript tests
         run: make test-dashboard
+
+      - name: Check dashboard sources
+        run: cd web/dashboard && npx svelte-check --tsconfig ./jsconfig.json
+
+      - name: Verify committed dashboard build is current
+        run: |
+          (cd web/dashboard && npm run build)
+          git diff --exit-code --stat -- internal/admin/dashboard/static/dist
 
   performance:
     name: Performance Guard

@@ -1,0 +1,110 @@
+<script>
+  // Budgets page (list, editor, per-budget reset, delete flows).
+  import LoadingState from "$lib/components/molecules/LoadingState.svelte";
+  import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
+  import { router } from "$lib/stores/router.svelte.js";
+  import { auth } from "$lib/stores/auth.svelte.js";
+  import Icon from "$lib/components/atoms/Icon.svelte";
+  import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
+  import BudgetList from "./BudgetList.svelte";
+  import BudgetEditor from "./BudgetEditor.svelte";
+  import { budgetsStore as store } from "./budgets.svelte.js";
+
+  const PAGE = "budgets";
+
+  // Re-fetch when the page becomes active or the API key changes.
+  $effect(() => {
+    void auth.refreshTick;
+    if (router.page === PAGE) store.fetchBudgetsPage();
+  });
+
+  const filtered = $derived(store.filteredBudgets());
+</script>
+
+<div>
+  <div class="page-header">
+    <div>
+      <InlineHelpSection copyId="budgets-help-copy" label="budgets help">
+        {#snippet title()}<h2>Budgets</h2>{/snippet}
+        {#snippet help()}
+          Budgets are evaluated from tracked usage cost records for each user
+          path subtree. Enforcement runs only when Budget is enabled for the
+          active workflow.
+        {/snippet}
+      </InlineHelpSection>
+    </div>
+    <div class="page-header-controls">
+      {#if store.managementEnabled() && store.budgetsAvailable && !auth.authError}
+        <button
+          type="button"
+          class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+          disabled={store.formSubmitting}
+          onclick={() => store.openForm()}
+        >
+          <Icon name="plus" class="form-action-icon" />
+          <span>Create Budget</span>
+        </button>
+      {/if}
+    </div>
+  </div>
+
+  <AuthBanner />
+
+  {#if (!store.managementEnabled() || !store.budgetsAvailable) && !auth.authError}
+    <div class="alert alert-warning">Budget management is unavailable.</div>
+  {/if}
+  {#if store.error && !auth.authError && !store.formOpen}
+    <p class="form-error" role="alert" aria-live="assertive">{store.error}</p>
+  {/if}
+  {#if store.notice && !store.formOpen}
+    <div class="alert alert-success" role="status" aria-live="polite">
+      {store.notice}
+    </div>
+  {/if}
+  {#if store.loading && !auth.authError}
+    <LoadingState label="Loading budgets..." />
+  {/if}
+
+  {#if (store.budgets.length > 0 || store.filter) && store.budgetsAvailable && !auth.authError && !store.formOpen}
+    <div class="table-toolbar">
+      <div class="table-toolbar-main">
+        <div class="filter-input-wrap">
+          <Icon name="search" class="filter-input-icon" />
+          <input
+            type="text"
+            id="budget-filter"
+            class="filter-input"
+            placeholder="Filter by user path or period..."
+            aria-label="Filter budgets by user path or period"
+            bind:value={store.filter}
+          />
+        </div>
+      </div>
+      <div class="table-toolbar-actions budget-sort-control">
+        <label for="budget-sort-by">Sort by</label>
+        <select
+          id="budget-sort-by"
+          class="usage-log-select budget-sort-select"
+          aria-label="Sort budgets by"
+          bind:value={store.sortBy}
+        >
+          <option value="user_path">User Path</option>
+          <option value="period">Period</option>
+        </select>
+      </div>
+    </div>
+  {/if}
+
+  <BudgetEditor />
+
+  {#if filtered.length > 0 && store.budgetsAvailable && !auth.authError}
+    <BudgetList budgets={filtered} />
+  {/if}
+
+  {#if store.budgets.length === 0 && !store.filter && !store.loading && !auth.authError && !store.error && store.budgetsAvailable && store.managementEnabled()}
+    <p class="empty-state">No budgets configured yet.</p>
+  {/if}
+  {#if store.budgets.length > 0 && filtered.length === 0 && store.filter && !store.loading && !auth.authError && !store.error && store.budgetsAvailable && store.managementEnabled()}
+    <p class="empty-state">No budgets match your filter.</p>
+  {/if}
+</div>

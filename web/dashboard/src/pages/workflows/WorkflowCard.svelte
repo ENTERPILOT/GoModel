@@ -1,0 +1,110 @@
+<script>
+  // A single workflow card: head, description, pipeline chart, guardrails and
+  // (list mode only) the deactivate/edit footer. `preview` renders the
+  // footer-less live preview card used inside the editor.
+  import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
+  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+  import { workflowsStore as wf } from "./workflows.svelte.js";
+  import WorkflowChart from "./WorkflowChart.svelte";
+  import {
+    workflowScopeTypeLabel,
+    workflowScopeLabel,
+    workflowDisplayName,
+    workflowFailoverLabel,
+    workflowGuardrails,
+    canDeactivateWorkflow,
+    shortHash,
+  } from "./workflowsLogic.js";
+  import { workflowChart } from "./workflowChartLogic.js";
+
+  let { workflow, preview = false } = $props();
+
+  const caps = $derived(wf.featureCaps());
+  const displayName = $derived(workflowDisplayName(workflow));
+  const guardrails = $derived(workflowGuardrails(workflow, caps));
+  const chart = $derived(workflowChart(workflow, caps));
+  const guardrailKeyPrefix = $derived(
+    preview ? "draft-workflow-preview-guardrail-" : workflow.id + "-guardrail-",
+  );
+</script>
+
+<article class="workflow-card" class:workflow-preview-card={preview}>
+  <div class="workflow-card-head">
+    <div>
+      <p class="form-kicker">{workflowScopeTypeLabel(workflow)}</p>
+      <h3>{displayName}</h3>
+    </div>
+    <div class="workflow-card-badges">
+      <span class="provider-badge">{workflowScopeLabel(workflow)}</span>
+    </div>
+  </div>
+
+  {#if workflow.description}
+    <p class="workflow-card-description">{workflow.description}</p>
+  {/if}
+  {#if wf.failoverVisible()}
+    <p class="form-hint">Failover: {workflowFailoverLabel(workflow, caps)}</p>
+  {/if}
+
+  <WorkflowChart {chart} />
+
+  {#if runtimeConfig.guardrailsVisible()}
+    <div class="workflow-guardrails">
+      <div class="workflow-section-head">
+        <h4>Guardrails</h4>
+        <span class="provider-badge">
+          {guardrails.length ? guardrails.length + " steps" : "None"}
+        </span>
+      </div>
+      {#if guardrails.length > 0}
+        <div class="workflow-guardrail-list">
+          {#each guardrails as step, stepIndex (guardrailKeyPrefix + stepIndex)}
+            <div class="workflow-guardrail-item">
+              <span class="mono font-size-md">{step.ref}</span>
+              <span class="provider-badge">step {step.step}</span>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <p class="form-hint">No guardrails configured for this workflow.</p>
+      {/if}
+    </div>
+  {/if}
+
+  {#if !preview}
+    <div class="workflow-card-footer">
+      <div class="alias-actions-cell">
+        <button
+          type="button"
+          class="table-action-btn table-action-btn-danger"
+          disabled={wf.deactivatingID === workflow.id || !canDeactivateWorkflow(workflow)}
+          aria-label={"Deactivate workflow " + displayName}
+          title={canDeactivateWorkflow(workflow)
+            ? "Deactivate active workflow"
+            : "The global workflow cannot be deactivated."}
+          onclick={() => wf.deactivate(workflow)}
+        >
+          {wf.deactivatingID === workflow.id ? "Deactivating..." : "Deactivate"}
+        </button>
+        <TableActionButton
+          label={"Edit workflow " + displayName}
+          class="table-icon-btn"
+          onclick={() => wf.openCreate(workflow)}
+        >
+          <svg class="table-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 20h9"></path>
+            <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+          </svg>
+        </TableActionButton>
+      </div>
+      <div class="workflow-card-meta workflow-card-meta-footer">
+        <span class="provider-badge mono">version: v{workflow.version}</span>
+        <span class="provider-badge mono">
+          created: {timezone.formatTimestamp(workflow.created_at)}
+        </span>
+        <span class="provider-badge mono">hash: {shortHash(workflow.workflow_hash)}</span>
+      </div>
+    </div>
+  {/if}
+</article>

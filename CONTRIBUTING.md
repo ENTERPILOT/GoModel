@@ -22,6 +22,24 @@ Please use Conventional Commits for commit subjects and PR titles:
 
 Allowed types are `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `build`, `ci`, `chore`, and `revert`.
 
+## Dashboard frontend
+
+The admin dashboard is a Svelte 5 single-page app in `web/dashboard/`. The
+built assets are committed under `internal/admin/dashboard/static/dist/` and
+embedded into the Go binary, so plain `go build` works without Node.
+
+When you change dashboard sources:
+
+```sh
+make frontend        # npm ci + vite build (requires Node 22+)
+make test-dashboard  # frontend unit tests
+```
+
+Commit the regenerated `static/dist` output together with your source change —
+CI verifies the committed build matches the sources. For live-reload
+development, run the gateway on :8080 and `npm run dev` in `web/dashboard/`
+(the Vite dev server proxies `/admin` and `/v1` API calls to the gateway).
+
 ## Questions
 
 For questions, ideas, or general discussion, please use GitHub Discussions:

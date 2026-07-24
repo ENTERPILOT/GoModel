@@ -1,0 +1,107 @@
+<script>
+  // Audit-log toolbar: consolidated search + method/status/stream selects and
+  // the Clear button.
+  import Icon from "$lib/components/atoms/Icon.svelte";
+  import { auditList } from "./auditList.svelte.js";
+
+  let searchDebounceTimer = null;
+
+  // Debounced search fetch (300ms).
+  function onSearchInput() {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      searchDebounceTimer = null;
+      auditList.fetchAuditLog(true);
+    }, 300);
+  }
+
+  $effect(() => {
+    return () => {
+      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    };
+  });
+</script>
+
+<div class="audit-log-toolbar">
+  <div class="audit-filter-row audit-filter-row-search">
+    <div class="filter-input-wrap">
+      <Icon name="search" class="filter-input-icon" />
+      <input
+        id="audit-filter-search"
+        type="text"
+        placeholder="Search by request ID, model, provider, path, user path, or error..."
+        aria-label="Search by request ID, model, provider, path, user path, or error"
+        class="filter-input"
+        bind:value={auditList.auditSearch}
+        oninput={onSearchInput}
+      />
+    </div>
+  </div>
+  <div class="audit-filter-row audit-filter-row-controls">
+    <select
+      id="audit-filter-method"
+      aria-label="HTTP method filter"
+      class="usage-log-select audit-filter-select"
+      bind:value={auditList.auditMethod}
+      onchange={() => auditList.fetchAuditLog(true)}
+    >
+      <option value="">All Methods</option>
+      <option value="GET">GET</option>
+      <option value="POST">POST</option>
+      <option value="PUT">PUT</option>
+      <option value="PATCH">PATCH</option>
+      <option value="DELETE">DELETE</option>
+    </select>
+    <select
+      id="audit-filter-status"
+      aria-label="Status code filter"
+      class="usage-log-select audit-filter-select"
+      bind:value={auditList.auditStatusCode}
+      onchange={() => auditList.fetchAuditLog(true)}
+    >
+      <option value="">All Statuses</option>
+      <option value="200">200</option>
+      <option value="201">201</option>
+      <option value="400">400</option>
+      <option value="401">401</option>
+      <option value="403">403</option>
+      <option value="404">404</option>
+      <option value="429">429</option>
+      <option value="500">500</option>
+      <option value="502">502</option>
+      <option value="503">503</option>
+      <option value="504">504</option>
+    </select>
+    <select
+      id="audit-filter-stream"
+      aria-label="Streaming mode filter"
+      class="usage-log-select audit-filter-select"
+      bind:value={auditList.auditStream}
+      onchange={() => auditList.fetchAuditLog(true)}
+    >
+      <option value="">All Modes</option>
+      <option value="true">Streaming</option>
+      <option value="false">Non-streaming</option>
+    </select>
+    <button
+      type="button"
+      class="pagination-btn audit-clear-btn"
+      onclick={() => auditList.clearAuditFilters()}
+    >
+      <svg
+        class="table-icon-svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M18 6L6 18"></path>
+        <path d="M6 6l12 12"></path>
+      </svg>
+      <span>Clear</span>
+    </button>
+  </div>
+</div>
