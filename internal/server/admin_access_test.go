@@ -55,20 +55,27 @@ func TestAdminGate_ManagedKeyWithoutDashboardAccessIsDenied(t *testing.T) {
 	}
 }
 
-func TestAdminGate_ManagedKeyWithDashboardAccessPasses(t *testing.T) {
+func TestAdminGate_AllowedCredentialsPass(t *testing.T) {
 	srv := newAdminGateServer("master-key")
 
 	// The auth-keys service is not wired in this test server, so passing the
 	// gate surfaces the handler's 503 rather than the gate's 403.
-	status, _ := adminGateStatus(t, srv, "/admin/auth-keys", "sk_gom_admin")
-	assert.Equal(t, http.StatusServiceUnavailable, status)
-}
-
-func TestAdminGate_MasterKeyAlwaysPasses(t *testing.T) {
-	srv := newAdminGateServer("master-key")
-
-	status, _ := adminGateStatus(t, srv, "/admin/auth-keys", "master-key")
-	assert.Equal(t, http.StatusServiceUnavailable, status)
+	tests := []struct {
+		name   string
+		path   string
+		bearer string
+	}{
+		{"dashboard key", "/admin/auth-keys", "sk_gom_admin"},
+		{"dashboard key legacy alias", "/admin/api/v1/auth-keys", "sk_gom_admin"},
+		{"master key", "/admin/auth-keys", "master-key"},
+		{"master key legacy alias", "/admin/api/v1/auth-keys", "master-key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, _ := adminGateStatus(t, srv, tt.path, tt.bearer)
+			assert.Equal(t, http.StatusServiceUnavailable, status)
+		})
+	}
 }
 
 func TestAdminGate_DoesNotCoverModelAndUsageRoutes(t *testing.T) {

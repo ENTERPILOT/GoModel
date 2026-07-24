@@ -78,7 +78,7 @@
                   label={(key.dashboard_access ? "Revoke dashboard access for API key " : "Grant dashboard access to API key ") + key.name}
                   class="table-icon-btn"
                   onclick={() => store.toggleDashboardAccess(key)}
-                  disabled={store.dashboardAccessID === key.id}
+                  disabled={Boolean(store.dashboardAccessID)}
                 >
                   <Icon name={key.dashboard_access ? "shield-off" : "shield-check"} class="table-icon-svg" />
                 </TableActionButton>

@@ -108,7 +108,7 @@ Full reference: `.env.template` and `config/config.yaml`
 
 - **Server:**
   - `PORT` (8080)
-  - `GOMODEL_MASTER_KEY` (empty = unsafe mode). Managed API keys (dashboard API Keys page / `POST /admin/auth-keys`) carry a per-key `dashboard_access` flag (default false, changeable via `PUT /admin/auth-keys/{id}/dashboard-access`): only the master key and flagged keys can call `/admin/*` (others get 403 `dashboard_access_denied`); model endpoints and `GET /v1/usage` stay open to every key, and the no-master-key lockout-recovery path (auth skipped on `/admin/*`) is unaffected.
+  - `GOMODEL_MASTER_KEY` (empty = unsafe mode). Managed API keys (dashboard API Keys page / `POST /admin/auth-keys`) carry a per-key `dashboard_access` flag (default false, changeable via `PUT /admin/auth-keys/{id}/dashboard-access`): only the master key and flagged keys can call the admin REST API endpoints under `/admin/*` (others get 403 `dashboard_access_denied`); the dashboard UI shell and static assets (`/admin/dashboard`, `/admin/static/*`) skip auth entirely — only the admin data they load is gated; model endpoints and `GET /v1/usage` stay open to every key, and the no-master-key lockout-recovery path (auth skipped on `/admin/*`) is unaffected.
   - `BODY_SIZE_LIMIT` ("10M")
   - `USER_PATH_HEADER` (`X-GoModel-User-Path`: Header used to read/write request `user_path` values)
   - `ENABLE_PASSTHROUGH_ROUTES` (true: Enable provider-native passthrough routes under /p/{provider}/...)

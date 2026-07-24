@@ -263,6 +263,17 @@ func TestUpdateAuthKeyDashboardAccess(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("UpdateAuthKeyDashboardAccess(missing) status = %d, want 404", rec.Code)
 	}
+
+	// Omitted or null values must be rejected, not treated as a revoke.
+	for _, body := range []string{`{}`, `{"dashboard_access":null}`} {
+		rec, err = updateAccess(issued.ID, body)
+		if err != nil {
+			t.Fatalf("UpdateAuthKeyDashboardAccess(%s) error = %v", body, err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("UpdateAuthKeyDashboardAccess(%s) status = %d, want 400", body, rec.Code)
+		}
+	}
 }
 
 func TestUpdateAuthKeyLabels(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/validation"
 )
 
 type createAuthKeyRequest struct {
@@ -87,7 +88,9 @@ func (h *Handler) UpdateAuthKeyLabels(c *echo.Context) error {
 }
 
 type updateAuthKeyDashboardAccessRequest struct {
-	DashboardAccess bool `json:"dashboard_access"`
+	// Pointer so an omitted or null value is rejected instead of being
+	// treated as an implicit revoke.
+	DashboardAccess *bool `json:"dashboard_access"`
 }
 
 // UpdateAuthKeyDashboardAccess handles PUT /admin/auth-keys/:id/dashboard-access.
@@ -95,7 +98,10 @@ type updateAuthKeyDashboardAccessRequest struct {
 func (h *Handler) UpdateAuthKeyDashboardAccess(c *echo.Context) error {
 	var req updateAuthKeyDashboardAccessRequest
 	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
-		return h.authKeys.UpdateDashboardAccess(ctx, id, req.DashboardAccess)
+		if req.DashboardAccess == nil {
+			return nil, validation.NewError("dashboard_access is required", nil)
+		}
+		return h.authKeys.UpdateDashboardAccess(ctx, id, *req.DashboardAccess)
 	})
 }
 
