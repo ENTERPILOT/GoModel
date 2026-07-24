@@ -3,6 +3,7 @@
   // pages call flash.success()/flash.error() instead of rendering their
   // own notice/error banners.
   import { fly, fade } from "svelte/transition";
+  import { backOut } from "svelte/easing";
   import { flash } from "$lib/stores/flash.svelte.js";
 </script>
 
@@ -14,8 +15,8 @@
       class:flash-toast-error={toast.kind === "error"}
       role={toast.kind === "error" ? "alert" : "status"}
       aria-live={toast.kind === "error" ? "assertive" : "polite"}
-      in:fly={{ x: 24, duration: 160 }}
-      out:fade={{ duration: 120 }}
+      in:fly={{ y: 32, duration: 360, easing: backOut }}
+      out:fade={{ duration: 150 }}
     >
       <span class="flash-toast-text">{toast.text}</span>
       <button
@@ -53,6 +54,28 @@
     font-size: 14px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
     pointer-events: auto;
+    /* Entry attention pulse: a colored glow (currentColor = the kind's
+       accent) that fades out, layered on the fly-in slide. */
+    animation: flash-toast-glow 900ms ease-out;
+  }
+
+  @keyframes flash-toast-glow {
+    0% {
+      box-shadow:
+        0 0 0 4px color-mix(in srgb, currentColor 45%, transparent),
+        0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+    100% {
+      box-shadow:
+        0 0 0 4px transparent,
+        0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .flash-toast {
+      animation: none;
+    }
   }
 
   .flash-toast-success {
