@@ -72,6 +72,9 @@
         return;
       }
       settings = normalizeBudgetSettings(result.data, settings);
+      // A successful save proves the endpoint works and delivered fresh
+      // data, so a load error from a failed earlier fetch is obsolete.
+      error = "";
       flash.success("Budget settings saved.");
     } catch (e) {
       console.error("Failed to save budget settings:", e);

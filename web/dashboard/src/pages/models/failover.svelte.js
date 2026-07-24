@@ -226,7 +226,7 @@ class FailoverStore {
       }
       flash.success("Failover mapping saved.");
       this.closeFailoverForm();
-      await this.fetchFailoverRules();
+      void this.fetchFailoverRules();
     } catch (e) {
       console.error("Failed to save failover mapping:", e);
       this.failoverError = "Failed to save failover mapping.";
@@ -259,7 +259,7 @@ class FailoverStore {
       }
       flash.success("Failover mapping removed.");
       this.closeFailoverForm();
-      await this.fetchFailoverRules();
+      void this.fetchFailoverRules();
     } catch (e) {
       console.error("Failed to remove failover mapping:", e);
       this.failoverError = "Failed to remove failover mapping.";
@@ -515,7 +515,7 @@ class FailoverStore {
       this.failoverGeneratedRules = [];
       this.failoverDraftSelections = {};
       this.failoverDraftFilter = "";
-      await this.fetchFailoverRules();
+      void this.fetchFailoverRules();
     } catch (e) {
       console.error("Failed to save generated failover mappings:", e);
       this.failoverError = "Failed to save failover mappings.";

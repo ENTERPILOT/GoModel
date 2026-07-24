@@ -194,7 +194,7 @@ class ProvidersConfigState {
       flash.success('Provider "' + payload.name + '" saved.');
       this.closeForm();
       this.#refreshInventory();
-      await this.fetchPage();
+      void this.fetchPage();
     } catch (e) {
       console.error("Failed to save provider credential:", e);
       this.error = "Failed to save provider credential.";
@@ -236,7 +236,7 @@ class ProvidersConfigState {
         this.closeForm();
       }
       this.#refreshInventory();
-      await this.fetchPage();
+      void this.fetchPage();
     } catch (e) {
       console.error("Failed to delete provider credential:", e);
       confirmDialog.error = "Failed to delete provider credential.";

@@ -83,7 +83,7 @@
       }
       confirmDialog.close();
       flash.success(pricingRecalculateSummary(result.data));
-      await usageData.fetchUsage();
+      void usageData.fetchUsage();
     } catch (e) {
       console.error("Failed to recalculate pricing:", e);
       confirmDialog.error = "Unable to recalculate pricing.";

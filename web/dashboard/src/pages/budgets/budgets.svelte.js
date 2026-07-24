@@ -189,7 +189,7 @@ class BudgetsStore {
       this.closeForm();
       // Flash before the refetch so feedback is instant.
       flash.success("Budget saved.");
-      await this.fetchBudgets();
+      void this.fetchBudgets();
     } catch (e) {
       console.error("Failed to save budget:", e);
       this.formError = "Unable to save budget.";
@@ -253,7 +253,7 @@ class BudgetsStore {
         return;
       }
       flash.success("Budget reset.");
-      await this.fetchBudgets();
+      void this.fetchBudgets();
     } catch (e) {
       console.error("Failed to reset budget:", e);
       flash.error("Unable to reset budget.");
@@ -342,7 +342,7 @@ class BudgetsStore {
       confirmDialog.close();
       flash.success("Budgets reset.");
       if (router.page === "budgets") {
-        await this.fetchBudgets();
+        void this.fetchBudgets();
       }
     } catch (e) {
       console.error("Failed to reset budgets:", e);

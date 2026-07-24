@@ -299,7 +299,7 @@ class WorkflowsStore {
 
       flash.success("Workflow created and activated.");
       this.closeForm();
-      await this.fetchPage();
+      void this.fetchPage();
     } catch (e) {
       console.error("Failed to create workflow:", e);
       this.formError = "Unable to create workflow.";
@@ -343,7 +343,7 @@ class WorkflowsStore {
       }
 
       flash.success("Workflow deactivated.");
-      await this.fetchPage();
+      void this.fetchPage();
     } catch (e) {
       console.error("Failed to deactivate workflow:", e);
       flash.error("Unable to deactivate workflow.");

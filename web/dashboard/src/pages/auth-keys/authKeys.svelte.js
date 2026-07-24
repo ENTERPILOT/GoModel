@@ -134,7 +134,7 @@ class AuthKeysStore {
       this.formOpen = true;
       this.copyState.reset();
       this.form = defaultAuthKeyForm();
-      await this.fetchKeys();
+      void this.fetchKeys();
     } catch (e) {
       console.error("Failed to issue auth key:", e);
       this.error = "Failed to create API key.";
@@ -200,7 +200,7 @@ class AuthKeysStore {
       flash.success('Labels updated for key "' + editor.name + '".');
       editor.submitting = false;
       this.closeLabelsEditor();
-      await this.fetchKeys();
+      void this.fetchKeys();
     } catch (e) {
       console.error("Failed to update auth key labels:", e);
       editor.error = "Failed to update labels.";
@@ -244,7 +244,7 @@ class AuthKeysStore {
         return;
       }
       flash.success('Key "' + key.name + '" deactivated.');
-      await this.fetchKeys();
+      void this.fetchKeys();
     } catch (e) {
       console.error("Failed to deactivate auth key:", e);
       flash.error("Failed to deactivate key.");

@@ -323,7 +323,7 @@ class VirtualModelsStore {
       }
 
       flash.success(payload.enabled ? "Alias enabled." : "Alias disabled.");
-      await this.fetchVirtualModels();
+      void this.fetchVirtualModels();
     } catch (e) {
       console.error("Failed to toggle alias state:", e);
       flash.error("Failed to update alias state.");
@@ -370,7 +370,7 @@ class VirtualModelsStore {
       }
 
       flash.success(desired ? "Model enabled." : "Model disabled.");
-      await Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
+      void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error("Failed to toggle model access:", e);
       flash.error("Failed to update model access.");
@@ -468,7 +468,7 @@ class VirtualModelsStore {
       this.virtualModelsAvailable = true;
 
       flash.success(options.notice);
-      await Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
+      void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error(options.failureMessage, e);
       flash.error(options.failureMessage);
@@ -801,7 +801,7 @@ class VirtualModelsStore {
             ? "Model access reset to inherited/default."
             : "Model access saved.",
       );
-      await Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
+      void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error("Failed to save virtual model:", e);
       this.vmFormError = "Failed to save virtual model.";
@@ -856,7 +856,7 @@ class VirtualModelsStore {
 
       this.closeVirtualModelForm();
       flash.success("Virtual model removed.");
-      await Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
+      void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error("Failed to delete virtual model:", e);
       this.vmFormError = "Failed to remove virtual model.";

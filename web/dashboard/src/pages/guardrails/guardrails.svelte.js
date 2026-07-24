@@ -253,7 +253,7 @@ class GuardrailsStore {
 
       flash.success('Guardrail "' + name + '" saved.');
       this.closeForm();
-      await this.fetchGuardrails();
+      void this.fetchGuardrails();
     } catch (e) {
       console.error("Failed to save guardrail:", e);
       this.error = "Failed to save guardrail.";
@@ -312,7 +312,7 @@ class GuardrailsStore {
       if (this.formOpen && this.formOriginalName === name) {
         this.closeForm();
       }
-      await this.fetchGuardrails();
+      void this.fetchGuardrails();
     } catch (e) {
       console.error("Failed to delete guardrail:", e);
       flash.error("Failed to delete guardrail.");

@@ -177,7 +177,7 @@ class McpServersState {
 
       flash.success('MCP server "' + built.payload.name + '" saved.');
       this.closeForm();
-      await this.fetchServers();
+      void this.fetchServers();
     } catch (e) {
       console.error("Failed to save MCP server:", e);
       this.error = "Failed to save MCP server.";
@@ -237,7 +237,7 @@ class McpServersState {
       if (this.formOpen && this.form.slug === slug) {
         this.closeForm();
       }
-      await this.fetchServers();
+      void this.fetchServers();
     } catch (e) {
       console.error("Failed to delete MCP server:", e);
       flash.error("Failed to delete MCP server.");
@@ -304,7 +304,7 @@ class McpServersState {
           mcpServerSlug(item) === mcpServerSlug(refreshed) ? refreshed : item,
         );
       } else {
-        await this.fetchServers();
+        void this.fetchServers();
       }
     } catch (e) {
       console.error("Failed to reconnect MCP server:", e);

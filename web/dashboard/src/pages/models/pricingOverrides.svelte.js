@@ -308,7 +308,7 @@ class PricingOverridesStore {
       this.modelPricingOverridesAvailable = true;
       this.closeModelPricingOverrideForm();
       flash.success("Model pricing saved.");
-      await this.fetchModelPricingOverrides();
+      void this.fetchModelPricingOverrides();
     } catch (e) {
       console.error("Failed to save model pricing override:", e);
       this.modelPricingOverrideError = "Failed to save model pricing.";
@@ -352,7 +352,7 @@ class PricingOverridesStore {
       this.modelPricingOverridesAvailable = true;
       this.closeModelPricingOverrideForm();
       flash.success("Model pricing override removed.");
-      await this.fetchModelPricingOverrides();
+      void this.fetchModelPricingOverrides();
     } catch (e) {
       console.error("Failed to delete model pricing override:", e);
       this.modelPricingOverrideError = "Failed to remove model pricing override.";

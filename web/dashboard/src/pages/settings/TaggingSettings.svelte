@@ -83,6 +83,9 @@
       }
       taggingHeaders = normalizeTaggingHeaders(result.data);
       editable = result.data && result.data.editable !== false;
+      // A successful save proves the endpoint works and delivered fresh
+      // data, so a load error from a failed earlier fetch is obsolete.
+      error = "";
       flash.success("Tagging settings saved.");
     } catch (e) {
       console.error("Failed to save tagging settings:", e);
