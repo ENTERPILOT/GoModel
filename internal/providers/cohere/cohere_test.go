@@ -485,6 +485,7 @@ func TestListModelsFiltersUnsupportedEndpointsAndRotatesKeys(t *testing.T) {
 		_, _ = io.WriteString(w, `{"models":[
 			{"name":"command-a","endpoints":["chat"],"context_length":128000},
 			{"name":"embed-v4.0","endpoints":["embed"]},
+			{"name":"cohere-transcribe-03-2026","endpoints":["transcriptions"]},
 			{"name":"rerank-v3.5","endpoints":["rerank"]},
 			{"name":"legacy-unknown"}
 		]}`)
@@ -498,7 +499,7 @@ func TestListModelsFiltersUnsupportedEndpointsAndRotatesKeys(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListModels() error = %v", err)
 		}
-		if len(resp.Data) != 3 {
+		if len(resp.Data) != 4 {
 			t.Fatalf("models = %#v", resp.Data)
 		}
 		if resp.Data[0].Metadata == nil || resp.Data[0].Metadata.ContextWindow == nil ||

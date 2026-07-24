@@ -30,6 +30,7 @@ type Provider struct {
 }
 
 var _ core.Provider = (*Provider)(nil)
+var _ core.AudioProvider = (*Provider)(nil)
 var _ core.PassthroughProvider = (*Provider)(nil)
 
 // New creates a Cohere provider using the shared resilience and observability settings.
@@ -108,7 +109,7 @@ func supportedModel(model modelInfo) bool {
 	}
 	for _, endpoint := range model.Endpoints {
 		switch strings.ToLower(strings.TrimSpace(endpoint)) {
-		case "chat", "embed":
+		case "chat", "embed", "transcriptions":
 			return true
 		}
 	}

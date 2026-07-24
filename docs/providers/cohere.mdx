@@ -1,12 +1,13 @@
 ---
 title: "Cohere"
-description: "Configure Cohere in GoModel and use Command chat, tool calling, reasoning, image input, and Embed models through OpenAI-compatible APIs."
+description: "Configure Cohere in GoModel and use Command chat, tool calling, reasoning, image input, audio transcription, and Embed models through OpenAI-compatible APIs."
 icon: "comment"
 ---
 
-GoModel translates OpenAI-compatible Chat Completions, Responses, and
-Embeddings requests to Cohere's native v2 API. Model discovery uses Cohere's
-model catalog and exposes chat and embedding models through `/v1/models`.
+GoModel translates OpenAI-compatible Chat Completions, Responses, Embeddings,
+and Audio Transcription requests to Cohere's native v2 API. Model
+discovery uses Cohere's model catalog and exposes chat, embedding, and
+transcription models through `/v1/models`.
 
 ## Configure
 
@@ -60,6 +61,27 @@ reasoning behavior, include its `thinking` object as an extension:
 Thinking output is returned as the OpenAI-compatible `reasoning_content`
 extension in both normal and streaming responses.
 
+## Audio transcription
+
+Cohere audio uses a dedicated speech-to-text model and endpoint; Command chat
+models do not accept audio content mixed into Chat Completions or Responses.
+Transcribe audio through the OpenAI-compatible endpoint:
+
+```bash
+curl http://localhost:8080/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -F "model=cohere/cohere-transcribe-03-2026" \
+  -F "language=en" \
+  -F "response_format=json" \
+  -F "file=@recording.wav"
+```
+
+The Cohere transcription API requires `language` and returns JSON. GoModel
+accepts the OpenAI-compatible `response_format=json` field but omits it from the
+native request because JSON is Cohere's fixed response format. Cohere does not
+support text-to-speech, prompt hints, timestamp granularities, or streaming
+transcription.
+
 ## Embeddings
 
 GoModel supplies Cohere's required embedding fields while retaining the
@@ -89,6 +111,7 @@ Add `cohere` to `server.enabled_passthrough_providers`, then use paths such as
 not have an OpenAI-compatible GoModel surface.
 
 See Cohere's [Chat API](https://docs.cohere.com/reference/chat),
-[Embed API](https://docs.cohere.com/reference/embed), and
-[reasoning guide](https://docs.cohere.com/docs/reasoning) for native fields and
-model-specific capabilities.
+[Embed API](https://docs.cohere.com/reference/embed),
+[Audio Transcription API](https://docs.cohere.com/reference/create-audio-transcription),
+and [reasoning guide](https://docs.cohere.com/docs/reasoning) for native fields
+and model-specific capabilities.
