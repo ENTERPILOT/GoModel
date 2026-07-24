@@ -53,9 +53,6 @@
   {#if providersConfig.error && !auth.needsAuth && !providersConfig.formOpen}
     <p class="form-error" role="alert" aria-live="assertive">{providersConfig.error}</p>
   {/if}
-  {#if providersConfig.notice && !providersConfig.formOpen}
-    <div class="alert alert-success" role="status" aria-live="polite">{providersConfig.notice}</div>
-  {/if}
   {#if providersConfig.loading && !auth.needsAuth}
     <LoadingState label="Loading providers..." />
   {/if}

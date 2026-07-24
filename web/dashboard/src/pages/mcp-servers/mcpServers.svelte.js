@@ -3,6 +3,7 @@
 // tests can exercise them without Svelte.
 
 import { getJSON, sendJSON } from "$lib/api/client.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
   buildMcpServerPayload,
@@ -21,8 +22,9 @@ class McpServersState {
   servers = $state([]);
   available = $state(true);
   loading = $state(false);
+  // Load and in-form errors only; row-action feedback goes through the
+  // flash store.
   error = $state("");
-  notice = $state("");
   filter = $state("");
 
   formOpen = $state(false);
@@ -98,7 +100,6 @@ class McpServersState {
     this.slugEdited = false;
     this.advancedOpen = false;
     this.error = "";
-    this.notice = "";
     this.form = defaultMcpServerForm();
     this.formOpen = true;
   }
@@ -111,7 +112,6 @@ class McpServersState {
     this.slugEdited = true;
     this.advancedOpen = false;
     this.error = "";
-    this.notice = "";
     this.form = mcpServerFormFromServer(server);
     this.formOpen = true;
   }
@@ -153,7 +153,6 @@ class McpServersState {
     }
 
     this.error = "";
-    this.notice = "";
     this.formSubmitting = true;
 
     try {
@@ -176,9 +175,9 @@ class McpServersState {
         return;
       }
 
-      await this.fetchServers();
-      this.notice = 'MCP server "' + built.payload.name + '" saved.';
+      flash.success('MCP server "' + built.payload.name + '" saved.');
       this.closeForm();
+      void this.fetchServers();
     } catch (e) {
       console.error("Failed to save MCP server:", e);
       this.error = "Failed to save MCP server.";
@@ -206,8 +205,6 @@ class McpServersState {
     }
 
     this.deletingName = slug;
-    this.error = "";
-    this.notice = "";
 
     try {
       const result = await sendJSON(
@@ -221,28 +218,29 @@ class McpServersState {
       }
       if (result.status === 503) {
         this.available = false;
-        this.error = "MCP server management is unavailable.";
+        flash.error("MCP server management is unavailable.");
         return;
       }
       if (!result.ok) {
-        this.error =
+        flash.error(
           result.status === 401
             ? "Authentication required."
             : mcpErrorPayloadMessage(
                 result.data,
                 "Failed to delete MCP server.",
-              );
+              ),
+        );
         return;
       }
 
-      await this.fetchServers();
+      flash.success('MCP server "' + name + '" deleted.');
       if (this.formOpen && this.form.slug === slug) {
         this.closeForm();
       }
-      this.notice = 'MCP server "' + name + '" deleted.';
+      void this.fetchServers();
     } catch (e) {
       console.error("Failed to delete MCP server:", e);
-      this.error = "Failed to delete MCP server.";
+      flash.error("Failed to delete MCP server.");
     } finally {
       this.deletingName = "";
     }
@@ -256,8 +254,6 @@ class McpServersState {
     }
 
     this.reconnectingName = slug;
-    this.error = "";
-    this.notice = "";
 
     try {
       const result = await sendJSON(
@@ -271,45 +267,48 @@ class McpServersState {
       }
       if (result.status === 503) {
         this.available = false;
-        this.error = "MCP server management is unavailable.";
+        flash.error("MCP server management is unavailable.");
         return;
       }
       if (!result.ok) {
-        this.error =
+        flash.error(
           result.status === 401
             ? "Authentication required."
             : mcpErrorPayloadMessage(
                 result.data,
                 "Failed to reconnect MCP server.",
-              );
+              ),
+        );
         return;
       }
 
       const refreshed = result.data;
+      const status = mcpServerStatus(refreshed);
+      if (status === "connected") {
+        flash.success('MCP server "' + name + '" reconnected.');
+      } else if (status === "disabled") {
+        flash.success(
+          'MCP server "' + name + '" is disabled; no connection was attempted.',
+        );
+      } else {
+        flash.error(
+          'Reconnect attempted, but MCP server "' +
+            name +
+            '" is still ' +
+            status +
+            ".",
+        );
+      }
       if (refreshed && refreshed.name) {
         this.servers = (this.servers || []).map((item) =>
           mcpServerSlug(item) === mcpServerSlug(refreshed) ? refreshed : item,
         );
       } else {
-        await this.fetchServers();
-      }
-      const status = mcpServerStatus(refreshed);
-      if (status === "connected") {
-        this.notice = 'MCP server "' + name + '" reconnected.';
-      } else if (status === "disabled") {
-        this.notice =
-          'MCP server "' + name + '" is disabled; no connection was attempted.';
-      } else {
-        this.error =
-          'Reconnect attempted, but MCP server "' +
-          name +
-          '" is still ' +
-          status +
-          ".";
+        void this.fetchServers();
       }
     } catch (e) {
       console.error("Failed to reconnect MCP server:", e);
-      this.error = "Failed to reconnect MCP server.";
+      flash.error("Failed to reconnect MCP server.");
     } finally {
       this.reconnectingName = "";
     }

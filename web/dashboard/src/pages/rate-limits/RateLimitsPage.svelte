@@ -54,15 +54,10 @@
   {#if (!rateLimits.rateLimitsEnabled() || !rateLimits.rateLimitsAvailable) && !auth.authError}
     <div class="alert alert-warning">Rate limit management is unavailable.</div>
   {/if}
-  {#if rateLimits.rateLimitError && !auth.authError && !rateLimits.rateLimitFormOpen}
+  {#if rateLimits.rateLimitError && !auth.authError}
     <p class="form-error" role="alert" aria-live="assertive">
       {rateLimits.rateLimitError}
     </p>
-  {/if}
-  {#if rateLimits.rateLimitNotice && !rateLimits.rateLimitFormOpen}
-    <div class="alert alert-success" role="status" aria-live="polite">
-      {rateLimits.rateLimitNotice}
-    </div>
   {/if}
   {#if rateLimits.rateLimitsLoading && !auth.authError}
     <LoadingState label="Loading rate limits..." />

@@ -52,9 +52,6 @@
   {#if mcpServers.error && !auth.authError && !mcpServers.formOpen}
     <p class="form-error" role="alert" aria-live="assertive">{mcpServers.error}</p>
   {/if}
-  {#if mcpServers.notice && !mcpServers.formOpen}
-    <div class="alert alert-success" role="status" aria-live="polite">{mcpServers.notice}</div>
-  {/if}
   {#if mcpServers.loading && !auth.authError}
     <LoadingState label="Loading MCP servers..." />
   {/if}

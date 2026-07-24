@@ -3,6 +3,7 @@
 // runtime feature gates come from the shared runtimeConfig store.
 
 import { errorMessage, getJSON, isAbortError, sendJSON } from "$lib/api/client.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import {
@@ -29,8 +30,8 @@ class WorkflowsStore {
   workflows = $state([]);
   available = $state(true);
   loading = $state(false);
+  // Load failures only; mutation feedback goes through the flash store.
   error = $state("");
-  notice = $state("");
   filter = $state("");
 
   formOpen = $state(false);
@@ -102,7 +103,6 @@ class WorkflowsStore {
     this.formOpen = true;
     this.submitting = false;
     this.formError = "";
-    this.notice = "";
 
     if (!workflow) {
       this.formHydrated = false;
@@ -272,7 +272,6 @@ class WorkflowsStore {
       return;
     }
     this.formError = "";
-    this.notice = "";
 
     const payload = this.buildRequest();
     const validationError = validateWorkflowRequest(payload, {
@@ -298,9 +297,9 @@ class WorkflowsStore {
         return;
       }
 
-      this.notice = "Workflow created and activated.";
+      flash.success("Workflow created and activated.");
       this.closeForm();
-      await this.fetchPage();
+      void this.fetchPage();
     } catch (e) {
       console.error("Failed to create workflow:", e);
       this.formError = "Unable to create workflow.";
@@ -325,8 +324,6 @@ class WorkflowsStore {
       return;
     }
 
-    this.error = "";
-    this.notice = "";
     this.deactivatingID = workflowID;
     try {
       const result = await sendJSON(
@@ -339,16 +336,17 @@ class WorkflowsStore {
         return;
       }
       if (!result.ok) {
-        this.error = errorMessage(result, "Unable to deactivate workflow.");
-        console.error("Failed to deactivate workflow:", result.status, this.error);
+        const message = errorMessage(result, "Unable to deactivate workflow.");
+        console.error("Failed to deactivate workflow:", result.status, message);
+        flash.error(message);
         return;
       }
 
-      this.notice = "Workflow deactivated.";
-      await this.fetchPage();
+      flash.success("Workflow deactivated.");
+      void this.fetchPage();
     } catch (e) {
       console.error("Failed to deactivate workflow:", e);
-      this.error = "Unable to deactivate workflow.";
+      flash.error("Unable to deactivate workflow.");
     } finally {
       this.deactivatingID = "";
     }

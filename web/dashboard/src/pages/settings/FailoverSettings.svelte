@@ -45,16 +45,6 @@
   </div>
 </div>
 <div>
-  {#if failover.failoverNotice && !failover.failoverError}
-    <div
-      class="alert alert-success settings-refresh-alert"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      {failover.failoverNotice}
-    </div>
-  {/if}
   {#if failover.failoverError}
     <div
       class="alert alert-warning settings-refresh-alert"

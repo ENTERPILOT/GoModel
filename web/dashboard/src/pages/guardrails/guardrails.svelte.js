@@ -3,6 +3,7 @@
 // responses, and the notice/error flow.
 
 import { getJSON, sendJSON } from "$lib/api/client.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import {
   buildGuardrailPayload,
   defaultGuardrailConfig,
@@ -26,8 +27,9 @@ class GuardrailsStore {
   available = $state(true);
   loading = $state(false);
   typesLoading = $state(false);
+  // Load and in-form errors only; mutation feedback goes through the
+  // flash store.
   error = $state("");
-  notice = $state("");
   filter = $state("");
   formOpen = $state(false);
   formSubmitting = $state(false);
@@ -89,7 +91,6 @@ class GuardrailsStore {
     this.formMode = "create";
     this.formOriginalName = "";
     this.error = "";
-    this.notice = "";
     this.form = defaultGuardrailForm(this.types, defaultGuardrailType(this.types));
     this.formOpen = true;
   }
@@ -102,7 +103,6 @@ class GuardrailsStore {
     this.formMode = "edit";
     this.formOriginalName = String((guardrail && guardrail.name) || "").trim();
     this.error = "";
-    this.notice = "";
     this.form = {
       name: this.formOriginalName,
       type: resolvedType,
@@ -222,7 +222,6 @@ class GuardrailsStore {
     }
 
     this.error = "";
-    this.notice = "";
     this.formSubmitting = true;
 
     const payload = buildGuardrailPayload(this.form);
@@ -252,9 +251,9 @@ class GuardrailsStore {
         return;
       }
 
-      await this.fetchGuardrails();
-      this.notice = 'Guardrail "' + name + '" saved.';
+      flash.success('Guardrail "' + name + '" saved.');
       this.closeForm();
+      void this.fetchGuardrails();
     } catch (e) {
       console.error("Failed to save guardrail:", e);
       this.error = "Failed to save guardrail.";
@@ -279,8 +278,6 @@ class GuardrailsStore {
     }
 
     this.deletingName = name;
-    this.error = "";
-    this.notice = "";
 
     try {
       const result = await sendJSON(
@@ -291,7 +288,7 @@ class GuardrailsStore {
       );
       if (result.status === 503) {
         this.available = false;
-        this.error = "Guardrails feature is unavailable.";
+        flash.error("Guardrails feature is unavailable.");
         return;
       }
       if (result.stale) {
@@ -299,25 +296,26 @@ class GuardrailsStore {
       }
       if (!result.ok) {
         if (result.status === 401) {
-          this.error = "Authentication required.";
+          flash.error("Authentication required.");
           return;
         }
-        this.error = guardrailErrorMessage(
+        const message = guardrailErrorMessage(
           result.data,
           "Failed to delete guardrail.",
         );
-        console.error("Failed to delete guardrail:", result.status, this.error);
+        console.error("Failed to delete guardrail:", result.status, message);
+        flash.error(message);
         return;
       }
 
-      await this.fetchGuardrails();
+      flash.success('Guardrail "' + name + '" deleted.');
       if (this.formOpen && this.formOriginalName === name) {
         this.closeForm();
       }
-      this.notice = 'Guardrail "' + name + '" deleted.';
+      void this.fetchGuardrails();
     } catch (e) {
       console.error("Failed to delete guardrail:", e);
-      this.error = "Failed to delete guardrail.";
+      flash.error("Failed to delete guardrail.");
     } finally {
       this.deletingName = "";
     }

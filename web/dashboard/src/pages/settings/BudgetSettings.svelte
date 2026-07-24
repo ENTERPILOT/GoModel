@@ -3,6 +3,7 @@
   // budget-settings section lives here; the budgets page itself is
   // src/pages/budgets/.
   import { auth } from "$lib/stores/auth.svelte.js";
+  import { flash } from "$lib/stores/flash.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { getJSON, sendJSON } from "$lib/api/client.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
@@ -17,7 +18,7 @@
   let settings = $state(defaultBudgetSettings());
   let loading = $state(false);
   let saving = $state(false);
-  let notice = $state("");
+  // Load failures only; save feedback goes through the flash store.
   let error = $state("");
   let monthlyDayHelpOpen = $state(false);
 
@@ -56,8 +57,6 @@
       return;
     }
     saving = true;
-    notice = "";
-    error = "";
     try {
       const result = await sendJSON(
         "/admin/budgets/settings",
@@ -69,14 +68,17 @@
         return;
       }
       if (!result.ok) {
-        error = "Unable to save budget settings.";
+        flash.error("Unable to save budget settings.");
         return;
       }
       settings = normalizeBudgetSettings(result.data, settings);
-      notice = "Budget settings saved.";
+      // A successful save proves the endpoint works and delivered fresh
+      // data, so a load error from a failed earlier fetch is obsolete.
+      error = "";
+      flash.success("Budget settings saved.");
     } catch (e) {
       console.error("Failed to save budget settings:", e);
-      error = "Unable to save budget settings.";
+      flash.error("Unable to save budget settings.");
     } finally {
       saving = false;
     }
@@ -256,11 +258,6 @@
   </div>
 
   <div>
-    {#if notice}
-      <div class="alert alert-success settings-refresh-alert" role="status" aria-live="polite">
-        {notice}
-      </div>
-    {/if}
     {#if error}
       <div class="alert alert-warning settings-refresh-alert" role="alert" aria-live="assertive">
         {error}

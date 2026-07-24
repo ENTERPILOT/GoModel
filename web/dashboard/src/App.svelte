@@ -2,6 +2,7 @@
   import Sidebar from "$lib/components/organisms/Sidebar.svelte";
   import AuthDialog from "$lib/components/organisms/AuthDialog.svelte";
   import TypedConfirmationDialog from "$lib/components/organisms/TypedConfirmationDialog.svelte";
+  import FlashMessages from "$lib/components/organisms/FlashMessages.svelte";
   import DemoModeBanner from "$lib/components/molecules/DemoModeBanner.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
@@ -68,4 +69,5 @@
   </main>
   <AuthDialog />
   <TypedConfirmationDialog />
+  <FlashMessages />
 </div>
