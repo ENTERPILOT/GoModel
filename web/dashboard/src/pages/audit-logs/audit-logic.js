@@ -1,0 +1,842 @@
+// Pure audit-log display/query logic (plus the tiny workflowFailoverTarget
+// helper the metadata row needs).
+// Keep this file dependency-free so node:test can import it directly.
+
+function tryParseJSON(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeAuditErrorText(value, depth) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (depth > 6) return text;
+
+  const parsed = tryParseJSON(text);
+  if (parsed == null) return text;
+  return findNestedAuditErrorMessage(parsed, depth + 1) || text;
+}
+
+function auditErrorMessageFromField(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return normalizeAuditErrorText(value, 0);
+  return findNestedAuditErrorMessage(value, 0);
+}
+
+function findNestedAuditErrorMessage(value, depth) {
+  if (value == null || depth > 6) return "";
+
+  if (typeof value === "string") {
+    const parsed = tryParseJSON(value.trim());
+    return parsed == null ? "" : findNestedAuditErrorMessage(parsed, depth + 1);
+  }
+
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const message = findNestedAuditErrorMessage(value[i], depth + 1);
+      if (message) return message;
+    }
+    return "";
+  }
+
+  if (typeof value !== "object") return "";
+
+  if (value.error !== undefined) {
+    if (typeof value.error === "string") {
+      return normalizeAuditErrorText(value.error, depth + 1);
+    }
+    if (
+      value.error &&
+      typeof value.error.message === "string" &&
+      value.error.message.trim()
+    ) {
+      return normalizeAuditErrorText(value.error.message, depth + 1);
+    }
+    const nestedError = findNestedAuditErrorMessage(value.error, depth + 1);
+    if (nestedError) return nestedError;
+  }
+
+  if (
+    typeof value.message === "string" &&
+    value.message.trim() &&
+    (value.error !== undefined ||
+      value.code !== undefined ||
+      value.status !== undefined ||
+      value.type !== undefined)
+  ) {
+    return normalizeAuditErrorText(value.message, depth + 1);
+  }
+
+  const keys = Object.keys(value);
+  for (let i = 0; i < keys.length; i++) {
+    if (keys[i] === "error") continue;
+    const message = findNestedAuditErrorMessage(value[keys[i]], depth + 1);
+    if (message) return message;
+  }
+  return "";
+}
+
+function auditEntryStatusCodeValue(entry, data) {
+  const candidates = [
+    entry && entry.status_code,
+    entry && entry.status,
+    data && data.status_code,
+    data && data.status,
+  ];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const parsed = Number(candidates[i]);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  return null;
+}
+
+function hasTopLevelAuditErrorShape(value) {
+  if (value == null) return false;
+
+  let candidate = value;
+  if (typeof candidate === "string") {
+    const parsed = tryParseJSON(candidate.trim());
+    if (parsed == null) return false;
+    candidate = parsed;
+  }
+
+  if (Array.isArray(candidate) || typeof candidate !== "object") return false;
+  if (candidate.error !== undefined) return true;
+  if (typeof candidate.message === "string" && candidate.message.trim())
+    return true;
+
+  const topLevelErrorFields = ["detail", "error_message", "error_msg", "title"];
+  for (let i = 0; i < topLevelErrorFields.length; i++) {
+    const field = topLevelErrorFields[i];
+    if (typeof candidate[field] === "string" && candidate[field].trim())
+      return true;
+  }
+
+  return false;
+}
+
+function shouldInspectAuditResponseBody(entry, data) {
+  const statusCode = auditEntryStatusCodeValue(entry, data);
+  if (statusCode !== null && statusCode >= 400) return true;
+  return hasTopLevelAuditErrorShape(data && data.response_body);
+}
+
+export function auditEntryErrorMessage(entry) {
+  const data = entry && entry.data ? entry.data : null;
+  if (!data) return "";
+  const fieldMessage = auditErrorMessageFromField(data.error_message);
+  if (fieldMessage) return fieldMessage;
+  if (!shouldInspectAuditResponseBody(entry, data)) return "";
+  return findNestedAuditErrorMessage(data.response_body, 0);
+}
+
+// --- Retention note ---------------------------------------------------------
+// `raw` is the raw LOGGING_RETENTION_DAYS runtime-config value.
+
+function auditRetentionDays(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === "")
+    return null;
+
+  const days = Number(raw);
+  if (!Number.isInteger(days) || days < 0) return null;
+  return days;
+}
+
+export function auditRetentionText(raw) {
+  const days = auditRetentionDays(raw);
+  if (days === null) return "";
+  if (days === 0) return "Audit logs are retained indefinitely.";
+  if (days === 1) return "Audit logs are retained for 1 day.";
+  return "Audit logs are retained for " + days + " days.";
+}
+
+export function auditRetentionPrefix(raw) {
+  const days = auditRetentionDays(raw);
+  if (days === null) return "";
+  return days === 0
+    ? "Audit logs are retained "
+    : "Audit logs are retained for ";
+}
+
+export function auditRetentionHighlight(raw) {
+  const days = auditRetentionDays(raw);
+  if (days === null) return "";
+  if (days === 0) return "indefinitely";
+  return days === 1 ? "1 day" : days + " days";
+}
+
+// --- Query building ---------------------------------------------------------
+
+// buildAuditLogQuery renders the GET /admin/audit/log query string: the
+// shared date window first, then paging, then only the consolidated audit
+// filters that are set.
+export function buildAuditLogQuery({
+  dateQuery,
+  limit,
+  offset,
+  search,
+  method,
+  statusCode,
+  stream,
+}) {
+  let qs = dateQuery;
+  qs += "&limit=" + limit + "&offset=" + offset;
+  if (search) qs += "&search=" + encodeURIComponent(search);
+  if (method) qs += "&method=" + encodeURIComponent(method);
+  if (statusCode) qs += "&status_code=" + encodeURIComponent(statusCode);
+  if (stream) qs += "&stream=" + encodeURIComponent(stream);
+  return qs;
+}
+
+// --- Live-entry merge -------------------------------------------------------
+// `filters` carries the current consolidated filters plus the custom date
+// range: { search, method, statusCode, stream, customStartDate, customEndDate }.
+
+export function auditEntryKey(entry) {
+  return String((entry && entry.id) || "").trim();
+}
+
+function auditEntryIdentityKeys(entry) {
+  if (!entry) return [];
+  const keys = [];
+  const id = String(entry.id || "").trim();
+  const requestID = String(entry.request_id || "").trim();
+  if (id) keys.push("id:" + id);
+  if (requestID) keys.push("request:" + requestID);
+  return keys;
+}
+
+function auditEntryLivePreviewPending(entry) {
+  return !!(entry && entry._live && entry._live_pending && !entry._audit_flushed);
+}
+
+function auditLiveDateRangeAllowsNow(filters) {
+  const customStartDate = filters && filters.customStartDate;
+  const customEndDate = filters && filters.customEndDate;
+  if (!customStartDate && !customEndDate) return true;
+  const now = new Date();
+  if (customStartDate) {
+    const start = new Date(customStartDate);
+    start.setHours(0, 0, 0, 0);
+    if (Number.isFinite(start.getTime()) && now < start) return false;
+  }
+  if (customEndDate) {
+    const end = new Date(customEndDate);
+    end.setHours(23, 59, 59, 999);
+    if (Number.isFinite(end.getTime()) && now > end) return false;
+  }
+  return true;
+}
+
+export function auditLogAllowsLiveEntries(payload, filters) {
+  return (
+    payload &&
+    Number(payload.offset || 0) === 0 &&
+    !(filters && filters.search) &&
+    !(filters && filters.method) &&
+    !(filters && filters.statusCode) &&
+    !(filters && filters.stream) &&
+    auditLiveDateRangeAllowsNow(filters)
+  );
+}
+
+// auditLogWithLiveEntries prepends still-pending live preview rows onto a
+// freshly fetched page so an in-flight request does not disappear on refresh.
+// Persisted rows replace matching previews (matched by id or request_id).
+export function auditLogWithLiveEntries(payload, currentEntries, filters) {
+  const next =
+    payload && typeof payload === "object"
+      ? { ...payload }
+      : { entries: [], total: 0, limit: 25, offset: 0 };
+  const entries = Array.isArray(next.entries) ? next.entries : [];
+  next.entries = entries;
+  if (!auditLogAllowsLiveEntries(next, filters)) return next;
+
+  const liveEntries = (Array.isArray(currentEntries) ? currentEntries : []).filter(
+    (entry) => auditEntryLivePreviewPending(entry),
+  );
+  if (liveEntries.length === 0) return next;
+
+  const persistedKeys = new Set(
+    entries.flatMap((entry) => auditEntryIdentityKeys(entry)),
+  );
+  const prepend = [];
+  liveEntries.forEach((entry) => {
+    const keys = auditEntryIdentityKeys(entry);
+    if (keys.length === 0) return;
+    if (keys.some((key) => persistedKeys.has(key))) return;
+    keys.forEach((key) => persistedKeys.add(key));
+    prepend.push(entry);
+  });
+  if (prepend.length === 0) return next;
+
+  next.entries = [...prepend, ...entries].slice(0, next.limit || 25);
+  next.total = Number(next.total || 0) + prepend.length;
+  return next;
+}
+
+// --- Expanded-entry map -----------------------------------------------------
+
+export function markExpandedEntry(expanded, entry) {
+  const key = auditEntryKey(entry);
+  const current = expanded || {};
+  if (!key || current[key]) return current;
+  return { ...current, [key]: true };
+}
+
+export function pruneExpandedEntries(expanded, entries) {
+  const current = expanded || {};
+  const keys = new Set(
+    (Array.isArray(entries) ? entries : [])
+      .map((entry) => auditEntryKey(entry))
+      .filter(Boolean),
+  );
+  const next = {};
+  let changed = false;
+
+  Object.keys(current).forEach((key) => {
+    if (keys.has(key)) {
+      next[key] = true;
+      return;
+    }
+    changed = true;
+  });
+
+  return changed ? next : current;
+}
+
+// --- Row display ------------------------------------------------------------
+
+export function formatDurationNs(ns) {
+  if (ns == null) return "-";
+  const v = Number(ns);
+  if (!Number.isFinite(v)) return "-";
+  if (v <= 0) return "pending";
+  if (v < 1000000) return Math.round(v / 1000) + " µs";
+  if (v < 1000000000) return (v / 1000000).toFixed(2) + " ms";
+  return (v / 1000000000).toFixed(2) + " s";
+}
+
+export function statusCodeClass(statusCode) {
+  if (statusCode === null || statusCode === undefined || statusCode === "")
+    return "status-unknown";
+  const parsedStatus = Number(statusCode);
+  if (!Number.isFinite(parsedStatus)) return "status-unknown";
+  if (parsedStatus >= 500) return "status-error";
+  if (parsedStatus >= 400) return "status-warning";
+  if (parsedStatus >= 300) return "status-neutral";
+  return "status-success";
+}
+
+export function auditEntryLiveInProgress(entry) {
+  if (!entry || !entry._live || !entry._live_pending) return false;
+  const liveState = String(entry._live_state || "").trim();
+  if (
+    liveState === "audit.completed" ||
+    liveState === "audit.flushed" ||
+    liveState === "audit.detail"
+  ) {
+    return false;
+  }
+  // A partial response body means the stream is still running, regardless of
+  // the other completion signals (streamed entries carry status 200 from the
+  // moment headers were committed).
+  if (entry._response_partial) return true;
+  if (
+    entry.status_code !== null &&
+    entry.status_code !== undefined &&
+    entry.status_code !== ""
+  )
+    return false;
+  if (Number(entry.duration_ns || 0) > 0) return false;
+  if (entry.error_type || entry.error_message) return false;
+
+  const data = entry.data || {};
+  return !(data.response_headers || data.response_body || data.error_message);
+}
+
+// workflowFailoverTarget surfaces the runtime failover target model recorded
+// on the entry.
+export function workflowFailoverTarget(entry) {
+  const raw = entry && entry.data && entry.data.failover;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const targetModel =
+    String(raw.target_model || raw.targetModel || "").trim() || null;
+  return targetModel;
+}
+
+// --- Provider attempts ------------------------------------------------------
+
+function auditAttempts(entry) {
+  const attempts =
+    entry && entry.data && Array.isArray(entry.data.attempts)
+      ? entry.data.attempts
+      : [];
+  return attempts
+    .map((attempt, index) => ({
+      ...attempt,
+      seq: Number((attempt && attempt.seq) || index + 1),
+    }))
+    .sort((a, b) => a.seq - b.seq);
+}
+
+// auditUsesPerAttemptResponses reports whether responses should be split into
+// one tab per attempt — when a failover/retry happened (more than one attempt)
+// or any attempt failed — instead of a single combined Response tab.
+function auditUsesPerAttemptResponses(entry) {
+  const attempts = auditAttempts(entry);
+  return (
+    attempts.length > 1 || attempts.some((attempt) => !(attempt && attempt.success))
+  );
+}
+
+function auditAttemptStatus(attempt) {
+  if (!attempt) return "-";
+  const status = attempt.status_code || attempt.status;
+  if (status) return String(status);
+  return attempt.success ? "ok" : "error";
+}
+
+function auditAttemptKind(attempt) {
+  const kind = String((attempt && attempt.kind) || "").trim();
+  return kind || "attempt";
+}
+
+function auditAttemptProvider(attempt) {
+  if (!attempt) return "-";
+  const name = String(attempt.provider_name || "").trim();
+  const type = String(attempt.provider_type || attempt.provider || "").trim();
+  if (name && type && name !== type) return name + " (" + type + ")";
+  return name || type || "-";
+}
+
+function auditAttemptModel(attempt) {
+  return String((attempt && attempt.model) || "").trim() || "-";
+}
+
+// auditAttemptTrack returns the attempt list when it is worth surfacing on the
+// collapsed summary row: a retry/failover happened (more than one attempt) or
+// any single attempt failed. A lone successful attempt is the common case and
+// needs no indicator.
+export function auditAttemptTrack(entry) {
+  const attempts = auditAttempts(entry);
+  if (attempts.length > 1) return attempts;
+  if (attempts.some((attempt) => !(attempt && attempt.success))) return attempts;
+  return [];
+}
+
+export function auditHasAttemptTrack(entry) {
+  return auditAttemptTrack(entry).length > 0;
+}
+
+export function auditAttemptTrackCount(entry) {
+  return auditAttempts(entry).length + "×";
+}
+
+export function auditAttemptTrackTitle(entry) {
+  const attempts = auditAttempts(entry);
+  const failed = attempts.filter((attempt) => !(attempt && attempt.success)).length;
+  const noun = attempts.length === 1 ? "attempt" : "attempts";
+  const base = attempts.length + " provider " + noun;
+  return failed > 0 ? base + " · " + failed + " failed" : base;
+}
+
+export function auditAttemptSegmentTitle(attempt) {
+  if (!attempt) return "";
+  const parts = ["#" + Number(attempt.seq || 0)];
+  const kind = auditAttemptKind(attempt);
+  if (kind && kind !== "attempt") parts.push(kind);
+  parts.push(auditAttemptStatus(attempt));
+  const provider = auditAttemptProvider(attempt);
+  if (provider && provider !== "-") parts.push(provider);
+  const model = auditAttemptModel(attempt);
+  if (model && model !== "-") parts.push(model);
+  parts.push(attempt.success ? "succeeded" : "failed");
+  return parts.join(" · ");
+}
+
+// auditAttemptBody is the captured raw upstream response body only: the final
+// response for the successful attempt, or the provider's raw error body for a
+// failed one. The normalized error message is surfaced separately.
+function auditAttemptBody(entry, attempt) {
+  if (!attempt) return null;
+  if (attempt.success) {
+    const data = entry && entry.data ? entry.data : null;
+    return data && data.response_body != null ? data.response_body : null;
+  }
+  return attempt.response_body != null && attempt.response_body !== ""
+    ? attempt.response_body
+    : null;
+}
+
+function auditAttemptErrorMessage(attempt) {
+  if (!attempt || attempt.success) return "";
+  const message = String(attempt.error_message || "").trim();
+  const code = String(attempt.error_code || "").trim();
+  const type = String(attempt.error_type || "").trim();
+  if (message && code) return code + ": " + message;
+  return message || code || type || "Provider attempt failed";
+}
+
+function auditAttemptHeaders(entry, attempt) {
+  if (!attempt) return null;
+  if (attempt.success) {
+    const data = entry && entry.data ? entry.data : null;
+    return data ? data.response_headers : null;
+  }
+  return attempt.response_headers || null;
+}
+
+function auditAttemptStatusCode(attempt) {
+  const code = Number(attempt && attempt.status_code);
+  return Number.isFinite(code) && code > 0 ? code : null;
+}
+
+function auditAttemptResponsePane(entry, attempt) {
+  const success = !!(attempt && attempt.success);
+  const data = entry && entry.data ? entry.data : null;
+  const body = auditAttemptBody(entry, attempt);
+  const headers = auditAttemptHeaders(entry, attempt);
+  const errorMessage = auditAttemptErrorMessage(attempt);
+  const hasBody = body != null && body !== "";
+  const kind = auditAttemptKind(attempt);
+  // With only one response tab the seq/type/status chips are just noise (it's
+  // the whole response); show them only to tell apart multiple attempt tabs.
+  const single = auditAttempts(entry).length <= 1;
+
+  return {
+    title: "Response",
+    direction: "response",
+    seq: single ? 0 : Number((attempt && attempt.seq) || 0),
+    kind: single ? "" : kind === "attempt" ? "" : kind,
+    statusCode: single ? null : auditAttemptStatusCode(attempt),
+    layout: "split",
+    entry,
+    copyHeaders: headers,
+    copyBody: body,
+    showErrorMessage: !!errorMessage,
+    errorMessage,
+    showHeaders: !!headers,
+    headers,
+    showBody: hasBody,
+    body,
+    showEmpty: !errorMessage && !hasBody && !headers,
+    emptyMessage: "No response was captured for this attempt.",
+    showTooLarge: !!(success && data && data.response_body_too_big_to_handle),
+    tooLargeMessage: "Response body was too large to capture.",
+  };
+}
+
+// --- Request revisions (ingress rewrites) -----------------------------------
+
+export function auditRequestRevisions(entry) {
+  return entry && entry.data && Array.isArray(entry.data.request_revisions)
+    ? entry.data.request_revisions
+    : [];
+}
+
+// auditRevisionPercentLabel renders how much of the request body this revision
+// removed (e.g. "-44%"), or '' when sizes are missing or the revision didn't
+// shrink the body.
+export function auditRevisionPercentLabel(revision) {
+  const before = Number(revision && revision.bytes_before);
+  const after = Number(revision && revision.bytes_after);
+  if (
+    !Number.isFinite(before) ||
+    !Number.isFinite(after) ||
+    before <= 0 ||
+    after >= before
+  )
+    return "";
+  const pct = (1 - after / before) * 100;
+  return "-" + (pct >= 10 ? String(Math.round(pct)) : pct.toFixed(1)) + "%";
+}
+
+// auditRequestRevisionPane renders one ingress rewrite: a structured summary
+// of what the rewriter changed plus the rewritten body when it was captured.
+export function auditRequestRevisionPane(entry, revision) {
+  const body = revision && revision.body;
+  const hasBody = body != null && body !== "";
+  const single = auditRequestRevisions(entry).length <= 1;
+  const summary = {
+    rewriter: (revision && revision.rewriter) || "",
+    bytes:
+      Number((revision && revision.bytes_before) || 0) +
+      " → " +
+      Number((revision && revision.bytes_after) || 0),
+  };
+  if (revision && revision.detail != null) {
+    summary.detail = revision.detail;
+  }
+
+  return {
+    title: "Rewritten",
+    direction: "request",
+    seq: single ? 0 : Number((revision && revision.seq) || 0),
+    kind: revision && revision.rewriter ? String(revision.rewriter) : "",
+    savingsLabel: auditRevisionPercentLabel(revision),
+    layout: "split",
+    entry,
+    copyHeaders: summary,
+    copyBody: body,
+    showErrorMessage: false,
+    errorMessage: null,
+    showHeaders: true,
+    headers: summary,
+    headersTitle: "What changed",
+    showBody: hasBody,
+    body,
+    showEmpty: false,
+    emptyMessage: "",
+    showTooLarge: !hasBody,
+    tooLargeMessage:
+      "Rewritten body not captured (body logging disabled or body too large).",
+  };
+}
+
+// --- Usage / prompt-cache helpers -------------------------------------------
+
+function formatNumber(n) {
+  if (n == null || n === undefined) return "-";
+  return n.toLocaleString();
+}
+
+function auditUsage(entry) {
+  const usage = entry && entry.usage;
+  if (!usage || typeof usage !== "object") return null;
+  return usage;
+}
+
+export function auditHasCachedTokens(entry) {
+  const usage = auditUsage(entry);
+  return Number((usage && usage.cached_input_tokens) || 0) > 0;
+}
+
+export function auditCacheSharePercent(entry) {
+  const usage = auditUsage(entry);
+  const inputTokens = Number((usage && usage.input_tokens) || 0);
+  const cachedTokens = Number((usage && usage.cached_input_tokens) || 0);
+  if (
+    !Number.isFinite(inputTokens) ||
+    inputTokens <= 0 ||
+    !Number.isFinite(cachedTokens) ||
+    cachedTokens <= 0
+  ) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, (cachedTokens / inputTokens) * 100));
+}
+
+export function auditCacheRatioLabel(entry) {
+  const usage = auditUsage(entry);
+  if (!usage) return "";
+  const inputTokens = Number(usage.input_tokens || 0);
+  const cachedTokens = Number(usage.cached_input_tokens || 0);
+  if (inputTokens <= 0) {
+    return formatNumber(cachedTokens) + " cached";
+  }
+  return auditCacheSharePercent(entry).toFixed(1) + "% cached";
+}
+
+export function auditCacheRatioPillLabel(entry) {
+  if (!auditHasCachedTokens(entry)) return "";
+  return auditCacheRatioLabel(entry);
+}
+
+// auditPromptCacheHighlight derives the estimated cached prompt prefix from
+// the request body. `extractSegments` is the conversation-helpers
+// extractRequestPromptTextSegments function (injected to keep this pure).
+export function auditPromptCacheHighlight(entry, extractSegments) {
+  const usage = auditUsage(entry);
+  if (!usage || !entry || !entry.data || !entry.data.request_body) return null;
+
+  const estimatedChars = Number(usage.estimated_cached_characters || 0);
+  if (!Number.isFinite(estimatedChars) || estimatedChars <= 0) {
+    return null;
+  }
+
+  if (typeof extractSegments !== "function") {
+    return null;
+  }
+
+  const segments = extractSegments(entry.data.request_body);
+  if (!Array.isArray(segments) || segments.length === 0) {
+    return null;
+  }
+
+  return {
+    characters: estimatedChars,
+    segments,
+  };
+}
+
+// --- Panes ------------------------------------------------------------------
+
+export function formatJSON(v) {
+  if (v == null || v === undefined || v === "") return "Not captured";
+
+  if (typeof v === "string") {
+    const trimmed = v.trim();
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch {
+        return v;
+      }
+    }
+    return v;
+  }
+
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
+export function auditRequestPane(entry, extractSegments) {
+  const data = entry && entry.data ? entry.data : null;
+  const empty = !data || (!data.request_headers && !data.request_body);
+  const pending = empty && auditEntryLiveInProgress(entry);
+
+  return {
+    title: "Request",
+    direction: "request",
+    layout: "split",
+    entry,
+    copyHeaders: data && data.request_headers,
+    copyBody: data && data.request_body,
+    showErrorMessage: false,
+    errorMessage: null,
+    showHeaders: !!(data && data.request_headers),
+    headers: data && data.request_headers,
+    showBody: !!(data && data.request_body),
+    body: data && data.request_body,
+    bodyCacheRatioLabel: auditCacheRatioPillLabel(entry),
+    promptCacheHighlight: auditPromptCacheHighlight(entry, extractSegments),
+    showEmpty: empty && !pending,
+    emptyMessage: "Request details were not captured.",
+    showPending: pending,
+    pendingMessage: "Waiting for request data…",
+    showTooLarge: !!(data && data.request_body_too_big_to_handle),
+    tooLargeMessage: "Request body was too large to capture.",
+  };
+}
+
+export function auditResponsePane(entry) {
+  const data = entry && entry.data ? entry.data : null;
+  const errorMessage = auditEntryErrorMessage(entry);
+  const empty =
+    !data || (!errorMessage && !data.response_headers && !data.response_body);
+  const pending = empty && auditEntryLiveInProgress(entry);
+
+  return {
+    title: "Response",
+    direction: "response",
+    layout: "split",
+    entry,
+    copyHeaders: data && data.response_headers,
+    copyBody: data && data.response_body,
+    showErrorMessage: !!errorMessage,
+    errorMessage,
+    showHeaders: !!(data && data.response_headers),
+    headers: data && data.response_headers,
+    showBody: !!(data && data.response_body),
+    body: data && data.response_body,
+    streaming:
+      !!(entry && entry._response_partial && data && data.response_body) &&
+      auditEntryLiveInProgress(entry),
+    showEmpty: empty && !pending,
+    emptyMessage: "Response details were not captured.",
+    showPending: pending,
+    pendingMessage: "Response in progress…",
+    showTooLarge: !!(data && data.response_body_too_big_to_handle),
+    tooLargeMessage: "Response body was too large to capture.",
+  };
+}
+
+// auditPanes returns the ordered Request/Response panes that back the tab
+// strip: the original request, one pane per ingress rewrite revision, then
+// either the single response or one pane per provider attempt.
+export function auditPanes(entry, extractSegments) {
+  const panes = [{ id: "request", pane: auditRequestPane(entry, extractSegments) }];
+  auditRequestRevisions(entry).forEach((revision) => {
+    panes.push({
+      id: "revision-" + Number((revision && revision.seq) || 0),
+      pane: auditRequestRevisionPane(entry, revision),
+    });
+  });
+  if (auditUsesPerAttemptResponses(entry)) {
+    auditAttempts(entry).forEach((attempt) => {
+      panes.push({
+        id: "response-" + Number((attempt && attempt.seq) || 0),
+        pane: auditAttemptResponsePane(entry, attempt),
+      });
+    });
+  } else {
+    panes.push({ id: "response", pane: auditResponsePane(entry) });
+  }
+  return panes;
+}
+
+// auditDefaultPaneTab selects the tab shown first: the last valid (successful)
+// response, falling back to the last attempt when none succeeded, and to the
+// single response otherwise.
+function auditDefaultPaneTab(entry) {
+  if (!auditUsesPerAttemptResponses(entry)) return "response";
+  const attempts = auditAttempts(entry);
+  let target = null;
+  attempts.forEach((attempt) => {
+    if (attempt && attempt.success) target = attempt;
+  });
+  if (!target) target = attempts[attempts.length - 1];
+  return target ? "response-" + Number(target.seq || 0) : "request";
+}
+
+// auditEffectiveTab resolves the active tab id, falling back to the default
+// when nothing is selected yet or the selection no longer exists (e.g. a live
+// entry gained attempts after the first render).
+export function auditEffectiveTab(active, entry) {
+  if (active && auditPanes(entry).some((p) => p.id === active)) {
+    return active;
+  }
+  return auditDefaultPaneTab(entry);
+}
+
+// auditTabKeydownTarget implements roving-tabindex keyboard navigation for the
+// request/response tablist. It returns the tab id to activate, or null for
+// unhandled keys (the caller keeps the current selection, moves focus, and
+// calls preventDefault).
+export function auditTabKeydownTarget(key, ids, currentId) {
+  if (!ids || !ids.length) return null;
+  let idx = ids.indexOf(currentId);
+  if (idx < 0) idx = 0;
+  let next;
+  switch (key) {
+    case "ArrowRight":
+    case "ArrowDown":
+      next = (idx + 1) % ids.length;
+      break;
+    case "ArrowLeft":
+    case "ArrowUp":
+      next = (idx - 1 + ids.length) % ids.length;
+      break;
+    case "Home":
+      next = 0;
+      break;
+    case "End":
+      next = ids.length - 1;
+      break;
+    default:
+      return null;
+  }
+  return ids[next];
+}

@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -20,312 +21,134 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func serveIndex(t *testing.T, h *Handler, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.Index(c); err != nil {
+		t.Fatalf("Index() returned error: %v", err)
+	}
+	return rec
+}
+
+func serveStatic(t *testing.T, h *Handler, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.Static(c); err != nil {
+		t.Fatalf("Static() returned error: %v", err)
+	}
+	return rec
+}
+
 func TestIndex_ReturnsHTML(t *testing.T) {
 	h, err := NewWithBasePath("/")
 	if err != nil {
 		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Index(c); err != nil {
-		t.Fatalf("Index() returned error: %v", err)
-	}
+	rec := serveIndex(t, h, "/admin/dashboard")
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
-
 	contentType := rec.Header().Get("Content-Type")
 	if contentType != "text/html; charset=utf-8" {
 		t.Errorf("expected Content-Type text/html; charset=utf-8, got %s", contentType)
 	}
 
-	body := strings.ToLower(rec.Body.String())
-	if !strings.Contains(body, "<!doctype html") && !strings.Contains(body, "<html") {
-		t.Errorf("expected HTML content, got: %.200s", rec.Body.String())
+	body := rec.Body.String()
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "<!doctype html") && !strings.Contains(lower, "<html") {
+		t.Errorf("expected HTML content, got: %.200s", body)
 	}
-	if !strings.Contains(body, "audit logs") {
-		t.Errorf("expected audit logs navigation item in page HTML")
+	if !strings.Contains(body, `window.GOMODEL_BASE_PATH="/"`) {
+		t.Errorf("expected injected base path global in page HTML")
 	}
-	if !strings.Contains(body, "workflows") {
-		t.Errorf("expected workflows navigation item in page HTML")
+	if !regexp.MustCompile(`window\.GOMODEL_VERSION="[^"]+"`).MatchString(body) {
+		t.Errorf("expected injected version global in page HTML")
 	}
-	if !strings.Contains(body, `x-data="dashboard()"`) {
-		t.Errorf("expected alpine dashboard root in page HTML")
+	if !strings.Contains(body, "window.GOMODEL_DEMO_MODE=false") {
+		t.Errorf("expected demo mode global false in page HTML")
 	}
-	if strings.Contains(body, `x-init="init()"`) {
-		t.Errorf("expected dashboard HTML not to call init() explicitly")
+	if !regexp.MustCompile(`/admin/static/assets/index-[^"]+\.js`).MatchString(body) {
+		t.Errorf("expected hashed SPA script tag in page HTML")
 	}
-	if !regexp.MustCompile(`/admin/static/css/dashboard\.css\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
-		t.Errorf("expected versioned dashboard CSS link in page HTML")
-	}
-	if !regexp.MustCompile(`/admin/static/js/dashboard\.js\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
-		t.Errorf("expected versioned dashboard JS link in page HTML")
-	}
-	if !regexp.MustCompile(`/admin/static/js/modules/virtual-models\.js\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
-		t.Errorf("expected versioned dashboard module JS link in page HTML")
-	}
-	if !strings.Contains(body, "settings-version-footer") {
-		t.Errorf("expected settings-version-footer element in page HTML")
-	}
-	if !strings.Contains(body, "gomodel ") {
-		t.Errorf("expected gomodel version string in page HTML")
+	if !regexp.MustCompile(`/admin/static/assets/index-[^"]+\.css`).MatchString(body) {
+		t.Errorf("expected hashed SPA stylesheet link in page HTML")
 	}
 }
 
-func TestIndex_DemoModeShowsWarning(t *testing.T) {
+func TestIndex_DemoModeInjectsFlag(t *testing.T) {
 	h, err := NewWithDemoMode("/", true)
 	if err != nil {
 		t.Fatalf("NewWithDemoMode() returned error: %v", err)
 	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Index(c); err != nil {
-		t.Fatalf("Index() returned error: %v", err)
-	}
-
-	body := rec.Body.String()
-	if !strings.Contains(body, `class="demo-mode-banner"`) {
-		t.Error("expected demo mode banner in page HTML")
-	}
-	if !strings.Contains(body, "Do not enter sensitive or personal data. Demo data is reset regularly.") {
-		t.Error("expected demo mode data warning in page HTML")
-	}
-	if !strings.Contains(body, `href="https://gomodel.enterpilot.io/?utm_source=gomodel_dashboard" target="_blank" rel="noopener noreferrer">gomodel.enterpilot.io</a>`) {
-		t.Error("expected demo mode website link in page HTML")
-	}
-	for _, unwanted := range []string{
-		`href="https://gomodel.enterpilot.io/docs"`,
-		`href="https://github.com/ENTERPILOT/GoModel"`,
-	} {
-		if strings.Contains(body, unwanted) {
-			t.Errorf("unexpected demo mode link %s in page HTML", unwanted)
-		}
+	body := serveIndex(t, h, "/admin/dashboard").Body.String()
+	if !strings.Contains(body, "window.GOMODEL_DEMO_MODE=true") {
+		t.Error("expected demo mode global true in page HTML")
 	}
 }
 
-func TestIndex_StandardModeHidesDemoWarning(t *testing.T) {
+func TestIndex_StandardModeHidesDemoFlag(t *testing.T) {
 	h, err := NewWithBasePath("/")
 	if err != nil {
 		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Index(c); err != nil {
-		t.Fatalf("Index() returned error: %v", err)
-	}
-	if strings.Contains(rec.Body.String(), `class="demo-mode-banner"`) {
-		t.Error("did not expect demo mode banner in standard mode")
+	body := serveIndex(t, h, "/admin/dashboard").Body.String()
+	if !strings.Contains(body, "window.GOMODEL_DEMO_MODE=false") {
+		t.Error("expected demo mode global false in page HTML")
 	}
 }
 
 func TestIndex_UsesBasePathForGeneratedURLs(t *testing.T) {
-	h, err := NewWithBasePath("g/")
+	h, err := NewWithBasePath("/gw")
 	if err != nil {
 		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
+	body := serveIndex(t, h, "/gw/admin/dashboard").Body.String()
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Index(c); err != nil {
-		t.Fatalf("Index() returned error: %v", err)
+	if !strings.Contains(body, `window.GOMODEL_BASE_PATH="/gw"`) {
+		t.Errorf("expected injected base path /gw in page HTML")
 	}
-
-	body := rec.Body.String()
-	if !strings.Contains(body, `window.GOMODEL_BASE_PATH = basePath`) ||
-		!regexp.MustCompile(`const basePath = "\\?/g";`).MatchString(body) {
-		t.Errorf("expected base path bootstrap in page HTML")
+	if !regexp.MustCompile(`"/gw/admin/static/assets/index-[^"]+\.js`).MatchString(body) {
+		t.Errorf("expected base-path-prefixed script URL in page HTML")
 	}
-	if !regexp.MustCompile(`/g/admin/static/css/dashboard\.css\?v=[0-9a-f]+`).MatchString(body) {
-		t.Errorf("expected versioned dashboard CSS link to include base path")
-	}
-	if !regexp.MustCompile(`/g/admin/static/js/dashboard\.js\?v=[0-9a-f]+`).MatchString(body) {
-		t.Errorf("expected versioned dashboard JS link to include base path")
-	}
-	if !regexp.MustCompile(`/g/admin/static/js/modules/virtual-models\.js\?v=[0-9a-f]+`).MatchString(body) {
-		t.Errorf("expected versioned dashboard module JS link to include base path")
-	}
-	if !strings.Contains(body, `href="/g/admin/dashboard/overview"`) {
-		t.Errorf("expected dashboard navigation links to include base path")
-	}
-	if strings.Contains(body, `href="/admin/dashboard/overview"`) {
-		t.Errorf("expected dashboard navigation links not to point at root admin path")
+	if strings.Contains(body, `"/admin/static/`) {
+		t.Errorf("expected no unprefixed asset URLs in page HTML")
 	}
 }
 
-func TestStatic_ServesCSS(t *testing.T) {
+func TestStatic_ServesSPAAssets(t *testing.T) {
 	h, err := NewWithBasePath("/")
 	if err != nil {
 		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/css/dashboard.css", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Static(c); err != nil {
-		t.Fatalf("Static() returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.Len() == 0 {
-		t.Error("expected non-empty body for CSS file")
-	}
-}
-
-func TestStatic_ServesJS(t *testing.T) {
-	h, err := NewWithBasePath("/")
+	sub, err := fs.Sub(content, "static/dist")
 	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
+		t.Fatalf("fs.Sub returned error: %v", err)
 	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/dashboard.js", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Static(c); err != nil {
-		t.Fatalf("Static() returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.Len() == 0 {
-		t.Error("expected non-empty body for JS file")
-	}
-}
-
-func TestStatic_ServesModuleJS(t *testing.T) {
-	h, err := NewWithBasePath("/")
+	entries, err := fs.ReadDir(sub, "assets")
 	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
+		t.Fatalf("expected built assets directory in embed: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("expected built assets in embed, got none")
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/usage.js", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Static(c); err != nil {
-		t.Fatalf("Static() returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.Len() == 0 {
-		t.Error("expected non-empty body for module JS file")
-	}
-}
-
-func TestStatic_ServesProvidersModuleJS(t *testing.T) {
-	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/providers.js", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Static(c); err != nil {
-		t.Fatalf("Static() returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.Len() == 0 {
-		t.Error("expected non-empty body for providers module JS file")
-	}
-}
-
-func TestStatic_ServesVirtualModelsModuleJS(t *testing.T) {
-	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/virtual-models.js", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Static(c); err != nil {
-		t.Fatalf("Static() returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.Len() == 0 {
-		t.Error("expected non-empty body for virtual-models module JS file")
-	}
-}
-
-func TestStatic_ServesWorkflowsModuleJS(t *testing.T) {
-	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/workflows.js", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Static(c); err != nil {
-		t.Fatalf("Static() returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.Len() == 0 {
-		t.Error("expected non-empty body for workflows module JS file")
-	}
-}
-
-func TestStatic_ServesGuardrailsModuleJS(t *testing.T) {
-	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/guardrails.js", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Static(c); err != nil {
-		t.Fatalf("Static() returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.Len() == 0 {
-		t.Error("expected non-empty body for guardrails module JS file")
+	for _, entry := range entries {
+		rec := serveStatic(t, h, "/admin/static/assets/"+entry.Name())
+		if rec.Code != http.StatusOK {
+			t.Errorf("asset %s: expected 200, got %d", entry.Name(), rec.Code)
+		}
+		if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
+			t.Errorf("asset %s: expected immutable cache header, got %q", entry.Name(), cc)
+		}
 	}
 }
 
@@ -334,21 +157,20 @@ func TestStatic_ServesFavicon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/favicon.svg", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Static(c); err != nil {
-		t.Fatalf("Static() returned error: %v", err)
-	}
-
+	rec := serveStatic(t, h, "/admin/static/favicon.svg")
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
+		t.Errorf("expected 200 for favicon, got %d", rec.Code)
 	}
-	if rec.Body.Len() == 0 {
-		t.Error("expected non-empty body for favicon")
+}
+
+func TestStatic_ServesFonts(t *testing.T) {
+	h, err := NewWithBasePath("/")
+	if err != nil {
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
+	}
+	rec := serveStatic(t, h, "/admin/static/fonts/inter.css")
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for fonts/inter.css, got %d", rec.Code)
 	}
 }
 
@@ -357,90 +179,29 @@ func TestStatic_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/nonexistent.txt", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Static(c); err != nil {
-		t.Fatalf("Static() returned error: %v", err)
-	}
-
+	rec := serveStatic(t, h, "/admin/static/nope.js")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", rec.Code)
 	}
 }
 
-// TestIndex_HasNoExternalResources guards the offline guarantee: the rendered
-// page must load every script, style, and font from the embedded /admin/static
-// tree, never from a CDN or remote font host.
+// TestIndex_HasNoExternalResources keeps the dashboard self-contained: no
+// CDN scripts, styles, or fonts.
 func TestIndex_HasNoExternalResources(t *testing.T) {
 	h, err := NewWithBasePath("/")
 	if err != nil {
 		t.Fatalf("NewWithBasePath() returned error: %v", err)
 	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.Index(c); err != nil {
-		t.Fatalf("Index() returned error: %v", err)
-	}
-
-	// Match resources the browser actually fetches (src=, href=, CSS url()),
-	// including protocol-relative (//cdn...) URLs, while ignoring inline-SVG
-	// namespace URIs like http://www.w3.org/2000/svg.
-	loaded := regexp.MustCompile(`(?:src|href)=["'](?:https?:)?//|url\(\s*["']?(?:https?:)?//`)
-	if matches := loaded.FindAllString(rec.Body.String(), -1); len(matches) > 0 {
-		t.Errorf("expected no external (http/https) resources in page HTML, found: %v", matches)
-	}
-	for _, want := range []string{
-		`/admin/static/fonts/inter.css`,
-		`/admin/static/vendor/chart.umd.min.js`,
-		`/admin/static/vendor/alpine.min.js`,
-		`/admin/static/vendor/lucide.min.js`,
+	body := serveIndex(t, h, "/admin/dashboard").Body.String()
+	for _, marker := range []string{
+		"https://cdn.",
+		"http://cdn.",
+		"unpkg.com",
+		"jsdelivr.net",
+		"googleapis.com",
 	} {
-		if !strings.Contains(rec.Body.String(), want) {
-			t.Errorf("expected local asset %q in page HTML", want)
+		if strings.Contains(body, marker) {
+			t.Errorf("expected no external resource %q in page HTML", marker)
 		}
-	}
-}
-
-// TestStatic_ServesVendoredAssets confirms the vendored libraries and font
-// files are embedded and served, so the dashboard renders without network access.
-func TestStatic_ServesVendoredAssets(t *testing.T) {
-	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
-
-	paths := []string{
-		"/admin/static/vendor/chart.umd.min.js",
-		"/admin/static/vendor/alpine.min.js",
-		"/admin/static/vendor/lucide.min.js",
-		"/admin/static/fonts/inter.css",
-		"/admin/static/fonts/inter-latin.woff2",
-		"/admin/static/fonts/inter-latin-ext.woff2",
-	}
-	for _, path := range paths {
-		t.Run(path, func(t *testing.T) {
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodGet, path, nil)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
-
-			if err := h.Static(c); err != nil {
-				t.Fatalf("Static() returned error: %v", err)
-			}
-			if rec.Code != http.StatusOK {
-				t.Errorf("expected 200, got %d", rec.Code)
-			}
-			if rec.Body.Len() == 0 {
-				t.Errorf("expected non-empty body for %s", path)
-			}
-		})
 	}
 }

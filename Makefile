@@ -1,4 +1,4 @@
-.PHONY: all build run demo clean tidy mod-check test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
+.PHONY: all build run demo clean tidy mod-check frontend test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
 
 all: build
 
@@ -69,9 +69,14 @@ test:
 test-race:
 	go test -v -race -coverprofile=coverage.out ./cmd/... ./config/... ./ext/... ./internal/... ./run/...
 
+# Build the Svelte dashboard into internal/admin/dashboard/static/dist
+# (embedded into the Go binary; commit the dist output).
+frontend:
+	cd web/dashboard && npm ci --no-audit --no-fund && npm run build
+
 # Run dashboard JavaScript unit tests
 test-dashboard:
-	node --test internal/admin/dashboard/static/js/modules/*.test.cjs
+	cd web/dashboard && node --test "tests/*.test.js"
 
 # Run e2e tests (uses an in-process mock LLM server; no Docker required)
 test-e2e:

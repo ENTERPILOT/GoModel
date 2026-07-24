@@ -929,7 +929,7 @@ func TestAdminStaticAssets_SkipAuth(t *testing.T) {
 	})
 
 	// Static assets should be accessible without auth
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/css/dashboard.css", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/static/favicon.svg", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 

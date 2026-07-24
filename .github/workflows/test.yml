@@ -89,8 +89,27 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install frontend dependencies
+        run: cd web/dashboard && npm ci --no-audit --no-fund
+
       - name: Run dashboard JavaScript tests
         run: make test-dashboard
+
+      - name: Check dashboard sources
+        run: cd web/dashboard && npx svelte-check --tsconfig ./jsconfig.json
+
+      - name: Verify committed dashboard build is current
+        run: |
+          (cd web/dashboard && npm run build)
+          git diff --exit-code --stat -- internal/admin/dashboard/static/dist
+          # git diff ignores untracked files: a build emitting a new asset
+          # must also fail the check, or a clean checkout won't embed it.
+          untracked="$(git status --porcelain -- internal/admin/dashboard/static/dist)"
+          if [ -n "$untracked" ]; then
+            echo "Dashboard build produced uncommitted files:"
+            echo "$untracked"
+            exit 1
+          fi
 
   performance:
     name: Performance Guard

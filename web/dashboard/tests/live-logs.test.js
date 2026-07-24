@@ -1,0 +1,761 @@
+// Ported from internal/admin/dashboard/static/js/modules/live-logs.test.cjs
+// against the extracted pure logic in src/pages/audit-logs/live-logs-logic.js.
+// Transport-only legacy cases (fetch/base-path plumbing) are replaced by the
+// pure liveLogsStreamPath cursor test; everything else runs the exact merge
+// engine the Svelte singleton uses.
+
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  liveLogsMethods,
+  liveLogsStreamPath,
+} from "../src/pages/audit-logs/live-logs-logic.js";
+
+function createLiveLogsApp(overrides = {}) {
+  return {
+    liveLogsLastSeq: 0,
+    skippedLiveUsageByRequestId: null,
+    auditLog: { entries: [], total: 0, limit: 25, offset: 0 },
+    usageLog: { entries: [], total: 0, limit: 50, offset: 0 },
+    auditSearch: "",
+    auditMethod: "",
+    auditStatusCode: "",
+    auditStream: "",
+    usageLogSearch: "",
+    usageFilterModel: "",
+    usageFilterProvider: "",
+    usageFilterLabel: "",
+    usageFilterUserPath: "",
+    usageLogHideCached: false,
+    customStartDate: null,
+    customEndDate: null,
+    page: "audit-logs",
+    fetchUsageCalls: 0,
+    fetchAuditCalls: 0,
+    fetchUsage() {
+      this.fetchUsageCalls++;
+    },
+    fetchAuditLog() {
+      this.fetchAuditCalls++;
+    },
+    ...liveLogsMethods(),
+    ...overrides,
+  };
+}
+
+function liveReaderFromChunks(chunks) {
+  const encoder = new TextEncoder();
+  const values = chunks.map((chunk) => encoder.encode(chunk));
+  let index = 0;
+  return {
+    async read() {
+      if (index >= values.length) {
+        return { done: true };
+      }
+      return { done: false, value: values[index++] };
+    },
+  };
+}
+
+test("live logs stream path carries the replay cursor", () => {
+  assert.equal(liveLogsStreamPath(0), "/admin/live/logs?types=audit,usage");
+  assert.equal(liveLogsStreamPath(42), "/admin/live/logs?types=audit,usage&cursor=42");
+});
+
+test("live audit lifecycle events merge into one dashboard row by request id", () => {
+  const app = createLiveLogsApp();
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.started",
+    data: { id: "audit-1", request_id: "req-1", method: "POST", path: "/v1/chat/completions" },
+  });
+  app.applyLiveLogEvent({
+    seq: 2,
+    type: "audit.updated",
+    data: { id: "audit-1", request_id: "req-1", requested_model: "gpt-test", provider: "openai" },
+  });
+  app.applyLiveLogEvent({
+    seq: 3,
+    type: "audit.completed",
+    data: { id: "audit-1", request_id: "req-1", status_code: 200, duration_ns: 1000 },
+  });
+  app.applyLiveLogEvent({
+    seq: 4,
+    type: "audit.flushed",
+    data: { id: "audit-1", request_id: "req-1", status_code: 200, duration_ns: 1000 },
+  });
+
+  assert.equal(app.liveLogsLastSeq, 4);
+  assert.equal(app.auditLog.entries.length, 1);
+  assert.equal(app.auditLog.entries[0].requested_model, "gpt-test");
+  assert.equal(app.auditLog.entries[0].status_code, 200);
+  assert.equal(app.auditLog.entries[0]._live_state, "audit.flushed");
+  assert.equal(app.auditLog.entries[0]._live_pending, false);
+  assert.equal(app.auditLog.entries[0]._audit_flushed, true);
+});
+
+test("audit.stream events merge partial response bodies and keep rows pending", () => {
+  const app = createLiveLogsApp();
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.started",
+    data: { id: "audit-1", request_id: "req-1", method: "POST", path: "/v1/chat/completions" },
+  });
+  app.applyLiveLogEvent({
+    seq: 2,
+    type: "audit.stream",
+    data: {
+      id: "audit-1",
+      request_id: "req-1",
+      status_code: 200,
+      stream: true,
+      data: {
+        response_body: { choices: [{ index: 0, message: { role: "assistant", content: "partial" } }] },
+        response_body_partial: true,
+      },
+    },
+  });
+
+  const streaming = app.auditLog.entries[0];
+  assert.equal(streaming._response_partial, true);
+  assert.equal(streaming._live_pending, true);
+  assert.equal(streaming._live_state, "audit.stream");
+  assert.equal(streaming.data.response_body.choices[0].message.content, "partial");
+
+  app.applyLiveLogEvent({
+    seq: 3,
+    type: "audit.completed",
+    data: {
+      id: "audit-1",
+      request_id: "req-1",
+      status_code: 200,
+      duration_ns: 1000,
+      data: {
+        response_body: { choices: [{ index: 0, message: { role: "assistant", content: "final" } }] },
+      },
+    },
+  });
+
+  const completed = app.auditLog.entries[0];
+  assert.equal(completed._response_partial, false);
+  assert.equal(completed._live_state, "audit.completed");
+  assert.equal(completed.data.response_body.choices[0].message.content, "final");
+});
+
+test("live audit merges notify an open live conversation drawer", () => {
+  const app = createLiveLogsApp();
+  const seen = [];
+  app.refreshLiveConversation = (entry) => seen.push(entry);
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.started",
+    data: { id: "audit-1", request_id: "req-1" },
+  });
+  app.applyLiveLogEvent({
+    seq: 2,
+    type: "audit.stream",
+    data: { id: "audit-1", request_id: "req-1", data: { response_body: { choices: [] }, response_body_partial: true } },
+  });
+
+  assert.equal(seen.length, 2);
+  assert.equal(seen[1]._response_partial, true);
+});
+
+test("live audit removed event drops suppressed preview rows", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.entries = [{ id: "audit-1", request_id: "req-1" }];
+  app.auditLog.total = 1;
+
+  app.applyLiveLogEvent({
+    seq: 4,
+    type: "audit.removed",
+    data: { id: "audit-1", request_id: "req-1" },
+  });
+
+  assert.deepEqual(app.auditLog.entries, []);
+  assert.equal(app.auditLog.total, 0);
+});
+
+test("live audit removed event decrements total by removed row count", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.entries = [
+    { id: "audit-1", request_id: "req-1" },
+    { id: "audit-2", request_id: "req-1" },
+    { id: "audit-3", request_id: "req-3" },
+  ];
+  app.auditLog.total = 3;
+
+  app.applyLiveLogEvent({
+    seq: 5,
+    type: "audit.removed",
+    data: { request_id: "req-1" },
+  });
+
+  assert.deepEqual(app.auditLog.entries, [{ id: "audit-3", request_id: "req-3" }]);
+  assert.equal(app.auditLog.total, 1);
+});
+
+test("live audit inserts are blocked while a custom audit date range is active", () => {
+  const app = createLiveLogsApp();
+
+  app.customStartDate = new Date();
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.started",
+    data: { id: "audit-start", request_id: "req-start" },
+  });
+
+  app.customStartDate = null;
+  app.customEndDate = new Date();
+  app.applyLiveLogEvent({
+    seq: 2,
+    type: "audit.started",
+    data: { id: "audit-end", request_id: "req-end" },
+  });
+
+  assert.equal(app.auditLog.entries.length, 0);
+  assert.equal(app.auditLog.total, 0);
+});
+
+test("live audit inserts are blocked while filters or pagination are active", () => {
+  const app = createLiveLogsApp();
+  app.auditSearch = "gpt";
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.started",
+    data: { id: "audit-1", request_id: "req-1" },
+  });
+  assert.equal(app.auditLog.entries.length, 0);
+
+  app.auditSearch = "";
+  app.auditLog.offset = 25;
+  app.applyLiveLogEvent({
+    seq: 2,
+    type: "audit.started",
+    data: { id: "audit-2", request_id: "req-2" },
+  });
+  assert.equal(app.auditLog.entries.length, 0);
+});
+
+test("live audit inserts cap the preview buffer at the page limit", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.limit = 3;
+
+  for (let i = 1; i <= 5; i++) {
+    app.applyLiveLogEvent({
+      seq: i,
+      type: "audit.started",
+      data: { id: "audit-" + i, request_id: "req-" + i },
+    });
+  }
+
+  assert.equal(app.auditLog.entries.length, 3);
+  assert.equal(app.auditLog.total, 5);
+  assert.equal(app.auditLog.entries[0].id, "audit-5");
+  assert.equal(app.auditLog.entries[2].id, "audit-3");
+});
+
+test("live logs parser handles CRLF-separated SSE frames", async () => {
+  const app = createLiveLogsApp();
+
+  await app.consumeLiveLogsBody(liveReaderFromChunks([
+    'data: {"seq":1,"type":"heartbeat"}\r\n\r\n',
+    'data: {"seq":2,"type":"audit.started","data":{"id":"audit-1","request_id":"req-1"}}\r\n\r\n',
+  ]));
+
+  assert.equal(app.liveLogsLastSeq, 2);
+  assert.equal(app.auditLog.entries.length, 1);
+  assert.equal(app.auditLog.entries[0].id, "audit-1");
+});
+
+test("live logs parser joins split chunks and flushes a trailing frame", async () => {
+  const app = createLiveLogsApp();
+
+  await app.consumeLiveLogsBody(liveReaderFromChunks([
+    'data: {"seq":1,"type":"audit.star',
+    'ted","data":{"id":"audit-1","request_id":"req-1"}}\n\ndata: {"seq":2,"type":"heartbeat"}',
+  ]));
+
+  assert.equal(app.liveLogsLastSeq, 2);
+  assert.equal(app.auditLog.entries.length, 1);
+});
+
+test("live usage event updates usage log and enriches matching audit row", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.entries = [{ id: "audit-1", request_id: "req-1" }];
+
+  app.applyLiveLogEvent({
+    seq: 5,
+    type: "usage.completed",
+    data: {
+      id: "usage-1",
+      request_id: "req-1",
+      model: "gpt-test",
+      provider: "openai",
+      input_tokens: 10,
+      output_tokens: 4,
+      total_tokens: 14,
+    },
+  });
+
+  assert.equal(app.usageLog.entries.length, 1);
+  assert.equal(app.usageLog.entries[0].id, "usage-1");
+  assert.equal(app.auditLog.entries[0].usage.total_tokens, 14);
+  assert.equal(app.auditLog.entries[0]._usage_live_pending, true);
+
+  app.applyLiveLogEvent({
+    seq: 6,
+    type: "usage.flushed",
+    data: {
+      id: "usage-1",
+      request_id: "req-1",
+      model: "gpt-test",
+      provider: "openai",
+      input_tokens: 10,
+      output_tokens: 4,
+      total_tokens: 14,
+    },
+  });
+
+  assert.equal(app.usageLog.entries[0]._live_pending, false);
+  assert.equal(app.auditLog.entries[0]._usage_flushed, true);
+});
+
+test("usage events forward the type to the live-token hook", () => {
+  const app = createLiveLogsApp();
+  const noted = [];
+  app.noteLiveTokenUsage = (type) => noted.push(type);
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "usage.completed",
+    data: { id: "usage-1", request_id: "req-1", total_tokens: 14 },
+  });
+
+  assert.deepEqual(noted, ["usage.completed"]);
+});
+
+test("cached live usage events stay visible in default usage preview", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.entries = [{
+    id: "audit-cache",
+    request_id: "req-cache",
+    cache_type: "exact",
+    _live: true,
+  }];
+
+  app.applyLiveLogEvent({
+    seq: 7,
+    type: "usage.completed",
+    data: {
+      id: "usage-cache",
+      request_id: "req-cache",
+      cache_type: "exact",
+      model: "gpt-test",
+      provider: "openai",
+      input_tokens: 10,
+      output_tokens: 4,
+      total_tokens: 14,
+      total_cost: 0,
+    },
+  });
+
+  assert.equal(app.liveLogsLastSeq, 7);
+  assert.equal(app.usageLog.entries.length, 1);
+  assert.equal(app.usageLog.total, 1);
+  assert.equal(app.usageLog.entries[0].id, "usage-cache");
+  assert.equal(app.usageLog.entries[0]._live_pending, true);
+  assert.equal(app.auditLog.entries[0].usage.total_tokens, 14);
+  assert.equal(app.auditLog.entries[0]._usage_live_pending, true);
+  assert.equal(app.auditLog.entries[0]._usage_live_state, "usage.completed");
+});
+
+test("hidden cached live usage attaches to later audit previews", () => {
+  const app = createLiveLogsApp();
+  app.usageLogHideCached = true;
+
+  app.applyLiveLogEvent({
+    seq: 11,
+    type: "usage.completed",
+    data: {
+      id: "usage-cache",
+      request_id: "req-cache",
+      cache_type: "exact",
+      model: "gpt-test",
+      provider: "openai",
+      input_tokens: 10,
+      output_tokens: 4,
+      total_tokens: 14,
+    },
+  });
+
+  assert.equal(app.usageLog.entries.length, 0);
+
+  app.applyLiveLogEvent({
+    seq: 12,
+    type: "audit.completed",
+    data: {
+      id: "audit-cache",
+      request_id: "req-cache",
+      cache_type: "exact",
+      status_code: 200,
+    },
+  });
+
+  assert.equal(app.auditLog.entries[0].usage.total_tokens, 14);
+  assert.equal(app.auditLog.entries[0]._usage_live_state, "usage.completed");
+  assert.equal(app.auditLog.entries[0]._usage_live_pending, true);
+  assert.equal(app.skippedLiveUsageByRequestId["req-cache"], undefined);
+
+  app.applyLiveLogEvent({
+    seq: 13,
+    type: "usage.flushed",
+    data: {
+      id: "usage-cache",
+      request_id: "req-cache",
+      cache_type: "exact",
+    },
+  });
+
+  assert.equal(app.usageLog.entries.length, 0);
+  assert.equal(app.auditLog.entries[0].usage.total_tokens, 14);
+  assert.equal(app.auditLog.entries[0]._usage_flushed, true);
+  assert.equal(app.auditLog.entries[0]._usage_live_pending, false);
+
+  app.usageLogHideCached = false;
+  app.applyLiveLogEvent({
+    seq: 14,
+    type: "usage.flushed",
+    data: {
+      id: "usage-cache",
+      request_id: "req-cache",
+      cache_type: "exact",
+    },
+  });
+
+  assert.equal(app.usageLog.entries.length, 1);
+  assert.equal(app.usageLog.entries[0].total_tokens, 14);
+  assert.equal(app.skippedLiveUsageByRequestId["req-cache"], undefined);
+});
+
+test("cached updates to visible live usage rows move to skipped when cached rows are hidden", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.entries = [{ id: "audit-cache", request_id: "req-cache" }];
+
+  app.applyLiveLogEvent({
+    seq: 15,
+    type: "usage.completed",
+    data: {
+      id: "usage-cache",
+      request_id: "req-cache",
+      model: "gpt-test",
+      provider: "openai",
+      input_tokens: 10,
+      output_tokens: 4,
+      total_tokens: 14,
+    },
+  });
+
+  assert.equal(app.usageLog.entries.length, 1);
+  assert.equal(app.usageLog.total, 1);
+
+  app.usageLogHideCached = true;
+  app.applyLiveLogEvent({
+    seq: 16,
+    type: "usage.flushed",
+    data: {
+      id: "usage-cache",
+      request_id: "req-cache",
+      cache_type: "exact",
+    },
+  });
+
+  assert.equal(app.usageLog.entries.length, 0);
+  assert.equal(app.usageLog.total, 0);
+  assert.equal(app.auditLog.entries[0]._usage_flushed, true);
+  assert.equal(app.auditLog.entries[0].usage.total_tokens, 14);
+  assert.equal(app.skippedLiveUsageByRequestId["req-cache"].total_tokens, 14);
+});
+
+test("live usage audit summary uses normalized split prompt-cache tokens", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.entries = [{ id: "audit-cache", request_id: "req-cache" }];
+
+  app.applyLiveLogEvent({
+    seq: 17,
+    type: "usage.completed",
+    data: {
+      id: "usage-cache",
+      request_id: "req-cache",
+      input_tokens: 100,
+      uncached_input_tokens: 100,
+      cached_input_tokens: 50,
+      cache_write_input_tokens: 25,
+      output_tokens: 20,
+      total_tokens: 120,
+    },
+  });
+
+  const summary = app.auditLog.entries[0].usage;
+  assert.equal(summary.input_tokens, 175);
+  assert.equal(summary.uncached_input_tokens, 100);
+  assert.equal(summary.cached_input_tokens, 50);
+  assert.equal(summary.cache_write_input_tokens, 25);
+  assert.equal(summary.output_tokens, 20);
+  assert.equal(summary.total_tokens, 195);
+  assert.equal(summary.cached_input_ratio, 50 / 175);
+  assert.equal(summary.estimated_cached_characters, 200);
+});
+
+test("audit detail merge preserves existing live lifecycle state", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.entries = [{
+    id: "audit-1",
+    request_id: "req-1",
+    _live: true,
+    _live_state: "audit.completed",
+    _live_pending: true,
+    _audit_flushed: false,
+    data: {
+      workflow_features: { cache: true },
+    },
+  }];
+
+  const merged = app.mergeLiveAuditEntry({
+    id: "audit-1",
+    request_id: "req-1",
+    data: {
+      request_headers: { authorization: "Bearer redacted" },
+    },
+  }, "audit.detail");
+
+  assert.equal(merged._live, true);
+  assert.equal(merged._live_state, "audit.completed");
+  assert.equal(merged._live_pending, true);
+  assert.equal(merged._audit_flushed, false);
+  assert.equal(merged._detail_loaded, true);
+  assert.deepEqual(merged.data.workflow_features, { cache: true });
+  assert.deepEqual(merged.data.request_headers, { authorization: "Bearer redacted" });
+});
+
+test("live audit lifecycle patches merge captured detail data", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.entries = [{
+    id: "audit-1",
+    request_id: "req-1",
+    _detail_loaded: true,
+    data: {
+      request_headers: { authorization: "Bearer redacted" },
+      response_body: { id: "chatcmpl_123" },
+    },
+  }];
+
+  app.applyLiveLogEvent({
+    seq: 9,
+    type: "audit.flushed",
+    data: {
+      id: "audit-1",
+      request_id: "req-1",
+      status_code: 200,
+      data: {
+        response_headers: { "x-request-id": "req-1" },
+      },
+    },
+  });
+
+  assert.equal(app.auditLog.entries[0].status_code, 200);
+  assert.equal(app.auditLog.entries[0]._live_state, "audit.flushed");
+  assert.equal(app.auditLog.entries[0]._live_pending, false);
+  assert.deepEqual(app.auditLog.entries[0].data.request_headers, { authorization: "Bearer redacted" });
+  assert.deepEqual(app.auditLog.entries[0].data.response_headers, { "x-request-id": "req-1" });
+  assert.deepEqual(app.auditLog.entries[0].data.response_body, { id: "chatcmpl_123" });
+});
+
+test("late queued events do not regress flushed live rows to pending", () => {
+  const app = createLiveLogsApp();
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.flushed",
+    data: { id: "audit-1", request_id: "req-1", status_code: 200, duration_ns: 1000 },
+  });
+  app.applyLiveLogEvent({
+    seq: 2,
+    type: "audit.completed",
+    data: { id: "audit-1", request_id: "req-1", status_code: 200, duration_ns: 1000 },
+  });
+
+  assert.equal(app.auditLog.entries[0]._live_state, "audit.flushed");
+  assert.equal(app.auditLog.entries[0]._live_pending, false);
+  assert.equal(app.auditLog.entries[0]._audit_flushed, true);
+
+  app.auditLog.entries[0].usage = { entries: 1 };
+  app.applyLiveLogEvent({
+    seq: 3,
+    type: "usage.flushed",
+    data: { id: "usage-1", request_id: "req-1", total_tokens: 14 },
+  });
+  app.applyLiveLogEvent({
+    seq: 4,
+    type: "usage.completed",
+    data: { id: "usage-1", request_id: "req-1", total_tokens: 14 },
+  });
+
+  assert.equal(app.usageLog.entries[0]._live_state, "usage.flushed");
+  assert.equal(app.usageLog.entries[0]._live_pending, false);
+  assert.equal(app.usageLog.entries[0]._usage_flushed, true);
+  assert.equal(app.auditLog.entries[0]._usage_live_state, "usage.flushed");
+  assert.equal(app.auditLog.entries[0]._usage_live_pending, false);
+  assert.equal(app.auditLog.entries[0]._usage_flushed, true);
+});
+
+test("flushed expanded live audit rows retry detail fetch", () => {
+  const app = createLiveLogsApp();
+  let detailFetches = 0;
+  app.auditLog.entries = [{
+    id: "audit-1",
+    request_id: "req-1",
+    _live: true,
+    _live_state: "audit.completed",
+    _live_pending: true,
+    _audit_flushed: false,
+  }];
+  app.isAuditEntryExpanded = (entry) => String(entry && entry.id || "") === "audit-1";
+  app.fetchAuditEntryDetail = (entry) => {
+    detailFetches++;
+    assert.equal(entry.id, "audit-1");
+    assert.equal(entry._live_state, "audit.flushed");
+  };
+
+  app.applyLiveLogEvent({
+    seq: 5,
+    type: "audit.flushed",
+    data: { id: "audit-1", request_id: "req-1", status_code: 200 },
+  });
+
+  assert.equal(detailFetches, 1);
+});
+
+test("failed live events clear pending state", () => {
+  const app = createLiveLogsApp();
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.completed",
+    data: { id: "audit-1", request_id: "req-1" },
+  });
+  app.applyLiveLogEvent({
+    seq: 2,
+    type: "audit.failed",
+    data: { id: "audit-1", request_id: "req-1" },
+  });
+  app.applyLiveLogEvent({
+    seq: 3,
+    type: "usage.completed",
+    data: { id: "usage-1", request_id: "req-1", total_tokens: 14 },
+  });
+  app.applyLiveLogEvent({
+    seq: 4,
+    type: "usage.failed",
+    data: { id: "usage-1", request_id: "req-1", total_tokens: 14 },
+  });
+
+  assert.equal(app.auditLog.entries[0]._live_state, "audit.failed");
+  assert.equal(app.auditLog.entries[0]._live_pending, false);
+  assert.equal(app.usageLog.entries[0]._live_state, "usage.failed");
+  assert.equal(app.usageLog.entries[0]._live_pending, false);
+  assert.equal(app.auditLog.entries[0]._usage_live_state, "usage.failed");
+  assert.equal(app.auditLog.entries[0]._usage_live_pending, false);
+});
+
+test("cached live usage events are suppressed when hide-cached toggle is on", () => {
+  const app = createLiveLogsApp();
+  app.usageLogHideCached = true;
+
+  app.applyLiveLogEvent({
+    seq: 10,
+    type: "usage.completed",
+    data: {
+      id: "usage-cache",
+      request_id: "req-cache",
+      cache_type: "exact",
+      model: "gpt-test",
+      provider: "openai",
+      input_tokens: 10,
+      output_tokens: 4,
+      total_tokens: 14,
+    },
+  });
+
+  assert.equal(app.usageLog.entries.length, 0);
+  assert.equal(app.usageLog.total, 0);
+
+  app.applyLiveLogEvent({
+    seq: 11,
+    type: "usage.completed",
+    data: {
+      id: "usage-fresh",
+      request_id: "req-fresh",
+      model: "gpt-test",
+      provider: "openai",
+      input_tokens: 10,
+      output_tokens: 4,
+      total_tokens: 14,
+    },
+  });
+
+  assert.equal(app.usageLog.entries.length, 1);
+  assert.equal(app.usageLog.entries[0].id, "usage-fresh");
+});
+
+test("live reset asks normal REST endpoints to resync source of truth", () => {
+  const app = createLiveLogsApp();
+
+  app.applyLiveLogEvent({ seq: 8, type: "reset" });
+
+  assert.equal(app.liveLogsLastSeq, 8);
+  assert.equal(app.fetchUsageCalls, 1);
+  assert.equal(app.fetchAuditCalls, 1);
+});
+
+test("audit detail fetch gating: skips captured data, waits for live flush", () => {
+  const app = createLiveLogsApp();
+
+  // Already-captured detail data: no fetch.
+  assert.equal(app.auditEntryShouldFetchDetail({
+    id: "audit-1",
+    request_id: "req-1",
+    data: { request_headers: { authorization: "Bearer redacted" } },
+  }), false);
+
+  // Live row still streaming: wait for the flush.
+  assert.equal(app.auditEntryShouldFetchDetail({
+    id: "audit-1",
+    _live: true,
+    _live_state: "audit.updated",
+    _live_pending: true,
+    _audit_flushed: false,
+    data: { request_body: { model: "gpt-test" } },
+  }), false);
+
+  // Flushed live row fetches persisted detail even with preview data.
+  assert.equal(app.auditEntryShouldFetchDetail({
+    id: "audit-1",
+    _live: true,
+    _live_state: "audit.flushed",
+    _live_pending: false,
+    _audit_flushed: true,
+    data: { request_body: { model: "gpt-test" } },
+  }), true);
+
+  // Compact (workflow-only) data on a persisted row fetches detail.
+  assert.equal(app.auditEntryShouldFetchDetail({
+    id: "audit-1",
+    data: { workflow_features: { cache: true } },
+  }), true);
+});

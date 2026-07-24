@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -226,19 +227,29 @@ func TestAdminDashboard_Enabled_E2E(t *testing.T) {
 		html := string(body)
 
 		// Guard against regressions that return a 200 with an empty/placeholder
-		// document. The dashboard layout pins these markers.
+		// document. The built SPA entry point pins these markers.
 		assert.Contains(t, html, "<title>GoModel Dashboard</title>",
 			"dashboard HTML should carry the expected <title>")
-		assert.Contains(t, html, `<meta name="robots" content="noindex, nofollow, nosnippet, noimageindex">`,
+		assert.Contains(t, html, `<meta name="robots" content="noindex, nofollow, nosnippet, noimageindex"`,
 			"dashboard HTML should prevent search engine indexing")
-		assert.Contains(t, html, "css/dashboard.css",
+		assert.Contains(t, html, "window.GOMODEL_BASE_PATH",
+			"dashboard HTML should carry the injected runtime globals")
+		assert.Regexp(t, `/admin/static/assets/index-[^"]+\.css`, html,
 			"dashboard HTML should reference its stylesheet bundle")
-		assert.Contains(t, html, "js/dashboard.js",
+		assert.Regexp(t, `/admin/static/assets/index-[^"]+\.js`, html,
 			"dashboard HTML should reference its script bundle")
 	})
 
 	t.Run("static CSS returns 200 with css content", func(t *testing.T) {
-		resp, err := http.Get(ts.URL + "/admin/static/css/dashboard.css")
+		indexResp, err := http.Get(ts.URL + "/admin/dashboard")
+		require.NoError(t, err)
+		defer closeBody(indexResp)
+		indexBody, err := io.ReadAll(indexResp.Body)
+		require.NoError(t, err)
+		matches := regexp.MustCompile(`/admin/static/assets/index-[^"]+\.css`).FindString(string(indexBody))
+		require.NotEmpty(t, matches, "index HTML must reference a CSS bundle")
+
+		resp, err := http.Get(ts.URL + matches)
 		require.NoError(t, err)
 		defer closeBody(resp)
 

@@ -1,0 +1,403 @@
+// Pure budget helpers, kept free of Svelte/store imports so node:test can
+// exercise them directly (the relative format.js import resolves under both
+// Vite and plain node).
+
+import { formatCost } from "../../lib/utils/format.js";
+
+export function defaultBudgetForm() {
+  return {
+    user_path: "/",
+    period: "daily",
+    period_seconds: 86400,
+    amount: "",
+    source: "manual",
+  };
+}
+
+export function budgetPeriodOptions() {
+  return [
+    { value: "hourly", label: "Hourly" },
+    { value: "daily", label: "Daily" },
+    { value: "weekly", label: "Weekly" },
+    { value: "monthly", label: "Monthly" },
+    { value: "custom", label: "Custom seconds" },
+  ];
+}
+
+export function budgetPeriodSeconds(period) {
+  switch (
+    String(period || "")
+      .trim()
+      .toLowerCase()
+  ) {
+    case "hourly":
+      return 3600;
+    case "daily":
+      return 86400;
+    case "weekly":
+      return 604800;
+    case "monthly":
+      return 2592000;
+    default:
+      return 0;
+  }
+}
+
+export function budgetPeriodFromSeconds(seconds) {
+  switch (Number(seconds || 0)) {
+    case 3600:
+      return "hourly";
+    case 86400:
+      return "daily";
+    case 604800:
+      return "weekly";
+    case 2592000:
+      return "monthly";
+    default:
+      return "custom";
+  }
+}
+
+export function budgetKey(item) {
+  return (
+    String((item && item.user_path) || "") +
+    ":" +
+    String((item && item.period_seconds) || "")
+  );
+}
+
+export function findExistingBudget(budgets, payload) {
+  if (!payload || !Array.isArray(budgets)) {
+    return null;
+  }
+  const key = budgetKey(payload);
+  return budgets.find((item) => budgetKey(item) === key) || null;
+}
+
+export function budgetUserPathValidationError(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "User path is required.";
+  }
+  const raw = trimmed.startsWith("/") ? trimmed : "/" + trimmed;
+  const segments = raw.split("/");
+  for (const part of segments) {
+    const segment = String(part || "").trim();
+    if (!segment) {
+      continue;
+    }
+    if (segment === "." || segment === "..") {
+      return 'User path cannot contain "." or ".." segments.';
+    }
+    if (segment.includes(":")) {
+      return 'User path cannot contain ":" segments.';
+    }
+  }
+  return "";
+}
+
+export function normalizeBudgetUserPath(value) {
+  if (budgetUserPathValidationError(value)) {
+    return "";
+  }
+  const trimmed = String(value || "").trim();
+  const raw = trimmed.startsWith("/") ? trimmed : "/" + trimmed;
+  const segments = raw.split("/");
+  const canonical = [];
+  for (const part of segments) {
+    const segment = String(part || "").trim();
+    if (segment) {
+      canonical.push(segment);
+    }
+  }
+  return canonical.length ? "/" + canonical.join("/") : "/";
+}
+
+// budgetInputUserPath keeps the form input controlled with a leading slash.
+export function budgetInputUserPath(value) {
+  const body = String(value || "")
+    .trimStart()
+    .replace(/^\/+/, "");
+  return "/" + body;
+}
+
+export function normalizeBudgetListPayload(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (payload && Array.isArray(payload.budgets)) {
+    return payload.budgets;
+  }
+  return [];
+}
+
+function budgetFilterText(item) {
+  const seconds = Number((item && item.period_seconds) || 0);
+  return [
+    item && item.user_path,
+    budgetPeriodLabel(item),
+    budgetPeriodFromSeconds(seconds),
+    seconds ? String(seconds) + "s" : "",
+    seconds ? String(seconds) + " seconds" : "",
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function sortBudgets(items, sortBy) {
+  const sorted = Array.isArray(items) ? items.slice() : [];
+  const by = String(sortBy || "user_path");
+  sorted.sort((a, b) => {
+    const pathCompare = String((a && a.user_path) || "").localeCompare(
+      String((b && b.user_path) || ""),
+    );
+    const periodCompare =
+      Number((b && b.period_seconds) || 0) - Number((a && a.period_seconds) || 0);
+    if (by === "period") {
+      return periodCompare || pathCompare;
+    }
+    return pathCompare || periodCompare;
+  });
+  return sorted;
+}
+
+export function filterAndSortBudgets(budgets, filter, sortBy) {
+  const list = Array.isArray(budgets) ? budgets : [];
+  const needle = String(filter || "")
+    .trim()
+    .toLowerCase();
+  const items = needle
+    ? list.filter((item) => budgetFilterText(item).includes(needle))
+    : list.slice();
+  return sortBudgets(items, sortBy);
+}
+
+// buildBudgetFormPayload validates the editor form and returns
+// { payload, error } — payload is null when validation fails.
+export function buildBudgetFormPayload(form) {
+  const f = form || {};
+  const userPathError = budgetUserPathValidationError(f.user_path);
+  if (userPathError) {
+    return { payload: null, error: userPathError };
+  }
+  const amount = Number(f.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { payload: null, error: "Amount must be greater than 0." };
+  }
+  const period = String(f.period || "").trim();
+  let periodSeconds = budgetPeriodSeconds(period);
+  if (period === "custom") {
+    periodSeconds = Number(f.period_seconds);
+  }
+  if (!Number.isFinite(periodSeconds) || periodSeconds <= 0) {
+    return { payload: null, error: "Period seconds must be greater than 0." };
+  }
+  return {
+    payload: {
+      user_path: normalizeBudgetUserPath(f.user_path),
+      period_seconds: Math.trunc(periodSeconds),
+      amount,
+      source: String(f.source || "manual").trim() || "manual",
+    },
+    error: "",
+  };
+}
+
+// Request bodies for the /admin/budgets endpoints (the exact shapes the
+// API expects).
+export function budgetPutBody(payload) {
+  return {
+    user_path: payload.user_path,
+    budget_key: { period_seconds: payload.period_seconds },
+    amount: payload.amount,
+  };
+}
+
+export function budgetDeleteBody(item) {
+  return {
+    user_path: item.user_path,
+    budget_key: { period_seconds: item.period_seconds },
+  };
+}
+
+export function budgetResetOneBody(item) {
+  return {
+    user_path: item.user_path,
+    period_seconds: item.period_seconds,
+  };
+}
+
+export function budgetAmountLabel(value) {
+  return formatCost(value);
+}
+
+export function budgetOverrideDialogMessage(payload, existing) {
+  const p = payload || {};
+  const e = existing || {};
+  const label =
+    String(p.user_path || e.user_path || "") +
+    " " +
+    budgetPeriodLabel({
+      period_seconds: p.period_seconds || e.period_seconds,
+      period_label: e.period_label,
+    });
+  return (
+    'A budget for "' +
+    label +
+    '" already exists. Saving will override the current ' +
+    budgetAmountLabel(e.amount) +
+    " limit with " +
+    budgetAmountLabel(p.amount) +
+    "."
+  );
+}
+
+function budgetRatio(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+  return parsed;
+}
+
+function budgetPercentFromRatio(value, clamp) {
+  const ratio = budgetRatio(value);
+  const bounded = clamp ? Math.min(ratio, 1) : ratio;
+  return Math.round(bounded * 1000) / 10;
+}
+
+export function budgetUsageRatio(item) {
+  return budgetRatio(item && item.usage_ratio);
+}
+
+export function budgetUsagePercent(item) {
+  return budgetPercentFromRatio(budgetUsageRatio(item), true);
+}
+
+export function budgetPeriodPercent(item) {
+  return budgetPercentFromRatio(item && item.period_ratio, true);
+}
+
+export function budgetUsagePercentLabel(item) {
+  return (
+    budgetPercentFromRatio(budgetUsageRatio(item), false)
+      .toFixed(1)
+      .replace(/\.0$/, "") + "%"
+  );
+}
+
+export function budgetPeriodPercentLabel(item) {
+  return budgetPeriodPercent(item).toFixed(1).replace(/\.0$/, "") + "%";
+}
+
+export function budgetPeriodLabel(item) {
+  const seconds = Number((item && item.period_seconds) || 0);
+  switch (seconds) {
+    case 3600:
+      return "Hourly";
+    case 86400:
+      return "Daily";
+    case 604800:
+      return "Weekly";
+    case 2592000:
+      return "Monthly";
+    default: {
+      const label = String((item && item.period_label) || "").trim();
+      return label ? "Custom " + label : "Custom " + String(seconds || "") + "s";
+    }
+  }
+}
+
+export function budgetPeriodClass(item) {
+  const seconds = Number((item && item.period_seconds) || 0);
+  switch (seconds) {
+    case 3600:
+      return "budget-period-label-hourly";
+    case 86400:
+      return "budget-period-label-daily";
+    case 604800:
+      return "budget-period-label-weekly";
+    case 2592000:
+      return "budget-period-label-monthly";
+    default:
+      return "budget-period-label-custom";
+  }
+}
+
+export function budgetPeriodBarClass(item) {
+  return budgetPeriodClass(item).replace(
+    "budget-period-label-",
+    "budget-bar-fill-period-",
+  );
+}
+
+export function budgetPeriodTrackClass(item) {
+  return budgetPeriodClass(item).replace(
+    "budget-period-label-",
+    "budget-bar-track-period-",
+  );
+}
+
+export function budgetPeriodIcon(item) {
+  const seconds = Number((item && item.period_seconds) || 0);
+  switch (seconds) {
+    case 3600:
+      return "clock";
+    case 86400:
+      return "sun";
+    case 604800:
+      return "calendar-days";
+    case 2592000:
+      return "calendar";
+    default:
+      return "settings-2";
+  }
+}
+
+function formatBudgetPeriodSeconds(seconds) {
+  const normalized = Math.max(0, Math.trunc(Number(seconds || 0)));
+  return normalized + " " + (normalized === 1 ? "second" : "seconds");
+}
+
+export function budgetPeriodDurationLabel(item) {
+  const seconds = Number((item && item.period_seconds) || 0);
+  switch (seconds) {
+    case 3600:
+      return "1 hour";
+    case 86400:
+      return "1 day";
+    case 604800:
+      return "1 week";
+    case 2592000:
+      return "1 month";
+    default:
+      return formatBudgetPeriodSeconds(seconds);
+  }
+}
+
+export function budgetSourceLabel(item) {
+  const source = String((item && item.source) || "").trim();
+  return source || "manual";
+}
+
+export function budgetSourceTitle(item) {
+  const source = budgetSourceLabel(item).toLowerCase();
+  if (source === "manual") {
+    return "Created from the dashboard.";
+  }
+  if (source === "config") {
+    return "Loaded from configuration.";
+  }
+  return "Budget source: " + source;
+}
+
+export function budgetRemainingLabel(item) {
+  const remaining = Number(item && item.remaining);
+  if (!Number.isFinite(remaining)) {
+    return "";
+  }
+  if (remaining < 0) {
+    return formatCost(Math.abs(remaining)) + " over";
+  }
+  return formatCost(remaining) + " remaining";
+}

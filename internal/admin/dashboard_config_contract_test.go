@@ -8,19 +8,19 @@ import (
 	"testing"
 )
 
-// workflowsJSPath holds the dashboard module that mirrors DashboardConfigResponse.
-const workflowsJSPath = "dashboard/static/js/modules/workflows.js"
+// runtimeConfigStorePath holds the dashboard store that mirrors DashboardConfigResponse.
+const runtimeConfigStorePath = "../../web/dashboard/src/lib/stores/runtimeConfig.svelte.js"
 
 var (
-	allowlistBlockRe = regexp.MustCompile(`(?s)workflowRuntimeConfigKeys\(\)\s*\{\s*return\s*\[(.*?)\]`)
-	allowlistKeyRe   = regexp.MustCompile(`'([A-Z0-9_]+)'`)
+	allowlistBlockRe = regexp.MustCompile(`(?s)const CONFIG_KEYS = \[(.*?)\]`)
+	allowlistKeyRe   = regexp.MustCompile(`"([A-Z0-9_]+)"`)
 )
 
 // TestDashboardConfigContract_MatchesFrontendAllowlist pins the runtime-config
 // contract to the dashboard's client-side allowlist.
 //
-// fetchWorkflowRuntimeConfig() copies only allowlisted keys out of the
-// /admin/runtime/config payload, so a flag the backend emits but the JS omits
+// The runtimeConfig store copies only allowlisted keys out of the
+// /admin/runtime/config payload, so a flag the backend emits but the store omits
 // is silently dropped and its feature gate falls back to its default. That is
 // how RATE_LIMITS_ENABLED once left the Rate Limits nav item visible with the
 // feature switched off. Keep both lists in lockstep.
@@ -37,13 +37,13 @@ func TestDashboardConfigContract_MatchesFrontendAllowlist(t *testing.T) {
 		t.Fatal("DashboardConfigResponse exposes no json-tagged fields")
 	}
 
-	source, err := os.ReadFile(workflowsJSPath)
+	source, err := os.ReadFile(runtimeConfigStorePath)
 	if err != nil {
-		t.Fatalf("read %s: %v", workflowsJSPath, err)
+		t.Fatalf("read %s: %v", runtimeConfigStorePath, err)
 	}
 	block := allowlistBlockRe.FindSubmatch(source)
 	if block == nil {
-		t.Fatalf("workflowRuntimeConfigKeys() allowlist not found in %s", workflowsJSPath)
+		t.Fatalf("CONFIG_KEYS allowlist not found in %s", runtimeConfigStorePath)
 	}
 
 	frontend := map[string]bool{}
@@ -53,12 +53,12 @@ func TestDashboardConfigContract_MatchesFrontendAllowlist(t *testing.T) {
 
 	for key := range backend {
 		if !frontend[key] {
-			t.Errorf("%s is served by /admin/runtime/config but missing from workflowRuntimeConfigKeys() in %s; the dashboard will drop it and fall back to the gate's default", key, workflowsJSPath)
+			t.Errorf("%s is served by /admin/runtime/config but missing from CONFIG_KEYS in %s; the dashboard will drop it and fall back to the gate's default", key, runtimeConfigStorePath)
 		}
 	}
 	for key := range frontend {
 		if !backend[key] {
-			t.Errorf("workflowRuntimeConfigKeys() allowlists %s, but DashboardConfigResponse never emits it", key)
+			t.Errorf("CONFIG_KEYS allowlists %s, but DashboardConfigResponse never emits it", key)
 		}
 	}
 }
