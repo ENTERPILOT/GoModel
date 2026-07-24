@@ -2,6 +2,7 @@ package cohere
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"strconv"
@@ -147,10 +148,25 @@ func (s *cohereStreamState) consume(out io.Writer, raw string) error {
 				"arguments": call.Function.Arguments,
 			},
 		}}})
+	case "citation-start":
+		citations := bytes.TrimSpace(event.Delta.Message.Citations)
+		if len(citations) == 0 || bytes.Equal(citations, []byte("null")) {
+			return nil
+		}
+		if citations[0] == '[' {
+			return s.writeDelta(out, map[string]any{"citations": json.RawMessage(citations)})
+		}
+		return s.writeDelta(out, map[string]any{"citations": []json.RawMessage{
+			core.CloneRawJSON(citations),
+		}})
+	case "citation-end":
+		// Cohere's citation-end event is only a boundary marker; all citation
+		// data is carried by the corresponding citation-start event.
+		return nil
 	case "message-end":
-		if event.Delta.Error != "" {
+		if failure := cohereGenerationError(event.Delta.FinishReason, event.Delta.Error); failure != nil {
 			s.finished = true
-			return writeStreamError(out, event.Delta.Error)
+			return writeStreamError(out, failure.Message)
 		}
 		finish := normalizeFinishReason(event.Delta.FinishReason)
 		if s.sawToolCalls {

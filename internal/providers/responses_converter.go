@@ -56,6 +56,7 @@ func NewOpenAIResponsesStreamConverter(reader io.ReadCloser, model, provider str
 // openAIStreamChunk is the subset of an OpenAI chat.completion.chunk the
 // converter consumes. Typed decoding avoids a map[string]any per chunk.
 type openAIStreamChunk struct {
+	Error   json.RawMessage `json:"error"`
 	Usage   json.RawMessage `json:"usage"`
 	Choices []struct {
 		Delta struct {
@@ -192,6 +193,10 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 		sc.processChunkTolerant(data)
 		return
 	}
+	if len(bytes.TrimSpace(chunk.Error)) > 0 && !bytes.Equal(bytes.TrimSpace(chunk.Error), []byte("null")) {
+		sc.appendFailedEvents(chunk.Error)
+		return
+	}
 
 	// Capture usage if present and object-shaped (OpenAI sends it in the
 	// final chunk); anything else must not leak into response.completed.
@@ -220,6 +225,13 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 	var chunk map[string]any
 	if err := json.Unmarshal(data, &chunk); err != nil {
+		return
+	}
+	if streamErr, present := chunk["error"]; present && streamErr != nil {
+		raw, err := json.Marshal(streamErr)
+		if err == nil {
+			sc.appendFailedEvents(raw)
+		}
 		return
 	}
 
@@ -334,6 +346,56 @@ func (sc *OpenAIResponsesStreamConverter) appendCompletedEvents() {
 		return
 	}
 	sc.buffer.AppendString("event: response.completed\ndata: ")
+	sc.buffer.AppendBytes(jsonData)
+	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+}
+
+func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage) {
+	if sc.sentDone {
+		return
+	}
+	sc.sentDone = true
+
+	var upstream struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+		Code    any    `json:"code"`
+	}
+	_ = json.Unmarshal(raw, &upstream)
+	code, _ := upstream.Code.(string)
+	if code == "" {
+		code = upstream.Type
+	}
+	if code == "" {
+		code = "provider_error"
+	}
+	if strings.TrimSpace(upstream.Message) == "" {
+		upstream.Message = "provider stream failed"
+	}
+
+	responseData := map[string]any{
+		"id":         sc.responseID,
+		"object":     "response",
+		"status":     "failed",
+		"model":      sc.model,
+		"provider":   sc.provider,
+		"created_at": sc.createdAt,
+		"output":     []map[string]any{},
+		"error": map[string]any{
+			"code":    code,
+			"message": upstream.Message,
+		},
+	}
+	failedEvent := map[string]any{
+		"type":     "response.failed",
+		"response": responseData,
+	}
+	jsonData, err := json.Marshal(failedEvent)
+	if err != nil {
+		slog.Error("failed to marshal response.failed event", "error", err, "response_id", sc.responseID)
+		return
+	}
+	sc.buffer.AppendString("event: response.failed\ndata: ")
 	sc.buffer.AppendBytes(jsonData)
 	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
 }

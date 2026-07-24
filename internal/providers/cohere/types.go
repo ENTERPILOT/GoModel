@@ -146,6 +146,7 @@ type streamDeltaMessage struct {
 	Content   streamDeltaContent `json:"content"`
 	ToolCalls *toolCall          `json:"tool_calls,omitempty"`
 	ToolPlan  string             `json:"tool_plan,omitempty"`
+	Citations json.RawMessage    `json:"citations,omitempty"`
 }
 
 type streamDeltaContent struct {

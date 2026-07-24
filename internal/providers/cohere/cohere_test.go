@@ -94,9 +94,16 @@ func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
 		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"stop":                  json.RawMessage(`"END"`),
 			"max_completion_tokens": json.RawMessage(`250`),
-			"response_format":       json.RawMessage(`{"type":"json_object"}`),
-			"top_k":                 json.RawMessage(`20`),
-			"thinking":              json.RawMessage(`{"type":"enabled","token_budget":500}`),
+			"response_format": json.RawMessage(`{
+				"type":"json_schema",
+				"json_schema":{
+					"name":"weather",
+					"strict":true,
+					"schema":{"type":"object","properties":{"summary":{"type":"string"}}}
+				}
+			}`),
+			"top_k":    json.RawMessage(`20`),
+			"thinking": json.RawMessage(`{"type":"enabled","token_budget":500}`),
 		}),
 	}
 
@@ -136,6 +143,17 @@ func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
 	if captured["k"] != float64(20) {
 		t.Fatalf("k = %#v", captured["k"])
 	}
+	responseFormat := captured["response_format"].(map[string]any)
+	if responseFormat["type"] != "json_object" {
+		t.Fatalf("response_format.type = %#v, want json_object", responseFormat["type"])
+	}
+	jsonSchema, ok := responseFormat["json_schema"].(map[string]any)
+	if !ok || jsonSchema["type"] != "object" {
+		t.Fatalf("response_format.json_schema = %#v, want translated schema", responseFormat["json_schema"])
+	}
+	if _, leaked := responseFormat["name"]; leaked {
+		t.Fatalf("response_format leaked OpenAI wrapper fields: %#v", responseFormat)
+	}
 
 	if resp.ID != "cohere-id" || resp.Model != req.Model || resp.Provider != "cohere" {
 		t.Fatalf("response identity = %#v", resp)
@@ -158,6 +176,50 @@ func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
 	}
 	if resp.Usage.PromptTokensDetails == nil || resp.Usage.PromptTokensDetails.CachedTokens != 2 {
 		t.Fatalf("prompt token details = %#v", resp.Usage.PromptTokensDetails)
+	}
+}
+
+func TestChatCompletionReturnsCohereGenerationFailures(t *testing.T) {
+	tests := []struct {
+		finishReason string
+		wantStatus   int
+		wantMessage  string
+	}{
+		{finishReason: "ERROR", wantStatus: http.StatusBadGateway, wantMessage: "generation failed"},
+		{finishReason: "TIMEOUT", wantStatus: http.StatusGatewayTimeout, wantMessage: "generation timed out"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.finishReason, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, `{
+					"id":"failed-generation",
+					"finish_reason":"`+tt.finishReason+`",
+					"message":{"role":"assistant","content":[]},
+					"usage":{}
+				}`)
+			}))
+			defer server.Close()
+
+			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "command-a",
+				Messages: []core.Message{{Role: "user", Content: "hello"}},
+			})
+			if resp != nil {
+				t.Fatalf("ChatCompletion() response = %#v, want nil", resp)
+			}
+			gatewayErr, ok := err.(*core.GatewayError)
+			if !ok {
+				t.Fatalf("ChatCompletion() error = %#v, want GatewayError", err)
+			}
+			if gatewayErr.Type != core.ErrorTypeProvider || gatewayErr.StatusCode != tt.wantStatus {
+				t.Fatalf("ChatCompletion() error = %#v, want provider status %d", gatewayErr, tt.wantStatus)
+			}
+			if !strings.Contains(strings.ToLower(gatewayErr.Message), tt.wantMessage) {
+				t.Fatalf("ChatCompletion() message = %q, want %q", gatewayErr.Message, tt.wantMessage)
+			}
+		})
 	}
 }
 
@@ -186,6 +248,12 @@ func TestStreamChatCompletionConvertsCohereEvents(t *testing.T) {
 			``,
 			`event: tool-call-delta`,
 			`data: {"type":"tool-call-delta","index":0,"delta":{"message":{"tool_calls":{"function":{"arguments":"{\"q\":\"x\"}"}}}}}`,
+			``,
+			`event: citation-start`,
+			`data: {"type":"citation-start","index":0,"delta":{"message":{"citations":{"start":0,"end":5,"text":"Hello","sources":[{"type":"document","id":"doc-1"}]}}}}`,
+			``,
+			`event: citation-end`,
+			`data: {"type":"citation-end","index":0}`,
 			``,
 			`event: message-end`,
 			`data: {"type":"message-end","delta":{"finish_reason":"TOOL_CALL","usage":{"tokens":{"input_tokens":8,"output_tokens":3},"cached_tokens":1}}}`,
@@ -221,6 +289,7 @@ func TestStreamChatCompletionConvertsCohereEvents(t *testing.T) {
 		`"tool_plan":"Use lookup."`,
 		`"name":"lookup"`,
 		`"arguments":"{\"q\":\"x\"}"`,
+		`"citations":[{"start":0,"end":5,"text":"Hello","sources":[{"type":"document","id":"doc-1"}]}]`,
 		`"finish_reason":"tool_calls"`,
 		`"prompt_tokens":8`,
 		`"cached_tokens":1`,
@@ -229,6 +298,79 @@ func TestStreamChatCompletionConvertsCohereEvents(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Errorf("stream missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestStreamChatCompletionReturnsGenerationFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
+			``,
+			`data: {"type":"message-end","delta":{"finish_reason":"TIMEOUT"}}`,
+			``,
+		}, "\n"))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "command-a",
+		Messages: []core.Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChatCompletion() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	output := string(body)
+	if !strings.Contains(output, `"type":"provider_error"`) ||
+		!strings.Contains(output, `"message":"Cohere generation timed out"`) {
+		t.Fatalf("stream = %s, want provider timeout error", output)
+	}
+	if strings.Contains(output, `"finish_reason":"stop"`) {
+		t.Fatalf("stream fabricated a successful stop finish:\n%s", output)
+	}
+}
+
+func TestStreamResponsesPropagatesGenerationFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
+			``,
+			`data: {"type":"message-end","delta":{"finish_reason":"ERROR","error":"capacity exhausted"}}`,
+			``,
+		}, "\n"))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "command-a",
+		Input: "hello",
+	})
+	if err != nil {
+		t.Fatalf("StreamResponses() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	output := string(body)
+	if !strings.Contains(output, "event: response.failed") ||
+		!strings.Contains(output, `"status":"failed"`) ||
+		!strings.Contains(output, `"message":"capacity exhausted"`) {
+		t.Fatalf("Responses stream = %s, want response.failed", output)
+	}
+	if strings.Contains(output, "event: response.completed") {
+		t.Fatalf("Responses stream fabricated response.completed:\n%s", output)
 	}
 }
 
@@ -372,6 +514,15 @@ func TestInvalidCohereRequestsReturnClientErrors(t *testing.T) {
 		Model:      "command-a",
 		Messages:   []core.Message{{Role: "user", Content: "hello"}},
 		ToolChoice: "required",
+	}, false)
+	assertInvalidRequest(t, err)
+
+	_, err = toCohereChatRequest(&core.ChatRequest{
+		Model:    "command-a",
+		Messages: []core.Message{{Role: "user", Content: "hello"}},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"response_format": json.RawMessage(`{"type":"json_schema","json_schema":{"name":"missing-schema"}}`),
+		}),
 	}, false)
 	assertInvalidRequest(t, err)
 

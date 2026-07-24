@@ -29,6 +29,9 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	}, &upstream); err != nil {
 		return nil, err
 	}
+	if err := cohereGenerationError(upstream.FinishReason, ""); err != nil {
+		return nil, err
+	}
 	return fromCohereChatResponse(&upstream, req.Model), nil
 }
 
@@ -77,7 +80,9 @@ func toCohereChatRequest(req *core.ChatRequest, stream bool) (*chatRequest, erro
 		P:           req.TopP,
 		Stream:      stream,
 	}
-	copyChatExtraFields(out, req.ExtraFields)
+	if err := copyChatExtraFields(out, req.ExtraFields); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -290,7 +295,7 @@ func cohereToolChoice(value any) (choice, selectedName string, disableTools bool
 	}
 }
 
-func copyChatExtraFields(out *chatRequest, fields core.UnknownJSONFields) {
+func copyChatExtraFields(out *chatRequest, fields core.UnknownJSONFields) error {
 	out.StopSequences = stopSequences(fields.Lookup("stop"))
 	if len(out.StopSequences) == 0 {
 		out.StopSequences = fields.Lookup("stop_sequences")
@@ -303,13 +308,56 @@ func copyChatExtraFields(out *chatRequest, fields core.UnknownJSONFields) {
 		out.K = fields.Lookup("k")
 	}
 	out.Logprobs = fields.Lookup("logprobs")
-	out.ResponseFormat = fields.Lookup("response_format")
+	responseFormat, err := cohereResponseFormat(fields.Lookup("response_format"))
+	if err != nil {
+		return err
+	}
+	out.ResponseFormat = responseFormat
 	out.SafetyMode = fields.Lookup("safety_mode")
 	out.Documents = fields.Lookup("documents")
 	out.CitationOptions = fields.Lookup("citation_options")
 	out.StrictTools = fields.Lookup("strict_tools")
 	out.Thinking = fields.Lookup("thinking")
 	out.Priority = fields.Lookup("priority")
+	return nil
+}
+
+func cohereResponseFormat(raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+
+	var format map[string]any
+	if err := json.Unmarshal(raw, &format); err != nil {
+		return nil, core.NewInvalidRequestError("response_format must be an object", err)
+	}
+	formatType, _ := format["type"].(string)
+	if strings.ToLower(strings.TrimSpace(formatType)) != "json_schema" {
+		return raw, nil
+	}
+
+	openAISchema, ok := format["json_schema"].(map[string]any)
+	if !ok {
+		return nil, core.NewInvalidRequestError("response_format.json_schema must be an object", nil)
+	}
+	schema, ok := openAISchema["schema"]
+	if !ok {
+		// Be liberal with clients that put the schema directly under
+		// json_schema instead of using OpenAI's name/schema wrapper.
+		if _, directSchema := openAISchema["type"]; !directSchema {
+			return nil, core.NewInvalidRequestError("response_format.json_schema.schema is required", nil)
+		}
+		schema = openAISchema
+	}
+
+	converted, err := json.Marshal(map[string]any{
+		"type":        "json_object",
+		"json_schema": schema,
+	})
+	if err != nil {
+		return nil, core.NewInvalidRequestError("response_format.json_schema must be JSON-serializable", err)
+	}
+	return converted, nil
 }
 
 func stopSequences(raw json.RawMessage) json.RawMessage {
@@ -414,11 +462,38 @@ func normalizeFinishReason(reason string) string {
 		return "length"
 	case "TOOL_CALL":
 		return "tool_calls"
-	case "COMPLETE", "STOP_SEQUENCE", "ERROR", "TIMEOUT", "":
+	case "COMPLETE", "STOP_SEQUENCE", "":
 		return "stop"
 	default:
 		return "stop"
 	}
+}
+
+func cohereGenerationError(reason, detail string) *core.GatewayError {
+	normalized := strings.ToUpper(strings.TrimSpace(reason))
+	detail = strings.TrimSpace(detail)
+	if detail == "" && normalized != "ERROR" && normalized != "TIMEOUT" {
+		return nil
+	}
+
+	status := http.StatusBadGateway
+	message := detail
+	switch normalized {
+	case "TIMEOUT":
+		status = http.StatusGatewayTimeout
+		if message == "" {
+			message = "Cohere generation timed out"
+		}
+	case "ERROR":
+		if message == "" {
+			message = "Cohere generation failed"
+		}
+	default:
+		if message == "" {
+			message = "Cohere generation failed"
+		}
+	}
+	return core.NewProviderError("cohere", status, message, nil)
 }
 
 func toCoreUsage(value usage) core.Usage {
