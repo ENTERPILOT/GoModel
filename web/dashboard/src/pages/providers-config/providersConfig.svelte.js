@@ -9,6 +9,7 @@
 
 import { getJSON, sendJSON, isAbortError } from "$lib/api/client.js";
 import { confirmDialog } from "$lib/stores/confirm.svelte.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import {
   defaultProviderCredentialForm,
@@ -23,8 +24,9 @@ class ProvidersConfigState {
   rows = $state([]);
   available = $state(true);
   loading = $state(false);
+  // Load and in-form errors only; mutation feedback goes through the
+  // flash store.
   error = $state("");
-  notice = $state("");
   filter = $state("");
 
   formOpen = $state(false);
@@ -109,7 +111,6 @@ class ProvidersConfigState {
     this.formMode = "create";
     this.advancedOpen = false;
     this.error = "";
-    this.notice = "";
     this.form = defaultProviderCredentialForm();
     this.formOpen = true;
     if (!this.typesLoaded) {
@@ -124,7 +125,6 @@ class ProvidersConfigState {
     this.formMode = "edit";
     this.advancedOpen = false;
     this.error = "";
-    this.notice = "";
     this.form = providerCredentialRowToForm(row);
     this.formOpen = true;
     if (!this.typesLoaded) {
@@ -168,7 +168,6 @@ class ProvidersConfigState {
 
     const payload = buildProviderCredentialPayload(this.form);
     this.error = "";
-    this.notice = "";
     this.formSubmitting = true;
     try {
       const result = await sendJSON("/admin/provider-credentials", "PUT", payload, {
@@ -192,10 +191,10 @@ class ProvidersConfigState {
         return;
       }
 
-      await this.fetchPage();
-      this.notice = 'Provider "' + payload.name + '" saved.';
+      flash.success('Provider "' + payload.name + '" saved.');
       this.closeForm();
       this.#refreshInventory();
+      await this.fetchPage();
     } catch (e) {
       console.error("Failed to save provider credential:", e);
       this.error = "Failed to save provider credential.";
@@ -207,8 +206,6 @@ class ProvidersConfigState {
   async performDelete(name) {
     this.deleteSubmitting = true;
     this.deletingName = name;
-    this.error = "";
-    this.notice = "";
     try {
       const result = await sendJSON(
         "/admin/provider-credentials/" + encodeURIComponent(name),
@@ -219,34 +216,30 @@ class ProvidersConfigState {
       if (result.stale) return;
       if (result.status === 503) {
         this.available = false;
-        this.error = "Provider credential management is unavailable.";
-        confirmDialog.error = this.error;
+        confirmDialog.error = "Provider credential management is unavailable.";
         return;
       }
       if (!result.ok) {
-        if (result.status === 401) {
-          this.error = "Authentication required.";
-        } else {
-          this.error = providerCredentialErrorMessage(
-            result.data,
-            "Failed to delete provider credential.",
-          );
-        }
-        confirmDialog.error = this.error;
+        confirmDialog.error =
+          result.status === 401
+            ? "Authentication required."
+            : providerCredentialErrorMessage(
+                result.data,
+                "Failed to delete provider credential.",
+              );
         return;
       }
 
-      await this.fetchPage();
+      flash.success('Provider "' + name + '" deleted.');
+      confirmDialog.close();
       if (this.formOpen && this.form.name === name) {
         this.closeForm();
       }
-      this.notice = 'Provider "' + name + '" deleted.';
-      confirmDialog.close();
       this.#refreshInventory();
+      await this.fetchPage();
     } catch (e) {
       console.error("Failed to delete provider credential:", e);
-      this.error = "Failed to delete provider credential.";
-      confirmDialog.error = this.error;
+      confirmDialog.error = "Failed to delete provider credential.";
     } finally {
       this.deleteSubmitting = false;
       this.deletingName = "";
@@ -267,8 +260,6 @@ class ProvidersConfigState {
     if (row && row.managed) {
       return;
     }
-    this.error = "";
-    this.notice = "";
     confirmDialog.open({
       title: "Delete Provider",
       titleId: "providerCredentialDeleteDialogTitle",

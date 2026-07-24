@@ -53,13 +53,8 @@
   {#if (!store.managementEnabled() || !store.budgetsAvailable) && !auth.authError}
     <div class="alert alert-warning">Budget management is unavailable.</div>
   {/if}
-  {#if store.error && !auth.authError && !store.formOpen}
+  {#if store.error && !auth.authError}
     <p class="form-error" role="alert" aria-live="assertive">{store.error}</p>
-  {/if}
-  {#if store.notice && !store.formOpen}
-    <div class="alert alert-success" role="status" aria-live="polite">
-      {store.notice}
-    </div>
   {/if}
   {#if store.loading && !auth.authError}
     <LoadingState label="Loading budgets..." />

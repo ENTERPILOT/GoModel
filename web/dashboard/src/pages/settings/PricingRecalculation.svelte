@@ -2,6 +2,7 @@
   // Usage pricing recalculation (POST /admin/usage/recalculate-pricing),
   // gated on the USAGE_PRICING_RECALCULATION_ENABLED runtime flag and
   // guarded by the shared typed-confirmation dialog ("recalculate").
+  import { flash } from "$lib/stores/flash.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { dateRange } from "$lib/stores/dateRange.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
@@ -18,8 +19,6 @@
 
   let userPath = $state("");
   let selector = $state("");
-  let notice = $state("");
-  let error = $state("");
   let loading = $state(false);
 
   const enabled = $derived(
@@ -28,13 +27,12 @@
 
   function openDialog() {
     if (!enabled) {
-      error = "Usage pricing recalculation is unavailable.";
+      flash.error("Usage pricing recalculation is unavailable.");
       return;
     }
     if (loading) {
       return;
     }
-    error = "";
     confirmDialog.open({
       title: "Recalculate Pricing",
       titleId: "pricingRecalculateDialogTitle",
@@ -51,15 +49,13 @@
 
   async function recalculate() {
     if (!enabled) {
-      error = "Usage pricing recalculation is unavailable.";
+      flash.error("Usage pricing recalculation is unavailable.");
       return;
     }
     if (loading) {
       return;
     }
     loading = true;
-    notice = "";
-    error = "";
     try {
       const payload = pricingRecalculatePayload(
         {
@@ -82,17 +78,15 @@
         return;
       }
       if (!result.ok) {
-        error = "Unable to recalculate pricing.";
-        confirmDialog.error = error;
+        confirmDialog.error = "Unable to recalculate pricing.";
         return;
       }
       confirmDialog.close();
-      notice = pricingRecalculateSummary(result.data);
+      flash.success(pricingRecalculateSummary(result.data));
       await usageData.fetchUsage();
     } catch (e) {
       console.error("Failed to recalculate pricing:", e);
-      error = "Unable to recalculate pricing.";
-      confirmDialog.error = error;
+      confirmDialog.error = "Unable to recalculate pricing.";
     } finally {
       loading = false;
     }
@@ -158,18 +152,6 @@
         <span>Recalculate Pricing</span>
       </button>
     </div>
-  </div>
-  <div>
-    {#if notice}
-      <div class="alert alert-success settings-refresh-alert" role="status" aria-live="polite">
-        {notice}
-      </div>
-    {/if}
-    {#if error}
-      <div class="alert alert-warning settings-refresh-alert" role="alert" aria-live="assertive">
-        {error}
-      </div>
-    {/if}
   </div>
 {/if}
 

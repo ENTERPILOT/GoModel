@@ -1,6 +1,7 @@
 // Model pricing overrides state for the Models page.
 
 import { errorMessage, getJSON, sendJSON } from "$lib/api/client.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import {
   GLOBAL_PRICING_SELECTOR,
   PRICE_FIELDS,
@@ -21,8 +22,9 @@ import {
 class PricingOverridesStore {
   modelPricingOverridesAvailable = $state(true);
   modelPricingOverrideViews = $state([]);
+  // Load and in-form errors only; mutation feedback goes through the
+  // flash store.
   modelPricingOverrideError = $state("");
-  modelPricingOverrideNotice = $state("");
   modelPricingOverrideFormOpen = $state(false);
   modelPricingOverrideSubmitting = $state(false);
   modelPricingOverrideFormHasExistingOverride = $state(false);
@@ -154,7 +156,6 @@ class PricingOverridesStore {
     const opts = options || {};
     this.modelPricingOverrideFormOpen = true;
     this.modelPricingOverrideError = "";
-    this.modelPricingOverrideNotice = "";
     this.modelPricingOverrideFormDisplayName = opts.displayName || opts.selector || "Pricing";
     this.modelPricingOverrideFormScope = opts.scope || "";
     this.modelPricingOverrideFormScopeOptions = Array.isArray(opts.scopeOptions)
@@ -285,7 +286,6 @@ class PricingOverridesStore {
 
     this.modelPricingOverrideSubmitting = true;
     this.modelPricingOverrideError = "";
-    this.modelPricingOverrideNotice = "";
     try {
       const result = await sendJSON("/admin/model-pricing-overrides", "PUT", requestPayload, {
         label: "model pricing override",
@@ -306,9 +306,9 @@ class PricingOverridesStore {
         return;
       }
       this.modelPricingOverridesAvailable = true;
-      await this.fetchModelPricingOverrides();
       this.closeModelPricingOverrideForm();
-      this.modelPricingOverrideNotice = "Model pricing saved.";
+      flash.success("Model pricing saved.");
+      await this.fetchModelPricingOverrides();
     } catch (e) {
       console.error("Failed to save model pricing override:", e);
       this.modelPricingOverrideError = "Failed to save model pricing.";
@@ -328,7 +328,6 @@ class PricingOverridesStore {
 
     this.modelPricingOverrideSubmitting = true;
     this.modelPricingOverrideError = "";
-    this.modelPricingOverrideNotice = "";
     try {
       const result = await sendJSON("/admin/model-pricing-overrides", "DELETE", { selector }, {
         label: "model pricing override",
@@ -351,9 +350,9 @@ class PricingOverridesStore {
         }
       }
       this.modelPricingOverridesAvailable = true;
-      await this.fetchModelPricingOverrides();
       this.closeModelPricingOverrideForm();
-      this.modelPricingOverrideNotice = "Model pricing override removed.";
+      flash.success("Model pricing override removed.");
+      await this.fetchModelPricingOverrides();
     } catch (e) {
       console.error("Failed to delete model pricing override:", e);
       this.modelPricingOverrideError = "Failed to remove model pricing override.";

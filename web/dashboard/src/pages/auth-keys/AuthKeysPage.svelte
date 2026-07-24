@@ -45,9 +45,6 @@
   {#if store.error && !auth.authError && !store.formOpen}
     <p class="form-error" role="alert" aria-live="assertive">{store.error}</p>
   {/if}
-  {#if store.notice && !store.formOpen}
-    <p class="form-hint">{store.notice}</p>
-  {/if}
 
   {#if store.available && !auth.authError}
     <p class="form-hint auth-keys-help-notice">

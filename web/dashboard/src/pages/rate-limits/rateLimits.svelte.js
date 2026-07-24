@@ -3,6 +3,7 @@
 // ./rateLimitsLogic.js.
 
 import { errorMessage, getJSON, sendJSON } from "$lib/api/client.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import * as logic from "./rateLimitsLogic.js";
 
@@ -12,8 +13,8 @@ class RateLimitsStore {
   rateLimitsLoading = $state(false);
   rateLimitFetchPromise = null;
   rateLimitFilter = $state("");
+  // Load failures only; mutation feedback goes through the flash store.
   rateLimitError = $state("");
-  rateLimitNotice = $state("");
   rateLimitFormOpen = $state(false);
   rateLimitFormSubmitting = $state(false);
   rateLimitFormError = $state("");
@@ -171,8 +172,6 @@ class RateLimitsStore {
   openRateLimitForm(item) {
     this.rateLimitEditing = !!item;
     this.rateLimitFormError = "";
-    this.rateLimitError = "";
-    this.rateLimitNotice = "";
     if (item) {
       const periodSeconds = Number(item.period_seconds || 0);
       this.rateLimitEditingOriginal = {
@@ -266,9 +265,11 @@ class RateLimitsStore {
         return;
       }
       this.closeRateLimitForm();
-      this.rateLimitNotice = moved
-        ? "Rate limit moved; live counters restarted."
-        : "Rate limit saved.";
+      flash.success(
+        moved
+          ? "Rate limit moved; live counters restarted."
+          : "Rate limit saved.",
+      );
     } catch (e) {
       console.error("Failed to save rate limit:", e);
       this.rateLimitFormError = "Unable to save rate limit.";
@@ -312,8 +313,6 @@ class RateLimitsStore {
       return;
     }
     this.rateLimitDeletingKey = key;
-    this.rateLimitError = "";
-    this.rateLimitNotice = "";
     try {
       const result = await sendJSON(
         "/admin/rate-limits",
@@ -329,17 +328,14 @@ class RateLimitsStore {
         return;
       }
       if (!result.ok) {
-        this.rateLimitError = errorMessage(
-          result,
-          "Unable to delete rate limit.",
-        );
+        flash.error(errorMessage(result, "Unable to delete rate limit."));
         return;
       }
       this.rateLimits = logic.normalizeRateLimitListPayload(result.data);
-      this.rateLimitNotice = "Rate limit deleted.";
+      flash.success("Rate limit deleted.");
     } catch (e) {
       console.error("Failed to delete rate limit:", e);
-      this.rateLimitError = "Unable to delete rate limit.";
+      flash.error("Unable to delete rate limit.");
     } finally {
       this.rateLimitDeletingKey = "";
     }
@@ -351,8 +347,6 @@ class RateLimitsStore {
       return;
     }
     this.rateLimitResettingKey = key;
-    this.rateLimitError = "";
-    this.rateLimitNotice = "";
     try {
       const result = await sendJSON(
         "/admin/rate-limits/reset-one",
@@ -368,17 +362,14 @@ class RateLimitsStore {
         return;
       }
       if (!result.ok) {
-        this.rateLimitError = errorMessage(
-          result,
-          "Unable to reset rate limit.",
-        );
+        flash.error(errorMessage(result, "Unable to reset rate limit."));
         return;
       }
       this.rateLimits = logic.normalizeRateLimitListPayload(result.data);
-      this.rateLimitNotice = "Rate limit counters reset.";
+      flash.success("Rate limit counters reset.");
     } catch (e) {
       console.error("Failed to reset rate limit:", e);
-      this.rateLimitError = "Unable to reset rate limit.";
+      flash.error("Unable to reset rate limit.");
     } finally {
       this.rateLimitResettingKey = "";
     }

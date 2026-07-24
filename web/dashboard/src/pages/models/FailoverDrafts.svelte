@@ -40,17 +40,6 @@
       <LoadingState label="Generating failover drafts..." class="failover-drafts-loading" />
     {/if}
 
-    {#if !failover.failoverGenerating && failover.failoverNotice && !failover.failoverError}
-      <div
-        class="alert alert-success failover-draft-alert"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {failover.failoverNotice}
-      </div>
-    {/if}
-
     {#if !failover.failoverGenerating && failover.failoverGeneratedRules.length > 0}
       <div class="failover-draft-toolbar">
         <div class="filter-input-wrap">
@@ -178,10 +167,6 @@
 
 .failover-draft-toggle-all {
     flex: 0 0 auto;
-  }
-
-.failover-draft-alert {
-    margin: 0;
   }
 
 .failover-draft-list {
