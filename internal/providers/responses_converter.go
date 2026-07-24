@@ -357,12 +357,15 @@ func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage
 	sc.sentDone = true
 
 	var upstream struct {
-		Type    string `json:"type"`
-		Message string `json:"message"`
-		Code    any    `json:"code"`
+		Type    string          `json:"type"`
+		Message string          `json:"message"`
+		Code    json.RawMessage `json:"code"`
 	}
-	_ = json.Unmarshal(raw, &upstream)
-	code, _ := upstream.Code.(string)
+	if err := json.Unmarshal(raw, &upstream); err != nil {
+		_ = json.Unmarshal(raw, &upstream.Message)
+	}
+	var code string
+	_ = json.Unmarshal(upstream.Code, &code)
 	if code == "" {
 		code = upstream.Type
 	}
