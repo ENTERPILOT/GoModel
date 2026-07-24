@@ -3,6 +3,7 @@ package cohere
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -49,7 +50,7 @@ func convertChatStream(body io.ReadCloser, out *io.PipeWriter, model string, inc
 		line := strings.TrimRight(scanner.Text(), "\r")
 		if line == "" {
 			if err := state.consume(out, data.String()); err != nil {
-				_ = out.CloseWithError(err)
+				closeStreamWithError(out, err)
 				return
 			}
 			data.Reset()
@@ -64,12 +65,14 @@ func convertChatStream(body io.ReadCloser, out *io.PipeWriter, model string, inc
 	}
 	if data.Len() > 0 {
 		if err := state.consume(out, data.String()); err != nil {
-			_ = out.CloseWithError(err)
+			closeStreamWithError(out, err)
 			return
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		_ = out.CloseWithError(err)
+		closeStreamWithError(out, core.NewProviderError(
+			"cohere", 502, "failed to read Cohere stream", err,
+		))
 		return
 	}
 	if !state.finished {
@@ -79,6 +82,29 @@ func convertChatStream(body io.ReadCloser, out *io.PipeWriter, model string, inc
 		}
 	}
 	_, _ = io.WriteString(out, "data: [DONE]\n\n")
+	_ = out.Close()
+}
+
+// closeStreamWithError converts adapter read and decoding failures into the
+// same OpenAI-compatible error chunk used for upstream generation failures.
+// Closing normally after [DONE] lets the Responses converter emit its terminal
+// response.failed event instead of surfacing a raw pipe error to the client.
+func closeStreamWithError(out *io.PipeWriter, err error) {
+	message := "Cohere stream failed"
+	var gatewayErr *core.GatewayError
+	if errors.As(err, &gatewayErr) && strings.TrimSpace(gatewayErr.Message) != "" {
+		message = gatewayErr.Message
+	} else if err != nil && strings.TrimSpace(err.Error()) != "" {
+		message = err.Error()
+	}
+	if writeErr := writeStreamError(out, message); writeErr != nil {
+		_ = out.CloseWithError(writeErr)
+		return
+	}
+	if _, writeErr := io.WriteString(out, "data: [DONE]\n\n"); writeErr != nil {
+		_ = out.CloseWithError(writeErr)
+		return
+	}
 	_ = out.Close()
 }
 

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -373,6 +374,75 @@ func TestStreamResponsesPropagatesGenerationFailure(t *testing.T) {
 	}
 	if strings.Contains(output, "event: response.completed") {
 		t.Fatalf("Responses stream fabricated response.completed:\n%s", output)
+	}
+}
+
+func TestStreamResponsesPropagatesAdapterFailures(t *testing.T) {
+	tests := []struct {
+		name               string
+		body               string
+		contentLengthExtra int
+		wantMessage        string
+	}{
+		{
+			name: "malformed event",
+			body: strings.Join([]string{
+				`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
+				``,
+				`data: {not-json}`,
+				``,
+			}, "\n"),
+			wantMessage: "failed to parse Cohere stream event",
+		},
+		{
+			name: "upstream read failure",
+			body: strings.Join([]string{
+				`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
+				``,
+				`data: {"type":"content-delta","delta":{"message":{"content":{"text":"partial"}}}}`,
+				``,
+			}, "\n"),
+			contentLengthExtra: 100,
+			wantMessage:        "failed to read Cohere stream",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				if tt.contentLengthExtra > 0 {
+					w.Header().Set("Content-Length", strconv.Itoa(len(tt.body)+tt.contentLengthExtra))
+				}
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer server.Close()
+
+			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+			stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+				Model: "command-a",
+				Input: "hello",
+			})
+			if err != nil {
+				t.Fatalf("StreamResponses() error = %v", err)
+			}
+			defer stream.Close()
+
+			body, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatalf("read stream: %v", err)
+			}
+			output := string(body)
+			if !strings.Contains(output, "event: response.failed") ||
+				!strings.Contains(output, `"status":"failed"`) ||
+				!strings.Contains(output, `"message":"`+tt.wantMessage+`"`) ||
+				!strings.Contains(output, "data: [DONE]") {
+				t.Fatalf("Responses stream = %s, want terminal failure %q", output, tt.wantMessage)
+			}
+			if strings.Contains(output, "event: response.completed") {
+				t.Fatalf("Responses stream fabricated response.completed:\n%s", output)
+			}
+		})
 	}
 }
 
