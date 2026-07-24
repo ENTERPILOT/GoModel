@@ -151,11 +151,16 @@ func TestSQLiteAuthKeyDashboardAccessRoundTrip(t *testing.T) {
 		if len(keys) != len(want) {
 			t.Fatalf("List() len = %d, want %d", len(keys), len(want))
 		}
+		seen := make(map[string]bool, len(keys))
 		for _, key := range keys {
 			wantAccess, expected := want[key.ID]
 			if !expected {
 				t.Fatalf("List() returned unexpected key %s", key.ID)
 			}
+			if seen[key.ID] {
+				t.Fatalf("List() returned duplicate key %s", key.ID)
+			}
+			seen[key.ID] = true
 			if key.DashboardAccess != wantAccess {
 				t.Fatalf("key %s dashboard access = %v, want %v", key.ID, key.DashboardAccess, wantAccess)
 			}
