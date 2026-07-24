@@ -1,0 +1,94 @@
+---
+title: "Cohere"
+description: "Configure Cohere in GoModel and use Command chat, tool calling, reasoning, image input, and Embed models through OpenAI-compatible APIs."
+icon: "comment"
+---
+
+GoModel translates OpenAI-compatible Chat Completions, Responses, and
+Embeddings requests to Cohere's native v2 API. Model discovery uses Cohere's
+model catalog and exposes chat and embedding models through `/v1/models`.
+
+## Configure
+
+```bash
+COHERE_API_KEY=...
+# COHERE_BASE_URL=https://api.cohere.com   # optional override
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  cohere:
+    type: cohere
+    api_key: "${COHERE_API_KEY}"
+```
+
+Multiple keys use the standard `COHERE_API_KEY_2`,
+`COHERE_API_KEY_3`, ... rotation convention. You can restrict or supplement
+model discovery with `COHERE_MODELS`.
+
+## Chat and Responses
+
+Use a Cohere Command model with either OpenAI-compatible endpoint:
+
+```bash
+curl http://localhost:8090/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "command-a-plus-05-2026",
+    "messages": [{"role": "user", "content": "Explain vector search briefly"}]
+  }'
+```
+
+Chat streaming, system and developer messages, image URL parts, JSON response
+formats, tool definitions, tool calls, and tool results are translated to the
+Cohere v2 format. `/v1/responses` uses the same chat adapter.
+
+Cohere reasoning models enable thinking by default. To control Cohere's native
+reasoning behavior, include its `thinking` object as an extension:
+
+```json
+{
+  "model": "command-a-reasoning-08-2025",
+  "messages": [{"role": "user", "content": "Solve this carefully..."}],
+  "thinking": {"type": "enabled", "token_budget": 4000}
+}
+```
+
+Thinking output is returned as the OpenAI-compatible `reasoning_content`
+extension in both normal and streaming responses.
+
+## Embeddings
+
+GoModel supplies Cohere's required embedding fields while retaining the
+OpenAI request shape:
+
+```bash
+curl http://localhost:8090/v1/embeddings \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "embed-v4.0",
+    "input": ["first document", "second document"],
+    "dimensions": 1024,
+    "input_type": "search_document"
+  }'
+```
+
+`input_type` defaults to `search_document`. Set it to `search_query`,
+`classification`, or `clustering` when that better describes the input.
+`encoding_format` supports `float` (the default) and `base64`. Cohere-native
+`truncate`, `max_tokens`, and `priority` fields are also passed through.
+
+## Native passthrough
+
+Add `cohere` to `server.enabled_passthrough_providers`, then use paths such as
+`/p/cohere/v2/chat` or `/p/cohere/v2/rerank` to call Cohere-native APIs that do
+not have an OpenAI-compatible GoModel surface.
+
+See Cohere's [Chat API](https://docs.cohere.com/reference/chat),
+[Embed API](https://docs.cohere.com/reference/embed), and
+[reasoning guide](https://docs.cohere.com/docs/reasoning) for native fields and
+model-specific capabilities.

@@ -19,6 +19,7 @@ func clearProviderEnvVars(t *testing.T) {
 	for _, key := range []string{
 		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODELS",
 		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODELS",
+		"COHERE_API_KEY", "COHERE_BASE_URL", "COHERE_MODELS",
 		"GEMINI_API_KEY", "GEMINI_BASE_URL", "GEMINI_MODELS",
 		"DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODELS",
 		"XAI_API_KEY", "XAI_BASE_URL", "XAI_MODELS",
@@ -1131,7 +1132,7 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 			t.Fatalf("expected Cache.Model.Redis to be nil in example config, got %+v", result.Config.Cache.Model.Redis)
 		}
 		gotProviders := result.Config.Server.EnabledPassthroughProviders
-		wantProviders := []string{"openai", "anthropic", "openrouter", "kilo", "zai", "vllm", "deepseek", "bailian"}
+		wantProviders := []string{"openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "vllm", "deepseek", "bailian"}
 		if !reflect.DeepEqual(gotProviders, wantProviders) {
 			t.Fatalf("Server.EnabledPassthroughProviders = %v, want %v", gotProviders, wantProviders)
 		}

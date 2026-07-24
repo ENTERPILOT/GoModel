@@ -154,11 +154,11 @@ const client = new Anthropic({
 
 ## Supported LLM Providers
 
-GoModel supports OpenAI, Anthropic, Google Gemini, Vertex AI, DeepSeek, Groq,
-Fireworks AI, Meta (Muse Spark), OpenRouter, Z.ai, xAI (Grok), Alibaba Cloud
-Model Studio (Bailian), Kilo AI, MiniMax, Xiaomi MiMo, OpenCode Go, Azure OpenAI,
-Oracle, Ollama, vLLM, Amazon Bedrock Runtime, Amazon Bedrock Mantle, and all
-OpenAI-compatible providers.
+GoModel supports OpenAI, Anthropic, Cohere, Google Gemini, Vertex AI, DeepSeek,
+Groq, Fireworks AI, Meta (Muse Spark), OpenRouter, Z.ai, xAI (Grok), Alibaba
+Cloud Model Studio (Bailian), Kilo AI, MiniMax, Xiaomi MiMo, OpenCode Go, Azure
+OpenAI, Oracle, Ollama, vLLM, Amazon Bedrock Runtime, Amazon Bedrock Mantle, and
+all OpenAI-compatible providers.
 
 See the [Providers Overview](https://gomodel.enterpilot.io/docs/providers/overview?utm_source=readme) for the full
 per-provider feature matrix (chat, `/responses`, embeddings, files, batches,

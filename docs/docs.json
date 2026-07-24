@@ -139,6 +139,7 @@
                     "providers/overview",
                     "providers/key-rotation",
                     "providers/anthropic",
+                    "providers/cohere",
                     "providers/gemini",
                     "providers/deepseek",
                     "providers/xai",

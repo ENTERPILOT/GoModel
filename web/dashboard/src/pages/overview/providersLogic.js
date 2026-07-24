@@ -19,6 +19,7 @@ const PROVIDER_DOC_SLUGS = {
   bailian: "bailian",
   bedrock: "bedrock",
   "bedrock-mantle": "bedrock-mantle",
+  cohere: "cohere",
   deepseek: "deepseek",
   gemini: "gemini",
   opencode_go: "opencode-go",

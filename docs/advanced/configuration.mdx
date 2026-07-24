@@ -243,6 +243,7 @@ Set these to automatically register providers. No YAML configuration required.
 | -------------------- | -------------------------------------------------- |
 | `OPENAI_API_KEY`     | OpenAI                                             |
 | `ANTHROPIC_API_KEY`  | Anthropic                                          |
+| `COHERE_API_KEY`     | Cohere                                             |
 | `GEMINI_API_KEY`     | Google Gemini                                      |
 | `DEEPSEEK_API_KEY`   | DeepSeek                                           |
 | `OPENROUTER_API_KEY` | OpenRouter                                         |
@@ -376,6 +377,7 @@ The simplest way to add providers. GoModel checks for well-known API key environ
 ```bash
 export OPENAI_API_KEY="sk-..."      # Registers "openai" provider
 export ANTHROPIC_API_KEY="sk-ant-..." # Registers "anthropic" provider
+export COHERE_API_KEY="..."           # Registers "cohere" provider
 export GEMINI_API_KEY="..."          # Registers "gemini" provider
 export DEEPSEEK_API_KEY="..."        # Registers "deepseek" provider
 export XAI_API_KEY="..."             # Registers "xai" provider

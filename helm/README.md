@@ -1,6 +1,6 @@
 # GoModel Helm Chart
 
-High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, Groq, Kilo AI, Z.ai, xAI, Oracle).
+High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Cohere, Gemini, DeepSeek, Groq, Kilo AI, Z.ai, xAI, Oracle).
 
 ## Prerequisites
 
@@ -58,6 +58,8 @@ helm install gomodel ./helm \
 | `providers.existingSecret`       | Existing secret for API keys                                                                   | `""`                   |
 | `providers.openai.enabled`       | Enable OpenAI                                                                                  | `false`                |
 | `providers.anthropic.enabled`    | Enable Anthropic                                                                               | `false`                |
+| `providers.cohere.enabled`       | Enable Cohere                                                                                  | `false`                |
+| `providers.cohere.baseUrl`       | Optional Cohere base URL mapped to `COHERE_BASE_URL`                                           | `""`                   |
 | `providers.gemini.enabled`       | Enable Gemini                                                                                  | `false`                |
 | `providers.gemini.useNativeApi`  | Use Gemini native generateContent for chat/responses; set false for Gemini OpenAI compatibility | `true`                 |
 | `providers.groq.enabled`         | Enable Groq                                                                                    | `false`                |
@@ -92,6 +94,7 @@ type: Opaque
 stringData:
   OPENAI_API_KEY: "sk-..."
   ANTHROPIC_API_KEY: "sk-ant-..."
+  COHERE_API_KEY: "..."
   GEMINI_API_KEY: "..."
   ZAI_API_KEY: "..."
   KILO_API_KEY: "..."
