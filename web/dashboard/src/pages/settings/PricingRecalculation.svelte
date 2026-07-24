@@ -222,4 +222,14 @@
           width: 100%;
         }
 }
+
+  /* Dropdown positioning override; the dropdown renders inside the
+     DatePicker child, so :global reaches it while the field class
+     keeps this rule winning over DatePicker's scoped base. */
+  .pricing-recalculate-date-field :global(.date-picker-dropdown) {
+        top: auto;
+        bottom: calc(100% + 6px);
+        right: auto;
+        left: 0;
+      }
 </style>

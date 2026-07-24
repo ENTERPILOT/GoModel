@@ -200,4 +200,10 @@
     left: 8px;
     transform: translateY(-50%);
   }
+
+  /* budget-bar-track-period-* is composed dynamically; this must sit
+     after the base text-row rule to win the cascade. */
+  .budget-bar-track-period-custom .budget-bar-text-row-on-fill {
+    color: #3f332a;
+  }
 </style>

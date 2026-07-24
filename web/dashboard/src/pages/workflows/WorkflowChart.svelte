@@ -590,4 +590,123 @@
     white-space: nowrap;
     flex-shrink: 0;
   }
+
+  /* Status variants of the node internals. The state classes
+     (workflow-node-success/current/...) are computed in
+     workflowChartLogic.js; these rules must live AFTER the base
+     icon/label/sub/badge rules above so they win the cascade —
+     as global rules they would lose ties to the scoped bases. */
+  .workflow-node-success .workflow-node-icon {
+    background: color-mix(in srgb, var(--success) 18%, var(--bg));
+    color: var(--success);
+  }
+
+  .workflow-node-success .workflow-node-icon-endpoint {
+    color: var(--success);
+  }
+
+  .workflow-node-success .workflow-node-label {
+    color: color-mix(in srgb, var(--success) 85%, var(--text));
+  }
+
+  .workflow-node-success .workflow-node-sub {
+    color: color-mix(in srgb, var(--success) 74%, var(--text-muted));
+  }
+
+  .workflow-node-success .workflow-node-badge {
+    background: color-mix(in srgb, var(--success) 14%, var(--bg));
+    border-color: color-mix(in srgb, var(--success) 38%, var(--border));
+    color: var(--success);
+  }
+
+  .workflow-node-current .workflow-node-icon {
+    background: color-mix(in srgb, var(--info) 16%, var(--bg));
+    color: var(--info);
+  }
+
+  .workflow-node-current .workflow-node-icon-endpoint {
+    color: var(--info);
+  }
+
+  .workflow-node-current .workflow-node-label {
+    color: color-mix(in srgb, var(--info) 85%, var(--text));
+  }
+
+  .workflow-node-current .workflow-node-sub {
+    color: color-mix(in srgb, var(--info) 72%, var(--text-muted));
+  }
+
+  .workflow-node-current .workflow-node-badge {
+    background: color-mix(in srgb, var(--info) 13%, var(--bg));
+    border-color: color-mix(in srgb, var(--info) 36%, var(--border));
+    color: var(--info);
+  }
+
+  .workflow-node-warning .workflow-node-icon {
+    background: color-mix(in srgb, var(--warning) 14%, var(--bg));
+    color: var(--warning);
+  }
+
+  .workflow-node-warning .workflow-node-icon-endpoint {
+    color: var(--warning);
+  }
+
+  .workflow-node-warning .workflow-node-label {
+    color: color-mix(in srgb, var(--warning) 85%, var(--text));
+  }
+
+  .workflow-node-warning .workflow-node-sub {
+    color: color-mix(in srgb, var(--warning) 72%, var(--text-muted));
+  }
+
+  .workflow-node-warning .workflow-node-badge {
+    background: color-mix(in srgb, var(--warning) 14%, var(--bg));
+    border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+    color: var(--warning);
+  }
+
+  .workflow-node-error .workflow-node-icon {
+    background: color-mix(in srgb, var(--danger) 14%, var(--bg));
+    color: var(--danger);
+  }
+
+  .workflow-node-error .workflow-node-icon-endpoint {
+    color: var(--danger);
+  }
+
+  .workflow-node-error .workflow-node-label {
+    color: color-mix(in srgb, var(--danger) 85%, var(--text));
+  }
+
+  .workflow-node-error .workflow-node-sub {
+    color: color-mix(in srgb, var(--danger) 72%, var(--text-muted));
+  }
+
+  .workflow-node-neutral .workflow-node-icon {
+    background: color-mix(in srgb, var(--text-muted) 12%, var(--bg));
+    color: var(--text-muted);
+  }
+
+  .workflow-node-neutral .workflow-node-icon-endpoint {
+    color: var(--text-muted);
+  }
+
+  .workflow-node-neutral .workflow-node-label {
+    color: var(--text-muted);
+  }
+
+  .workflow-node-neutral .workflow-node-sub {
+    color: color-mix(in srgb, var(--text-muted) 84%, var(--border));
+  }
+
+  .workflow-node-neutral .workflow-node-badge {
+    background: color-mix(in srgb, var(--text-muted) 10%, var(--bg));
+    border-color: color-mix(in srgb, var(--text-muted) 28%, var(--border));
+    color: var(--text-muted);
+  }
+
+  .workflow-node-cache-miss .workflow-node-badge {
+    color: var(--text-muted);
+    border-color: var(--border);
+  }
 </style>
