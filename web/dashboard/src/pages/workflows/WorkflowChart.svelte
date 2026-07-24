@@ -709,4 +709,53 @@
     color: var(--text-muted);
     border-color: var(--border);
   }
+
+  /* Node/connector state tints (classes computed in workflowChartLogic.js).
+     Must live after the structural rules (feature/endpoint/async set their
+     own border/background) so the state coloring wins the cascade. */
+  .workflow-conn-hit {
+    background: color-mix(in srgb, var(--success) 58%, var(--border));
+  }
+
+  .workflow-conn-hit::after {
+    background: color-mix(in srgb, var(--success) 58%, var(--border));
+  }
+
+  .workflow-conn-dim {
+    background: color-mix(in srgb, var(--border) 75%, transparent);
+  }
+
+  .workflow-conn-dim::after {
+    background: color-mix(in srgb, var(--border) 75%, transparent);
+  }
+
+  .workflow-node-success {
+    border-color: color-mix(in srgb, var(--success) 52%, var(--border));
+    background: color-mix(in srgb, var(--success) 9%, var(--bg-surface));
+  }
+
+  .workflow-node-current {
+    border-color: color-mix(in srgb, var(--info) 56%, var(--border));
+    background: color-mix(in srgb, var(--info) 10%, var(--bg-surface));
+  }
+
+  .workflow-node-warning {
+    border-color: color-mix(in srgb, var(--warning) 52%, var(--border));
+    background: color-mix(in srgb, var(--warning) 9%, var(--bg-surface));
+  }
+
+  .workflow-node-error {
+    border-color: color-mix(in srgb, var(--danger) 52%, var(--border));
+    background: color-mix(in srgb, var(--danger) 9%, var(--bg-surface));
+  }
+
+  .workflow-node-neutral {
+    border-color: color-mix(in srgb, var(--text-muted) 40%, var(--border));
+    background: color-mix(in srgb, var(--text-muted) 8%, var(--bg-surface));
+  }
+
+  .workflow-node-skipped {
+    position: relative;
+    opacity: 0.28;
+  }
 </style>

@@ -74,7 +74,7 @@
             >
           </td>
           <td class="col-actions">
-            <div class="alias-actions-cell">
+            <div class="alias-actions-cell model-list-actions">
               {#if !server.managed}
                 <TableActionButton
                   label={"Edit MCP server " + server.name}

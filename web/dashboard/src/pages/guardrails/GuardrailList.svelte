@@ -87,7 +87,7 @@
                   {/if}
                 </td>
                 <td class="col-actions">
-                  <div class="alias-actions-cell">
+                  <div class="alias-actions-cell model-list-actions">
                     <TableActionButton
                       label={"Edit guardrail " + guardrail.name}
                       class="table-icon-btn"

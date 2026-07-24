@@ -50,7 +50,7 @@
           </td>
           <td>{timezone.formatTimestamp(row.updated_at)}</td>
           <td class="col-actions">
-            <div class="alias-actions-cell">
+            <div class="alias-actions-cell model-list-actions">
               {#if !row.managed}
                 <TableActionButton
                   label={"Edit provider " + row.name}
