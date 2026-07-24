@@ -15,7 +15,7 @@
       class:flash-toast-error={toast.kind === "error"}
       role={toast.kind === "error" ? "alert" : "status"}
       aria-live={toast.kind === "error" ? "assertive" : "polite"}
-      in:fly={{ y: 32, duration: 360, easing: backOut }}
+      in:fly={{ y: -24, duration: 360, easing: backOut }}
       out:fade={{ duration: 150 }}
     >
       <span class="flash-toast-text">{toast.text}</span>
@@ -32,17 +32,31 @@
 </div>
 
 <style>
+  /* Anchored top-center over the main content area: spans from the
+     sidebar's right edge to the viewport edge, toasts centered within. */
   .flash-region {
     position: fixed;
-    bottom: 16px;
-    right: 16px;
+    top: 16px;
+    left: var(--sidebar-width);
+    right: 0;
     /* Above modal shells (z 90) so feedback fired from a dialog is seen. */
     z-index: 120;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 10px;
-    width: min(360px, calc(100vw - 32px));
     pointer-events: none;
+  }
+
+  /* Track the sidebar's collapsed (60px) width; same on mobile. */
+  :global(.sidebar.sidebar-collapsed) ~ .flash-region {
+    left: 60px;
+  }
+
+  @media (max-width: 768px) {
+    .flash-region {
+      left: 60px;
+    }
   }
 
   .flash-toast {
@@ -54,6 +68,8 @@
     font-size: 14px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
     pointer-events: auto;
+    width: max-content;
+    max-width: min(480px, calc(100% - 32px));
     /* Entry attention pulse: a colored glow (currentColor = the kind's
        accent) that fades out, layered on the fly-in slide. */
     animation: flash-toast-glow 900ms ease-out;
