@@ -322,3 +322,73 @@ data: [DONE]
 	}
 	t.Fatal("expected response.completed event")
 }
+
+func TestOpenAIResponsesStreamConverter_PropagatesStreamError(t *testing.T) {
+	tests := []struct {
+		name        string
+		errorChunk  string
+		wantCode    string
+		wantMessage string
+	}{
+		{
+			name:        "object error",
+			errorChunk:  `{"error":{"type":"provider_error","message":"upstream generation timed out","param":null,"code":null}}`,
+			wantCode:    "provider_error",
+			wantMessage: "upstream generation timed out",
+		},
+		{
+			name:        "scalar error",
+			errorChunk:  `{"error":"capacity exhausted"}`,
+			wantCode:    "provider_error",
+			wantMessage: "capacity exhausted",
+		},
+		{
+			name:        "tolerant fallback",
+			errorChunk:  `{"error":{"message":"malformed companion field","code":"upstream_error"},"choices":"invalid"}`,
+			wantCode:    "upstream_error",
+			wantMessage: "malformed companion field",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStream := `data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}
+
+data: ` + tt.errorChunk + `
+
+data: [DONE]
+`
+
+			converter := NewOpenAIResponsesStreamConverter(
+				io.NopCloser(strings.NewReader(mockStream)),
+				"test-model",
+				"cohere",
+			)
+			raw, err := io.ReadAll(converter)
+			if err != nil {
+				t.Fatalf("failed to read from converter: %v", err)
+			}
+
+			var failed map[string]any
+			for _, event := range parseTestSSEEvents(t, string(raw)) {
+				switch event.Name {
+				case "response.completed":
+					t.Fatalf("stream emitted response.completed after provider error:\n%s", raw)
+				case "response.failed":
+					failed, _ = event.Payload["response"].(map[string]any)
+				}
+			}
+			if failed == nil {
+				t.Fatalf("stream missing response.failed event:\n%s", raw)
+			}
+			if failed["status"] != "failed" || failed["provider"] != "cohere" {
+				t.Fatalf("response.failed response = %#v", failed)
+			}
+			responseErr, _ := failed["error"].(map[string]any)
+			if responseErr["code"] != tt.wantCode ||
+				responseErr["message"] != tt.wantMessage {
+				t.Fatalf("response.failed error = %#v", responseErr)
+			}
+		})
+	}
+}

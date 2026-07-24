@@ -276,14 +276,15 @@ func TestNewNotFoundError(t *testing.T) {
 
 func TestParseProviderError(t *testing.T) {
 	tests := []struct {
-		name           string
-		provider       string
-		statusCode     int
-		body           []byte
-		expectedType   ErrorType
-		expectedStatus int
-		expectedParam  *string
-		expectedCode   *string
+		name            string
+		provider        string
+		statusCode      int
+		body            []byte
+		expectedType    ErrorType
+		expectedStatus  int
+		expectedMessage string
+		expectedParam   *string
+		expectedCode    *string
 	}{
 		{
 			name:           "401 unauthorized",
@@ -342,6 +343,45 @@ func TestParseProviderError(t *testing.T) {
 			expectedStatus: http.StatusInternalServerError, // Now preserves original 500
 		},
 		{
+			name:            "top-level Cohere error",
+			provider:        "cohere",
+			statusCode:      http.StatusUnprocessableEntity,
+			body:            []byte(`{"error_type":"INVALID_TOOL_GENERATION","id":"request-id","message":"invalid tool generation"}`),
+			expectedType:    ErrorTypeInvalidRequest,
+			expectedStatus:  http.StatusUnprocessableEntity,
+			expectedMessage: "invalid tool generation",
+			expectedCode:    new("INVALID_TOOL_GENERATION"),
+		},
+		{
+			name:            "nested Cohere error",
+			provider:        "cohere",
+			statusCode:      http.StatusBadRequest,
+			body:            []byte(`{"error":{"message":"nested Cohere failure","code":"bad_request"}}`),
+			expectedType:    ErrorTypeInvalidRequest,
+			expectedStatus:  http.StatusBadRequest,
+			expectedMessage: "nested Cohere failure",
+			expectedCode:    new("bad_request"),
+		},
+		{
+			name:            "scalar Cohere error",
+			provider:        "cohere",
+			statusCode:      http.StatusBadGateway,
+			body:            []byte(`{"error":"scalar Cohere failure"}`),
+			expectedType:    ErrorTypeProvider,
+			expectedStatus:  http.StatusBadGateway,
+			expectedMessage: "scalar Cohere failure",
+		},
+		{
+			name:            "null Cohere error uses top-level message",
+			provider:        "cohere",
+			statusCode:      http.StatusUnprocessableEntity,
+			body:            []byte(`{"error":null,"message":"top-level Cohere failure","error_type":"INVALID_REQUEST"}`),
+			expectedType:    ErrorTypeInvalidRequest,
+			expectedStatus:  http.StatusUnprocessableEntity,
+			expectedMessage: "top-level Cohere failure",
+			expectedCode:    new("INVALID_REQUEST"),
+		},
+		{
 			name:           "json parse with message",
 			provider:       "openai",
 			statusCode:     http.StatusBadRequest,
@@ -369,7 +409,9 @@ func TestParseProviderError(t *testing.T) {
 				t.Errorf("Provider = %v, want %v", err.Provider, tt.provider)
 			}
 
-			if err.Message == "" {
+			if tt.expectedMessage != "" && err.Message != tt.expectedMessage {
+				t.Errorf("Message = %q, want %q", err.Message, tt.expectedMessage)
+			} else if err.Message == "" {
 				t.Error("Message should not be empty")
 			}
 

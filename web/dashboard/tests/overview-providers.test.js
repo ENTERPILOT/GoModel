@@ -143,6 +143,10 @@ test("providerDocUrl links provider types with docs and stays empty otherwise", 
     providerDocUrl({ type: "bedrock-mantle" }),
     "https://gomodel.enterpilot.io/docs/providers/bedrock-mantle?utm_source=gomodel_dashboard",
   );
+  assert.equal(
+    providerDocUrl({ type: "cohere" }),
+    "https://gomodel.enterpilot.io/docs/providers/cohere?utm_source=gomodel_dashboard",
+  );
   // Type slug differs from the docs slug.
   assert.equal(
     providerDocUrl({ type: "opencode_go" }),

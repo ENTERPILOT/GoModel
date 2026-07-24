@@ -145,6 +145,17 @@
       "properties": {
         "providers": {
           "properties": {
+            "cohere": {
+              "properties": { "apiKey": { "minLength": 1 } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "providers": {
+          "properties": {
             "gemini": {
               "properties": { "apiKey": { "minLength": 1 } }
             }
@@ -254,6 +265,14 @@
           }
         },
         "anthropic": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "apiKey": { "type": "string" },
+            "baseUrl": { "type": "string" }
+          }
+        },
+        "cohere": {
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },

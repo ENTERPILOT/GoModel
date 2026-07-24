@@ -36,6 +36,7 @@ To get the application URL:
 {{- $enabledProviders := list }}
 {{- if or .Values.providers.openai.enabled .Values.providers.openai.apiKey }}{{ $enabledProviders = append $enabledProviders "openai" }}{{ end }}
 {{- if or .Values.providers.anthropic.enabled .Values.providers.anthropic.apiKey }}{{ $enabledProviders = append $enabledProviders "anthropic" }}{{ end }}
+{{- if or .Values.providers.cohere.enabled .Values.providers.cohere.apiKey }}{{ $enabledProviders = append $enabledProviders "cohere" }}{{ end }}
 {{- if or .Values.providers.gemini.enabled .Values.providers.gemini.apiKey }}{{ $enabledProviders = append $enabledProviders "gemini" }}{{ end }}
 {{- if or .Values.providers.groq.enabled .Values.providers.groq.apiKey }}{{ $enabledProviders = append $enabledProviders "groq" }}{{ end }}
 {{- if or .Values.providers.xai.enabled .Values.providers.xai.apiKey }}{{ $enabledProviders = append $enabledProviders "xai" }}{{ end }}

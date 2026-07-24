@@ -13,7 +13,7 @@ server:
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
-  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "kilo", "zai", "vllm", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
+  enabled_passthrough_providers: ["openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "vllm", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
   realtime_enabled: true # env: REALTIME_ENABLED; expose /v1/realtime websocket and /p/{provider}/v1/realtime upgrades (OpenAI only)
 
 models:
@@ -310,6 +310,10 @@ providers:
   anthropic:
     type: anthropic
     api_key: "sk-ant-..."
+
+  cohere:
+    type: cohere
+    api_key: "${COHERE_API_KEY}"
 
   bailian:
     type: bailian

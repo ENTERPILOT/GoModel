@@ -25,6 +25,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"anthropic": {
 		DefaultBaseURL: "https://api.anthropic.com/v1",
 	},
+	"cohere": {
+		DefaultBaseURL: "https://api.cohere.com",
+	},
 	"gemini": {
 		DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
 	},
