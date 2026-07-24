@@ -279,29 +279,56 @@ type providerErrorDetails struct {
 
 func parseProviderErrorBody(body []byte) providerErrorDetails {
 	var payload struct {
-		Error json.RawMessage `json:"error"`
+		Error     json.RawMessage `json:"error"`
+		Message   json.RawMessage `json:"message"`
+		Param     json.RawMessage `json:"param"`
+		Code      json.RawMessage `json:"code"`
+		ErrorType json.RawMessage `json:"error_type"`
 	}
-	if err := json.Unmarshal(body, &payload); err != nil || len(payload.Error) == 0 {
-		return providerErrorDetails{}
-	}
-
-	if message := jsonString(payload.Error); message != "" {
-		return providerErrorDetails{Message: message}
-	}
-
-	var errorFields map[string]json.RawMessage
-	if err := json.Unmarshal(payload.Error, &errorFields); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
 		return providerErrorDetails{}
 	}
 
 	details := providerErrorDetails{
+		Message: jsonString(payload.Message),
+		Param:   jsonString(payload.Param),
+		Code:    jsonScalarString(payload.Code),
+	}
+	if details.Code == "" {
+		details.Code = jsonString(payload.ErrorType)
+	}
+
+	if len(payload.Error) == 0 || bytes.Equal(bytes.TrimSpace(payload.Error), []byte("null")) {
+		return details
+	}
+
+	if message := jsonString(payload.Error); message != "" {
+		details.Message = message
+		return details
+	}
+
+	var errorFields map[string]json.RawMessage
+	if err := json.Unmarshal(payload.Error, &errorFields); err != nil {
+		return details
+	}
+
+	nested := providerErrorDetails{
 		Message: jsonString(errorFields["message"]),
 		Param:   jsonString(errorFields["param"]),
 		Code:    jsonScalarString(errorFields["code"]),
 	}
 
-	if raw := providerErrorMetadataRaw(errorFields["metadata"]); shouldPreferProviderRaw(details.Message, raw) {
-		details.Message = raw
+	if raw := providerErrorMetadataRaw(errorFields["metadata"]); shouldPreferProviderRaw(nested.Message, raw) {
+		nested.Message = raw
+	}
+	if nested.Message != "" {
+		details.Message = nested.Message
+	}
+	if nested.Param != "" {
+		details.Param = nested.Param
+	}
+	if nested.Code != "" {
+		details.Code = nested.Code
 	}
 
 	return details

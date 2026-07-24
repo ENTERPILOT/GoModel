@@ -108,12 +108,16 @@ func (s *cohereStreamState) consume(out io.Writer, raw string) error {
 	case "message-start":
 		return s.writeDelta(out, map[string]any{"role": "assistant"})
 	case "content-delta":
-		delta := map[string]any{}
-		if event.Delta.Message.Content.Text != "" {
-			delta["content"] = event.Delta.Message.Content.Text
+		content, err := decodeStreamContent(event.Delta.Message.Content)
+		if err != nil {
+			return err
 		}
-		if event.Delta.Message.Content.Thinking != "" {
-			delta["reasoning_content"] = event.Delta.Message.Content.Thinking
+		delta := map[string]any{}
+		if content.Text != "" {
+			delta["content"] = content.Text
+		}
+		if content.Thinking != "" {
+			delta["reasoning_content"] = content.Thinking
 		}
 		return s.writeDelta(out, delta)
 	case "tool-plan-delta":
@@ -122,7 +126,10 @@ func (s *cohereStreamState) consume(out io.Writer, raw string) error {
 		}
 		return s.writeDelta(out, map[string]any{"tool_plan": event.Delta.Message.ToolPlan})
 	case "tool-call-start":
-		call := event.Delta.Message.ToolCalls
+		call, err := decodeStreamToolCall(event.Delta.Message.ToolCalls)
+		if err != nil {
+			return err
+		}
 		if call == nil {
 			return nil
 		}
@@ -137,7 +144,10 @@ func (s *cohereStreamState) consume(out io.Writer, raw string) error {
 			},
 		}}})
 	case "tool-call-delta":
-		call := event.Delta.Message.ToolCalls
+		call, err := decodeStreamToolCall(event.Delta.Message.ToolCalls)
+		if err != nil {
+			return err
+		}
 		if call == nil {
 			return nil
 		}
@@ -176,6 +186,37 @@ func (s *cohereStreamState) consume(out io.Writer, raw string) error {
 	default:
 		return nil
 	}
+}
+
+func decodeStreamContent(raw json.RawMessage) (streamDeltaContent, error) {
+	if !streamObject(raw) {
+		return streamDeltaContent{}, nil
+	}
+	var content streamDeltaContent
+	if err := json.Unmarshal(raw, &content); err != nil {
+		return streamDeltaContent{}, core.NewProviderError(
+			"cohere", 502, "failed to parse Cohere stream content", err,
+		)
+	}
+	return content, nil
+}
+
+func decodeStreamToolCall(raw json.RawMessage) (*toolCall, error) {
+	if !streamObject(raw) {
+		return nil, nil
+	}
+	var call toolCall
+	if err := json.Unmarshal(raw, &call); err != nil {
+		return nil, core.NewProviderError(
+			"cohere", 502, "failed to parse Cohere stream tool call", err,
+		)
+	}
+	return &call, nil
+}
+
+func streamObject(raw json.RawMessage) bool {
+	raw = bytes.TrimSpace(raw)
+	return len(raw) > 0 && raw[0] == '{'
 }
 
 func (s *cohereStreamState) writeDelta(out io.Writer, delta map[string]any) error {

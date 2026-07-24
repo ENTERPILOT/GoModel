@@ -87,6 +87,7 @@ type billedUnits struct {
 
 type tokenUsage struct {
 	InputTokens  float64 `json:"input_tokens,omitempty"`
+	ImageTokens  float64 `json:"image_tokens,omitempty"`
 	OutputTokens float64 `json:"output_tokens,omitempty"`
 }
 
@@ -142,11 +143,11 @@ type streamEventDelta struct {
 }
 
 type streamDeltaMessage struct {
-	Role      string             `json:"role,omitempty"`
-	Content   streamDeltaContent `json:"content"`
-	ToolCalls *toolCall          `json:"tool_calls,omitempty"`
-	ToolPlan  string             `json:"tool_plan,omitempty"`
-	Citations json.RawMessage    `json:"citations,omitempty"`
+	Role      string          `json:"role,omitempty"`
+	Content   json.RawMessage `json:"content"`
+	ToolCalls json.RawMessage `json:"tool_calls,omitempty"`
+	ToolPlan  string          `json:"tool_plan,omitempty"`
+	Citations json.RawMessage `json:"citations,omitempty"`
 }
 
 type streamDeltaContent struct {

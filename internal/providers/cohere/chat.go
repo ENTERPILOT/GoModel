@@ -497,7 +497,7 @@ func cohereGenerationError(reason, detail string) *core.GatewayError {
 }
 
 func toCoreUsage(value usage) core.Usage {
-	input := int(value.Tokens.InputTokens)
+	input := int(value.Tokens.InputTokens + value.Tokens.ImageTokens)
 	output := int(value.Tokens.OutputTokens)
 	if input == 0 && output == 0 {
 		input = int(value.BilledUnits.InputTokens)
@@ -518,8 +518,11 @@ func toCoreUsage(value usage) core.Usage {
 		CompletionTokens: output,
 		TotalTokens:      input + output,
 	}
-	if value.CachedTokens != 0 {
-		result.PromptTokensDetails = &core.PromptTokensDetails{CachedTokens: int(value.CachedTokens)}
+	if value.CachedTokens != 0 || value.Tokens.ImageTokens != 0 {
+		result.PromptTokensDetails = &core.PromptTokensDetails{
+			CachedTokens: int(value.CachedTokens),
+			ImageTokens:  int(value.Tokens.ImageTokens),
+		}
 	}
 	if len(raw) > 0 {
 		result.RawUsage = raw

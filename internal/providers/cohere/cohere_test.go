@@ -49,7 +49,7 @@ func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
 			},
 			"usage":{
 				"billed_units":{"input_tokens":10,"output_tokens":3},
-				"tokens":{"input_tokens":12,"output_tokens":4},
+				"tokens":{"input_tokens":12,"image_tokens":5,"output_tokens":4},
 				"cached_tokens":2
 			}
 		}`)
@@ -171,10 +171,12 @@ func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
 		resp.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Warsaw"}` {
 		t.Fatalf("tool calls = %#v", resp.Choices[0].Message.ToolCalls)
 	}
-	if resp.Usage.PromptTokens != 12 || resp.Usage.CompletionTokens != 4 || resp.Usage.TotalTokens != 16 {
+	if resp.Usage.PromptTokens != 17 || resp.Usage.CompletionTokens != 4 || resp.Usage.TotalTokens != 21 {
 		t.Fatalf("usage = %#v", resp.Usage)
 	}
-	if resp.Usage.PromptTokensDetails == nil || resp.Usage.PromptTokensDetails.CachedTokens != 2 {
+	if resp.Usage.PromptTokensDetails == nil ||
+		resp.Usage.PromptTokensDetails.CachedTokens != 2 ||
+		resp.Usage.PromptTokensDetails.ImageTokens != 5 {
 		t.Fatalf("prompt token details = %#v", resp.Usage.PromptTokensDetails)
 	}
 }
@@ -232,7 +234,7 @@ func TestStreamChatCompletionConvertsCohereEvents(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, strings.Join([]string{
 			`event: message-start`,
-			`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
+			`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant","content":[],"tool_calls":[],"citations":[]}}}`,
 			``,
 			`event: content-delta`,
 			`data: {"type":"content-delta","index":0,"delta":{"message":{"content":{"thinking":"consider"}}}}`,

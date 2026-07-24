@@ -342,6 +342,15 @@ func TestParseProviderError(t *testing.T) {
 			expectedStatus: http.StatusInternalServerError, // Now preserves original 500
 		},
 		{
+			name:           "top-level Cohere error",
+			provider:       "cohere",
+			statusCode:     http.StatusUnprocessableEntity,
+			body:           []byte(`{"error_type":"INVALID_TOOL_GENERATION","id":"request-id","message":"invalid tool generation"}`),
+			expectedType:   ErrorTypeInvalidRequest,
+			expectedStatus: http.StatusUnprocessableEntity,
+			expectedCode:   new("INVALID_TOOL_GENERATION"),
+		},
+		{
 			name:           "json parse with message",
 			provider:       "openai",
 			statusCode:     http.StatusBadRequest,
