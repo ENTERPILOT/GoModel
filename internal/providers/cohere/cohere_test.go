@@ -611,6 +611,61 @@ func TestProviderImplementsNativePassthrough(t *testing.T) {
 	var _ core.PassthroughProvider = provider
 }
 
+func TestPassthroughForwardsNativeCohereRequest(t *testing.T) {
+	const upstreamBody = `{"message":"rate limited"}`
+	var gotPath, gotAuth, gotHeader string
+	var gotBody []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.RequestURI()
+		gotAuth = r.Header.Get("Authorization")
+		gotHeader = r.Header.Get("X-Client-Trace")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("X-Upstream-Request-ID", "cohere-request-1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "v2/rerank?priority=high",
+		Body:     io.NopCloser(strings.NewReader(`{"model":"rerank-v3.5","query":"gateway"}`)),
+		Headers:  http.Header{"X-Client-Trace": {"trace-123"}},
+	})
+	if err != nil {
+		t.Fatalf("Passthrough() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotPath != "/v2/rerank?priority=high" {
+		t.Fatalf("path = %q, want native endpoint and query", gotPath)
+	}
+	if gotAuth != "Bearer test-key" {
+		t.Fatalf("authorization = %q, want Cohere bearer token", gotAuth)
+	}
+	if gotHeader != "trace-123" {
+		t.Fatalf("X-Client-Trace = %q, want forwarded header", gotHeader)
+	}
+	if !strings.Contains(string(gotBody), `"rerank-v3.5"`) {
+		t.Fatalf("body = %q, want native request body", gotBody)
+	}
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	if got := resp.Headers["X-Upstream-Request-Id"]; len(got) != 1 || got[0] != "cohere-request-1" {
+		t.Fatalf("upstream response header = %#v", got)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if string(body) != upstreamBody {
+		t.Fatalf("body = %q, want upstream error body", body)
+	}
+}
+
 func assertInvalidRequest(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
