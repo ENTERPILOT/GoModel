@@ -371,7 +371,6 @@ func (h *Handler) CacheOverview(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	params.CacheMode = usage.CacheModeCached
 
 	if h.usageReader == nil {
 		return c.JSON(http.StatusOK, usage.CacheOverview{

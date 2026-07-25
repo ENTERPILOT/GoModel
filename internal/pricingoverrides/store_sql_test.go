@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
@@ -18,6 +21,28 @@ func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore, db s
 			t.Fatalf("NewSQLStore: %v", err)
 		}
 		body(t, store, db)
+	})
+}
+
+// runStoreSuite exercises behaviour every Store implementation owes its
+// callers, against each backend available in this environment.
+func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
+	t.Helper()
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := NewSQLStore(context.Background(), db)
+		if err != nil {
+			t.Fatalf("NewSQLStore: %v", err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		body(t, store)
+	})
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		store, err := NewMongoDBStore(db)
+		if err != nil {
+			t.Fatalf("NewMongoDBStore: %v", err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		body(t, store)
 	})
 }
 
@@ -59,8 +84,8 @@ func TestSQLStoreStoresPricingWithoutCurrency(t *testing.T) {
 	})
 }
 
-func TestSQLStoreUpsertReplacesPricing(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
+func TestStoreUpsertReplacesPricing(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 
 		if err := store.Upsert(ctx, Override{
@@ -120,8 +145,8 @@ func TestSQLStoreListIsOrderedBySelector(t *testing.T) {
 	})
 }
 
-func TestSQLStoreDeleteMissingReturnsNotFound(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
+func TestStoreDeleteMissingReturnsNotFound(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
 		err := store.Delete(context.Background(), "absent/model")
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("Delete error = %v, want ErrNotFound", err)
@@ -129,8 +154,8 @@ func TestSQLStoreDeleteMissingReturnsNotFound(t *testing.T) {
 	})
 }
 
-func TestSQLStoreDeleteRemovesOverride(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
+func TestStoreDeleteRemovesOverride(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 
 		if err := store.Upsert(ctx, Override{

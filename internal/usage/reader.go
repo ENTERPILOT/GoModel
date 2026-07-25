@@ -419,6 +419,9 @@ type UsageReader interface {
 	GetUsageByRequestIDs(ctx context.Context, requestIDs []string) (map[string][]UsageLogEntry, error)
 
 	// GetCacheOverview returns cached-only aggregates for the admin dashboard.
+	// The cached-only scope is this method's contract, not the caller's to
+	// arrange: an implementation overrides params.CacheMode rather than
+	// honouring it, so callers pass the params they parsed and no more.
 	GetCacheOverview(ctx context.Context, params UsageQueryParams) (*CacheOverview, error)
 
 	// GetTokenThroughput returns a fixed-width window of token-volume buckets

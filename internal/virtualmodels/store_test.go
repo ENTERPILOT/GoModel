@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func TestSQLStore_RoundTripRedirectAndPolicy(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 
 		redirect := VirtualModel{
@@ -63,8 +63,8 @@ func TestSQLStore_RoundTripRedirectAndPolicy(t *testing.T) {
 	})
 }
 
-func TestSQLStore_GetMissingAndDelete(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+func TestStore_GetMissingAndDelete(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 
 		if _, err := store.Get(ctx, "nope"); !errors.Is(err, ErrNotFound) {

@@ -1,8 +1,9 @@
 # Architecture Review — 2026-07-04
 
 Scope: whole repo on `chore/architecture` (HEAD `87d78d2c`). Evidence is cited as
-`file:line`. Items already tracked in `docs/dev/possible-refactoring.md` are marked
-**(known #N)** rather than re-explained.
+`file:line`. Items marked **(known #N)** were already tracked in a
+`docs/dev/possible-refactoring.md` list that has since been retired; its live
+entries were carried into `docs/dev/2026-07-25_storage-refactor.md`.
 
 Legend: **[COUPLING]** dependency/blast-radius problem · **[SMELL]** design debt ·
 **[BUG]** incorrect behavior · **[REMOVE]** dead or redundant code ·
@@ -486,8 +487,10 @@ guardrails error).
   (`make swagger && git diff --exit-code`) so PRs stop hand-carrying them.
 - **[REMOVE]** `gateway/refactor_findings_test.go` — legitimate regression tests
   named after the review session that produced them; rename to describe behavior.
-- **[SMELL]** Dated snapshot docs (`docs/dev/2026-03-16_ARCHITECTURE_SNAPSHOT.md`,
-  `docs/2026-04-09_CODEBASE_SNAPSHOT.md`) look authoritative while 3+ months stale.
+- **[SMELL]** Dated snapshot docs look authoritative while months stale.
+  `docs/dev/2026-03-16_ARCHITECTURE_SNAPSHOT.md` was deleted on 2026-07-25 for
+  this reason; `docs/2026-04-09_CODEBASE_SNAPSHOT.md` (1,368 lines) remains and
+  has the same problem.
 - **[GOOD]** Test culture: test LOC ≈ source LOC in most packages
   (`internal/server`: 15.8k test vs 8k source), plus e2e/integration/contract
   suites and dashboard JS tests. `internal/streaming`'s cross-chunk boundary logic

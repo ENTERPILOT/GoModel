@@ -13,7 +13,7 @@ provider implementations themselves are not aware of metrics.
 ## Wiring
 
 ```text
-cmd/gomodel/main.go
+run/providers.go (defaultProviderFactory)
   └─ if cfg.Metrics.Enabled:
        factory.SetHooks(observability.NewPrometheusHooks())
 
@@ -170,7 +170,7 @@ curl -s http://localhost:8080/metrics | grep gomodel_requests_total
 
 The hooks API is provider-agnostic. To add another backend, return a
 different `llmclient.Hooks` value from a constructor in
-`internal/observability` and wire it in `cmd/gomodel/main.go`:
+`internal/observability` and wire it in `run/providers.go`:
 
 ```go
 // example sketch — combineHooks does not exist today

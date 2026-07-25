@@ -5,23 +5,37 @@ import (
 	"errors"
 	"testing"
 
+	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
-func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore)) {
+// runStoreSuite exercises behaviour every Store implementation owes its
+// callers, against each backend available in this environment.
+func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := NewSQLStore(context.Background(), db)
 		if err != nil {
 			t.Fatalf("NewSQLStore: %v", err)
 		}
+		t.Cleanup(func() { _ = store.Close() })
+		body(t, store)
+	})
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		store, err := NewMongoDBStore(db)
+		if err != nil {
+			t.Fatalf("NewMongoDBStore: %v", err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
 }
 
-func TestSQLStoreRoundTrip(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+func TestStoreRoundTrip(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 
 		server := ManagedServer{

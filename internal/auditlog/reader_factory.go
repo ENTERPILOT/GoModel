@@ -1,12 +1,12 @@
 package auditlog
 
 import (
-	"database/sql"
+	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // NewReader creates an audit log Reader from a storage backend.
@@ -16,10 +16,10 @@ func NewReader(store storage.Storage) (Reader, error) {
 		return nil, nil
 	}
 
-	return storage.ResolveBackend[Reader](
+	return storage.ResolveSQLBackend[Reader](
+		context.Background(),
 		store,
-		func(db *sql.DB) (Reader, error) { return NewSQLiteReader(db) },
-		func(pool *pgxpool.Pool) (Reader, error) { return NewPostgreSQLReader(pool) },
+		func(db sqlx.DB) (Reader, error) { return NewSQLReader(db) },
 		func(db *mongo.Database) (Reader, error) { return NewMongoDBReader(db) },
 	)
 }

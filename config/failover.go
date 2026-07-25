@@ -90,43 +90,13 @@ func loadFailoverConfig(cfg *FailoverConfig) error {
 		slog.Warn("failover.overrides was removed and is ignored; use failover.disabled_models instead")
 		cfg.Overrides = nil
 	}
-
 	cfg.DefaultMode = ResolveFailoverDefaultMode(cfg.DefaultMode)
 
-	manual := make(map[string][]string)
-	if err := mergeFailoverRules(manual, cfg.Rules, "failover.rules"); err != nil {
+	manual, err := failoverManualRules(cfg)
+	if err != nil {
 		return err
 	}
-
-	path := strings.TrimSpace(cfg.ManualRulesPath)
-	if path != "" {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("failover.manual_rules_path: failed to read %q: %w", path, err)
-		}
-		decoded, err := decodeFailoverRuleJSON(string(raw), fmt.Sprintf("failover.manual_rules_path: failed to parse %q", path))
-		if err != nil {
-			return err
-		}
-		if err := mergeFailoverRules(manual, decoded, "failover.manual_rules_path"); err != nil {
-			return err
-		}
-	}
-
-	if inline := strings.TrimSpace(cfg.RulesJSON); inline != "" {
-		decoded, err := decodeFailoverRuleJSON(inline, "failover.rules_json")
-		if err != nil {
-			return err
-		}
-		if err := mergeFailoverRules(manual, decoded, "failover.rules_json"); err != nil {
-			return err
-		}
-	}
-
-	cfg.Manual = nil
-	if len(manual) > 0 {
-		cfg.Manual = manual
-	}
+	cfg.Manual = manual
 
 	disabled, err := failoverDisabledModels(cfg)
 	if err != nil {
@@ -136,21 +106,93 @@ func loadFailoverConfig(cfg *FailoverConfig) error {
 	return nil
 }
 
-func decodeFailoverRuleJSON(raw, label string) (map[string][]string, error) {
-	expanded := expandString(raw)
-	decoded := make(map[string][]string)
-	decoder := json.NewDecoder(strings.NewReader(expanded))
+// failoverManualRules merges the three sources of manual rules, later sources
+// overwriting a key an earlier one set: inline YAML, then the rules file, then
+// the env JSON. It returns nil rather than an empty map when no source
+// contributes, because callers treat a nil map as "no manual rules".
+func failoverManualRules(cfg *FailoverConfig) (map[string][]string, error) {
+	merged := make(map[string][]string)
 
-	token, err := decoder.Token()
+	if err := mergeFailoverRules(merged, cfg.Rules, "failover.rules"); err != nil {
+		return nil, err
+	}
+
+	fromFile, err := failoverRulesFromFile(cfg.ManualRulesPath)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", label, err)
+		return nil, err
 	}
-	delim, ok := token.(json.Delim)
-	if !ok || delim != '{' {
-		return nil, fmt.Errorf("%s: top-level JSON value must be an object", label)
+	if err := mergeFailoverRules(merged, fromFile, "failover.manual_rules_path"); err != nil {
+		return nil, err
 	}
 
-	seenKeys := make(map[string]struct{})
+	// An unset env var is simply no rules; an empty *file*, by contrast, stays
+	// a parse error, since configuring a path to nothing is a mistake.
+	if strings.TrimSpace(cfg.RulesJSON) != "" {
+		fromEnv, err := failoverRulesFromJSON(cfg.RulesJSON, "failover.rules_json")
+		if err != nil {
+			return nil, err
+		}
+		if err := mergeFailoverRules(merged, fromEnv, "failover.rules_json"); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(merged) == 0 {
+		return nil, nil
+	}
+	return merged, nil
+}
+
+// failoverRulesFromFile reads manual rules from a JSON file, or returns nil
+// when no path is configured.
+func failoverRulesFromFile(path string) (map[string][]string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failover.manual_rules_path: failed to read %q: %w", path, err)
+	}
+	return failoverRulesFromJSON(string(raw),
+		fmt.Sprintf("failover.manual_rules_path: failed to parse %q", path))
+}
+
+// failoverRulesFromJSON decodes a JSON object mapping a source model to its
+// ordered failover models.
+func failoverRulesFromJSON(raw, label string) (map[string][]string, error) {
+	entries, err := decodeStrictJSONObject(raw, label)
+	if err != nil {
+		return nil, err
+	}
+	rules := make(map[string][]string, len(entries))
+	for key, rawModels := range entries {
+		if bytes.Equal(bytes.TrimSpace(rawModels), []byte("null")) {
+			return nil, fmt.Errorf("%s: null not allowed for %q", label, key)
+		}
+		var models []string
+		if err := json.Unmarshal(rawModels, &models); err != nil {
+			return nil, fmt.Errorf("%s: %w", label, err)
+		}
+		rules[key] = models
+	}
+	return rules, nil
+}
+
+// decodeStrictJSONObject decodes a JSON object into its raw values, rejecting
+// what a plain json.Unmarshal into a map would silently accept: a non-object
+// top level, a repeated key (the last would win, quietly discarding a rule an
+// operator wrote), and trailing content after the object (usually a truncated
+// or concatenated file). Detecting those needs the token stream, which is why
+// this is hand-rolled rather than an Unmarshal.
+func decodeStrictJSONObject(raw, label string) (map[string]json.RawMessage, error) {
+	decoder := json.NewDecoder(strings.NewReader(expandString(raw)))
+
+	if err := expectJSONDelim(decoder, '{', label); err != nil {
+		return nil, err
+	}
+
+	entries := make(map[string]json.RawMessage)
 	for decoder.More() {
 		token, err := decoder.Token()
 		if err != nil {
@@ -160,32 +202,19 @@ func decodeFailoverRuleJSON(raw, label string) (map[string][]string, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s: object key must be a string", label)
 		}
-		if _, exists := seenKeys[key]; exists {
+		if _, exists := entries[key]; exists {
 			return nil, fmt.Errorf("%s: duplicate JSON key %q", label, key)
 		}
-		seenKeys[key] = struct{}{}
 
-		var rawModels json.RawMessage
-		if err := decoder.Decode(&rawModels); err != nil {
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
 			return nil, fmt.Errorf("%s: %w", label, err)
 		}
-		if bytes.Equal(bytes.TrimSpace(rawModels), []byte("null")) {
-			return nil, fmt.Errorf("%s: null not allowed for %q", label, key)
-		}
-		var models []string
-		if err := json.Unmarshal(rawModels, &models); err != nil {
-			return nil, fmt.Errorf("%s: %w", label, err)
-		}
-		decoded[key] = models
+		entries[key] = value
 	}
 
-	token, err = decoder.Token()
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", label, err)
-	}
-	delim, ok = token.(json.Delim)
-	if !ok || delim != '}' {
-		return nil, fmt.Errorf("%s: top-level JSON value must be an object", label)
+	if err := expectJSONDelim(decoder, '}', label); err != nil {
+		return nil, err
 	}
 
 	var trailing json.RawMessage
@@ -195,7 +224,18 @@ func decodeFailoverRuleJSON(raw, label string) (map[string][]string, error) {
 		}
 		return nil, fmt.Errorf("%s: unexpected trailing JSON content", label)
 	}
-	return decoded, nil
+	return entries, nil
+}
+
+func expectJSONDelim(decoder *json.Decoder, want json.Delim, label string) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != want {
+		return fmt.Errorf("%s: top-level JSON value must be an object", label)
+	}
+	return nil
 }
 
 func mergeFailoverRules(dst map[string][]string, src map[string][]string, label string) error {
@@ -224,39 +264,51 @@ func mergeFailoverRules(dst map[string][]string, src map[string][]string, label 
 
 func failoverDisabledModels(cfg *FailoverConfig) (map[string]bool, error) {
 	disabled := make(map[string]bool)
-	for _, model := range cfg.DisabledModels {
-		model = strings.TrimSpace(model)
-		if model != "" {
+	addDisabledModel(disabled, cfg.DisabledModels...)
+
+	raw := strings.TrimSpace(cfg.DisabledModelsJSON)
+	if raw == "" {
+		return nilIfEmpty(disabled), nil
+	}
+	if err := addDisabledModelsFromJSON(disabled, raw); err != nil {
+		return nil, err
+	}
+	return nilIfEmpty(disabled), nil
+}
+
+// addDisabledModelsFromJSON accepts either spelling operators use: a plain
+// array of selectors, or an object mapping a selector to a boolean so a single
+// entry can be turned off without deleting it.
+func addDisabledModelsFromJSON(disabled map[string]bool, raw string) error {
+	expanded := expandString(raw)
+	if strings.TrimSpace(expanded) == "null" {
+		return fmt.Errorf("disabled models JSON: null not allowed; expected an array or object")
+	}
+
+	var list []string
+	if err := json.Unmarshal([]byte(expanded), &list); err == nil {
+		addDisabledModel(disabled, list...)
+		return nil
+	}
+
+	var keyed map[string]bool
+	if err := json.Unmarshal([]byte(expanded), &keyed); err != nil {
+		return fmt.Errorf("failover.disabled_models_json: must be a JSON array or boolean object: %w", err)
+	}
+	for model, isDisabled := range keyed {
+		if isDisabled {
+			addDisabledModel(disabled, model)
+		}
+	}
+	return nil
+}
+
+func addDisabledModel(disabled map[string]bool, models ...string) {
+	for _, model := range models {
+		if model = strings.TrimSpace(model); model != "" {
 			disabled[model] = true
 		}
 	}
-	if raw := strings.TrimSpace(cfg.DisabledModelsJSON); raw != "" {
-		expanded := expandString(raw)
-		if strings.TrimSpace(expanded) == "null" {
-			return nil, fmt.Errorf("disabled models JSON: null not allowed; expected an array or object")
-		}
-		var list []string
-		if err := json.Unmarshal([]byte(expanded), &list); err == nil {
-			for _, model := range list {
-				model = strings.TrimSpace(model)
-				if model != "" {
-					disabled[model] = true
-				}
-			}
-			return nilIfEmpty(disabled), nil
-		}
-		var keyed map[string]bool
-		if err := json.Unmarshal([]byte(expanded), &keyed); err != nil {
-			return nil, fmt.Errorf("failover.disabled_models_json: must be a JSON array or boolean object: %w", err)
-		}
-		for key, value := range keyed {
-			key = strings.TrimSpace(key)
-			if key != "" && value {
-				disabled[key] = true
-			}
-		}
-	}
-	return nilIfEmpty(disabled), nil
 }
 
 func nilIfEmpty(m map[string]bool) map[string]bool {

@@ -5,6 +5,9 @@ import (
 	"math"
 	"testing"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
 func hourRow(hour time.Time, provider string, mutate func(*statsRow)) statsRow {
@@ -169,84 +172,84 @@ func TestFoldRequestStats_ZeroFillStopsAtNow(t *testing.T) {
 	}
 }
 
-func TestSQLiteReaderGetRequestStats(t *testing.T) {
-	db := createTestDB(t)
-	defer db.Close()
+func TestSQLReaderGetRequestStats(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 
-	store, err := newSQLiteStore(t, db, 0)
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
 
-	day := time.Date(2026, 1, 16, 0, 0, 0, 0, time.UTC)
-	entries := []*LogEntry{
-		{ID: "ok-1", Timestamp: day.Add(10*time.Hour + 15*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 200, DurationNs: 100e6},
-		{ID: "ok-2", Timestamp: day.Add(10*time.Hour + 45*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 201, DurationNs: 300e6},
-		{ID: "client-err", Timestamp: day.Add(10*time.Hour + 50*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 429, DurationNs: 5e6},
-		{ID: "server-err", Timestamp: day.Add(11*time.Hour + 5*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 502, DurationNs: 2e9},
-		// Local cache hit: counted as 2xx but excluded from latency.
-		{ID: "cache-hit", Timestamp: day.Add(11*time.Hour + 10*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 200, DurationNs: 1e6, CacheType: CacheTypeExact},
-		// Empty provider name falls back to the provider type.
-		{ID: "fallback-name", Timestamp: day.Add(11*time.Hour + 20*time.Minute), Provider: "anthropic", StatusCode: 200, DurationNs: 700e6},
-		// Outside the queried range.
-		{ID: "next-day", Timestamp: day.Add(30 * time.Hour), Provider: "openai", ProviderName: "openai-prod", StatusCode: 200, DurationNs: 100e6},
-	}
-	if err := store.WriteBatch(context.Background(), entries); err != nil {
-		t.Fatalf("failed to seed audit logs: %v", err)
-	}
+		day := time.Date(2026, 1, 16, 0, 0, 0, 0, time.UTC)
+		entries := []*LogEntry{
+			{ID: "ok-1", Timestamp: day.Add(10*time.Hour + 15*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 200, DurationNs: 100e6},
+			{ID: "ok-2", Timestamp: day.Add(10*time.Hour + 45*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 201, DurationNs: 300e6},
+			{ID: "client-err", Timestamp: day.Add(10*time.Hour + 50*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 429, DurationNs: 5e6},
+			{ID: "server-err", Timestamp: day.Add(11*time.Hour + 5*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 502, DurationNs: 2e9},
+			// Local cache hit: counted as 2xx but excluded from latency.
+			{ID: "cache-hit", Timestamp: day.Add(11*time.Hour + 10*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 200, DurationNs: 1e6, CacheType: CacheTypeExact},
+			// Empty provider name falls back to the provider type.
+			{ID: "fallback-name", Timestamp: day.Add(11*time.Hour + 20*time.Minute), Provider: "anthropic", StatusCode: 200, DurationNs: 700e6},
+			// Outside the queried range.
+			{ID: "next-day", Timestamp: day.Add(30 * time.Hour), Provider: "openai", ProviderName: "openai-prod", StatusCode: 200, DurationNs: 100e6},
+		}
+		if err := store.WriteBatch(context.Background(), entries); err != nil {
+			t.Fatalf("failed to seed audit logs: %v", err)
+		}
 
-	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create reader: %v", err)
-	}
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
 
-	stats, err := reader.GetRequestStats(context.Background(), RequestStatsParams{
-		QueryParams: QueryParams{StartDate: day, EndDate: day},
-		Interval:    StatsIntervalHour,
-		Location:    time.UTC,
-		Now:         day.Add(23 * time.Hour),
+		stats, err := reader.GetRequestStats(context.Background(), RequestStatsParams{
+			QueryParams: QueryParams{StartDate: day, EndDate: day},
+			Interval:    StatsIntervalHour,
+			Location:    time.UTC,
+			Now:         day.Add(23 * time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("GetRequestStats failed: %v", err)
+		}
+
+		if stats.Summary.Requests != 6 {
+			t.Fatalf("summary requests = %d, want 6", stats.Summary.Requests)
+		}
+		if stats.Summary.Status2xx != 4 || stats.Summary.Status4xx != 1 || stats.Summary.Status5xx != 1 || stats.Summary.StatusOther != 0 {
+			t.Fatalf("summary = %+v", stats.Summary)
+		}
+
+		byStart := map[int]RequestStatsBucket{}
+		for _, b := range stats.Buckets {
+			byStart[b.Start.UTC().Hour()] = b
+		}
+		if b := byStart[10]; b.Requests != 3 || b.Status2xx != 2 || b.Status4xx != 1 {
+			t.Fatalf("10:00 bucket = %+v", b)
+		}
+		if b := byStart[11]; b.Requests != 3 || b.Status2xx != 2 || b.Status5xx != 1 {
+			t.Fatalf("11:00 bucket = %+v", b)
+		}
+
+		if len(stats.ProviderLatency) != 2 {
+			t.Fatalf("provider series = %d, want 2", len(stats.ProviderLatency))
+		}
+		if stats.ProviderLatency[0].Provider != "openai-prod" {
+			t.Fatalf("first provider = %q, want openai-prod", stats.ProviderLatency[0].Provider)
+		}
+		openai := stats.ProviderLatency[0]
+		if openai.AvgDurationMs[10] == nil || *openai.AvgDurationMs[10] != 200 {
+			t.Fatalf("openai 10:00 avg = %v, want 200 (2xx only)", openai.AvgDurationMs[10])
+		}
+		// The 11:00 openai bucket only saw a 502 and a cache hit -> gap.
+		if openai.AvgDurationMs[11] != nil {
+			t.Fatalf("openai 11:00 avg = %v, want nil", openai.AvgDurationMs[11])
+		}
+		anthropic := stats.ProviderLatency[1]
+		if anthropic.Provider != "anthropic" {
+			t.Fatalf("second provider = %q, want anthropic", anthropic.Provider)
+		}
+		if anthropic.AvgDurationMs[11] == nil || *anthropic.AvgDurationMs[11] != 700 {
+			t.Fatalf("anthropic 11:00 avg = %v, want 700", anthropic.AvgDurationMs[11])
+		}
 	})
-	if err != nil {
-		t.Fatalf("GetRequestStats failed: %v", err)
-	}
-
-	if stats.Summary.Requests != 6 {
-		t.Fatalf("summary requests = %d, want 6", stats.Summary.Requests)
-	}
-	if stats.Summary.Status2xx != 4 || stats.Summary.Status4xx != 1 || stats.Summary.Status5xx != 1 || stats.Summary.StatusOther != 0 {
-		t.Fatalf("summary = %+v", stats.Summary)
-	}
-
-	byStart := map[int]RequestStatsBucket{}
-	for _, b := range stats.Buckets {
-		byStart[b.Start.UTC().Hour()] = b
-	}
-	if b := byStart[10]; b.Requests != 3 || b.Status2xx != 2 || b.Status4xx != 1 {
-		t.Fatalf("10:00 bucket = %+v", b)
-	}
-	if b := byStart[11]; b.Requests != 3 || b.Status2xx != 2 || b.Status5xx != 1 {
-		t.Fatalf("11:00 bucket = %+v", b)
-	}
-
-	if len(stats.ProviderLatency) != 2 {
-		t.Fatalf("provider series = %d, want 2", len(stats.ProviderLatency))
-	}
-	if stats.ProviderLatency[0].Provider != "openai-prod" {
-		t.Fatalf("first provider = %q, want openai-prod", stats.ProviderLatency[0].Provider)
-	}
-	openai := stats.ProviderLatency[0]
-	if openai.AvgDurationMs[10] == nil || *openai.AvgDurationMs[10] != 200 {
-		t.Fatalf("openai 10:00 avg = %v, want 200 (2xx only)", openai.AvgDurationMs[10])
-	}
-	// The 11:00 openai bucket only saw a 502 and a cache hit -> gap.
-	if openai.AvgDurationMs[11] != nil {
-		t.Fatalf("openai 11:00 avg = %v, want nil", openai.AvgDurationMs[11])
-	}
-	anthropic := stats.ProviderLatency[1]
-	if anthropic.Provider != "anthropic" {
-		t.Fatalf("second provider = %q, want anthropic", anthropic.Provider)
-	}
-	if anthropic.AvgDurationMs[11] == nil || *anthropic.AvgDurationMs[11] != 700 {
-		t.Fatalf("anthropic 11:00 avg = %v, want 700", anthropic.AvgDurationMs[11])
-	}
 }
