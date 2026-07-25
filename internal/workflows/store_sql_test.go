@@ -244,3 +244,57 @@ func testWorkflowPayload() Payload {
 		Features:      FeatureFlags{Cache: true, Audit: true, Usage: true},
 	}
 }
+
+// TestNewSQLStoreConvertsTimestamptzCreatedAt covers the one column where the
+// two hand-written stores disagreed on representation: PostgreSQL kept
+// created_at as TIMESTAMPTZ while SQLite kept unix seconds. Existing
+// PostgreSQL deployments must be converted in place, not left with a column
+// the shared scan cannot read.
+func TestNewSQLStoreConvertsTimestamptzCreatedAt(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("timestamptz column only ever existed on PostgreSQL")
+		}
+		ctx := context.Background()
+		if err := db.Schema(ctx, `
+			CREATE TABLE workflow_versions (
+				id TEXT PRIMARY KEY,
+				scope_provider TEXT,
+				scope_model TEXT,
+				scope_user_path TEXT,
+				scope_key TEXT NOT NULL,
+				version INTEGER NOT NULL,
+				active BOOLEAN NOT NULL DEFAULT TRUE,
+				managed_default BOOLEAN NOT NULL DEFAULT FALSE,
+				name TEXT NOT NULL,
+				description TEXT NOT NULL DEFAULT '',
+				workflow_payload JSONB NOT NULL,
+				workflow_hash TEXT NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL
+			)`); err != nil {
+			t.Fatalf("create legacy table: %v", err)
+		}
+		if _, err := db.Exec(ctx, `
+			INSERT INTO workflow_versions (
+				id, scope_key, version, active, managed_default, name,
+				workflow_payload, workflow_hash, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, to_timestamp(?))
+		`, "legacy-id", "global", 1, true, false, "legacy",
+			`{"schema_version":1}`, "hash-legacy", 1700000000); err != nil {
+			t.Fatalf("seed legacy row: %v", err)
+		}
+
+		store, err := NewSQLStore(ctx, db)
+		if err != nil {
+			t.Fatalf("NewSQLStore: %v", err)
+		}
+		got, err := store.Get(ctx, "legacy-id")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		// The instant must survive the conversion, not just the column type.
+		if got.CreatedAt.Unix() != 1700000000 {
+			t.Errorf("CreatedAt = %d, want 1700000000 preserved", got.CreatedAt.Unix())
+		}
+	})
+}

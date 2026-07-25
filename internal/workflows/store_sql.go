@@ -76,6 +76,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
 		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
+	if err := migrateCreatedAtToUnixSeconds(ctx, db); err != nil {
+		return nil, err
+	}
 	if err := db.Schema(ctx, sqlSchema[1:]...); err != nil {
 		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
