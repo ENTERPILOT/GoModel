@@ -205,6 +205,19 @@ several now do (`guardrails`, `mcpgateway`, `failover`, `ratelimit`,
 - **F6 (b)–(e)**: cache-type vocabulary spread over four packages (import-cycle
   risk), `failover/resolver.go` recomputing selector identity per request,
   `config.loadFailoverConfig` mixing validation with a bespoke JSON loader.
+- **Timestamps render in a different zone per backend.** Writes are UTC
+  everywhere — `Dialect.TimestampArg` normalises on both engines, and
+  `auditlog.TestStoreWritesTimestampsInUTC` asserts it against the stored
+  column rather than the reader. Reads are *not* normalised: SQLite returns the
+  `Z` text it stored, while pgx materialises a `TIMESTAMPTZ` in the server's
+  local zone, so the same entry serialises as `…T12:30:00Z` or
+  `…T14:30:00+02:00` depending on the backend, with an offset that also shifts
+  with DST. Same instant, and any client parsing RFC 3339 correctly is
+  unaffected. This is pre-existing — neither hand-written reader normalised
+  either — and `sqlx.Timestamp` preserves it deliberately. Normalising is one
+  line in `Scan`, but it changes the timestamp string in every PostgreSQL
+  deployment's admin API responses, so it was left as a separate decision
+  rather than folded into a refactor.
 
 `docs/dev/possible-refactoring.md` items 2, 6, 7 and 10 are **stale** — the
 dashboard JS they reference was replaced by the Svelte app, and the failover
