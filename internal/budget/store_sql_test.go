@@ -13,7 +13,6 @@ import (
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
-// runSQLStoreTest runs one test body against every available SQL dialect.
 func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {

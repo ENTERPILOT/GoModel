@@ -15,7 +15,6 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
-// runSQLStoreTest runs one test body against every available SQL dialect.
 // These cases matter most on PostgreSQL: the atomic JSON mutations they cover
 // are the one place the two engines need genuinely different statements.
 func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore)) {

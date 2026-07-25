@@ -9,7 +9,6 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
-// runSQLCredentialStoreTest runs one test body against every available SQL dialect.
 func runSQLCredentialStoreTest(t *testing.T, body func(t *testing.T, store *SQLCredentialStore)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
