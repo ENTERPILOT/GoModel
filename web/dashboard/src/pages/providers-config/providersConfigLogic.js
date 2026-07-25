@@ -124,14 +124,9 @@ export function suggestProviderCredentialName(rows, type) {
   return base + "-" + n;
 }
 
-// normalizeProviderCredentialCommaList splits a comma-separated input into a
-// trimmed array, dropping empty items.
-export function normalizeProviderCredentialCommaList(value) {
-  return String(value || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item);
-}
+import { splitCommaList } from "../../lib/utils/format.js";
+
+export { splitCommaList };
 
 // providerCredentialRowToForm prefills the editor form from a fetched row.
 export function providerCredentialRowToForm(row) {
@@ -206,24 +201,7 @@ export function buildProviderCredentialPayload(form) {
       (form && form.service_account_json_base64) || "",
     ).trim(),
     gcp_scope: String((form && form.gcp_scope) || "").trim(),
-    models: normalizeProviderCredentialCommaList(form && form.models),
+    models: splitCommaList(form && form.models),
     enabled: Boolean(form && form.enabled),
   };
-}
-
-// providerCredentialErrorMessage extracts {error:{message}} from an admin
-// error payload (the shape the provider-credentials API returns), falling
-// back to the supplied default.
-export function providerCredentialErrorMessage(data, fallback) {
-  if (
-    data &&
-    typeof data === "object" &&
-    data.error &&
-    typeof data.error === "object" &&
-    typeof data.error.message === "string" &&
-    data.error.message
-  ) {
-    return data.error.message;
-  }
-  return fallback;
 }

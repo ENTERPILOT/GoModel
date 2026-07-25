@@ -7,7 +7,7 @@
 //   PUT    /admin/provider-credentials          — upsert one row
 //   DELETE /admin/provider-credentials/{name}   — delete one row
 
-import { getJSON, sendJSON, isAbortError } from "$lib/api/client.js";
+import { errorPayloadMessage, getJSON, sendJSON, isAbortError } from "$lib/api/client.js";
 import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
@@ -17,7 +17,6 @@ import {
   providerCredentialRowToForm,
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
-  providerCredentialErrorMessage,
 } from "./providersConfigLogic.js";
 
 class ProvidersConfigState {
@@ -83,7 +82,7 @@ class ProvidersConfigState {
       if (!result.ok) {
         this.rows = [];
         if (result.status !== 401) {
-          this.error = providerCredentialErrorMessage(
+          this.error = errorPayloadMessage(
             result.data,
             "Failed to load provider credentials.",
           );
@@ -184,7 +183,7 @@ class ProvidersConfigState {
           this.error = "Authentication required.";
           return;
         }
-        this.error = providerCredentialErrorMessage(
+        this.error = errorPayloadMessage(
           result.data,
           "Failed to save provider credential.",
         );
@@ -223,7 +222,7 @@ class ProvidersConfigState {
         confirmDialog.error =
           result.status === 401
             ? "Authentication required."
-            : providerCredentialErrorMessage(
+            : errorPayloadMessage(
                 result.data,
                 "Failed to delete provider credential.",
               );

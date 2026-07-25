@@ -52,12 +52,12 @@
       <div class="auth-dialog-actions">
         <button
           type="button"
-          class="pagination-btn"
+          class="btn"
           onclick={() => confirmDialog.close()}>Cancel</button
         >
         <button
           type="submit"
-          class="pagination-btn pagination-btn-danger pagination-btn-with-icon"
+          class="btn btn-danger btn-with-icon"
           disabled={dialog.loading || !confirmDialog.ready()}
         >
           <Icon name={dialog.icon} class="form-action-icon" />

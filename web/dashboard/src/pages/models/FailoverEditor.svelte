@@ -104,7 +104,7 @@
         <div class="failover-target-actions">
           <button
             type="button"
-            class="pagination-btn pagination-btn-with-icon"
+            class="btn btn-with-icon"
             disabled={failover.failoverFormManaged ||
               failover.failoverGenerating ||
               failover.failoverSaving}
@@ -115,7 +115,7 @@
           </button>
           <button
             type="button"
-            class="pagination-btn pagination-btn-with-icon"
+            class="btn btn-with-icon"
             disabled={failover.failoverFormManaged ||
               failover.failoverGenerating ||
               failover.failoverSaving ||
@@ -162,7 +162,7 @@
       <div class="form-actions">
         <button
           type="button"
-          class="pagination-btn"
+          class="btn"
           onclick={() => failover.closeFailoverForm()}
         >
           Cancel
@@ -170,7 +170,7 @@
         {#if failover.failoverFormMode === "edit" && !failover.failoverFormManaged}
           <button
             type="button"
-            class="pagination-btn pagination-btn-danger-outline"
+            class="btn btn-danger-outline"
             disabled={failover.failoverSaving || failover.failoverGenerating}
             onclick={() => failover.deleteFailoverRule()}
           >
@@ -180,7 +180,7 @@
         {#if !failover.failoverFormManaged}
           <button
             type="submit"
-            class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+            class="btn btn-primary btn-with-icon"
             disabled={failover.failoverSaving || failover.failoverGenerating}
           >
             <Icon name="save" class="form-action-icon" />

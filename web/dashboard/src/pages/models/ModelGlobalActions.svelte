@@ -1,5 +1,6 @@
 <script>
   // Global-scope action buttons shown in every table's actions header.
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
@@ -8,7 +9,6 @@
     modelOverrideEditButtonLabel,
   } from "./virtualModelsLogic.js";
   import AccessToggle from "./AccessToggle.svelte";
-  import TableIcon from "./TableIcon.svelte";
 </script>
 
 <div class="alias-actions-cell model-list-actions">
@@ -21,7 +21,7 @@
       class="table-icon-btn {pricingOverrides.modelPricingButtonClass(pricingOverrides.hasGlobalPricingOverride())}"
       onclick={() => pricingOverrides.openGlobalPricingOverrideEdit()}
     >
-      <TableIcon name="dollar" />
+      <Icon name="circle-dollar-sign" class="table-icon-svg" />
     </TableActionButton>
   {/if}
   {#if virtualModels.virtualModelsAvailable}
@@ -30,7 +30,7 @@
       class="table-icon-btn {modelOverrideEditButtonClass(virtualModels.hasGlobalModelOverride())}"
       onclick={() => virtualModels.openGlobalModelOverrideEdit()}
     >
-      <TableIcon name="edit" />
+      <Icon name="pencil" class="table-icon-svg" />
     </TableActionButton>
   {/if}
 </div>

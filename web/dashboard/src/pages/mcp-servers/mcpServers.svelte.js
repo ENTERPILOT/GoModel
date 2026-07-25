@@ -2,7 +2,7 @@
 // of the shared admin API client. Pure helpers live in ./mcp-servers.js so
 // tests can exercise them without Svelte.
 
-import { getJSON, sendJSON } from "$lib/api/client.js";
+import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
@@ -11,7 +11,6 @@ import {
   defaultMcpServerForm,
   deriveMcpServerSlug,
   filterMcpServers,
-  mcpErrorPayloadMessage,
   mcpServerFormFromServer,
   mcpServerSlug,
   mcpServerStatus,
@@ -76,7 +75,7 @@ class McpServersState {
       if (!result.ok) {
         this.servers = [];
         if (result.status !== 401) {
-          this.error = mcpErrorPayloadMessage(
+          this.error = errorPayloadMessage(
             result.data,
             "Failed to load MCP servers.",
           );
@@ -171,7 +170,7 @@ class McpServersState {
         this.error =
           result.status === 401
             ? "Authentication required."
-            : mcpErrorPayloadMessage(result.data, "Failed to save MCP server.");
+            : errorPayloadMessage(result.data, "Failed to save MCP server.");
         return;
       }
 
@@ -225,7 +224,7 @@ class McpServersState {
         flash.error(
           result.status === 401
             ? "Authentication required."
-            : mcpErrorPayloadMessage(
+            : errorPayloadMessage(
                 result.data,
                 "Failed to delete MCP server.",
               ),
@@ -274,7 +273,7 @@ class McpServersState {
         flash.error(
           result.status === 401
             ? "Authentication required."
-            : mcpErrorPayloadMessage(
+            : errorPayloadMessage(
                 result.data,
                 "Failed to reconnect MCP server.",
               ),
@@ -353,7 +352,7 @@ class McpServersState {
         this.catalogError =
           result.status === 401
             ? "Authentication required."
-            : mcpErrorPayloadMessage(
+            : errorPayloadMessage(
                 result.data,
                 "Failed to load MCP server catalog.",
               );

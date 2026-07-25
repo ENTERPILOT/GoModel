@@ -24,7 +24,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* Interval Picker */
   .segmented-control {
     display: inline-flex;

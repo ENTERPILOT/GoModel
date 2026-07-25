@@ -139,7 +139,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .conversation-overlay {
     position: fixed;
     inset: 0;

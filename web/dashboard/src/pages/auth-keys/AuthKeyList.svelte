@@ -107,7 +107,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* Read-only chip variant (e.g. API key labels) — same look, no affordance. */
   .usage-label-chip-static, .usage-label-chip-static:hover {
     cursor: default;

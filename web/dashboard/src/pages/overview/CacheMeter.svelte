@@ -63,7 +63,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .cache-meter-header {
     display: flex;
     align-items: baseline;

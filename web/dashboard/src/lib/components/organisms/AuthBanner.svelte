@@ -9,7 +9,7 @@
     <span>Authentication required for dashboard data.</span>
     <button
       type="button"
-      class="pagination-btn pagination-btn-primary"
+      class="btn btn-primary"
       onclick={() => auth.openDialog()}
     >
       Enter API key
@@ -18,7 +18,6 @@
 {/if}
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .auth-banner {
     display: flex;
     align-items: center;

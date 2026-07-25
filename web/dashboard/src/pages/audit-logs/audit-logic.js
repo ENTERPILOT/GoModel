@@ -1,6 +1,9 @@
 // Pure audit-log display/query logic (plus the tiny workflowFailoverTarget
 // helper the metadata row needs).
-// Keep this file dependency-free so node:test can import it directly.
+// Keep this file free of Svelte-runtime imports so node:test can import it
+// directly.
+
+import { formatNumber } from "../../lib/utils/format.js";
 
 function tryParseJSON(value) {
   try {
@@ -601,10 +604,6 @@ export function auditRequestRevisionPane(entry, revision) {
 
 // --- Usage / prompt-cache helpers -------------------------------------------
 
-function formatNumber(n) {
-  if (n == null || n === undefined) return "-";
-  return n.toLocaleString();
-}
 
 function auditUsage(entry) {
   const usage = entry && entry.usage;

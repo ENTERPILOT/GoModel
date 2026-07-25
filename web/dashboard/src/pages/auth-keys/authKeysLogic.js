@@ -101,41 +101,6 @@ export function buildCreateAuthKeyPayload(form) {
   return { payload };
 }
 
-// authKeyErrorMessage extracts the admin error payload message
-// ({ error: { message } }) from a parsed response body.
-export function authKeyErrorMessage(data, fallback) {
-  if (
-    data &&
-    typeof data === "object" &&
-    data.error &&
-    typeof data.error === "object" &&
-    typeof data.error.message === "string" &&
-    data.error.message
-  ) {
-    return data.error.message;
-  }
-  return fallback;
-}
 
-// Deterministic label -> palette color so a label keeps one color across the
-// usage charts and every chip on the dashboard (same palette + djb2 hash as
-// src/pages/usage/usage-helpers.js).
-const LABEL_PALETTE = [
-  "#c2845a", "#7a9e7e", "#d4a574", "#b8a98e", "#8b9e6b",
-  "#7d8a97", "#c47a5a", "#6b8e6b", "#a09486", "#9b7ea4",
-  "#c49a6c",
-];
-
-export function labelColor(label) {
-  let hash = 5381;
-  const text = String(label || "");
-  for (let i = 0; i < text.length; i++) {
-    hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
-  }
-  return LABEL_PALETTE[Math.abs(hash) % LABEL_PALETTE.length];
-}
-
-// labelChipStyle returns the inline style string for a usage-label chip.
-export function labelChipStyle(label) {
-  return "--label-color: " + labelColor(label);
-}
+// Label chips share the dashboard-wide palette and chip styling.
+export { labelChipStyle, labelColor } from "../../lib/utils/chartTheme.js";

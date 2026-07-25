@@ -26,7 +26,6 @@
 </button>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .dialog-close-btn {
     display: inline-flex;
     align-items: center;

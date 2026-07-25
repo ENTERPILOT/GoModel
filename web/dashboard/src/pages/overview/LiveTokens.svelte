@@ -4,7 +4,7 @@
   // engine (polling + usage SSE signal) lives in liveTokensState.svelte.js.
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
-  import { chartColors } from "$lib/utils/chartTheme.js";
+  import { chartColors, resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
   import { liveTokensState } from "./liveTokensState.svelte.js";
   import {
     GRANULARITY_OPTIONS,
@@ -15,7 +15,6 @@
     liveTokensChartAriaLabel,
     liveTokensChartConfig,
   } from "./liveTokensLogic.js";
-  import { resolveColor } from "./chartStyle.js";
 
   const series = $derived(
     bucketsToSeries(liveTokensState.buckets, liveTokensState.granularity),
@@ -90,7 +89,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* Live token throughput chart */
   /* The generic .chart-container has no margin (siblings space it), but this card
      is followed by the cache meter, which only spaces below itself — so give the

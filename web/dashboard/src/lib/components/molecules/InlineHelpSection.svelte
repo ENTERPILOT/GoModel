@@ -49,7 +49,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .inline-help-toggle.is-open {
     color: var(--text);
     background: transparent;

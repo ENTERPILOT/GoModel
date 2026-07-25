@@ -2,40 +2,23 @@
   // Audit-log toolbar: consolidated search + method/status/stream selects and
   // the Clear button.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import { debounced } from "$lib/utils/debounce.js";
   import { auditList } from "./auditList.svelte.js";
 
-  let searchDebounceTimer = null;
-
-  // Debounced search fetch (300ms).
-  function onSearchInput() {
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => {
-      searchDebounceTimer = null;
-      auditList.fetchAuditLog(true);
-    }, 300);
-  }
-
-  $effect(() => {
-    return () => {
-      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    };
-  });
+  const onSearchInput = debounced(() => auditList.fetchAuditLog(true));
+  $effect(() => onSearchInput.cancel);
 </script>
 
 <div class="audit-log-toolbar">
   <div class="audit-filter-row audit-filter-row-search">
-    <div class="filter-input-wrap">
-      <Icon name="search" class="filter-input-icon" />
-      <input
-        id="audit-filter-search"
-        type="text"
-        placeholder="Search by request ID, model, provider, path, user path, or error..."
-        aria-label="Search by request ID, model, provider, path, user path, or error"
-        class="filter-input"
-        bind:value={auditList.auditSearch}
-        oninput={onSearchInput}
-      />
-    </div>
+    <FilterInput
+      id="audit-filter-search"
+      placeholder="Search by request ID, model, provider, path, user path, or error..."
+      label="Search by request ID, model, provider, path, user path, or error"
+      bind:value={auditList.auditSearch}
+      oninput={onSearchInput}
+    />
   </div>
   <div class="audit-filter-row audit-filter-row-controls">
     <select
@@ -85,29 +68,16 @@
     </select>
     <button
       type="button"
-      class="pagination-btn audit-clear-btn"
+      class="btn audit-clear-btn"
       onclick={() => auditList.clearAuditFilters()}
     >
-      <svg
-        class="table-icon-svg"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M18 6L6 18"></path>
-        <path d="M6 6l12 12"></path>
-      </svg>
+      <Icon name="x" class="table-icon-svg" />
       <span>Clear</span>
     </button>
   </div>
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .audit-log-toolbar {
     display: flex;
     flex-direction: column;
@@ -135,14 +105,14 @@
     grid-column: span 2;
   }
 
-  .audit-filter-row-controls :global(.pagination-btn) {
+  .audit-filter-row-controls :global(.btn) {
     grid-column: 11 / -1;
     justify-self: end;
     min-width: 108px;
   }
 
-  /* Colors come from the shared .pagination-btn styles: the stylesheet
-     originally declared a white variant here, but the later .pagination-btn
+  /* Colors come from the shared .btn styles: the stylesheet
+     originally declared a white variant here, but the later .btn
      base rule always overrode it, so the shipped button is the plain one.
      Scoping would resurrect the dead declarations — keep only the live ones. */
   .audit-clear-btn {
@@ -168,7 +138,7 @@
         grid-template-columns: 1fr;
       }
 
-    .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.pagination-btn) {
+    .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.btn) {
         grid-column: auto;
       }
   }

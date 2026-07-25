@@ -111,8 +111,6 @@
 {/if}
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
-  /* Contribution Calendar */
   .contribution-calendar-section {
     background: var(--bg-surface);
     border: 1px solid var(--border);

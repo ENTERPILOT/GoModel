@@ -2,7 +2,7 @@
 // Handles the /admin/guardrails endpoints, 503 "feature unavailable"
 // responses, and the notice/error flow.
 
-import { getJSON, sendJSON } from "$lib/api/client.js";
+import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import {
   buildGuardrailPayload,
@@ -11,7 +11,6 @@ import {
   defaultGuardrailType,
   filterGuardrails,
   guardrailArrayFieldSelected,
-  guardrailErrorMessage,
   guardrailFieldValue,
   guardrailTypeFields,
   guardrailTypeLabel,
@@ -243,7 +242,7 @@ class GuardrailsStore {
           this.error = "Authentication required.";
           return;
         }
-        this.error = guardrailErrorMessage(
+        this.error = errorPayloadMessage(
           result.data,
           "Failed to save guardrail.",
         );
@@ -299,7 +298,7 @@ class GuardrailsStore {
           flash.error("Authentication required.");
           return;
         }
-        const message = guardrailErrorMessage(
+        const message = errorPayloadMessage(
           result.data,
           "Failed to delete guardrail.",
         );

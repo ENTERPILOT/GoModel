@@ -2,11 +2,10 @@
 // on top of the shared admin API client (401s and stale-auth are handled by
 // the client).
 
-import { getJSON, sendJSON } from "$lib/api/client.js";
+import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import {
-  authKeyErrorMessage,
   buildCreateAuthKeyPayload,
   defaultAuthKeyForm,
   parseAuthKeyLabels,
@@ -50,7 +49,7 @@ class AuthKeysStore {
       this.available = true;
       if (!result.ok) {
         if (result.status !== 401) {
-          this.error = authKeyErrorMessage(result.data, "Unable to load API keys.");
+          this.error = errorPayloadMessage(result.data, "Unable to load API keys.");
         }
         return;
       }
@@ -124,7 +123,7 @@ class AuthKeysStore {
           this.error = "Authentication required.";
           return;
         }
-        this.error = authKeyErrorMessage(result.data, "Failed to create API key.");
+        this.error = errorPayloadMessage(result.data, "Failed to create API key.");
         console.error("Failed to create API key:", result.status, this.error);
         return;
       }
@@ -194,7 +193,7 @@ class AuthKeysStore {
           editor.error = "Authentication required.";
           return;
         }
-        editor.error = authKeyErrorMessage(result.data, "Failed to update labels.");
+        editor.error = errorPayloadMessage(result.data, "Failed to update labels.");
         console.error("Failed to update auth key labels:", result.status, editor.error);
         return;
       }
@@ -237,7 +236,7 @@ class AuthKeysStore {
           flash.error("Authentication required.");
           return;
         }
-        const message = authKeyErrorMessage(result.data, "Failed to update dashboard access.");
+        const message = errorPayloadMessage(result.data, "Failed to update dashboard access.");
         console.error("Failed to update auth key dashboard access:", result.status, message);
         flash.error(message);
         return;
@@ -283,7 +282,7 @@ class AuthKeysStore {
           flash.error("Authentication required.");
           return;
         }
-        const message = authKeyErrorMessage(result.data, "Failed to deactivate key.");
+        const message = errorPayloadMessage(result.data, "Failed to deactivate key.");
         console.error("Failed to deactivate auth key:", result.status, message);
         flash.error(message);
         return;

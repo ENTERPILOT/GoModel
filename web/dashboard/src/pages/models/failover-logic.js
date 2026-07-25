@@ -2,29 +2,9 @@
 // which only has value-shaped variants). Kept rune-free so node:test can
 // exercise it directly; the failover store delegates here.
 
-// qualifiedModelName renders a model inventory row as "provider/model".
-export function qualifiedModelName(model) {
-  if (!model) {
-    return "";
-  }
-  const selector = String(model.selector || "").trim();
-  if (selector) {
-    return selector;
-  }
-  if (!model.model || !model.model.id) {
-    return "";
-  }
-  const modelID = String(model.model.id || "").trim();
-  const providerName = String(model.provider_name || "").trim();
-  if (providerName) {
-    return providerName + "/" + modelID;
-  }
-  const providerType = String(model.provider_type || "").trim();
-  if (!providerType || modelID.includes("/")) {
-    return modelID;
-  }
-  return providerType + "/" + modelID;
-}
+import { qualifiedModelName } from "./virtualModelsLogic.js";
+
+export { qualifiedModelName };
 
 export function failoverPrimaryModel(rule) {
   return String((rule && (rule.primary_model || rule.source)) || "").trim();

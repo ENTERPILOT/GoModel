@@ -15,14 +15,7 @@ import {
   PROVIDER_STATUS_POLL_MS,
 } from "./providersLogic.js";
 import { emptyAuditStats, normalizeAuditStats } from "./auditStatsLogic.js";
-
-function browserStorage() {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
-  }
-}
+import { browserStorage } from "$lib/utils/storage.js";
 
 class ProviderStatusState {
   status = $state(emptyProviderStatus());

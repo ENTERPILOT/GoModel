@@ -2,7 +2,7 @@
   // Requests by Status + Provider Latency charts fed by /admin/audit/stats.
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
-  import { chartColors } from "$lib/utils/chartTheme.js";
+  import { chartColors, resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
   import { formatNumber } from "$lib/utils/format.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { auditStatsState } from "./overviewState.svelte.js";
@@ -16,7 +16,6 @@
     auditLatencyChartConfig,
     createProviderColorPicker,
   } from "./auditStatsLogic.js";
-  import { resolveColor } from "./chartStyle.js";
 
   // Colors are handed out in first-seen order and kept while the dashboard
   // stays open, so a provider's line color is stable across refetches.
@@ -119,7 +118,6 @@
 {/if}
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* Audit stats charts (Requests by Status / Provider Latency) */
   /* The Activity calendar above only spaces itself upward, so these sections
      bring their own top margin; between the two charts it collapses with the

@@ -2,6 +2,8 @@
 // rides on every admin request as the X-GoModel-Timezone header so
 // server-side day grouping matches the UI.
 
+import { browserStorage } from "$lib/utils/storage.js";
+
 const DEFAULT_TIMEZONE = "UTC";
 const TIMEZONE_STORAGE_KEY = "gomodel_timezone_override";
 const formatterCache = new Map();
@@ -9,14 +11,6 @@ const supportedTimeZoneCache = new Map();
 
 function pad(value) {
   return String(value).padStart(2, "0");
-}
-
-function browserStorage() {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
-  }
 }
 
 function getCachedFormatter(locale, options) {

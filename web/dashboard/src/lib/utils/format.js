@@ -1,3 +1,12 @@
+// splitCommaList turns a comma-separated input into a trimmed array,
+// dropping empty items.
+export function splitCommaList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item);
+}
+
 // Shared display formatters.
 
 export function formatNumber(n) {
@@ -52,6 +61,20 @@ export function tokenCountTitle(label, n) {
   const value = n == null || n === "" ? NaN : Number(n);
   const exact = Number.isFinite(value) ? formatNumber(value) : "-";
   return String(label || "Tokens") + ": " + exact;
+}
+
+// formatDateParam renders a Date (or passes a string through) as the UTC
+// yyyy-mm-dd used in admin query parameters.
+export function formatDateParam(date) {
+  if (!date) return "";
+  if (typeof date === "string") return date;
+  return (
+    date.getUTCFullYear() +
+    "-" +
+    String(date.getUTCMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(date.getUTCDate()).padStart(2, "0")
+  );
 }
 
 export function formatDateUTC(ts) {

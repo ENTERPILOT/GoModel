@@ -3,18 +3,7 @@
 // in the effective timezone.
 
 import { timezone } from "./timezone.svelte.js";
-
-function formatDateParam(date) {
-  if (!date) return "";
-  if (typeof date === "string") return date;
-  return (
-    date.getUTCFullYear() +
-    "-" +
-    String(date.getUTCMonth() + 1).padStart(2, "0") +
-    "-" +
-    String(date.getUTCDate()).padStart(2, "0")
-  );
-}
+import { formatDateParam } from "$lib/utils/format.js";
 
 class DateRangeStore {
   days = $state("30");

@@ -48,7 +48,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .settings-version-footer {
     margin-top: 24px;
     color: var(--text-muted);

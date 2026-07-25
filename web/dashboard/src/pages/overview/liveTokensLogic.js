@@ -3,7 +3,8 @@
 // engine lives in liveTokensState.svelte.js.
 
 import { formatTokensShort } from "../../lib/utils/format.js";
-import { chartTickFont, chartTooltip, tokenAxisTicks } from "./chartStyle.js";
+import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
+import { tokenAxisTicks } from "./chartStyle.js";
 
 // apiName: backend granularity; refreshMs: how often to refetch to scroll the
 // window (matched to the bucket width, capped for coarse views).

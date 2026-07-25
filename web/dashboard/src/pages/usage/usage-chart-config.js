@@ -3,21 +3,7 @@
 // node:test can exercise it without a DOM.
 
 import { formatTokensShort } from "../../lib/utils/format.js";
-
-function chartTickFont() {
-  return { size: 11, family: "'SF Mono', Menlo, Consolas, monospace" };
-}
-
-function chartTooltip(colors, callbacks) {
-  return {
-    backgroundColor: colors.tooltipBg,
-    borderColor: colors.tooltipBorder,
-    borderWidth: 1,
-    titleColor: colors.tooltipText,
-    bodyColor: colors.tooltipText,
-    callbacks: callbacks,
-  };
-}
+import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 
 // Horizontal input/output bars: one row per entity (model, user path, label).
 // In the default diverging view the input-side series (paid input,
@@ -115,19 +101,4 @@ export function horizontalUsageChartConfig(colors, labels, series, options) {
       },
     },
   };
-}
-
-// Resolve a CSS color expression (var()/color-mix()) to a concrete color via
-// a hidden DOM probe, as Chart.js cannot read CSS variables itself.
-export function resolveCssColor(expr) {
-  if (typeof document === "undefined" || !document.body) {
-    return expr;
-  }
-  const probe = document.createElement("span");
-  probe.style.display = "none";
-  probe.style.color = expr;
-  document.body.appendChild(probe);
-  const resolved = getComputedStyle(probe).color;
-  document.body.removeChild(probe);
-  return resolved || expr;
 }

@@ -137,7 +137,7 @@
     <div class="form-actions">
       <button
         type="button"
-        class="pagination-btn"
+        class="btn"
         onclick={() => rateLimits.closeRateLimitInspector()}
       >
         Close
@@ -145,7 +145,7 @@
       {#if rateLimits.rateLimitsEnabled()}
         <button
           type="button"
-          class="pagination-btn"
+          class="btn"
           onclick={() => {
             rateLimits.closeRateLimitInspector();
             router.navigate("rate-limits");

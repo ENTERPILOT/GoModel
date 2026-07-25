@@ -22,7 +22,7 @@
   <div class="settings-refresh-actions">
     <button
       type="button"
-      class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+      class="btn btn-primary btn-with-icon"
       disabled={busy}
       onclick={() => failover.generateFailoverRules()}
     >
@@ -35,7 +35,7 @@
     </button>
     <button
       type="button"
-      class="pagination-btn pagination-btn-danger-outline pagination-btn-with-icon"
+      class="btn btn-danger-outline btn-with-icon"
       disabled={busy}
       onclick={() => failover.openFailoverResetDialog()}
     >

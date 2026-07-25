@@ -1,5 +1,11 @@
 /* GoModel Dashboard Styles */
-/* TODO: It might be optimized once the css preprocessor is added. Intentional duplication for now */
+/* The light palette below is deliberately written twice: once for an explicit
+   [data-theme="light"] and once for the system preference, because
+   themeStore.apply() *removes* data-theme in "system" mode, so neither block
+   can cover the other. Do not collapse them with light-dark(): chartTheme.js
+   reads these variables back through getComputedStyle, and an unregistered
+   custom property computes to its token stream — Chart.js would receive the
+   literal "light-dark(...)" text instead of a color. */
 /* Dark mode (default) — matches gomodel.enterpilot.io */
 :root {
   --bg: #111110;
@@ -174,10 +180,6 @@
   padding: 0;
 }
 
-[x-cloak] {
-  display: none !important;
-}
-
 body {
   font-family:
     "Inter",
@@ -198,25 +200,6 @@ body.dashboard-modal-open {
 .app {
   display: flex;
   min-height: 100vh;
-}
-
-/* Sidebar */
-.sidebar {
-  flex: 0 0 var(--sidebar-width);
-  width: var(--sidebar-width);
-  background: var(--bg-surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  position: sticky;
-  top: 0;
-  max-height: 100vh;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  z-index: 10;
-  transition:
-    flex-basis 0.2s,
-    width 0.2s;
 }
 
 .badge {
@@ -328,11 +311,6 @@ body.dashboard-modal-open {
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.3px;
-}
-
-/* Date Picker */
-.date-picker {
-  position: relative;
 }
 
 /* Page Header Controls (interval + date picker wrapper) */
@@ -492,12 +470,6 @@ body.dashboard-modal-open {
   color: var(--warning);
 }
 
-.alert-success {
-  background: rgba(52, 211, 153, 0.12);
-  border: 1px solid rgba(52, 211, 153, 0.28);
-  color: var(--success);
-}
-
 /* Table */
 .table-toolbar {
   display: flex;
@@ -542,36 +514,6 @@ textarea:disabled,
 .form-input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.filter-input {
-  flex: 1;
-  min-width: min(400px, 100%);
-}
-
-.filter-input-wrap {
-  position: relative;
-  display: flex;
-  flex: 1;
-  min-width: min(400px, 100%);
-  width: 100%;
-}
-
-.filter-input-wrap .filter-input {
-  min-width: 0;
-  width: 100%;
-  padding-left: 34px;
-}
-
-.filter-input-icon {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  width: 14px;
-  height: 14px;
-  color: var(--text-muted);
-  pointer-events: none;
-  transform: translateY(-50%);
 }
 
 .table-wrapper {
@@ -627,10 +569,9 @@ textarea:disabled,
   font-size: 13px;
 }
 
-.col-price {
-  text-align: right;
-}
-
+/* Numeric column. The `th` needs the extra specificity to beat
+   `.data-table th`'s left alignment; the bare class covers the body cells. */
+.col-price,
 .data-table th.col-price {
   text-align: right;
 }
@@ -829,16 +770,6 @@ td.col-price {
   letter-spacing: 0.2px;
   text-transform: uppercase;
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-}
-
-.inline-link {
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--accent);
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
 .form h3 {
@@ -1063,18 +994,6 @@ textarea:focus {
   border-color: var(--accent);
 }
 
-.alias-checkbox {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-}
-
-.alias-checkbox input {
-  width: 16px;
-  height: 16px;
-}
-
 .form-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1088,10 +1007,6 @@ textarea:focus {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
-}
-
-.model-row-actions-empty {
-  color: var(--text-muted);
 }
 
 .data-table tr.alias-row.is-valid td {
@@ -1136,12 +1051,8 @@ textarea:focus {
 }
 
 .workflow-section-head h4 {
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.workflow-section-head h4 {
   font-size: 14px;
+  font-weight: 700;
 }
 
 .workflow-preview {
@@ -1329,58 +1240,6 @@ textarea:focus {
   border-color: color-mix(in srgb, var(--border) 75%, transparent);
 }
 
-/* Tab content fades and rises in on switch; leave is instant so panels never
-   overlap or jump. */
-.audit-tabpanel-enter {
-  transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
-}
-
-.audit-tabpanel-enter-start {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
-.audit-tabpanel-enter-end {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .audit-tabpanel-enter {
-      transition: none;
-    }
-
-  .audit-tabpanel-enter-start {
-      transform: none;
-    }
-}
-
-.audit-pane-icon-request {
-  color: var(--accent);
-}
-
-.audit-pane-icon-response {
-  color: var(--info);
-}
-
-.audit-pane-kind-primary {
-  color: var(--text-muted);
-}
-
-.audit-pane-kind-failover {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-}
-
-.audit-pane-kind-retry {
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 14%, var(--bg));
-  border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
-}
-
 .audit-pane {
   border: 1px solid var(--border);
   border-top: 0;
@@ -1537,7 +1396,10 @@ body.conversation-drawer-open {
   padding: 12px 0 0;
 }
 
-.pagination-btn {
+/* Buttons — the app-wide base and its variants. Pair `.btn` with at most one
+   of `-primary` / `-danger` / `-danger-outline`, and add `-with-icon` when the
+   button holds an <Icon> next to its label. */
+.btn {
   padding: 6px 16px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1549,11 +1411,11 @@ body.conversation-drawer-open {
   transition: all 0.15s;
 }
 
-.pagination-btn:hover:not(:disabled) {
+.btn:hover:not(:disabled) {
   background: var(--bg-surface-hover);
 }
 
-.pagination-btn-primary {
+.btn-primary {
   background: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 70%, #000 10%);
   color: #fff;
@@ -1561,24 +1423,24 @@ body.conversation-drawer-open {
   box-shadow: 0 10px 22px rgba(59, 130, 246, 0.18);
 }
 
-.pagination-btn-primary:hover:not(:disabled) {
+.btn-primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 90%, #fff 10%);
   border-color: color-mix(in srgb, var(--accent) 78%, #000 12%);
 }
 
-.pagination-btn-danger-outline {
+.btn-danger-outline {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
   background: transparent;
   font-weight: 600;
 }
 
-.pagination-btn-danger-outline:hover:not(:disabled) {
+.btn-danger-outline:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 10%, var(--bg));
   border-color: color-mix(in srgb, var(--danger) 75%, var(--border));
 }
 
-.pagination-btn-danger {
+.btn-danger {
   color: #fff;
   border-color: color-mix(in srgb, var(--danger) 76%, #000 12%);
   background: var(--danger);
@@ -1586,24 +1448,24 @@ body.conversation-drawer-open {
   box-shadow: 0 10px 22px color-mix(in srgb, var(--danger) 20%, transparent);
 }
 
-.pagination-btn-danger:hover:not(:disabled) {
+.btn-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 90%, #fff 10%);
   border-color: color-mix(in srgb, var(--danger) 82%, #000 14%);
 }
 
-.pagination-btn-with-icon {
+.btn-with-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
 }
 
-.pagination-btn-with-icon .table-icon-svg {
+.btn-with-icon .table-icon-svg {
   width: 16px;
   height: 16px;
 }
 
-.pagination-btn:disabled {
+.btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
@@ -1726,10 +1588,6 @@ body.conversation-drawer-open {
   color: var(--text-muted);
   font-size: 14px;
   line-height: 1.55;
-}
-
-.budget-help-notice {
-  margin-bottom: 16px;
 }
 
 .budget-list {
@@ -1860,26 +1718,6 @@ body.conversation-drawer-open {
 
 .budget-bar-fill-danger {
   background: var(--danger);
-}
-
-.budget-bar-fill-period-monthly {
-  background: #30302c;
-}
-
-.budget-bar-fill-period-weekly {
-  background: #68765c;
-}
-
-.budget-bar-fill-period-daily {
-  background: #b5652d;
-}
-
-.budget-bar-fill-period-hourly {
-  background: #783f22;
-}
-
-.budget-bar-fill-period-custom {
-  background: #bfa584;
 }
 
 .budget-bar-text-row {
@@ -2080,25 +1918,6 @@ body.conversation-drawer-open {
   max-width: 460px;
 }
 
-.pricing-recalculate-date-field .date-picker-trigger {
-  width: 100%;
-}
-
-.pricing-recalculate-date-field .date-picker-trigger {
-  justify-content: space-between;
-}
-
-@media (min-width: 769px) {
-}
-
-.budget-override-dialog-backdrop {
-  z-index: 100;
-}
-
-.budget-override-dialog-shell {
-  z-index: 110;
-}
-
 .form-action-icon {
   width: 16px;
   height: 16px;
@@ -2112,11 +1931,6 @@ body.conversation-drawer-open {
 
 /* Responsive */
 @media (max-width: 768px) {
-  .sidebar {
-      width: 60px;
-      flex-basis: 60px;
-    }
-
   .badge {
       display: none;
     }
@@ -2135,7 +1949,7 @@ body.conversation-drawer-open {
       flex-direction: column-reverse;
     }
 
-  .auth-dialog-actions .pagination-btn {
+  .auth-dialog-actions .btn {
       width: 100%;
     }
 
@@ -2183,10 +1997,6 @@ body.conversation-drawer-open {
       justify-content: space-between;
     }
 
-  .settings-panel-title-row {
-      gap: 8px;
-    }
-
   .usage-log-select {
       min-width: 0;
     }
@@ -2227,7 +2037,7 @@ body.conversation-drawer-open {
       justify-content: stretch;
     }
 
-  .table-toolbar-actions .pagination-btn {
+  .table-toolbar-actions .btn {
       width: 100%;
     }
 
@@ -2294,12 +2104,14 @@ body.conversation-drawer-open {
       width: 100%;
     }
 
-  .budget-settings-actions .pagination-btn {
+  .budget-settings-actions .btn {
       width: 100%;
     }
 }
 
-/* ─── Connectors ─── */
+/* Workflow pipeline connector + node bases. They stay global because
+   WorkflowChart's state variants are composed from dynamic class strings the
+   compiler cannot see (see workflowChartLogic.js). */
 .workflow-conn {
   flex: 1 1 0;
   min-width: 13px;
@@ -2321,11 +2133,6 @@ body.conversation-drawer-open {
   clip-path: polygon(0 0, 100% 50%, 0 100%);
 }
 
-/* Green connector — cache hit path */
-
-/* Dimmed connector — path not taken */
-
-/* ─── Base node ─── */
 .workflow-node {
   display: flex;
   flex-direction: column;
@@ -2341,12 +2148,6 @@ body.conversation-drawer-open {
   flex-shrink: 0;
 }
 
-
-
-
-
-/* ─── Cache node ─── */
-/* Cache — runtime: miss badge only */
 .auth-key-description {
   color: var(--text-muted);
   font-size: 13px;
@@ -2487,11 +2288,9 @@ body.conversation-drawer-open {
   border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
 }
 
-/* Rules whose targets render in child-component DOM (class props passed
-
-   into Icon/LoadingState/...) or via dynamic class strings the compiler
-
-   cannot see: parent-scoped styles cannot match these, so they stay global. */
+/* Rules whose targets render in child-component DOM (class props passed into
+   Icon/LoadingState/...) or via dynamic class strings the compiler cannot see:
+   parent-scoped styles cannot match these, so they stay global. */
 
 .auth-dialog-input-icon {
     position: absolute;
@@ -2545,10 +2344,6 @@ body.conversation-drawer-open {
           flex-basis: 16px;
         }
 }
-
-.settings-guardrails-layout.is-editor-open {
-    grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.9fr);
-  }
 
 .failover-drafts-loading {
     min-height: 96px;
@@ -2612,7 +2407,3 @@ body.conversation-drawer-open {
   vertical-align: -2px;
   stroke-width: 2;
 }
-
-.workflows-layout.is-editor-open {
-    align-items: stretch;
-  }
