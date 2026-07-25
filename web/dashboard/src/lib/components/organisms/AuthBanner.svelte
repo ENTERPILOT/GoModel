@@ -18,7 +18,6 @@
 {/if}
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .auth-banner {
     display: flex;
     align-items: center;

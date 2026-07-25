@@ -55,7 +55,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* Page-level filter bar under the Usage Analytics header. Every widget on the
      page (cards, charts, request log) follows these filters. */
   .usage-page-filters {

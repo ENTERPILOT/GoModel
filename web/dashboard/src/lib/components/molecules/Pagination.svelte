@@ -26,7 +26,6 @@
 {/if}
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .pagination-info {
     font-size: 13px;
     color: var(--text-muted);

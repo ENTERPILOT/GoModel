@@ -125,7 +125,6 @@
 </Modal>
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
 .failover-drafts-editor {
     display: flex;
     flex-direction: column;

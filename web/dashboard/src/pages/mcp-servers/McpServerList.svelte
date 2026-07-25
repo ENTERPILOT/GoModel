@@ -118,7 +118,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* MCP servers: secondary line under a table cell (prompt/resource counts,
      inline last_error for degraded servers). */
   .mcp-server-sub-counts {

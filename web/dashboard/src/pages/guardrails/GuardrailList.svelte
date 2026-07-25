@@ -113,7 +113,6 @@
 </section>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .settings-guardrails-list {
     min-width: 0;
   }

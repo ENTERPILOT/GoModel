@@ -56,7 +56,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .settings-panel-header {
     display: flex;
     justify-content: space-between;

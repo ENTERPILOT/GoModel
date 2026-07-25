@@ -89,7 +89,6 @@
 </div>
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
 .settings-refresh-icon {
     width: 16px;
     height: 16px;

@@ -176,7 +176,6 @@
 </Modal>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .auth-key-form-fields > :global(.form-field) {
     margin-bottom: 4px;
   }

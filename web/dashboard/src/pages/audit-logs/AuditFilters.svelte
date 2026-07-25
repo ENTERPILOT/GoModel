@@ -78,7 +78,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .audit-log-toolbar {
     display: flex;
     flex-direction: column;

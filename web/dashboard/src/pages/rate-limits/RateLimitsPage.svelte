@@ -1,5 +1,4 @@
 <script>
-  // Rate Limits page.
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";

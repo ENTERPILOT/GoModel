@@ -267,7 +267,6 @@
 {/if}
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .budget-settings-section {
     width: 100%;
   }

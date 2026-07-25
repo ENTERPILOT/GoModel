@@ -1,5 +1,4 @@
 <script>
-  // Workflows page.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
@@ -69,7 +68,6 @@
 </div>
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
 /* Workflows */
 .workflow-page-note {
     margin-top: 6px;

@@ -218,7 +218,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .tagging-settings-grid {
     display: grid;
     gap: 12px;

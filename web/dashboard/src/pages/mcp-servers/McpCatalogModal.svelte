@@ -81,7 +81,6 @@
 </Modal>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* MCP catalog inspector: read-only lists of tools, prompts, and resources. */
   .mcp-catalog-section {
     margin-top: 18px;

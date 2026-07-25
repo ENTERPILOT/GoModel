@@ -177,7 +177,6 @@
 </Modal>
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
 .pricing-override-rows {
     display: grid;
     gap: 12px;

@@ -169,7 +169,6 @@
 </article>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .provider-status-card {
     display: flex;
     flex-direction: column;

@@ -158,7 +158,6 @@
 </tr>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .model-name-cell {
     display: flex;
     flex-direction: column;

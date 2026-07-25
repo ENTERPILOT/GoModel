@@ -108,7 +108,6 @@
 </article>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .workflow-card {
     display: flex;
     flex-direction: column;

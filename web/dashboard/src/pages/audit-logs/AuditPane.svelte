@@ -137,7 +137,6 @@
 </section>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* Request and response panes place Headers (1/3) in the first column and
      Body (2/3) in the second; full-width rows span both columns, and a pane
      with only one of the two stretches it to fill. */

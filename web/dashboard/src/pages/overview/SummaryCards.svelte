@@ -191,7 +191,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .provider-status-flag {
     grid-column: span 2;
   }

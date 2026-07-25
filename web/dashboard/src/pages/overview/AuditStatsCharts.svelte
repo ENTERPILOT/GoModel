@@ -118,7 +118,6 @@
 {/if}
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* Audit stats charts (Requests by Status / Provider Latency) */
   /* The Activity calendar above only spaces itself upward, so these sections
      bring their own top margin; between the two charts it collapses with the

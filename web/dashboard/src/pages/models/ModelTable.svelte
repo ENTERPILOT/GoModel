@@ -100,7 +100,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .provider-group-row :global(td) {
     background: color-mix(in srgb, var(--accent) 6%, var(--bg));
     padding-top: 12px;

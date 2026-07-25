@@ -9,7 +9,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .loading-state {
     display: flex;
     align-items: center;

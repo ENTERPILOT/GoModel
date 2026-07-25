@@ -65,7 +65,6 @@
     {/if}
   </div>
 
-  <!-- Auth Error Banner -->
   <AuthBanner />
   {#if !virtualModels.virtualModelsAvailable && !authError}
     <div class="alert alert-warning">Virtual models feature is unavailable.</div>
@@ -77,7 +76,6 @@
     <div class="alert alert-warning">{pricingOverrides.modelPricingOverrideError}</div>
   {/if}
 
-  <!-- Category Tabs -->
   {#if modelsStore.categories.length > 0}
     <div class="category-tabs">
       {#each modelsStore.categories as cat (cat.category)}
@@ -94,7 +92,6 @@
     </div>
   {/if}
 
-  <!-- Filter -->
   {#if virtualModels.displayModels.length > 0 || modelsStore.filter || virtualModels.virtualModelsAvailable}
     <div class="table-toolbar">
       <div class="table-toolbar-main">
@@ -149,8 +146,6 @@
 </div>
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
-/* Category Tabs */
 .category-tabs {
     display: flex;
     align-items: center;

@@ -71,7 +71,6 @@
 </Modal>
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
 .auth-dialog-input-shell {
     position: relative;
   }

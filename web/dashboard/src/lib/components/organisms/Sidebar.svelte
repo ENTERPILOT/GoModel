@@ -102,7 +102,6 @@
 ></button>
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
 .sidebar {
     flex: 0 0 var(--sidebar-width);
     width: var(--sidebar-width);

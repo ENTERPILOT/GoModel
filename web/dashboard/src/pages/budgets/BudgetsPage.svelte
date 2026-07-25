@@ -101,7 +101,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .budget-sort-control {
     align-items: center;
     gap: 8px;

@@ -133,7 +133,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* ═══════════════════════════════════════════════════════════════
      Workflow Pipeline Visualization
      ═══════════════════════════════════════════════════════════════ */

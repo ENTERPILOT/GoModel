@@ -89,7 +89,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* Live token throughput chart */
   /* The generic .chart-container has no margin (siblings space it), but this card
      is followed by the cache meter, which only spaces below itself — so give the

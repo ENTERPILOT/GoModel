@@ -156,7 +156,6 @@
 {/if}
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
 .pricing-recalculate-section {
     width: 100%;
   }
