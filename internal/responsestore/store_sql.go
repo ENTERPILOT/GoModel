@@ -2,45 +2,44 @@ package responsestore
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
-// SQLiteStore persists response snapshots in SQLite.
-type SQLiteStore struct {
-	db          *sql.DB
+// SQLStore persists response snapshots in a SQL database.
+type SQLStore struct {
+	db          sqlx.DB
 	ttl         time.Duration
 	stopCleanup chan struct{}
 	closeOnce   sync.Once
 }
 
-// NewSQLiteStore creates the response_snapshots table if needed and starts the
+var sqlSchema = []string{
+	`CREATE TABLE IF NOT EXISTS response_snapshots (
+		id TEXT PRIMARY KEY,
+		data TEXT NOT NULL,
+		stored_at ` + sqlx.TypeInt64 + ` NOT NULL,
+		expires_at ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_response_snapshots_expires_at ON response_snapshots(expires_at)`,
+}
+
+// NewSQLStore creates the response_snapshots table if needed and starts the
 // hourly expired-snapshot sweep.
-func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
+func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS response_snapshots (
-			id TEXT PRIMARY KEY,
-			data TEXT NOT NULL,
-			stored_at INTEGER NOT NULL,
-			expires_at INTEGER NOT NULL DEFAULT 0
-		)
-	`)
-	if err != nil {
+	if err := db.Schema(ctx, sqlSchema...); err != nil {
 		return nil, fmt.Errorf("failed to create response_snapshots table: %w", err)
 	}
-	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_response_snapshots_expires_at ON response_snapshots(expires_at)"); err != nil {
-		return nil, fmt.Errorf("failed to create response_snapshots expires index: %w", err)
-	}
 
-	store := &SQLiteStore{
+	store := &SQLStore{
 		db:          db,
 		ttl:         DefaultPersistentStoreTTL,
 		stopCleanup: make(chan struct{}),
@@ -51,7 +50,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 
 // Create stores a new response snapshot. An existing snapshot with the same id
 // is only replaced when it has already expired.
-func (s *SQLiteStore) Create(ctx context.Context, response *StoredResponse) error {
+func (s *SQLStore) Create(ctx context.Context, response *StoredResponse) error {
 	now := time.Now().UTC()
 	normalized, data, err := prepareStoredResponseForStorage(response, now, s.ttl, true)
 	if err != nil {
@@ -60,7 +59,7 @@ func (s *SQLiteStore) Create(ctx context.Context, response *StoredResponse) erro
 	if responseExpired(normalized, now) {
 		return nil
 	}
-	result, err := s.db.ExecContext(ctx, `
+	affected, err := s.db.Exec(ctx, `
 		INSERT INTO response_snapshots (id, data, stored_at, expires_at)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
@@ -68,13 +67,10 @@ func (s *SQLiteStore) Create(ctx context.Context, response *StoredResponse) erro
 			stored_at = excluded.stored_at,
 			expires_at = excluded.expires_at
 		WHERE response_snapshots.expires_at > 0 AND response_snapshots.expires_at <= ?
-	`, normalized.Response.ID, string(data), storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt), now.Unix())
+	`, normalized.Response.ID, string(data), storage.UnixOrZero(normalized.StoredAt),
+		storage.UnixOrZero(normalized.ExpiresAt), now.Unix())
 	if err != nil {
 		return fmt.Errorf("create response snapshot: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read create rows affected: %w", err)
 	}
 	if affected == 0 {
 		return fmt.Errorf("response already exists: %s", normalized.Response.ID)
@@ -83,15 +79,15 @@ func (s *SQLiteStore) Create(ctx context.Context, response *StoredResponse) erro
 }
 
 // Get retrieves one response snapshot by id.
-func (s *SQLiteStore) Get(ctx context.Context, id string) (*StoredResponse, error) {
-	return scanStoredResponseRow(s.db.QueryRowContext(ctx, `
+func (s *SQLStore) Get(ctx context.Context, id string) (*StoredResponse, error) {
+	return scanStoredResponseRow(s.db.QueryRow(ctx, `
 		SELECT data, stored_at, expires_at FROM response_snapshots WHERE id = ?
-	`, id), sql.ErrNoRows)
+	`, id))
 }
 
 // Update replaces an existing, unexpired response snapshot. Zero StoredAt or
 // ExpiresAt values preserve the stored retention columns.
-func (s *SQLiteStore) Update(ctx context.Context, response *StoredResponse) error {
+func (s *SQLStore) Update(ctx context.Context, response *StoredResponse) error {
 	now := time.Now().UTC()
 	normalized, data, err := prepareStoredResponseForStorage(response, now, s.ttl, false)
 	if err != nil {
@@ -99,7 +95,7 @@ func (s *SQLiteStore) Update(ctx context.Context, response *StoredResponse) erro
 	}
 	storedAt := storage.UnixOrZero(normalized.StoredAt)
 	expiresAt := storage.UnixOrZero(normalized.ExpiresAt)
-	result, err := s.db.ExecContext(ctx, `
+	affected, err := s.db.Exec(ctx, `
 		UPDATE response_snapshots SET
 			data = ?,
 			stored_at = CASE WHEN ? = 0 THEN stored_at ELSE ? END,
@@ -109,10 +105,6 @@ func (s *SQLiteStore) Update(ctx context.Context, response *StoredResponse) erro
 	if err != nil {
 		return fmt.Errorf("update response snapshot: %w", err)
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read update rows affected: %w", err)
-	}
 	if affected == 0 {
 		return ErrNotFound
 	}
@@ -120,16 +112,12 @@ func (s *SQLiteStore) Update(ctx context.Context, response *StoredResponse) erro
 }
 
 // Delete removes one unexpired response snapshot by id.
-func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `
+func (s *SQLStore) Delete(ctx context.Context, id string) error {
+	affected, err := s.db.Exec(ctx, `
 		DELETE FROM response_snapshots WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
 	`, id, time.Now().Unix())
 	if err != nil {
 		return fmt.Errorf("delete response snapshot: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read delete rows affected: %w", err)
 	}
 	if affected == 0 {
 		return ErrNotFound
@@ -138,8 +126,8 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 }
 
 // DeleteExpired removes all expired response snapshots.
-func (s *SQLiteStore) DeleteExpired(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `
+func (s *SQLStore) DeleteExpired(ctx context.Context) error {
+	if _, err := s.db.Exec(ctx, `
 		DELETE FROM response_snapshots WHERE expires_at > 0 AND expires_at <= ?
 	`, time.Now().Unix()); err != nil {
 		return fmt.Errorf("delete expired response snapshots: %w", err)
@@ -147,7 +135,7 @@ func (s *SQLiteStore) DeleteExpired(ctx context.Context) error {
 	return nil
 }
 
-func (s *SQLiteStore) cleanup() {
+func (s *SQLStore) cleanup() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := s.DeleteExpired(ctx); err != nil {
@@ -155,8 +143,9 @@ func (s *SQLiteStore) cleanup() {
 	}
 }
 
-// Close stops the cleanup loop; DB lifecycle is managed by the storage layer.
-func (s *SQLiteStore) Close() error {
+// Close stops the cleanup loop; connection lifecycle is managed by the
+// storage layer.
+func (s *SQLStore) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.stopCleanup)
 	})

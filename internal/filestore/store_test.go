@@ -2,121 +2,158 @@ package filestore
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	_ "modernc.org/sqlite"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
-func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
-	ctx := context.Background()
-	stores := map[string]func(t *testing.T) (Store, func()){
-		"memory": func(t *testing.T) (Store, func()) {
-			return NewMemoryStore(), func() {}
-		},
-		"sqlite": func(t *testing.T) (Store, func()) {
-			db, err := sql.Open("sqlite", ":memory:")
-			if err != nil {
-				t.Fatalf("sql.Open() error = %v", err)
-			}
-			store, err := NewSQLiteStore(db)
-			if err != nil {
-				_ = db.Close()
-				t.Fatalf("NewSQLiteStore() error = %v", err)
-			}
-			return store, func() {
-				_ = db.Close()
-			}
-		},
-		"postgres": func(t *testing.T) (Store, func()) {
-			dsn := os.Getenv("TEST_DATABASE_DSN")
-			if dsn == "" {
-				t.Skip("TEST_DATABASE_DSN is not set")
-			}
-			pool, err := pgxpool.New(ctx, dsn)
-			if err != nil {
-				t.Fatalf("pgxpool.New() error = %v", err)
-			}
-			store, err := NewPostgreSQLStore(ctx, pool)
-			if err != nil {
-				pool.Close()
-				t.Fatalf("NewPostgreSQLStore() error = %v", err)
-			}
-			return store, pool.Close
-		},
-		"mongo": func(t *testing.T) (Store, func()) {
-			dsn := os.Getenv("MONGO_TEST_DSN")
-			if dsn == "" {
-				t.Skip("MONGO_TEST_DSN is not set")
-			}
-			client, err := mongo.Connect(options.Client().ApplyURI(dsn))
-			if err != nil {
-				t.Fatalf("mongo.Connect() error = %v", err)
-			}
-			db := client.Database("gomodel_filestore_test_" + strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().Format("20060102150405_000000000"))
-			store, err := NewMongoDBStore(db)
-			if err != nil {
-				_ = client.Disconnect(ctx)
-				t.Fatalf("NewMongoDBStore() error = %v", err)
-			}
-			return store, func() {
-				_ = db.Drop(ctx)
-				_ = client.Disconnect(ctx)
-			}
-		},
-	}
+// runStoreSuite exercises the behaviour every Store implementation owes its
+// callers, against each backend available in this environment.
+func runStoreSuite(t *testing.T, suite func(t *testing.T, store Store)) {
+	t.Helper()
 
-	for name, newStore := range stores {
-		t.Run(name, func(t *testing.T) {
-			store, cleanup := newStore(t)
-			defer cleanup()
-			fileID := "file_" + strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().Format("20060102150405.000000000")
-			defer func() {
-				_ = store.Delete(ctx, fileID)
-			}()
+	t.Run("memory", func(t *testing.T) {
+		suite(t, NewMemoryStore())
+	})
 
-			if err := store.Upsert(ctx, &StoredFile{
-				ID:           fileID,
-				ProviderType: "openai",
-				Purpose:      "batch",
-				Filename:     "original.jsonl",
-				Bytes:        10,
-				CreatedAt:    111,
-				UserPath:     "/v1/files",
-			}); err != nil {
-				t.Fatalf("initial Upsert() error = %v", err)
-			}
-			if err := store.Upsert(ctx, &StoredFile{
-				ID:           fileID,
-				ProviderType: "anthropic",
-				Purpose:      "fine-tune",
-				Filename:     "updated.jsonl",
-				Bytes:        20,
-				CreatedAt:    222,
-				UserPath:     "/v1/files?provider=anthropic",
-			}); err != nil {
-				t.Fatalf("second Upsert() error = %v", err)
-			}
-
-			stored, err := store.Get(ctx, fileID)
+	t.Run("sql", func(t *testing.T) {
+		sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+			store, err := NewSQLStore(context.Background(), db)
 			if err != nil {
-				t.Fatalf("Get() error = %v", err)
+				t.Fatalf("NewSQLStore: %v", err)
 			}
-			if stored.CreatedAt != 111 {
-				t.Fatalf("CreatedAt = %d, want 111", stored.CreatedAt)
-			}
-			if stored.ProviderType != "anthropic" {
-				t.Fatalf("ProviderType = %q, want anthropic", stored.ProviderType)
-			}
-			if stored.Filename != "updated.jsonl" {
-				t.Fatalf("Filename = %q, want updated.jsonl", stored.Filename)
-			}
+			suite(t, store)
 		})
+	})
+
+	t.Run("mongo", func(t *testing.T) {
+		suite(t, newMongoTestStore(t))
+	})
+}
+
+func newMongoTestStore(t *testing.T) Store {
+	t.Helper()
+
+	dsn := os.Getenv("MONGO_TEST_DSN")
+	if dsn == "" {
+		t.Skip("MONGO_TEST_DSN is not set")
 	}
+	ctx := context.Background()
+	client, err := mongo.Connect(options.Client().ApplyURI(dsn))
+	if err != nil {
+		t.Fatalf("mongo.Connect: %v", err)
+	}
+	name := "gomodel_filestore_test_" +
+		strings.ReplaceAll(t.Name(), "/", "_") + "_" +
+		time.Now().Format("20060102150405_000000000")
+	db := client.Database(name)
+	store, err := NewMongoDBStore(db)
+	if err != nil {
+		_ = client.Disconnect(ctx)
+		t.Fatalf("NewMongoDBStore: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Drop(ctx)
+		_ = client.Disconnect(ctx)
+	})
+	return store
+}
+
+func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+
+		if err := store.Upsert(ctx, &StoredFile{
+			ID:           "file-1",
+			ProviderType: "openai",
+			Purpose:      "batch",
+			Filename:     "original.jsonl",
+			Bytes:        10,
+			CreatedAt:    111,
+			UserPath:     "/v1/files",
+		}); err != nil {
+			t.Fatalf("initial Upsert: %v", err)
+		}
+		if err := store.Upsert(ctx, &StoredFile{
+			ID:           "file-1",
+			ProviderType: "anthropic",
+			Purpose:      "fine-tune",
+			Filename:     "updated.jsonl",
+			Bytes:        20,
+			CreatedAt:    222,
+			UserPath:     "/v1/files?provider=anthropic",
+		}); err != nil {
+			t.Fatalf("second Upsert: %v", err)
+		}
+
+		stored, err := store.Get(ctx, "file-1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		// created_at is deliberately absent from the ON CONFLICT update list:
+		// a re-upsert refreshes provider ownership without rewriting when the
+		// file was first seen.
+		if stored.CreatedAt != 111 {
+			t.Errorf("CreatedAt = %d, want 111 preserved", stored.CreatedAt)
+		}
+		if stored.ProviderType != "anthropic" {
+			t.Errorf("ProviderType = %q, want anthropic", stored.ProviderType)
+		}
+		if stored.Filename != "updated.jsonl" {
+			t.Errorf("Filename = %q, want updated.jsonl", stored.Filename)
+		}
+	})
+}
+
+func TestStoreGetMissingReturnsNotFound(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		_, err := store.Get(context.Background(), "absent")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("Get error = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+func TestStoreDeleteMissingReturnsNotFound(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		err := store.Delete(context.Background(), "absent")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("Delete error = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+func TestStoreDeleteRemovesMapping(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		if err := store.Upsert(ctx, &StoredFile{ID: "file-1", ProviderType: "openai"}); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if err := store.Delete(ctx, "file-1"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := store.Get(ctx, "file-1"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("Get after Delete = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+func TestStoreRejectsIncompleteMapping(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		if err := store.Upsert(ctx, &StoredFile{ProviderType: "openai"}); err == nil {
+			t.Error("Upsert without an id succeeded, want failure")
+		}
+		if err := store.Upsert(ctx, &StoredFile{ID: "file-1"}); err == nil {
+			t.Error("Upsert without a provider type succeeded, want failure")
+		}
+	})
 }

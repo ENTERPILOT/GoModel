@@ -2,15 +2,14 @@ package filestore
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // Result holds the initialized file store and optional owned storage.
@@ -71,10 +70,10 @@ func NewWithSharedStorage(ctx context.Context, shared storage.Storage) (*Result,
 }
 
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {
-	return storage.ResolveBackend[Store](
+	return storage.ResolveSQLBackend[Store](
+		ctx,
 		store,
-		func(db *sql.DB) (Store, error) { return NewSQLiteStore(db) },
-		func(pool *pgxpool.Pool) (Store, error) { return NewPostgreSQLStore(ctx, pool) },
+		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
 		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(db) },
 	)
 }

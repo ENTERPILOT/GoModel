@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // ErrNotFound indicates a requested file mapping was not found.
@@ -30,15 +32,11 @@ type Store interface {
 	Close() error
 }
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanStoredFile(row rowScanner, notFound error) (*StoredFile, error) {
+func scanStoredFile(row sqlx.Row) (*StoredFile, error) {
 	file := &StoredFile{}
 	err := row.Scan(&file.ID, &file.ProviderType, &file.Purpose, &file.Filename, &file.Bytes, &file.CreatedAt, &file.UserPath)
 	if err != nil {
-		if errors.Is(err, notFound) {
+		if errors.Is(err, sqlx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("query file mapping: %w", err)
