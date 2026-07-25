@@ -89,15 +89,33 @@ func (r *Resolver) ResolveFailovers(resolution *core.RequestModelResolution, op 
 		return nil
 	}
 
-	source := r.sourceModelInfo(resolution)
-	if r.disabledFor(resolution, source) {
+	identity := r.identify(resolution)
+	if r.disabledFor(identity) {
 		return nil
 	}
+	return r.manualSelectorsFor(identity, make(map[string]struct{}))
+}
 
-	sourceKey := r.sourceKey(resolution, source)
-	seen := make(map[string]struct{})
+// requestIdentity is the set of names one resolution answers to: the source
+// model it resolved to, that model's canonical key, and every key a failover
+// rule may be written against.
+//
+// It exists so matchKeys runs once per request. Both the disabled check and
+// the manual-rule lookup need the same list, and building it allocates a map
+// and two slices — on the resolve path of every translated request.
+type requestIdentity struct {
+	source    *providers.ModelInfo
+	sourceKey string
+	matchKeys []string
+}
 
-	return r.manualSelectorsFor(resolution, source, sourceKey, seen)
+func (r *Resolver) identify(resolution *core.RequestModelResolution) requestIdentity {
+	source := r.sourceModelInfo(resolution)
+	return requestIdentity{
+		source:    source,
+		sourceKey: r.sourceKey(resolution, source),
+		matchKeys: r.matchKeys(resolution, source),
+	}
 }
 
 func (r *Resolver) sourceModelInfo(resolution *core.RequestModelResolution) *providers.ModelInfo {
@@ -123,9 +141,9 @@ func (r *Resolver) sourceModelInfo(resolution *core.RequestModelResolution) *pro
 	return nil
 }
 
-func (r *Resolver) disabledFor(resolution *core.RequestModelResolution, source *providers.ModelInfo) bool {
+func (r *Resolver) disabledFor(identity requestIdentity) bool {
 	disabled := r.effectiveDisabled()
-	for _, key := range r.matchKeys(resolution, source) {
+	for _, key := range identity.matchKeys {
 		if disabled[key] {
 			return true
 		}
@@ -133,14 +151,9 @@ func (r *Resolver) disabledFor(resolution *core.RequestModelResolution, source *
 	return false
 }
 
-func (r *Resolver) manualSelectorsFor(
-	resolution *core.RequestModelResolution,
-	source *providers.ModelInfo,
-	sourceKey string,
-	seen map[string]struct{},
-) []core.ModelSelector {
+func (r *Resolver) manualSelectorsFor(identity requestIdentity, seen map[string]struct{}) []core.ModelSelector {
 	manual := r.effectiveManualRules()
-	for _, key := range r.matchKeys(resolution, source) {
+	for _, key := range identity.matchKeys {
 		models, ok := manual[key]
 		if !ok {
 			continue
@@ -148,7 +161,7 @@ func (r *Resolver) manualSelectorsFor(
 		result := make([]core.ModelSelector, 0, len(models))
 		for _, model := range models {
 			selector, candidateKey, ok := r.resolveSelector(model)
-			if !ok || candidateKey == sourceKey {
+			if !ok || candidateKey == identity.sourceKey {
 				continue
 			}
 			if _, exists := seen[candidateKey]; exists {
@@ -172,16 +185,15 @@ func (r *Resolver) SuggestFailovers(resolution *core.RequestModelResolution, op 
 	if requiredCategory == core.CategoryEmbedding {
 		return nil
 	}
-	source := r.sourceModelInfo(resolution)
-	if r.disabledFor(resolution, source) {
+	identity := r.identify(resolution)
+	if r.disabledFor(identity) {
 		return nil
 	}
-	sourceKey := r.sourceKey(resolution, source)
 	seen := make(map[string]struct{})
-	for _, selector := range r.manualSelectorsFor(resolution, source, sourceKey, seen) {
+	for _, selector := range r.manualSelectorsFor(identity, seen) {
 		seen[selector.QualifiedModel()] = struct{}{}
 	}
-	return r.autoSelectorsFor(source, sourceKey, requiredCategory, seen)
+	return r.autoSelectorsFor(identity, requiredCategory, seen)
 }
 
 func (r *Resolver) effectiveManualRules() map[string][]string {
@@ -225,11 +237,11 @@ func (r *Resolver) effectiveDisabled() map[string]bool {
 }
 
 func (r *Resolver) autoSelectorsFor(
-	source *providers.ModelInfo,
-	sourceKey string,
+	identity requestIdentity,
 	requiredCategory core.ModelCategory,
 	seen map[string]struct{},
 ) []core.ModelSelector {
+	source := identity.source
 	if source == nil || source.Model.Metadata == nil {
 		return nil
 	}
@@ -255,7 +267,7 @@ func (r *Resolver) autoSelectorsFor(
 	candidates := make([]scoredCandidate, 0)
 	for _, candidate := range r.registry.ListModelsWithProvider() {
 		key := strings.TrimSpace(candidate.Selector)
-		if key == "" || key == sourceKey {
+		if key == "" || key == identity.sourceKey {
 			continue
 		}
 		if _, exists := seen[key]; exists {
