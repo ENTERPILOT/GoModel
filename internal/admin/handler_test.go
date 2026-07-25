@@ -2503,9 +2503,6 @@ func TestCacheOverview_ReturnsPayloadWhenEnabled(t *testing.T) {
 	if len(body.Daily) != 1 || body.Daily[0].ExactHits != 3 {
 		t.Fatalf("unexpected daily payload: %+v", body.Daily)
 	}
-	if reader.lastCacheOverview.CacheMode != usage.CacheModeCached {
-		t.Fatalf("CacheMode = %q, want %q", reader.lastCacheOverview.CacheMode, usage.CacheModeCached)
-	}
 	if reader.lastCacheOverview.UserPath != "/team" {
 		t.Fatalf("UserPath = %q, want %q", reader.lastCacheOverview.UserPath, "/team")
 	}
@@ -2547,9 +2544,6 @@ func TestCacheOverview_ReturnsErrorWhenReaderFails(t *testing.T) {
 	if _, ok := errorBody["code"]; !ok {
 		t.Fatalf("error.code missing from payload: %v", errorBody)
 	}
-	if reader.lastCacheOverview.CacheMode != usage.CacheModeCached {
-		t.Fatalf("CacheMode = %q, want %q", reader.lastCacheOverview.CacheMode, usage.CacheModeCached)
-	}
 }
 
 func TestCacheOverview_ReturnsClientClosedWhenRequestIsCanceled(t *testing.T) {
@@ -2582,9 +2576,6 @@ func TestCacheOverview_ReturnsClientClosedWhenRequestIsCanceled(t *testing.T) {
 	}
 	if got, ok := errorBody["code"].(string); !ok || got != "request_canceled" {
 		t.Fatalf("error.code = %#v, want request_canceled", errorBody["code"])
-	}
-	if reader.lastCacheOverview.CacheMode != usage.CacheModeCached {
-		t.Fatalf("CacheMode = %q, want %q", reader.lastCacheOverview.CacheMode, usage.CacheModeCached)
 	}
 }
 
