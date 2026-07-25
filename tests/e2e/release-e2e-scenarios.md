@@ -92,7 +92,11 @@ Stateful note:
 - IaC virtual-models behavior (declarative `VIRTUAL_MODELS`/`config.yaml`,
   managed read-only, env-over-YAML, startup validation) needs gateways launched
   with custom config, so it is covered by a standalone script rather than this
-  running-stack matrix
+  running-stack matrix (`tests/e2e/test-iac-virtualmodels.sh`)
+- Storage upgrade behavior (a database written by an older release, read and
+  written by this one) needs two binaries, so it is covered by
+  `tests/e2e/upgrade-compat.sh` rather than this matrix, which always runs one
+  binary against whatever the stack already holds
 - `S173`-`S182` exercise the Anthropic Messages drop-in compatibility fixes
   (`x-api-key` auth fallback, `stop_sequence`, seeded stream usage,
   dialect-aware `/v1/models` and 404s); `S173`-`S175` need the auth-enabled
