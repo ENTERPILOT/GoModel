@@ -36,7 +36,7 @@ func balancingCatalog() fakeCatalog {
 
 func newBalancingService(t *testing.T) *Service {
 	t.Helper()
-	svc, err := NewService(newSQLiteVMStore(t), balancingCatalog(), true)
+	svc, err := NewService(newSQLVMStore(t), balancingCatalog(), true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -71,7 +71,7 @@ func TestBalancer_SkipsStaleProviderTargets(t *testing.T) {
 	t.Parallel()
 	catalog := balancingCatalog()
 	catalog.stale = map[string]bool{"openai/gpt-4o": true}
-	svc, err := NewService(newSQLiteVMStore(t), catalog, true)
+	svc, err := NewService(newSQLVMStore(t), catalog, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -303,7 +303,7 @@ func TestBalancer_SaturationFallbackSkipsUnavailableTargets(t *testing.T) {
 	t.Parallel()
 	catalog := balancingCatalog()
 	catalog.stale = map[string]bool{"openai/gpt-4o": true}
-	svc, err := NewService(newSQLiteVMStore(t), catalog, true)
+	svc, err := NewService(newSQLVMStore(t), catalog, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}

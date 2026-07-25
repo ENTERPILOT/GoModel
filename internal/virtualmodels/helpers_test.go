@@ -1,25 +1,33 @@
 package virtualmodels
 
 import (
-	"database/sql"
+	"context"
 	"testing"
 
-	_ "modernc.org/sqlite"
-
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
-func newSQLiteVMStore(t *testing.T) *SQLiteStore {
+// runSQLStoreTest runs one test body against every available SQL dialect.
+func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore)) {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := NewSQLStore(context.Background(), db)
+		if err != nil {
+			t.Fatalf("NewSQLStore: %v", err)
+		}
+		body(t, store)
+	})
+}
+
+// newSQLVMStore returns a store on a fresh in-memory SQLite database, for
+// tests that exercise logic above the store rather than the store itself.
+func newSQLVMStore(t *testing.T) *SQLStore {
+	t.Helper()
+	store, err := NewSQLStore(context.Background(), sqlxtest.NewSQLite(t))
 	if err != nil {
-		t.Fatalf("sql.Open() error = %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	store, err := NewSQLiteStore(db)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore() error = %v", err)
+		t.Fatalf("NewSQLStore: %v", err)
 	}
 	return store
 }

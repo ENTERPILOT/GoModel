@@ -202,7 +202,7 @@ func TestService_ValidateManagedConfigTargetProviders(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			svc, err := NewService(newSQLiteVMStore(t), testCatalog(), true)
+			svc, err := NewService(newSQLVMStore(t), testCatalog(), true)
 			if err != nil {
 				t.Fatalf("NewService() error = %v", err)
 			}
@@ -257,7 +257,7 @@ func TestService_UpsertRejectsUnknownTargetProvider(t *testing.T) {
 func TestService_ManagedRedirectToleratesColdCatalogAtStartup(t *testing.T) {
 	t.Parallel()
 	supported := map[string]core.Model{} // cold: no provider models loaded yet
-	store := newSQLiteVMStore(t)
+	store := newSQLVMStore(t)
 	svc, err := NewService(store, fakeCatalog{providers: []string{"openai"}, supported: supported}, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
@@ -309,7 +309,7 @@ func TestService_ManagedRedirectToleratesTransientCatalogGapAfterStartup(t *test
 		"openai/gpt-4o":      {ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"},
 		"openai/gpt-4o-mini": {ID: "openai/gpt-4o-mini", Object: "model", OwnedBy: "openai"},
 	}
-	store := newSQLiteVMStore(t)
+	store := newSQLVMStore(t)
 	svc, err := NewService(store, fakeCatalog{providers: []string{"openai"}, supported: supported}, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)

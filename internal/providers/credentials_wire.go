@@ -2,16 +2,15 @@ package providers
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // CredentialsResult holds the initialized provider-credentials subsystem and
@@ -96,10 +95,10 @@ func newCredentialsResult(ctx context.Context, storeConn storage.Storage, factor
 }
 
 func createCredentialStore(ctx context.Context, store storage.Storage) (CredentialStore, error) {
-	return storage.ResolveBackend[CredentialStore](
+	return storage.ResolveSQLBackend[CredentialStore](
+		ctx,
 		store,
-		func(db *sql.DB) (CredentialStore, error) { return NewSQLiteCredentialStore(db) },
-		func(pool *pgxpool.Pool) (CredentialStore, error) { return NewPostgreSQLCredentialStore(ctx, pool) },
+		func(db sqlx.DB) (CredentialStore, error) { return NewSQLCredentialStore(ctx, db) },
 		func(db *mongo.Database) (CredentialStore, error) { return NewMongoDBCredentialStore(db) },
 	)
 }
