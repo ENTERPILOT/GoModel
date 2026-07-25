@@ -1,7 +1,8 @@
 <script>
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import ThemeToggle from "./ThemeToggle.svelte";
   import { router } from "$lib/stores/router.svelte.js";
-  import { themeStore, sidebar } from "$lib/stores/ui.svelte.js";
+  import { sidebar } from "$lib/stores/ui.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { gomodelPath } from "$lib/api/paths.js";
@@ -42,15 +43,6 @@
       { page: "settings", label: "Settings", icon: "settings" },
     ].filter((item) => item.visible !== false),
   );
-
-  const themes = [
-    { value: "light", icon: "sun", label: "Light theme" },
-    { value: "system", icon: "monitor", label: "System theme" },
-    { value: "dark", icon: "moon", label: "Dark theme" },
-  ];
-  const activeTheme = $derived(
-    themes.find((t) => t.value === themeStore.theme) || themes[1],
-  );
 </script>
 
 <aside class="sidebar" class:sidebar-collapsed={sidebar.collapsed}>
@@ -83,29 +75,7 @@
     {/each}
   </nav>
   <div class="sidebar-footer">
-    <div class="theme-toggle">
-      {#each themes as theme (theme.value)}
-        <button
-          class="theme-btn"
-          class:active={themeStore.theme === theme.value}
-          onclick={() => themeStore.set(theme.value)}
-          title={theme.label}
-          aria-label={theme.label}
-        >
-          <Icon name={theme.icon} class="theme-icon" />
-        </button>
-      {/each}
-    </div>
-    <!-- Collapsed/mobile stand-in for the pill: cycles through the same
-         three themes. -->
-    <button
-      class="theme-toggle-mobile"
-      onclick={() => themeStore.toggle()}
-      title={activeTheme.label}
-      aria-label={activeTheme.label}
-    >
-      <Icon name={activeTheme.icon} class="theme-icon" />
-    </button>
+    <ThemeToggle compact={sidebar.collapsed} />
     {#if auth.needsAuth || auth.hasApiKey()}
       <div class="api-key-section">
         <button
@@ -249,64 +219,6 @@
     outline-offset: 2px;
   }
 
-/* Theme toggle — compact pill */
-.theme-toggle {
-    display: inline-flex;
-    align-items: center;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 2px;
-    margin-bottom: 10px;
-  }
-
-.theme-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 24px;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-.theme-btn:hover {
-    color: var(--text);
-  }
-
-.theme-btn.active {
-    background: var(--accent);
-    color: #fff;
-  }
-
-.theme-btn:focus-visible, .theme-toggle-mobile:focus-visible, .sidebar-toggle:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
-    outline-offset: 2px;
-  }
-
-/* Theme toggle — single button for mobile */
-.theme-toggle-mobile {
-    display: none;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-.theme-toggle-mobile:hover {
-    color: var(--text);
-  }
-
 /* Sidebar toggle handle */
 .sidebar-toggle {
     flex: 0 0 6px;
@@ -328,6 +240,11 @@
 
 .sidebar-toggle.collapsed {
     cursor: e-resize;
+  }
+
+.sidebar-toggle:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+    outline-offset: 2px;
   }
 
 /* Collapsed sidebar (desktop) */
@@ -360,15 +277,6 @@
 
 .sidebar.sidebar-collapsed .sidebar-footer .api-key-section {
     display: none;
-  }
-
-.sidebar.sidebar-collapsed .sidebar-footer .theme-toggle {
-    display: none;
-  }
-
-.sidebar.sidebar-collapsed .sidebar-footer .theme-toggle-mobile {
-    display: flex;
-    margin: 0 auto;
   }
 
 @media (max-width: 768px) {
@@ -417,15 +325,6 @@
 
   .sidebar-footer .api-key-open-btn :global(span) {
           display: none;
-        }
-
-  .sidebar-footer .theme-toggle {
-          display: none;
-        }
-
-  .sidebar-footer .theme-toggle-mobile {
-          display: flex;
-          margin: 0 auto;
         }
 
   .sidebar-toggle {
