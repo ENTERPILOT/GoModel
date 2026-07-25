@@ -8,8 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/streaming"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +16,9 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/streaming"
 
 	"github.com/andybalholm/brotli"
 	"github.com/labstack/echo/v5"

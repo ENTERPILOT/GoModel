@@ -12,7 +12,8 @@ import (
 // its argument lists.
 //
 // A `?` is only a placeholder outside quoted text and comments. The scanner
-// therefore skips over single-quoted strings (with '' escapes), double-quoted
+// therefore skips over single-quoted strings (where a doubled quote is an
+// escaped quote rather than a terminator), double-quoted
 // identifiers, dollar-quoted bodies ($$...$$ and $tag$...$tag$, used by the
 // migration DO blocks), line comments and block comments. Without that, a
 // question mark inside a string literal would silently shift every subsequent
