@@ -7,8 +7,11 @@ import { flash } from "$lib/stores/flash.svelte.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import {
   buildCreateAuthKeyPayload,
+  countInactiveAuthKeys,
   defaultAuthKeyForm,
+  filterAuthKeys,
   parseAuthKeyLabels,
+  sortAuthKeys,
 } from "./authKeysLogic.js";
 
 function emptyLabelsEditor() {
@@ -22,6 +25,17 @@ class AuthKeysStore {
   // Load and in-form errors only; row-action feedback goes through the
   // flash store.
   error = $state("");
+
+  // Toolbar: inactive keys (deactivated or expired) are hidden by default.
+  filter = $state("");
+  showInactive = $state(false);
+
+  visibleKeys = $derived(
+    sortAuthKeys(
+      filterAuthKeys(this.keys, { query: this.filter, showInactive: this.showInactive }),
+    ),
+  );
+  inactiveCount = $derived(countInactiveAuthKeys(this.keys));
 
   formOpen = $state(false);
   formSubmitting = $state(false);

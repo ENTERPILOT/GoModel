@@ -2,14 +2,36 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  authKeyActive,
+  authKeyDeactivated,
+  authKeyExpired,
   authKeyUserPathValidationError,
   buildCreateAuthKeyPayload,
+  countInactiveAuthKeys,
   defaultAuthKeyForm,
+  filterAuthKeys,
   labelChipStyle,
   labelColor,
   normalizeAuthKeyUserPath,
   parseAuthKeyLabels,
+  sortAuthKeys,
 } from "../src/pages/auth-keys/authKeysLogic.js";
+
+const NOW = Date.parse("2026-07-25T12:00:00Z");
+
+function authKey(overrides) {
+  return {
+    id: "k1",
+    name: "ci-deploy",
+    description: "",
+    user_path: "",
+    labels: [],
+    redacted_value: "sk_gom_...abcd",
+    enabled: true,
+    active: true,
+    ...overrides,
+  };
+}
 
 test("buildCreateAuthKeyPayload serializes date-only expirations to the end of the selected UTC day", () => {
   const { payload, error } = buildCreateAuthKeyPayload({
@@ -129,6 +151,95 @@ test("parseAuthKeyLabels trims, de-duplicates, and preserves order", () => {
   assert.deepEqual(parseAuthKeyLabels(null), []);
 });
 
+
+test("authKeyExpired only fires for a parseable expiration in the past", () => {
+  assert.equal(authKeyExpired(authKey(), NOW), false);
+  assert.equal(authKeyExpired(authKey({ expires_at: "2026-07-24T23:59:59Z" }), NOW), true);
+  assert.equal(authKeyExpired(authKey({ expires_at: "2026-07-26T23:59:59Z" }), NOW), false);
+  assert.equal(authKeyExpired(authKey({ expires_at: "not-a-date" }), NOW), false);
+});
+
+test("authKeyDeactivated distinguishes deactivation from expiration", () => {
+  assert.equal(authKeyDeactivated(authKey({ expires_at: "2020-01-01T00:00:00Z", active: false })), false);
+  assert.equal(authKeyDeactivated(authKey({ deactivated_at: "2026-07-01T00:00:00Z", active: false })), true);
+  assert.equal(authKeyDeactivated(authKey({ enabled: false })), true);
+});
+
+test("authKeyActive re-checks expiration locally on top of the backend flag", () => {
+  assert.equal(authKeyActive(authKey(), NOW), true);
+  assert.equal(authKeyActive(authKey({ active: false }), NOW), false);
+  // Expired since the list was fetched, so the backend still reports active.
+  assert.equal(authKeyActive(authKey({ active: true, expires_at: "2026-07-25T11:00:00Z" }), NOW), false);
+});
+
+test("filterAuthKeys hides inactive keys unless they are requested", () => {
+  const keys = [
+    authKey({ id: "live", name: "live" }),
+    authKey({ id: "dead", name: "dead", active: false, deactivated_at: "2026-07-01T00:00:00Z" }),
+    authKey({ id: "old", name: "old", active: false, expires_at: "2026-07-01T00:00:00Z" }),
+  ];
+  assert.deepEqual(
+    filterAuthKeys(keys, { now: NOW }).map((k) => k.id),
+    ["live"],
+  );
+  assert.deepEqual(
+    filterAuthKeys(keys, { showInactive: true, now: NOW }).map((k) => k.id),
+    ["live", "dead", "old"],
+  );
+  assert.equal(countInactiveAuthKeys(keys, NOW), 2);
+});
+
+test("filterAuthKeys matches the query case-insensitively across searchable fields", () => {
+  const keys = [
+    authKey({ id: "a", name: "ci-deploy", labels: ["team-a"] }),
+    authKey({ id: "b", name: "ops", description: "On-call rotation" }),
+    authKey({ id: "c", name: "batch", user_path: "/team/alpha" }),
+    authKey({ id: "d", name: "tokened", redacted_value: "sk_gom_...wxyz" }),
+  ];
+  const ids = (query) => filterAuthKeys(keys, { query, now: NOW }).map((k) => k.id);
+  assert.deepEqual(ids("TEAM-A"), ["a"]);
+  assert.deepEqual(ids("on-call"), ["b"]);
+  assert.deepEqual(ids("/team/alpha"), ["c"]);
+  assert.deepEqual(ids("wxyz"), ["d"]);
+  assert.deepEqual(ids("  "), ["a", "b", "c", "d"]);
+  assert.deepEqual(ids("nothing"), []);
+});
+
+test("sortAuthKeys puts live keys first by remaining lifetime, deactivated last", () => {
+  const keys = [
+    authKey({ id: "1", name: "expires-soon", expires_at: "2026-07-26T00:00:00Z" }),
+    authKey({ id: "2", name: "deactivated-old", active: false, deactivated_at: "2026-01-01T00:00:00Z" }),
+    authKey({ id: "3", name: "never-expires" }),
+    authKey({ id: "4", name: "expired", active: false, expires_at: "2026-07-01T00:00:00Z" }),
+    authKey({ id: "5", name: "expires-later", expires_at: "2027-01-01T00:00:00Z" }),
+    authKey({ id: "6", name: "deactivated-recent", active: false, deactivated_at: "2026-07-01T00:00:00Z" }),
+    authKey({ id: "7", name: "expired-earlier", active: false, expires_at: "2026-02-01T00:00:00Z" }),
+  ];
+  assert.deepEqual(
+    sortAuthKeys(keys, NOW).map((k) => k.name),
+    [
+      "never-expires",
+      "expires-later",
+      "expires-soon",
+      "expired",
+      "expired-earlier",
+      "deactivated-recent",
+      "deactivated-old",
+    ],
+  );
+});
+
+test("sortAuthKeys breaks ties by name and leaves the input untouched", () => {
+  const keys = [authKey({ id: "1", name: "zeta" }), authKey({ id: "2", name: "alpha" })];
+  assert.deepEqual(sortAuthKeys(keys, NOW).map((k) => k.name), ["alpha", "zeta"]);
+  assert.deepEqual(keys.map((k) => k.name), ["zeta", "alpha"]);
+  assert.deepEqual(sortAuthKeys(undefined, NOW), []);
+});
+
+test("filterAuthKeys tolerates a missing list", () => {
+  assert.deepEqual(filterAuthKeys(undefined, { now: NOW }), []);
+  assert.equal(countInactiveAuthKeys(null, NOW), 0);
+});
 
 test("labelColor is deterministic and feeds the chip style custom property", () => {
   assert.equal(labelColor("team-a"), labelColor("team-a"));

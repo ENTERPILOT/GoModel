@@ -3,6 +3,7 @@
   // reveal, label editing, permanent deactivation).
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
@@ -63,7 +64,36 @@
   {/if}
 
   {#if store.keys.length > 0 && store.available}
+    <div class="table-toolbar">
+      <div class="table-toolbar-main">
+        <FilterInput
+          placeholder="Filter by name, description, user path, label, or token..."
+          label="Filter API keys by name, description, user path, label, or token"
+          bind:value={store.filter}
+        />
+      </div>
+      <div class="table-toolbar-actions">
+        <label class="auth-keys-inactive-toggle">
+          <input type="checkbox" bind:checked={store.showInactive} />
+          <span>
+            Show inactive
+            {#if store.inactiveCount > 0}({store.inactiveCount}){/if}
+          </span>
+        </label>
+      </div>
+    </div>
+  {/if}
+
+  {#if store.visibleKeys.length > 0 && store.available}
     <AuthKeyList />
+  {/if}
+
+  {#if store.keys.length > 0 && store.visibleKeys.length === 0 && store.available}
+    <p class="empty-state">
+      No API keys match the current filter.{store.inactiveCount > 0 && !store.showInactive
+        ? " " + store.inactiveCount + " inactive " + (store.inactiveCount === 1 ? "key is" : "keys are") + " hidden."
+        : ""}
+    </p>
   {/if}
 
   {#if store.keys.length === 0 && !store.loading && !auth.authError && !store.error && store.available}
@@ -81,5 +111,23 @@
 /* --- API Keys page --- */
 .auth-keys-help-notice {
   margin-bottom: 20px;
+}
+
+.auth-keys-inactive-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.auth-keys-inactive-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 </style>

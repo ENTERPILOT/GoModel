@@ -102,5 +102,121 @@ export function buildCreateAuthKeyPayload(form) {
 }
 
 
+// authKeyExpired reports whether a key's expiration has passed. Keys without
+// an expiration never expire; an unparseable timestamp is treated as not
+// expired so a bad value never hides a working key.
+export function authKeyExpired(key, now = Date.now()) {
+  const raw = key && key.expires_at;
+  if (!raw) {
+    return false;
+  }
+  const expiresAt = Date.parse(raw);
+  return Number.isFinite(expiresAt) && expiresAt <= now;
+}
+
+// authKeyDeactivated reports whether a key was permanently deactivated, as
+// opposed to merely expired.
+export function authKeyDeactivated(key) {
+  if (!key) {
+    return false;
+  }
+  return Boolean(key.deactivated_at) || key.enabled === false;
+}
+
+// authKeyActive mirrors the backend's `active` flag but re-checks expiration
+// locally, so a key that expires while the page is open stops counting as
+// active without a refetch.
+export function authKeyActive(key, now = Date.now()) {
+  if (!key || key.active === false) {
+    return false;
+  }
+  return !authKeyExpired(key, now);
+}
+
+// authKeySearchText builds the haystack the toolbar query matches against.
+function authKeySearchText(key) {
+  return [
+    key.name,
+    key.description,
+    key.user_path,
+    key.redacted_value,
+    ...(key.labels || []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+// filterAuthKeys applies the API Keys toolbar: inactive keys (deactivated or
+// expired) are hidden unless `showInactive`, and `query` matches the name,
+// description, user path, labels, or redacted token.
+export function filterAuthKeys(keys, options = {}) {
+  const { query = "", showInactive = false, now = Date.now() } = options;
+  const needle = String(query || "").trim().toLowerCase();
+  const list = Array.isArray(keys) ? keys : [];
+  return list.filter((key) => {
+    if (!showInactive && !authKeyActive(key, now)) {
+      return false;
+    }
+    return !needle || authKeySearchText(key).includes(needle);
+  });
+}
+
+// authKeyRank groups keys by how usable they are: live keys first, then
+// expired ones, then permanently deactivated ones at the bottom.
+function authKeyRank(key, now) {
+  if (authKeyDeactivated(key)) {
+    return 2;
+  }
+  return authKeyActive(key, now) ? 0 : 1;
+}
+
+// expiresAtValue orders expirations by remaining lifetime: a key that never
+// expires outlives every dated one, so it sorts above them.
+function expiresAtValue(key) {
+  const raw = key && key.expires_at;
+  if (!raw) {
+    return Infinity;
+  }
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : Infinity;
+}
+
+// deactivatedAtValue orders deactivations most-recent-first; an unknown
+// timestamp sorts last within the group.
+function deactivatedAtValue(key) {
+  const parsed = Date.parse((key && key.deactivated_at) || "");
+  return Number.isFinite(parsed) ? parsed : -Infinity;
+}
+
+// sortAuthKeys orders the table: live keys first (longest-lived at the top,
+// so keys about to expire surface at the bottom of the group), then expired
+// keys most-recently-expired first, then deactivated keys most-recently-
+// deactivated first. Names break every tie so the order stays stable.
+export function sortAuthKeys(keys, now = Date.now()) {
+  const list = Array.isArray(keys) ? keys.slice() : [];
+  return list.sort((a, b) => {
+    const rankA = authKeyRank(a, now);
+    const rankB = authKeyRank(b, now);
+    if (rankA !== rankB) {
+      return rankA - rankB;
+    }
+    const [valueA, valueB] =
+      rankA === 2
+        ? [deactivatedAtValue(a), deactivatedAtValue(b)]
+        : [expiresAtValue(a), expiresAtValue(b)];
+    if (valueA !== valueB) {
+      return valueA > valueB ? -1 : 1;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+}
+
+// countInactiveAuthKeys counts the keys hidden by the default view.
+export function countInactiveAuthKeys(keys, now = Date.now()) {
+  const list = Array.isArray(keys) ? keys : [];
+  return list.reduce((total, key) => total + (authKeyActive(key, now) ? 0 : 1), 0);
+}
+
 // Label chips share the dashboard-wide palette and chip styling.
 export { labelChipStyle, labelColor } from "../../lib/utils/chartTheme.js";

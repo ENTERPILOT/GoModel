@@ -4,7 +4,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatDateUTC, formatTimestampUTC } from "$lib/utils/format.js";
-  import { labelChipStyle } from "./authKeysLogic.js";
+  import { authKeyDeactivated, authKeyExpired, labelChipStyle } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
 </script>
 
@@ -26,15 +26,14 @@
             <Icon name="info" width="13" height="13" />
           </span>
         </th>
-        <th>Status</th>
         <th>Expires</th>
         <th>Created</th>
         <th aria-label="Actions"></th>
       </tr>
     </thead>
     <tbody>
-      {#each store.keys as key (key.id)}
-        <tr>
+      {#each store.visibleKeys as key (key.id)}
+        <tr class:auth-key-row-deactivated={authKeyDeactivated(key)}>
           <td>{key.name}</td>
           <td class="auth-key-description">{key.description || "—"}</td>
           <td>{key.user_path || "—"}</td>
@@ -60,15 +59,17 @@
               class:auth-key-status-inactive={!key.dashboard_access}
             >{key.dashboard_access ? "Allowed" : "Denied"}</span>
           </td>
-          <td>
-            <span
-              class="auth-key-status-badge"
-              class:auth-key-status-active={key.active}
-              class:auth-key-status-inactive={!key.active}
-            >{key.active ? "Active" : "Inactive"}</span>
-          </td>
           <td title={key.expires_at ? formatTimestampUTC(key.expires_at) : ""}>
-            {key.expires_at ? formatDateUTC(key.expires_at) : "—"}
+            {#if key.expires_at}
+              <span class="auth-key-expiry">
+                <span>{formatDateUTC(key.expires_at)}</span>
+                {#if authKeyExpired(key)}
+                  <span class="auth-key-status-badge auth-key-status-inactive">Expired</span>
+                {/if}
+              </span>
+            {:else}
+              &mdash;
+            {/if}
           </td>
           <td>{timezone.formatTimestamp(key.created_at)}</td>
           <td class="auth-key-actions-cell">
@@ -97,6 +98,13 @@
                 >
                   <Icon name="power" class="table-icon-svg" />
                 </TableActionButton>
+              {:else if authKeyDeactivated(key)}
+                <span
+                  class="auth-key-status-badge auth-key-status-inactive"
+                  title={key.deactivated_at
+                    ? "Deactivated on " + formatTimestampUTC(key.deactivated_at)
+                    : "Deactivated"}
+                >Deactivated</span>
               {/if}
             </div>
           </td>
@@ -119,6 +127,19 @@
   }
 
   .auth-key-actions-cell {
+    white-space: nowrap;
+  }
+
+  /* Deactivated keys are kept for the record only — recede them, but leave
+     the actions cell at full strength so its "Deactivated" pill stays legible. */
+  .auth-key-row-deactivated td:not(.auth-key-actions-cell) {
+    opacity: 0.55;
+  }
+
+  .auth-key-expiry {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     white-space: nowrap;
   }
 
