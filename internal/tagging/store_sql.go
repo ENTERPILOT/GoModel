@@ -2,40 +2,43 @@ package tagging
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
-// SQLiteStore persists tagging rules in a key-value settings table.
-type SQLiteStore struct {
-	db *sql.DB
+// SQLStore persists tagging rules in a key-value settings table.
+type SQLStore struct {
+	db sqlx.DB
 }
 
-// NewSQLiteStore creates the tagging settings table when missing.
-func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
+const sqlSchema = `
+	CREATE TABLE IF NOT EXISTS tagging_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
+	)
+`
+
+// NewSQLStore creates the tagging settings table when missing.
+func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS tagging_settings (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL,
-			updated_at INTEGER NOT NULL
-		)
-	`); err != nil {
+	if err := db.Schema(ctx, sqlSchema); err != nil {
 		return nil, fmt.Errorf("failed to create tagging_settings table: %w", err)
 	}
-	return &SQLiteStore{db: db}, nil
+	return &SQLStore{db: db}, nil
 }
 
-func (s *SQLiteStore) GetRules(ctx context.Context) ([]Rule, error) {
+func (s *SQLStore) GetRules(ctx context.Context) ([]Rule, error) {
 	var value string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM tagging_settings WHERE key = ?`, rulesSettingKey).Scan(&value)
-	if errors.Is(err, sql.ErrNoRows) {
+	err := s.db.QueryRow(ctx, `SELECT value FROM tagging_settings WHERE key = ?`, rulesSettingKey).Scan(&value)
+	if errors.Is(err, sqlx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -44,12 +47,12 @@ func (s *SQLiteStore) GetRules(ctx context.Context) ([]Rule, error) {
 	return decodeRules([]byte(value))
 }
 
-func (s *SQLiteStore) SaveRules(ctx context.Context, rules []Rule) error {
+func (s *SQLStore) SaveRules(ctx context.Context, rules []Rule) error {
 	value, err := encodeRules(rules)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.Exec(ctx, `
 		INSERT INTO tagging_settings (key, value, updated_at) VALUES (?, ?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
 	`, rulesSettingKey, string(value), time.Now().Unix())
@@ -59,8 +62,8 @@ func (s *SQLiteStore) SaveRules(ctx context.Context, rules []Rule) error {
 	return nil
 }
 
-// Close is a no-op: the DB handle is managed by the storage layer.
-func (s *SQLiteStore) Close() error {
+// Close is a no-op: the connection is managed by the storage layer.
+func (s *SQLStore) Close() error {
 	return nil
 }
 
