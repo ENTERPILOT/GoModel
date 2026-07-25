@@ -30,7 +30,11 @@ follow these rules so the pages compose into one coherent app.
    `<Pascal>Page.svelte`. Split big pages into sub-components in the same
    directory (atomic design: compose from
    `$lib/components/atoms|molecules|organisms`). Keep files under ~400 lines
-   where practical.
+   where practical. A component whose state classes are computed strings
+   (`WorkflowChart`, `ProviderStatusCard`) can't hand its status CSS to a
+   child: the compiler can't see those classes in the child's markup and
+   prunes the rules. Split the markup and leave that CSS behind, or keep it
+   in one file — don't move it and assume it still applies.
 5. **Shared foundation code lives in `src/lib/`** (plus `src/App.svelte`) —
    changes there affect every page, so keep them deliberate and consistent
    with the foundation API below. Page-specific helpers belong in the page

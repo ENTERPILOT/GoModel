@@ -1,5 +1,11 @@
 /* GoModel Dashboard Styles */
-/* TODO: It might be optimized once the css preprocessor is added. Intentional duplication for now */
+/* The light palette below is deliberately written twice: once for an explicit
+   [data-theme="light"] and once for the system preference, because
+   themeStore.apply() *removes* data-theme in "system" mode, so neither block
+   can cover the other. Do not collapse them with light-dark(): chartTheme.js
+   reads these variables back through getComputedStyle, and an unregistered
+   custom property computes to its token stream — Chart.js would receive the
+   literal "light-dark(...)" text instead of a color. */
 /* Dark mode (default) — matches gomodel.enterpilot.io */
 :root {
   --bg: #111110;
