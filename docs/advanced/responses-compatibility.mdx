@@ -38,6 +38,7 @@ function tool loops. They cannot safely execute OpenAI-hosted tools.
 | OpenAI-hosted file search | Provider decides | Rejected |
 | OpenAI-hosted computer use | Provider decides | Rejected |
 | `previous_response_id` and `conversation` | Forwarded | Rejected |
+| `include` annotations | Forwarded | Accepted and ignored, except `message.output_text.logprobs` |
 | Unknown Responses input item types | Preserved | Rejected |
 | Responses websocket transport | Not implemented by GoModel | Not implemented by GoModel |
 
@@ -46,6 +47,19 @@ function tool loops. They cannot safely execute OpenAI-hosted tools.
   `text.verbosity` settings through GoModel's chat translation path. GoModel
   rejects those fields instead of dropping them.
 </Note>
+
+## The `include` field
+
+`include` asks for extra annotations on response items, such as
+`reasoning.encrypted_content` or `file_search_call.results`. It never changes
+what the model does, so chat-translated providers accept it and return a
+response without those annotations, exactly like a native provider that does
+not support them. Clients that always attach `include`, such as Codex with
+`wire_api = "responses"`, work without extra configuration.
+
+The one exception is `message.output_text.logprobs`, which requests real model
+output rather than an annotation. GoModel rejects it for the same reason it
+rejects `top_logprobs`.
 
 ## Hosted tools
 

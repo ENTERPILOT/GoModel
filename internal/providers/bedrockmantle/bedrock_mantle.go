@@ -29,6 +29,13 @@ var Registration = providers.Registration{
 	New:  New,
 	Discovery: providers.DiscoveryConfig{
 		AllowAPIKeyless: true,
+		// Mantle takes a bearer token (or falls back to AWS_BEARER_TOKEN_BEDROCK)
+		// against a region or endpoint, and picks its request shape from api_mode.
+		CredentialFields: []providers.CredentialField{
+			{Name: providers.CredentialFieldAPIKeys},
+			{Name: providers.CredentialFieldBaseURL},
+			{Name: providers.CredentialFieldAPIMode, Advanced: true, Options: []string{modeAuto, modeOpenAI, modeStandard}},
+		},
 	},
 }
 

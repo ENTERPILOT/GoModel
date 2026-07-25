@@ -83,8 +83,8 @@ func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) erro
 	if req.Conversation != nil {
 		return unsupportedResponsesChatTranslationField("conversation")
 	}
-	if len(req.Include) > 0 {
-		return unsupportedResponsesChatTranslationField("include")
+	if err := validateResponsesIncludeForChatTranslation(req.Include); err != nil {
+		return err
 	}
 	if req.Prompt != nil {
 		return unsupportedResponsesChatTranslationField("prompt")
@@ -109,6 +109,30 @@ func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) erro
 	}
 	if err := validateResponsesToolChoiceForChatTranslation(req.ToolChoice); err != nil {
 		return err
+	}
+	return nil
+}
+
+// responsesIncludeOutputLogprobs asks for token logprobs on output text. It is
+// the only include value that requests real model output rather than an
+// annotation on a provider-hosted item, so it is rejected for the same reason
+// top_logprobs is.
+const responsesIncludeOutputLogprobs = "message.output_text.logprobs"
+
+// validateResponsesIncludeForChatTranslation accepts the Responses "include"
+// field for chat-translated providers. include only asks for extra annotations
+// on response items; it never changes what the model does. Chat translation
+// cannot produce those items — hosted-tool items are rejected at the tools
+// check, and encrypted reasoning has no chat equivalent — so the annotations
+// are simply absent, exactly as they are for a native provider that does not
+// support them. Unrecognized values are dropped too: a stricter allowlist would
+// break clients again every time OpenAI adds a value, and no include value can
+// make a response wrong.
+func validateResponsesIncludeForChatTranslation(include []string) error {
+	for _, value := range include {
+		if strings.TrimSpace(value) == responsesIncludeOutputLogprobs {
+			return unsupportedResponsesChatTranslationField("include")
+		}
 	}
 	return nil
 }

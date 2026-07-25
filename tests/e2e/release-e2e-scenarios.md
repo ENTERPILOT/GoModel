@@ -4677,8 +4677,10 @@ curl -fsS -o /dev/null -X DELETE "$BASE_URL/admin/provider-credentials/$PC_NAME"
 
 Covers the guardrails: a config/env-declared provider is read-only for both
 PUT and DELETE, an unknown type and a name containing `/` are rejected, a
-redacted API key with no stored value to preserve is rejected, and deleting an
-absent provider returns 404.
+redacted API key with no stored value to preserve is rejected, a credential
+missing a field its provider type requires is rejected without being stored,
+and deleting an absent provider returns 404. Every rejection names the
+offending field in `error.param`.
 
 ```bash
 MANAGED_NAME=$(curl -fsS "$BASE_URL/admin/provider-credentials" | jq -er 'map(select(.managed)) | .[0].name')
@@ -4702,21 +4704,30 @@ curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/provider-cre
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"qa-cred-badtype-$QA_SUFFIX\",\"type\":\"definitely-not-a-provider\"}"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.message | test("unknown provider type")' "$BODY_FILE" >/dev/null
+jq -e '(.error.message | test("unknown provider type")) and .error.param == "type"' "$BODY_FILE" >/dev/null
 
 # Name containing '/' (400).
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/provider-credentials" \
   -H 'Content-Type: application/json' \
   -d '{"name":"qa/slash","type":"openai"}'
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.message | test("must not contain")' "$BODY_FILE" >/dev/null
+jq -e '(.error.message | test("must not contain")) and .error.param == "name"' "$BODY_FILE" >/dev/null
 
 # Redacted API key with no stored value to preserve (400).
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/provider-credentials" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"qa-cred-noval-$QA_SUFFIX\",\"type\":\"openai\",\"api_keys\":[\"***********\"]}"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.message | test("redacted")' "$BODY_FILE" >/dev/null
+jq -e '(.error.message | test("redacted")) and .error.param == "api_keys"' "$BODY_FILE" >/dev/null
+
+# A field the provider type requires is missing (400), and nothing is stored.
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/provider-credentials" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-cred-nokey-$QA_SUFFIX\",\"type\":\"openai\"}"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.param == "api_keys"' "$BODY_FILE" >/dev/null
+curl -fsS "$BASE_URL/admin/provider-credentials" \
+  | jq -e --arg n "qa-cred-nokey-$QA_SUFFIX" 'all(.[]?; .name != $n)' >/dev/null
 
 # Deleting an absent provider (404).
 curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/provider-credentials/qa-cred-absent-$QA_SUFFIX" \
@@ -4751,15 +4762,18 @@ done
 
 On the auth-enabled gateway the endpoints reject unauthenticated reads (401) and
 serve authenticated ones, the `/types` catalog lists constructible provider
-types, and env/config-declared providers surface as read-only `managed:true`
-rows.
+types with the credential fields each one accepts (Vertex takes no API key),
+and env/config-declared providers surface as read-only `managed:true` rows.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/provider-credentials" \
   | jq -R -e '. == "401"' >/dev/null
 
 curl -fsS -H "$ADMIN_AUTH_HEADER" "$AUTH_BASE_URL/admin/provider-credentials/types" \
-  | jq -e 'type == "array" and (index("openai") != null) and (index("anthropic") != null)' >/dev/null
+  | jq -e 'type == "array"
+      and (map(.type) | index("openai") != null and index("anthropic") != null)
+      and (map(select(.type == "openai")) | first | .fields | map(.name) | index("api_keys") != null)
+      and (map(select(.type == "vertex")) | first | .fields | map(.name) | (index("api_keys") == null and index("vertex_project") != null))' >/dev/null
 
 curl -fsS -H "$ADMIN_AUTH_HEADER" "$AUTH_BASE_URL/admin/provider-credentials" \
   | jq -e 'type == "array" and any(.[]?; .managed == true)' >/dev/null

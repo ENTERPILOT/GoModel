@@ -959,6 +959,29 @@ td.col-price {
   display: none;
 }
 
+/* Per-field validation message, shown in place of the field's hint so the
+   complaint sits where the value that caused it is. */
+.form-field-error {
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.form-field-required {
+  margin-left: 3px;
+  color: var(--danger);
+}
+
+:is(input, textarea, select)[aria-invalid="true"] {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+}
+
+:is(input, textarea, select)[aria-invalid="true"]:focus {
+  border-color: var(--danger);
+}
+
 textarea {
   width: 100%;
   min-height: 60px;
