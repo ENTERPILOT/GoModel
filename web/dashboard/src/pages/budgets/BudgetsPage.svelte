@@ -66,7 +66,7 @@
       <div class="table-toolbar-main">
         <FilterInput
           id="budget-filter"
-          placeholder="Filter by user path or period..."
+          placeholder="Filter by user path, label, or period..."
           label="Filter budgets by user path or period"
           bind:value={store.filter}
         />

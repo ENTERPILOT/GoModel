@@ -56,6 +56,12 @@ export function budgetScopeLabel(item) {
   return budgetScopeMeta(budgetScope(item)).chip;
 }
 
+// budgetScopeValueClass names the scope modifier for the shared
+// .budget-scope-value subject styling.
+export function budgetScopeValueClass(item) {
+  return budgetScope(item) === "label" ? "budget-label" : "budget-user-path";
+}
+
 export function budgetSubjectFieldLabel(form) {
   return budgetScopeMeta(String((form && form.scope) || "")).fieldLabel;
 }

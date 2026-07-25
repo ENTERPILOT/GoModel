@@ -15,7 +15,7 @@
           <div class="budget-row-main">
             <div class="budget-row-head">
               <code
-                class="budget-user-path"
+                class="budget-scope-value budget-user-path"
                 title={rateLimits.rateLimitScopeLabel(item) +
                   ": " +
                   rateLimits.rateLimitSubject(item)}

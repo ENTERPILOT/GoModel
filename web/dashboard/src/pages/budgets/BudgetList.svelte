@@ -4,6 +4,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatCost } from "$lib/utils/format.js";
+  import { labelColor } from "$lib/utils/chartTheme.js";
   import { budgetsStore as store } from "./budgets.svelte.js";
   import {
     budgetKey,
@@ -18,6 +19,7 @@
     budgetRemainingLabel,
     budgetScope,
     budgetScopeLabel,
+    budgetScopeValueClass,
     budgetSourceLabel,
     budgetSubject,
     budgetSourceTitle,
@@ -47,21 +49,18 @@
       <div class="budget-row-main">
         <div class="budget-row-head">
           <code
-            class="budget-user-path"
+            class="budget-scope-value {budgetScopeValueClass(item)}"
+            style={budgetScope(item) === "label"
+              ? "--label-color: " + labelColor(budgetSubject(item))
+              : undefined}
             title={budgetScopeLabel(item) + ": " + budgetSubject(item)}
           >
+            {#if budgetScope(item) === "label"}
+              <Icon name="tag" class="budget-scope-icon" />
+            {/if}
             {budgetSubject(item)}
           </code>
           <div class="budget-row-period">
-            {#if budgetScope(item) === "label"}
-              <span
-                class="budget-period-label"
-                title={"Budget scope: " + budgetScopeLabel(item)}
-              >
-                <Icon name="tag" class="budget-period-icon" />
-                <span>{budgetScopeLabel(item)}</span>
-              </span>
-            {/if}
             <span class="budget-period-label {budgetPeriodClass(item)}">
               <Icon name={budgetPeriodIcon(item)} class="budget-period-icon" />
               <span>{budgetPeriodLabel(item)}</span>

@@ -22,6 +22,7 @@ import {
   budgetScope,
   budgetScopeLabel,
   budgetScopeOptions,
+  budgetScopeValueClass,
   budgetSourceTitle,
   budgetSubject,
   budgetSubjectFieldLabel,
@@ -97,6 +98,13 @@ test("budget scope metadata drives the selector and subject field", () => {
   assert.equal(budgetSubject({ scope: "label", subject: "iOS" }), "iOS");
   assert.equal(budgetSubjectFieldLabel({ scope: "label" }), "Label");
   assert.equal(budgetSubjectPlaceholder({ scope: "user_path" }), "/team/alpha");
+});
+
+test("budgetScopeValueClass picks the scope modifier for the shared subject style", () => {
+  assert.equal(budgetScopeValueClass({ scope: "label", subject: "iOS" }), "budget-label");
+  assert.equal(budgetScopeValueClass({ scope: "user_path", subject: "/team" }), "budget-user-path");
+  // A row predating scopes still styles as a user path.
+  assert.equal(budgetScopeValueClass({ user_path: "/team" }), "budget-user-path");
 });
 
 test("syncBudgetScope resets the subject so a path is never sent as a label", () => {
