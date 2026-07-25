@@ -1,11 +1,11 @@
 package budget
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
-	"strings"
+	"slices"
 	"sync"
 	"time"
 )
@@ -47,11 +47,14 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	sort.SliceStable(budgets, func(i, j int) bool {
-		if budgets[i].UserPath == budgets[j].UserPath {
-			return budgets[i].PeriodSeconds > budgets[j].PeriodSeconds
+	slices.SortStableFunc(budgets, func(a, b Budget) int {
+		if order := cmp.Or(
+			cmp.Compare(a.Scope, b.Scope),
+			cmp.Compare(a.Subject, b.Subject),
+		); order != 0 {
+			return order
 		}
-		return budgets[i].UserPath < budgets[j].UserPath
+		return cmp.Compare(b.PeriodSeconds, a.PeriodSeconds)
 	})
 	s.mu.Lock()
 	s.budgets = budgets
@@ -70,18 +73,15 @@ func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 	return s.Refresh(ctx)
 }
 
-func (s *Service) DeleteBudget(ctx context.Context, userPath string, periodSeconds int64) error {
+func (s *Service) DeleteBudget(ctx context.Context, scope Scope, subject string, periodSeconds int64) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	userPath, err := NormalizeUserPath(userPath)
+	scope, subject, err := normalizeBudgetKey(scope, subject, periodSeconds)
 	if err != nil {
 		return err
 	}
-	if periodSeconds <= 0 {
-		return fmt.Errorf("period_seconds must be greater than 0")
-	}
-	if err := s.store.DeleteBudget(ctx, userPath, periodSeconds); err != nil {
+	if err := s.store.DeleteBudget(ctx, scope, subject, periodSeconds); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -129,49 +129,44 @@ func (s *Service) SaveSettings(ctx context.Context, settings Settings) (Settings
 	return saved, nil
 }
 
+// Statuses evaluates every configured budget without enforcing limits.
 func (s *Service) Statuses(ctx context.Context, now time.Time) ([]CheckResult, error) {
+	return s.statusesMatching(ctx, nil, now)
+}
+
+// StatusesFor evaluates every budget covering the request subjects without
+// enforcing limits. Unlike CheckWithResults it never stops at an exhausted
+// budget, so callers get the full status picture even when several are
+// exceeded.
+func (s *Service) StatusesFor(ctx context.Context, subjects Subjects, now time.Time) ([]CheckResult, error) {
+	return s.statusesMatching(ctx, &subjects, now)
+}
+
+// statusesMatching evaluates the budgets covering subjects, or all of them
+// when subjects is nil.
+func (s *Service) statusesMatching(ctx context.Context, subjects *Subjects, now time.Time) ([]CheckResult, error) {
 	if s == nil || s.store == nil {
 		return nil, ErrUnavailable
 	}
-	if now.IsZero() {
-		now = time.Now().UTC()
+	matching, settings, now, err := s.match(subjects, now)
+	if err != nil {
+		return nil, err
 	}
-	now = now.UTC()
-
-	s.mu.RLock()
-	budgets := append([]Budget(nil), s.budgets...)
-	settings := s.settings
-	s.mu.RUnlock()
-	if len(budgets) == 0 {
-		return []CheckResult{}, nil
-	}
-
-	results := make([]CheckResult, 0, len(budgets))
-	for _, budget := range budgets {
-		result, err := s.evaluateBudget(ctx, budget, now, settings)
-		if err != nil {
-			return results, err
-		}
-		results = append(results, result)
-	}
-	return results, nil
+	return s.evaluate(ctx, matching, now, settings)
 }
 
-func (s *Service) ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error {
+func (s *Service) ResetBudget(ctx context.Context, scope Scope, subject string, periodSeconds int64, at time.Time) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	userPath, err := NormalizeUserPath(userPath)
+	scope, subject, err := normalizeBudgetKey(scope, subject, periodSeconds)
 	if err != nil {
 		return err
-	}
-	if periodSeconds <= 0 {
-		return fmt.Errorf("period_seconds must be greater than 0")
 	}
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	if err := s.store.ResetBudget(ctx, userPath, periodSeconds, at.UTC()); err != nil {
+	if err := s.store.ResetBudget(ctx, scope, subject, periodSeconds, at.UTC()); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -190,108 +185,105 @@ func (s *Service) ResetAll(ctx context.Context, at time.Time) error {
 	return s.Refresh(ctx)
 }
 
-func (s *Service) Check(ctx context.Context, userPath string, now time.Time) error {
-	_, err := s.CheckWithResults(ctx, userPath, now)
+func (s *Service) Check(ctx context.Context, subjects Subjects, now time.Time) error {
+	_, err := s.CheckWithResults(ctx, subjects, now)
 	return err
 }
 
-func (s *Service) CheckWithResults(ctx context.Context, userPath string, now time.Time) ([]CheckResult, error) {
+// CheckWithResults evaluates every budget covering the request subjects and
+// stops at the first exhausted one, returning it as an ExceededError alongside
+// the results evaluated so far.
+func (s *Service) CheckWithResults(ctx context.Context, subjects Subjects, now time.Time) ([]CheckResult, error) {
 	if s == nil || s.store == nil {
 		return nil, ErrUnavailable
 	}
-	userPath, err := NormalizeUserPath(userPath)
+	matching, settings, now, err := s.match(&subjects, now)
 	if err != nil {
 		return nil, err
 	}
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
-	now = now.UTC()
-
-	s.mu.RLock()
-	budgets := append([]Budget(nil), s.budgets...)
-	settings := s.settings
-	s.mu.RUnlock()
-	if len(budgets) == 0 {
+	if len(matching) == 0 {
 		return nil, nil
 	}
-
-	results := make([]CheckResult, 0, len(budgets))
-	for _, budget := range budgets {
-		if !budgetAppliesToPath(budget.UserPath, userPath) {
-			continue
-		}
-		result, err := s.evaluateBudget(ctx, budget, now, settings)
-		if err != nil {
-			return results, err
-		}
-		results = append(results, result)
-		if result.HasUsage && result.Spent >= budget.Amount {
-			return results, &ExceededError{Result: result}
+	results, err := s.evaluate(ctx, matching, now, settings)
+	if err != nil {
+		return results, err
+	}
+	for i, result := range results {
+		if result.HasUsage && result.Spent >= result.Budget.Amount {
+			return results[:i+1], &ExceededError{Result: result}
 		}
 	}
 	return results, nil
 }
 
-// StatusesForPath evaluates every budget covering userPath without enforcing
-// limits. Unlike CheckWithResults it never stops at an exhausted budget, so
-// callers get the full status picture even when several budgets are exceeded.
-func (s *Service) StatusesForPath(ctx context.Context, userPath string, now time.Time) ([]CheckResult, error) {
-	if s == nil || s.store == nil {
-		return nil, ErrUnavailable
-	}
-	userPath, err := NormalizeUserPath(userPath)
-	if err != nil {
-		return nil, err
-	}
+// match snapshots the budgets covering subjects — or all of them when subjects
+// is nil — along with the reset settings and the normalized evaluation time.
+func (s *Service) match(subjects *Subjects, now time.Time) ([]Budget, Settings, time.Time, error) {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
 	now = now.UTC()
 
+	// Refresh publishes a freshly built slice rather than mutating the current
+	// one, so the header read under the lock stays valid afterwards and the
+	// matching pass needs no copy.
 	s.mu.RLock()
-	budgets := append([]Budget(nil), s.budgets...)
+	budgets := s.budgets
 	settings := s.settings
 	s.mu.RUnlock()
 
-	results := make([]CheckResult, 0, len(budgets))
+	if subjects == nil {
+		return slices.Clone(budgets), settings, now, nil
+	}
+	userPath, err := NormalizeUserPath(subjects.UserPath)
+	if err != nil {
+		return nil, settings, now, err
+	}
+	resolved := Subjects{UserPath: userPath, Labels: subjects.Labels}
+
+	matching := make([]Budget, 0, len(budgets))
 	for _, budget := range budgets {
-		if !budgetAppliesToPath(budget.UserPath, userPath) {
-			continue
+		if budget.appliesTo(resolved) {
+			matching = append(matching, budget)
 		}
-		result, err := s.evaluateBudget(ctx, budget, now, settings)
-		if err != nil {
-			return results, err
+	}
+	return matching, settings, now, nil
+}
+
+// evaluate resolves the active period of every budget and asks the store for
+// all their spends in one round trip. Enforcement runs on every request, so the
+// batched lookup is what keeps a wide match set from costing a query each.
+func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time, settings Settings) ([]CheckResult, error) {
+	if len(budgets) == 0 {
+		return []CheckResult{}, nil
+	}
+	results := make([]CheckResult, len(budgets))
+	windows := make([]SpendWindow, len(budgets))
+	for i, budget := range budgets {
+		start, end := PeriodBounds(now, budget.PeriodSeconds, settings)
+		if budget.LastResetAt != nil && budget.LastResetAt.After(start) {
+			start = budget.LastResetAt.UTC()
 		}
-		results = append(results, result)
+		results[i] = CheckResult{Budget: budget, PeriodStart: start, PeriodEnd: end}
+		windows[i] = SpendWindow{
+			Scope:   budget.Scope,
+			Subject: budget.Subject,
+			Start:   start,
+			End:     now,
+		}
+	}
+
+	spends, err := s.store.SumSpend(ctx, windows)
+	if err != nil {
+		return nil, err
+	}
+	if len(spends) != len(windows) {
+		return nil, fmt.Errorf("budget store returned %d spends for %d windows", len(spends), len(windows))
+	}
+	for i, spend := range spends {
+		results[i].Spent = spend.Total
+		results[i].HasUsage = spend.HasUsage
+		results[i].Remaining = results[i].Budget.Amount - spend.Total
 	}
 	return results, nil
-}
-
-func (s *Service) evaluateBudget(ctx context.Context, budget Budget, now time.Time, settings Settings) (CheckResult, error) {
-	start, end := PeriodBounds(now, budget.PeriodSeconds, settings)
-	if budget.LastResetAt != nil && budget.LastResetAt.After(start) {
-		start = budget.LastResetAt.UTC()
-	}
-	spent, hasUsage, err := s.store.SumUsageCost(ctx, budget.UserPath, start, now)
-	if err != nil {
-		return CheckResult{}, err
-	}
-	return CheckResult{
-		Budget:      budget,
-		PeriodStart: start,
-		PeriodEnd:   end,
-		Spent:       spent,
-		HasUsage:    hasUsage,
-		Remaining:   budget.Amount - spent,
-	}, nil
-}
-
-func budgetAppliesToPath(budgetPath, requestPath string) bool {
-	budgetPath = strings.TrimSpace(budgetPath)
-	requestPath = strings.TrimSpace(requestPath)
-	if budgetPath == "/" {
-		return true
-	}
-	return requestPath == budgetPath || strings.HasPrefix(requestPath, budgetPath+"/")
 }

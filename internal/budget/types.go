@@ -3,6 +3,7 @@ package budget
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,15 +25,65 @@ const (
 	SourceManual = "manual"
 )
 
-// Budget stores one spend limit for one user path and reset period.
+// Scope names what a budget limits: a consumer user-path subtree or a request
+// label.
+type Scope string
+
+const (
+	// ScopeUserPath limits a consumer subtree; the subject is a user path and
+	// covers all its descendants.
+	ScopeUserPath Scope = "user_path"
+	// ScopeLabel limits everything carrying one request label; the subject is
+	// the label verbatim. A request carrying several labels is charged against
+	// every matching label budget.
+	ScopeLabel Scope = "label"
+)
+
+// Budget stores one spend limit for one scope, subject, and reset period.
 type Budget struct {
-	UserPath      string     `json:"user_path" bson:"user_path"`
+	Scope         Scope      `json:"scope" bson:"scope"`
+	Subject       string     `json:"subject" bson:"subject"`
 	PeriodSeconds int64      `json:"period_seconds" bson:"period_seconds"`
 	Amount        float64    `json:"amount" bson:"amount"`
 	Source        string     `json:"source,omitempty" bson:"source,omitempty"`
 	LastResetAt   *time.Time `json:"last_reset_at,omitempty" bson:"last_reset_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at" bson:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at" bson:"updated_at"`
+}
+
+// Subjects identifies the dimensions one request can be budgeted by. UserPath
+// is always known at ingress; Labels are whatever tagging extracted for the
+// request.
+type Subjects struct {
+	UserPath string
+	Labels   []string
+}
+
+// appliesTo reports whether the budget covers the request subjects.
+func (b Budget) appliesTo(s Subjects) bool {
+	if b.Scope == ScopeLabel {
+		return slices.Contains(s.Labels, b.Subject)
+	}
+	return budgetAppliesToPath(b.Subject, s.UserPath)
+}
+
+// SubjectLabel names the budget subject for error messages and logs.
+func (b Budget) SubjectLabel() string {
+	if b.Scope == ScopeLabel {
+		return "label " + b.Subject
+	}
+	return b.Subject
+}
+
+// budgetAppliesToPath reports whether a budget path covers the request path,
+// using the same subtree semantics as rate limits.
+func budgetAppliesToPath(budgetPath, requestPath string) bool {
+	budgetPath = strings.TrimSpace(budgetPath)
+	requestPath = strings.TrimSpace(requestPath)
+	if budgetPath == "/" {
+		return true
+	}
+	return requestPath == budgetPath || strings.HasPrefix(requestPath, budgetPath+"/")
 }
 
 // Settings controls the calendar anchors used to find the active budget period.
@@ -97,7 +148,7 @@ func (e *ExceededError) Error() string {
 	}
 	return fmt.Sprintf(
 		"budget exceeded for %s %s limit: spent %.6f of %.6f",
-		e.Result.Budget.UserPath,
+		e.Result.Budget.SubjectLabel(),
 		PeriodLabel(e.Result.Budget.PeriodSeconds),
 		e.Result.Spent,
 		e.Result.Budget.Amount,
@@ -129,12 +180,45 @@ func NormalizeUserPath(raw string) (string, error) {
 	return path, nil
 }
 
+// NormalizeScope canonicalizes a budget scope name. An empty scope means
+// user_path, keeping pre-scope budget definitions and requests valid.
+func NormalizeScope(raw string) (Scope, error) {
+	switch Scope(strings.ToLower(strings.TrimSpace(raw))) {
+	case "", ScopeUserPath:
+		return ScopeUserPath, nil
+	case ScopeLabel:
+		return ScopeLabel, nil
+	default:
+		return "", fmt.Errorf("scope must be one of user_path, label")
+	}
+}
+
+// NormalizeSubject canonicalizes a budget subject for its scope. Label
+// subjects keep their case: they are compared verbatim against the labels
+// recorded on usage entries, the same way the usage label filter and by-label
+// breakdown compare them.
+func NormalizeSubject(scope Scope, subject string) (string, error) {
+	if scope != ScopeLabel {
+		return NormalizeUserPath(subject)
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return "", fmt.Errorf("label budget subject is required")
+	}
+	return subject, nil
+}
+
 func NormalizeBudget(b Budget) (Budget, error) {
-	path, err := NormalizeUserPath(b.UserPath)
+	scope, err := NormalizeScope(string(b.Scope))
 	if err != nil {
 		return Budget{}, err
 	}
-	b.UserPath = path
+	b.Scope = scope
+	subject, err := NormalizeSubject(scope, b.Subject)
+	if err != nil {
+		return Budget{}, err
+	}
+	b.Subject = subject
 	if b.PeriodSeconds <= 0 {
 		return Budget{}, fmt.Errorf("period_seconds must be greater than 0")
 	}

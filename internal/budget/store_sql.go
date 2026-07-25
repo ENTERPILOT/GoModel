@@ -3,6 +3,7 @@ package budget
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -27,41 +28,38 @@ type SQLStore struct {
 	db sqlx.DB
 }
 
-var sqlBudgetsTable = `CREATE TABLE IF NOT EXISTS budgets (
-		user_path TEXT NOT NULL,
+// sqlBudgetsSchema is shared by fresh installs and the pre-scope migration
+// rebuild.
+var sqlBudgetsSchema = `CREATE TABLE IF NOT EXISTS budgets (
+		scope TEXT NOT NULL DEFAULT 'user_path',
+		subject TEXT NOT NULL,
 		period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
 		amount ` + sqlx.TypeFloat + ` NOT NULL,
 		source TEXT NOT NULL DEFAULT '',
 		last_reset_at ` + sqlx.TypeInt64 + `,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
-		PRIMARY KEY (user_path, period_seconds)
+		PRIMARY KEY (scope, subject, period_seconds)
 	)`
 
-// sqlRest is applied after the budgets migrations.
+// sqlRest is applied after the budgets table exists.
 var sqlRest = []string{
 	`CREATE TABLE IF NOT EXISTS budget_settings (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_budgets_user_path ON budgets(user_path)`,
+	`CREATE INDEX IF NOT EXISTS idx_budgets_subject ON budgets(scope, subject)`,
 	`CREATE INDEX IF NOT EXISTS idx_budgets_period_seconds ON budgets(period_seconds)`,
-}
-
-// sqlMigrations backfill columns added after the table's first release.
-var sqlMigrations = []string{
-	`ALTER TABLE budgets ADD COLUMN source TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE budgets ADD COLUMN last_reset_at ` + sqlx.TypeInt64,
 }
 
 // upsertBudgetSQL preserves a manually edited budget against a config re-seed:
 // a column is only overwritten when the incoming or stored row is manual, or
 // when both are config-sourced.
 const upsertBudgetSQL = `
-	INSERT INTO budgets (user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(user_path, period_seconds) DO UPDATE SET
+	INSERT INTO budgets (scope, subject, period_seconds, amount, source, last_reset_at, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
 		amount = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.amount ELSE budgets.amount END,
 		source = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.source ELSE budgets.source END,
 		updated_at = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.updated_at ELSE budgets.updated_at END
@@ -72,11 +70,11 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
-	if err := db.Schema(ctx, sqlBudgetsTable); err != nil {
-		return nil, fmt.Errorf("failed to create budgets table: %w", err)
+	if err := migratePreScopeTable(ctx, db); err != nil {
+		return nil, err
 	}
-	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
-		return nil, fmt.Errorf("failed to migrate budgets table: %w", err)
+	if err := db.Schema(ctx, sqlBudgetsSchema); err != nil {
+		return nil, fmt.Errorf("failed to create budgets table: %w", err)
 	}
 	if err := db.Schema(ctx, sqlRest...); err != nil {
 		return nil, fmt.Errorf("failed to create budget tables: %w", err)
@@ -86,9 +84,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 
 func (s *SQLStore) ListBudgets(ctx context.Context) ([]Budget, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at
+		SELECT scope, subject, period_seconds, amount, source, last_reset_at, created_at, updated_at
 		FROM budgets
-		ORDER BY user_path ASC, period_seconds ASC
+		ORDER BY scope ASC, subject ASC, period_seconds ASC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list budgets: %w", err)
@@ -122,23 +120,20 @@ func (s *SQLStore) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 	})
 }
 
-func (s *SQLStore) DeleteBudget(ctx context.Context, userPath string, periodSeconds int64) error {
-	userPath, err := NormalizeUserPath(userPath)
+func (s *SQLStore) DeleteBudget(ctx context.Context, scope Scope, subject string, periodSeconds int64) error {
+	scope, subject, err := normalizeBudgetKey(scope, subject, periodSeconds)
 	if err != nil {
 		return err
 	}
-	if periodSeconds <= 0 {
-		return fmt.Errorf("period_seconds must be greater than 0")
-	}
 	affected, err := s.db.Exec(ctx, `
 		DELETE FROM budgets
-		WHERE user_path = ? AND period_seconds = ?
-	`, userPath, periodSeconds)
+		WHERE scope = ? AND subject = ? AND period_seconds = ?
+	`, scope, subject, periodSeconds)
 	if err != nil {
-		return fmt.Errorf("delete budget %s/%d: %w", userPath, periodSeconds, err)
+		return fmt.Errorf("delete budget %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
+		return fmt.Errorf("%w: %s %s/%d", ErrNotFound, scope, subject, periodSeconds)
 	}
 	return nil
 }
@@ -160,8 +155,8 @@ func (s *SQLStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) e
 		if len(budgets) > 0 {
 			conditions := make([]string, 0, len(budgets))
 			for _, budget := range budgets {
-				conditions = append(conditions, `(user_path = ? AND period_seconds = ?)`)
-				args = append(args, budget.UserPath, budget.PeriodSeconds)
+				conditions = append(conditions, `(scope = ? AND subject = ? AND period_seconds = ?)`)
+				args = append(args, budget.Scope, budget.Subject, budget.PeriodSeconds)
 			}
 			query += ` AND NOT (` + strings.Join(conditions, " OR ") + `)`
 		}
@@ -209,24 +204,21 @@ func (s *SQLStore) SaveSettings(ctx context.Context, settings Settings) (Setting
 	return settings, nil
 }
 
-func (s *SQLStore) ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error {
-	userPath, err := NormalizeUserPath(userPath)
+func (s *SQLStore) ResetBudget(ctx context.Context, scope Scope, subject string, periodSeconds int64, at time.Time) error {
+	scope, subject, err := normalizeBudgetKey(scope, subject, periodSeconds)
 	if err != nil {
 		return err
-	}
-	if periodSeconds <= 0 {
-		return fmt.Errorf("period_seconds must be greater than 0")
 	}
 	affected, err := s.db.Exec(ctx, `
 		UPDATE budgets
 		SET last_reset_at = ?, updated_at = ?
-		WHERE user_path = ? AND period_seconds = ?
-	`, at.UTC().Unix(), at.UTC().Unix(), userPath, periodSeconds)
+		WHERE scope = ? AND subject = ? AND period_seconds = ?
+	`, at.UTC().Unix(), at.UTC().Unix(), scope, subject, periodSeconds)
 	if err != nil {
-		return fmt.Errorf("reset budget %s/%d: %w", userPath, periodSeconds, err)
+		return fmt.Errorf("reset budget %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
+		return fmt.Errorf("%w: %s %s/%d", ErrNotFound, scope, subject, periodSeconds)
 	}
 	return nil
 }
@@ -240,53 +232,129 @@ func (s *SQLStore) ResetAllBudgets(ctx context.Context, at time.Time) error {
 	return nil
 }
 
-// SumUsageCost totals uncached spend for a budget's subtree over a window.
+// spendChunkSize caps how many windows share one statement. Each window binds
+// up to four parameters, keeping a chunk well inside the 999-parameter limit
+// of older SQLite builds.
+const spendChunkSize = 64
+
+// SumSpend totals uncached spend for every window with one scan per chunk.
 //
-// This is the one budget statement that cannot be shared: SQLite keeps the
-// usage timestamp as text and must convert it, while PostgreSQL compares a
-// real timestamp column and has to quote "usage" as a reserved word.
-func (s *SQLStore) SumUsageCost(ctx context.Context, userPath string, start, end time.Time) (float64, bool, error) {
-	userPath, err := NormalizeUserPath(userPath)
-	if err != nil {
-		return 0, false, err
+// A budget check matches several budgets at once — a user-path subtree plus a
+// budget per request label — and running one statement each would scan the
+// usage table once per budget. Conditional aggregation collapses them into a
+// single pass: the outer WHERE spans the union of the windows, and each window
+// gets its own SUM(CASE ...) column.
+func (s *SQLStore) SumSpend(ctx context.Context, windows []SpendWindow) ([]Spend, error) {
+	if len(windows) == 0 {
+		return nil, nil
 	}
-	userPathExpr := usagePathMatchesBudgetExpr("user_path")
-
-	var query string
-	var args []any
-	switch s.db.Dialect() {
-	case sqlx.SQLite:
-		epoch := "unixepoch(REPLACE(timestamp, ' ', 'T'))"
-		query = `SELECT SUM(total_cost) FROM usage
-			WHERE ` + epoch + ` >= unixepoch(?)
-				AND ` + epoch + ` < unixepoch(?)
-				AND (` + userPathExpr + ` = ? OR ` + userPathExpr + ` LIKE ? ESCAPE '\')
-				AND (cache_type IS NULL OR cache_type = '')`
-		args = []any{
-			start.UTC().Format(time.RFC3339Nano),
-			end.UTC().Format(time.RFC3339Nano),
-			userPath,
-			usagePathLikePattern(userPath),
+	if dialect := s.db.Dialect(); dialect != sqlx.SQLite && dialect != sqlx.PostgreSQL {
+		return nil, fmt.Errorf("unsupported dialect %q", dialect)
+	}
+	spends := make([]Spend, 0, len(windows))
+	for chunk := range slices.Chunk(windows, spendChunkSize) {
+		part, err := s.sumSpendChunk(ctx, chunk)
+		if err != nil {
+			return nil, err
 		}
-	case sqlx.PostgreSQL:
-		query = `SELECT SUM(total_cost) FROM "usage"
-			WHERE timestamp >= ?
-				AND timestamp < ?
-				AND (` + userPathExpr + ` = ? OR ` + userPathExpr + ` LIKE ? ESCAPE '\')
-				AND (cache_type IS NULL OR cache_type = '')`
-		args = []any{start.UTC(), end.UTC(), userPath, usagePathLikePattern(userPath)}
-	default:
-		return 0, false, fmt.Errorf("unsupported dialect %q", s.db.Dialect())
+		spends = append(spends, part...)
+	}
+	return spends, nil
+}
+
+func (s *SQLStore) sumSpendChunk(ctx context.Context, windows []SpendWindow) ([]Spend, error) {
+	// SQLite keeps the usage timestamp as text and must convert it, while
+	// PostgreSQL compares a real timestamp column and has to quote "usage" as a
+	// reserved word.
+	sqlite := s.db.Dialect() == sqlx.SQLite
+	timeExpr, timeBound, table := "timestamp", "?", `"usage"`
+	timeArg := func(t time.Time) any { return t.UTC() }
+	if sqlite {
+		timeExpr, timeBound, table = "unixepoch(REPLACE(timestamp, ' ', 'T'))", "unixepoch(?)", "usage"
+		timeArg = func(t time.Time) any { return t.UTC().Format(time.RFC3339Nano) }
 	}
 
-	var total *float64
-	if err := s.db.QueryRow(ctx, query, args...).Scan(&total); err != nil {
-		return 0, false, fmt.Errorf("sum usage cost: %w", err)
+	columns := make([]string, 0, len(windows))
+	args := make([]any, 0, len(windows)*4+2)
+	for _, window := range windows {
+		match, matchArgs, err := spendSubjectMatch(window, sqlite)
+		if err != nil {
+			return nil, err
+		}
+		columns = append(columns, "SUM(CASE WHEN "+timeExpr+" >= "+timeBound+
+			" AND "+timeExpr+" < "+timeBound+" AND "+match+" THEN total_cost END)")
+		args = append(args, timeArg(window.Start), timeArg(window.End))
+		args = append(args, matchArgs...)
 	}
-	if total == nil {
-		return 0, false, nil
+	query := `SELECT ` + strings.Join(columns, ", ") + ` FROM ` + table +
+		` WHERE ` + timeExpr + ` >= ` + timeBound +
+		` AND ` + timeExpr + ` < ` + timeBound +
+		` AND (cache_type IS NULL OR cache_type = '')`
+	minStart, maxEnd := spendBounds(windows)
+	args = append(args, timeArg(minStart), timeArg(maxEnd))
+
+	totals := make([]*float64, len(windows))
+	dest := make([]any, len(windows))
+	for i := range totals {
+		dest[i] = &totals[i]
 	}
-	return *total, true, nil
+	if err := s.db.QueryRow(ctx, query, args...).Scan(dest...); err != nil {
+		return nil, fmt.Errorf("sum usage cost: %w", err)
+	}
+
+	spends := make([]Spend, len(windows))
+	for i, total := range totals {
+		// A NULL sum means the window matched no priced usage at all, which is
+		// what keeps an untouched budget from blocking.
+		if total != nil {
+			spends[i] = Spend{Total: *total, HasUsage: true}
+		}
+	}
+	return spends, nil
+}
+
+// spendSubjectMatch renders the usage-row predicate for one budget subject.
+func spendSubjectMatch(window SpendWindow, sqlite bool) (string, []any, error) {
+	if window.Scope == ScopeLabel {
+		subject, err := NormalizeSubject(ScopeLabel, window.Subject)
+		if err != nil {
+			return "", nil, err
+		}
+		if sqlite {
+			return `(labels IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(usage.labels) WHERE json_each.value = ?))`,
+				[]any{subject}, nil
+		}
+		// The function form, not the `?` operator, so the placeholder rewriter
+		// never has to tell the two apart.
+		return `jsonb_exists(labels, ?)`, []any{subject}, nil
+	}
+	userPath, err := NormalizeUserPath(window.Subject)
+	if err != nil {
+		return "", nil, err
+	}
+	pathExpr := usagePathMatchesBudgetExpr("user_path")
+	return `(` + pathExpr + ` = ? OR ` + pathExpr + ` LIKE ? ESCAPE '\')`,
+		[]any{userPath, usagePathLikePattern(userPath)}, nil
+}
+
+// usagePathMatchesBudgetExpr normalizes a stored user path the way budget
+// matching expects: missing and blank paths count as the root.
+func usagePathMatchesBudgetExpr(column string) string {
+	return "COALESCE(NULLIF(TRIM(" + column + "), ''), '/')"
+}
+
+func usagePathLikePattern(userPath string) string {
+	if userPath == "/" {
+		return "/%"
+	}
+	return escapeLikeWildcards(userPath) + "/%"
+}
+
+func escapeLikeWildcards(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
 }
 
 func (s *SQLStore) Close() error {
@@ -296,7 +364,8 @@ func (s *SQLStore) Close() error {
 func upsertBudgets(ctx context.Context, q sqlx.Querier, budgets []Budget) error {
 	for _, budget := range budgets {
 		_, err := q.Exec(ctx, upsertBudgetSQL,
-			budget.UserPath,
+			budget.Scope,
+			budget.Subject,
 			budget.PeriodSeconds,
 			budget.Amount,
 			budget.Source,
@@ -308,7 +377,7 @@ func upsertBudgets(ctx context.Context, q sqlx.Querier, budgets []Budget) error 
 			SourceManual, SourceConfig,
 		)
 		if err != nil {
-			return fmt.Errorf("upsert budget %s/%d: %w", budget.UserPath, budget.PeriodSeconds, err)
+			return fmt.Errorf("upsert budget %s %s/%d: %w", budget.Scope, budget.Subject, budget.PeriodSeconds, err)
 		}
 	}
 	return nil
@@ -319,7 +388,8 @@ func scanSQLBudget(scanner sqlx.Row) (Budget, error) {
 	var lastResetAt *int64
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
-		&budget.UserPath,
+		&budget.Scope,
+		&budget.Subject,
 		&budget.PeriodSeconds,
 		&budget.Amount,
 		&budget.Source,

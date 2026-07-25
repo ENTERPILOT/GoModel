@@ -1642,23 +1642,44 @@ body.conversation-drawer-open {
   min-width: 0;
 }
 
-.budget-user-path {
+/* Shared shape of a scoped subject: a user path or a request label. The scope
+   modifier below only changes the hue. */
+.budget-scope-value {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
   justify-self: start;
   width: fit-content;
   max-width: 100%;
   min-height: 24px;
   padding: 2px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
   border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
   color: var(--text);
   font-family: "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.budget-user-path {
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
+}
+
+/* --label-color is the same per-label hue the usage log and API keys use, so
+   one label reads the same everywhere in the dashboard. */
+.budget-label {
+  border: 1px solid color-mix(in srgb, var(--label-color, var(--accent)) 45%, var(--border));
+  background: color-mix(in srgb, var(--label-color, var(--accent)) 14%, var(--bg));
+}
+
+.budget-scope-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  stroke-width: 2.2;
+  opacity: 0.85;
 }
 
 .budget-row-meta {

@@ -6802,11 +6802,17 @@ const docTemplate = `{
                 "remaining": {
                     "type": "number"
                 },
+                "scope": {
+                    "type": "string"
+                },
                 "source": {
                     "type": "string"
                 },
                 "spent": {
                     "type": "number"
+                },
+                "subject": {
+                    "type": "string"
                 },
                 "updated_at": {
                     "type": "string"
@@ -6824,6 +6830,12 @@ const docTemplate = `{
             "properties": {
                 "budget_key": {
                     "$ref": "#/definitions/admin.budgetKeyRequest"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
                 },
                 "user_path": {
                     "type": "string"
@@ -7222,6 +7234,12 @@ const docTemplate = `{
                 "period_seconds": {
                     "type": "integer"
                 },
+                "scope": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
                 "user_path": {
                     "type": "string"
                 }
@@ -7346,6 +7364,12 @@ const docTemplate = `{
                 },
                 "budget_key": {
                     "$ref": "#/definitions/admin.budgetKeyRequest"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
                 },
                 "user_path": {
                     "type": "string"
@@ -10191,8 +10215,14 @@ const docTemplate = `{
                 "resets_in_seconds": {
                     "type": "integer"
                 },
+                "scope": {
+                    "type": "string"
+                },
                 "spent": {
                     "type": "number"
+                },
+                "subject": {
+                    "type": "string"
                 },
                 "usage_ratio": {
                     "description": "UsageRatio is spent/amount, deliberately unclamped: values above 1\nmean the budget is blown through.",

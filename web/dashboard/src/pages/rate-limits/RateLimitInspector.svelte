@@ -78,7 +78,7 @@
                 >
                   <div class="budget-row-main">
                     <div class="budget-row-head">
-                      <code class="budget-user-path">
+                      <code class="budget-scope-value budget-user-path">
                         {rateLimits.rateLimitSubject(item)}
                       </code>
                       <div class="budget-row-period">

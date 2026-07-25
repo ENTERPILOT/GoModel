@@ -8,6 +8,9 @@
   import {
     budgetOverrideDialogMessage,
     budgetPeriodOptions,
+    budgetScopeOptions,
+    budgetSubjectFieldLabel,
+    budgetSubjectPlaceholder,
   } from "./budgets-helpers.js";
 
   // Escape handling: the editor only closes when neither the auth dialog
@@ -18,10 +21,10 @@
     }
   }
 
-  function onUserPathInput(event) {
-    store.setFormUserPath(event.target.value);
+  function onSubjectInput(event) {
+    store.setFormSubject(event.target.value);
     // Keep the input strictly controlled.
-    event.target.value = store.form.user_path;
+    event.target.value = store.form.subject;
   }
 </script>
 
@@ -52,14 +55,30 @@
 
       <div class="form-grid">
         <div class="form-field">
-          <label class="form-field-label" for="budget-user-path">User Path</label>
+          <label class="form-field-label" for="budget-scope">Scope</label>
+          <select
+            id="budget-scope"
+            class="form-select settings-select"
+            bind:value={store.form.scope}
+            disabled={store.editing}
+            onchange={() => store.syncScope()}
+          >
+            {#each budgetScopeOptions() as option (option.value)}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-field-label" for="budget-subject">
+            {budgetSubjectFieldLabel(store.form)}
+          </label>
           <input
-            id="budget-user-path"
+            id="budget-subject"
             class="form-input"
             type="text"
-            placeholder="/team/alpha"
-            value={store.form.user_path}
-            oninput={onUserPathInput}
+            placeholder={budgetSubjectPlaceholder(store.form)}
+            value={store.form.subject}
+            oninput={onSubjectInput}
             disabled={store.editing}
             data-modal-autofocus={!store.editing || undefined}
           />

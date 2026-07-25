@@ -80,6 +80,27 @@ func NewSQLite(t *testing.T) sqlx.DB {
 func newPostgres(t *testing.T) sqlx.DB {
 	t.Helper()
 
+	pool := NewPostgresPool(t)
+	if pool == nil {
+		return nil // NewPostgresPool already skipped
+	}
+	db, err := sqlx.NewPostgreSQL(pool)
+	if err != nil {
+		t.Fatalf("wrap postgres: %v", err)
+	}
+	return db
+}
+
+// NewPostgresPool returns a connection pool scoped to a throwaway schema, or
+// nil after skipping when no test server is configured.
+//
+// Run is the right entry point for a store written against sqlx.DB. This is
+// for the few tests that also need the raw pool — a store that has not moved
+// onto sqlx yet takes *pgxpool.Pool directly, and a test spanning both wants
+// them pointed at one schema.
+func NewPostgresPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+
 	baseURL := strings.TrimSpace(os.Getenv(PostgresURLEnv))
 	if baseURL == "" {
 		t.Skipf("%s not set", PostgresURLEnv)
@@ -127,12 +148,7 @@ func newPostgres(t *testing.T) sqlx.DB {
 		t.Fatalf("open scoped pool: %v", err)
 	}
 	t.Cleanup(pool.Close)
-
-	db, err := sqlx.NewPostgreSQL(pool)
-	if err != nil {
-		t.Fatalf("wrap postgres: %v", err)
-	}
-	return db
+	return pool
 }
 
 // sanitizeIdentifier reduces a test name to characters safe in a schema name

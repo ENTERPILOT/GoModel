@@ -172,6 +172,13 @@ budgets:
           amount: 10.00
         - period: "weekly"
           amount: 50.00
+  labels:
+    # Request labels are matched verbatim, so they have no env-var form:
+    # declare label budgets here or in the dashboard.
+    - label: "Mobile-App-iOS"
+      limits:
+        - period: "monthly"
+          amount: 500.00
 
 rate_limits:
   enabled: true # env: RATE_LIMITS_ENABLED; with no configured rules this has no effect

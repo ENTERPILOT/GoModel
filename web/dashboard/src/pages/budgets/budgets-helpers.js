@@ -6,12 +6,74 @@ import { formatCost } from "../../lib/utils/format.js";
 
 export function defaultBudgetForm() {
   return {
-    user_path: "/",
+    scope: "user_path",
+    subject: "/",
     period: "daily",
     period_seconds: 86400,
     amount: "",
     source: "manual",
   };
+}
+
+// One scope metadata table drives the select options, list chips, and the
+// subject field's label/placeholder, mirroring the Rate Limits page.
+export function budgetScopeMeta(scope) {
+  const meta = {
+    user_path: {
+      label: "User path",
+      chip: "user path",
+      fieldLabel: "User Path",
+      placeholder: "/team/alpha",
+    },
+    label: {
+      label: "Label",
+      chip: "label",
+      fieldLabel: "Label",
+      placeholder: "Mobile-App-iOS",
+    },
+  };
+  return meta[scope] || meta.user_path;
+}
+
+export function budgetScopeOptions() {
+  return ["user_path", "label"].map((scope) => ({
+    value: scope,
+    label: budgetScopeMeta(scope).label,
+  }));
+}
+
+export function budgetScope(item) {
+  const scope = String((item && item.scope) || "").trim();
+  return scope || "user_path";
+}
+
+export function budgetSubject(item) {
+  const subject = String((item && item.subject) || "").trim();
+  return subject || String((item && item.user_path) || "");
+}
+
+export function budgetScopeLabel(item) {
+  return budgetScopeMeta(budgetScope(item)).chip;
+}
+
+// budgetScopeValueClass names the scope modifier for the shared
+// .budget-scope-value subject styling.
+export function budgetScopeValueClass(item) {
+  return budgetScope(item) === "label" ? "budget-label" : "budget-user-path";
+}
+
+export function budgetSubjectFieldLabel(form) {
+  return budgetScopeMeta(String((form && form.scope) || "")).fieldLabel;
+}
+
+export function budgetSubjectPlaceholder(form) {
+  return budgetScopeMeta(String((form && form.scope) || "")).placeholder;
+}
+
+// Changing scope resets the subject: a user path never carries over to a
+// label. Mutates the form in place.
+export function syncBudgetScope(form) {
+  form.subject = String((form && form.scope) || "") === "user_path" ? "/" : "";
 }
 
 export function budgetPeriodOptions() {
@@ -60,7 +122,9 @@ export function budgetPeriodFromSeconds(seconds) {
 
 export function budgetKey(item) {
   return (
-    String((item && item.user_path) || "") +
+    budgetScope(item) +
+    ":" +
+    budgetSubject(item) +
     ":" +
     String((item && item.period_seconds) || "")
   );
@@ -134,7 +198,8 @@ export function normalizeBudgetListPayload(payload) {
 function budgetFilterText(item) {
   const seconds = Number((item && item.period_seconds) || 0);
   return [
-    item && item.user_path,
+    budgetSubject(item),
+    budgetScopeLabel(item),
     budgetPeriodLabel(item),
     budgetPeriodFromSeconds(seconds),
     seconds ? String(seconds) + "s" : "",
@@ -144,19 +209,21 @@ function budgetFilterText(item) {
     .toLowerCase();
 }
 
+const budgetScopeOrder = { user_path: 0, label: 1 };
+
 function sortBudgets(items, sortBy) {
   const sorted = Array.isArray(items) ? items.slice() : [];
-  const by = String(sortBy || "user_path");
+  const by = String(sortBy || "subject");
   sorted.sort((a, b) => {
-    const pathCompare = String((a && a.user_path) || "").localeCompare(
-      String((b && b.user_path) || ""),
-    );
+    const scopeCompare =
+      (budgetScopeOrder[budgetScope(a)] || 0) - (budgetScopeOrder[budgetScope(b)] || 0);
+    const subjectCompare = budgetSubject(a).localeCompare(budgetSubject(b));
     const periodCompare =
       Number((b && b.period_seconds) || 0) - Number((a && a.period_seconds) || 0);
     if (by === "period") {
-      return periodCompare || pathCompare;
+      return periodCompare || scopeCompare || subjectCompare;
     }
-    return pathCompare || periodCompare;
+    return scopeCompare || subjectCompare || periodCompare;
   });
   return sorted;
 }
@@ -176,9 +243,15 @@ export function filterAndSortBudgets(budgets, filter, sortBy) {
 // { payload, error } — payload is null when validation fails.
 export function buildBudgetFormPayload(form) {
   const f = form || {};
-  const userPathError = budgetUserPathValidationError(f.user_path);
-  if (userPathError) {
-    return { payload: null, error: userPathError };
+  const scope = budgetScope(f);
+  const subject = String(f.subject || "").trim();
+  if (scope === "user_path") {
+    const userPathError = budgetUserPathValidationError(subject);
+    if (userPathError) {
+      return { payload: null, error: userPathError };
+    }
+  } else if (!subject) {
+    return { payload: null, error: "Label is required." };
   }
   const amount = Number(f.amount);
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -194,7 +267,8 @@ export function buildBudgetFormPayload(form) {
   }
   return {
     payload: {
-      user_path: normalizeBudgetUserPath(f.user_path),
+      scope,
+      subject: scope === "user_path" ? normalizeBudgetUserPath(subject) : subject,
       period_seconds: Math.trunc(periodSeconds),
       amount,
       source: String(f.source || "manual").trim() || "manual",
@@ -207,7 +281,8 @@ export function buildBudgetFormPayload(form) {
 // API expects).
 export function budgetPutBody(payload) {
   return {
-    user_path: payload.user_path,
+    scope: budgetScope(payload),
+    subject: budgetSubject(payload),
     budget_key: { period_seconds: payload.period_seconds },
     amount: payload.amount,
   };
@@ -215,14 +290,16 @@ export function budgetPutBody(payload) {
 
 export function budgetDeleteBody(item) {
   return {
-    user_path: item.user_path,
+    scope: budgetScope(item),
+    subject: budgetSubject(item),
     budget_key: { period_seconds: item.period_seconds },
   };
 }
 
 export function budgetResetOneBody(item) {
   return {
-    user_path: item.user_path,
+    scope: budgetScope(item),
+    subject: budgetSubject(item),
     period_seconds: item.period_seconds,
   };
 }
@@ -235,7 +312,7 @@ export function budgetOverrideDialogMessage(payload, existing) {
   const p = payload || {};
   const e = existing || {};
   const label =
-    String(p.user_path || e.user_path || "") +
+    (budgetSubject(p) || budgetSubject(e)) +
     " " +
     budgetPeriodLabel({
       period_seconds: p.period_seconds || e.period_seconds,

@@ -29,7 +29,7 @@ type UsageSummarizer interface {
 // budget and rate limit services implement them; enforcement-only fakes keep
 // working and simply yield no status.
 type budgetStatusReporter interface {
-	StatusesForPath(ctx context.Context, userPath string, now time.Time) ([]budget.CheckResult, error)
+	StatusesFor(ctx context.Context, subjects budget.Subjects, now time.Time) ([]budget.CheckResult, error)
 }
 
 type rateLimitStatusReporter interface {
@@ -53,7 +53,9 @@ type usageStatusSummary struct {
 }
 
 type usageStatusBudget struct {
-	UserPath      string  `json:"user_path"`
+	Scope         string  `json:"scope"`
+	Subject       string  `json:"subject"`
+	UserPath      string  `json:"user_path,omitempty"`
 	PeriodSeconds int64   `json:"period_seconds"`
 	PeriodLabel   string  `json:"period_label"`
 	Amount        float64 `json:"amount"`
@@ -141,7 +143,8 @@ func (h *Handler) UsageStatus(c *echo.Context) error {
 	}
 
 	if reporter, ok := h.budgetChecker.(budgetStatusReporter); ok {
-		results, err := reporter.StatusesForPath(ctx, userPath, now)
+		subjects := budget.Subjects{UserPath: userPath, Labels: core.RequestLabelsFromContext(ctx)}
+		results, err := reporter.StatusesFor(ctx, subjects, now)
 		if err != nil && !errors.Is(err, budget.ErrUnavailable) {
 			return handleError(c, core.NewProviderError("budget", http.StatusServiceUnavailable, "failed to read budget status", err).WithCode("usage_status_failed"))
 		}
@@ -203,8 +206,9 @@ func usageStatusWindow(c *echo.Context, now time.Time) (usage.UsageQueryParams, 
 func usageStatusBudgets(results []budget.CheckResult, now time.Time) []usageStatusBudget {
 	statuses := make([]usageStatusBudget, 0, len(results))
 	for _, result := range results {
-		statuses = append(statuses, usageStatusBudget{
-			UserPath:        result.Budget.UserPath,
+		status := usageStatusBudget{
+			Scope:           string(result.Budget.Scope),
+			Subject:         result.Budget.Subject,
 			PeriodSeconds:   result.Budget.PeriodSeconds,
 			PeriodLabel:     budget.PeriodLabel(result.Budget.PeriodSeconds),
 			Amount:          result.Budget.Amount,
@@ -216,7 +220,12 @@ func usageStatusBudgets(results []budget.CheckResult, now time.Time) []usageStat
 			ResetsInSeconds: secondsUntil(result.PeriodEnd, now),
 			// Mirrors enforcement: budgets without any usage never block.
 			Exceeded: result.HasUsage && result.Spent >= result.Budget.Amount,
-		})
+		}
+		// Convenience duplicate: user-path budgets keep the natural spelling.
+		if result.Budget.Scope == budget.ScopeUserPath {
+			status.UserPath = result.Budget.Subject
+		}
+		statuses = append(statuses, status)
 	}
 	return statuses
 }

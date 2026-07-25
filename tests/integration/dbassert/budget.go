@@ -23,9 +23,9 @@ func QueryBudgets(t *testing.T, pool *pgxpool.Pool) []budget.Budget {
 	defer cancel()
 
 	rows, err := pool.Query(ctx, `
-		SELECT user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at
+		SELECT scope, subject, period_seconds, amount, source, last_reset_at, created_at, updated_at
 		FROM budgets
-		ORDER BY user_path, period_seconds
+		ORDER BY scope, subject, period_seconds
 	`)
 	require.NoError(t, err, "failed to query budgets")
 	defer rows.Close()
@@ -37,7 +37,8 @@ func QueryBudgets(t *testing.T, pool *pgxpool.Pool) []budget.Budget {
 		var createdAt int64
 		var updatedAt int64
 		require.NoError(t, rows.Scan(
-			&item.UserPath,
+			&item.Scope,
+			&item.Subject,
 			&item.PeriodSeconds,
 			&item.Amount,
 			&item.Source,
@@ -111,7 +112,8 @@ func AssertOneSeededBudget(t *testing.T, budgets []budget.Budget, userPath strin
 	t.Helper()
 	require.Len(t, budgets, 1, "expected one seeded budget")
 	got := budgets[0]
-	require.Equal(t, userPath, got.UserPath)
+	require.Equal(t, budget.ScopeUserPath, got.Scope)
+	require.Equal(t, userPath, got.Subject)
 	require.Equal(t, periodSeconds, got.PeriodSeconds)
 	require.InEpsilon(t, amount, got.Amount, 0.000001)
 	require.Equal(t, budget.SourceConfig, got.Source)

@@ -69,7 +69,8 @@
   padding: 8px 12px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  /* Matches .btn and .table-action-btn; only the switch itself stays round. */
+  border-radius: 6px;
   color: var(--text);
   font-size: 12px;
   font-family: inherit;

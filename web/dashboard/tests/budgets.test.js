@@ -19,7 +19,14 @@ import {
   budgetPeriodTrackClass,
   budgetPutBody,
   budgetResetOneBody,
+  budgetScope,
+  budgetScopeLabel,
+  budgetScopeOptions,
+  budgetScopeValueClass,
   budgetSourceTitle,
+  budgetSubject,
+  budgetSubjectFieldLabel,
+  budgetSubjectPlaceholder,
   budgetUserPathValidationError,
   buildBudgetFormPayload,
   defaultBudgetForm,
@@ -27,11 +34,13 @@ import {
   findExistingBudget,
   normalizeBudgetListPayload,
   normalizeBudgetUserPath,
+  syncBudgetScope,
 } from "../src/pages/budgets/budgets-helpers.js";
 
 test("buildBudgetFormPayload normalizes user path and standard periods", () => {
   const { payload, error } = buildBudgetFormPayload({
-    user_path: "team/alpha",
+    scope: "user_path",
+    subject: "team/alpha",
     period: "weekly",
     period_seconds: 0,
     amount: "12.3456",
@@ -42,12 +51,70 @@ test("buildBudgetFormPayload normalizes user path and standard periods", () => {
   assert.equal(
     JSON.stringify(payload),
     JSON.stringify({
-      user_path: "/team/alpha",
+      scope: "user_path",
+      subject: "/team/alpha",
       period_seconds: 604800,
       amount: 12.3456,
       source: "manual",
     }),
   );
+});
+
+test("buildBudgetFormPayload keeps a label subject verbatim", () => {
+  const { payload, error } = buildBudgetFormPayload({
+    scope: "label",
+    subject: "  Mobile-App-iOS  ",
+    period: "monthly",
+    amount: "500",
+    source: "manual",
+  });
+
+  assert.equal(error, "");
+  // Only surrounding whitespace is trimmed: labels are matched exactly, so the
+  // casing must survive and no leading slash may be added.
+  assert.equal(payload.scope, "label");
+  assert.equal(payload.subject, "Mobile-App-iOS");
+
+  const blank = buildBudgetFormPayload({
+    scope: "label",
+    subject: "   ",
+    period: "daily",
+    amount: "5",
+  });
+  assert.equal(blank.payload, null);
+  assert.equal(blank.error, "Label is required.");
+});
+
+test("budget scope metadata drives the selector and subject field", () => {
+  assert.deepEqual(budgetScopeOptions(), [
+    { value: "user_path", label: "User path" },
+    { value: "label", label: "Label" },
+  ]);
+  assert.equal(budgetScopeLabel({ scope: "label" }), "label");
+  // A budget without an explicit scope predates label budgets: treat it as a
+  // user-path budget, and read its subject from the legacy user_path field.
+  assert.equal(budgetScope({}), "user_path");
+  assert.equal(budgetSubject({ user_path: "/team" }), "/team");
+  assert.equal(budgetSubject({ scope: "label", subject: "iOS" }), "iOS");
+  assert.equal(budgetSubjectFieldLabel({ scope: "label" }), "Label");
+  assert.equal(budgetSubjectPlaceholder({ scope: "user_path" }), "/team/alpha");
+});
+
+test("budgetScopeValueClass picks the scope modifier for the shared subject style", () => {
+  assert.equal(budgetScopeValueClass({ scope: "label", subject: "iOS" }), "budget-label");
+  assert.equal(budgetScopeValueClass({ scope: "user_path", subject: "/team" }), "budget-user-path");
+  // A row predating scopes still styles as a user path.
+  assert.equal(budgetScopeValueClass({ user_path: "/team" }), "budget-user-path");
+});
+
+test("syncBudgetScope resets the subject so a path is never sent as a label", () => {
+  const form = { scope: "label", subject: "/team" };
+  syncBudgetScope(form);
+  assert.equal(form.subject, "");
+
+  form.scope = "user_path";
+  syncBudgetScope(form);
+  assert.equal(form.subject, "/");
 });
 
 test("buildBudgetFormPayload rejects invalid amounts and custom seconds", () => {
@@ -59,7 +126,8 @@ test("buildBudgetFormPayload rejects invalid amounts and custom seconds", () => 
   assert.equal(emptyAmount.error, "Amount must be greater than 0.");
 
   const badSeconds = buildBudgetFormPayload({
-    user_path: "/team",
+    scope: "user_path",
+    subject: "/team",
     period: "custom",
     period_seconds: 0,
     amount: "5",
@@ -70,7 +138,7 @@ test("buildBudgetFormPayload rejects invalid amounts and custom seconds", () => 
 
   const badPath = buildBudgetFormPayload({
     ...defaultBudgetForm(),
-    user_path: "/team/../oops",
+    subject: "/team/../oops",
     amount: "5",
   });
   assert.equal(badPath.payload, null);
@@ -89,7 +157,7 @@ test("user path validation and normalization mirror the legacy rules", () => {
 });
 
 test("budgetInputUserPath keeps the form input controlled with a leading slash", () => {
-  assert.equal(defaultBudgetForm().user_path, "/");
+  assert.equal(defaultBudgetForm().subject, "/");
   assert.equal(budgetInputUserPath("team/alpha"), "/team/alpha");
   assert.equal(budgetInputUserPath("/platform/service"), "/platform/service");
   assert.equal(budgetInputUserPath(""), "/");
@@ -110,17 +178,28 @@ test("normalizeBudgetListPayload reads budget rows from the list envelope", () =
   assert.deepEqual(normalizeBudgetListPayload({}), []);
 });
 
-test("findExistingBudget matches on the user path + period key", () => {
+test("findExistingBudget matches on the scope + subject + period key", () => {
   const budgets = [
-    { user_path: "/team", period_seconds: 86400, amount: 10 },
-    { user_path: "/team", period_seconds: 3600, amount: 2 },
+    { scope: "user_path", subject: "/team", period_seconds: 86400, amount: 10 },
+    { scope: "user_path", subject: "/team", period_seconds: 3600, amount: 2 },
+    { scope: "label", subject: "/team", period_seconds: 86400, amount: 7 },
   ];
-  const payload = { user_path: "/team", period_seconds: 86400, amount: 12.5 };
+  const payload = {
+    scope: "user_path",
+    subject: "/team",
+    period_seconds: 86400,
+    amount: 12.5,
+  };
 
-  assert.equal(budgetKey(payload), "/team:86400");
+  assert.equal(budgetKey(payload), "user_path:/team:86400");
   assert.equal(findExistingBudget(budgets, payload), budgets[0]);
+  // Same subject spelling, different scope: a distinct budget.
   assert.equal(
-    findExistingBudget(budgets, { user_path: "/other", period_seconds: 86400 }),
+    findExistingBudget(budgets, { scope: "label", subject: "/team", period_seconds: 86400 }),
+    budgets[2],
+  );
+  assert.equal(
+    findExistingBudget(budgets, { scope: "user_path", subject: "/other", period_seconds: 86400 }),
     null,
   );
 });
@@ -198,6 +277,23 @@ test("filterAndSortBudgets filters by user path or period and applies selected s
   );
 });
 
+test("filterAndSortBudgets groups user-path budgets before label budgets", () => {
+  const budgets = [
+    { scope: "label", subject: "iOS", period_seconds: 86400 },
+    { scope: "user_path", subject: "/team", period_seconds: 86400 },
+  ];
+
+  assert.deepEqual(
+    filterAndSortBudgets(budgets, "", "subject").map((item) => item.subject),
+    ["/team", "iOS"],
+  );
+  // The scope chip is searchable alongside the subject.
+  assert.deepEqual(
+    filterAndSortBudgets(budgets, "label", "subject").map((item) => item.subject),
+    ["iOS"],
+  );
+});
+
 test("budgetSourceTitle explains manual and config sources", () => {
   assert.equal(budgetSourceTitle({ source: "manual" }), "Created from the dashboard.");
   assert.equal(budgetSourceTitle({ source: "config" }), "Loaded from configuration.");
@@ -241,25 +337,37 @@ test("budget period label, classes, icon, and duration distinguish standard and 
 });
 
 test("request bodies keep the exact /admin/budgets payload shapes", () => {
+  const item = { scope: "user_path", subject: "/team", period_seconds: 86400 };
   assert.equal(
-    JSON.stringify(
-      budgetPutBody({ user_path: "/team", period_seconds: 86400, amount: 12.5 }),
-    ),
+    JSON.stringify(budgetPutBody({ ...item, amount: 12.5 })),
     JSON.stringify({
-      user_path: "/team",
+      scope: "user_path",
+      subject: "/team",
       budget_key: { period_seconds: 86400 },
       amount: 12.5,
     }),
   );
   assert.equal(
-    JSON.stringify(budgetDeleteBody({ user_path: "/team", period_seconds: 86400 })),
+    JSON.stringify(budgetDeleteBody(item)),
     JSON.stringify({
-      user_path: "/team",
+      scope: "user_path",
+      subject: "/team",
       budget_key: { period_seconds: 86400 },
     }),
   );
   assert.equal(
-    JSON.stringify(budgetResetOneBody({ user_path: "/team", period_seconds: 86400 })),
-    JSON.stringify({ user_path: "/team", period_seconds: 86400 }),
+    JSON.stringify(budgetResetOneBody(item)),
+    JSON.stringify({ scope: "user_path", subject: "/team", period_seconds: 86400 }),
+  );
+  assert.equal(
+    JSON.stringify(
+      budgetPutBody({ scope: "label", subject: "iOS", period_seconds: 86400, amount: 5 }),
+    ),
+    JSON.stringify({
+      scope: "label",
+      subject: "iOS",
+      budget_key: { period_seconds: 86400 },
+      amount: 5,
+    }),
   );
 });

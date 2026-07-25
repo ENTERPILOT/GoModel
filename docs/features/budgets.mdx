@@ -1,21 +1,29 @@
 ---
 title: "Budgets"
-description: "Set spend limits per user path and enforce them through workflow budget controls."
+description: "Set spend limits per user path or request label and enforce them through workflow budget controls."
 icon: "wallet"
-keywords: ["budgets", "spend limits", "cost controls", "user path"]
+keywords: ["budgets", "spend limits", "cost controls", "user path", "labels"]
 ---
 
 ## Overview
 
-Budgets let you set spend limits for a `user_path` subtree. GoModel evaluates
-them from tracked usage cost records and blocks matching requests when a limit
-has already been spent.
+Budgets let you set spend limits for a `user_path` subtree or a request
+[label](/features/labelling). GoModel evaluates them from tracked usage cost
+records and blocks matching requests when a limit has already been spent.
+
+Every budget has a **scope** that names what it limits:
+
+| Scope       | Subject                    | Matches                                              |
+| ----------- | -------------------------- | ---------------------------------------------------- |
+| `user_path` | A user path (`/team/alpha`) | That path and every path below it                    |
+| `label`     | A label (`Mobile-App-iOS`) | Every request carrying that label                    |
 
 Use budgets when you want limits such as:
 
 - `/team/alpha` can spend `$10` per day
 - `/team/alpha` can spend `$50` per week
 - `/` has a global monthly limit
+- everything labelled `Mobile-App-iOS` can spend `$500` per month
 
 <Info>
   Budget enforcement runs only when budgets are globally enabled and the active
@@ -56,11 +64,12 @@ Budgets -> Create Budget
   className="rounded-lg"
 />
 
-Set the **user path**, **period**, and **amount** in the form. Each row on the
-Budgets page then shows spend as a percentage of the limit, the amount spent
-versus the cap, and the remaining balance for the current period.
-Dashboard-created budgets are marked as `manual`. Budgets loaded from YAML or
-environment variables are marked as `config`.
+Set the **scope**, **subject** (a user path or a label), **period**, and
+**amount** in the form. Each row on the Budgets page then shows spend as a
+percentage of the limit, the amount spent versus the cap, and the remaining
+balance for the current period. Label budgets carry a `label` chip next to the
+period. Dashboard-created budgets are marked as `manual`. Budgets loaded from
+YAML or environment variables are marked as `config`.
 
 You can also seed budgets from YAML:
 
@@ -75,6 +84,11 @@ budgets:
         - period: "weekly"
           amount: 50.00
     - path: "/"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+  labels:
+    - label: "Mobile-App-iOS"
       limits:
         - period: "monthly"
           amount: 500.00
@@ -96,6 +110,13 @@ The suffix after `SET_BUDGET_` becomes a user path. Use double underscores
 
 There is no escape for a literal double underscore inside a path segment. Use
 YAML or the dashboard for paths that need a `__` segment value.
+
+<Note>
+  Label budgets have no environment-variable form. Labels are matched verbatim,
+  including their casing, and may contain characters that environment variable
+  names cannot express. Declare them under `budgets.labels` in YAML or create
+  them in the dashboard or admin API.
+</Note>
 
 Supported standard periods are:
 
@@ -136,8 +157,22 @@ Sibling paths do not match:
 - request path `/team-alpha`
 - result: budget does not apply
 
-If multiple budgets match a request, GoModel checks all matching limits. The
-request is rejected if any matching limit is exhausted.
+Label budgets match a label exactly, with no subtree or case folding:
+
+- budget label `Mobile-App-iOS`
+- request labels `["Mobile-App-iOS", "prod"]`
+- result: budget applies
+
+- budget label `Mobile-App-iOS`
+- request labels `["mobile-app-ios"]`
+- result: budget does not apply
+
+Labels come from the tagging rules and from labels attached to the managed API
+key that authenticated the request; see [Labelling](/features/labelling). A
+request carrying several labels is charged against every matching label budget.
+
+If multiple budgets match a request, GoModel checks all matching limits in one
+lookup. The request is rejected if any matching limit is exhausted.
 
 ## Workflow enforcement
 
@@ -195,22 +230,47 @@ curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   http://localhost:8080/admin/budgets
 ```
 
-Create or update a budget:
+Create or update a budget. A budget is identified by its `scope`, `subject`,
+and period; `user_path` is accepted as a shorthand spelling of the subject for
+user-path budgets:
 
 ```bash
-curl -X PUT http://localhost:8080/admin/budgets/%2Fteam%2Falpha/daily \
+curl -X PUT http://localhost:8080/admin/budgets \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
+    "scope": "user_path",
+    "subject": "/team/alpha",
+    "budget_key": { "period": "daily" },
     "amount": 10.00
+  }'
+```
+
+The same call for a label budget:
+
+```bash
+curl -X PUT http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "Mobile-App-iOS",
+    "budget_key": { "period": "monthly" },
+    "amount": 500.00
   }'
 ```
 
 Delete a budget:
 
 ```bash
-curl -X DELETE http://localhost:8080/admin/budgets/%2Fteam%2Falpha/daily \
-  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+curl -X DELETE http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "Mobile-App-iOS",
+    "budget_key": { "period": "monthly" }
+  }'
 ```
 
 See [Admin Endpoints](/advanced/admin-endpoints) for the endpoint list.

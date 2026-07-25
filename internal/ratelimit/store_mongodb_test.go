@@ -1,10 +1,16 @@
 package ratelimit
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 )
 
 func TestIsOnlyDuplicateKeyErrors(t *testing.T) {
@@ -171,4 +177,50 @@ func TestClassifyBulkWriteError(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A MongoDB database written before rule scopes existed carries a unique index
+// on (user_path, period_seconds). Unsetting user_path collapses every migrated
+// document of the same period onto one index key, so the legacy index has to go
+// before the rewrite rather than after it.
+func TestMongoDBStoreMigratesPreScopeDocuments(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		rules := db.Collection("rate_limits")
+		if _, err := rules.Indexes().CreateOne(ctx, mongo.IndexModel{
+			Keys:    bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}},
+			Options: options.Index().SetUnique(true),
+		}); err != nil {
+			t.Fatalf("create pre-scope index: %v", err)
+		}
+		now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+		// Two paths sharing one period: the case that collides.
+		if _, err := rules.InsertMany(ctx, []any{
+			bson.D{{Key: "user_path", Value: "/team/alpha"}, {Key: "period_seconds", Value: PeriodMinuteSeconds},
+				{Key: "max_requests", Value: int64(10)}, {Key: "source", Value: SourceManual},
+				{Key: "created_at", Value: now}, {Key: "updated_at", Value: now}},
+			bson.D{{Key: "user_path", Value: "/team/beta"}, {Key: "period_seconds", Value: PeriodMinuteSeconds},
+				{Key: "max_requests", Value: int64(20)}, {Key: "source", Value: SourceManual},
+				{Key: "created_at", Value: now}, {Key: "updated_at", Value: now}},
+		}); err != nil {
+			t.Fatalf("seed pre-scope documents: %v", err)
+		}
+
+		store, err := NewMongoDBStore(ctx, db)
+		if err != nil {
+			t.Fatalf("NewMongoDBStore() failed: %v", err)
+		}
+		got, err := store.ListRules(ctx)
+		if err != nil {
+			t.Fatalf("ListRules() failed: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("migrated rules = %+v, want both pre-scope rows", got)
+		}
+		for _, rule := range got {
+			if rule.Scope != ScopeUserPath || rule.Subject == "" {
+				t.Fatalf("migrated rule %+v, want a user_path scope and a subject", rule)
+			}
+		}
+	})
 }
