@@ -1,8 +1,9 @@
 # Architecture Review — 2026-07-04
 
 Scope: whole repo on `chore/architecture` (HEAD `87d78d2c`). Evidence is cited as
-`file:line`. Items already tracked in `docs/dev/possible-refactoring.md` are marked
-**(known #N)** rather than re-explained.
+`file:line`. Items marked **(known #N)** were already tracked in a
+`docs/dev/possible-refactoring.md` list that has since been retired; its live
+entries were carried into `docs/dev/2026-07-25_storage-refactor.md`.
 
 Legend: **[COUPLING]** dependency/blast-radius problem · **[SMELL]** design debt ·
 **[BUG]** incorrect behavior · **[REMOVE]** dead or redundant code ·
