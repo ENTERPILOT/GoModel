@@ -2,6 +2,7 @@ package providers
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -33,6 +34,9 @@ func validateCredential(cred ManagedProviderCredential, schema CredentialSchema)
 	// gets its own rules.
 	if raw := cred.toRawProviderConfig(); isVertexProviderConfig(raw) {
 		return validateGoogleCredential(cred)
+	}
+	if err := validateGoogleBackendIsExplicit(cred, schema); err != nil {
+		return err
 	}
 	for _, field := range schema.Fields {
 		if !field.Required || field.Name == CredentialFieldAPIKeys {
@@ -90,6 +94,34 @@ func validateCredentialAPIKeys(cred ManagedProviderCredential, schema Credential
 		return credentialFieldError(CredentialFieldAPIKeys, "at least one API key is required for provider type %q", cred.Type)
 	}
 	return nil
+}
+
+// backendVertex is the backend value that routes an adapter at Vertex.
+const backendVertex = "vertex"
+
+// validateGoogleBackendIsExplicit covers the one row shape the credential form
+// and the resolution pipeline read differently. A Gemini adapter infers the
+// Vertex backend from the project/location fields alone, but resolution only
+// recognizes an explicit `backend` and so still demands an API key: the row is
+// rejected further down, blaming the key when what the operator meant was
+// Vertex. Saying so against `backend` is the difference between "provide a
+// key you do not have" and "finish choosing the backend".
+//
+// A row that does carry a key resolves and runs — the adapter's own inference
+// takes it from there — so it is left alone.
+func validateGoogleBackendIsExplicit(cred ManagedProviderCredential, schema CredentialSchema) error {
+	backend, offered := schema.Field(CredentialFieldBackend)
+	if !offered || !slices.Contains(backend.Options, backendVertex) {
+		return nil
+	}
+	if len(cred.APIKeys) > 0 {
+		return nil
+	}
+	if !HasResolvedProviderValue(cred.VertexProject) && !HasResolvedProviderValue(cred.VertexLocation) {
+		return nil
+	}
+	return credentialFieldError(CredentialFieldBackend,
+		"set backend to %q to authenticate with the Vertex project and location, or provide an API key", backendVertex)
 }
 
 // validateGoogleCredential covers Vertex and Vertex-backed Gemini: the

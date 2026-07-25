@@ -155,6 +155,47 @@ func TestValidateCredential_GoogleAuth(t *testing.T) {
 	}
 }
 
+// A Gemini adapter infers the Vertex backend from the project/location fields
+// alone, while resolution only recognizes an explicit backend and would reject
+// the row for missing an API key. The form asks the operator to finish
+// choosing rather than to produce a key they do not need.
+func TestValidateCredential_VertexFieldsNeedAnExplicitBackend(t *testing.T) {
+	schema := credentialSchema("gemini", DiscoveryConfig{
+		CredentialFields: []CredentialField{
+			{Name: CredentialFieldAPIKeys},
+			{Name: CredentialFieldBackend, Options: []string{"aistudio", "vertex"}},
+			{Name: CredentialFieldVertexProject},
+			{Name: CredentialFieldVertexLocation},
+		},
+	})
+
+	ambiguous := ManagedProviderCredential{Name: "g", Type: "gemini", VertexProject: "p", VertexLocation: "us-central1"}
+	assertCredentialField(t, validateCredential(ambiguous, schema), CredentialFieldBackend)
+
+	// Saying "vertex" hands the row to Google's own rules, which it satisfies.
+	explicit := ambiguous
+	explicit.Backend = "vertex"
+	if err := validateCredential(explicit, schema); err != nil {
+		t.Errorf("validateCredential(backend=vertex) error = %v, want nil", err)
+	}
+
+	// With a key the row resolves and runs, so the adapter's own inference
+	// takes it from there.
+	keyed := ambiguous
+	keyed.APIKeys = []string{"AIza-real"}
+	if err := validateCredential(keyed, schema); err != nil {
+		t.Errorf("validateCredential(with an API key) error = %v, want nil", err)
+	}
+
+	// A type with no backend field to set is never asked to set one.
+	vertexOnly := credentialSchema("vertex", DiscoveryConfig{
+		CredentialFields: []CredentialField{{Name: CredentialFieldVertexProject}, {Name: CredentialFieldVertexLocation}},
+	})
+	if err := validateCredential(ManagedProviderCredential{Name: "v", Type: "vertex", VertexProject: "p", VertexLocation: "us-central1"}, vertexOnly); err != nil {
+		t.Errorf("validateCredential(vertex type) error = %v, want nil", err)
+	}
+}
+
 // A Gemini row only has to satisfy Google's rules once it points at Vertex;
 // against AI Studio it is a plain API-key provider.
 func TestValidateCredential_GeminiOnlyNeedsGoogleAuthOnVertex(t *testing.T) {
