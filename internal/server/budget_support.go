@@ -15,7 +15,17 @@ import (
 )
 
 type BudgetChecker interface {
-	Check(ctx context.Context, userPath string, now time.Time) error
+	Check(ctx context.Context, subjects budget.Subjects, now time.Time) error
+}
+
+// budgetSubjectsFromContext reads the dimensions a request can be budgeted by:
+// its user path and the labels tagging extracted at ingress.
+func budgetSubjectsFromContext(ctx context.Context) budget.Subjects {
+	userPath := core.UserPathFromContext(ctx)
+	if userPath == "" {
+		userPath = "/"
+	}
+	return budget.Subjects{UserPath: userPath, Labels: core.RequestLabelsFromContext(ctx)}
 }
 
 func enforceBudget(c *echo.Context, checker BudgetChecker) error {
@@ -32,11 +42,7 @@ func enforceBudgetForContext(ctx context.Context, checker BudgetChecker) error {
 	if workflow := core.GetWorkflow(ctx); workflow != nil && !workflow.BudgetEnabled() {
 		return nil
 	}
-	userPath := core.UserPathFromContext(ctx)
-	if userPath == "" {
-		userPath = "/"
-	}
-	if err := checker.Check(ctx, userPath, time.Now().UTC()); err != nil {
+	if err := checker.Check(ctx, budgetSubjectsFromContext(ctx), time.Now().UTC()); err != nil {
 		return budgetCheckError(err)
 	}
 	return nil

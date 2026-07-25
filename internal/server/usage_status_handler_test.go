@@ -28,15 +28,15 @@ func (f *fakeUsageSummarizer) GetSummary(_ context.Context, params usage.UsageQu
 // fakeBudgetStatusChecker enforces nothing and reports canned statuses,
 // satisfying both BudgetChecker and the status upgrade interface.
 type fakeBudgetStatusChecker struct {
-	results []budget.CheckResult
-	err     error
-	gotPath string
+	results     []budget.CheckResult
+	err         error
+	gotSubjects budget.Subjects
 }
 
-func (f *fakeBudgetStatusChecker) Check(context.Context, string, time.Time) error { return nil }
+func (f *fakeBudgetStatusChecker) Check(context.Context, budget.Subjects, time.Time) error { return nil }
 
-func (f *fakeBudgetStatusChecker) StatusesForPath(_ context.Context, userPath string, _ time.Time) ([]budget.CheckResult, error) {
-	f.gotPath = userPath
+func (f *fakeBudgetStatusChecker) StatusesFor(_ context.Context, subjects budget.Subjects, _ time.Time) ([]budget.CheckResult, error) {
+	f.gotSubjects = subjects
 	return f.results, f.err
 }
 
@@ -79,7 +79,7 @@ func TestUsageStatusReportsManagedKeyPath(t *testing.T) {
 	requests := int64(7)
 	summarizer := &fakeUsageSummarizer{summary: &usage.UsageSummary{TotalRequests: 7, TotalTokens: 1234}}
 	budgets := &fakeBudgetStatusChecker{results: []budget.CheckResult{{
-		Budget:      budget.Budget{UserPath: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
+		Budget:      budget.Budget{Scope: budget.ScopeUserPath, Subject: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
 		PeriodStart: time.Date(2026, time.July, 6, 0, 0, 0, 0, time.UTC),
 		PeriodEnd:   time.Date(2026, time.July, 7, 0, 0, 0, 0, time.UTC),
 		Spent:       12,
@@ -112,7 +112,7 @@ func TestUsageStatusReportsManagedKeyPath(t *testing.T) {
 	}
 	for name, got := range map[string]string{
 		"summarizer": summarizer.gotParams.UserPath,
-		"budgets":    budgets.gotPath,
+		"budgets":    budgets.gotSubjects.UserPath,
 		"ratelimits": limiter.gotPath,
 	} {
 		if got != "/team/alice" {
@@ -156,7 +156,7 @@ func TestUsageStatusDerivedFields(t *testing.T) {
 	periodEnd := now.Add(90 * time.Minute)
 
 	budgets := &fakeBudgetStatusChecker{results: []budget.CheckResult{{
-		Budget:      budget.Budget{UserPath: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
+		Budget:      budget.Budget{Scope: budget.ScopeUserPath, Subject: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
 		PeriodStart: periodEnd.Add(-24 * time.Hour),
 		PeriodEnd:   periodEnd,
 		Spent:       12,

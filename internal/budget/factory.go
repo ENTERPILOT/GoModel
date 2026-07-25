@@ -80,28 +80,46 @@ func seedConfiguredBudgets(ctx context.Context, service *Service, cfg config.Bud
 	if service == nil {
 		return nil
 	}
-	budgets := make([]Budget, 0)
+	budgets := make([]Budget, 0, len(cfg.UserPaths)+len(cfg.Labels))
 	for _, entry := range cfg.UserPaths {
-		userPath, err := NormalizeUserPath(entry.Path)
+		seeded, err := seedBudgets(ScopeUserPath, entry.Path, entry.Limits)
 		if err != nil {
-			return fmt.Errorf("invalid budget user path %q: %w", entry.Path, err)
+			return err
 		}
-		for limitIdx, limit := range entry.Limits {
-			seconds := limit.PeriodSeconds
-			if seconds <= 0 {
-				parsed, ok := PeriodSeconds(limit.Period)
-				if !ok {
-					return fmt.Errorf("invalid budget period for user path %q limit %d: %q", userPath, limitIdx, limit.Period)
-				}
-				seconds = parsed
-			}
-			budgets = append(budgets, Budget{
-				UserPath:      userPath,
-				PeriodSeconds: seconds,
-				Amount:        limit.Amount,
-				Source:        SourceConfig,
-			})
+		budgets = append(budgets, seeded...)
+	}
+	for _, entry := range cfg.Labels {
+		seeded, err := seedBudgets(ScopeLabel, entry.Label, entry.Limits)
+		if err != nil {
+			return err
 		}
+		budgets = append(budgets, seeded...)
 	}
 	return service.ReplaceConfigBudgets(ctx, budgets)
+}
+
+func seedBudgets(scope Scope, rawSubject string, limits []config.BudgetLimitConfig) ([]Budget, error) {
+	subject, err := NormalizeSubject(scope, rawSubject)
+	if err != nil {
+		return nil, fmt.Errorf("invalid budget %s %q: %w", scope, rawSubject, err)
+	}
+	budgets := make([]Budget, 0, len(limits))
+	for limitIdx, limit := range limits {
+		seconds := limit.PeriodSeconds
+		if seconds <= 0 {
+			parsed, ok := PeriodSeconds(limit.Period)
+			if !ok {
+				return nil, fmt.Errorf("invalid budget period for %s %q limit %d: %q", scope, subject, limitIdx, limit.Period)
+			}
+			seconds = parsed
+		}
+		budgets = append(budgets, Budget{
+			Scope:         scope,
+			Subject:       subject,
+			PeriodSeconds: seconds,
+			Amount:        limit.Amount,
+			Source:        SourceConfig,
+		})
+	}
+	return budgets, nil
 }

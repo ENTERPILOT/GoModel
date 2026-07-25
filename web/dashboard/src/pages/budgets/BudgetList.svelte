@@ -16,7 +16,10 @@
     budgetPeriodPercentLabel,
     budgetPeriodTrackClass,
     budgetRemainingLabel,
+    budgetScope,
+    budgetScopeLabel,
     budgetSourceLabel,
+    budgetSubject,
     budgetSourceTitle,
     budgetUsagePercent,
     budgetUsagePercentLabel,
@@ -43,10 +46,22 @@
     <section class="budget-row">
       <div class="budget-row-main">
         <div class="budget-row-head">
-          <code class="budget-user-path" title={"User Path: " + item.user_path}>
-            {item.user_path}
+          <code
+            class="budget-user-path"
+            title={budgetScopeLabel(item) + ": " + budgetSubject(item)}
+          >
+            {budgetSubject(item)}
           </code>
           <div class="budget-row-period">
+            {#if budgetScope(item) === "label"}
+              <span
+                class="budget-period-label"
+                title={"Budget scope: " + budgetScopeLabel(item)}
+              >
+                <Icon name="tag" class="budget-period-icon" />
+                <span>{budgetScopeLabel(item)}</span>
+              </span>
+            {/if}
             <span class="budget-period-label {budgetPeriodClass(item)}">
               <Icon name={budgetPeriodIcon(item)} class="budget-period-icon" />
               <span>{budgetPeriodLabel(item)}</span>

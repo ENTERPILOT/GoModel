@@ -30,9 +30,12 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 		settings: database.Collection("budget_settings"),
 		usage:    database.Collection("usage"),
 	}
+	if err := store.migratePreScopeDocuments(ctx); err != nil {
+		return nil, err
+	}
 	_, err := store.budgets.Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{
-			Keys:    bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}},
+			Keys:    bson.D{{Key: "scope", Value: 1}, {Key: "subject", Value: 1}, {Key: "period_seconds", Value: 1}},
 			Options: options.Index().SetUnique(true),
 		},
 		{Keys: bson.D{{Key: "period_seconds", Value: 1}}},
@@ -50,8 +53,31 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 	return store, nil
 }
 
+// migratePreScopeDocuments rewrites budgets stored before budget scopes
+// existed (keyed by user_path only) into the scoped shape, and drops the old
+// unique index so it cannot reject scoped documents.
+func (s *MongoDBStore) migratePreScopeDocuments(ctx context.Context) error {
+	_, err := s.budgets.UpdateMany(ctx,
+		bson.D{{Key: "subject", Value: bson.D{{Key: "$exists", Value: false}}}},
+		mongo.Pipeline{
+			bson.D{{Key: "$set", Value: bson.D{
+				{Key: "scope", Value: string(ScopeUserPath)},
+				{Key: "subject", Value: "$user_path"},
+			}}},
+			bson.D{{Key: "$unset", Value: "user_path"}},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("migrate budgets to scoped schema: %w", err)
+	}
+	// Best-effort: the index may not exist on fresh databases.
+	_ = s.budgets.Indexes().DropOne(ctx, "user_path_1_period_seconds_1")
+	return nil
+}
+
 func (s *MongoDBStore) ListBudgets(ctx context.Context) ([]Budget, error) {
-	cursor, err := s.budgets.Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}}))
+	cursor, err := s.budgets.Find(ctx, bson.D{}, options.Find().SetSort(
+		bson.D{{Key: "scope", Value: 1}, {Key: "subject", Value: 1}, {Key: "period_seconds", Value: 1}}))
 	if err != nil {
 		return nil, fmt.Errorf("list budgets: %w", err)
 	}
@@ -85,9 +111,10 @@ func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Bu
 	}
 	models := make([]mongo.WriteModel, 0, len(budgets))
 	for _, budget := range budgets {
-		filter := bson.D{{Key: "user_path", Value: budget.UserPath}, {Key: "period_seconds", Value: budget.PeriodSeconds}}
+		filter := mongoBudgetKey(budget.Scope, budget.Subject, budget.PeriodSeconds)
 		update := bson.D{{Key: "$set", Value: bson.D{
-			{Key: "user_path", Value: budget.UserPath},
+			{Key: "scope", Value: budget.Scope},
+			{Key: "subject", Value: budget.Subject},
 			{Key: "period_seconds", Value: budget.PeriodSeconds},
 			{Key: "amount", Value: budget.Amount},
 			{Key: "source", Value: budget.Source},
@@ -107,22 +134,28 @@ func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Bu
 	return nil
 }
 
-func (s *MongoDBStore) DeleteBudget(ctx context.Context, userPath string, periodSeconds int64) error {
-	userPath, err := NormalizeUserPath(userPath)
+func (s *MongoDBStore) DeleteBudget(ctx context.Context, scope Scope, subject string, periodSeconds int64) error {
+	scope, subject, err := normalizeBudgetKey(scope, subject, periodSeconds)
 	if err != nil {
 		return err
 	}
-	if periodSeconds <= 0 {
-		return fmt.Errorf("period_seconds must be greater than 0")
-	}
-	result, err := s.budgets.DeleteOne(ctx, bson.D{{Key: "user_path", Value: userPath}, {Key: "period_seconds", Value: periodSeconds}})
+	result, err := s.budgets.DeleteOne(ctx, mongoBudgetKey(scope, subject, periodSeconds))
 	if err != nil {
-		return fmt.Errorf("delete budget %s/%d: %w", userPath, periodSeconds, err)
+		return fmt.Errorf("delete budget %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	if result.DeletedCount == 0 {
-		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
+		return fmt.Errorf("%w: %s %s/%d", ErrNotFound, scope, subject, periodSeconds)
 	}
 	return nil
+}
+
+// mongoBudgetKey is the document filter identifying one budget.
+func mongoBudgetKey(scope Scope, subject string, periodSeconds int64) bson.D {
+	return bson.D{
+		{Key: "scope", Value: scope},
+		{Key: "subject", Value: subject},
+		{Key: "period_seconds", Value: periodSeconds},
+	}
 }
 
 func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) error {
@@ -170,10 +203,7 @@ func (s *MongoDBStore) replaceConfigBudgets(ctx context.Context, budgets []Budge
 	if len(budgets) > 0 {
 		keep := make(bson.A, 0, len(budgets))
 		for _, budget := range budgets {
-			keep = append(keep, bson.D{
-				{Key: "user_path", Value: budget.UserPath},
-				{Key: "period_seconds", Value: budget.PeriodSeconds},
-			})
+			keep = append(keep, mongoBudgetKey(budget.Scope, budget.Subject, budget.PeriodSeconds))
 		}
 		filter = append(filter, bson.E{Key: "$nor", Value: keep})
 	}
@@ -193,10 +223,7 @@ func (s *MongoDBStore) configBudgetsWithoutManualCollisions(ctx context.Context,
 	}
 	keys := make(bson.A, 0, len(budgets))
 	for _, budget := range budgets {
-		keys = append(keys, bson.D{
-			{Key: "user_path", Value: budget.UserPath},
-			{Key: "period_seconds", Value: budget.PeriodSeconds},
-		})
+		keys = append(keys, mongoBudgetKey(budget.Scope, budget.Subject, budget.PeriodSeconds))
 	}
 	cursor, err := s.budgets.Find(ctx, bson.D{{Key: "$or", Value: keys}})
 	if err != nil {
@@ -210,7 +237,7 @@ func (s *MongoDBStore) configBudgetsWithoutManualCollisions(ctx context.Context,
 		if err := cursor.Decode(&existing); err != nil {
 			return nil, fmt.Errorf("decode existing budget collision: %w", err)
 		}
-		existingSources[budgetKey(existing.UserPath, existing.PeriodSeconds)] = existing.Source
+		existingSources[budgetKey(existing.Scope, existing.Subject, existing.PeriodSeconds)] = existing.Source
 	}
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("iterate existing budget collisions: %w", err)
@@ -218,7 +245,7 @@ func (s *MongoDBStore) configBudgetsWithoutManualCollisions(ctx context.Context,
 
 	filtered := make([]Budget, 0, len(budgets))
 	for _, budget := range budgets {
-		if source, ok := existingSources[budgetKey(budget.UserPath, budget.PeriodSeconds)]; ok && source != "" && source != SourceConfig {
+		if source, ok := existingSources[budgetKey(budget.Scope, budget.Subject, budget.PeriodSeconds)]; ok && source != "" && source != SourceConfig {
 			continue
 		}
 		filtered = append(filtered, budget)
@@ -351,26 +378,23 @@ func (s *MongoDBStore) saveSettingsValues(ctx context.Context, settings Settings
 	return nil
 }
 
-func (s *MongoDBStore) ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error {
-	userPath, err := NormalizeUserPath(userPath)
+func (s *MongoDBStore) ResetBudget(ctx context.Context, scope Scope, subject string, periodSeconds int64, at time.Time) error {
+	scope, subject, err := normalizeBudgetKey(scope, subject, periodSeconds)
 	if err != nil {
 		return err
 	}
-	if periodSeconds <= 0 {
-		return fmt.Errorf("period_seconds must be greater than 0")
-	}
 	result, err := s.budgets.UpdateOne(ctx,
-		bson.D{{Key: "user_path", Value: userPath}, {Key: "period_seconds", Value: periodSeconds}},
+		mongoBudgetKey(scope, subject, periodSeconds),
 		bson.D{{Key: "$set", Value: bson.D{
 			{Key: "last_reset_at", Value: at.UTC()},
 			{Key: "updated_at", Value: at.UTC()},
 		}}},
 	)
 	if err != nil {
-		return fmt.Errorf("reset budget %s/%d: %w", userPath, periodSeconds, err)
+		return fmt.Errorf("reset budget %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	if result.MatchedCount == 0 {
-		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
+		return fmt.Errorf("%w: %s %s/%d", ErrNotFound, scope, subject, periodSeconds)
 	}
 	return nil
 }
@@ -386,42 +410,128 @@ func (s *MongoDBStore) ResetAllBudgets(ctx context.Context, at time.Time) error 
 	return nil
 }
 
-func (s *MongoDBStore) SumUsageCost(ctx context.Context, userPath string, start, end time.Time) (float64, bool, error) {
-	userPath, err := NormalizeUserPath(userPath)
-	if err != nil {
-		return 0, false, err
+// SumSpend totals uncached spend for every window in one aggregation.
+//
+// A budget check matches several budgets at once — a user-path subtree plus a
+// budget per request label — so the pipeline matches the union of their windows
+// once and accumulates a conditional sum per window instead of running an
+// aggregation each.
+func (s *MongoDBStore) SumSpend(ctx context.Context, windows []SpendWindow) ([]Spend, error) {
+	if len(windows) == 0 {
+		return nil, nil
 	}
+	group := bson.D{{Key: "_id", Value: nil}}
+	for i, window := range windows {
+		condition, err := mongoSpendCondition(window)
+		if err != nil {
+			return nil, err
+		}
+		group = append(group,
+			bson.E{Key: spendTotalField(i), Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{
+				condition,
+				bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}},
+				0,
+			}}}}}},
+			bson.E{Key: spendHasUsageField(i), Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{
+				bson.D{{Key: "$and", Value: bson.A{condition, bson.D{{Key: "$gt", Value: bson.A{"$total_cost", nil}}}}}},
+				1,
+				0,
+			}}}}}},
+		)
+	}
+
+	minStart, maxEnd := spendBounds(windows)
 	pipeline := bson.A{
 		bson.D{{Key: "$match", Value: bson.D{
-			{Key: "timestamp", Value: bson.D{{Key: "$gte", Value: start.UTC()}, {Key: "$lt", Value: end.UTC()}}},
-			{Key: "$and", Value: bson.A{
-				mongoUsagePathMatch(userPath),
-				mongoUncachedUsageMatch(),
+			{Key: "timestamp", Value: bson.D{{Key: "$gte", Value: minStart.UTC()}, {Key: "$lt", Value: maxEnd.UTC()}}},
+			{Key: "$or", Value: bson.A{
+				bson.D{{Key: "cache_type", Value: bson.D{{Key: "$exists", Value: false}}}},
+				bson.D{{Key: "cache_type", Value: nil}},
+				bson.D{{Key: "cache_type", Value: ""}},
 			}},
 		}}},
-		bson.D{{Key: "$group", Value: bson.D{
-			{Key: "_id", Value: nil},
-			{Key: "total", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}}}}},
-			{Key: "has_costs", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$total_cost", nil}}}, 1, 0}}}}}},
-		}}},
+		bson.D{{Key: "$group", Value: group}},
 	}
 	cursor, err := s.usage.Aggregate(ctx, pipeline)
 	if err != nil {
-		return 0, false, fmt.Errorf("sum usage cost: %w", err)
+		return nil, fmt.Errorf("sum usage cost: %w", err)
 	}
 	defer cursor.Close(ctx)
 
+	spends := make([]Spend, len(windows))
 	if !cursor.Next(ctx) {
-		return 0, false, cursor.Err()
+		// No usage in the union window at all: every budget is untouched.
+		return spends, cursor.Err()
 	}
-	var row struct {
-		Total    float64 `bson:"total"`
-		HasCosts int     `bson:"has_costs"`
-	}
+	var row bson.M
 	if err := cursor.Decode(&row); err != nil {
-		return 0, false, fmt.Errorf("decode usage cost sum: %w", err)
+		return nil, fmt.Errorf("decode usage cost sum: %w", err)
 	}
-	return row.Total, row.HasCosts > 0, nil
+	for i := range windows {
+		total, _ := bsonNumber(row[spendTotalField(i)])
+		hasUsage, _ := bsonNumber(row[spendHasUsageField(i)])
+		spends[i] = Spend{Total: total, HasUsage: hasUsage > 0}
+	}
+	return spends, nil
+}
+
+func spendTotalField(i int) string    { return "total_" + strconv.Itoa(i) }
+func spendHasUsageField(i int) string { return "priced_" + strconv.Itoa(i) }
+
+// bsonNumber reads a numeric aggregation result, which the server may return
+// as an int32, int64, or double depending on the values it summed.
+func bsonNumber(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case int64:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	default:
+		return 0, false
+	}
+}
+
+// mongoSpendCondition renders the per-document predicate for one window as an
+// aggregation expression: inside the time window and matching the subject.
+func mongoSpendCondition(window SpendWindow) (bson.D, error) {
+	subjectMatch, err := mongoSubjectMatch(window)
+	if err != nil {
+		return nil, err
+	}
+	return bson.D{{Key: "$and", Value: bson.A{
+		bson.D{{Key: "$gte", Value: bson.A{"$timestamp", window.Start.UTC()}}},
+		bson.D{{Key: "$lt", Value: bson.A{"$timestamp", window.End.UTC()}}},
+		subjectMatch,
+	}}}, nil
+}
+
+func mongoSubjectMatch(window SpendWindow) (bson.D, error) {
+	if window.Scope == ScopeLabel {
+		subject, err := NormalizeSubject(ScopeLabel, window.Subject)
+		if err != nil {
+			return nil, err
+		}
+		return bson.D{{Key: "$in", Value: bson.A{subject, bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}}}}}, nil
+	}
+	userPath, err := NormalizeUserPath(window.Subject)
+	if err != nil {
+		return nil, err
+	}
+	// Missing and blank user paths count as the root, matching the SQL stores.
+	normalized := bson.D{{Key: "$let", Value: bson.D{
+		{Key: "vars", Value: bson.D{{Key: "path", Value: bson.D{{Key: "$trim", Value: bson.D{
+			{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$user_path", ""}}}},
+		}}}}}},
+		{Key: "in", Value: bson.D{{Key: "$cond", Value: bson.A{
+			bson.D{{Key: "$eq", Value: bson.A{"$$path", ""}}}, "/", "$$path",
+		}}}},
+	}}}
+	return bson.D{{Key: "$regexMatch", Value: bson.D{
+		{Key: "input", Value: normalized},
+		{Key: "regex", Value: usagePathRegex(userPath)},
+	}}}, nil
 }
 
 func (s *MongoDBStore) Close() error {
@@ -433,24 +543,4 @@ func usagePathRegex(userPath string) string {
 		return "^/"
 	}
 	return "^" + regexp.QuoteMeta(userPath) + "(?:/|$)"
-}
-
-func mongoUsagePathMatch(userPath string) bson.D {
-	pathPattern := usagePathRegex(userPath)
-	if userPath == "/" {
-		return bson.D{{Key: "$or", Value: bson.A{
-			bson.D{{Key: "user_path", Value: bson.D{{Key: "$exists", Value: false}}}},
-			bson.D{{Key: "user_path", Value: bson.D{{Key: "$regex", Value: `^\s*$`}}}},
-			bson.D{{Key: "user_path", Value: bson.D{{Key: "$regex", Value: pathPattern}}}},
-		}}}
-	}
-	return bson.D{{Key: "user_path", Value: bson.D{{Key: "$regex", Value: pathPattern}}}}
-}
-
-func mongoUncachedUsageMatch() bson.D {
-	return bson.D{{Key: "$or", Value: bson.A{
-		bson.D{{Key: "cache_type", Value: bson.D{{Key: "$exists", Value: false}}}},
-		bson.D{{Key: "cache_type", Value: nil}},
-		bson.D{{Key: "cache_type", Value: ""}},
-	}}}
 }

@@ -9,6 +9,9 @@ import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import {
   budgetDeleteBody,
   budgetInputUserPath,
+  budgetScope,
+  budgetSubject,
+  syncBudgetScope,
   budgetKey,
   budgetPeriodFromSeconds,
   budgetPeriodLabel,
@@ -27,7 +30,7 @@ class BudgetsStore {
   budgetsAvailable = $state(true);
   loading = $state(false);
   filter = $state("");
-  sortBy = $state("user_path");
+  sortBy = $state("subject");
   // Load failures only; mutation feedback goes through the flash store.
   error = $state("");
 
@@ -108,7 +111,8 @@ class BudgetsStore {
     if (item) {
       const periodSeconds = Number(item.period_seconds || 0);
       this.form = {
-        user_path: String(item.user_path || ""),
+        scope: budgetScope(item),
+        subject: budgetSubject(item),
         period: budgetPeriodFromSeconds(periodSeconds),
         period_seconds: periodSeconds,
         amount: String(item.amount || ""),
@@ -129,8 +133,17 @@ class BudgetsStore {
     }
   }
 
-  setFormUserPath(value) {
-    this.form.user_path = budgetInputUserPath(value);
+  // A user-path subject stays controlled with a leading slash; a label is
+  // taken verbatim, since labels are matched exactly.
+  setFormSubject(value) {
+    this.form.subject =
+      this.form.scope === "label" ? String(value ?? "") : budgetInputUserPath(value);
+  }
+
+  // syncScope clears the subject when the scope changes, so a user path is
+  // never submitted as a label.
+  syncScope() {
+    syncBudgetScope(this.form);
   }
 
   closeForm() {
@@ -228,7 +241,7 @@ class BudgetsStore {
     if (this.resettingKey === key) {
       return;
     }
-    const label = String(item.user_path || "") + " " + budgetPeriodLabel(item);
+    const label = budgetSubject(item) + " " + budgetPeriodLabel(item);
     if (!confirm('Reset budget "' + label + '"?')) {
       return;
     }
@@ -270,7 +283,7 @@ class BudgetsStore {
     if (this.deletingKey === key) {
       return;
     }
-    const label = String(item.user_path || "") + " " + budgetPeriodLabel(item);
+    const label = budgetSubject(item) + " " + budgetPeriodLabel(item);
     if (!confirm('Delete budget "' + label + '"? This cannot be undone.')) {
       return;
     }

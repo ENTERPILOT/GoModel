@@ -18,12 +18,12 @@ import (
 
 type countingBudgetChecker struct {
 	calls    int
-	userPath string
+	subjects budget.Subjects
 }
 
-func (c *countingBudgetChecker) Check(_ context.Context, userPath string, _ time.Time) error {
+func (c *countingBudgetChecker) Check(_ context.Context, subjects budget.Subjects, _ time.Time) error {
 	c.calls++
-	c.userPath = userPath
+	c.subjects = subjects
 	return nil
 }
 
@@ -61,8 +61,8 @@ func TestEnforceBudgetDefaultsEnabledWithoutWorkflow(t *testing.T) {
 	if checker.calls != 1 {
 		t.Fatalf("budget checker was called %d times, want 1", checker.calls)
 	}
-	if checker.userPath != "/" {
-		t.Fatalf("budget user path = %q, want /", checker.userPath)
+	if checker.subjects.UserPath != "/" {
+		t.Fatalf("budget user path = %q, want /", checker.subjects.UserPath)
 	}
 }
 
@@ -166,7 +166,8 @@ func TestBudgetExceededResponseIncludesRetryAfter(t *testing.T) {
 	err := budgetCheckError(&budget.ExceededError{
 		Result: budget.CheckResult{
 			Budget: budget.Budget{
-				UserPath:      "/",
+				Scope:         budget.ScopeUserPath,
+				Subject:       "/",
 				PeriodSeconds: budget.PeriodDailySeconds,
 				Amount:        1,
 			},

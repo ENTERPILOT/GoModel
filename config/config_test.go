@@ -460,7 +460,7 @@ budgets:
 		if err == nil {
 			t.Fatal("Load() error = nil, want duplicate budget error")
 		}
-		if !strings.Contains(err.Error(), "duplicate budget for path /team/alpha period 86400") {
+		if !strings.Contains(err.Error(), "duplicate budget for user_path /team/alpha period 86400") {
 			t.Fatalf("Load() error = %v, want duplicate budget validation", err)
 		}
 	})

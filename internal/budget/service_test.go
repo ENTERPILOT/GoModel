@@ -14,10 +14,10 @@ type fakeStore struct {
 	budgets  []Budget
 	settings Settings
 	listErr  error
-	sum      func(userPath string, start, end time.Time) (float64, bool, error)
+	sum      func(SpendWindow) (float64, bool, error)
 
-	lastSumUserPath string
-	lastSumStart    time.Time
+	sumCalls        int
+	lastWindows     []SpendWindow
 	lastResetAt     time.Time
 	replaceCalls    int
 	replacedBudgets []Budget
@@ -34,7 +34,7 @@ func (s *fakeStore) UpsertBudgets(context.Context, []Budget) error {
 	return nil
 }
 
-func (s *fakeStore) DeleteBudget(context.Context, string, int64) error {
+func (s *fakeStore) DeleteBudget(context.Context, Scope, string, int64) error {
 	return nil
 }
 
@@ -56,7 +56,7 @@ func (s *fakeStore) SaveSettings(_ context.Context, settings Settings) (Settings
 	return settings, nil
 }
 
-func (s *fakeStore) ResetBudget(_ context.Context, _ string, _ int64, at time.Time) error {
+func (s *fakeStore) ResetBudget(_ context.Context, _ Scope, _ string, _ int64, at time.Time) error {
 	s.lastResetAt = at
 	return nil
 }
@@ -66,17 +66,30 @@ func (s *fakeStore) ResetAllBudgets(_ context.Context, at time.Time) error {
 	return nil
 }
 
-func (s *fakeStore) SumUsageCost(_ context.Context, userPath string, start, end time.Time) (float64, bool, error) {
-	s.lastSumUserPath = userPath
-	s.lastSumStart = start
-	if s.sum == nil {
-		return 0, false, nil
+func (s *fakeStore) SumSpend(_ context.Context, windows []SpendWindow) ([]Spend, error) {
+	s.sumCalls++
+	s.lastWindows = append([]SpendWindow(nil), windows...)
+	spends := make([]Spend, len(windows))
+	for i, window := range windows {
+		if s.sum == nil {
+			continue
+		}
+		total, hasUsage, err := s.sum(window)
+		if err != nil {
+			return nil, err
+		}
+		spends[i] = Spend{Total: total, HasUsage: hasUsage}
 	}
-	return s.sum(userPath, start, end)
+	return spends, nil
 }
 
 func (s *fakeStore) Close() error {
 	return nil
+}
+
+// path builds the Subjects of a request with no labels.
+func path(userPath string) Subjects {
+	return Subjects{UserPath: userPath}
 }
 
 func TestServiceUnavailableOperationsReturnErrors(t *testing.T) {
@@ -92,9 +105,11 @@ func TestServiceUnavailableOperationsReturnErrors(t *testing.T) {
 		{name: "nil receiver", run: func() error { return nilService.Refresh(ctx) }},
 		{name: "refresh", run: func() error { return service.Refresh(ctx) }},
 		{name: "upsert", run: func() error {
-			return service.UpsertBudgets(ctx, []Budget{{UserPath: "/", PeriodSeconds: PeriodDailySeconds, Amount: 1}})
+			return service.UpsertBudgets(ctx, []Budget{{Subject: "/", PeriodSeconds: PeriodDailySeconds, Amount: 1}})
 		}},
-		{name: "delete", run: func() error { return service.DeleteBudget(ctx, "/", PeriodDailySeconds) }},
+		{name: "delete", run: func() error {
+			return service.DeleteBudget(ctx, ScopeUserPath, "/", PeriodDailySeconds)
+		}},
 		{name: "replace config", run: func() error { return service.ReplaceConfigBudgets(ctx, nil) }},
 		{name: "save settings", run: func() error {
 			_, err := service.SaveSettings(ctx, DefaultSettings())
@@ -104,15 +119,17 @@ func TestServiceUnavailableOperationsReturnErrors(t *testing.T) {
 			_, err := service.Statuses(ctx, now)
 			return err
 		}},
-		{name: "reset one", run: func() error { return service.ResetBudget(ctx, "/", PeriodDailySeconds, now) }},
+		{name: "reset one", run: func() error {
+			return service.ResetBudget(ctx, ScopeUserPath, "/", PeriodDailySeconds, now)
+		}},
 		{name: "reset all", run: func() error { return service.ResetAll(ctx, now) }},
-		{name: "check", run: func() error { return service.Check(ctx, "/", now) }},
+		{name: "check", run: func() error { return service.Check(ctx, path("/"), now) }},
 		{name: "check with results", run: func() error {
-			_, err := service.CheckWithResults(ctx, "/", now)
+			_, err := service.CheckWithResults(ctx, path("/"), now)
 			return err
 		}},
-		{name: "statuses for path", run: func() error {
-			_, err := service.StatusesForPath(ctx, "/", now)
+		{name: "statuses for subjects", run: func() error {
+			_, err := service.StatusesFor(ctx, path("/"), now)
 			return err
 		}},
 	}
@@ -150,14 +167,15 @@ func TestServiceSaveSettingsReturnsSavedSnapshotWhenRefreshFails(t *testing.T) {
 	}
 }
 
-func TestServiceRefreshSortsBudgetsByUserPathThenLongestPeriod(t *testing.T) {
+func TestServiceRefreshSortsBudgetsByScopeSubjectThenLongestPeriod(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{
 		budgets: []Budget{
-			{UserPath: "/team/beta", PeriodSeconds: PeriodDailySeconds, Amount: 10},
-			{UserPath: "/team/alpha", PeriodSeconds: PeriodDailySeconds, Amount: 10},
-			{UserPath: "/team/alpha", PeriodSeconds: PeriodMonthlySeconds, Amount: 100},
-			{UserPath: "/team/alpha", PeriodSeconds: PeriodWeeklySeconds, Amount: 50},
+			{Scope: ScopeLabel, Subject: "prod", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeUserPath, Subject: "/team/beta", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeUserPath, Subject: "/team/alpha", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeUserPath, Subject: "/team/alpha", PeriodSeconds: PeriodMonthlySeconds, Amount: 100},
+			{Scope: ScopeUserPath, Subject: "/team/alpha", PeriodSeconds: PeriodWeeklySeconds, Amount: 50},
 		},
 	}
 	service, err := NewService(ctx, store)
@@ -167,17 +185,20 @@ func TestServiceRefreshSortsBudgetsByUserPathThenLongestPeriod(t *testing.T) {
 
 	got := service.Budgets()
 	want := []Budget{
-		{UserPath: "/team/alpha", PeriodSeconds: PeriodMonthlySeconds, Amount: 100},
-		{UserPath: "/team/alpha", PeriodSeconds: PeriodWeeklySeconds, Amount: 50},
-		{UserPath: "/team/alpha", PeriodSeconds: PeriodDailySeconds, Amount: 10},
-		{UserPath: "/team/beta", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+		{Scope: ScopeLabel, Subject: "prod", PeriodSeconds: PeriodDailySeconds},
+		{Scope: ScopeUserPath, Subject: "/team/alpha", PeriodSeconds: PeriodMonthlySeconds},
+		{Scope: ScopeUserPath, Subject: "/team/alpha", PeriodSeconds: PeriodWeeklySeconds},
+		{Scope: ScopeUserPath, Subject: "/team/alpha", PeriodSeconds: PeriodDailySeconds},
+		{Scope: ScopeUserPath, Subject: "/team/beta", PeriodSeconds: PeriodDailySeconds},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d budgets, want %d: %+v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i].UserPath != want[i].UserPath || got[i].PeriodSeconds != want[i].PeriodSeconds {
-			t.Fatalf("budget[%d] = %s/%d, want %s/%d", i, got[i].UserPath, got[i].PeriodSeconds, want[i].UserPath, want[i].PeriodSeconds)
+		if got[i].Scope != want[i].Scope || got[i].Subject != want[i].Subject || got[i].PeriodSeconds != want[i].PeriodSeconds {
+			t.Fatalf("budget[%d] = %s %s/%d, want %s %s/%d",
+				i, got[i].Scope, got[i].Subject, got[i].PeriodSeconds,
+				want[i].Scope, want[i].Subject, want[i].PeriodSeconds)
 		}
 	}
 }
@@ -199,6 +220,42 @@ func TestSeedConfiguredBudgetsReplacesEmptyConfigSet(t *testing.T) {
 	}
 	if len(store.replacedBudgets) != 0 {
 		t.Fatalf("replaced budgets = %+v, want empty", store.replacedBudgets)
+	}
+}
+
+func TestSeedConfiguredBudgetsSeedsBothScopes(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+
+	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{
+		UserPaths: []config.BudgetUserPathConfig{
+			{Path: "team", Limits: []config.BudgetLimitConfig{{Period: "daily", Amount: 10}}},
+		},
+		Labels: []config.BudgetLabelConfig{
+			{Label: "Mobile-App-iOS", Limits: []config.BudgetLimitConfig{{Period: "monthly", Amount: 500}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("seedConfiguredBudgets() failed: %v", err)
+	}
+
+	want := []Budget{
+		{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceConfig},
+		{Scope: ScopeLabel, Subject: "Mobile-App-iOS", PeriodSeconds: PeriodMonthlySeconds, Amount: 500, Source: SourceConfig},
+	}
+	if len(store.replacedBudgets) != len(want) {
+		t.Fatalf("replaced budgets = %+v, want %d entries", store.replacedBudgets, len(want))
+	}
+	for i, budget := range want {
+		got := store.replacedBudgets[i]
+		if got.Scope != budget.Scope || got.Subject != budget.Subject ||
+			got.PeriodSeconds != budget.PeriodSeconds || got.Amount != budget.Amount || got.Source != budget.Source {
+			t.Fatalf("replaced budget[%d] = %+v, want %+v", i, got, budget)
+		}
 	}
 }
 
@@ -225,7 +282,7 @@ func TestSeedConfiguredBudgetsRejectsInvalidPeriodBeforeReplacing(t *testing.T) 
 	if err == nil {
 		t.Fatal("seedConfiguredBudgets() error = nil, want invalid period error")
 	}
-	if !strings.Contains(err.Error(), `invalid budget period for user path "/team" limit 0: "fortnightly"`) {
+	if !strings.Contains(err.Error(), `invalid budget period for user_path "/team" limit 0: "fortnightly"`) {
 		t.Fatalf("seedConfiguredBudgets() error = %v, want contextual invalid period error", err)
 	}
 	if store.replaceCalls != 0 {
@@ -237,11 +294,11 @@ func TestServiceCheckRejectsExceededBudgetForMatchingUserPath(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{
 		budgets: []Budget{
-			{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
 		},
-		sum: func(userPath string, start, end time.Time) (float64, bool, error) {
-			if userPath != "/team" {
-				t.Fatalf("sum user path = %q, want /team", userPath)
+		sum: func(window SpendWindow) (float64, bool, error) {
+			if window.Subject != "/team" {
+				t.Fatalf("sum subject = %q, want /team", window.Subject)
 			}
 			return 10, true, nil
 		},
@@ -251,27 +308,94 @@ func TestServiceCheckRejectsExceededBudgetForMatchingUserPath(t *testing.T) {
 		t.Fatalf("NewService() failed: %v", err)
 	}
 
-	err = service.Check(ctx, "/team/app", time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
+	err = service.Check(ctx, path("/team/app"), time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
 	var exceeded *ExceededError
 	if !errors.As(err, &exceeded) {
 		t.Fatalf("Check() error = %v, want ExceededError", err)
 	}
-	if got := exceeded.Result.Budget.UserPath; got != "/team" {
-		t.Fatalf("exceeded budget path = %q, want /team", got)
+	if got := exceeded.Result.Budget.Subject; got != "/team" {
+		t.Fatalf("exceeded budget subject = %q, want /team", got)
 	}
 }
 
-func TestServiceStatusesForPathReportsAllMatchingBudgetsWithoutEnforcing(t *testing.T) {
+func TestServiceCheckRejectsExceededLabelBudget(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{
 		budgets: []Budget{
-			{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
-			{UserPath: "/team", PeriodSeconds: PeriodMonthlySeconds, Amount: 100},
-			{UserPath: "/other", PeriodSeconds: PeriodDailySeconds, Amount: 5},
+			{Scope: ScopeLabel, Subject: "iOS", PeriodSeconds: PeriodMonthlySeconds, Amount: 100},
 		},
-		sum: func(userPath string, start, end time.Time) (float64, bool, error) {
+		sum: func(window SpendWindow) (float64, bool, error) {
+			if window.Scope != ScopeLabel || window.Subject != "iOS" {
+				t.Fatalf("sum window = %s %q, want label iOS", window.Scope, window.Subject)
+			}
+			return 120, true, nil
+		},
+	}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+
+	subjects := Subjects{UserPath: "/team", Labels: []string{"android", "iOS"}}
+	var exceeded *ExceededError
+	if err := service.Check(ctx, subjects, now); !errors.As(err, &exceeded) {
+		t.Fatalf("Check() error = %v, want ExceededError", err)
+	}
+	if got := exceeded.Error(); !strings.Contains(got, "label iOS") {
+		t.Fatalf("ExceededError = %q, want it to name the label subject", got)
+	}
+
+	// The label is matched verbatim, so a different casing is a different budget.
+	if err := service.Check(ctx, Subjects{UserPath: "/team", Labels: []string{"ios"}}, now); err != nil {
+		t.Fatalf("Check() with unmatched label casing error = %v, want nil", err)
+	}
+}
+
+func TestServiceCheckEvaluatesEveryMatchingBudgetInOneStoreCall(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{
+			{Scope: ScopeUserPath, Subject: "/", PeriodSeconds: PeriodMonthlySeconds, Amount: 1000},
+			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeUserPath, Subject: "/other", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeLabel, Subject: "prod", PeriodSeconds: PeriodDailySeconds, Amount: 50},
+			{Scope: ScopeLabel, Subject: "iOS", PeriodSeconds: PeriodDailySeconds, Amount: 50},
+			{Scope: ScopeLabel, Subject: "staging", PeriodSeconds: PeriodDailySeconds, Amount: 50},
+		},
+	}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+
+	subjects := Subjects{UserPath: "/team/app", Labels: []string{"prod", "iOS"}}
+	results, err := service.CheckWithResults(ctx, subjects, time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("CheckWithResults() error = %v", err)
+	}
+	if len(results) != 4 {
+		t.Fatalf("CheckWithResults() returned %d results, want 4 (/, /team, label prod, label iOS)", len(results))
+	}
+	if store.sumCalls != 1 {
+		t.Fatalf("store spend lookups = %d, want 1 batched call for all matching budgets", store.sumCalls)
+	}
+	if len(store.lastWindows) != 4 {
+		t.Fatalf("batched windows = %d, want 4", len(store.lastWindows))
+	}
+}
+
+func TestServiceStatusesForReportsAllMatchingBudgetsWithoutEnforcing(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{
+			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodMonthlySeconds, Amount: 100},
+			{Scope: ScopeUserPath, Subject: "/other", PeriodSeconds: PeriodDailySeconds, Amount: 5},
+		},
+		sum: func(window SpendWindow) (float64, bool, error) {
 			// The daily budget is exceeded; the monthly one is not.
-			if end.Sub(start) <= 24*time.Hour {
+			if window.End.Sub(window.Start) <= 24*time.Hour {
 				return 12, true, nil
 			}
 			return 42, true, nil
@@ -282,17 +406,17 @@ func TestServiceStatusesForPathReportsAllMatchingBudgetsWithoutEnforcing(t *test
 		t.Fatalf("NewService() failed: %v", err)
 	}
 
-	results, err := service.StatusesForPath(ctx, "/team/app", time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
+	results, err := service.StatusesFor(ctx, path("/team/app"), time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
 	if err != nil {
-		t.Fatalf("StatusesForPath() error = %v, want nil", err)
+		t.Fatalf("StatusesFor() error = %v, want nil", err)
 	}
 	if len(results) != 2 {
-		t.Fatalf("StatusesForPath() returned %d results, want 2 (exceeded budgets must not stop evaluation)", len(results))
+		t.Fatalf("StatusesFor() returned %d results, want 2 (exceeded budgets must not stop evaluation)", len(results))
 	}
 	byPeriod := map[int64]CheckResult{}
 	for _, result := range results {
-		if result.Budget.UserPath != "/team" {
-			t.Fatalf("result budget path = %q, want /team", result.Budget.UserPath)
+		if result.Budget.Subject != "/team" {
+			t.Fatalf("result budget subject = %q, want /team", result.Budget.Subject)
 		}
 		byPeriod[result.Budget.PeriodSeconds] = result
 	}
@@ -304,12 +428,12 @@ func TestServiceStatusesForPathReportsAllMatchingBudgetsWithoutEnforcing(t *test
 	}
 }
 
-func TestServiceStatusesForPathErrorPaths(t *testing.T) {
+func TestServiceStatusesForErrorPaths(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 	store := &fakeStore{
-		budgets: []Budget{{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10}},
-		sum: func(string, time.Time, time.Time) (float64, bool, error) {
+		budgets: []Budget{{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10}},
+		sum: func(SpendWindow) (float64, bool, error) {
 			return 0, false, errors.New("store down")
 		},
 	}
@@ -318,15 +442,15 @@ func TestServiceStatusesForPathErrorPaths(t *testing.T) {
 		t.Fatalf("NewService() failed: %v", err)
 	}
 
-	if _, err := service.StatusesForPath(ctx, "/te:am", now); err == nil {
-		t.Fatal("StatusesForPath() with invalid path: error = nil, want normalization error")
+	if _, err := service.StatusesFor(ctx, path("/te:am"), now); err == nil {
+		t.Fatal("StatusesFor() with invalid path: error = nil, want normalization error")
 	}
-	results, err := service.StatusesForPath(ctx, "/team", now)
+	results, err := service.StatusesFor(ctx, path("/team"), now)
 	if err == nil || !strings.Contains(err.Error(), "store down") {
-		t.Fatalf("StatusesForPath() error = %v, want store failure", err)
+		t.Fatalf("StatusesFor() error = %v, want store failure", err)
 	}
 	if len(results) != 0 {
-		t.Fatalf("StatusesForPath() partial results = %d, want 0 before the failing budget", len(results))
+		t.Fatalf("StatusesFor() partial results = %d, want 0 when the batch fails", len(results))
 	}
 }
 
@@ -348,9 +472,9 @@ func TestServiceCheckBudgetAmountBoundary(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeStore{
 				budgets: []Budget{
-					{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+					{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
 				},
-				sum: func(userPath string, start, end time.Time) (float64, bool, error) {
+				sum: func(SpendWindow) (float64, bool, error) {
 					return tt.spent, true, nil
 				},
 			}
@@ -359,7 +483,7 @@ func TestServiceCheckBudgetAmountBoundary(t *testing.T) {
 				t.Fatalf("NewService() failed: %v", err)
 			}
 
-			err = service.Check(ctx, "/team/app", now)
+			err = service.Check(ctx, path("/team/app"), now)
 			var exceeded *ExceededError
 			if tt.wantError {
 				if !errors.As(err, &exceeded) {
@@ -379,13 +503,14 @@ func TestServiceCheckBudgetAmountBoundary(t *testing.T) {
 
 func TestServiceCheckDoesNotEnforceBudgetWithoutUsage(t *testing.T) {
 	ctx := context.Background()
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 	store := &fakeStore{
 		budgets: []Budget{
-			{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
 		},
-		sum: func(userPath string, start, end time.Time) (float64, bool, error) {
-			if userPath != "/team" {
-				t.Fatalf("sum user path = %q, want /team", userPath)
+		sum: func(window SpendWindow) (float64, bool, error) {
+			if window.Subject != "/team" {
+				t.Fatalf("sum subject = %q, want /team", window.Subject)
 			}
 			return 100, false, nil
 		},
@@ -395,10 +520,10 @@ func TestServiceCheckDoesNotEnforceBudgetWithoutUsage(t *testing.T) {
 		t.Fatalf("NewService() failed: %v", err)
 	}
 
-	if err := service.Check(ctx, "/team", time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatalf("Check() error = %v, want nil when SumUsageCost reports no usage", err)
+	if err := service.Check(ctx, path("/team"), now); err != nil {
+		t.Fatalf("Check() error = %v, want nil when the store reports no usage", err)
 	}
-	results, err := service.CheckWithResults(ctx, "/team", time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
+	results, err := service.CheckWithResults(ctx, path("/team"), now)
 	if err != nil {
 		t.Fatalf("CheckWithResults() error = %v", err)
 	}
@@ -410,16 +535,13 @@ func TestServiceCheckDoesNotEnforceBudgetWithoutUsage(t *testing.T) {
 	}
 }
 
-func TestServiceCheckIgnoresSiblingUserPath(t *testing.T) {
+func TestServiceCheckIgnoresNonMatchingSubjects(t *testing.T) {
 	ctx := context.Background()
-	called := false
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 	store := &fakeStore{
 		budgets: []Budget{
-			{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
-		},
-		sum: func(userPath string, start, end time.Time) (float64, bool, error) {
-			called = true
-			return 0, false, nil
+			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeLabel, Subject: "prod", PeriodSeconds: PeriodDailySeconds, Amount: 10},
 		},
 	}
 	service, err := NewService(ctx, store)
@@ -427,15 +549,16 @@ func TestServiceCheckIgnoresSiblingUserPath(t *testing.T) {
 		t.Fatalf("NewService() failed: %v", err)
 	}
 
-	results, err := service.CheckWithResults(ctx, "/team-alpha", time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
+	// A sibling path, and a request whose labels do not include "prod".
+	results, err := service.CheckWithResults(ctx, Subjects{UserPath: "/team-alpha", Labels: []string{"staging"}}, now)
 	if err != nil {
 		t.Fatalf("CheckWithResults() error = %v", err)
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected no matching budgets, got %d", len(results))
 	}
-	if called {
-		t.Fatal("sum should not be called for a sibling path")
+	if store.sumCalls != 0 {
+		t.Fatal("the store should not be queried when nothing matches")
 	}
 }
 
@@ -444,7 +567,7 @@ func TestServiceCheckStartsAtManualResetWhenNewerThanPeriodStart(t *testing.T) {
 	resetAt := time.Date(2026, time.April, 25, 9, 0, 0, 0, time.UTC)
 	store := &fakeStore{
 		budgets: []Budget{
-			{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, LastResetAt: &resetAt},
+			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, LastResetAt: &resetAt},
 		},
 	}
 	service, err := NewService(ctx, store)
@@ -452,12 +575,12 @@ func TestServiceCheckStartsAtManualResetWhenNewerThanPeriodStart(t *testing.T) {
 		t.Fatalf("NewService() failed: %v", err)
 	}
 
-	_, err = service.CheckWithResults(ctx, "/team", time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
+	_, err = service.CheckWithResults(ctx, path("/team"), time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("CheckWithResults() error = %v", err)
 	}
-	if !store.lastSumStart.Equal(resetAt) {
-		t.Fatalf("sum start = %s, want reset time %s", store.lastSumStart, resetAt)
+	if !store.lastWindows[0].Start.Equal(resetAt) {
+		t.Fatalf("sum start = %s, want reset time %s", store.lastWindows[0].Start, resetAt)
 	}
 }
 
@@ -467,7 +590,7 @@ func TestServiceCheckIgnoresManualResetOlderThanPeriodStart(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 	store := &fakeStore{
 		budgets: []Budget{
-			{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, LastResetAt: &resetAt},
+			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, LastResetAt: &resetAt},
 		},
 	}
 	service, err := NewService(ctx, store)
@@ -475,12 +598,12 @@ func TestServiceCheckIgnoresManualResetOlderThanPeriodStart(t *testing.T) {
 		t.Fatalf("NewService() failed: %v", err)
 	}
 
-	_, err = service.CheckWithResults(ctx, "/team", now)
+	_, err = service.CheckWithResults(ctx, path("/team"), now)
 	if err != nil {
 		t.Fatalf("CheckWithResults() error = %v", err)
 	}
 	want := time.Date(2026, time.April, 25, 0, 0, 0, 0, time.UTC)
-	if !store.lastSumStart.Equal(want) {
-		t.Fatalf("sum start = %s, want period start %s", store.lastSumStart, want)
+	if !store.lastWindows[0].Start.Equal(want) {
+		t.Fatalf("sum start = %s, want period start %s", store.lastWindows[0].Start, want)
 	}
 }

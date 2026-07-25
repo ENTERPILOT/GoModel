@@ -224,7 +224,9 @@ seed() {
 # snapshot writes one normalized JSON file per domain into $1. Fields that
 # legitimately differ between two runs of the same binary are dropped: rate
 # limit counters live in memory and reset with the process, and budget ratios
-# and settings timestamps move with the clock.
+# and settings timestamps move with the clock. Budget scope/subject are dropped
+# only while the baseline predates budget scopes: user_path is still emitted for
+# user-path budgets, so the migrated row is still compared by its identity.
 snapshot() {
   local out="$1"
   mkdir -p "$out"
@@ -235,7 +237,7 @@ snapshot() {
   curl -fsS "$BASE/admin/guardrails" \
     | jq -S 'map(select(.name|startswith("compat")))' > "$out/guardrails.json"
   curl -fsS "$BASE/admin/budgets" \
-    | jq -S 'del(.server_time) | .budgets |= map(select(.user_path|startswith("/compat")) | del(.period_ratio))' \
+    | jq -S 'del(.server_time) | .budgets |= map(select(.user_path // "" |startswith("/compat")) | del(.period_ratio, .scope, .subject))' \
     > "$out/budgets.json"
   curl -fsS "$BASE/admin/budgets/settings" | jq -S 'del(.updated_at)' > "$out/budget-settings.json"
   curl -fsS "$BASE/admin/rate-limits" \
@@ -360,6 +362,7 @@ write_check "virtual-models upsert" jput /admin/virtual-models '{"source":"compa
 write_check "failover upsert" jput /admin/failover '{"primary_model":"compat-failover-src","fallback_models":["groq/llama-3.1-8b-instant"]}'
 write_check "guardrail upsert" jput /admin/guardrails '{"name":"compat-guardrail","type":"system_prompt","description":"updated","config":{"mode":"inject","content":"updated content"}}'
 write_check "budget upsert" jput /admin/budgets '{"user_path":"/compat/budget","budget_key":{"period":"daily"},"amount":22.5}'
+write_check "label budget upsert" jput /admin/budgets '{"scope":"label","subject":"compat-label","budget_key":{"period":"daily"},"amount":7.5}'
 write_check "rate-limit upsert" jput /admin/rate-limits '{"scope":"user_path","subject":"/compat/rl","limit_key":{"period":"minute"},"max_requests":43,"max_tokens":4343}'
 write_check "tagging upsert" jput /admin/tagging/settings '{"headers":[{"header":"X-Compat-Tag-2"}]}'
 write_check "mcp-server upsert" jput /admin/mcp-servers '{"name":"compat-mcp","url":"http://localhost:18090/beta","transport":"http","description":"updated"}'

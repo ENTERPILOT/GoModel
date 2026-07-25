@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 )
@@ -84,10 +85,10 @@ func (rejectingRateLimiter) Acquire(ratelimit.Subjects, time.Time) (*ratelimit.R
 
 func (rejectingRateLimiter) RouteAvailable(string, string) bool { return true }
 
-// rejectingBudgetChecker refuses every user path.
+// rejectingBudgetChecker refuses every request.
 type rejectingBudgetChecker struct{}
 
-func (rejectingBudgetChecker) Check(context.Context, string, time.Time) error {
+func (rejectingBudgetChecker) Check(context.Context, budget.Subjects, time.Time) error {
 	return context.DeadlineExceeded
 }
 

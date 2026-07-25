@@ -58,12 +58,13 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	userPath, periodSeconds, err := budgetRequestKey(req.UserPath, req.BudgetKey)
+	scope, subject, periodSeconds, err := budgetRequestKey(req.Scope, req.Subject, req.UserPath, req.BudgetKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
 	item, err := budget.NormalizeBudget(budget.Budget{
-		UserPath:      userPath,
+		Scope:         scope,
+		Subject:       subject,
 		PeriodSeconds: periodSeconds,
 		Amount:        req.Amount,
 		Source:        budget.SourceManual,
@@ -99,11 +100,11 @@ func (h *Handler) DeleteBudget(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	userPath, periodSeconds, err := budgetRequestKey(req.UserPath, req.BudgetKey)
+	scope, subject, periodSeconds, err := budgetRequestKey(req.Scope, req.Subject, req.UserPath, req.BudgetKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
-	if err := h.budgets.DeleteBudget(c.Request().Context(), userPath, periodSeconds); err != nil {
+	if err := h.budgets.DeleteBudget(c.Request().Context(), scope, subject, periodSeconds); err != nil {
 		return handleError(c, budgetServiceError("failed to delete budget", err))
 	}
 	return h.ListBudgets(c)
@@ -176,15 +177,16 @@ func (h *Handler) ResetBudget(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
+	// The reset request spells the period flat rather than under budget_key.
 	periodSeconds, err := budgetRequestPeriodSeconds(req.Period, req.PeriodSeconds)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
-	userPath, err := budget.NormalizeUserPath(req.UserPath)
+	scope, subject, err := budgetRequestSubject(req.Scope, req.Subject, req.UserPath)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
-	if err := h.budgets.ResetBudget(c.Request().Context(), userPath, periodSeconds, time.Now().UTC()); err != nil {
+	if err := h.budgets.ResetBudget(c.Request().Context(), scope, subject, periodSeconds, time.Now().UTC()); err != nil {
 		return handleError(c, budgetServiceError("failed to reset budget", err))
 	}
 	return h.ListBudgets(c)
@@ -225,7 +227,9 @@ type budgetListResponse struct {
 }
 
 type budgetStatusResponse struct {
-	UserPath      string     `json:"user_path"`
+	Scope         string     `json:"scope"`
+	Subject       string     `json:"subject"`
+	UserPath      string     `json:"user_path,omitempty"`
 	PeriodSeconds int64      `json:"period_seconds"`
 	PeriodLabel   string     `json:"period_label"`
 	Amount        float64    `json:"amount"`
@@ -243,12 +247,16 @@ type budgetStatusResponse struct {
 }
 
 type upsertBudgetRequest struct {
+	Scope     string            `json:"scope"`
+	Subject   string            `json:"subject"`
 	UserPath  string            `json:"user_path"`
 	BudgetKey *budgetKeyRequest `json:"budget_key"`
 	Amount    float64           `json:"amount"`
 }
 
 type deleteBudgetRequest struct {
+	Scope     string            `json:"scope"`
+	Subject   string            `json:"subject"`
 	UserPath  string            `json:"user_path"`
 	BudgetKey *budgetKeyRequest `json:"budget_key"`
 }
@@ -259,6 +267,8 @@ type budgetKeyRequest struct {
 }
 
 type resetBudgetRequest struct {
+	Scope         string `json:"scope"`
+	Subject       string `json:"subject"`
 	UserPath      string `json:"user_path"`
 	Period        string `json:"period,omitempty"`
 	PeriodSeconds int64  `json:"period_seconds,omitempty"`
@@ -326,8 +336,9 @@ func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budge
 	responses := make([]budgetStatusResponse, 0, len(statuses))
 	for _, status := range statuses {
 		item := status.Budget
-		responses = append(responses, budgetStatusResponse{
-			UserPath:      item.UserPath,
+		response := budgetStatusResponse{
+			Scope:         string(item.Scope),
+			Subject:       item.Subject,
 			PeriodSeconds: item.PeriodSeconds,
 			PeriodLabel:   budget.PeriodLabel(item.PeriodSeconds),
 			Amount:        item.Amount,
@@ -342,21 +353,52 @@ func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budge
 			Remaining:     status.Remaining,
 			UsageRatio:    status.UsageRatio(),
 			PeriodRatio:   status.PeriodRatio(now),
-		})
+		}
+		// Convenience duplicate: user-path budgets keep the natural spelling.
+		if item.Scope == budget.ScopeUserPath {
+			response.UserPath = item.Subject
+		}
+		responses = append(responses, response)
 	}
 	return responses
 }
 
-func budgetRequestKey(rawUserPath string, key *budgetKeyRequest) (string, int64, error) {
-	userPath, err := budget.NormalizeUserPath(rawUserPath)
+// budgetRequestSubject resolves which budget a request names. The subject may
+// arrive as `subject` (any scope) or as `user_path` (the natural spelling for
+// user-path budgets); scope defaults to user_path.
+func budgetRequestSubject(rawScope, rawSubject, rawUserPath string) (budget.Scope, string, error) {
+	scope, err := budget.NormalizeScope(rawScope)
 	if err != nil {
-		return "", 0, err
+		return "", "", err
+	}
+	rawSubject = strings.TrimSpace(rawSubject)
+	if rawSubject == "" {
+		if scope != budget.ScopeUserPath && strings.TrimSpace(rawUserPath) != "" {
+			return "", "", errors.New("subject is required for label budgets; user_path only names user-path budgets")
+		}
+		rawSubject = rawUserPath
+	} else if scope != budget.ScopeUserPath && strings.TrimSpace(rawUserPath) != "" {
+		// Silently dropping the conflicting field would mask authoring mistakes.
+		return "", "", errors.New("user_path must not be set alongside subject for label budgets")
+	}
+	subject, err := budget.NormalizeSubject(scope, rawSubject)
+	if err != nil {
+		return "", "", err
+	}
+	return scope, subject, nil
+}
+
+// budgetRequestKey resolves the full budget identity, period included.
+func budgetRequestKey(rawScope, rawSubject, rawUserPath string, key *budgetKeyRequest) (budget.Scope, string, int64, error) {
+	scope, subject, err := budgetRequestSubject(rawScope, rawSubject, rawUserPath)
+	if err != nil {
+		return "", "", 0, err
 	}
 	periodSeconds, err := budgetKeyPeriodSeconds(key)
 	if err != nil {
-		return "", 0, err
+		return "", "", 0, err
 	}
-	return userPath, periodSeconds, nil
+	return scope, subject, periodSeconds, nil
 }
 
 func budgetKeyPeriodSeconds(key *budgetKeyRequest) (int64, error) {

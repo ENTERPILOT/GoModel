@@ -21,11 +21,25 @@ type BudgetsConfig struct {
 
 	// UserPaths declares budget limits by tracked user path.
 	UserPaths []BudgetUserPathConfig `yaml:"user_paths"`
+
+	// Labels declares budget limits by request label. A request carrying
+	// several labels is charged against every matching label budget.
+	//
+	// Labels have no env-var form: they are matched verbatim and may contain
+	// characters and casing that env var names cannot express. Declare them
+	// here or through the admin API.
+	Labels []BudgetLabelConfig `yaml:"labels"`
 }
 
 // BudgetUserPathConfig declares one or more budget limits for a user path.
 type BudgetUserPathConfig struct {
 	Path   string              `yaml:"path"`
+	Limits []BudgetLimitConfig `yaml:"limits"`
+}
+
+// BudgetLabelConfig declares one or more budget limits for a request label.
+type BudgetLabelConfig struct {
+	Label  string              `yaml:"label"`
 	Limits []BudgetLimitConfig `yaml:"limits"`
 }
 
@@ -133,36 +147,57 @@ func validateBudgetConfig(cfg *BudgetsConfig) error {
 	}
 	seen := make(map[string]struct{})
 	for pathIdx, entry := range cfg.UserPaths {
+		field := fmt.Sprintf("budgets.user_paths[%d]", pathIdx)
 		if strings.TrimSpace(entry.Path) == "" {
-			return fmt.Errorf("budgets.user_paths[%d].path is required", pathIdx)
+			return fmt.Errorf("%s.path is required", field)
 		}
 		normalizedPath, err := core.NormalizeUserPath(entry.Path)
 		if err != nil {
-			return fmt.Errorf("budgets.user_paths[%d].path is invalid: %w", pathIdx, err)
+			return fmt.Errorf("%s.path is invalid: %w", field, err)
 		}
 		if normalizedPath == "" {
-			return fmt.Errorf("budgets.user_paths[%d].path is required", pathIdx)
+			return fmt.Errorf("%s.path is required", field)
 		}
 		cfg.UserPaths[pathIdx].Path = normalizedPath
-		for limitIdx, limit := range entry.Limits {
-			if math.IsNaN(limit.Amount) || math.IsInf(limit.Amount, 0) || limit.Amount <= 0 {
-				return fmt.Errorf("budgets.user_paths[%d].limits[%d].amount must be a finite number greater than 0", pathIdx, limitIdx)
-			}
-			seconds := limit.PeriodSeconds
-			if limit.PeriodSeconds <= 0 {
-				parsed, ok := budgetPeriodSeconds(limit.Period)
-				if !ok {
-					return fmt.Errorf("budgets.user_paths[%d].limits[%d].period must be one of hourly, daily, weekly, monthly or period_seconds must be set", pathIdx, limitIdx)
-				}
-				seconds = parsed
-				cfg.UserPaths[pathIdx].Limits[limitIdx].PeriodSeconds = seconds
-			}
-			key := normalizedPath + ":" + strconv.FormatInt(seconds, 10)
-			if _, ok := seen[key]; ok {
-				return fmt.Errorf("duplicate budget for path %s period %d", normalizedPath, seconds)
-			}
-			seen[key] = struct{}{}
+		if err := validateBudgetLimits(cfg.UserPaths[pathIdx].Limits, field, "user_path", normalizedPath, seen); err != nil {
+			return err
 		}
+	}
+	for labelIdx, entry := range cfg.Labels {
+		field := fmt.Sprintf("budgets.labels[%d]", labelIdx)
+		label := strings.TrimSpace(entry.Label)
+		if label == "" {
+			return fmt.Errorf("%s.label is required", field)
+		}
+		cfg.Labels[labelIdx].Label = label
+		if err := validateBudgetLimits(cfg.Labels[labelIdx].Limits, field, "label", label, seen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateBudgetLimits validates and canonicalizes the limits of one budget
+// subject in place, rejecting a period declared twice for the same subject.
+func validateBudgetLimits(limits []BudgetLimitConfig, field, scope, subject string, seen map[string]struct{}) error {
+	for limitIdx, limit := range limits {
+		if math.IsNaN(limit.Amount) || math.IsInf(limit.Amount, 0) || limit.Amount <= 0 {
+			return fmt.Errorf("%s.limits[%d].amount must be a finite number greater than 0", field, limitIdx)
+		}
+		seconds := limit.PeriodSeconds
+		if seconds <= 0 {
+			parsed, ok := budgetPeriodSeconds(limit.Period)
+			if !ok {
+				return fmt.Errorf("%s.limits[%d].period must be one of hourly, daily, weekly, monthly or period_seconds must be set", field, limitIdx)
+			}
+			seconds = parsed
+			limits[limitIdx].PeriodSeconds = seconds
+		}
+		key := scope + "\x00" + subject + "\x00" + strconv.FormatInt(seconds, 10)
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("duplicate budget for %s %s period %d", scope, subject, seconds)
+		}
+		seen[key] = struct{}{}
 	}
 	return nil
 }

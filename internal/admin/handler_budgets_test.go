@@ -19,7 +19,8 @@ type adminBudgetStore struct {
 	sum      float64
 	settings budget.Settings
 
-	resetUserPath      string
+	resetScope         budget.Scope
+	resetSubject       string
 	resetPeriodSeconds int64
 	resetAllAt         time.Time
 	deleteErr          error
@@ -38,7 +39,8 @@ func (s *adminBudgetStore) UpsertBudgets(_ context.Context, budgets []budget.Bud
 		}
 		replaced := false
 		for i, existing := range s.budgets {
-			if existing.UserPath == normalized.UserPath && existing.PeriodSeconds == normalized.PeriodSeconds {
+			if existing.Scope == normalized.Scope && existing.Subject == normalized.Subject &&
+				existing.PeriodSeconds == normalized.PeriodSeconds {
 				s.budgets[i] = normalized
 				replaced = true
 				break
@@ -51,16 +53,16 @@ func (s *adminBudgetStore) UpsertBudgets(_ context.Context, budgets []budget.Bud
 	return nil
 }
 
-func (s *adminBudgetStore) DeleteBudget(_ context.Context, userPath string, periodSeconds int64) error {
+func (s *adminBudgetStore) DeleteBudget(_ context.Context, scope budget.Scope, subject string, periodSeconds int64) error {
 	if s.deleteErr != nil {
 		return s.deleteErr
 	}
-	normalizedPath, err := budget.NormalizeUserPath(userPath)
+	subject, err := budget.NormalizeSubject(scope, subject)
 	if err != nil {
 		return err
 	}
 	for i, existing := range s.budgets {
-		if existing.UserPath == normalizedPath && existing.PeriodSeconds == periodSeconds {
+		if existing.Scope == scope && existing.Subject == subject && existing.PeriodSeconds == periodSeconds {
 			s.budgets = append(s.budgets[:i], s.budgets[i+1:]...)
 			return nil
 		}
@@ -85,14 +87,15 @@ func (s *adminBudgetStore) SaveSettings(_ context.Context, settings budget.Setti
 	return settings, nil
 }
 
-func (s *adminBudgetStore) ResetBudget(_ context.Context, userPath string, periodSeconds int64, at time.Time) error {
+func (s *adminBudgetStore) ResetBudget(_ context.Context, scope budget.Scope, subject string, periodSeconds int64, at time.Time) error {
 	if s.resetErr != nil {
 		return s.resetErr
 	}
-	s.resetUserPath = userPath
+	s.resetScope = scope
+	s.resetSubject = subject
 	s.resetPeriodSeconds = periodSeconds
 	for i := range s.budgets {
-		if s.budgets[i].UserPath == userPath && s.budgets[i].PeriodSeconds == periodSeconds {
+		if s.budgets[i].Scope == scope && s.budgets[i].Subject == subject && s.budgets[i].PeriodSeconds == periodSeconds {
 			t := at.UTC()
 			s.budgets[i].LastResetAt = &t
 		}
@@ -109,8 +112,12 @@ func (s *adminBudgetStore) ResetAllBudgets(_ context.Context, at time.Time) erro
 	return nil
 }
 
-func (s *adminBudgetStore) SumUsageCost(context.Context, string, time.Time, time.Time) (float64, bool, error) {
-	return s.sum, s.sum > 0, nil
+func (s *adminBudgetStore) SumSpend(_ context.Context, windows []budget.SpendWindow) ([]budget.Spend, error) {
+	spends := make([]budget.Spend, len(windows))
+	for i := range windows {
+		spends[i] = budget.Spend{Total: s.sum, HasUsage: s.sum > 0}
+	}
+	return spends, nil
 }
 
 func (s *adminBudgetStore) Close() error {
@@ -129,7 +136,7 @@ func newBudgetHandler(t *testing.T, store *adminBudgetStore) *Handler {
 func TestBudgetEndpointsListStatuses(t *testing.T) {
 	store := &adminBudgetStore{
 		budgets: []budget.Budget{
-			{UserPath: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
+			{Scope: budget.ScopeUserPath, Subject: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
 		},
 		sum: 4,
 	}
@@ -176,7 +183,7 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 	if upsertRec.Code != http.StatusOK {
 		t.Fatalf("upsert status = %d, want %d body=%s", upsertRec.Code, http.StatusOK, upsertRec.Body.String())
 	}
-	if len(store.budgets) != 1 || store.budgets[0].UserPath != "/team/beta" || store.budgets[0].PeriodSeconds != budget.PeriodWeeklySeconds {
+	if len(store.budgets) != 1 || store.budgets[0].Subject != "/team/beta" || store.budgets[0].PeriodSeconds != budget.PeriodWeeklySeconds {
 		t.Fatalf("stored budgets = %+v", store.budgets)
 	}
 
@@ -194,15 +201,16 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 	if resetRec.Code != http.StatusOK {
 		t.Fatalf("reset status = %d, want %d body=%s", resetRec.Code, http.StatusOK, resetRec.Body.String())
 	}
-	if store.resetUserPath != "/team/beta" || store.resetPeriodSeconds != budget.PeriodWeeklySeconds {
-		t.Fatalf("reset key = %s/%d", store.resetUserPath, store.resetPeriodSeconds)
+	if store.resetScope != budget.ScopeUserPath || store.resetSubject != "/team/beta" ||
+		store.resetPeriodSeconds != budget.PeriodWeeklySeconds {
+		t.Fatalf("reset key = %s %s/%d", store.resetScope, store.resetSubject, store.resetPeriodSeconds)
 	}
 }
 
 func TestBudgetEndpointsUpsertMarksConfigBudgetManual(t *testing.T) {
 	store := &adminBudgetStore{
 		budgets: []budget.Budget{
-			{UserPath: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10, Source: budget.SourceConfig},
+			{Scope: budget.ScopeUserPath, Subject: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10, Source: budget.SourceConfig},
 		},
 	}
 	h := newBudgetHandler(t, store)
@@ -280,6 +288,26 @@ func TestBudgetEndpointsRejectInvalidBudgetKey(t *testing.T) {
 			body: `{"user_path":"/team"}`,
 			run:  (*Handler).DeleteBudget,
 		},
+		{
+			name: "unknown scope",
+			body: `{"scope":"provider","subject":"openai","budget_key":{"period":"daily"},"amount":12.5}`,
+			run:  (*Handler).UpsertBudget,
+		},
+		{
+			name: "label budget without a subject",
+			body: `{"scope":"label","budget_key":{"period":"daily"},"amount":12.5}`,
+			run:  (*Handler).UpsertBudget,
+		},
+		{
+			name: "label budget naming a user path",
+			body: `{"scope":"label","user_path":"/team","budget_key":{"period":"daily"},"amount":12.5}`,
+			run:  (*Handler).UpsertBudget,
+		},
+		{
+			name: "label budget with both subject and user path",
+			body: `{"scope":"label","subject":"prod","user_path":"/team","budget_key":{"period":"daily"},"amount":12.5}`,
+			run:  (*Handler).UpsertBudget,
+		},
 	}
 
 	for _, tt := range tests {
@@ -305,8 +333,8 @@ func TestBudgetEndpointsRejectInvalidBudgetKey(t *testing.T) {
 func TestBudgetEndpointsDeleteBudget(t *testing.T) {
 	store := &adminBudgetStore{
 		budgets: []budget.Budget{
-			{UserPath: "/team/beta", PeriodSeconds: budget.PeriodWeeklySeconds, Amount: 12.5},
-			{UserPath: "/team/beta", PeriodSeconds: budget.PeriodDailySeconds, Amount: 4},
+			{Scope: budget.ScopeUserPath, Subject: "/team/beta", PeriodSeconds: budget.PeriodWeeklySeconds, Amount: 12.5},
+			{Scope: budget.ScopeUserPath, Subject: "/team/beta", PeriodSeconds: budget.PeriodDailySeconds, Amount: 4},
 		},
 	}
 	h := newBudgetHandler(t, store)
@@ -486,7 +514,7 @@ func TestBudgetSettingsEndpoints(t *testing.T) {
 func TestResetBudgetsEndpoint(t *testing.T) {
 	store := &adminBudgetStore{
 		budgets: []budget.Budget{
-			{UserPath: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
+			{Scope: budget.ScopeUserPath, Subject: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
 		},
 	}
 	h := newBudgetHandler(t, store)
@@ -528,5 +556,77 @@ func TestResetBudgetsEndpoint(t *testing.T) {
 	}
 	if body.Status != "ok" {
 		t.Fatalf("reset status body = %q, want ok", body.Status)
+	}
+}
+
+// The API accepts a label budget and keeps its subject verbatim; the response
+// omits user_path, which only names user-path budgets.
+func TestBudgetEndpointsUpsertLabelBudget(t *testing.T) {
+	store := &adminBudgetStore{}
+	h := newBudgetHandler(t, store)
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/budgets",
+		strings.NewReader(`{"scope":"label","subject":"Mobile-App-iOS","budget_key":{"period":"monthly"},"amount":500}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.UpsertBudget(c); err != nil {
+		t.Fatalf("UpsertBudget() failed: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(store.budgets) != 1 {
+		t.Fatalf("stored budgets = %+v, want one", store.budgets)
+	}
+	stored := store.budgets[0]
+	if stored.Scope != budget.ScopeLabel || stored.Subject != "Mobile-App-iOS" {
+		t.Fatalf("stored budget = %+v, want the label subject unchanged", stored)
+	}
+
+	var body budgetListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Budgets) != 1 {
+		t.Fatalf("response budgets = %+v, want one", body.Budgets)
+	}
+	if got := body.Budgets[0]; got.Scope != "label" || got.Subject != "Mobile-App-iOS" || got.UserPath != "" {
+		t.Fatalf("response budget = %+v, want a label budget with no user_path", got)
+	}
+}
+
+// A user path and a label can spell the same subject; deleting one must leave
+// the other in place.
+func TestBudgetEndpointsDeleteDistinguishesScopes(t *testing.T) {
+	store := &adminBudgetStore{
+		budgets: []budget.Budget{
+			{Scope: budget.ScopeUserPath, Subject: "/prod", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
+			{Scope: budget.ScopeLabel, Subject: "/prod", PeriodSeconds: budget.PeriodDailySeconds, Amount: 20},
+		},
+	}
+	h := newBudgetHandler(t, store)
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodDelete,
+		"/admin/budgets",
+		strings.NewReader(`{"scope":"label","subject":"/prod","budget_key":{"period":"daily"}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.DeleteBudget(c); err != nil {
+		t.Fatalf("DeleteBudget() failed: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(store.budgets) != 1 || store.budgets[0].Scope != budget.ScopeUserPath {
+		t.Fatalf("stored budgets after delete = %+v, want only the user-path budget", store.budgets)
 	}
 }

@@ -79,7 +79,7 @@
           aria-label="Sort budgets by"
           bind:value={store.sortBy}
         >
-          <option value="user_path">User Path</option>
+          <option value="subject">Scope &amp; Subject</option>
           <option value="period">Period</option>
         </select>
       </div>

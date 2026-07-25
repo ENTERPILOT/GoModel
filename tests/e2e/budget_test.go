@@ -48,7 +48,7 @@ func (staticBudgetPricingResolver) ResolvePricing(_, _ string) *core.ModelPricin
 func TestBudgetEnforcementSQLite_E2E(t *testing.T) {
 	mockServer.ResetRequests()
 	fixture := setupBudgetE2EFixture(t, []budget.Budget{
-		{UserPath: "/team/sqlite", PeriodSeconds: budget.PeriodDailySeconds, Amount: sqliteBudgetAmount},
+		{Scope: budget.ScopeUserPath, Subject: "/team/sqlite", PeriodSeconds: budget.PeriodDailySeconds, Amount: sqliteBudgetAmount},
 	})
 
 	ts := httptest.NewServer(setupE2EServer(t, e2eServerOptions{
@@ -193,7 +193,7 @@ func waitForBudgetSpent(t *testing.T, service *budget.Service, userPath string, 
 		if err != nil || len(statuses) != 1 {
 			return false
 		}
-		return statuses[0].Budget.UserPath == userPath && statuses[0].HasUsage && statuses[0].Spent > amount
+		return statuses[0].Budget.Subject == userPath && statuses[0].HasUsage && statuses[0].Spent > amount
 	}, 2*time.Second, 20*time.Millisecond)
 }
 
