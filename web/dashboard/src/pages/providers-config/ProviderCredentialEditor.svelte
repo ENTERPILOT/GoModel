@@ -116,7 +116,7 @@
         <div class="failover-target-actions">
           <button
             type="button"
-            class="pagination-btn pagination-btn-with-icon"
+            class="btn btn-with-icon"
             onclick={() => providersConfig.addApiKeyRow()}
           >
             <Icon name="plus" class="form-action-icon" />
@@ -220,10 +220,10 @@
       </details>
 
       <div class="form-actions">
-        <button type="button" class="pagination-btn" onclick={() => providersConfig.closeForm()}>Cancel</button>
+        <button type="button" class="btn" onclick={() => providersConfig.closeForm()}>Cancel</button>
         <button
           type="submit"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+          class="btn btn-primary btn-with-icon"
           disabled={providersConfig.formSubmitting}
         >
           <Icon name="save" class="form-action-icon" />

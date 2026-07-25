@@ -200,19 +200,3 @@ export function buildGuardrailPayload(form) {
     config: cloneGuardrailJSON(form && form.config),
   };
 }
-
-// guardrailErrorMessage extracts the admin error payload message
-// ({ error: { message } }), falling back to the given default.
-export function guardrailErrorMessage(data, fallback) {
-  if (
-    data &&
-    typeof data === "object" &&
-    data.error &&
-    typeof data.error === "object" &&
-    typeof data.error.message === "string" &&
-    data.error.message
-  ) {
-    return data.error.message;
-  }
-  return fallback;
-}

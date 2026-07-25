@@ -142,7 +142,7 @@
     <div class="settings-refresh-actions pricing-recalculate-actions">
       <button
         type="button"
-        class="pagination-btn pagination-btn-danger pagination-btn-with-icon"
+        class="btn btn-danger btn-with-icon"
         disabled={loading || !enabled}
         aria-busy={loading ? "true" : "false"}
         aria-describedby="pricing-recalculate-help-copy"
@@ -156,7 +156,6 @@
 {/if}
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
 .pricing-recalculate-section {
     width: 100%;
   }
@@ -181,8 +180,16 @@
     width: 100%;
   }
 
+/* The picker and its trigger render inside the DatePicker child, so :global
+   reaches them; the field class keeps these rules winning over DatePicker's
+   scoped bases. */
 .pricing-recalculate-date-field :global(.date-picker) {
     width: 100%;
+  }
+
+.pricing-recalculate-date-field :global(.date-picker-trigger) {
+    width: 100%;
+    justify-content: space-between;
   }
 
 .pricing-recalculate-actions {
@@ -200,7 +207,7 @@
           width: 100%;
         }
 
-  .pricing-recalculate-actions :global(.pagination-btn) {
+  .pricing-recalculate-actions :global(.btn) {
           width: 100%;
         }
 }

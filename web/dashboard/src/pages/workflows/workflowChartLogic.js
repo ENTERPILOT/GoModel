@@ -265,10 +265,10 @@ function workflowFailoverTargetLabel(runtime) {
   return runtime && runtime.failoverTarget ? runtime.failoverTarget : null;
 }
 
-function workflowAiConnClass(runtime) {
-  if (!runtime) return "";
-  if (runtime.cacheHit) return "workflow-conn-dim";
-  return "";
+// A cache hit bypasses the AI call, so both the connector into the AI node
+// and the one out to Response are dimmed.
+function workflowBypassedConnClass(runtime) {
+  return runtime && runtime.cacheHit ? "workflow-conn-dim" : "";
 }
 
 function workflowAiNodeClass(runtime, current) {
@@ -276,12 +276,6 @@ function workflowAiNodeClass(runtime, current) {
   if (runtime.cacheHit) return "workflow-node-skipped";
   if (current) return "workflow-node-current";
   return runtime.aiSuccess ? "workflow-node-success" : "";
-}
-
-function workflowResponseConnClass(runtime) {
-  if (!runtime) return "";
-  if (runtime.cacheHit) return "workflow-conn-dim";
-  return "";
 }
 
 export function workflowResponseNodeClass(runtime, current) {
@@ -410,9 +404,9 @@ function workflowChartModel(source, runtime, options, caps) {
     failoverTargetLabel: showFailover ? workflowFailoverTargetLabel(runtime) : null,
     aiLabel: workflowAiLabel(source, runtime),
     aiSublabel: workflowAiSublabel(source, runtime),
-    aiConnClass: workflowAiConnClass(runtime),
+    aiConnClass: workflowBypassedConnClass(runtime),
     aiNodeClass: workflowAiNodeClass(runtime, liveStep === "ai"),
-    responseConnClass: workflowResponseConnClass(runtime),
+    responseConnClass: workflowBypassedConnClass(runtime),
     responseNodeClass: workflowResponseNodeClass(runtime, liveStep === "response"),
     responseNodeSublabel: workflowResponseNodeSublabel(runtime),
     authNodeClass: workflowAuthNodeClass(runtime, liveStep === "auth"),

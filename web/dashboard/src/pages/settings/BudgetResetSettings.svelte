@@ -18,7 +18,7 @@
     <div class="settings-refresh-actions budget-settings-actions">
       <button
         type="button"
-        class="pagination-btn pagination-btn-danger pagination-btn-with-icon"
+        class="btn btn-danger btn-with-icon"
         disabled={budgetsStore.resetAllLoading}
         onclick={() => budgetsStore.openResetDialog()}
       >

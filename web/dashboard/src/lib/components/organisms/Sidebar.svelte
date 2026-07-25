@@ -1,7 +1,8 @@
 <script>
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import ThemeToggle from "./ThemeToggle.svelte";
   import { router } from "$lib/stores/router.svelte.js";
-  import { themeStore, sidebar } from "$lib/stores/ui.svelte.js";
+  import { sidebar } from "$lib/stores/ui.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { gomodelPath } from "$lib/api/paths.js";
@@ -42,14 +43,6 @@
       { page: "settings", label: "Settings", icon: "settings" },
     ].filter((item) => item.visible !== false),
   );
-
-  const themeTitle = $derived(
-    themeStore.theme === "light"
-      ? "Light theme"
-      : themeStore.theme === "dark"
-        ? "Dark theme"
-        : "System theme",
-  );
 </script>
 
 <aside class="sidebar" class:sidebar-collapsed={sidebar.collapsed}>
@@ -82,49 +75,7 @@
     {/each}
   </nav>
   <div class="sidebar-footer">
-    <div class="theme-toggle">
-      <button
-        class="theme-btn"
-        class:active={themeStore.theme === "light"}
-        onclick={() => themeStore.set("light")}
-        title="Light theme"
-        aria-label="Light theme"
-      >
-        <Icon name="sun" class="theme-icon" />
-      </button>
-      <button
-        class="theme-btn"
-        class:active={themeStore.theme === "system"}
-        onclick={() => themeStore.set("system")}
-        title="System theme"
-        aria-label="System theme"
-      >
-        <Icon name="monitor" class="theme-icon" />
-      </button>
-      <button
-        class="theme-btn"
-        class:active={themeStore.theme === "dark"}
-        onclick={() => themeStore.set("dark")}
-        title="Dark theme"
-        aria-label="Dark theme"
-      >
-        <Icon name="moon" class="theme-icon" />
-      </button>
-    </div>
-    <button
-      class="theme-toggle-mobile"
-      onclick={() => themeStore.toggle()}
-      title={themeTitle}
-      aria-label={themeTitle}
-    >
-      {#if themeStore.theme === "light"}
-        <Icon name="sun" class="theme-icon" />
-      {:else if themeStore.theme === "dark"}
-        <Icon name="moon" class="theme-icon" />
-      {:else}
-        <Icon name="monitor" class="theme-icon" />
-      {/if}
-    </button>
+    <ThemeToggle compact={sidebar.collapsed} />
     {#if auth.needsAuth || auth.hasApiKey()}
       <div class="api-key-section">
         <button
@@ -151,7 +102,24 @@
 ></button>
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
+.sidebar {
+    flex: 0 0 var(--sidebar-width);
+    width: var(--sidebar-width);
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    max-height: 100vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    z-index: 10;
+    transition:
+      flex-basis 0.2s,
+      width 0.2s;
+  }
+
 .sidebar-header {
     padding: 20px;
     border-bottom: 1px solid var(--border);
@@ -250,74 +218,6 @@
     outline-offset: 2px;
   }
 
-/* Theme toggle — compact pill */
-.theme-toggle {
-    display: inline-flex;
-    align-items: center;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 2px;
-    margin-bottom: 10px;
-  }
-
-.theme-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 24px;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-.theme-btn :global(svg) {
-    width: 14px;
-    height: 14px;
-  }
-
-.theme-btn:hover {
-    color: var(--text);
-  }
-
-.theme-btn.active {
-    background: var(--accent);
-    color: #fff;
-  }
-
-.theme-btn:focus-visible, .theme-toggle-mobile:focus-visible, .sidebar-toggle:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
-    outline-offset: 2px;
-  }
-
-/* Theme toggle — single button for mobile */
-.theme-toggle-mobile {
-    display: none;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-.theme-toggle-mobile:hover {
-    color: var(--text);
-  }
-
-.theme-toggle-mobile :global(svg) {
-    width: 16px;
-    height: 16px;
-  }
-
 /* Sidebar toggle handle */
 .sidebar-toggle {
     flex: 0 0 6px;
@@ -339,6 +239,11 @@
 
 .sidebar-toggle.collapsed {
     cursor: e-resize;
+  }
+
+.sidebar-toggle:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+    outline-offset: 2px;
   }
 
 /* Collapsed sidebar (desktop) */
@@ -373,16 +278,12 @@
     display: none;
   }
 
-.sidebar.sidebar-collapsed .sidebar-footer .theme-toggle {
-    display: none;
-  }
-
-.sidebar.sidebar-collapsed .sidebar-footer .theme-toggle-mobile {
-    display: flex;
-    margin: 0 auto;
-  }
-
 @media (max-width: 768px) {
+  .sidebar {
+          width: 60px;
+          flex-basis: 60px;
+        }
+
   .sidebar-header {
           justify-content: center;
           padding: 16px;
@@ -423,15 +324,6 @@
 
   .sidebar-footer .api-key-open-btn :global(span) {
           display: none;
-        }
-
-  .sidebar-footer .theme-toggle {
-          display: none;
-        }
-
-  .sidebar-footer .theme-toggle-mobile {
-          display: flex;
-          margin: 0 auto;
         }
 
   .sidebar-toggle {

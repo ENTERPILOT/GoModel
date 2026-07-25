@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  authKeyErrorMessage,
   authKeyUserPathValidationError,
   buildCreateAuthKeyPayload,
   defaultAuthKeyForm,
@@ -130,15 +129,6 @@ test("parseAuthKeyLabels trims, de-duplicates, and preserves order", () => {
   assert.deepEqual(parseAuthKeyLabels(null), []);
 });
 
-test("authKeyErrorMessage extracts the admin error payload message", () => {
-  assert.equal(
-    authKeyErrorMessage({ error: { message: "key vanished" } }, "fallback"),
-    "key vanished",
-  );
-  assert.equal(authKeyErrorMessage({ error: "plain" }, "fallback"), "fallback");
-  assert.equal(authKeyErrorMessage(null, "fallback"), "fallback");
-  assert.equal(authKeyErrorMessage({}, "fallback"), "fallback");
-});
 
 test("labelColor is deterministic and feeds the chip style custom property", () => {
   assert.equal(labelColor("team-a"), labelColor("team-a"));

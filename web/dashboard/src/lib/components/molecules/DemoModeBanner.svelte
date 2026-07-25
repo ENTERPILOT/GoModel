@@ -16,7 +16,6 @@
 {/if}
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .demo-mode-banner {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;

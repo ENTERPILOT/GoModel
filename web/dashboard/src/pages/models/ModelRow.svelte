@@ -1,5 +1,6 @@
 <script>
   // One model/alias table row.
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
@@ -17,7 +18,6 @@
     rowRedirectCanRemove,
   } from "./virtualModelsLogic.js";
   import AccessToggle from "./AccessToggle.svelte";
-  import TableIcon from "./TableIcon.svelte";
 
   // columns: the active category's column spec from categoryColumns.js
   // (ModelTable renders the matching <thead> from the same spec).
@@ -91,7 +91,7 @@
             onclick={() => virtualModels.removeAliasRow(row)}
             disabled={Boolean(virtualModels.rowDeletingKey)}
           >
-            <TableIcon name="trash" />
+            <Icon name="trash-2" class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if virtualModels.virtualModelsAvailable}
@@ -100,7 +100,7 @@
             class="table-icon-btn table-action-btn-active"
             onclick={() => virtualModels.openVirtualModelEditAlias(row.alias)}
           >
-            <TableIcon name="edit" />
+            <Icon name="pencil" class="table-icon-svg" />
           </TableActionButton>
         {/if}
       </div>
@@ -113,7 +113,7 @@
             class="table-icon-btn {pricingOverrides.modelPricingButtonClass(pricingOverrides.hasModelPricingOverride(row))}"
             onclick={() => pricingOverrides.openModelPricingOverrideEdit(row)}
           >
-            <TableIcon name="dollar" />
+            <Icon name="circle-dollar-sign" class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if failover.failoverAvailable && failover.failoverEnabled()}
@@ -122,7 +122,7 @@
             class="table-icon-btn {failover.failoverButtonClass(row)}"
             onclick={() => failover.openFailoverForModel(row)}
           >
-            <TableIcon name="failover" />
+            <Icon name="shuffle" class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if rateLimits.rateLimitsEnabled() && rateLimits.rateLimitInspectorModelID(row)}
@@ -131,7 +131,7 @@
             class="table-icon-btn {rateLimits.rateLimitGaugeClassForModel(row)}"
             onclick={() => rateLimits.openRateLimitInspectorForModel(row)}
           >
-            <TableIcon name="gauge" />
+            <Icon name="gauge" class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if virtualModels.virtualModelsAvailable && row.masking_alias && row.masking_alias.name}
@@ -140,7 +140,7 @@
             class="table-icon-btn table-action-btn-active"
             onclick={() => virtualModels.openVirtualModelEditAlias(row.masking_alias)}
           >
-            <TableIcon name="edit" />
+            <Icon name="pencil" class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if virtualModels.virtualModelsAvailable && !row.masking_alias}
@@ -149,7 +149,7 @@
             class="table-icon-btn {modelOverrideEditButtonClass(hasAccessOverride(row.access))}"
             onclick={() => virtualModels.openVirtualModelEditModel(row)}
           >
-            <TableIcon name="edit" />
+            <Icon name="pencil" class="table-icon-svg" />
           </TableActionButton>
         {/if}
       </div>
@@ -158,7 +158,6 @@
 </tr>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .model-name-cell {
     display: flex;
     flex-direction: column;

@@ -1,6 +1,8 @@
 // Cross-cutting UI state: theme, sidebar collapse, and the count of open
 // overlay dialogs (drives the body-level dashboard-modal-open class).
 
+import { readStored, writeStored } from "$lib/utils/storage.js";
+
 class ThemeStore {
   theme = $state("system");
   // tick increments whenever effective colors may have changed (explicit
@@ -9,11 +11,7 @@ class ThemeStore {
   tick = $state(0);
 
   init() {
-    try {
-      this.theme = localStorage.getItem("gomodel_theme") || "system";
-    } catch {
-      this.theme = "system";
-    }
+    this.theme = readStored("gomodel_theme", "system");
     this.apply();
     window
       .matchMedia("(prefers-color-scheme: dark)")
@@ -26,11 +24,7 @@ class ThemeStore {
 
   set(t) {
     this.theme = t;
-    try {
-      localStorage.setItem("gomodel_theme", t);
-    } catch {
-      // Non-fatal: theme just won't persist.
-    }
+    writeStored("gomodel_theme", t);
     this.apply();
     this.tick++;
   }
@@ -56,20 +50,12 @@ class SidebarStore {
   collapsed = $state(false);
 
   init() {
-    try {
-      this.collapsed = localStorage.getItem("gomodel_sidebar_collapsed") === "true";
-    } catch {
-      this.collapsed = false;
-    }
+    this.collapsed = readStored("gomodel_sidebar_collapsed") === "true";
   }
 
   toggle() {
     this.collapsed = !this.collapsed;
-    try {
-      localStorage.setItem("gomodel_sidebar_collapsed", String(this.collapsed));
-    } catch {
-      // Non-fatal.
-    }
+    writeStored("gomodel_sidebar_collapsed", this.collapsed);
   }
 }
 

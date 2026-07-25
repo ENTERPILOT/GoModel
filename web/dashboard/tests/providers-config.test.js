@@ -14,11 +14,10 @@ import {
   providerCredentialKeysToRows,
   providerCredentialKeyRowsToArray,
   suggestProviderCredentialName,
-  normalizeProviderCredentialCommaList,
+  splitCommaList,
   providerCredentialRowToForm,
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
-  providerCredentialErrorMessage,
 } from "../src/pages/providers-config/providersConfigLogic.js";
 
 test("buildProviderCredentialPayload sends a normalized PUT payload on create", () => {
@@ -235,26 +234,10 @@ test("providerCredentialTypeOptions always includes the current selection", () =
   assert.deepEqual(providerCredentialTypeOptions(null, " "), []);
 });
 
-test("normalizeProviderCredentialCommaList trims and drops empties", () => {
+test("splitCommaList trims and drops empties", () => {
   assert.deepEqual(
-    normalizeProviderCredentialCommaList(" gpt-4o, gpt-4o-mini ,,"),
+    splitCommaList(" gpt-4o, gpt-4o-mini ,,"),
     ["gpt-4o", "gpt-4o-mini"],
   );
-  assert.deepEqual(normalizeProviderCredentialCommaList(""), []);
-});
-
-test("providerCredentialErrorMessage extracts error.message or falls back", () => {
-  assert.equal(
-    providerCredentialErrorMessage(
-      { error: { message: "storage unavailable" } },
-      "fallback",
-    ),
-    "storage unavailable",
-  );
-  assert.equal(providerCredentialErrorMessage({}, "fallback"), "fallback");
-  assert.equal(providerCredentialErrorMessage(null, "fallback"), "fallback");
-  assert.equal(
-    providerCredentialErrorMessage({ error: "plain string" }, "fallback"),
-    "fallback",
-  );
+  assert.deepEqual(splitCommaList(""), []);
 });

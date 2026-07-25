@@ -4,7 +4,7 @@
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
-  import { chartColors } from "$lib/utils/chartTheme.js";
+  import { chartColors, resolveCssColor } from "$lib/utils/chartTheme.js";
   import {
     formatCost,
     formatNumber,
@@ -21,7 +21,7 @@
     usageRowsBySelectedValue,
     userPathUsageChartVisible,
   } from "./usage-helpers.js";
-  import { horizontalUsageChartConfig, resolveCssColor } from "./usage-chart-config.js";
+  import { horizontalUsageChartConfig } from "./usage-chart-config.js";
 
   /** @type {{ kind: "model" | "userPath" | "label" }} */
   let { kind } = $props();

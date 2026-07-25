@@ -80,7 +80,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .settings-guardrails-hero {
     display: flex;
     align-items: flex-start;

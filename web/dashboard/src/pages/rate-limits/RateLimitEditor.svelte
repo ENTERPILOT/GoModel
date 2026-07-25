@@ -157,14 +157,14 @@
       <div class="form-actions">
         <button
           type="button"
-          class="pagination-btn"
+          class="btn"
           onclick={() => rateLimits.closeRateLimitForm()}
         >
           Cancel
         </button>
         <button
           type="submit"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+          class="btn btn-primary btn-with-icon"
           disabled={rateLimits.rateLimitFormSubmitting}
         >
           <Icon name="save" class="form-action-icon" />

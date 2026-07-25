@@ -13,132 +13,87 @@ follow these rules so the pages compose into one coherent app.
    `<style>` blocks in the owning component; `src/styles/dashboard.css`
    holds only the shared design system (tokens, reset, typography, buttons,
    forms, tables, alerts, layout, keyframes) plus rules that target
-   child-component DOM (e.g. a class passed as a prop into `Icon` or
+   child-component DOM — a class passed as a prop into `Icon` or
    `LoadingState` renders in the child's markup, where the parent's scope
-   hash cannot match — those must stay global). Reuse existing shared class
-   names for standard elements. Cascade gotcha: scoping adds specificity,
-   so when moving a rule out of dashboard.css move its state/media/theme
-   variants with it, and check the shipped computed style doesn't change —
-   a scoped rule can win ties it used to lose.
-3. **Svelte 5 runes only.** `$state`, `$derived`, `$effect`, `$props`,
+   hash cannot match. Reuse existing shared class names for standard
+   elements.
+3. **Mind the scope hash when moving CSS.** Scoping adds specificity, and it
+   cuts both ways:
+   - Moving a rule *out* of dashboard.css can make it win ties it used to
+     lose. Move its state/media/theme variants with it and check the shipped
+     computed style is unchanged.
+   - A global modifier (`.x-request`) silently *loses* to the scoped base
+     (`.x.svelte-hash`) it is meant to override. If the modifier is composed
+     dynamically, keep it in the owning component as a compound `:global`
+     (`.x:global(.x-request)`) so it still outranks the base.
+   - The compiler prunes selectors it cannot see in the markup, so a
+     component whose state classes are computed strings (`WorkflowChart`,
+     `ProviderStatusCard`) cannot hand that CSS to a child component.
+4. **Svelte 5 runes only.** `$state`, `$derived`, `$effect`, `$props`,
    snippets/`{@render}`. No legacy `$:` reactivity, no svelte/store.
-4. **Files:** page code lives in `src/pages/<page>/`. The entry component is
+5. **Files:** page code lives in `src/pages/<page>/`. The entry component is
    `<Pascal>Page.svelte`. Split big pages into sub-components in the same
    directory (atomic design: compose from
    `$lib/components/atoms|molecules|organisms`). Keep files under ~400 lines
    where practical.
-5. **Shared foundation code lives in `src/lib/`** (plus `src/App.svelte`) —
-   changes there affect every page, so keep them deliberate and consistent
-   with the foundation API below. Page-specific helpers belong in the page
-   directory.
+6. **Shared foundation code lives in `src/lib/`** (plus `src/App.svelte`) —
+   changes there affect every page, so keep them deliberate. Page-specific
+   helpers belong in the page directory.
+7. **Do NOT add new npm dependencies.**
 
-## Foundation API (already implemented — use it, don't re-implement)
+## Foundation — use it, don't re-implement
 
-Imports use the `$lib` alias.
+Imports use the `$lib` alias. **Each module documents its own exports and
+props in its header comment** — read those for the details; this list exists
+so you know what already exists.
 
 ### HTTP: `$lib/api/client.js`
 
 ```js
-import { getJSON, sendJSON, apiFetch, errorMessage, isAbortError } from "$lib/api/client.js";
-
 const result = await getJSON("/admin/foo?x=1", { label: "foo", signal });
 // result = { ok, stale, status, data, res }
-// - 401s are handled globally (auth dialog opens). result.ok === false.
-// - result.stale === true → response belongs to an old API key: return
-//   WITHOUT touching your state (a stale response must not clobber fresh data).
-// - Non-OK: result.data holds the parsed error payload when present.
 const saved = await sendJSON("/admin/foo", "POST", payload, { label: "save foo" });
-const msg = errorMessage(saved, "Failed to save."); // extracts payload message
 ```
 
-`apiFetch(path, options)` is the raw escape hatch (SSE streams, blobs); it
-adds auth + timezone headers and the base path. Never call `fetch` directly
-with `/admin/...` paths.
+- `result.stale === true` → the response belongs to an old API key: **return
+  without touching your state**, or it clobbers fresh data.
+- 401s are handled globally (the auth dialog opens); `result.ok` is `false`.
+- `errorMessage(result, fallback)` reads a result envelope;
+  `errorPayloadMessage(data, fallback)` reads a raw `{error:{message}}` body.
+  Both really live in `$lib/api/errors.js`, which imports no Svelte runtime —
+  pure page logic and its `node:test` suite import them from there directly.
+- `apiFetch(path, options)` is the raw escape hatch (SSE, blobs); it adds auth
+  + timezone headers and the base path. Never call `fetch` on `/admin/...`.
 
 ### Stores (`$lib/stores/*.svelte.js`) — all singletons
 
-- `auth` — `apiKey, needsAuth, hasApiKey(), openDialog(), refreshTick`.
-  Pages re-fetch when `auth.refreshTick` changes (see Page skeleton).
-- `router` — `page`, `sub`, `navigate(page, sub?)`.
-- `themeStore` — `theme`, `tick` (increment = rebuild charts).
-- `sidebar`, `modals` (used by Modal atom; don't touch directly).
-- `timezone` — `effectiveTimezone()`, `formatTimestamp(ts)` (effective TZ),
-  `currentDateKey()`, `dateKeyToDate/dateToDateKey/addDaysToDateKey`,
-  `ensureOptions()`, `options`, `override`, `saveOverride()/clearOverride()`.
-- `runtimeConfig` — `ensureLoaded()`, `booleanFlag(name, def)`,
-  `cacheVisible()`, `auditVisible()`, `usageVisible()`, `budgetsVisible()`,
-  `rateLimitsVisible()`, `guardrailsVisible()`, `mcpVisible()`,
-  `liveLogsVisible()`, `flag(name)`.
-- `modelsStore` — `models`, `categories`, `filteredModels`, `filter`,
-  `activeCategory`, `loading`, `fetchModels()`, `fetchCategories()`,
-  `selectCategory(cat)`, `categoryCount(cat)`.
-- `dateRange` — shared reporting window: `days`, `selectedPreset`,
-  `customStartDate/customEndDate`, `interval`, `queryStr()`,
-  `dateRangeLabel()`, `chartTitle()`.
-- `usageData` — `summary`, `daily`, `cacheOverview`, `fetchUsage()`,
-  `fetchCacheOverview(extraQuery)`, `emptyUsageSummary()`,
-  `emptyCacheOverview()` (named exports), `cacheAnalyticsEnabled()`.
-- `confirmDialog` — typed confirmation:
-  `confirmDialog.open({ title, message, requiredText, confirmLabel, icon, onConfirm: async () => { ...; confirmDialog.close(); } })`.
+`auth` · `router` · `themeStore` (bump `tick` to rebuild charts) · `sidebar` ·
+`modals` (owned by the `Modal` atom — don't touch) · `timezone` ·
+`runtimeConfig` (feature-flag visibility) · `modelsStore` · `dateRange`
+(shared reporting window) · `usageData` · `flash` · `confirmDialog` (typed
+confirmations).
 
 ### Components
 
-- `$lib/components/atoms/Icon.svelte` — `<Icon name="chart-column" class="nav-icon" />`
-  (kebab-case lucide names).
-- `$lib/components/atoms/Spinner.svelte` — `<Spinner size={16} label="Loading models" />`.
-  Use it for loading states; prefer a visible loading affordance over a
-  silent load.
-- `$lib/components/atoms/Modal.svelte` —
-  `<Modal open={x} variant="editor|auth" onclose={...}> <section class="model-editor" role="dialog" aria-modal="true">…</section> </Modal>`.
-  Handles Escape/backdrop/scroll-lock/autofocus (`data-modal-autofocus` attr).
-  `variant="editor"` renders `editor-modal-*` classes (model editors),
-  `"auth"` renders `auth-dialog-*` (small centered dialogs).
-- `$lib/components/atoms/EmptyState.svelte` — `<EmptyState icon="inbox" title="No data" hint="..." />`.
-- `$lib/components/atoms/TableActionButton.svelte` — small table/card action
-  button (`.table-action-btn`): `label` fills both title and aria-label,
-  children supply the icon (and optional `.budget-action-label` span);
-  optional extra `class` (state classes like `is-set`) and `disabled`.
-  Only hand-roll the `<button>` when title and aria-label must differ.
-- `$lib/components/atoms/DialogCloseButton.svelte` — the standard editor/drawer
-  X button: `<DialogCloseButton label="Close budget editor" onclick={...} />`.
-  Optional `class` (e.g. `auth-dialog-close`), `disabled`, `bind:el`, and
-  `iconClass=""` for the larger auth-dialog-style X.
-- `$lib/components/molecules/LoadingState.svelte` —
-  `<LoadingState label="Loading budgets..." />` (the `.loading-state` row
-  with the CSS spinner; optional extra `class`).
-- `$lib/components/organisms/AuthBanner.svelte` — `<AuthBanner />`; the
-  "Authentication required" page banner. Owns its own `auth.authError` gate.
-- `$lib/components/atoms/SegmentedControl.svelte` — exclusive-option button group:
-  `<SegmentedControl ariaLabel="Usage mode" options={[{value, label}, ...]} value={mode} onchange={(v) => ...} />`
-  (uses the `segmented-control`/`segmented-btn` classes; the standard markup
-  for mode toggles and interval pickers).
-- `$lib/components/molecules/Pagination.svelte` —
-  `<Pagination total={log.total} offset={log.offset} limit={log.limit} onprev={...} onnext={...} />`.
-- `$lib/components/molecules/DatePicker.svelte` — `<DatePicker onchange={() => refetch()} />`
-  (binds the shared `dateRange` store).
-- `$lib/components/molecules/InlineHelpSection.svelte` — title row with the
-  "?" help toggle and collapsible copy below (the `inline-help-section`
-  markup): `<InlineHelpSection copyId="x-help-copy" label="x help" text={...}>
-  {#snippet title()}<h3>…</h3>{/snippet} </InlineHelpSection>`.
-  aria reads "Show/Hide {label}". Rich copy goes in a `help` snippet instead
-  of `text`; `extra` renders after the toggle (e.g. a spinner); `bind:open`
-  for store-held state; `external` when the caller renders the copy elsewhere
-  (give that element `id={copyId}`). The toggle hides when there is no copy.
-- `$lib/components/molecules/ChartCanvas.svelte` — Chart.js wrapper:
-  `<ChartCanvas build={() => makeConfig()} />`. `build` runs in an effect:
-  reactive values read inside it are tracked, and the chart rebuilds on theme
-  change automatically. Return `null` for "no chart". Import chart color
-  tokens from `$lib/utils/chartTheme.js` (`chartColors()`, `cssVar(name)`).
+- **atoms** — `Icon` (kebab-case lucide names), `Spinner`, `Modal`,
+  `EmptyState`, `NoDataIllustration`, `CopyButton`, `TableActionButton`,
+  `DialogCloseButton`, `SegmentedControl`.
+- **molecules** — `LoadingState`, `Pagination`, `DatePicker`, `FilterInput`,
+  `InlineHelpSection`, `ChartCanvas`, `DemoModeBanner`.
+- **organisms** — `AuthBanner`, `AuthDialog`, `Sidebar`, `ThemeToggle`,
+  `FlashMessages`, `TypedConfirmationDialog`.
+
+`Modal` handles Escape/backdrop/scroll-lock and autofocuses
+`[data-modal-autofocus]`. `ChartCanvas` runs its `build()` inside an effect,
+so reactive reads are tracked and theme changes rebuild automatically.
 
 ### Utils
 
-- `$lib/utils/format.js` — `formatNumber, formatCost, formatPrice,
-  formatPriceFine, formatTokensShort, tokenCountTitle, formatDateUTC,
-  formatTimestampUTC, providerTypeValue, providerDisplayValue,
-  qualifiedModelDisplay, qualifiedModelValueDisplay,
-  qualifiedResolvedModelDisplay, auditModelDisplay`.
-- `$lib/utils/clipboard.svelte.js` — `writeTextToClipboard(v)`,
-  `createCopyState()` (copy-button feedback state).
+`format.js` (numbers, costs, tokens, UTC dates and date params, comma lists,
+provider/model display) ·
+`chartTheme.js` (theme colors + the shared Chart.js style fragments) ·
+`clipboard.svelte.js` · `debounce.js` · `storage.js` (localStorage can be
+absent or blocked — never touch it directly) · `api/paths.js` (`gomodelPath`).
 
 ## Page skeleton
 
@@ -164,28 +119,29 @@ Cross-page conventions:
 - Abortable fetches: cancel the in-flight request when a newer one starts
   (AbortController); ignore abort errors.
 - `history.pushState` deep links (e.g. audit filters in the query string):
-  keep the established URL shapes; use `gomodelPath()` from
-  `$lib/api/paths.js`.
+  keep the established URL shapes; use `gomodelPath()`.
 - Timestamps shown to users: `timezone.formatTimestamp(ts)`;
   `title` tooltips use `formatTimestampUTC(ts)`.
-- Confirmation prompts: simple ones use `confirm()`; typed
-  confirmations use `confirmDialog`.
-- Do NOT add new npm dependencies.
-
-## Verification
-
-Run from `web/dashboard/`:
-
-```sh
-npx svelte-check --tsconfig ./jsconfig.json  # zero errors required (warnings OK)
-```
-
-Run `npm run build` before committing so the embedded `dist/` stays in sync
-(CI enforces drift).
+- Confirmation prompts: simple ones use `confirm()`; typed confirmations use
+  `confirmDialog`.
 
 ## Tests
 
 Pure logic (formatting, reducers, query building) lives in plain `.js` files
 in the page directory and is tested in `web/dashboard/tests/<name>.test.js`
 using `node:test` + `assert` (ESM imports; no DOM).
-Verify with `node --test tests/<name>.test.js`.
+
+Those `.js` files must use **relative** imports, not `$lib` — node runs them
+without Vite, so the alias does not resolve. That also means they cannot
+import a `.svelte.js` store (runes need the compiler); keep shared helpers
+they need in a plain module.
+
+## Verification
+
+Run from `web/dashboard/`:
+
+```sh
+npm run check   # svelte-check: zero errors required (warnings OK)
+npm test        # node --test tests/*.test.js
+npm run build   # keeps the embedded dist/ in sync — CI enforces drift
+```

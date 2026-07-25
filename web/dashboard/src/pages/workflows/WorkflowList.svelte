@@ -47,10 +47,4 @@
   grid-template-columns: 1fr;
   gap: 16px;
 }
-
-@media (max-width: 768px) {
-  .workflow-card-grid {
-      grid-template-columns: 1fr;
-    }
-}
 </style>

@@ -204,12 +204,12 @@
       <div class="form-actions">
         <button
           type="button"
-          class="pagination-btn"
+          class="btn"
           onclick={() => store.closeForm()}>Cancel</button
         >
         <button
           type="submit"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon guardrail-submit-btn"
+          class="btn btn-primary btn-with-icon guardrail-submit-btn"
           disabled={store.formSubmitting}
         >
           <Icon name="save" class="form-action-icon" />

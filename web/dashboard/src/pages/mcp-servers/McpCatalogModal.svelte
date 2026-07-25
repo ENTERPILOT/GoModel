@@ -75,13 +75,12 @@
     {/if}
 
     <div class="form-actions">
-      <button type="button" class="pagination-btn" onclick={() => mcpServers.closeCatalog()}>Close</button>
+      <button type="button" class="btn" onclick={() => mcpServers.closeCatalog()}>Close</button>
     </div>
   </div>
 </Modal>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* MCP catalog inspector: read-only lists of tools, prompts, and resources. */
   .mcp-catalog-section {
     margin-top: 18px;

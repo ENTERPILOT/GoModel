@@ -6,7 +6,6 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { formatPriceFine } from "$lib/utils/format.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
-  import TableIcon from "./TableIcon.svelte";
 
   const po = pricingOverrides;
 </script>
@@ -102,7 +101,7 @@
               class="table-action-btn-danger table-icon-btn pricing-override-remove-row"
               onclick={() => po.removeModelPricingOverrideRow(row)}
             >
-              <TableIcon name="x" />
+              <Icon name="x" class="table-icon-svg" />
             </TableActionButton>
           </div>
         {/each}
@@ -111,7 +110,7 @@
       <div class="pricing-override-row-actions">
         <button
           type="button"
-          class="pagination-btn pagination-btn-with-icon"
+          class="btn btn-with-icon"
           onclick={() => po.addModelPricingOverrideRow()}
         >
           <Icon name="plus" class="form-action-icon" />
@@ -151,13 +150,13 @@
       {/if}
 
       <div class="form-actions">
-        <button type="button" class="pagination-btn" onclick={() => po.closeModelPricingOverrideForm()}>
+        <button type="button" class="btn" onclick={() => po.closeModelPricingOverrideForm()}>
           Cancel
         </button>
         {#if po.modelPricingOverrideFormHasExistingOverride}
           <button
             type="button"
-            class="pagination-btn pagination-btn-danger-outline"
+            class="btn btn-danger-outline"
             disabled={po.modelPricingOverrideSubmitting}
             onclick={() => po.deleteModelPricingOverride()}
           >
@@ -166,7 +165,7 @@
         {/if}
         <button
           type="submit"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon model-pricing-submit-btn"
+          class="btn btn-primary btn-with-icon model-pricing-submit-btn"
           disabled={po.modelPricingOverrideSubmitting}
         >
           <Icon name="save" class="form-action-icon" />
@@ -178,7 +177,6 @@
 </Modal>
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
 .pricing-override-rows {
     display: grid;
     gap: 12px;

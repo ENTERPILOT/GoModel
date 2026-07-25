@@ -34,7 +34,7 @@
     mcpOverviewSummaryText,
   } from "./mcpOverviewLogic.js";
   import { providerStatusState, mcpServersState } from "./overviewState.svelte.js";
-  import { resolveColor } from "./chartStyle.js";
+  import { resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
 
   const summary = $derived(usageData.summary);
   const cacheOverview = $derived(usageData.cacheOverview);
@@ -191,7 +191,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .provider-status-flag {
     grid-column: span 2;
   }

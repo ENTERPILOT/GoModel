@@ -66,7 +66,6 @@
 {/if}
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .auth-dialog-backdrop {
     position: fixed;
     inset: 0;
@@ -107,10 +106,6 @@
     overflow: auto;
     overscroll-behavior: contain;
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
-  }
-
-  .editor-modal-shell.editor-modal-shell-wide > :global(*) {
-    width: min(1080px, 100%);
   }
 
   @media (max-width: 768px) {

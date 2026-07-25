@@ -190,7 +190,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .budget-bar-text-row-on-fill {
     color: #fff;
     clip-path: inset(0 calc(100% - var(--budget-progress, 0%)) 0 0);

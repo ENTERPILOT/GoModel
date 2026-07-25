@@ -45,7 +45,7 @@
       <div class="form-actions">
         <button
           type="submit"
-          class="pagination-btn pagination-btn-primary"
+          class="btn btn-primary"
           disabled={store.labelsEditor.submitting}
         >{store.labelsEditor.submitting ? "Saving..." : "Save Labels"}</button>
       </div>

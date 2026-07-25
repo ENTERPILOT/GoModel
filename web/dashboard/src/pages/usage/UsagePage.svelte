@@ -69,7 +69,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* Usage page: the Tokens/Costs toggle shares the sticky bar with the date
      picker so both stay reachable while scrolling. */
   .usage-sticky-controls {

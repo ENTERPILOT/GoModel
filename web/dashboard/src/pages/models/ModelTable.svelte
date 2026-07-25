@@ -1,6 +1,7 @@
 <script>
   // Grouped models table for the active category — one component that
   // switches its columns per category.
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { virtualModels } from "./virtualModels.svelte.js";
@@ -12,7 +13,6 @@
     modelOverrideEditButtonLabel,
   } from "./virtualModelsLogic.js";
   import AccessToggle from "./AccessToggle.svelte";
-  import TableIcon from "./TableIcon.svelte";
   import ModelGlobalActions from "./ModelGlobalActions.svelte";
   import ModelRow from "./ModelRow.svelte";
   import { categoryColumns, categoryColspan } from "./categoryColumns.js";
@@ -66,7 +66,7 @@
                     class="table-icon-btn {pricingOverrides.modelPricingButtonClass(pricingOverrides.hasProviderPricingOverride(group))}"
                     onclick={() => pricingOverrides.openProviderPricingOverrideEdit(group)}
                   >
-                    <TableIcon name="dollar" />
+                    <Icon name="circle-dollar-sign" class="table-icon-svg" />
                   </TableActionButton>
                 {/if}
                 {#if rateLimits.rateLimitsEnabled() && group.provider_name}
@@ -75,7 +75,7 @@
                     class="table-icon-btn {rateLimits.rateLimitGaugeClassForProvider(group)}"
                     onclick={() => rateLimits.openRateLimitInspectorForProvider(group)}
                   >
-                    <TableIcon name="gauge" />
+                    <Icon name="gauge" class="table-icon-svg" />
                   </TableActionButton>
                 {/if}
                 {#if virtualModels.virtualModelsAvailable && group.access.selector}
@@ -84,7 +84,7 @@
                     class="table-icon-btn {modelOverrideEditButtonClass(hasAccessOverride(group.access))}"
                     onclick={() => virtualModels.openProviderOverrideEdit(group)}
                   >
-                    <TableIcon name="edit" />
+                    <Icon name="pencil" class="table-icon-svg" />
                   </TableActionButton>
                 {/if}
               </div>
@@ -100,7 +100,6 @@
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   .provider-group-row :global(td) {
     background: color-mix(in srgb, var(--accent) 6%, var(--bg));
     padding-top: 12px;

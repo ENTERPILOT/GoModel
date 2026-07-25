@@ -1,17 +1,12 @@
 <script>
   // Page-level data filters: every widget on the usage page follows them.
   // Each facet dropdown honors every filter except its own (faceted search).
-  import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import { debounced } from "$lib/utils/debounce.js";
   import { usagePage } from "./usage.svelte.js";
 
-  let userPathDebounce = null;
-
-  function onUserPathInput() {
-    clearTimeout(userPathDebounce);
-    userPathDebounce = setTimeout(() => usagePage.onUsageFilterChanged(), 300);
-  }
-
-  $effect(() => () => clearTimeout(userPathDebounce));
+  const onUserPathInput = debounced(() => usagePage.onUsageFilterChanged());
+  $effect(() => onUserPathInput.cancel);
 </script>
 
 <div class="usage-page-filters" role="group" aria-label="Usage data filters">
@@ -50,21 +45,16 @@
       {/each}
     </select>
   {/if}
-  <div class="filter-input-wrap usage-page-filters-user-path">
-    <Icon name="search" class="filter-input-icon" />
-    <input
-      type="text"
-      placeholder="User path /team/alpha"
-      aria-label="Filter by user path"
-      bind:value={usagePage.usageFilterUserPath}
-      oninput={onUserPathInput}
-      class="filter-input"
-    />
-  </div>
+  <FilterInput
+    class="usage-page-filters-user-path"
+    placeholder="User path /team/alpha"
+    label="Filter by user path"
+    bind:value={usagePage.usageFilterUserPath}
+    oninput={onUserPathInput}
+  />
 </div>
 
 <style>
-  /* Styles owned by this component (moved from dashboard.css). */
   /* Page-level filter bar under the Usage Analytics header. Every widget on the
      page (cards, charts, request log) follows these filters. */
   .usage-page-filters {
@@ -78,14 +68,17 @@
     flex: 0 1 auto;
   }
 
-  .usage-page-filters-user-path {
+  /* The modifier class rides on FilterInput's own wrapper, so it has to be
+     reached through :global from here. */
+  .usage-page-filters :global(.usage-page-filters-user-path) {
     flex: 1 1 220px;
     min-width: 180px;
     max-width: 360px;
   }
 
   @media (max-width: 768px) {
-    .usage-page-filters :global(.usage-log-select), .usage-page-filters-user-path {
+    .usage-page-filters :global(.usage-log-select),
+    .usage-page-filters :global(.usage-page-filters-user-path) {
         flex: 1 1 100%;
         max-width: none;
       }

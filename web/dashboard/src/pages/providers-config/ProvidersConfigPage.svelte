@@ -3,6 +3,7 @@
   // (/admin/provider-credentials).
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
@@ -36,7 +37,7 @@
       {#if providersConfig.available && !auth.needsAuth}
         <button
           type="button"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+          class="btn btn-primary btn-with-icon"
           disabled={providersConfig.formSubmitting}
           onclick={() => providersConfig.openCreate()}
         >
@@ -60,17 +61,12 @@
   {#if (providersConfig.rows.length > 0 || providersConfig.filter) && providersConfig.available && !auth.needsAuth}
     <div class="table-toolbar">
       <div class="table-toolbar-main">
-        <div class="filter-input-wrap">
-          <Icon name="search" class="filter-input-icon" />
-          <input
-            type="text"
-            id="provider-credential-filter"
-            class="filter-input"
-            placeholder="Filter by name, type, or base URL..."
-            aria-label="Filter providers by name, type, or base URL"
-            bind:value={providersConfig.filter}
-          />
-        </div>
+        <FilterInput
+          id="provider-credential-filter"
+          placeholder="Filter by name, type, or base URL..."
+          label="Filter providers by name, type, or base URL"
+          bind:value={providersConfig.filter}
+        />
       </div>
     </div>
   {/if}

@@ -108,7 +108,7 @@
         <div class="failover-target-actions">
           <button
             type="button"
-            class="pagination-btn pagination-btn-with-icon"
+            class="btn btn-with-icon"
             onclick={() => mcpServers.addHeader()}
           >
             <Icon name="plus" class="form-action-icon" />
@@ -205,10 +205,10 @@
       </details>
 
       <div class="form-actions">
-        <button type="button" class="pagination-btn" onclick={() => mcpServers.closeForm()}>Cancel</button>
+        <button type="button" class="btn" onclick={() => mcpServers.closeForm()}>Cancel</button>
         <button
           type="submit"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+          class="btn btn-primary btn-with-icon"
           disabled={mcpServers.formSubmitting}
         >
           <Icon name="save" class="form-action-icon" />

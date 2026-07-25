@@ -2,9 +2,9 @@
 // needs). The card is hidden entirely when the feature is unavailable or no
 // servers are configured.
 
-export function mcpServerStatus(server) {
-  return String((server && server.status) || "").trim() || "connecting";
-}
+import { mcpServerStatus } from "../mcp-servers/mcp-servers.js";
+
+export { mcpServerStatus };
 
 function mcpOverviewTotal(servers) {
   return (servers || []).length;

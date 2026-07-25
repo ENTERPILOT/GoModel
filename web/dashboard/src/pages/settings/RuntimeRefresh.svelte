@@ -64,7 +64,7 @@
   <div class="settings-refresh-actions">
     <button
       type="button"
-      class="pagination-btn pagination-btn-primary pagination-btn-with-icon settings-refresh-btn"
+      class="btn btn-primary btn-with-icon settings-refresh-btn"
       class:is-refreshing={loading}
       disabled={loading}
       aria-busy={loading ? "true" : "false"}
@@ -89,7 +89,6 @@
 </div>
 
 <style>
-/* Styles owned by this component (moved from dashboard.css). */
 .settings-refresh-icon {
     width: 16px;
     height: 16px;

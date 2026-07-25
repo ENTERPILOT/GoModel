@@ -2,8 +2,8 @@
   // One target row of the virtual-model editor. The primary target and the
   // extra {#each} rows share this shape; two or more rows make the redirect
   // a load balancer (weights show only for round-robin).
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
-  import TableIcon from "./TableIcon.svelte";
   import { virtualModels as vm } from "./virtualModels.svelte.js";
 
   let {
@@ -47,7 +47,7 @@
       onclick={onremove}
       disabled={vm.vmFormManaged}
     >
-      <TableIcon name="trash" />
+      <Icon name="trash-2" class="table-icon-svg" />
     </TableActionButton>
   {/if}
 </div>
