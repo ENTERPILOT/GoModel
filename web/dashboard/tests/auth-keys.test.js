@@ -172,6 +172,20 @@ test("authKeyActive re-checks expiration locally on top of the backend flag", ()
   assert.equal(authKeyActive(authKey({ active: true, expires_at: "2026-07-25T11:00:00Z" }), NOW), false);
 });
 
+test("authKeyActive never reports a deactivated key as active", () => {
+  // A payload claiming active:true alongside deactivation would otherwise be
+  // shown by the filter while sorting ranked it with the deactivated keys.
+  const byTimestamp = authKey({ active: true, deactivated_at: "2026-07-01T00:00:00Z" });
+  const byFlag = authKey({ active: true, enabled: false });
+  assert.equal(authKeyActive(byTimestamp, NOW), false);
+  assert.equal(authKeyActive(byFlag, NOW), false);
+
+  const keys = [authKey({ id: "live", name: "live" }), byTimestamp, byFlag];
+  assert.deepEqual(filterAuthKeys(keys, { now: NOW }).map((k) => k.name), ["live"]);
+  assert.equal(countInactiveAuthKeys(keys, NOW), 2);
+  assert.equal(sortAuthKeys(keys, NOW)[0].name, "live");
+});
+
 test("filterAuthKeys hides inactive keys unless they are requested", () => {
   const keys = [
     authKey({ id: "live", name: "live" }),

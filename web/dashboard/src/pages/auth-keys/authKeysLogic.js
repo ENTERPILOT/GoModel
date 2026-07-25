@@ -123,11 +123,11 @@ export function authKeyDeactivated(key) {
   return Boolean(key.deactivated_at) || key.enabled === false;
 }
 
-// authKeyActive mirrors the backend's `active` flag but re-checks expiration
-// locally, so a key that expires while the page is open stops counting as
-// active without a refetch.
+// authKeyActive mirrors the backend's `active` flag but re-derives the two
+// inputs it can check locally — deactivation and expiration — so visibility
+// and sort ranking always agree even if a payload contradicts itself.
 export function authKeyActive(key, now = Date.now()) {
-  if (!key || key.active === false) {
+  if (!key || key.active === false || authKeyDeactivated(key)) {
     return false;
   }
   return !authKeyExpired(key, now);
