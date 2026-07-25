@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/admin"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -145,7 +146,9 @@ func setupBudgetE2EFixture(t *testing.T, budgets []budget.Budget) *budgetE2EFixt
 	usageStore, err := usage.NewSQLiteStore(db, 0)
 	require.NoError(t, err)
 
-	budgetStore, err := budget.NewSQLiteStore(db)
+	budgetDB, err := sqlx.NewSQLite(db)
+	require.NoError(t, err)
+	budgetStore, err := budget.NewSQLStore(context.Background(), budgetDB)
 	require.NoError(t, err)
 
 	service, err := budget.NewService(context.Background(), budgetStore)

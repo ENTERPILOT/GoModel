@@ -2,16 +2,15 @@ package budget
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 type Result struct {
@@ -95,10 +94,10 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 }
 
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {
-	return storage.ResolveBackend[Store](
+	return storage.ResolveSQLBackend[Store](
+		ctx,
 		store,
-		func(db *sql.DB) (Store, error) { return NewSQLiteStore(db) },
-		func(pool *pgxpool.Pool) (Store, error) { return NewPostgreSQLStore(ctx, pool) },
+		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
 		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(ctx, db) },
 	)
 }
