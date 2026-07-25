@@ -45,6 +45,24 @@ jobs:
   go-tests:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    # One store implementation now serves SQLite and PostgreSQL, so the store
+    # suites run against both. Without this service GOMODEL_TEST_POSTGRES_URL
+    # is unset, every PostgreSQL subtest skips, and CI stays green while
+    # covering only SQLite.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: gomodel
+          POSTGRES_PASSWORD: gomodel
+          POSTGRES_DB: gomodel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gomodel -d gomodel"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     strategy:
       fail-fast: false
       matrix:
@@ -69,6 +87,10 @@ jobs:
 
       - name: Run tests
         run: ${{ matrix.cmd }}
+        env:
+          # Deliberately not POSTGRES_URL: the suite creates and drops schemas,
+          # so pointing it at a configured application database is opt-in.
+          GOMODEL_TEST_POSTGRES_URL: postgres://gomodel:gomodel@localhost:5432/gomodel
 
       - name: Upload coverage
         if: matrix.coverage

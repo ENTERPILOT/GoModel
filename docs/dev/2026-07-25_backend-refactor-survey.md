@@ -69,22 +69,22 @@ keys through two independently written migrations, only one of them verified.
 | Phase | Work | Status |
 |---|---|---|
 | 1 | `internal/storage/sqlx` adapter + conformance suite | done |
-| 2 | Migrate stores to one implementation | **15 of 17 domains** |
+| 2 | Migrate stores to one implementation | **16 of 17 domains** |
 | 3 | Single storage connection; delete the duplicate constructors | done |
 | 4 | `Shutdown` → ordered closer list | done |
 | 5 | Small cleanups | partly; see §7 |
 
-Net across the branch: **120 files changed, +7,990 / −9,334**.
+Net across the branch: **130 files changed, +8,460 / −10,470**.
 
 | | before | after |
 |---|---:|---:|
-| SQLite store code | 5,570 | 2,079 |
-| PostgreSQL store code | 5,015 | 1,847 |
-| Unified `store_sql*.go` | — | 3,953 |
-| `internal/storage/sqlx` | — | 789 |
-| Factories | 2,232 | 1,763 |
+| SQLite store code | 5,570 | 1,705 |
+| PostgreSQL store code | 5,015 | 1,448 |
+| Unified `store_sql*.go` | — | 3,948 |
+| `internal/storage/sqlx` | — | 820 |
+| Factories | 2,232 | 1,762 |
 
-**PostgreSQL subtests executing against a real database: 0 → 86.**
+**PostgreSQL subtests executing against a real database: 0 → 91.**
 
 ## 5. The adapter
 
@@ -151,13 +151,30 @@ several now do (`guardrails`, `mcpgateway`, `failover`, `ratelimit`,
 
 ## 7. What is deliberately not done
 
-- **`usage` and `auditlog` (2 of 17 domains).** Their readers are the one place
-  where the divergence is real analytics SQL — 7 SQLite date-function sites vs
-  6 PostgreSQL ones for bucketing and grouping — not mechanical duplication.
-  Their *stores* are mechanical (`auditlog`'s write path has zero
-  dialect-specific constructs) and remain a straightforward follow-up; the
-  readers deserve a deliberate decision about whether a shared query builder is
-  worth it, or whether two honest implementations are the right answer.
+- **The `usage` store, and both analytics readers.**
+
+  The readers (`usage` 1,376 lines, `auditlog` 892) are the one place where the
+  divergence is real analytics SQL — 7 SQLite date-function sites versus 6
+  PostgreSQL ones for bucketing and grouping — not mechanical duplication. They
+  deserve a deliberate decision about whether a shared query builder beats two
+  honest implementations.
+
+  The **`usage` store** was scoped as mechanical and is not, which is worth
+  recording because the estimate came from counting dialect-specific constructs
+  in the store file alone and that missed two couplings:
+
+  1. `RecalculatePricing` is a store method whose row queries are built by the
+     *reader's* `sqliteUsageConditions` / `pgUsageConditions`. Unifying the
+     store without the reader means keeping a dialect switch that reaches into
+     reader internals.
+  2. The two implementations differ **semantically, not syntactically**: SQLite
+     paginates by `id > lastID` in batches of 500, while PostgreSQL selects
+     every matching row in one statement with `FOR UPDATE` row locking. Those
+     are different memory and locking profiles, and picking one would change
+     behaviour on the other engine.
+
+  So `usage` should follow its reader rather than lead it. `auditlog`'s store,
+  which had no such coupling, was migrated.
 - **`CacheModeCached` set in four places** (F6a). Removing the handler's copy
   in favour of reader ownership breaks three admin tests that assert it through
   a *stub* reader; with the readers still split and not uniformly tested, that
@@ -185,8 +202,9 @@ Every commit passed the full pre-commit gate: `make test-race`, `make lint`
 and `make fix-check` across all build tags
 (`swagger,e2e,integration,contract`). Beyond that:
 
-- The whole suite was run with `GOMODEL_TEST_POSTGRES_URL` pointed at a live
-  PostgreSQL 18, so all 86 PostgreSQL subtests execute rather than skip.
+- CI runs a `postgres:18-alpine` service and sets
+  `GOMODEL_TEST_POSTGRES_URL`, so all 91 PostgreSQL subtests execute there
+  rather than skip.
 - The built binary was smoke-tested on both backends: boot, `/health`, an
   auth-gated `/v1/models`, and graceful shutdown. This is what caught the
   `workflow_versions` schema break, which no unit test could have.
