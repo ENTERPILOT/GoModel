@@ -223,6 +223,30 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
   return { primary, advanced };
 }
 
+// Form values that identify the provider rather than configure its type, so a
+// change of type leaves them alone.
+const IDENTITY_FIELDS = new Set(["name", "type", "enabled"]);
+
+// resetProviderCredentialFields puts every value the given fields do not
+// render back to its default. Changing type changes which fields exist, and
+// buildProviderCredentialPayload deliberately echoes back values the form does
+// not render — right when editing a stored row, wrong for something typed
+// under the type just abandoned, which would reach the gateway with nothing on
+// screen to explain it.
+export function resetProviderCredentialFields(form, fields) {
+  const rendered = new Set(
+    [...(fields.primary || []), ...(fields.advanced || [])].map((field) => field.name),
+  );
+  const blank = defaultProviderCredentialForm();
+  const next = { ...form };
+  for (const name of Object.keys(blank)) {
+    if (!IDENTITY_FIELDS.has(name) && !rendered.has(name)) {
+      next[name] = blank[name];
+    }
+  }
+  return next;
+}
+
 // providerCredentialAuthLabel infers the auth mode of a row from which
 // credential fields are populated.
 export function providerCredentialAuthLabel(row) {

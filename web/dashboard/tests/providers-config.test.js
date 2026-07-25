@@ -18,6 +18,7 @@ import {
   suggestProviderCredentialName,
   splitCommaList,
   providerCredentialRowToForm,
+  resetProviderCredentialFields,
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
 } from "../src/pages/providers-config/providersConfigLogic.js";
@@ -116,6 +117,35 @@ test("a stored value the form does not render is sent back, not dropped", () => 
   assert.equal(body.api_version, "2024-10-01-preview");
   // Empty non-schema fields stay out of the payload.
   assert.equal("vertex_project" in body, false);
+});
+
+// Switching type in the create form must not leave the abandoned type's
+// values behind: the payload echoes back unrendered values, so they would
+// reach the gateway with nothing on screen to explain them.
+test("changing type drops the values the new type does not render", () => {
+  const typedForGemini = {
+    ...defaultProviderCredentialForm(),
+    name: "my-openai",
+    type: "openai",
+    api_keys: [{ value: "sk-live" }],
+    vertex_project: "left-over",
+    service_account_json: '{"type":"service_account"}',
+    models: "gpt-4o",
+  };
+
+  const form = resetProviderCredentialFields(
+    typedForGemini,
+    providerCredentialFormFields(OPENAI_SCHEMA),
+  );
+
+  assert.equal(form.vertex_project, "");
+  assert.equal(form.service_account_json, "");
+  // Identity and the fields OpenAI does render survive.
+  assert.equal(form.name, "my-openai");
+  assert.equal(form.type, "openai");
+  assert.equal(form.models, "gpt-4o");
+  assert.deepEqual(form.api_keys, [{ value: "sk-live" }]);
+  assert.equal("vertex_project" in buildProviderCredentialPayload(form, OPENAI_SCHEMA), false);
 });
 
 test("an unavailable schema falls back to sending every field", () => {

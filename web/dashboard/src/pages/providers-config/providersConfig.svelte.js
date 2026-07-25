@@ -17,6 +17,7 @@ import {
   providerCredentialFormFields,
   providerCredentialRowToForm,
   providerCredentialSchema,
+  resetProviderCredentialFields,
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
 } from "./providersConfigLogic.js";
@@ -168,13 +169,20 @@ class ProvidersConfigState {
   }
 
   // selectType reacts to a change of provider type: the form's shape changes
-  // with it, so stale complaints about the previous type's fields go, and a
+  // with it, so complaints and values belonging to the previous type go, and a
   // type that authenticates with a key opens with a row ready to paste into
   // rather than an "Add key" button the operator has to find first.
+  //
+  // Only creating clears: an existing provider's type is immutable, and there
+  // the payload's echo of unrendered values is what keeps a stored setting the
+  // form cannot show from being wiped.
   selectType() {
     this.fieldErrors = {};
-    const { primary } = this.formFields;
-    const apiKeys = primary.find((field) => field.name === "api_keys");
+    const fields = this.formFields;
+    if (this.formMode === "create") {
+      this.form = resetProviderCredentialFields(this.form, fields);
+    }
+    const apiKeys = fields.primary.find((field) => field.name === "api_keys");
     if (apiKeys && apiKeys.required && this.form.api_keys.length === 0) {
       this.form.api_keys = [{ value: "" }];
     }

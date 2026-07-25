@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -28,65 +29,82 @@ func fieldNames(schema CredentialSchema) []string {
 	return names
 }
 
+// The discovery flags a provider already declares for env/YAML resolution
+// decide its form, so the two can never disagree about what a type needs.
 func TestCredentialSchemas_DerivesTheFormFromDiscoveryFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		spec     DiscoveryConfig
+		fields   []string
+		required []string
+		advanced []string
+	}{
+		{
+			name:     "an API key against one endpoint",
+			spec:     DiscoveryConfig{DefaultBaseURL: "https://api.example.com/v1"},
+			fields:   []string{"api_keys", "base_url", "models"},
+			required: []string{"api_keys"},
+			// Nothing else to configure once the key is filled in.
+			advanced: []string{"base_url", "models"},
+		},
+		{
+			name:     "keyless",
+			spec:     DiscoveryConfig{DefaultBaseURL: "http://localhost:11434", AllowAPIKeyless: true},
+			fields:   []string{"api_keys", "base_url", "models"},
+			required: nil,
+			// With no key to fill in, the endpoint is the configuration.
+			advanced: []string{"models"},
+		},
+		{
+			name:     "an endpoint the operator must name",
+			spec:     DiscoveryConfig{RequireBaseURL: true, SupportsAPIVersion: true},
+			fields:   []string{"api_keys", "base_url", "api_version", "models"},
+			required: []string{"api_keys", "base_url"},
+			advanced: []string{"models"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schema := credentialSchema("under-test", tt.spec)
+
+			if got := fieldNames(schema); !equalStrings(got, tt.fields) {
+				t.Fatalf("fields = %v, want %v", got, tt.fields)
+			}
+			if schema.DefaultBaseURL != tt.spec.DefaultBaseURL {
+				t.Errorf("DefaultBaseURL = %q, want %q", schema.DefaultBaseURL, tt.spec.DefaultBaseURL)
+			}
+			for _, field := range schema.Fields {
+				if want := slices.Contains(tt.required, field.Name); field.Required != want {
+					t.Errorf("%s.Required = %v, want %v", field.Name, field.Required, want)
+				}
+				if want := slices.Contains(tt.advanced, field.Name); field.Advanced != want {
+					t.Errorf("%s.Advanced = %v, want %v", field.Name, field.Advanced, want)
+				}
+			}
+			// A plain provider type is offered none of Google's auth fields.
+			if schema.Accepts(CredentialFieldVertexProject) {
+				t.Error("Accepts(vertex_project) = true, want false")
+			}
+		})
+	}
+}
+
+// CredentialSchemas covers every registered type, ordered by name so a type
+// picker is stable.
+func TestCredentialSchemas_CoversEveryTypeInOrder(t *testing.T) {
 	factory := schemaTestFactory(t, map[string]DiscoveryConfig{
-		"keyed":    {DefaultBaseURL: "https://api.example.com/v1"},
-		"keyless":  {DefaultBaseURL: "http://localhost:11434", AllowAPIKeyless: true},
-		"endpoint": {RequireBaseURL: true, SupportsAPIVersion: true},
+		"keyed":    {},
+		"keyless":  {AllowAPIKeyless: true},
+		"endpoint": {RequireBaseURL: true},
 	})
 
-	schemas := factory.CredentialSchemas()
-	if len(schemas) != 3 {
-		t.Fatalf("CredentialSchemas() returned %d schemas, want 3", len(schemas))
+	var types []string
+	for _, schema := range factory.CredentialSchemas() {
+		types = append(types, schema.Type)
 	}
-	// Sorted by type name, so a dashboard's type picker is stable.
-	if schemas[0].Type != "endpoint" || schemas[1].Type != "keyed" || schemas[2].Type != "keyless" {
-		t.Fatalf("schema order = %q/%q/%q, want endpoint/keyed/keyless", schemas[0].Type, schemas[1].Type, schemas[2].Type)
-	}
-
-	byType := map[string]CredentialSchema{}
-	for _, schema := range schemas {
-		byType[schema.Type] = schema
-	}
-
-	keyed := byType["keyed"]
-	if got, want := fieldNames(keyed), []string{"api_keys", "base_url", "models"}; !equalStrings(got, want) {
-		t.Errorf("keyed fields = %v, want %v", got, want)
-	}
-	if keyed.DefaultBaseURL != "https://api.example.com/v1" {
-		t.Errorf("keyed DefaultBaseURL = %q, want the registration's default", keyed.DefaultBaseURL)
-	}
-	apiKeys, _ := keyed.Field(CredentialFieldAPIKeys)
-	if !apiKeys.Required {
-		t.Error("api_keys.Required = false for a keyed provider type, want true")
-	}
-	// Nothing else to configure once the key is filled in, so the base URL
-	// folds away.
-	baseURL, _ := keyed.Field(CredentialFieldBaseURL)
-	if !baseURL.Advanced || baseURL.Required {
-		t.Errorf("keyed base_url = %+v, want optional and advanced", baseURL)
-	}
-
-	keylessAPIKeys, _ := byType["keyless"].Field(CredentialFieldAPIKeys)
-	if keylessAPIKeys.Required {
-		t.Error("api_keys.Required = true for an AllowAPIKeyless type, want false")
-	}
-	// With no key to fill in, the endpoint is the whole configuration.
-	keylessBaseURL, _ := byType["keyless"].Field(CredentialFieldBaseURL)
-	if keylessBaseURL.Advanced {
-		t.Error("keyless base_url.Advanced = true, want it shown up front")
-	}
-
-	endpoint := byType["endpoint"]
-	if got, want := fieldNames(endpoint), []string{"api_keys", "base_url", "api_version", "models"}; !equalStrings(got, want) {
-		t.Errorf("endpoint fields = %v, want %v", got, want)
-	}
-	endpointBaseURL, _ := endpoint.Field(CredentialFieldBaseURL)
-	if !endpointBaseURL.Required {
-		t.Error("base_url.Required = false for a RequireBaseURL type, want true")
-	}
-	if endpoint.Accepts("vertex_project") {
-		t.Error("Accepts(vertex_project) = true for a plain endpoint type, want false")
+	if want := []string{"endpoint", "keyed", "keyless"}; !equalStrings(types, want) {
+		t.Errorf("schema types = %v, want %v", types, want)
 	}
 }
 
