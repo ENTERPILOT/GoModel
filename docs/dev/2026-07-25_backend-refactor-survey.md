@@ -137,6 +137,18 @@ Recording these because each marks a real gap, not just a fixed bug.
    `EXTRACT(EPOCH FROM ...)` conversion in `NewSQLStore`, plus a test starting
    from the legacy shape.
 
+   **Two consequences operators need to know.** The conversion keeps the
+   instant but not the representation: a workflow's `created_at` in
+   `GET /admin/workflows` loses sub-second precision and renders as UTC
+   (`2026-07-25T14:04:29.08001+02:00` becomes `2026-07-25T12:04:29Z`). Nothing
+   depends on the lost precision — `active` is enforced by a unique partial
+   index, so the one `ORDER BY created_at DESC ... LIMIT 1` query cannot tie —
+   and this is the granularity SQLite always had. And the conversion is
+   **one-way**: once the new binary has started against a PostgreSQL database,
+   an older binary rolled back onto it fails at startup with `cannot scan int8
+   (OID 20) in binary format into *time.Time`. Roll back by restoring a dump
+   taken before the upgrade, not by swapping the binary.
+
 3. **A nil-handling bug in the new shutdown ordering.** `closerOf` initially
    handled typed-nil `*Result` but not a nil `storage.Storage` interface, which
    reflect reports as *invalid* rather than as a nil pointer. An existing
@@ -208,6 +220,17 @@ and `make fix-check` across all build tags
 - The built binary was smoke-tested on both backends: boot, `/health`, an
   auth-gated `/v1/models`, and graceful shutdown. This is what caught the
   `workflow_versions` schema break, which no unit test could have.
+- The full release matrix (`tests/e2e/release-e2e-scenarios.md`, 196 scenarios
+  over six gateways and real provider upstreams) passed with no failures and no
+  skips, as did `tests/e2e/test-iac-virtualmodels.sh` (19 checks) and the
+  dashboard suite (331 tests).
+- **An upgrade harness** (`tests/e2e/upgrade-compat.sh`) boots the `main` binary against an empty database,
+  writes a row through every store domain, restarts it so the snapshot comes
+  from storage rather than from the caches the writes populated, then boots
+  this branch on the same database. All 17 domain reads come back identical and
+  every domain still accepts writes, on SQLite, PostgreSQL and MongoDB. This is
+  what established the `created_at` representation change and the one-way
+  migration in §6.2 — a fresh-schema conformance suite sees neither.
 
 **To run the PostgreSQL half locally:**
 
