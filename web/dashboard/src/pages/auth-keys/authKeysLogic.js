@@ -103,6 +103,4 @@ export function buildCreateAuthKeyPayload(form) {
 
 
 // Label chips share the dashboard-wide palette and chip styling.
-import { labelChipStyle, labelColor } from "../../lib/utils/chartTheme.js";
-
-export { labelChipStyle, labelColor };
+export { labelChipStyle, labelColor } from "../../lib/utils/chartTheme.js";

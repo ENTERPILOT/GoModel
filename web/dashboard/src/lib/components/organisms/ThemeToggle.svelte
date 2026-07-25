@@ -16,13 +16,17 @@
   const activeTheme = $derived(
     themes.find((t) => t.value === themeStore.theme) || themes[1],
   );
+  // The narrow button cycles rather than selects, so it is named for the
+  // action it performs and carries the current theme as context.
+  const cycleLabel = $derived("Change theme (currently " + activeTheme.label + ")");
 </script>
 
-<div class="theme-toggle" class:is-compact={compact}>
+<div class="theme-toggle" class:is-compact={compact} role="group" aria-label="Theme">
   {#each themes as theme (theme.value)}
     <button
       class="theme-btn"
       class:active={themeStore.theme === theme.value}
+      aria-pressed={themeStore.theme === theme.value}
       onclick={() => themeStore.set(theme.value)}
       title={theme.label}
       aria-label={theme.label}
@@ -35,8 +39,8 @@
   class="theme-toggle-mobile"
   class:is-compact={compact}
   onclick={() => themeStore.toggle()}
-  title={activeTheme.label}
-  aria-label={activeTheme.label}
+  title={cycleLabel}
+  aria-label={cycleLabel}
 >
   <Icon name={activeTheme.icon} class="theme-icon" />
 </button>

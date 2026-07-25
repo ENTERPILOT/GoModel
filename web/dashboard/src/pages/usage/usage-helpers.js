@@ -336,6 +336,4 @@ export function chartWrapHeight(labelCount) {
 
 // --- Label chips ---
 
-import { labelColor } from "../../lib/utils/chartTheme.js";
-
-export { labelColor };
+export { labelColor } from "../../lib/utils/chartTheme.js";

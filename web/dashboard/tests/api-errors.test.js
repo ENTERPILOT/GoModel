@@ -16,6 +16,12 @@ test("errorPayloadMessage falls back on any other shape", () => {
   }
 });
 
+test("errorPayloadMessage trims, and treats blank as absent like errorMessage", () => {
+  assert.equal(errorPayloadMessage({ error: { message: "  boom  " } }, "fallback"), "boom");
+  assert.equal(errorPayloadMessage({ error: { message: "   " } }, "fallback"), "fallback");
+  assert.equal(errorPayloadMessage({ error: { message: "" } }, "fallback"), "fallback");
+});
+
 test("errorMessage reads the result envelope, preferring message over error", () => {
   assert.equal(errorMessage({ data: { message: "  boom  " } }, "fallback"), "boom");
   assert.equal(errorMessage({ data: { error: "flat error" } }, "fallback"), "flat error");

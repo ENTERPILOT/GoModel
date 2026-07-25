@@ -9,8 +9,9 @@
   class="empty-state-icon"
   viewBox="0 0 220 262"
   fill="none"
-  role="img"
-  aria-label={label || "No data"}
+  role={label ? "img" : undefined}
+  aria-label={label || undefined}
+  aria-hidden={label ? undefined : "true"}
   xmlns="http://www.w3.org/2000/svg"
 >
   <!-- GoModel hexagon mark: sharp mitered edges like the logotype -->

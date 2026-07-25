@@ -89,7 +89,8 @@ so reactive reads are tracked and theme changes rebuild automatically.
 
 ### Utils
 
-`format.js` (numbers, costs, tokens, UTC dates, provider/model display) ·
+`format.js` (numbers, costs, tokens, UTC dates and date params, comma lists,
+provider/model display) ·
 `chartTheme.js` (theme colors + the shared Chart.js style fragments) ·
 `clipboard.svelte.js` · `debounce.js` · `storage.js` (localStorage can be
 absent or blocked — never touch it directly) · `api/paths.js` (`gomodelPath`).

@@ -5,7 +5,8 @@
 // errorPayloadMessage pulls {error:{message}} out of a parsed admin payload.
 export function errorPayloadMessage(data, fallback) {
   const message = data && typeof data === "object" && data.error && data.error.message;
-  return typeof message === "string" && message ? message : fallback;
+  const trimmed = typeof message === "string" ? message.trim() : "";
+  return trimmed || fallback;
 }
 
 // errorMessage does the same for a getJSON/sendJSON result envelope, also
