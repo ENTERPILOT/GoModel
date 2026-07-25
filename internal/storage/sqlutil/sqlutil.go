@@ -3,7 +3,6 @@
 package sqlutil
 
 import (
-	"database/sql"
 	"log/slog"
 	"strings"
 	"time"
@@ -65,15 +64,6 @@ func UnixOrNil(value *time.Time) any {
 	return value.UTC().Unix()
 }
 
-// TimeFromUnix converts a nullable Unix timestamp column to a *time.Time.
-func TimeFromUnix(value sql.NullInt64) *time.Time {
-	if !value.Valid {
-		return nil
-	}
-	t := time.Unix(value.Int64, 0).UTC()
-	return &t
-}
-
 // TimeFromUnixPtr converts an optional Unix timestamp to a *time.Time.
 func TimeFromUnixPtr(value *int64) *time.Time {
 	if value == nil {
@@ -124,14 +114,6 @@ func StringsFromJSON(raw string, ref string) []string {
 		return nil
 	}
 	return values
-}
-
-// StringFromNullable converts a nullable text column to a trimmed string.
-func StringFromNullable(value sql.NullString) string {
-	if !value.Valid {
-		return ""
-	}
-	return strings.TrimSpace(value.String)
 }
 
 // DerefTrimmed converts an optional text column to a trimmed string.

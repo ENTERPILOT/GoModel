@@ -118,6 +118,18 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | `MONGODB_URL`        | MongoDB connection string; a database named in its path is used | _(empty)_ |
 | `MONGODB_DATABASE`   | MongoDB database name; overrides the URL path | `gomodel`         |
 
+<Warning>
+  **Upgrading a PostgreSQL deployment past v0.1.59.** The `workflow_versions`
+  table stored `created_at` as `TIMESTAMPTZ` on PostgreSQL and as unix seconds
+  on SQLite. The two are now unified on unix seconds, and the first startup
+  converts the column in place. No manual migration is needed, but the change
+  is one-way: an older binary started against a converted database fails to
+  boot. Take a backup before upgrading if you may need to roll back, and roll
+  back by restoring it rather than by swapping the binary. Workflow
+  `created_at` values are floored to whole seconds and rendered in UTC.
+  SQLite and MongoDB deployments are unaffected.
+</Warning>
+
 #### Audit Logging
 
 | Variable                          | Description                                | Default |

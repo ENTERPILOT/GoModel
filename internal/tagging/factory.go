@@ -2,23 +2,21 @@ package tagging
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
-// Result bundles the tagging service with its store and optional owned storage.
+// Result bundles the tagging service with its store.
 type Result struct {
 	Service *Service
 	Store   Store
-	Storage storage.Storage
 
 	closeOnce sync.Once
 	closeErr  error
@@ -33,11 +31,6 @@ func (r *Result) Close() error {
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
 				errs = append(errs, fmt.Errorf("store close: %w", err))
-			}
-		}
-		if r.Storage != nil {
-			if err := r.Storage.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("storage close: %w", err))
 			}
 		}
 		if len(errs) > 0 {
@@ -66,9 +59,9 @@ func ConfigRules(entries []config.TaggingHeaderConfig) []Rule {
 	return rules
 }
 
-// NewWithSharedStorage builds the tagging service on an existing storage
-// backend and loads the persisted operator rules.
-func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storage.Storage) (*Result, error) {
+// New builds the tagging service on the shared storage connection
+// and loads the persisted operator rules.
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -87,29 +80,11 @@ func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storag
 	return &Result{Service: service, Store: store}, nil
 }
 
-// New builds the tagging service with its own storage connection.
-func New(ctx context.Context, cfg *config.Config) (*Result, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("config is required")
-	}
-	storeConn, err := storage.New(ctx, cfg.Storage.BackendConfig())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create storage: %w", err)
-	}
-	result, err := NewWithSharedStorage(ctx, cfg, storeConn)
-	if err != nil {
-		_ = storeConn.Close()
-		return nil, err
-	}
-	result.Storage = storeConn
-	return result, nil
-}
-
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {
-	return storage.ResolveBackend[Store](
+	return storage.ResolveSQLBackend[Store](
+		ctx,
 		store,
-		func(db *sql.DB) (Store, error) { return NewSQLiteStore(db) },
-		func(pool *pgxpool.Pool) (Store, error) { return NewPostgreSQLStore(ctx, pool) },
+		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
 		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(ctx, db) },
 	)
 }

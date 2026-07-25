@@ -15,6 +15,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
@@ -113,7 +114,9 @@ func TestRateLimitFullySaturatedAliasReturns429_E2E(t *testing.T) {
 	require.NoError(t, err)
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
-	vmStore, err := virtualmodels.NewSQLiteStore(db)
+	vmDB, err := sqlx.NewSQLite(db)
+	require.NoError(t, err)
+	vmStore, err := virtualmodels.NewSQLStore(t.Context(), vmDB)
 	require.NoError(t, err)
 	vmService, err := virtualmodels.NewService(vmStore, registry, true)
 	require.NoError(t, err)

@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/admin"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -30,7 +31,9 @@ func setupRateLimitService(t *testing.T, rules []ratelimit.Rule) *ratelimit.Serv
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 
-	store, err := ratelimit.NewSQLiteStore(db)
+	rateLimitDB, err := sqlx.NewSQLite(db)
+	require.NoError(t, err)
+	store, err := ratelimit.NewSQLStore(context.Background(), rateLimitDB)
 	require.NoError(t, err)
 
 	service, err := ratelimit.NewService(context.Background(), store)

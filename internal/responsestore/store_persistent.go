@@ -8,6 +8,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 const (
@@ -47,13 +48,13 @@ func prepareStoredResponseForStorage(response *StoredResponse, now time.Time, tt
 // scanStoredResponseRow converts one (data, stored_at, expires_at) row into a
 // StoredResponse, mapping the backend's no-rows sentinel to ErrNotFound and
 // treating expired rows as absent.
-func scanStoredResponseRow(row storage.RowScanner, noRows error) (*StoredResponse, error) {
+func scanStoredResponseRow(row sqlx.Row) (*StoredResponse, error) {
 	var (
 		data                string
 		storedAt, expiresAt int64
 	)
 	if err := row.Scan(&data, &storedAt, &expiresAt); err != nil {
-		if errors.Is(err, noRows) {
+		if errors.Is(err, sqlx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("query response snapshot: %w", err)

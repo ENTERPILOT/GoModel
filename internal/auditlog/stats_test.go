@@ -173,7 +173,7 @@ func TestSQLiteReaderGetRequestStats(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

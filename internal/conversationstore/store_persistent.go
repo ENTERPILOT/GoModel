@@ -8,6 +8,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 const (
@@ -58,13 +59,13 @@ func prepareStoredConversationForStorage(conversation *StoredConversation, now t
 // scanStoredConversationRow converts one (data, items, stored_at, expires_at)
 // row into a StoredConversation, mapping the backend's no-rows sentinel to
 // ErrNotFound and treating expired rows as absent.
-func scanStoredConversationRow(row storage.RowScanner, noRows error) (*StoredConversation, error) {
+func scanStoredConversationRow(row sqlx.Row) (*StoredConversation, error) {
 	var (
-		data, items         string
+		data, items         []byte
 		storedAt, expiresAt int64
 	)
 	if err := row.Scan(&data, &items, &storedAt, &expiresAt); err != nil {
-		if errors.Is(err, noRows) {
+		if errors.Is(err, sqlx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("query conversation snapshot: %w", err)
@@ -72,7 +73,7 @@ func scanStoredConversationRow(row storage.RowScanner, noRows error) (*StoredCon
 	if expiresAt > 0 && expiresAt <= time.Now().Unix() {
 		return nil, ErrNotFound
 	}
-	return decodeStoredConversation([]byte(data), []byte(items), storedAt, expiresAt)
+	return decodeStoredConversation(data, items, storedAt, expiresAt)
 }
 
 // decodeStoredConversation deserializes a snapshot and its items and applies

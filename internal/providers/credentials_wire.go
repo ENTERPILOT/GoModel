@@ -2,16 +2,15 @@ package providers
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // CredentialsResult holds the initialized provider-credentials subsystem and
@@ -19,7 +18,6 @@ import (
 type CredentialsResult struct {
 	Service *CredentialsService
 	Store   CredentialStore
-	Storage storage.Storage
 
 	closeOnce sync.Once
 	closeErr  error
@@ -37,11 +35,6 @@ func (r *CredentialsResult) Close() error {
 				errs = append(errs, fmt.Errorf("store close: %w", err))
 			}
 		}
-		if r.Storage != nil {
-			if err := r.Storage.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("storage close: %w", err))
-			}
-		}
 		if len(errs) > 0 {
 			r.closeErr = fmt.Errorf("close errors: %w", errors.Join(errs...))
 		}
@@ -49,28 +42,9 @@ func (r *CredentialsResult) Close() error {
 	return r.closeErr
 }
 
-// NewCredentialsStore creates the provider-credentials subsystem with its own
-// storage connection.
-func NewCredentialsStore(ctx context.Context, cfg *config.Config, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string) (*CredentialsResult, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("config is required")
-	}
-	storeConn, err := storage.New(ctx, cfg.Storage.BackendConfig())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create storage: %w", err)
-	}
-	result, err := newCredentialsResult(ctx, storeConn, factory, registry, declaredNames, cfg.Resilience)
-	if err != nil {
-		_ = storeConn.Close()
-		return nil, err
-	}
-	result.Storage = storeConn
-	return result, nil
-}
-
-// NewCredentialsStoreWithSharedStorage creates the provider-credentials
+// NewCredentialsStore creates the provider-credentials
 // subsystem using an existing storage connection.
-func NewCredentialsStoreWithSharedStorage(ctx context.Context, shared storage.Storage, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig) (*CredentialsResult, error) {
+func NewCredentialsStore(ctx context.Context, shared storage.Storage, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig) (*CredentialsResult, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
@@ -96,10 +70,10 @@ func newCredentialsResult(ctx context.Context, storeConn storage.Storage, factor
 }
 
 func createCredentialStore(ctx context.Context, store storage.Storage) (CredentialStore, error) {
-	return storage.ResolveBackend[CredentialStore](
+	return storage.ResolveSQLBackend[CredentialStore](
+		ctx,
 		store,
-		func(db *sql.DB) (CredentialStore, error) { return NewSQLiteCredentialStore(db) },
-		func(pool *pgxpool.Pool) (CredentialStore, error) { return NewPostgreSQLCredentialStore(ctx, pool) },
+		func(db sqlx.DB) (CredentialStore, error) { return NewSQLCredentialStore(ctx, db) },
 		func(db *mongo.Database) (CredentialStore, error) { return NewMongoDBCredentialStore(db) },
 	)
 }

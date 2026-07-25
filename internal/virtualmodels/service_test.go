@@ -9,7 +9,7 @@ import (
 
 func newTestService(t *testing.T) *Service {
 	t.Helper()
-	svc, err := NewService(newSQLiteVMStore(t), testCatalog(), true)
+	svc, err := NewService(newSQLVMStore(t), testCatalog(), true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -402,7 +402,7 @@ func TestService_PolicyScopePrecedence(t *testing.T) {
 			"openai/gpt-4o": {ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"},
 		},
 	}
-	svc, err := NewService(newSQLiteVMStore(t), catalog, true)
+	svc, err := NewService(newSQLVMStore(t), catalog, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -521,7 +521,7 @@ func TestService_UpsertPrunesOnlyRedundantPolicies(t *testing.T) {
 	})
 
 	t.Run("different from default", func(t *testing.T) {
-		svc, err := NewService(newSQLiteVMStore(t), testCatalog(), false)
+		svc, err := NewService(newSQLVMStore(t), testCatalog(), false)
 		if err != nil {
 			t.Fatalf("NewService() error = %v", err)
 		}
@@ -551,7 +551,7 @@ func TestService_UpsertReplacesPolicyWithRedirect(t *testing.T) {
 	t.Parallel()
 	catalog := testCatalog()
 	catalog.supported["openai/gpt-4o-mini"] = core.Model{ID: "openai/gpt-4o-mini", Object: "model", OwnedBy: "openai"}
-	svc, err := NewService(newSQLiteVMStore(t), catalog, true)
+	svc, err := NewService(newSQLVMStore(t), catalog, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}

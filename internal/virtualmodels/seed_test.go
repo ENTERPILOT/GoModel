@@ -9,7 +9,24 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
+
+// newSeedTargetStore wraps the same SQLite handle the legacy tables live on,
+// so the seed reads and writes one database. The legacy migration only ever
+// ran against SQLite, so this path stays single-dialect.
+func newSeedTargetStore(t *testing.T, db *sql.DB) *SQLStore {
+	t.Helper()
+	wrapped, err := sqlx.NewSQLite(db)
+	if err != nil {
+		t.Fatalf("sqlx.NewSQLite: %v", err)
+	}
+	store, err := NewSQLStore(context.Background(), wrapped)
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	return store
+}
 
 // failingUpsertStore wraps a Store and fails Upsert after failAfter successful
 // writes, to exercise the seed's partial-write rollback.
@@ -104,10 +121,7 @@ func TestSeedFromLegacy_CopiesAndIsIdempotent(t *testing.T) {
 	insertLegacyAlias(t, db, "slow", "gpt-4o-mini", "openai", false)
 	insertLegacyOverride(t, db, "openai/gpt-4o", "openai", "gpt-4o", `["/team"]`)
 
-	vmStore, err := NewSQLiteStore(db)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore() error = %v", err)
-	}
+	vmStore := newSeedTargetStore(t, db)
 	if err := seedFromLegacy(ctx, vmStore, conn); err != nil {
 		t.Fatalf("seedFromLegacy() error = %v", err)
 	}
@@ -158,10 +172,7 @@ func TestSeedFromLegacy_CollisionFailsClosed(t *testing.T) {
 	insertLegacyAlias(t, db, "gpt-4o", "gpt-4o-real", "openai", true)
 	insertLegacyOverride(t, db, "gpt-4o", "", "gpt-4o", `["/team"]`)
 
-	vmStore, err := NewSQLiteStore(db)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore() error = %v", err)
-	}
+	vmStore := newSeedTargetStore(t, db)
 	// A name shared by an alias and an access override must fail the migration
 	// rather than silently dropping the access control.
 	if err := seedFromLegacy(ctx, vmStore, conn); err == nil {
@@ -190,10 +201,7 @@ func TestSeedFromLegacy_RollsBackPartialWriteOnError(t *testing.T) {
 	insertLegacyAlias(t, db, "slow", "gpt-4o-mini", "openai", true)
 	insertLegacyOverride(t, db, "openai/gpt-4o", "openai", "gpt-4o", `["/team"]`)
 
-	vmStore, err := NewSQLiteStore(db)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore() error = %v", err)
-	}
+	vmStore := newSeedTargetStore(t, db)
 	// Fail the second write; the first must be rolled back so the table is left
 	// empty (not partially seeded, which would skip the rest next startup).
 	failing := &failingUpsertStore{Store: vmStore, failAfter: 1}
@@ -214,10 +222,7 @@ func TestSeedFromLegacy_MissingLegacyTablesIsNoOp(t *testing.T) {
 	conn := newSQLiteStorage(t)
 	ctx := context.Background()
 
-	vmStore, err := NewSQLiteStore(conn.DB())
-	if err != nil {
-		t.Fatalf("NewSQLiteStore() error = %v", err)
-	}
+	vmStore := newSeedTargetStore(t, conn.DB())
 	// No legacy tables exist; seeding must succeed as a no-op.
 	if err := seedFromLegacy(ctx, vmStore, conn); err != nil {
 		t.Fatalf("seedFromLegacy() error = %v, want nil", err)

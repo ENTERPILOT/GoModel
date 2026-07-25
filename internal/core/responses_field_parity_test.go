@@ -3,9 +3,10 @@ package core
 import (
 	"reflect"
 
-	"github.com/goccy/go-json"
 	"slices"
 	"testing"
+
+	"github.com/goccy/go-json"
 )
 
 // The utility request types must accept exactly the ResponsesRequest field set

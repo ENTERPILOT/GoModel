@@ -2,23 +2,21 @@ package auditlog
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
-// Result holds the initialized audit logger and its dependencies.
+// Result holds the initialized audit logger.
 // The caller is responsible for calling Close() to release resources.
 type Result struct {
-	Logger  LoggerInterface
-	Storage storage.Storage
+	Logger LoggerInterface
 }
 
 // Close releases all resources held by the audit logger.
@@ -30,62 +28,41 @@ func (r *Result) Close() error {
 			errs = append(errs, fmt.Errorf("logger close: %w", err))
 		}
 	}
-	if r.Storage != nil {
-		if err := r.Storage.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("storage close: %w", err))
-		}
-	}
 	if len(errs) > 0 {
 		return fmt.Errorf("close errors: %w", errors.Join(errs...))
 	}
 	return nil
 }
 
-// New creates an audit logger from configuration.
-// Returns a Result containing the logger and storage for lifecycle management.
+// New creates an audit logger on the shared storage connection.
 // The caller must call Result.Close() during shutdown.
 //
-// If logging is disabled in the config, returns a NoopLogger with nil storage.
-func New(ctx context.Context, cfg *config.Config) (*Result, error) {
-	// Return noop if logging is disabled
+// If logging is disabled in the config, returns a NoopLogger and never
+// touches storage.
+func New(ctx context.Context, cfg *config.Config, store storage.Storage) (*Result, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config is required")
+	}
 	if !cfg.Logging.Enabled {
-		return &Result{
-			Logger:  &NoopLogger{},
-			Storage: nil,
-		}, nil
+		return &Result{Logger: &NoopLogger{}}, nil
+	}
+	if store == nil {
+		return nil, fmt.Errorf("storage is required when audit logging is enabled")
 	}
 
-	// Create storage configuration
-	storageCfg := cfg.Storage.BackendConfig()
-
-	// Create storage connection
-	store, err := storage.New(ctx, storageCfg)
+	logStore, err := createLogStore(ctx, store, cfg.Logging.RetentionDays)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create storage: %w", err)
-	}
-
-	// Create the log store based on storage type
-	logStore, err := createLogStore(store, cfg.Logging.RetentionDays)
-	if err != nil {
-		store.Close()
 		return nil, err
 	}
-
-	// Create logger configuration
-	logCfg := buildLoggerConfig(cfg.Logging)
-
-	return &Result{
-		Logger:  NewLogger(logStore, logCfg),
-		Storage: store,
-	}, nil
+	return &Result{Logger: NewLogger(logStore, buildLoggerConfig(cfg.Logging))}, nil
 }
 
 // createLogStore creates the appropriate LogStore for the given storage backend.
-func createLogStore(store storage.Storage, retentionDays int) (LogStore, error) {
-	return storage.ResolveBackend[LogStore](
+func createLogStore(ctx context.Context, store storage.Storage, retentionDays int) (LogStore, error) {
+	return storage.ResolveSQLBackend[LogStore](
+		ctx,
 		store,
-		func(db *sql.DB) (LogStore, error) { return NewSQLiteStore(db, retentionDays) },
-		func(pool *pgxpool.Pool) (LogStore, error) { return NewPostgreSQLStore(pool, retentionDays) },
+		func(db sqlx.DB) (LogStore, error) { return NewSQLStore(ctx, db, retentionDays) },
 		func(db *mongo.Database) (LogStore, error) { return NewMongoDBStore(db, retentionDays) },
 	)
 }

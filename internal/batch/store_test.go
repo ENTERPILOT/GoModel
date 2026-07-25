@@ -168,12 +168,12 @@ func TestDeserializeBatchRejectsLegacyPayloadWithoutID(t *testing.T) {
 	}
 }
 
-func TestNewRequiresConfig(t *testing.T) {
+func TestNewRequiresSharedStorage(t *testing.T) {
 	_, err := New(context.Background(), nil)
 	if err == nil {
-		t.Fatal("expected error for nil config")
+		t.Fatal("expected error for nil storage")
 	}
-	if !strings.Contains(err.Error(), "config is required") {
+	if !strings.Contains(err.Error(), "shared storage is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

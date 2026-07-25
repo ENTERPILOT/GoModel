@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +70,7 @@ type App struct {
 	workflows           *workflows.Result
 	live                *live.Broker
 	server              *server.Server
+	storage             storage.Storage
 
 	shutdownMu  sync.Mutex
 	shutdown    bool
@@ -175,14 +177,16 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		}
 	}
 
-	// sharedStorage is the first non-nil storage backend among initialized
-	// components; later stores reuse it instead of opening their own.
-	var sharedStorage storage.Storage
-	claimSharedStorage := func(s storage.Storage) {
-		if sharedStorage == nil {
-			sharedStorage = s
-		}
+	// One storage connection serves every subsystem. Each used to be able to
+	// open its own, which meant a deployment with audit logging and usage
+	// tracking both disabled opened a separate connection per subsystem to the
+	// same database.
+	sharedStorage, err := storage.New(ctx, appCfg.Storage.BackendConfig())
+	if err != nil {
+		return fail("failed to create storage", err)
 	}
+	app.storage = sharedStorage
+	closers = append(closers, sharedStorage.Close)
 
 	// Track real-traffic outcomes per provider/model for the dashboard's
 	// provider status; hooks must be composed before any provider is created.
@@ -197,24 +201,15 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	closers = append(closers, app.providers.Close)
 
 	// Initialize audit logging
-	auditResult, err := auditlog.New(ctx, appCfg)
+	auditResult, err := auditlog.New(ctx, appCfg, sharedStorage)
 	if err != nil {
 		return fail("failed to initialize audit logging", err)
 	}
 	app.audit = auditResult
 	closers = append(closers, app.audit.Close)
-	claimSharedStorage(auditResult.Storage)
 
-	// Initialize usage tracking
-	// Use shared storage if both audit logging and usage tracking use the same backend
-	var usageResult *usage.Result
-	if auditResult.Storage != nil && appCfg.Usage.Enabled {
-		// Share storage connection with audit logging
-		usageResult, err = usage.NewWithSharedStorage(ctx, appCfg, auditResult.Storage)
-	} else {
-		// Create separate storage or return noop logger
-		usageResult, err = usage.New(ctx, appCfg)
-	}
+	// Initialize usage tracking. Disabled tracking yields a noop logger.
+	usageResult, err := usage.New(ctx, appCfg, sharedStorage)
 	if err != nil {
 		return fail("failed to initialize usage tracking", err)
 	}
@@ -226,15 +221,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	app.usage = usageResult
 	closers = append(closers, app.usage.Close)
-	claimSharedStorage(usageResult.Storage)
 
 	var budgetResult *budget.Result
 	if appCfg.Budgets.Enabled {
-		if sharedStorage != nil {
-			budgetResult, err = budget.NewWithSharedStorage(ctx, appCfg, sharedStorage)
-		} else {
-			budgetResult, err = budget.New(ctx, appCfg)
-		}
+		budgetResult, err = budget.New(ctx, appCfg, sharedStorage)
 		if err != nil {
 			return fail("failed to initialize budgets", err)
 		}
@@ -247,11 +237,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	var rateLimitResult *ratelimit.Result
 	if appCfg.RateLimits.Enabled {
-		if sharedStorage != nil {
-			rateLimitResult, err = ratelimit.NewWithSharedStorage(ctx, appCfg, sharedStorage)
-		} else {
-			rateLimitResult, err = ratelimit.New(ctx, appCfg)
-		}
+		rateLimitResult, err = ratelimit.New(ctx, appCfg, sharedStorage)
 		if err != nil {
 			return fail("failed to initialize rate limits", err)
 		}
@@ -270,60 +256,40 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	// Initialize batch lifecycle storage.
 	var batchResult *batch.Result
-	if sharedStorage != nil {
-		batchResult, err = batch.NewWithSharedStorage(ctx, sharedStorage)
-	} else {
-		batchResult, err = batch.New(ctx, appCfg)
-	}
+	batchResult, err = batch.New(ctx, sharedStorage)
 	if err != nil {
 		return fail("failed to initialize batch storage", err)
 	}
 	app.batch = batchResult
 	closers = append(closers, app.batch.Close)
-	claimSharedStorage(batchResult.Storage)
 
 	// Initialize file provider mapping storage for OpenAI-compatible Files/Batches workflows.
 	var fileStoreResult *filestore.Result
-	if sharedStorage != nil {
-		fileStoreResult, err = filestore.NewWithSharedStorage(ctx, sharedStorage)
-	} else {
-		fileStoreResult, err = filestore.New(ctx, appCfg)
-	}
+	fileStoreResult, err = filestore.New(ctx, sharedStorage)
 	if err != nil {
 		return fail("failed to initialize file mapping storage", err)
 	}
 	app.fileStore = fileStoreResult
 	closers = append(closers, app.fileStore.Close)
-	claimSharedStorage(fileStoreResult.Storage)
 
 	// Initialize Responses/Conversations lifecycle persistence so agentic
 	// response chains and conversation history land in storage instead of
 	// accumulating in process memory.
 	var responseStoreResult *responsestore.Result
-	if sharedStorage != nil {
-		responseStoreResult, err = responsestore.NewWithSharedStorage(ctx, sharedStorage)
-	} else {
-		responseStoreResult, err = responsestore.New(ctx, appCfg)
-	}
+	responseStoreResult, err = responsestore.New(ctx, sharedStorage)
 	if err != nil {
 		return fail("failed to initialize response snapshot storage", err)
 	}
 	app.responseStore = responseStoreResult
 	closers = append(closers, app.responseStore.Close)
-	claimSharedStorage(responseStoreResult.Storage)
 
 	var conversationStoreResult *conversationstore.Result
-	if sharedStorage != nil {
-		conversationStoreResult, err = conversationstore.NewWithSharedStorage(ctx, sharedStorage)
-	} else {
-		conversationStoreResult, err = conversationstore.New(ctx, appCfg)
-	}
+	conversationStoreResult, err = conversationstore.New(ctx, sharedStorage)
 	if err != nil {
 		return fail("failed to initialize conversation storage", err)
 	}
 	app.conversations = conversationStoreResult
 	closers = append(closers, app.conversations.Close)
-	claimSharedStorage(conversationStoreResult.Storage)
 
 	// Initialize virtual models (unified aliases + access overrides) using
 	// shared storage when already available. Provider names declared in YAML —
@@ -355,30 +321,20 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	var providerCredentialsResult *providers.CredentialsResult
-	if sharedStorage != nil {
-		providerCredentialsResult, err = providers.NewCredentialsStoreWithSharedStorage(ctx, sharedStorage, providerResult.Factory, providerResult.Registry, managedProviderNames, appCfg.Resilience)
-	} else {
-		providerCredentialsResult, err = providers.NewCredentialsStore(ctx, appCfg, providerResult.Factory, providerResult.Registry, managedProviderNames)
-	}
+	providerCredentialsResult, err = providers.NewCredentialsStore(ctx, sharedStorage, providerResult.Factory, providerResult.Registry, managedProviderNames, appCfg.Resilience)
 	if err != nil {
 		return fail("failed to initialize provider credentials store", err)
 	}
 	app.providerCredentials = providerCredentialsResult
 	closers = append(closers, app.providerCredentials.Close)
-	claimSharedStorage(providerCredentialsResult.Storage)
 
 	var virtualModelsResult *virtualmodels.Result
-	if sharedStorage != nil {
-		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry, declaredProviders)
-	} else {
-		virtualModelsResult, err = virtualmodels.New(ctx, appCfg, providerResult.Registry, declaredProviders)
-	}
+	virtualModelsResult, err = virtualmodels.New(ctx, appCfg, sharedStorage, providerResult.Registry, declaredProviders)
 	if err != nil {
 		return fail("failed to initialize virtual models", err)
 	}
 	app.virtualModels = virtualModelsResult
 	closers = append(closers, app.virtualModels.Close)
-	claimSharedStorage(virtualModelsResult.Storage)
 
 	// The unified virtual models service is the single engine: it serves model
 	// resolution (redirects), access authorization (policies), and exposed-model
@@ -400,43 +356,28 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	var failoverResult *failover.Result
-	if sharedStorage != nil {
-		failoverResult, err = failover.NewWithSharedStorage(ctx, appCfg, sharedStorage)
-	} else {
-		failoverResult, err = failover.New(ctx, appCfg)
-	}
+	failoverResult, err = failover.New(ctx, appCfg, sharedStorage)
 	if err != nil {
 		return fail("failed to initialize failover rules", err)
 	}
 	app.failover = failoverResult
 	closers = append(closers, app.failover.Close)
-	claimSharedStorage(failoverResult.Storage)
 
 	var taggingResult *tagging.Result
-	if sharedStorage != nil {
-		taggingResult, err = tagging.NewWithSharedStorage(ctx, appCfg, sharedStorage)
-	} else {
-		taggingResult, err = tagging.New(ctx, appCfg)
-	}
+	taggingResult, err = tagging.New(ctx, appCfg, sharedStorage)
 	if err != nil {
 		return fail("failed to initialize tagging", err)
 	}
 	app.tagging = taggingResult
 	closers = append(closers, app.tagging.Close)
-	claimSharedStorage(taggingResult.Storage)
 
 	var pricingOverrideResult *pricingoverrides.Result
-	if sharedStorage != nil {
-		pricingOverrideResult, err = pricingoverrides.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry, providerResult.Registry)
-	} else {
-		pricingOverrideResult, err = pricingoverrides.New(ctx, appCfg, providerResult.Registry, providerResult.Registry)
-	}
+	pricingOverrideResult, err = pricingoverrides.New(ctx, appCfg, sharedStorage, providerResult.Registry, providerResult.Registry)
 	if err != nil {
 		return fail("failed to initialize model pricing overrides", err)
 	}
 	app.pricingOverrides = pricingOverrideResult
 	closers = append(closers, app.pricingOverrides.Close)
-	claimSharedStorage(pricingOverrideResult.Storage)
 	pricingResolver := usage.PricingResolver(providerResult.Registry)
 	if app.pricingOverrides != nil && app.pricingOverrides.Service != nil {
 		pricingResolver = app.pricingOverrides.Service
@@ -450,17 +391,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	// Initialize reusable guardrail definitions using shared storage when already available.
 	var guardrailResult *guardrails.Result
-	if sharedStorage != nil {
-		guardrailResult, err = guardrails.NewWithSharedStorage(ctx, sharedStorage, refreshInterval, guardrailExecutor)
-	} else {
-		guardrailResult, err = guardrails.New(ctx, appCfg, refreshInterval, guardrailExecutor)
-	}
+	guardrailResult, err = guardrails.New(ctx, sharedStorage, refreshInterval, guardrailExecutor)
 	if err != nil {
 		return fail("failed to initialize guardrails", err)
 	}
 	app.guardrails = guardrailResult
 	closers = append(closers, app.guardrails.Close)
-	claimSharedStorage(guardrailResult.Storage)
 
 	seedGuardrails, err := configGuardrailDefinitions(appCfg.Guardrails)
 	if err != nil {
@@ -479,16 +415,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	var workflowResult *workflows.Result
 	workflowCompiler := workflows.NewCompilerWithFeatureCaps(guardrailResult.Service, featureCaps)
-	if sharedStorage != nil {
-		workflowResult, err = workflows.NewWithSharedStorage(ctx, sharedStorage, workflowCompiler, refreshInterval)
-	} else {
-		workflowResult, err = workflows.New(ctx, appCfg, workflowCompiler, refreshInterval)
-	}
+	workflowResult, err = workflows.New(ctx, sharedStorage, workflowCompiler, refreshInterval)
 	if err != nil {
 		return fail("failed to initialize workflows", err)
 	}
 	closers = append(closers, workflowResult.Close)
-	claimSharedStorage(workflowResult.Storage)
 	defaultWorkflow := defaultWorkflowInput(appCfg, guardrailResult.Service.Names(), seedGuardrails)
 	if err := workflowResult.Service.EnsureDefaultGlobal(ctx, defaultWorkflow); err != nil {
 		return fail("failed to seed workflows", err)
@@ -499,11 +430,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	app.workflows = workflowResult
 
 	var authKeyResult *authkeys.Result
-	if sharedStorage != nil {
-		authKeyResult, err = authkeys.NewWithSharedStorage(ctx, sharedStorage)
-	} else {
-		authKeyResult, err = authkeys.New(ctx, appCfg)
-	}
+	authKeyResult, err = authkeys.New(ctx, sharedStorage)
 	if err != nil {
 		return fail("failed to initialize auth keys", err)
 	}
@@ -555,17 +482,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// Initialize the MCP gateway (aggregated upstream MCP servers behind /mcp).
 	var mcpResult *mcpgateway.Result
 	if appCfg.MCP.Enabled {
-		if sharedStorage != nil {
-			mcpResult, err = mcpgateway.NewWithSharedStorage(ctx, appCfg, sharedStorage, nil, serverUsageLogger)
-		} else {
-			mcpResult, err = mcpgateway.New(ctx, appCfg, nil, serverUsageLogger)
-		}
+		mcpResult, err = mcpgateway.New(ctx, appCfg, sharedStorage, nil, serverUsageLogger)
 		if err != nil {
 			return fail("failed to initialize mcp gateway", err)
 		}
 		app.mcpGateway = mcpResult
 		closers = append(closers, app.mcpGateway.Close)
-		claimSharedStorage(mcpResult.Storage)
 		slog.Info("mcp gateway enabled",
 			"path", config.JoinBasePath(appCfg.Server.BasePath, "/mcp"),
 			"configured_servers", len(appCfg.MCP.Servers))
@@ -574,12 +496,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	// The self-service GET /v1/usage endpoint and the admin dashboard read
-	// usage aggregates through one shared reader. Audit storage is preferred
-	// because its schema always includes the usage tables.
-	usageReadStorage := auditResult.Storage
-	if usageReadStorage == nil {
-		usageReadStorage = usageResult.Storage
-	}
+	// usage aggregates through one shared reader.
+	usageReadStorage := sharedStorage
 	var usageReader usage.UsageReader
 	if usageReadStorage != nil {
 		var readerErr error
@@ -661,7 +579,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		adminHandler, dashHandler, adminErr := initAdmin(
 			usageReader,
 			usageReadStorage,
-			auditResult.Storage,
+			sharedStorage,
 			providerResult.Registry,
 			providerResult.ConfiguredProviders,
 			authKeyResult.Service,
@@ -932,131 +850,41 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 3. Close providers (stops model refresh and provider-owned resources)
-	if a.providers != nil {
-		if err := a.providers.Close(); err != nil {
-			slog.Error("providers close error", "error", err)
-			errs = append(errs, fmt.Errorf("providers close: %w", err))
+	// Remaining subsystems close in dependency order: producers before the
+	// stores they write to, and the shared connection last of all. Order is
+	// load-bearing, so it is spelled out here rather than derived.
+	for _, subsystem := range []struct {
+		name  string
+		close func() error
+	}{
+		// Providers first: stops model refresh and provider-owned resources.
+		{"providers", closerOf(a.providers)},
+		// Terminates upstream MCP sessions.
+		{"mcp gateway", closerOf(a.mcpGateway)},
+		{"provider credentials", closerOf(a.providerCredentials)},
+		{"virtual models", closerOf(a.virtualModels)},
+		{"failover", closerOf(a.failover)},
+		{"tagging", closerOf(a.tagging)},
+		{"workflows", closerOf(a.workflows)},
+		{"model pricing overrides", closerOf(a.pricingOverrides)},
+		{"guardrails", closerOf(a.guardrails)},
+		{"auth keys", closerOf(a.authKeys)},
+		{"file store", closerOf(a.fileStore)},
+		// The remaining three flush buffered work into storage, so they must
+		// close before the connection they write through.
+		{"batch store", closerOf(a.batch)},
+		{"budgets", closerOf(a.budgets)},
+		{"rate limits", closerOf(a.rateLimits)},
+		{"usage", closerOf(a.usage)},
+		{"audit", closerOf(a.audit)},
+		{"storage", closerOf(a.storage)},
+	} {
+		if subsystem.close == nil {
+			continue
 		}
-	}
-
-	// 3b. Close the MCP gateway (terminates upstream MCP sessions).
-	if a.mcpGateway != nil {
-		if err := a.mcpGateway.Close(); err != nil {
-			slog.Error("mcp gateway close error", "error", err)
-			errs = append(errs, fmt.Errorf("mcp gateway close: %w", err))
-		}
-	}
-
-	// 3c. Close provider credentials subsystem.
-	if a.providerCredentials != nil {
-		if err := a.providerCredentials.Close(); err != nil {
-			slog.Error("provider credentials close error", "error", err)
-			errs = append(errs, fmt.Errorf("provider credentials close: %w", err))
-		}
-	}
-
-	// 4. Close virtual models subsystem (aliases + access overrides).
-	if a.virtualModels != nil {
-		if err := a.virtualModels.Close(); err != nil {
-			slog.Error("virtual models close error", "error", err)
-			errs = append(errs, fmt.Errorf("virtual models close: %w", err))
-		}
-	}
-
-	// 5. Close failover rules subsystem.
-	if a.failover != nil {
-		if err := a.failover.Close(); err != nil {
-			slog.Error("failover rules close error", "error", err)
-			errs = append(errs, fmt.Errorf("failover close: %w", err))
-		}
-	}
-
-	// 6. Close tagging subsystem.
-	if a.tagging != nil {
-		if err := a.tagging.Close(); err != nil {
-			slog.Error("tagging close error", "error", err)
-			errs = append(errs, fmt.Errorf("tagging close: %w", err))
-		}
-	}
-
-	// 7. Close workflows subsystem.
-	if a.workflows != nil {
-		if err := a.workflows.Close(); err != nil {
-			slog.Error("workflows close error", "error", err)
-			errs = append(errs, fmt.Errorf("workflows close: %w", err))
-		}
-	}
-
-	// 8. Close model pricing overrides subsystem.
-	if a.pricingOverrides != nil {
-		if err := a.pricingOverrides.Close(); err != nil {
-			slog.Error("model pricing overrides close error", "error", err)
-			errs = append(errs, fmt.Errorf("model pricing overrides close: %w", err))
-		}
-	}
-
-	// 9. Close reusable guardrails subsystem.
-	if a.guardrails != nil {
-		if err := a.guardrails.Close(); err != nil {
-			slog.Error("guardrails close error", "error", err)
-			errs = append(errs, fmt.Errorf("guardrails close: %w", err))
-		}
-	}
-
-	// 10. Close managed auth keys subsystem.
-	if a.authKeys != nil {
-		if err := a.authKeys.Close(); err != nil {
-			slog.Error("auth keys close error", "error", err)
-			errs = append(errs, fmt.Errorf("auth keys close: %w", err))
-		}
-	}
-
-	// 11. Close file mapping store.
-	if a.fileStore != nil {
-		if err := a.fileStore.Close(); err != nil {
-			slog.Error("file mapping store close error", "error", err)
-			errs = append(errs, fmt.Errorf("file store close: %w", err))
-		}
-	}
-
-	// 12. Close batch store (flushes pending entries)
-	if a.batch != nil {
-		if err := a.batch.Close(); err != nil {
-			slog.Error("batch store close error", "error", err)
-			errs = append(errs, fmt.Errorf("batch close: %w", err))
-		}
-	}
-
-	// 13. Close budget subsystem.
-	if a.budgets != nil {
-		if err := a.budgets.Close(); err != nil {
-			slog.Error("budgets close error", "error", err)
-			errs = append(errs, fmt.Errorf("budgets close: %w", err))
-		}
-	}
-
-	// 13b. Close rate limit subsystem.
-	if a.rateLimits != nil {
-		if err := a.rateLimits.Close(); err != nil {
-			slog.Error("rate limits close error", "error", err)
-			errs = append(errs, fmt.Errorf("rate limits close: %w", err))
-		}
-	}
-
-	// 14. Close usage tracking (flushes pending entries)
-	if a.usage != nil {
-		if err := a.usage.Close(); err != nil {
-			slog.Error("usage logger close error", "error", err)
-			errs = append(errs, fmt.Errorf("usage close: %w", err))
-		}
-	}
-
-	// 15. Close audit logging (flushes pending logs)
-	if a.audit != nil {
-		if err := a.audit.Close(); err != nil {
-			slog.Error("audit logger close error", "error", err)
-			errs = append(errs, fmt.Errorf("audit close: %w", err))
+		if err := subsystem.close(); err != nil {
+			slog.Error(subsystem.name+" close error", "error", err)
+			errs = append(errs, fmt.Errorf("%s close: %w", subsystem.name, err))
 		}
 	}
 
@@ -1069,6 +897,24 @@ func (a *App) Shutdown(ctx context.Context) error {
 }
 
 // logStartupInfo logs the application configuration on startup.
+// closerOf returns c.Close, or nil when there is nothing to close.
+//
+// Two distinct kinds of nil arrive here. A subsystem that never initialized is
+// a typed-nil *Result, where taking the method value yields a non-nil func
+// that panics on call. An unset storage.Storage is a nil interface, which
+// reflect reports as an invalid value rather than a nil pointer.
+func closerOf[T interface{ Close() error }](c T) func() error {
+	switch value := reflect.ValueOf(c); value.Kind() {
+	case reflect.Invalid:
+		return nil
+	case reflect.Pointer, reflect.Interface:
+		if value.IsNil() {
+			return nil
+		}
+	}
+	return c.Close
+}
+
 func (a *App) logStartupInfo() {
 	cfg := a.config
 

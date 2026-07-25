@@ -17,8 +17,7 @@ import (
 // Result holds the initialized usage logger and its dependencies.
 // The caller is responsible for calling Close() to release resources.
 type Result struct {
-	Logger  LoggerInterface
-	Storage storage.Storage
+	Logger LoggerInterface
 }
 
 // Close releases all resources held by the usage logger.
@@ -30,65 +29,19 @@ func (r *Result) Close() error {
 			errs = append(errs, fmt.Errorf("logger close: %w", err))
 		}
 	}
-	if r.Storage != nil {
-		if err := r.Storage.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("storage close: %w", err))
-		}
-	}
 	if len(errs) > 0 {
 		return fmt.Errorf("close errors: %w", errors.Join(errs...))
 	}
 	return nil
 }
 
-// New creates a usage logger from configuration.
-// Returns a Result containing the logger and storage for lifecycle management.
-// The caller must call Result.Close() during shutdown.
-//
-// If usage tracking is disabled in the config, returns a NoopLogger with nil storage.
-func New(ctx context.Context, cfg *config.Config) (*Result, error) {
-	// Return noop if usage tracking is disabled
-	if !cfg.Usage.Enabled {
-		return &Result{
-			Logger:  NewNoopLogger(buildLoggerConfig(cfg.Usage)),
-			Storage: nil,
-		}, nil
-	}
-
-	// Create storage configuration - reuse the same storage backend as logging
-	storageCfg := cfg.Storage.BackendConfig()
-
-	// Create storage connection
-	store, err := storage.New(ctx, storageCfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create storage: %w", err)
-	}
-
-	// Create the usage store based on storage type
-	usageStore, err := createUsageStore(store, cfg.Usage.RetentionDays)
-	if err != nil {
-		store.Close()
-		return nil, err
-	}
-
-	// Create logger configuration
-	logCfg := buildLoggerConfig(cfg.Usage)
-
-	return &Result{
-		Logger:  NewLogger(usageStore, logCfg),
-		Storage: store,
-	}, nil
-}
-
-// NewWithSharedStorage creates a usage logger using a shared storage connection.
+// New creates a usage logger on the shared storage connection.
 // This is useful when you want to share the database connection with audit logging.
-// The caller is responsible for closing the storage separately.
-func NewWithSharedStorage(ctx context.Context, cfg *config.Config, store storage.Storage) (*Result, error) {
+func New(ctx context.Context, cfg *config.Config, store storage.Storage) (*Result, error) {
 	// Return noop if usage tracking is disabled
 	if !cfg.Usage.Enabled {
 		return &Result{
-			Logger:  NewNoopLogger(buildLoggerConfig(cfg.Usage)),
-			Storage: nil,
+			Logger: NewNoopLogger(buildLoggerConfig(cfg.Usage)),
 		}, nil
 	}
 
@@ -105,10 +58,7 @@ func NewWithSharedStorage(ctx context.Context, cfg *config.Config, store storage
 	// Create logger configuration
 	logCfg := buildLoggerConfig(cfg.Usage)
 
-	return &Result{
-		Logger:  NewLogger(usageStore, logCfg),
-		Storage: nil, // Don't set storage since it's shared
-	}, nil
+	return &Result{Logger: NewLogger(usageStore, logCfg)}, nil
 }
 
 // NewReader creates a UsageReader from a storage backend.

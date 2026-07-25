@@ -2,7 +2,6 @@ package guardrails
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 
@@ -61,19 +60,4 @@ func collectDefinitions(rows definitionRows, scan func(definitionScanner) (Defin
 		return nil, err
 	}
 	return result, nil
-}
-
-func nullableString(value string) any {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return value
-}
-
-func nullableStringValue(value sql.NullString) string {
-	if !value.Valid {
-		return ""
-	}
-	return strings.TrimSpace(value.String)
 }
