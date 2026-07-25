@@ -70,8 +70,6 @@ jobs:
           - name: Unit Tests
             cmd: make test-race
             coverage: true
-          - name: E2E Tests
-            cmd: go test -v -tags=e2e -timeout=5m ./tests/e2e/...
           - name: Integration Tests
             cmd: go test -v -tags=integration -timeout=10m ./tests/integration/...
           - name: Contract Replay Tests
@@ -99,6 +97,24 @@ jobs:
           files: ./coverage.out
           fail_ci_if_error: false
         continue-on-error: true
+
+  # E2E tests run with in-process mocks and do not require PostgreSQL.
+  # Keeping this as a standalone job avoids external registry pulls when
+  # only mock-based E2E coverage is needed.
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run tests
+        run: go test -v -tags=e2e -timeout=5m ./tests/e2e/...
 
   test-dashboard:
     name: Dashboard Unit Tests
