@@ -1,12 +1,17 @@
 package budget
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 )
 
 func TestIsMongoTransactionCapabilityError(t *testing.T) {
@@ -143,4 +148,63 @@ func TestBsonNumberReadsEveryNumericShape(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A MongoDB database written before budget scopes existed carries a unique
+// index on (user_path, period_seconds). Unsetting user_path collapses every
+// migrated document of the same period onto one index key, so the legacy index
+// has to go before the rewrite rather than after it.
+func TestMongoDBStoreMigratesPreScopeDocuments(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		budgets := db.Collection("budgets")
+		if _, err := budgets.Indexes().CreateOne(ctx, mongo.IndexModel{
+			Keys:    bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}},
+			Options: options.Index().SetUnique(true),
+		}); err != nil {
+			t.Fatalf("create pre-scope index: %v", err)
+		}
+		now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+		// Two paths sharing one period: the case that collides.
+		if _, err := budgets.InsertMany(ctx, []any{
+			bson.D{{Key: "user_path", Value: "/team/alpha"}, {Key: "period_seconds", Value: PeriodDailySeconds},
+				{Key: "amount", Value: 10.0}, {Key: "source", Value: SourceManual},
+				{Key: "created_at", Value: now}, {Key: "updated_at", Value: now}},
+			bson.D{{Key: "user_path", Value: "/team/beta"}, {Key: "period_seconds", Value: PeriodDailySeconds},
+				{Key: "amount", Value: 20.0}, {Key: "source", Value: SourceManual},
+				{Key: "created_at", Value: now}, {Key: "updated_at", Value: now}},
+		}); err != nil {
+			t.Fatalf("seed pre-scope documents: %v", err)
+		}
+
+		store, err := NewMongoDBStore(ctx, db)
+		if err != nil {
+			t.Fatalf("NewMongoDBStore() failed: %v", err)
+		}
+		got, err := store.ListBudgets(ctx)
+		if err != nil {
+			t.Fatalf("ListBudgets() failed: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("migrated budgets = %+v, want both pre-scope rows", got)
+		}
+		bySubject := map[string]Budget{}
+		for _, budget := range got {
+			if budget.Scope != ScopeUserPath {
+				t.Fatalf("migrated budget %+v, want scope user_path", budget)
+			}
+			bySubject[budget.Subject] = budget
+		}
+		if bySubject["/team/alpha"].Amount != 10 || bySubject["/team/beta"].Amount != 20 {
+			t.Fatalf("migrated budgets = %+v, want both amounts preserved", got)
+		}
+
+		// The scoped unique index must now allow a label budget spelled like an
+		// existing user path.
+		if err := store.UpsertBudgets(ctx, []Budget{
+			{Scope: ScopeLabel, Subject: "/team/alpha", PeriodSeconds: PeriodDailySeconds, Amount: 1},
+		}); err != nil {
+			t.Fatalf("UpsertBudgets() after migration failed: %v", err)
+		}
+	})
 }

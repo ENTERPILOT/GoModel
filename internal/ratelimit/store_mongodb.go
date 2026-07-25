@@ -37,9 +37,17 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 }
 
 // migratePreScopeDocuments rewrites rules stored before rule scopes existed
-// (keyed by user_path only) into the scoped shape, and drops the old unique
-// index so it cannot reject scoped documents.
+// (keyed by user_path only) into the scoped shape.
+//
+// The legacy unique index has to go first. The rewrite unsets user_path, and a
+// missing field indexes as null, so every migrated document of the same period
+// would collapse onto the key {user_path: null, period_seconds: N} and trip the
+// uniqueness constraint — two rules sharing a period is the ordinary case, not
+// an edge one.
 func (s *MongoDBStore) migratePreScopeDocuments(ctx context.Context) error {
+	// Best-effort: the index does not exist on fresh databases.
+	_ = s.rules.Indexes().DropOne(ctx, "user_path_1_period_seconds_1")
+
 	_, err := s.rules.UpdateMany(ctx,
 		bson.D{{Key: "subject", Value: bson.D{{Key: "$exists", Value: false}}}},
 		mongo.Pipeline{
@@ -53,8 +61,6 @@ func (s *MongoDBStore) migratePreScopeDocuments(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("migrate rate limit rules to scoped schema: %w", err)
 	}
-	// Best-effort: the index may not exist on fresh databases.
-	_ = s.rules.Indexes().DropOne(ctx, "user_path_1_period_seconds_1")
 	return nil
 }
 
