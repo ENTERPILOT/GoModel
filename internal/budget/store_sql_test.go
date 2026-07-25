@@ -2,7 +2,9 @@ package budget
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -187,23 +189,56 @@ func TestSQLStoreMigratesPreScopeTable(t *testing.T) {
 	})
 }
 
+// TestSQLStoreSumSpendHonorsSubjectBoundaryAndCacheType covers both dialects:
+// the label predicate is the one part of SumSpend written twice
+// (json_each on SQLite, jsonb_exists on PostgreSQL), so testing only one of
+// them would leave the other free to silently match nothing.
 func TestSQLStoreSumSpendHonorsSubjectBoundaryAndCacheType(t *testing.T) {
-	ctx := context.Background()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("sql.Open() failed: %v", err)
-	}
-	defer db.Close()
+	t.Run("sqlite", func(t *testing.T) {
+		db, err := sql.Open("sqlite", ":memory:")
+		if err != nil {
+			t.Fatalf("sql.Open() failed: %v", err)
+		}
+		defer db.Close()
 
-	usageStore, err := usage.NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore() for usage failed: %v", err)
-	}
-	wrapped, err := sqlx.NewSQLite(db)
-	if err != nil {
-		t.Fatalf("sqlx.NewSQLite() failed: %v", err)
-	}
-	store, err := NewSQLStore(ctx, wrapped)
+		usageStore, err := usage.NewSQLiteStore(db, 0)
+		if err != nil {
+			t.Fatalf("NewSQLiteStore() for usage failed: %v", err)
+		}
+		wrapped, err := sqlx.NewSQLite(db)
+		if err != nil {
+			t.Fatalf("sqlx.NewSQLite() failed: %v", err)
+		}
+		assertSumSpendMatchesSubjects(t, usageStore, wrapped)
+	})
+
+	t.Run("postgresql", func(t *testing.T) {
+		pool := sqlxtest.NewPostgresPool(t)
+		if pool == nil {
+			return // already skipped
+		}
+		usageStore, err := usage.NewPostgreSQLStore(pool, 0)
+		if err != nil {
+			t.Fatalf("NewPostgreSQLStore() for usage failed: %v", err)
+		}
+		wrapped, err := sqlx.NewPostgreSQL(pool)
+		if err != nil {
+			t.Fatalf("sqlx.NewPostgreSQL() failed: %v", err)
+		}
+		assertSumSpendMatchesSubjects(t, usageStore, wrapped)
+	})
+}
+
+// usageWriter is the slice of a usage store this test needs, satisfied by both
+// backend implementations.
+type usageWriter interface {
+	WriteBatch(ctx context.Context, entries []*usage.UsageEntry) error
+}
+
+func assertSumSpendMatchesSubjects(t *testing.T, usageStore usageWriter, db sqlx.DB) {
+	t.Helper()
+	ctx := context.Background()
+	store, err := NewSQLStore(ctx, db)
 	if err != nil {
 		t.Fatalf("NewSQLStore() failed: %v", err)
 	}
@@ -253,6 +288,13 @@ func TestSQLStoreSumSpendHonorsSubjectBoundaryAndCacheType(t *testing.T) {
 				i, windows[i].Scope, windows[i].Subject, got[i], want[i])
 		}
 	}
+}
+
+// usageEntryUUID maps a readable entry name to a stable UUID.
+func usageEntryUUID(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	hex := hex.EncodeToString(sum[:16])
+	return hex[0:8] + "-" + hex[8:12] + "-" + hex[12:16] + "-" + hex[16:20] + "-" + hex[20:32]
 }
 
 // The chunking that keeps a batch inside the SQLite parameter limit must not
@@ -313,14 +355,17 @@ func TestSQLStoreSumSpendChunksLargeBatches(t *testing.T) {
 	}
 }
 
-func usageEntryWithCost(id, userPath, cacheType string, ts time.Time, cost float64, labels ...string) *usage.UsageEntry {
+// usageEntryWithCost builds one priced usage row. PostgreSQL types usage.id as
+// a UUID, so the readable name only labels the request and a fixed UUID keyed
+// off it fills the primary key — no randomness, so runs stay reproducible.
+func usageEntryWithCost(name, userPath, cacheType string, ts time.Time, cost float64, labels ...string) *usage.UsageEntry {
 	inputCost := cost / 2
 	outputCost := cost / 2
 	totalCost := cost
 	return &usage.UsageEntry{
-		ID:           id,
-		RequestID:    id,
-		ProviderID:   id,
+		ID:           usageEntryUUID(name),
+		RequestID:    name,
+		ProviderID:   name,
 		Timestamp:    ts,
 		Model:        "gpt-4",
 		Provider:     "test",
