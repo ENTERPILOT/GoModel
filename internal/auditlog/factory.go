@@ -2,16 +2,15 @@ package auditlog
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // Result holds the initialized audit logger.
@@ -48,7 +47,7 @@ func New(ctx context.Context, cfg *config.Config, store storage.Storage) (*Resul
 		return nil, fmt.Errorf("storage is required when audit logging is enabled")
 	}
 
-	logStore, err := createLogStore(store, cfg.Logging.RetentionDays)
+	logStore, err := createLogStore(ctx, store, cfg.Logging.RetentionDays)
 	if err != nil {
 		return nil, err
 	}
@@ -56,11 +55,11 @@ func New(ctx context.Context, cfg *config.Config, store storage.Storage) (*Resul
 }
 
 // createLogStore creates the appropriate LogStore for the given storage backend.
-func createLogStore(store storage.Storage, retentionDays int) (LogStore, error) {
-	return storage.ResolveBackend[LogStore](
+func createLogStore(ctx context.Context, store storage.Storage, retentionDays int) (LogStore, error) {
+	return storage.ResolveSQLBackend[LogStore](
+		ctx,
 		store,
-		func(db *sql.DB) (LogStore, error) { return NewSQLiteStore(db, retentionDays) },
-		func(pool *pgxpool.Pool) (LogStore, error) { return NewPostgreSQLStore(pool, retentionDays) },
+		func(db sqlx.DB) (LogStore, error) { return NewSQLStore(ctx, db, retentionDays) },
 		func(db *mongo.Database) (LogStore, error) { return NewMongoDBStore(db, retentionDays) },
 	)
 }

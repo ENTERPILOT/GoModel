@@ -8,6 +8,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // createTestDB creates an in-memory SQLite database for testing.
@@ -20,11 +22,23 @@ func createTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// newSQLiteStore builds the store over an existing SQLite handle. These tests
+// pair the store with the SQLite reader, which is still dialect-specific, so
+// they stay on one engine rather than running through sqlxtest.
+func newSQLiteStore(t *testing.T, db *sql.DB, retentionDays int) (*SQLStore, error) {
+	t.Helper()
+	wrapped, err := sqlx.NewSQLite(db)
+	if err != nil {
+		t.Fatalf("sqlx.NewSQLite: %v", err)
+	}
+	return NewSQLStore(context.Background(), wrapped, retentionDays)
+}
+
 func TestSQLiteStore_WriteBatch_NullDataPreservation(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -90,7 +104,7 @@ func TestSQLiteStore_WriteBatch_Chunking(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -143,7 +157,7 @@ func TestSQLiteStore_WriteBatch_EmptyEntries(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -170,7 +184,7 @@ func TestSQLiteStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -228,7 +242,7 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -284,7 +298,7 @@ func TestSQLiteStore_WriteBatch_PersistsProviderAttempts(t *testing.T) {
 	db.SetMaxOpenConns(1)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -381,7 +395,7 @@ func TestSQLiteReader_AllowsNullWorkflowVersionIDAndErrorType(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -453,7 +467,7 @@ func TestSQLiteReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -531,7 +545,7 @@ func TestSQLiteReader_GetLogsRootUserPathIncludesLegacyNullRows(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -603,7 +617,7 @@ func TestSQLiteStoreAndReader_PreserveCacheType(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

@@ -10,7 +10,7 @@ func TestSQLiteReaderGetLogs_IncludesFractionalStartBoundaryAndExcludesFractiona
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestSQLiteReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestSQLiteReaderGetLogs_SearchMatchesErrorMessage(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(t, db, 0)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

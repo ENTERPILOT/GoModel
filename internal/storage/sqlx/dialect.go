@@ -1,6 +1,9 @@
 package sqlx
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Portable DDL type tokens.
 //
@@ -32,8 +35,12 @@ const (
 	// TypeJSONText is a JSON column that SQLite declares as TEXT.
 	TypeJSONText = "{json_text}"
 
-	// TypeTimestamp is an absolute-time column.
+	// TypeTimestamp is an absolute-time column. Note that the two engines do
+	// not agree on how a value binds to it: see TimestampArg.
 	TypeTimestamp = "{timestamp}"
+
+	// TypeSerialPK is an auto-assigned integer primary key.
+	TypeSerialPK = "{serial_pk}"
 )
 
 var typeExpansions = map[Dialect]*strings.Replacer{
@@ -44,6 +51,7 @@ var typeExpansions = map[Dialect]*strings.Replacer{
 		TypeJSON, "JSON",
 		TypeJSONText, "TEXT",
 		TypeTimestamp, "DATETIME",
+		TypeSerialPK, "INTEGER PRIMARY KEY AUTOINCREMENT",
 	),
 	PostgreSQL: strings.NewReplacer(
 		TypeInt64, "BIGINT",
@@ -52,6 +60,7 @@ var typeExpansions = map[Dialect]*strings.Replacer{
 		TypeJSON, "JSONB",
 		TypeJSONText, "JSONB",
 		TypeTimestamp, "TIMESTAMPTZ",
+		TypeSerialPK, "BIGSERIAL PRIMARY KEY",
 	),
 }
 
@@ -63,4 +72,26 @@ func (d Dialect) ExpandTypes(statement string) string {
 		return statement
 	}
 	return replacer.Replace(statement)
+}
+
+// TimestampArg converts a time into the form this dialect's TypeTimestamp
+// column expects.
+//
+// PostgreSQL binds a time.Time to TIMESTAMPTZ directly. SQLite has no real
+// date type: these columns hold RFC3339 text, which is what the readers parse
+// back, so the store must keep writing text rather than letting the driver
+// choose a representation.
+func (d Dialect) TimestampArg(t time.Time) any {
+	if d == SQLite {
+		return t.UTC().Format(time.RFC3339Nano)
+	}
+	return t.UTC()
+}
+
+// NullableTimestampArg is TimestampArg, mapping the zero time to SQL NULL.
+func (d Dialect) NullableTimestampArg(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return d.TimestampArg(t)
 }
