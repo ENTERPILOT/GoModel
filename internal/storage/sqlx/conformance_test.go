@@ -3,6 +3,7 @@ package sqlx_test
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
@@ -389,6 +390,56 @@ func TestRepeatedPlaceholderBindsPositionally(t *testing.T) {
 		}
 		if updatedAt != 5 {
 			t.Errorf("updated_at = %d, want 5 preserved", updatedAt)
+		}
+	})
+}
+
+// TestInTxIsAtomicUnderConcurrency pins what InTx actually guarantees on both
+// engines: each transaction commits or rolls back as a unit.
+//
+// It deliberately does NOT assert that concurrent read-then-allocate sequences
+// serialize. SQLite's BEGIN IMMEDIATE makes them queue, but PostgreSQL's
+// default READ COMMITTED lets both read the same MAX and lets the second fail
+// on the unique index instead. Callers that allocate from a MAX must cope with
+// that conflict; see the note on DB.InTx.
+func TestInTxIsAtomicUnderConcurrency(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		newConformanceDB(t, db)
+
+		const workers = 4
+		errs := make(chan error, workers)
+		start := make(chan struct{})
+		for worker := range workers {
+			go func() {
+				<-start
+				errs <- db.InTx(ctx, func(q sqlx.Querier) error {
+					for row := range 3 {
+						id := "w" + strconv.Itoa(worker) + "-r" + strconv.Itoa(row)
+						_, err := q.Exec(ctx, `
+							INSERT INTO conformance (id, flag, updated_at) VALUES (?, ?, ?)
+						`, id, true, int64(row))
+						if err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+			}()
+		}
+		close(start)
+		for range workers {
+			if err := <-errs; err != nil {
+				t.Fatalf("concurrent InTx: %v", err)
+			}
+		}
+
+		var count int
+		if err := db.QueryRow(ctx, `SELECT COUNT(*) FROM conformance`).Scan(&count); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if count != workers*3 {
+			t.Errorf("count = %d, want %d (every transaction fully applied)", count, workers*3)
 		}
 	})
 }

@@ -83,6 +83,14 @@ type DB interface {
 	Schema(ctx context.Context, statements ...string) error
 
 	// InTx runs fn inside a transaction, committing when fn returns nil and
-	// rolling back otherwise. A panic also rolls back before unwinding.
+	// rolling back otherwise.
+	//
+	// Atomicity is guaranteed on both engines; serializability is not. SQLite
+	// takes the write lock up front (BEGIN IMMEDIATE), so concurrent
+	// transactions queue. PostgreSQL runs at its default READ COMMITTED, so
+	// two transactions can read the same value and the second fails on a
+	// constraint instead of waiting. Code that allocates a key from a MAX must
+	// therefore be prepared for a conflict error rather than assuming it was
+	// serialized.
 	InTx(ctx context.Context, fn func(Querier) error) error
 }

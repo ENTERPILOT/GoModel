@@ -40,42 +40,57 @@ func (s *sqliteDB) Schema(ctx context.Context, statements ...string) error {
 	return execSchema(ctx, s, SQLite, statements)
 }
 
+// InTx runs fn in a BEGIN IMMEDIATE transaction on a dedicated connection.
+//
+// database/sql's BeginTx can only start SQLite's default deferred
+// transaction, which takes the write lock lazily. A read-then-write sequence —
+// every InTx caller here reads a MAX or an existing row before writing — can
+// then have two transactions both read, then collide when the second tries to
+// upgrade, surfacing as SQLITE_BUSY rather than one waiting for the other.
+// Taking the write lock up front serializes them properly.
 func (s *sqliteDB) InTx(ctx context.Context, fn func(Querier) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
+		return fmt.Errorf("acquire connection: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	committed := false
 	defer func() {
 		if !committed {
-			_ = tx.Rollback()
+			// Roll back on a live context: the caller's may already be done.
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), `ROLLBACK`)
 		}
 	}()
-	if err := fn(&sqliteQuerier{tx: tx}); err != nil {
+
+	if err := fn(&sqliteQuerier{conn: conn}); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 	committed = true
 	return nil
 }
 
-// sqliteQuerier adapts an open database/sql transaction to Querier.
+// sqliteQuerier adapts a connection inside an open transaction to Querier.
 type sqliteQuerier struct {
-	tx *sql.Tx
+	conn *sql.Conn
 }
 
 func (s *sqliteQuerier) Exec(ctx context.Context, query string, args ...any) (int64, error) {
-	return sqlExec(ctx, s.tx, query, args...)
+	return sqlExec(ctx, s.conn, query, args...)
 }
 
 func (s *sqliteQuerier) Query(ctx context.Context, query string, args ...any) (Rows, error) {
-	return sqlQuery(ctx, s.tx, query, args...)
+	return sqlQuery(ctx, s.conn, query, args...)
 }
 
 func (s *sqliteQuerier) QueryRow(ctx context.Context, query string, args ...any) Row {
-	return sqlQueryRow(ctx, s.tx, query, args...)
+	return sqlQueryRow(ctx, s.conn, query, args...)
 }
 
 // sqlExecutor is the subset of *sql.DB and *sql.Tx this adapter needs.
