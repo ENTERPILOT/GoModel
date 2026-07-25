@@ -173,7 +173,7 @@ func upsertRules(ctx context.Context, q sqlx.Querier, rules []Rule) error {
 	return nil
 }
 
-func scanSQLRule(scanner interface{ Scan(dest ...any) error }) (Rule, error) {
+func scanSQLRule(scanner sqlx.Row) (Rule, error) {
 	var rule Rule
 	var maxRequests, maxTokens *int64
 	var createdAt, updatedAt int64

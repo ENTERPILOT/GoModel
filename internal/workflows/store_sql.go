@@ -19,8 +19,7 @@ type SQLStore struct {
 	db sqlx.DB
 }
 
-var sqlSchema = []string{
-	`CREATE TABLE IF NOT EXISTS workflow_versions (
+var sqlTable = `CREATE TABLE IF NOT EXISTS workflow_versions (
 		id TEXT PRIMARY KEY,
 		scope_provider TEXT,
 		scope_model TEXT,
@@ -35,7 +34,9 @@ var sqlSchema = []string{
 		workflow_hash TEXT NOT NULL,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		CHECK (scope_provider IS NOT NULL OR scope_model IS NULL)
-	)`,
+	)`
+
+var sqlIndexes = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_scope_version
 		ON workflow_versions(scope_key, version)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_active_scope
@@ -70,7 +71,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
-	if err := db.Schema(ctx, sqlSchema[0]); err != nil {
+	if err := db.Schema(ctx, sqlTable); err != nil {
 		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
@@ -79,7 +80,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := migrateCreatedAtToUnixSeconds(ctx, db); err != nil {
 		return nil, err
 	}
-	if err := db.Schema(ctx, sqlSchema[1:]...); err != nil {
+	if err := db.Schema(ctx, sqlIndexes...); err != nil {
 		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
 	// Rows written before managed_default existed are recognised by the name

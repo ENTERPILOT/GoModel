@@ -161,7 +161,7 @@ func (s *SQLCredentialStore) Close() error {
 	return nil
 }
 
-func scanSQLCredential(scanner interface{ Scan(dest ...any) error }) (ManagedProviderCredential, error) {
+func scanSQLCredential(scanner sqlx.Row) (ManagedProviderCredential, error) {
 	var cred ManagedProviderCredential
 	var apiKeys, models []byte
 	var createdAt, updatedAt int64

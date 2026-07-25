@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
@@ -140,7 +141,7 @@ func TestSQLStoreDeactivate(t *testing.T) {
 			t.Fatalf("Deactivate: %v", err)
 		}
 		// Deactivating twice reports not-found rather than silently succeeding.
-		if err := store.Deactivate(ctx, created.ID); err != ErrNotFound {
+		if err := store.Deactivate(ctx, created.ID); !errors.Is(err, ErrNotFound) {
 			t.Errorf("second Deactivate = %v, want ErrNotFound", err)
 		}
 

@@ -61,8 +61,8 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := db.Schema(ctx, sqlTable); err != nil {
 		return nil, fmt.Errorf("failed to create auth_keys table: %w", err)
 	}
-	// Indexes come after the migrations because idx_auth_keys_enabled needs a
-	// column that older databases gained only through them.
+	// Migrations run before the indexes so that an index over a backfilled
+	// column would find it present on an older database.
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
 		return nil, err
 	}

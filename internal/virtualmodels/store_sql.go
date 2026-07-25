@@ -166,7 +166,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 	}, nil
 }
 
-func scanSQLVirtualModel(scanner interface{ Scan(dest ...any) error }) (VirtualModel, error) {
+func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	var vm VirtualModel
 	var targets, userPaths []byte
 	var createdAt, updatedAt int64

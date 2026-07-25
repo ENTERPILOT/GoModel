@@ -40,6 +40,9 @@ func (r *Result) Close() error {
 // If logging is disabled in the config, returns a NoopLogger and never
 // touches storage.
 func New(ctx context.Context, cfg *config.Config, store storage.Storage) (*Result, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config is required")
+	}
 	if !cfg.Logging.Enabled {
 		return &Result{Logger: &NoopLogger{}}, nil
 	}

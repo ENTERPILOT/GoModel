@@ -143,7 +143,7 @@ func ruleUpsertArgs(rule Rule) ([]any, error) {
 	}, nil
 }
 
-func scanSQLRule(scanner interface{ Scan(dest ...any) error }) (Rule, error) {
+func scanSQLRule(scanner sqlx.Row) (Rule, error) {
 	var rule Rule
 	var targets []byte
 	var createdAt, updatedAt int64

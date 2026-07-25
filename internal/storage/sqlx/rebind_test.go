@@ -70,7 +70,11 @@ func TestRebind(t *testing.T) {
 			want:  `DO $body$ SELECT '?' $body$; SELECT $1`,
 		},
 		{
-			name:  "existing positional parameter is not mistaken for a dollar quote",
+			// Not a supported input: a query must pick one placeholder style.
+			// Pinned only to show $1 is left alone rather than treated as an
+			// unterminated dollar quote, which would swallow the rest of the
+			// statement.
+			name:  "stray positional parameter is not mistaken for a dollar quote",
 			query: `SELECT $1, ?`,
 			want:  `SELECT $1, $1`,
 		},
@@ -99,7 +103,7 @@ func TestExpandTypes(t *testing.T) {
 	const ddl = `CREATE TABLE t (
 		id TEXT PRIMARY KEY,
 		n ` + TypeInt64 + ` NOT NULL,
-		flag ` + TypeBool + ` NOT NULL DEFAULT 1,
+		flag ` + TypeBool + ` NOT NULL DEFAULT TRUE,
 		cost ` + TypeFloat + `,
 		doc ` + TypeJSONText + ` NOT NULL DEFAULT '[]',
 		blob ` + TypeJSON + `,
@@ -110,8 +114,8 @@ func TestExpandTypes(t *testing.T) {
 		dialect Dialect
 		want    []string
 	}{
-		{SQLite, []string{"INTEGER NOT NULL", "INTEGER NOT NULL DEFAULT 1", "REAL", "TEXT NOT NULL", "JSON", "DATETIME"}},
-		{PostgreSQL, []string{"BIGINT NOT NULL", "BOOLEAN NOT NULL DEFAULT 1", "DOUBLE PRECISION", "JSONB NOT NULL", "JSONB", "TIMESTAMPTZ"}},
+		{SQLite, []string{"INTEGER NOT NULL", "INTEGER NOT NULL DEFAULT TRUE", "REAL", "TEXT NOT NULL", "JSON", "DATETIME"}},
+		{PostgreSQL, []string{"BIGINT NOT NULL", "BOOLEAN NOT NULL DEFAULT TRUE", "DOUBLE PRECISION", "JSONB NOT NULL", "JSONB", "TIMESTAMPTZ"}},
 	}
 
 	for _, tt := range tests {

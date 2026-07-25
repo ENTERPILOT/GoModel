@@ -51,10 +51,10 @@ func newMongoTestStore(t *testing.T) Store {
 	if err != nil {
 		t.Fatalf("mongo.Connect: %v", err)
 	}
-	name := "gomodel_filestore_test_" +
-		strings.ReplaceAll(t.Name(), "/", "_") + "_" +
-		time.Now().Format("20060102150405_000000000")
-	db := client.Database(name)
+	// MongoDB rejects database names of 64 bytes or more, and the prefix plus
+	// a timestamp already spends 48 of them, so the test name is bounded
+	// rather than concatenated whole.
+	db := client.Database(mongoTestDatabaseName(t.Name()))
 	store, err := NewMongoDBStore(db)
 	if err != nil {
 		_ = client.Disconnect(ctx)
@@ -65,6 +65,19 @@ func newMongoTestStore(t *testing.T) Store {
 		_ = client.Disconnect(ctx)
 	})
 	return store
+}
+
+// mongoTestDatabaseName builds a unique database name that stays inside
+// MongoDB's 64-byte limit.
+func mongoTestDatabaseName(testName string) string {
+	const prefix = "gomodel_filestore_test_"
+	suffix := "_" + time.Now().Format("20060102150405_000000000")
+
+	sanitized := strings.ReplaceAll(testName, "/", "_")
+	if budget := 63 - len(prefix) - len(suffix); len(sanitized) > budget {
+		sanitized = sanitized[:budget]
+	}
+	return prefix + sanitized + suffix
 }
 
 func TestStoreUpsertPreservesCreatedAt(t *testing.T) {

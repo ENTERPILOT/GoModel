@@ -173,7 +173,7 @@ func (s *SQLStore) Close() error {
 	return nil
 }
 
-func scanSQLMCPServer(scanner interface{ Scan(dest ...any) error }) (ManagedServer, error) {
+func scanSQLMCPServer(scanner sqlx.Row) (ManagedServer, error) {
 	var server ManagedServer
 	var headers, allowed, disallowed, userPaths []byte
 	var createdAt, updatedAt int64

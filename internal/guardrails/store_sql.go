@@ -15,8 +15,7 @@ type SQLStore struct {
 	db sqlx.DB
 }
 
-var sqlSchema = []string{
-	`CREATE TABLE IF NOT EXISTS guardrail_definitions (
+var sqlTable = `CREATE TABLE IF NOT EXISTS guardrail_definitions (
 		name TEXT PRIMARY KEY,
 		type TEXT NOT NULL,
 		description TEXT NOT NULL DEFAULT '',
@@ -24,7 +23,9 @@ var sqlSchema = []string{
 		config ` + sqlx.TypeJSON + ` NOT NULL,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
-	)`,
+	)`
+
+var sqlIndexes = []string{
 	`CREATE INDEX IF NOT EXISTS idx_guardrail_definitions_type ON guardrail_definitions(type)`,
 	`CREATE INDEX IF NOT EXISTS idx_guardrail_definitions_updated_at ON guardrail_definitions(updated_at DESC)`,
 }
@@ -55,13 +56,13 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
-	if err := db.Schema(ctx, sqlSchema[0]); err != nil {
+	if err := db.Schema(ctx, sqlTable); err != nil {
 		return nil, fmt.Errorf("initialize guardrail definitions table: %w", err)
 	}
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
 		return nil, fmt.Errorf("initialize guardrail definitions table: %w", err)
 	}
-	if err := db.Schema(ctx, sqlSchema[1:]...); err != nil {
+	if err := db.Schema(ctx, sqlIndexes...); err != nil {
 		return nil, fmt.Errorf("initialize guardrail definitions table: %w", err)
 	}
 	return &SQLStore{db: db}, nil

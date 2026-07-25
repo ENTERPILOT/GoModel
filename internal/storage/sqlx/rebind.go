@@ -11,6 +11,11 @@ import (
 // passed twice — matching how the SQLite half of these stores already builds
 // its argument lists.
 //
+// A query must use one placeholder style throughout. `?` is the portable one
+// and is what stores write; a literal $n left in the same statement is not
+// renumbered and would silently end up sharing an argument slot with a
+// rewritten `?`.
+//
 // A `?` is only a placeholder outside quoted text and comments. The scanner
 // therefore skips over single-quoted strings (where a doubled quote is an
 // escaped quote rather than a terminator), double-quoted

@@ -27,8 +27,7 @@ type SQLStore struct {
 	db sqlx.DB
 }
 
-var sqlSchema = []string{
-	`CREATE TABLE IF NOT EXISTS budgets (
+var sqlBudgetsTable = `CREATE TABLE IF NOT EXISTS budgets (
 		user_path TEXT NOT NULL,
 		period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
 		amount ` + sqlx.TypeFloat + ` NOT NULL,
@@ -37,7 +36,10 @@ var sqlSchema = []string{
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		PRIMARY KEY (user_path, period_seconds)
-	)`,
+	)`
+
+// sqlRest is applied after the budgets migrations.
+var sqlRest = []string{
 	`CREATE TABLE IF NOT EXISTS budget_settings (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL,
@@ -70,13 +72,13 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
-	if err := db.Schema(ctx, sqlSchema[0]); err != nil {
+	if err := db.Schema(ctx, sqlBudgetsTable); err != nil {
 		return nil, fmt.Errorf("failed to create budgets table: %w", err)
 	}
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
 		return nil, fmt.Errorf("failed to migrate budgets table: %w", err)
 	}
-	if err := db.Schema(ctx, sqlSchema[1:]...); err != nil {
+	if err := db.Schema(ctx, sqlRest...); err != nil {
 		return nil, fmt.Errorf("failed to create budget tables: %w", err)
 	}
 	return &SQLStore{db: db}, nil
@@ -312,7 +314,7 @@ func upsertBudgets(ctx context.Context, q sqlx.Querier, budgets []Budget) error 
 	return nil
 }
 
-func scanSQLBudget(scanner interface{ Scan(dest ...any) error }) (Budget, error) {
+func scanSQLBudget(scanner sqlx.Row) (Budget, error) {
 	var budget Budget
 	var lastResetAt *int64
 	var createdAt, updatedAt int64
