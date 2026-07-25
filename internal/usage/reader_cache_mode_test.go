@@ -64,6 +64,14 @@ func TestGetCacheOverviewIgnoresRequestedCacheMode(t *testing.T) {
 			if overview.Summary.TotalHits != 1 {
 				t.Fatalf("total_hits = %d, want 1 (the cached row only)", overview.Summary.TotalHits)
 			}
+			// Hit counts alone cannot catch a leak: only one row is a cache
+			// hit either way, so a mode that wrongly widened to both rows
+			// would still count 1. The token totals differ between the two
+			// rows, so they do catch it.
+			if overview.Summary.TotalInput != 100 || overview.Summary.TotalTokens != 120 {
+				t.Fatalf("tokens = in %d / total %d, want 100 / 120 — the uncached row leaked in",
+					overview.Summary.TotalInput, overview.Summary.TotalTokens)
+			}
 		})
 	}
 }

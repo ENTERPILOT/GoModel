@@ -58,7 +58,7 @@ func (r *SQLReader) GetRequestStats(ctx context.Context, params RequestStatsPara
 			return nil, fmt.Errorf("failed to scan audit request stats row: %w", err)
 		}
 		if !hour.valid {
-			return nil, fmt.Errorf("failed to parse audit request stats hour %q", hour.raw)
+			return nil, fmt.Errorf("failed to parse audit request stats hour %q: %w", hour.raw, hour.err)
 		}
 		row.HourUTC = hour.Time
 		stats = append(stats, row)
@@ -78,6 +78,7 @@ type statsHour struct {
 	time.Time
 	valid bool
 	raw   string
+	err   error
 }
 
 func (h *statsHour) Scan(src any) error {
@@ -95,11 +96,15 @@ func (h *statsHour) Scan(src any) error {
 	}
 }
 
+// parse keeps a failure on the value rather than returning it, so the caller
+// can report it with the row context. The reason is carried along, not
+// discarded.
 func (h *statsHour) parse(raw string) error {
 	h.raw = raw
 	parsed, err := time.ParseInLocation(statsHourLayout, raw, time.UTC)
 	if err != nil {
-		return nil // reported by the caller, which has the row context
+		h.err = err
+		return nil
 	}
 	h.Time, h.valid = parsed, true
 	return nil

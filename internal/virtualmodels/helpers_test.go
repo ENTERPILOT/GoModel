@@ -32,6 +32,7 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 		if err != nil {
 			t.Fatalf("NewSQLStore: %v", err)
 		}
+		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
@@ -39,6 +40,7 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 		if err != nil {
 			t.Fatalf("NewMongoDBStore: %v", err)
 		}
+		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
 }
