@@ -2,6 +2,7 @@
   // A single workflow card: head, description, pipeline chart, guardrails and
   // (list mode only) the deactivate/edit footer. `preview` renders the
   // footer-less live preview card used inside the editor.
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
@@ -92,10 +93,7 @@
           class="table-icon-btn"
           onclick={() => wf.openCreate(workflow)}
         >
-          <svg class="table-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 20h9"></path>
-            <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
-          </svg>
+          <Icon name="pencil" class="table-icon-svg" />
         </TableActionButton>
       </div>
       <div class="workflow-card-meta workflow-card-meta-footer">

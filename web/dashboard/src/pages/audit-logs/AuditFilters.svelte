@@ -2,40 +2,23 @@
   // Audit-log toolbar: consolidated search + method/status/stream selects and
   // the Clear button.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import { debounced } from "$lib/utils/debounce.js";
   import { auditList } from "./auditList.svelte.js";
 
-  let searchDebounceTimer = null;
-
-  // Debounced search fetch (300ms).
-  function onSearchInput() {
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => {
-      searchDebounceTimer = null;
-      auditList.fetchAuditLog(true);
-    }, 300);
-  }
-
-  $effect(() => {
-    return () => {
-      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    };
-  });
+  const onSearchInput = debounced(() => auditList.fetchAuditLog(true));
+  $effect(() => onSearchInput.cancel);
 </script>
 
 <div class="audit-log-toolbar">
   <div class="audit-filter-row audit-filter-row-search">
-    <div class="filter-input-wrap">
-      <Icon name="search" class="filter-input-icon" />
-      <input
-        id="audit-filter-search"
-        type="text"
-        placeholder="Search by request ID, model, provider, path, user path, or error..."
-        aria-label="Search by request ID, model, provider, path, user path, or error"
-        class="filter-input"
-        bind:value={auditList.auditSearch}
-        oninput={onSearchInput}
-      />
-    </div>
+    <FilterInput
+      id="audit-filter-search"
+      placeholder="Search by request ID, model, provider, path, user path, or error..."
+      label="Search by request ID, model, provider, path, user path, or error"
+      bind:value={auditList.auditSearch}
+      oninput={onSearchInput}
+    />
   </div>
   <div class="audit-filter-row audit-filter-row-controls">
     <select
@@ -88,19 +71,7 @@
       class="pagination-btn audit-clear-btn"
       onclick={() => auditList.clearAuditFilters()}
     >
-      <svg
-        class="table-icon-svg"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M18 6L6 18"></path>
-        <path d="M6 6l12 12"></path>
-      </svg>
+      <Icon name="x" class="table-icon-svg" />
       <span>Clear</span>
     </button>
   </div>

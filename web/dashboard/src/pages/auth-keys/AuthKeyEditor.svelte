@@ -1,6 +1,7 @@
 <script>
   // Create-API-key modal: form fields plus the one-time issued-secret banner
   // with clipboard copy.
+  import CopyButton from "$lib/components/atoms/CopyButton.svelte";
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
@@ -43,19 +44,10 @@
           </p>
           <div class="auth-key-issued-value-row">
             <code class="auth-key-issued-token">{store.issuedValue}</code>
-            <button
-              type="button"
-              class="pagination-btn copy-feedback-btn"
-              class:copy-feedback-btn-copied={store.copyState.copied}
+            <CopyButton
+              state={store.copyState}
               onclick={() => store.copyIssuedValue()}
-            >
-              {#if store.copyState.copied}
-                <Icon name="circle-check" width="14" height="14" stroke-width="2.5" />
-              {:else}
-                <Icon name="copy" width="14" height="14" />
-              {/if}
-              <span>{store.copyState.copied ? "Copied" : "Copy"}</span>
-            </button>
+            />
           </div>
           {#if store.copyState.error}
             <p class="form-error" role="alert" aria-live="assertive">

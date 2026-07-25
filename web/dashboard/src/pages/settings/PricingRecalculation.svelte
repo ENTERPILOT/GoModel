@@ -181,8 +181,16 @@
     width: 100%;
   }
 
+/* The picker and its trigger render inside the DatePicker child, so :global
+   reaches them; the field class keeps these rules winning over DatePicker's
+   scoped bases. */
 .pricing-recalculate-date-field :global(.date-picker) {
     width: 100%;
+  }
+
+.pricing-recalculate-date-field :global(.date-picker-trigger) {
+    width: 100%;
+    justify-content: space-between;
   }
 
 .pricing-recalculate-actions {

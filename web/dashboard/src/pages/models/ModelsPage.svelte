@@ -9,6 +9,7 @@
   import { router } from "$lib/stores/router.svelte.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import ModelTable from "./ModelTable.svelte";
@@ -97,16 +98,11 @@
   {#if virtualModels.displayModels.length > 0 || modelsStore.filter || virtualModels.virtualModelsAvailable}
     <div class="table-toolbar">
       <div class="table-toolbar-main">
-        <div class="filter-input-wrap">
-          <Icon name="search" class="filter-input-icon" />
-          <input
-            type="text"
-            placeholder="Filter by provider, provider/model, alias, or owner..."
-            aria-label="Filter models by provider, provider/model, alias, or owner"
-            bind:value={modelsStore.filter}
-            class="filter-input"
-          />
-        </div>
+        <FilterInput
+          placeholder="Filter by provider, provider/model, alias, or owner..."
+          label="Filter models by provider, provider/model, alias, or owner"
+          bind:value={modelsStore.filter}
+        />
       </div>
       <div class="table-toolbar-actions">
         {#if virtualModels.virtualModelsAvailable}

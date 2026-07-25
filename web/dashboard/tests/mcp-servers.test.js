@@ -12,7 +12,6 @@ import {
   filterMcpServers,
   mcpCatalogIsEmpty,
   mcpCatalogSections,
-  mcpErrorPayloadMessage,
   mcpHeaderRowsToObject,
   mcpHeadersToRows,
   mcpServerEndpointLabel,
@@ -21,7 +20,7 @@ import {
   mcpServerStatusClass,
   mcpServerStatusTitle,
   normalizeMcpCatalog,
-  normalizeMcpCommaList,
+  splitCommaList,
   normalizeMcpUserPaths,
 } from "../src/pages/mcp-servers/mcp-servers.js";
 
@@ -94,7 +93,7 @@ test("mcpServerEndpointLabel shows a command indicator for stdio servers", () =>
 });
 
 test("list normalization splits comma tools and newline user paths", () => {
-  assert.deepEqual(normalizeMcpCommaList(" search_issues, get_file ,, "), [
+  assert.deepEqual(splitCommaList(" search_issues, get_file ,, "), [
     "search_issues",
     "get_file",
   ]);
@@ -326,13 +325,4 @@ test("filterMcpServers matches name, url, transport, and status", () => {
     ["github"],
   );
   assert.equal(filterMcpServers(servers, "").length, 2);
-});
-
-test("mcpErrorPayloadMessage extracts admin error messages", () => {
-  assert.equal(
-    mcpErrorPayloadMessage({ error: { message: "storage unavailable" } }, "fallback"),
-    "storage unavailable",
-  );
-  assert.equal(mcpErrorPayloadMessage(null, "fallback"), "fallback");
-  assert.equal(mcpErrorPayloadMessage({ error: "flat" }, "fallback"), "fallback");
 });

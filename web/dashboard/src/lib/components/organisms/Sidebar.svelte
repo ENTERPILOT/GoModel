@@ -43,12 +43,13 @@
     ].filter((item) => item.visible !== false),
   );
 
-  const themeTitle = $derived(
-    themeStore.theme === "light"
-      ? "Light theme"
-      : themeStore.theme === "dark"
-        ? "Dark theme"
-        : "System theme",
+  const themes = [
+    { value: "light", icon: "sun", label: "Light theme" },
+    { value: "system", icon: "monitor", label: "System theme" },
+    { value: "dark", icon: "moon", label: "Dark theme" },
+  ];
+  const activeTheme = $derived(
+    themes.find((t) => t.value === themeStore.theme) || themes[1],
   );
 </script>
 
@@ -83,47 +84,27 @@
   </nav>
   <div class="sidebar-footer">
     <div class="theme-toggle">
-      <button
-        class="theme-btn"
-        class:active={themeStore.theme === "light"}
-        onclick={() => themeStore.set("light")}
-        title="Light theme"
-        aria-label="Light theme"
-      >
-        <Icon name="sun" class="theme-icon" />
-      </button>
-      <button
-        class="theme-btn"
-        class:active={themeStore.theme === "system"}
-        onclick={() => themeStore.set("system")}
-        title="System theme"
-        aria-label="System theme"
-      >
-        <Icon name="monitor" class="theme-icon" />
-      </button>
-      <button
-        class="theme-btn"
-        class:active={themeStore.theme === "dark"}
-        onclick={() => themeStore.set("dark")}
-        title="Dark theme"
-        aria-label="Dark theme"
-      >
-        <Icon name="moon" class="theme-icon" />
-      </button>
+      {#each themes as theme (theme.value)}
+        <button
+          class="theme-btn"
+          class:active={themeStore.theme === theme.value}
+          onclick={() => themeStore.set(theme.value)}
+          title={theme.label}
+          aria-label={theme.label}
+        >
+          <Icon name={theme.icon} class="theme-icon" />
+        </button>
+      {/each}
     </div>
+    <!-- Collapsed/mobile stand-in for the pill: cycles through the same
+         three themes. -->
     <button
       class="theme-toggle-mobile"
       onclick={() => themeStore.toggle()}
-      title={themeTitle}
-      aria-label={themeTitle}
+      title={activeTheme.label}
+      aria-label={activeTheme.label}
     >
-      {#if themeStore.theme === "light"}
-        <Icon name="sun" class="theme-icon" />
-      {:else if themeStore.theme === "dark"}
-        <Icon name="moon" class="theme-icon" />
-      {:else}
-        <Icon name="monitor" class="theme-icon" />
-      {/if}
+      <Icon name={activeTheme.icon} class="theme-icon" />
     </button>
     {#if auth.needsAuth || auth.hasApiKey()}
       <div class="api-key-section">
@@ -152,6 +133,24 @@
 
 <style>
 /* Styles owned by this component (moved from dashboard.css). */
+.sidebar {
+    flex: 0 0 var(--sidebar-width);
+    width: var(--sidebar-width);
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    max-height: 100vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    z-index: 10;
+    transition:
+      flex-basis 0.2s,
+      width 0.2s;
+  }
+
 .sidebar-header {
     padding: 20px;
     border-bottom: 1px solid var(--border);
@@ -275,11 +274,6 @@
     transition: all 0.15s;
   }
 
-.theme-btn :global(svg) {
-    width: 14px;
-    height: 14px;
-  }
-
 .theme-btn:hover {
     color: var(--text);
   }
@@ -311,11 +305,6 @@
 
 .theme-toggle-mobile:hover {
     color: var(--text);
-  }
-
-.theme-toggle-mobile :global(svg) {
-    width: 16px;
-    height: 16px;
   }
 
 /* Sidebar toggle handle */
@@ -383,6 +372,11 @@
   }
 
 @media (max-width: 768px) {
+  .sidebar {
+          width: 60px;
+          flex-basis: 60px;
+        }
+
   .sidebar-header {
           justify-content: center;
           padding: 16px;

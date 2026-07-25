@@ -87,22 +87,7 @@ export function sendJSON(path, method, body, options = {}) {
 }
 
 // errorMessage extracts a human-readable message from an admin error payload.
-export function errorMessage(result, fallback) {
-  const data = result && result.data;
-  if (data && typeof data === "object") {
-    const candidates = [
-      data.message,
-      data.error,
-      data.error && typeof data.error === "object" ? data.error.message : null,
-    ];
-    for (const msg of candidates) {
-      if (typeof msg === "string" && msg.trim()) {
-        return msg.trim();
-      }
-    }
-  }
-  return fallback;
-}
+export { errorMessage, errorPayloadMessage } from "./errors.js";
 
 export function isAbortError(error) {
   return Boolean(error) && (error.name === "AbortError" || error.code === 20);

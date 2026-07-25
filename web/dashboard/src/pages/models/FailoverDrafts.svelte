@@ -5,6 +5,7 @@
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { failover } from "./failover.svelte.js";
 </script>
 
@@ -42,16 +43,11 @@
 
     {#if !failover.failoverGenerating && failover.failoverGeneratedRules.length > 0}
       <div class="failover-draft-toolbar">
-        <div class="filter-input-wrap">
-          <Icon name="search" class="filter-input-icon" />
-          <input
-            type="text"
-            class="filter-input"
-            placeholder="Filter failover drafts..."
-            aria-label="Filter failover drafts"
-            bind:value={failover.failoverDraftFilter}
-          />
-        </div>
+        <FilterInput
+          placeholder="Filter failover drafts..."
+          label="Filter failover drafts"
+          bind:value={failover.failoverDraftFilter}
+        />
         <button
           type="button"
           class="pagination-btn pagination-btn-with-icon failover-draft-toggle-all"

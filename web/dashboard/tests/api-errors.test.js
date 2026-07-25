@@ -1,0 +1,36 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { errorMessage, errorPayloadMessage } from "../src/lib/api/errors.js";
+
+test("errorPayloadMessage extracts the admin error payload message", () => {
+  assert.equal(
+    errorPayloadMessage({ error: { message: "storage unavailable" } }, "fallback"),
+    "storage unavailable",
+  );
+});
+
+test("errorPayloadMessage falls back on any other shape", () => {
+  for (const payload of [null, undefined, {}, "text", { error: "flat" }, { error: {} }]) {
+    assert.equal(errorPayloadMessage(payload, "fallback"), "fallback");
+  }
+});
+
+test("errorMessage reads the result envelope, preferring message over error", () => {
+  assert.equal(errorMessage({ data: { message: "  boom  " } }, "fallback"), "boom");
+  assert.equal(errorMessage({ data: { error: "flat error" } }, "fallback"), "flat error");
+  assert.equal(
+    errorMessage({ data: { error: { message: "nested" } } }, "fallback"),
+    "nested",
+  );
+  assert.equal(
+    errorMessage({ data: { message: "wins", error: "loses" } }, "fallback"),
+    "wins",
+  );
+});
+
+test("errorMessage falls back when the envelope carries nothing usable", () => {
+  for (const result of [null, {}, { data: null }, { data: {} }, { data: { message: "  " } }]) {
+    assert.equal(errorMessage(result, "fallback"), "fallback");
+  }
+});

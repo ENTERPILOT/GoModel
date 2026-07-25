@@ -1,7 +1,7 @@
 // Audit stats (Requests by Status + Provider Latency) logic. Pure functions
 // so bucketing, labels, and chart configs are testable with node.
 
-import { chartTickFont, chartTooltip, barColors } from "./chartStyle.js";
+import { barColors, chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 import { formatTokensShort } from "../../lib/utils/format.js";
 
 export function emptyAuditStats() {

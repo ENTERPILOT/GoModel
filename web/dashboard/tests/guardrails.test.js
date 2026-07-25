@@ -10,7 +10,6 @@ import {
   defaultGuardrailForm,
   filterGuardrails,
   guardrailArrayFieldSelected,
-  guardrailErrorMessage,
   guardrailFieldValue,
   normalizeGuardrailConfig,
   setGuardrailFieldValue,
@@ -217,22 +216,4 @@ test("buildGuardrailPayload keeps trimmed optional fields", () => {
     user_path: "/team/alpha",
     config: { content: "x" },
   });
-});
-
-test("guardrailErrorMessage extracts the admin error payload message", () => {
-  assert.equal(
-    guardrailErrorMessage(
-      { error: { message: "system_prompt content is required" } },
-      "Failed to save guardrail.",
-    ),
-    "system_prompt content is required",
-  );
-  assert.equal(
-    guardrailErrorMessage(null, "Failed to save guardrail."),
-    "Failed to save guardrail.",
-  );
-  assert.equal(
-    guardrailErrorMessage({ error: "nope" }, "Failed to save guardrail."),
-    "Failed to save guardrail.",
-  );
 });

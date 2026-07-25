@@ -5,6 +5,7 @@
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import BudgetList from "./BudgetList.svelte";
   import BudgetEditor from "./BudgetEditor.svelte";
@@ -63,17 +64,12 @@
   {#if (store.budgets.length > 0 || store.filter) && store.budgetsAvailable && !auth.authError && !store.formOpen}
     <div class="table-toolbar">
       <div class="table-toolbar-main">
-        <div class="filter-input-wrap">
-          <Icon name="search" class="filter-input-icon" />
-          <input
-            type="text"
-            id="budget-filter"
-            class="filter-input"
-            placeholder="Filter by user path or period..."
-            aria-label="Filter budgets by user path or period"
-            bind:value={store.filter}
-          />
-        </div>
+        <FilterInput
+          id="budget-filter"
+          placeholder="Filter by user path or period..."
+          label="Filter budgets by user path or period"
+          bind:value={store.filter}
+        />
       </div>
       <div class="table-toolbar-actions budget-sort-control">
         <label for="budget-sort-by">Sort by</label>

@@ -5,6 +5,7 @@
   // whenever the API key changes.
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
@@ -59,17 +60,12 @@
   {#if (mcpServers.servers.length > 0 || mcpServers.filter) && mcpServers.available && !auth.authError}
     <div class="table-toolbar">
       <div class="table-toolbar-main">
-        <div class="filter-input-wrap">
-          <Icon name="search" class="filter-input-icon" />
-          <input
-            type="text"
-            id="mcp-server-filter"
-            class="filter-input"
-            placeholder="Filter by name, slug, URL, transport, or status..."
-            aria-label="Filter MCP servers by name, slug, URL, transport, or status"
-            bind:value={mcpServers.filter}
-          />
-        </div>
+        <FilterInput
+          id="mcp-server-filter"
+          placeholder="Filter by name, slug, URL, transport, or status..."
+          label="Filter MCP servers by name, slug, URL, transport, or status"
+          bind:value={mcpServers.filter}
+        />
       </div>
     </div>
   {/if}

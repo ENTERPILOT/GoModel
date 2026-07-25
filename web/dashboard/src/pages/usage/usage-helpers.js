@@ -336,27 +336,6 @@ export function chartWrapHeight(labelCount) {
 
 // --- Label chips ---
 
-const BAR_COLORS = [
-  "#c2845a",
-  "#7a9e7e",
-  "#d4a574",
-  "#b8a98e",
-  "#8b9e6b",
-  "#7d8a97",
-  "#c47a5a",
-  "#6b8e6b",
-  "#a09486",
-  "#9b7ea4",
-  "#c49a6c",
-];
+import { labelColor } from "../../lib/utils/chartTheme.js";
 
-// Deterministic label -> palette color so a label keeps one color across the
-// bar chart and every chip on the page.
-export function labelColor(label) {
-  let hash = 5381;
-  const text = String(label || "");
-  for (let i = 0; i < text.length; i++) {
-    hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
-  }
-  return BAR_COLORS[Math.abs(hash) % BAR_COLORS.length];
-}
+export { labelColor };

@@ -101,12 +101,9 @@ export function deriveMcpServerSlug(name) {
   return "mcp-" + hash.toString(16).padStart(8, "0");
 }
 
-export function normalizeMcpCommaList(value) {
-  return String(value || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item);
-}
+import { splitCommaList } from "../../lib/utils/format.js";
+
+export { splitCommaList };
 
 export function normalizeMcpUserPaths(value) {
   return String(value || "")
@@ -236,8 +233,8 @@ export function buildMcpServerPayload(form, mode, servers) {
       headers: mcpHeaderRowsToObject(form.headers),
       description: String(form.description || "").trim(),
       enabled: Boolean(form.enabled),
-      allowed_tools: normalizeMcpCommaList(form.allowed_tools),
-      disallowed_tools: normalizeMcpCommaList(form.disallowed_tools),
+      allowed_tools: splitCommaList(form.allowed_tools),
+      disallowed_tools: splitCommaList(form.disallowed_tools),
       user_paths: normalizeMcpUserPaths(form.user_paths),
       tool_timeout_seconds: toolTimeoutSeconds,
     },
@@ -319,20 +316,4 @@ export function mcpCatalogSections(catalog) {
 
 export function mcpCatalogIsEmpty(catalog) {
   return mcpCatalogSections(catalog).length === 0;
-}
-
-// mcpErrorPayloadMessage extracts the admin error message: the MCP
-// admin API reports failures as { error: { message } }.
-export function mcpErrorPayloadMessage(data, fallback) {
-  if (
-    data &&
-    typeof data === "object" &&
-    data.error &&
-    typeof data.error === "object" &&
-    typeof data.error.message === "string" &&
-    data.error.message
-  ) {
-    return data.error.message;
-  }
-  return fallback;
 }

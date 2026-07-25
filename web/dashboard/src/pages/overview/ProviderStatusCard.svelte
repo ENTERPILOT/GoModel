@@ -1,6 +1,7 @@
 <script>
   // One provider card in the Providers Overview grid: status pill, runtime
   // meta, and the expandable details (reason, request health, config).
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatNumber } from "$lib/utils/format.js";
   import { providerStatusState } from "./overviewState.svelte.js";
@@ -28,7 +29,26 @@
 
   const expanded = $derived(providerStatusState.cardExpanded(provider));
   const formatTimestamp = (ts) => timezone.formatTimestamp(ts);
+
+  // Config rows that are only rendered when the provider declares them.
+  const optionalConfig = $derived(
+    [
+      ["Base URL", provider.config?.base_url],
+      ["API Version", provider.config?.api_version],
+    ].filter(([, value]) => !!value),
+  );
 </script>
+
+{#snippet configRow(label, value, code = false)}
+  <div class="provider-status-config-row">
+    <span class="provider-status-config-label">{label}</span>
+    {#if code}
+      <code class="provider-status-config-value">{value}</code>
+    {:else}
+      <span class="provider-status-config-value">{value}</span>
+    {/if}
+  </div>
+{/snippet}
 
 <article class="provider-status-card">
   <div class="provider-status-card-head">
@@ -91,11 +111,7 @@
 
       {#if providerRequestHealth(provider)}
         <div class="provider-status-health">
-          <div class="provider-status-config-row">
-            <span class="provider-status-config-label">Recent Requests</span>
-            <span class="provider-status-config-value"
-            >{providerRecentTrafficSummary(provider)}</span>
-          </div>
+          {@render configRow("Recent Requests", providerRecentTrafficSummary(provider))}
           {#if providerBreakerState(provider)}
             <div class="provider-status-config-row">
               <span class="provider-status-config-label">Breaker State</span>
@@ -129,31 +145,12 @@
       {/if}
 
       <div class="provider-status-config">
-        {#if provider.config?.base_url}
-          <div class="provider-status-config-row">
-            <span class="provider-status-config-label">Base URL</span>
-            <code class="provider-status-config-value">{provider.config.base_url}</code>
-          </div>
-        {/if}
-        {#if provider.config?.api_version}
-          <div class="provider-status-config-row">
-            <span class="provider-status-config-label">API Version</span>
-            <code class="provider-status-config-value">{provider.config.api_version}</code>
-          </div>
-        {/if}
-        <div class="provider-status-config-row">
-          <span class="provider-status-config-label">Configured Models</span>
-          <span class="provider-status-config-value">{providerModelsSummary(provider)}</span>
-        </div>
-        <div class="provider-status-config-row">
-          <span class="provider-status-config-label">Retry</span>
-          <span class="provider-status-config-value">{providerRetrySummary(provider)}</span>
-        </div>
-        <div class="provider-status-config-row">
-          <span class="provider-status-config-label">Circuit Breaker</span>
-          <span class="provider-status-config-value"
-          >{providerCircuitBreakerSummary(provider)}</span>
-        </div>
+        {#each optionalConfig as [label, value] (label)}
+          {@render configRow(label, value, true)}
+        {/each}
+        {@render configRow("Configured Models", providerModelsSummary(provider))}
+        {@render configRow("Retry", providerRetrySummary(provider))}
+        {@render configRow("Circuit Breaker", providerCircuitBreakerSummary(provider))}
       </div>
     </div>
   </div>
@@ -167,22 +164,7 @@
     title={expanded ? "Collapse details" : "Expand details"}
     onclick={() => providerStatusState.toggleCard(provider)}
   >
-    <svg
-      class="provider-status-card-toggle-icon"
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M4 6l4 4 4-4"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
+    <Icon name="chevron-down" class="provider-status-card-toggle-icon" />
   </button>
 </article>
 
@@ -224,12 +206,15 @@
     outline-offset: -2px;
   }
 
-  .provider-status-card-toggle-icon {
+  /* The class rides on the Icon child's own <svg>, so it needs :global. */
+  .provider-status-card-toggle :global(.provider-status-card-toggle-icon) {
     display: block;
+    width: 16px;
+    height: 16px;
     transition: transform 0.28s ease;
   }
 
-  .provider-status-card-toggle.is-expanded .provider-status-card-toggle-icon {
+  .provider-status-card-toggle.is-expanded :global(.provider-status-card-toggle-icon) {
     transform: rotate(180deg);
   }
 
@@ -277,19 +262,24 @@
     white-space: nowrap;
   }
 
-  .provider-status-pill.is-healthy {
+  /* Shared health palette: the card's status pill and the breaker-state pill
+     inside the details read identically. */
+  .provider-status-pill.is-healthy,
+  .provider-status-health-state.is-healthy {
     color: var(--success);
     border-color: color-mix(in srgb, var(--success) 45%, var(--border));
     background: color-mix(in srgb, var(--success) 10%, transparent);
   }
 
-  .provider-status-pill.is-degraded {
+  .provider-status-pill.is-degraded,
+  .provider-status-health-state.is-degraded {
     color: var(--warning);
     border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
     background: color-mix(in srgb, var(--warning) 26%, var(--bg-surface));
   }
 
-  .provider-status-pill.is-unhealthy {
+  .provider-status-pill.is-unhealthy,
+  .provider-status-health-state.is-unhealthy {
     color: var(--danger);
     border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
     background: color-mix(in srgb, var(--danger) 10%, transparent);
@@ -397,24 +387,6 @@
     border: 1px solid var(--border);
     font-size: 12px;
     font-weight: 600;
-  }
-
-  .provider-status-health-state.is-healthy {
-    color: var(--success);
-    border-color: color-mix(in srgb, var(--success) 45%, var(--border));
-    background: color-mix(in srgb, var(--success) 10%, transparent);
-  }
-
-  .provider-status-health-state.is-degraded {
-    color: var(--warning);
-    border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
-    background: color-mix(in srgb, var(--warning) 26%, var(--bg-surface));
-  }
-
-  .provider-status-health-state.is-unhealthy {
-    color: var(--danger);
-    border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-    background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
   .provider-status-health-models {

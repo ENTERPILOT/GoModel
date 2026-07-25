@@ -3,6 +3,7 @@
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
@@ -66,17 +67,12 @@
   {#if (rateLimits.rateLimits.length > 0 || rateLimits.rateLimitFilter) && rateLimits.rateLimitsAvailable && !auth.authError && !rateLimits.rateLimitFormOpen}
     <div class="table-toolbar">
       <div class="table-toolbar-main">
-        <div class="filter-input-wrap">
-          <Icon name="search" class="filter-input-icon" />
-          <input
-            type="text"
-            id="rate-limit-filter"
-            class="filter-input"
-            placeholder="Filter by subject, scope, or period..."
-            aria-label="Filter rate limits by subject, scope, or period"
-            bind:value={rateLimits.rateLimitFilter}
-          />
-        </div>
+        <FilterInput
+          id="rate-limit-filter"
+          placeholder="Filter by subject, scope, or period..."
+          label="Filter rate limits by subject, scope, or period"
+          bind:value={rateLimits.rateLimitFilter}
+        />
       </div>
     </div>
   {/if}

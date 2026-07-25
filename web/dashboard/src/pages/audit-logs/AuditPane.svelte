@@ -1,6 +1,7 @@
 <script>
   // One request/response pane inside an expanded audit entry. `pane` is an
   // object built by audit-logic.js.
+  import CopyButton from "$lib/components/atoms/CopyButton.svelte";
   import { createCopyState } from "$lib/utils/clipboard.svelte.js";
   import { formatJSON } from "./audit-logic.js";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
@@ -72,52 +73,13 @@
     <div class="audit-pane-block audit-pane-block-headers">
       <div class="audit-pane-block-head">
         <h5>{pane.headersTitle || "Headers"}</h5>
-        <button
-          type="button"
-          class="copy-feedback-btn audit-copy-btn"
-          class:copy-feedback-btn-copied={copyHeadersState.copied}
-          onclick={(event) => {
-            event.preventDefault();
-            copyHeadersState.copy(pane.copyHeaders, formatJSON);
-          }}
-        >
-          {#if !copyHeadersState.copied}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-              /></svg
-            >
-          {:else}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              ><circle cx="12" cy="12" r="10" /><path
-                d="M8 12l3 3 5-5"
-              /></svg
-            >
-          {/if}
-          <span aria-live="polite" aria-atomic="true"
-            >{copyHeadersState.error
-              ? "Copy failed"
-              : copyHeadersState.copied
-                ? "Copied"
-                : "Copy Headers"}</span
-          >
-        </button>
+        <CopyButton
+          state={copyHeadersState}
+          label="Copy Headers"
+          errorLabel="Copy failed"
+          class="audit-copy-btn"
+          onclick={() => copyHeadersState.copy(pane.copyHeaders, formatJSON)}
+        />
       </div>
       <pre class="audit-json">{formattedHeaders}</pre>
     </div>
@@ -139,52 +101,13 @@
             </span>
           {/if}
         </div>
-        <button
-          type="button"
-          class="copy-feedback-btn audit-copy-btn"
-          class:copy-feedback-btn-copied={copyBodyState.copied}
-          onclick={(event) => {
-            event.preventDefault();
-            copyBodyState.copy(pane.copyBody, formatJSON);
-          }}
-        >
-          {#if !copyBodyState.copied}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-              /></svg
-            >
-          {:else}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              ><circle cx="12" cy="12" r="10" /><path
-                d="M8 12l3 3 5-5"
-              /></svg
-            >
-          {/if}
-          <span aria-live="polite" aria-atomic="true"
-            >{copyBodyState.error
-              ? "Copy failed"
-              : copyBodyState.copied
-                ? "Copied"
-                : "Copy Body"}</span
-          >
-        </button>
+        <CopyButton
+          state={copyBodyState}
+          label="Copy Body"
+          errorLabel="Copy failed"
+          class="audit-copy-btn"
+          onclick={() => copyBodyState.copy(pane.copyBody, formatJSON)}
+        />
       </div>
       <!-- Clicking a highlighted body snippet opens the Interactions drawer
            (drawer decides via selection state). -->
@@ -264,7 +187,8 @@
     min-width: 0;
   }
 
-  .audit-copy-btn {
+  /* The modifier class rides on the CopyButton child's own <button>. */
+  .audit-pane-block-head :global(.audit-copy-btn) {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -283,12 +207,12 @@
       color 0.15s;
   }
 
-  .audit-copy-btn:hover:not(:disabled) {
+  .audit-pane-block-head :global(.audit-copy-btn:hover:not(:disabled)) {
     background: color-mix(in srgb, var(--bg-surface) 80%, var(--text) 20%);
     border-color: color-mix(in srgb, var(--border) 45%, var(--text) 55%);
   }
 
-  .audit-copy-btn.copy-feedback-btn-copied {
+  .audit-pane-block-head :global(.audit-copy-btn.copy-feedback-btn-copied) {
     background: color-mix(in srgb, var(--success) 18%, var(--bg-surface));
   }
 

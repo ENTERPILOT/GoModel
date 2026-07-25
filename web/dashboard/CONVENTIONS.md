@@ -19,7 +19,11 @@ follow these rules so the pages compose into one coherent app.
    names for standard elements. Cascade gotcha: scoping adds specificity,
    so when moving a rule out of dashboard.css move its state/media/theme
    variants with it, and check the shipped computed style doesn't change —
-   a scoped rule can win ties it used to lose.
+   a scoped rule can win ties it used to lose. The mirror of that trap: a
+   global modifier (`.x-request`) silently loses to the scoped base
+   (`.x.svelte-hash`) it is meant to override. When the modifier is composed
+   dynamically, keep it in the owning component as a compound `:global` —
+   `.x:global(.x-request)` — so it still outranks the base.
 3. **Svelte 5 runes only.** `$state`, `$derived`, `$effect`, `$props`,
    snippets/`{@render}`. No legacy `$:` reactivity, no svelte/store.
 4. **Files:** page code lives in `src/pages/<page>/`. The entry component is
@@ -39,7 +43,7 @@ Imports use the `$lib` alias.
 ### HTTP: `$lib/api/client.js`
 
 ```js
-import { getJSON, sendJSON, apiFetch, errorMessage, isAbortError } from "$lib/api/client.js";
+import { getJSON, sendJSON, apiFetch, errorMessage, errorPayloadMessage, isAbortError } from "$lib/api/client.js";
 
 const result = await getJSON("/admin/foo?x=1", { label: "foo", signal });
 // result = { ok, stale, status, data, res }
@@ -54,6 +58,11 @@ const msg = errorMessage(saved, "Failed to save."); // extracts payload message
 `apiFetch(path, options)` is the raw escape hatch (SSE streams, blobs); it
 adds auth + timezone headers and the base path. Never call `fetch` directly
 with `/admin/...` paths.
+
+`errorMessage(result, fallback)` reads a result envelope;
+`errorPayloadMessage(data, fallback)` reads a raw `{error:{message}}` body.
+Both live in `$lib/api/errors.js` (no Svelte-runtime imports), so pure page
+logic and its `node:test` suite can import them directly from there.
 
 ### Stores (`$lib/stores/*.svelte.js`) — all singletons
 
@@ -94,6 +103,13 @@ with `/admin/...` paths.
   `variant="editor"` renders `editor-modal-*` classes (model editors),
   `"auth"` renders `auth-dialog-*` (small centered dialogs).
 - `$lib/components/atoms/EmptyState.svelte` — `<EmptyState icon="inbox" title="No data" hint="..." />`.
+- `$lib/components/atoms/NoDataIllustration.svelte` — the shared "no data"
+  artwork (hexagon over a ghosted bar chart): `<NoDataIllustration />`, or
+  `label=""` when the surrounding empty state already says it in text.
+- `$lib/components/atoms/CopyButton.svelte` — copy-to-clipboard button with
+  inline feedback: `<CopyButton state={copyState} label="Copy Body" onclick={...} />`.
+  The caller owns the `createCopyState()` state and does the copy, so the same
+  button works for page-local and store-held state.
 - `$lib/components/atoms/TableActionButton.svelte` — small table/card action
   button (`.table-action-btn`): `label` fills both title and aria-label,
   children supply the icon (and optional `.budget-action-label` span);
@@ -115,7 +131,13 @@ with `/admin/...` paths.
 - `$lib/components/molecules/Pagination.svelte` —
   `<Pagination total={log.total} offset={log.offset} limit={log.limit} onprev={...} onnext={...} />`.
 - `$lib/components/molecules/DatePicker.svelte` — `<DatePicker onchange={() => refetch()} />`
-  (binds the shared `dateRange` store).
+  (binds the shared `dateRange` store; the month grid lives in
+  `DatePickerCalendar.svelte`, its date math in `datePickerLogic.js`).
+- `$lib/components/molecules/FilterInput.svelte` — the standard toolbar search
+  field (magnifier + input):
+  `<FilterInput placeholder="Filter by ..." label="Filter budgets by ..." bind:value={store.filter} />`.
+  Optional `id`, `oninput` (debounce it), and `class` for wrapper modifiers —
+  a modifier class rides on the child's wrapper, so style it via `:global`.
 - `$lib/components/molecules/InlineHelpSection.svelte` — title row with the
   "?" help toggle and collapsible copy below (the `inline-help-section`
   markup): `<InlineHelpSection copyId="x-help-copy" label="x help" text={...}>
@@ -139,6 +161,15 @@ with `/admin/...` paths.
   qualifiedResolvedModelDisplay, auditModelDisplay`.
 - `$lib/utils/clipboard.svelte.js` — `writeTextToClipboard(v)`,
   `createCopyState()` (copy-button feedback state).
+- `$lib/utils/chartTheme.js` — `cssVar`, `chartColors`, plus the shared
+  Chart.js fragments every chart uses: `chartTickFont()`, `chartTooltip()`,
+  `resolveCssColor()` (var()/color-mix() → canvas-safe rgb), `barColors()`,
+  `labelColor(label)`, `labelChipStyle(label)`.
+- `$lib/utils/debounce.js` — `debounced(fn, delay = 300)` for search inputs;
+  call `.cancel()` from a teardown (`$effect(() => run.cancel)`).
+- `$lib/utils/storage.js` — `browserStorage()`, `readStored(key, fallback)`,
+  `writeStored(key, value)`. localStorage can be absent or blocked, so never
+  touch it directly.
 
 ## Page skeleton
 

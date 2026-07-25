@@ -1,17 +1,8 @@
 // Pure pricing-recalculation logic.
 
-// formatDateParam formats a Date as UTC yyyy-mm-dd.
-export function formatDateParam(date) {
-  if (!date) return "";
-  if (typeof date === "string") return date;
-  return (
-    date.getUTCFullYear() +
-    "-" +
-    String(date.getUTCMonth() + 1).padStart(2, "0") +
-    "-" +
-    String(date.getUTCDate()).padStart(2, "0")
-  );
-}
+import { formatDateParam } from "../../lib/utils/format.js";
+
+export { formatDateParam };
 
 // pricingRecalculateDatePayload renders the shared date-range window as the
 // recalculation request's date fields: preset -> {days}, custom range ->

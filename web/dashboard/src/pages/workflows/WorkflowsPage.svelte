@@ -1,6 +1,7 @@
 <script>
   // Workflows page.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { workflowsStore as wf } from "./workflows.svelte.js";
   import WorkflowEditor from "./WorkflowEditor.svelte";
@@ -44,16 +45,11 @@
   {#if wf.available}
     <div class="table-toolbar">
       <div class="table-toolbar-main">
-        <div class="filter-input-wrap">
-          <Icon name="search" class="filter-input-icon" aria-hidden="true" />
-          <input
-            type="text"
-            placeholder="Filter by scope, name, hash, or guardrail..."
-            bind:value={wf.filter}
-            class="filter-input"
-            aria-label="Filter workflows by scope, name, hash, or guardrail"
-          />
-        </div>
+        <FilterInput
+          placeholder="Filter by scope, name, hash, or guardrail..."
+          label="Filter workflows by scope, name, hash, or guardrail"
+          bind:value={wf.filter}
+        />
       </div>
       <div class="table-toolbar-actions">
         <span class="model-count">{wf.filteredWorkflows.length + " active scopes"}</span>
@@ -63,9 +59,7 @@
 
   <WorkflowEditor />
 
-  <div class="workflows-layout">
-    <WorkflowList />
-  </div>
+  <WorkflowList />
 
   <datalist id="workflow-guardrail-options">
     {#each wf.guardrailRefs as guardrailRef (guardrailRef)}
@@ -81,11 +75,5 @@
     margin-top: 6px;
     color: var(--text-muted);
     font-size: 14px;
-  }
-
-.workflows-layout {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
   }
 </style>
