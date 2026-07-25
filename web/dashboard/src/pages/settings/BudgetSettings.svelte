@@ -242,7 +242,7 @@
     <div class="settings-refresh-actions budget-settings-actions">
       <button
         type="button"
-        class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+        class="btn btn-primary btn-with-icon"
         disabled={saving || loading}
         aria-busy={saving ? "true" : "false"}
         aria-describedby="budget-settings-help-copy"

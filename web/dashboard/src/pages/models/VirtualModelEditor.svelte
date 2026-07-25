@@ -97,7 +97,7 @@
         <div>
           <button
             type="button"
-            class="pagination-btn pagination-btn-with-icon"
+            class="btn btn-with-icon"
             disabled={vm.vmFormManaged}
             onclick={() => vm.addVmTarget()}
           >
@@ -191,13 +191,13 @@
       {/if}
 
       <div class="form-actions">
-        <button type="button" class="pagination-btn" onclick={() => vm.closeVirtualModelForm()}>
+        <button type="button" class="btn" onclick={() => vm.closeVirtualModelForm()}>
           Cancel
         </button>
         {#if vm.vmFormHasExisting && !vm.vmFormManaged}
           <button
             type="button"
-            class="pagination-btn pagination-btn-danger-outline"
+            class="btn btn-danger-outline"
             disabled={vm.vmDeleting || vm.vmSubmitting}
             onclick={() => vm.deleteVirtualModel()}
           >
@@ -207,7 +207,7 @@
         {#if !vm.vmFormManaged}
           <button
             type="submit"
-            class="pagination-btn pagination-btn-primary pagination-btn-with-icon virtual-model-submit-btn"
+            class="btn btn-primary btn-with-icon virtual-model-submit-btn"
             disabled={vm.vmSubmitting || vm.vmDeleting}
           >
             {#if vm.vmFormMode !== "edit"}

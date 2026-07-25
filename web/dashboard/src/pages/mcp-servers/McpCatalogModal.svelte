@@ -75,7 +75,7 @@
     {/if}
 
     <div class="form-actions">
-      <button type="button" class="pagination-btn" onclick={() => mcpServers.closeCatalog()}>Close</button>
+      <button type="button" class="btn" onclick={() => mcpServers.closeCatalog()}>Close</button>
     </div>
   </div>
 </Modal>

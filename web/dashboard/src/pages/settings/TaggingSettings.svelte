@@ -169,7 +169,7 @@
           {:else}
             <button
               type="button"
-              class="pagination-btn pagination-btn-danger-outline"
+              class="btn btn-danger-outline"
               disabled={!editable}
               aria-label={"Remove tagging header " + (rule.header || index + 1)}
               onclick={() => removeHeader(index)}>Remove</button
@@ -190,7 +190,7 @@
   <div class="settings-refresh-actions tagging-settings-actions">
     <button
       type="button"
-      class="pagination-btn pagination-btn-with-icon"
+      class="btn btn-with-icon"
       disabled={!editable || saving || loading}
       onclick={addHeader}
     >
@@ -199,7 +199,7 @@
     </button>
     <button
       type="button"
-      class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+      class="btn btn-primary btn-with-icon"
       disabled={!editable || saving || loading}
       aria-busy={saving ? "true" : "false"}
       onclick={save}
@@ -272,7 +272,7 @@
         width: 100%;
       }
 
-    .tagging-settings-actions :global(.pagination-btn) {
+    .tagging-settings-actions :global(.btn) {
         width: 100%;
       }
   }

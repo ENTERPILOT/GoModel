@@ -21,7 +21,7 @@
     </div>
     <button
       type="button"
-      class="pagination-btn pagination-btn-primary pagination-btn-with-icon guardrail-create-btn"
+      class="btn btn-primary btn-with-icon guardrail-create-btn"
       disabled={store.typesLoading || store.formSubmitting || !store.available}
       onclick={() => store.openCreate()}
     >

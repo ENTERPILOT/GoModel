@@ -57,7 +57,7 @@
           <div class="form-actions">
             <button
               type="button"
-              class="pagination-btn pagination-btn-primary"
+              class="btn btn-primary"
               onclick={() => store.dismissIssuedKey()}
             >Done, I&rsquo;ve stored it</button>
           </div>
@@ -160,7 +160,7 @@
           <div class="form-actions">
             <button
               type="submit"
-              class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+              class="btn btn-primary btn-with-icon"
               disabled={store.formSubmitting}
             >
               {#if !store.formSubmitting}

@@ -123,12 +123,12 @@
       <div class="form-actions">
         <button
           type="button"
-          class="pagination-btn"
+          class="btn"
           onclick={() => store.closeForm()}>Cancel</button
         >
         <button
           type="submit"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+          class="btn btn-primary btn-with-icon"
           disabled={store.formSubmitting}
         >
           <Icon name="save" class="form-action-icon" />
@@ -176,13 +176,13 @@
       <div class="auth-dialog-actions">
         <button
           type="button"
-          class="pagination-btn"
+          class="btn"
           data-modal-autofocus
           onclick={() => store.closeOverrideDialog()}>Cancel</button
         >
         <button
           type="submit"
-          class="pagination-btn pagination-btn-danger pagination-btn-with-icon"
+          class="btn btn-danger btn-with-icon"
           disabled={store.formSubmitting}
         >
           <Icon name="save" class="form-action-icon" />

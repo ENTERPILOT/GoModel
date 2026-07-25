@@ -225,10 +225,10 @@
       {/if}
 
       <div class="form-actions">
-        <button type="button" class="pagination-btn" onclick={close}>Cancel</button>
+        <button type="button" class="btn" onclick={close}>Cancel</button>
         <button
           type="submit"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon workflow-submit-btn"
+          class="btn btn-primary btn-with-icon workflow-submit-btn"
           disabled={wf.submitting}
         >
           {#if wf.submitMode() === "create"}

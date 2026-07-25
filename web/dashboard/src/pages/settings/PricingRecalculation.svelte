@@ -142,7 +142,7 @@
     <div class="settings-refresh-actions pricing-recalculate-actions">
       <button
         type="button"
-        class="pagination-btn pagination-btn-danger pagination-btn-with-icon"
+        class="btn btn-danger btn-with-icon"
         disabled={loading || !enabled}
         aria-busy={loading ? "true" : "false"}
         aria-describedby="pricing-recalculate-help-copy"
@@ -208,7 +208,7 @@
           width: 100%;
         }
 
-  .pricing-recalculate-actions :global(.pagination-btn) {
+  .pricing-recalculate-actions :global(.btn) {
           width: 100%;
         }
 }

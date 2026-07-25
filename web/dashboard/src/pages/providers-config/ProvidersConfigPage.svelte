@@ -37,7 +37,7 @@
       {#if providersConfig.available && !auth.needsAuth}
         <button
           type="button"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+          class="btn btn-primary btn-with-icon"
           disabled={providersConfig.formSubmitting}
           onclick={() => providersConfig.openCreate()}
         >

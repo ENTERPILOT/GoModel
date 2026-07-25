@@ -49,7 +49,7 @@
 </div>
 <div class="form-actions">
   {#if timezone.override}
-    <button type="button" class="pagination-btn" onclick={clear}
+    <button type="button" class="btn" onclick={clear}
       >Use Browser Timezone</button
     >
   {/if}

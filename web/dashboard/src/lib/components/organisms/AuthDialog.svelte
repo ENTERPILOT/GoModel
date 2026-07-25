@@ -60,7 +60,7 @@
       <div class="auth-dialog-actions">
         <button
           type="submit"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon auth-dialog-submit-btn"
+          class="btn btn-primary btn-with-icon auth-dialog-submit-btn"
         >
           <Icon name="check" class="auth-dialog-submit-icon" />
           <span>{auth.needsAuth ? "Unlock dashboard" : "Save API key"}</span>

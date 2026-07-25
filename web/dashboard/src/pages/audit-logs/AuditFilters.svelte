@@ -68,7 +68,7 @@
     </select>
     <button
       type="button"
-      class="pagination-btn audit-clear-btn"
+      class="btn audit-clear-btn"
       onclick={() => auditList.clearAuditFilters()}
     >
       <Icon name="x" class="table-icon-svg" />
@@ -106,14 +106,14 @@
     grid-column: span 2;
   }
 
-  .audit-filter-row-controls :global(.pagination-btn) {
+  .audit-filter-row-controls :global(.btn) {
     grid-column: 11 / -1;
     justify-self: end;
     min-width: 108px;
   }
 
-  /* Colors come from the shared .pagination-btn styles: the stylesheet
-     originally declared a white variant here, but the later .pagination-btn
+  /* Colors come from the shared .btn styles: the stylesheet
+     originally declared a white variant here, but the later .btn
      base rule always overrode it, so the shipped button is the plain one.
      Scoping would resurrect the dead declarations — keep only the live ones. */
   .audit-clear-btn {
@@ -139,7 +139,7 @@
         grid-template-columns: 1fr;
       }
 
-    .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.pagination-btn) {
+    .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.btn) {
         grid-column: auto;
       }
   }

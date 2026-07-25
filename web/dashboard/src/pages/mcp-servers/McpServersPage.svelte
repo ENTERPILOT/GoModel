@@ -36,7 +36,7 @@
       {#if mcpServers.available && !auth.authError}
         <button
           type="button"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+          class="btn btn-primary btn-with-icon"
           disabled={mcpServers.formSubmitting}
           onclick={() => mcpServers.openCreate()}
         >

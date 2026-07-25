@@ -12,7 +12,7 @@
     // line), so the label keeps reading "Copy".
     errorLabel = "",
     onclick,
-    class: className = "pagination-btn",
+    class: className = "btn",
   } = $props();
 
   const text = $derived(

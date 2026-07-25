@@ -25,7 +25,7 @@
       {#if wf.available}
         <button
           type="button"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon workflow-create-btn"
+          class="btn btn-primary btn-with-icon workflow-create-btn"
           onclick={() => wf.openCreate()}
         >
           <Icon name="plus" class="form-action-icon" aria-hidden="true" />

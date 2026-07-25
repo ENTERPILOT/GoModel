@@ -1390,7 +1390,10 @@ body.conversation-drawer-open {
   padding: 12px 0 0;
 }
 
-.pagination-btn {
+/* Buttons — the app-wide base and its variants. Pair `.btn` with at most one
+   of `-primary` / `-danger` / `-danger-outline`, and add `-with-icon` when the
+   button holds an <Icon> next to its label. */
+.btn {
   padding: 6px 16px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1402,11 +1405,11 @@ body.conversation-drawer-open {
   transition: all 0.15s;
 }
 
-.pagination-btn:hover:not(:disabled) {
+.btn:hover:not(:disabled) {
   background: var(--bg-surface-hover);
 }
 
-.pagination-btn-primary {
+.btn-primary {
   background: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 70%, #000 10%);
   color: #fff;
@@ -1414,24 +1417,24 @@ body.conversation-drawer-open {
   box-shadow: 0 10px 22px rgba(59, 130, 246, 0.18);
 }
 
-.pagination-btn-primary:hover:not(:disabled) {
+.btn-primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 90%, #fff 10%);
   border-color: color-mix(in srgb, var(--accent) 78%, #000 12%);
 }
 
-.pagination-btn-danger-outline {
+.btn-danger-outline {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
   background: transparent;
   font-weight: 600;
 }
 
-.pagination-btn-danger-outline:hover:not(:disabled) {
+.btn-danger-outline:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 10%, var(--bg));
   border-color: color-mix(in srgb, var(--danger) 75%, var(--border));
 }
 
-.pagination-btn-danger {
+.btn-danger {
   color: #fff;
   border-color: color-mix(in srgb, var(--danger) 76%, #000 12%);
   background: var(--danger);
@@ -1439,24 +1442,24 @@ body.conversation-drawer-open {
   box-shadow: 0 10px 22px color-mix(in srgb, var(--danger) 20%, transparent);
 }
 
-.pagination-btn-danger:hover:not(:disabled) {
+.btn-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 90%, #fff 10%);
   border-color: color-mix(in srgb, var(--danger) 82%, #000 14%);
 }
 
-.pagination-btn-with-icon {
+.btn-with-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
 }
 
-.pagination-btn-with-icon .table-icon-svg {
+.btn-with-icon .table-icon-svg {
   width: 16px;
   height: 16px;
 }
 
-.pagination-btn:disabled {
+.btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
@@ -1940,7 +1943,7 @@ body.conversation-drawer-open {
       flex-direction: column-reverse;
     }
 
-  .auth-dialog-actions .pagination-btn {
+  .auth-dialog-actions .btn {
       width: 100%;
     }
 
@@ -2028,7 +2031,7 @@ body.conversation-drawer-open {
       justify-content: stretch;
     }
 
-  .table-toolbar-actions .pagination-btn {
+  .table-toolbar-actions .btn {
       width: 100%;
     }
 
@@ -2095,7 +2098,7 @@ body.conversation-drawer-open {
       width: 100%;
     }
 
-  .budget-settings-actions .pagination-btn {
+  .budget-settings-actions .btn {
       width: 100%;
     }
 }

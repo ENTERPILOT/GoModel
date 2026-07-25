@@ -39,7 +39,7 @@
       {#if rateLimits.rateLimitsEnabled() && rateLimits.rateLimitsAvailable && !auth.authError}
         <button
           type="button"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+          class="btn btn-primary btn-with-icon"
           disabled={rateLimits.rateLimitFormSubmitting}
           onclick={() => rateLimits.openRateLimitForm()}
         >

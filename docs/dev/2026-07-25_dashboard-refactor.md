@@ -170,17 +170,18 @@ each iteration, so the grid came out at 38–40 cells instead of 42. Fixed.
   payload builders, validation and flash messages. A generic base class would
   be the premature abstraction CLAUDE.md warns about.
 
-## 9. Open question for you
+## 9. `.pagination-btn` → `.btn`
 
-`.pagination-btn` is the app's **base button class**, used on ~37 elements
-that have nothing to do with pagination — every primary action reads
+`.pagination-btn` was the app's **base button class**, used on ~37 elements
+that have nothing to do with pagination — every primary action read
 `class="pagination-btn pagination-btn-primary pagination-btn-with-icon"`.
-Renaming it to `.btn` / `.btn-primary` / `.btn-icon` would fix a genuinely
-misleading name, but it's a ~40-file mechanical diff (plus several
-`:global(.pagination-btn)` references in other components), so I left it. Say
-the word and it's a quick follow-up.
+Renamed across 36 files (157 occurrences) to `.btn`, `.btn-primary`,
+`.btn-danger`, `.btn-danger-outline`, `.btn-with-icon`. `.pagination` (the
+container) is unchanged, and the rename is token-exact — no other class
+contains the substring `pagination-btn`, and `.btn-danger` does not collide
+with the pre-existing `.table-action-btn-danger` (different class token).
 
-I did *not* wrap that button in a component: the call sites vary a lot
+I did *not* wrap the button in a component: the call sites vary a lot
 (`disabled`, `title`, `aria-label`, differing icons, conditional labels,
 `&nbsp;` in text), so a component would need ~8 props and read worse than the
-plain `<button>` plus three utility classes.
+plain `<button>` plus utility classes.

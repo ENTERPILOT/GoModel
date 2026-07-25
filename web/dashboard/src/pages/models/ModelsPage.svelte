@@ -108,7 +108,7 @@
         {#if virtualModels.virtualModelsAvailable}
           <button
             type="button"
-            class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn"
+            class="btn btn-primary btn-with-icon alias-create-btn"
             aria-label="New virtual model alias"
             title="Alias"
             onclick={() => virtualModels.openVirtualModelCreate()}

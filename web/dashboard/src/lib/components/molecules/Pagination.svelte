@@ -11,13 +11,13 @@
     <div class="pagination-buttons">
       <button
         type="button"
-        class="pagination-btn"
+        class="btn"
         disabled={offset === 0}
         onclick={() => onprev?.()}>Prev</button
       >
       <button
         type="button"
-        class="pagination-btn"
+        class="btn"
         disabled={offset + limit >= total}
         onclick={() => onnext?.()}>Next</button
       >

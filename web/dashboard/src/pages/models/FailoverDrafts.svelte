@@ -50,7 +50,7 @@
         />
         <button
           type="button"
-          class="pagination-btn pagination-btn-with-icon failover-draft-toggle-all"
+          class="btn btn-with-icon failover-draft-toggle-all"
           disabled={failover.failoverDraftSaving}
           onclick={() => failover.toggleAllFailoverDrafts()}
         >
@@ -103,7 +103,7 @@
     <div class="form-actions failover-draft-actions">
       <button
         type="button"
-        class="pagination-btn"
+        class="btn"
         disabled={failover.failoverDraftSaving}
         onclick={() => failover.closeFailoverDraftsModal()}
       >
@@ -111,7 +111,7 @@
       </button>
       <button
         type="button"
-        class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+        class="btn btn-primary btn-with-icon"
         disabled={failover.failoverGenerating ||
           failover.failoverDraftSaving ||
           failover.selectedFailoverDraftCount() === 0}

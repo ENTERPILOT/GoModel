@@ -38,7 +38,7 @@
       {#if store.managementEnabled() && store.budgetsAvailable && !auth.authError}
         <button
           type="button"
-          class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+          class="btn btn-primary btn-with-icon"
           disabled={store.formSubmitting}
           onclick={() => store.openForm()}
         >
