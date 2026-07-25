@@ -26,11 +26,32 @@ import (
 var Registration = providers.Registration{
 	Type: "vertex",
 	New:  New,
+	Discovery: providers.DiscoveryConfig{
+		// Vertex never takes an API key: it authenticates with Application
+		// Default Credentials or a service account, against either an explicit
+		// base URL or the project/location pair. api_mode is honored through
+		// the Gemini adapter Vertex delegates translation to (VERTEX_API_MODE).
+		CredentialFields: []providers.CredentialField{
+			{Name: providers.CredentialFieldAuthType, Options: []string{authTypeGCPADC, authTypeServiceAccount}},
+			{Name: providers.CredentialFieldVertexProject},
+			{Name: providers.CredentialFieldVertexLocation},
+			{Name: providers.CredentialFieldServiceAccountJSON},
+			{Name: providers.CredentialFieldServiceAccountFile},
+			{Name: providers.CredentialFieldServiceAccountJSONBase64, Advanced: true},
+			{Name: providers.CredentialFieldBaseURL, Advanced: true},
+			{Name: providers.CredentialFieldAPIMode, Advanced: true, Options: []string{apiModeNative, apiModeOpenAICompatible}},
+			{Name: providers.CredentialFieldGCPScope, Advanced: true},
+		},
+	},
 }
 
 const (
 	authTypeGCPADC         = "gcp_adc"
 	authTypeServiceAccount = "gcp_service_account"
+	// The api_mode values the docs use; the Gemini adapter that reads them
+	// accepts further spellings of each.
+	apiModeNative           = "native"
+	apiModeOpenAICompatible = "openai_compatible"
 )
 
 // Provider implements Vertex AI through Gemini chat helpers plus Vertex-native

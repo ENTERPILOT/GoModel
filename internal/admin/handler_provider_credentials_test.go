@@ -88,6 +88,23 @@ func (f *providerCredentialsAdminFake) RegisteredTypes() []string {
 	return f.types
 }
 
+// CredentialSchemas returns a plain API-key form per known type; the
+// per-provider shapes themselves are covered in the providers package.
+func (f *providerCredentialsAdminFake) CredentialSchemas() []providers.CredentialSchema {
+	schemas := make([]providers.CredentialSchema, 0, len(f.types))
+	for _, providerType := range f.types {
+		schemas = append(schemas, providers.CredentialSchema{
+			Type: providerType,
+			Fields: []providers.CredentialField{
+				{Name: providers.CredentialFieldAPIKeys, Required: true},
+				{Name: providers.CredentialFieldBaseURL, Advanced: true},
+				{Name: providers.CredentialFieldModels, Advanced: true},
+			},
+		})
+	}
+	return schemas
+}
+
 func newProviderCredentialsHandler(fake *providerCredentialsAdminFake) *Handler {
 	return NewHandler(nil, nil, WithProviderCredentials(fake))
 }
@@ -365,19 +382,6 @@ func TestUpsertProviderCredential_RejectsManagedName(t *testing.T) {
 	}
 }
 
-func TestUpsertProviderCredential_RejectsUnknownType(t *testing.T) {
-	fake := newProviderCredentialsAdminFake()
-	h := newProviderCredentialsHandler(fake)
-
-	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"x","type":"not-a-real-type","api_keys":["sk-real"]}`)
-	if err := h.UpsertProviderCredential(c); err != nil {
-		t.Fatalf("UpsertProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestUpsertProviderCredential_RejectsNameContainingSlash(t *testing.T) {
 	fake := newProviderCredentialsAdminFake()
 	h := newProviderCredentialsHandler(fake)
@@ -389,8 +393,107 @@ func TestUpsertProviderCredential_RejectsNameContainingSlash(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
 	}
+	if got := errorParam(t, rec); got != "name" {
+		t.Errorf("error param = %q, want name", got)
+	}
 	if _, ok := fake.rows["my/provider"]; ok {
 		t.Fatal("a name containing '/' should not have been persisted")
+	}
+}
+
+// errorParam reads the `param` a rejection blames, which is what lets the
+// dashboard attach the message to one input instead of the whole form.
+func errorParam(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Param   *string `json:"param"`
+			Message string  `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode error body: %v (body=%s)", err, rec.Body.String())
+	}
+	if body.Error.Param == nil {
+		t.Fatalf("error has no param (body=%s)", rec.Body.String())
+	}
+	return *body.Error.Param
+}
+
+func TestUpsertProviderCredential_RejectionsNameTheOffendingField(t *testing.T) {
+	tests := []struct {
+		name  string
+		body  string
+		param string
+	}{
+		{name: "missing name", body: `{"type":"openai","api_keys":["sk-real"]}`, param: "name"},
+		{name: "missing type", body: `{"name":"x","api_keys":["sk-real"]}`, param: "type"},
+		{name: "unknown type", body: `{"name":"x","type":"not-a-real-type","api_keys":["sk-real"]}`, param: "type"},
+		{name: "redacted key with nothing to preserve", body: `{"name":"x","type":"openai","api_keys":["***********"]}`, param: "api_keys"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newProviderCredentialsHandler(newProviderCredentialsAdminFake())
+			c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", tt.body)
+			if err := h.UpsertProviderCredential(c); err != nil {
+				t.Fatalf("UpsertProviderCredential() error = %v", err)
+			}
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+			}
+			if got := errorParam(t, rec); got != tt.param {
+				t.Errorf("error param = %q, want %q", got, tt.param)
+			}
+		})
+	}
+}
+
+// A credential the service rejects as unusable is a 400 the operator can act
+// on, not a 502: it names the field to fix.
+func TestUpsertProviderCredential_ServiceFieldErrorIsABadRequest(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	fake.upsertErr = &providers.CredentialFieldError{
+		Field:   providers.CredentialFieldAPIKeys,
+		Message: `at least one API key is required for provider type "openai"`,
+	}
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"x","type":"openai"}`)
+	if err := h.UpsertProviderCredential(c); err != nil {
+		t.Fatalf("UpsertProviderCredential() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := errorParam(t, rec); got != providers.CredentialFieldAPIKeys {
+		t.Errorf("error param = %q, want api_keys", got)
+	}
+}
+
+func TestProviderCredentialTypes_ServesEachTypesCredentialForm(t *testing.T) {
+	h := newProviderCredentialsHandler(newProviderCredentialsAdminFake())
+
+	c, rec := newProviderCredentialContext(http.MethodGet, "/admin/provider-credentials/types", "")
+	if err := h.ProviderCredentialTypes(c); err != nil {
+		t.Fatalf("ProviderCredentialTypes() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body []providerCredentialTypeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v (body=%s)", err, rec.Body.String())
+	}
+	if len(body) != 3 {
+		t.Fatalf("got %d types, want 3", len(body))
+	}
+	if body[0].Type != "openai" {
+		t.Errorf("first type = %q, want openai", body[0].Type)
+	}
+	if len(body[0].Fields) == 0 || body[0].Fields[0].Name != providers.CredentialFieldAPIKeys || !body[0].Fields[0].Required {
+		t.Errorf("openai fields = %+v, want api_keys first and required", body[0].Fields)
 	}
 }
 

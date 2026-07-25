@@ -40,6 +40,12 @@ var Registration = providers.Registration{
 	New:  New,
 	Discovery: providers.DiscoveryConfig{
 		AllowAPIKeyless: true,
+		// Bedrock authenticates through the AWS SDK credential chain, never an
+		// API key, so the only thing to configure is which region or endpoint
+		// to call.
+		CredentialFields: []providers.CredentialField{
+			{Name: providers.CredentialFieldBaseURL},
+		},
 	},
 }
 

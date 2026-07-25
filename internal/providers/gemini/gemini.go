@@ -27,6 +27,22 @@ var Registration = providers.Registration{
 	New:  New,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultOpenAICompatibleBaseURL,
+		// An AI Studio Gemini takes a plain API key; pointing the same adapter
+		// at Vertex swaps that for Google credentials, so the key is optional
+		// and the Vertex fields stay out of the way until they are needed.
+		CredentialFields: []providers.CredentialField{
+			{Name: providers.CredentialFieldAPIKeys},
+			{Name: providers.CredentialFieldBackend, Options: []string{geminiBackendAIStudio, geminiBackendVertex}},
+			{Name: providers.CredentialFieldBaseURL, Advanced: true},
+			{Name: providers.CredentialFieldAPIMode, Advanced: true, Options: []string{geminiAPIModeNative, geminiAPIModeOpenAICompatible}},
+			{Name: providers.CredentialFieldAuthType, Advanced: true, Options: []string{geminiAuthTypeAPIKey, geminiAuthTypeGCPADC, geminiAuthTypeServiceKey}},
+			{Name: providers.CredentialFieldVertexProject, Advanced: true},
+			{Name: providers.CredentialFieldVertexLocation, Advanced: true},
+			{Name: providers.CredentialFieldServiceAccountJSON, Advanced: true},
+			{Name: providers.CredentialFieldServiceAccountFile, Advanced: true},
+			{Name: providers.CredentialFieldServiceAccountJSONBase64, Advanced: true},
+			{Name: providers.CredentialFieldGCPScope, Advanced: true},
+		},
 	},
 }
 
@@ -41,6 +57,10 @@ const (
 	geminiAuthTypeAPIKey     = "api_key"
 	geminiAuthTypeGCPADC     = "gcp_adc"
 	geminiAuthTypeServiceKey = "gcp_service_account"
+	// The api_mode values the docs and config examples use; useNativeAPI
+	// accepts further spellings of each.
+	geminiAPIModeNative           = "native"
+	geminiAPIModeOpenAICompatible = "openai_compatible"
 )
 
 // Provider implements the core.Provider interface for Google Gemini
@@ -290,9 +310,9 @@ func normalizeGeminiAuthType(backend string, cfg providers.ProviderConfig) strin
 
 func useNativeAPI(apiMode string) bool {
 	switch strings.ToLower(strings.TrimSpace(apiMode)) {
-	case "native", "gemini_native", "generate_content":
+	case geminiAPIModeNative, "gemini_native", "generate_content":
 		return true
-	case "openai", "openai_compatible", "openai-compatible", "compat", "compatible":
+	case geminiAPIModeOpenAICompatible, "openai", "openai-compatible", "compat", "compatible":
 		return false
 	case "":
 		return useNativeAPIFromEnv()

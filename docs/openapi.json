@@ -2172,10 +2172,11 @@
     },
     "/admin/provider-credentials/types": {
       "get": {
+        "description": "Each entry names a constructible provider type and the credential fields it accepts, so a client offers only the fields that type uses.",
         "tags": [
           "admin"
         ],
-        "summary": "List provider types the gateway can construct",
+        "summary": "List provider types the gateway can construct, with their credential forms",
         "responses": {
           "200": {
             "description": "OK",
@@ -2184,7 +2185,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "$ref": "#/components/schemas/admin.providerCredentialTypeResponse"
                   }
                 }
               }
@@ -9714,6 +9715,9 @@
           "LOGGING_RETENTION_DAYS": {
             "type": "string"
           },
+          "MCP_ENABLED": {
+            "type": "string"
+          },
           "RATE_LIMITS_ENABLED": {
             "type": "string"
           },
@@ -10102,6 +10106,45 @@
             "type": "string"
           },
           "selector": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.providerCredentialFieldResponse": {
+        "type": "object",
+        "properties": {
+          "advanced": {
+            "description": "Advanced marks a field most operators leave at its default for this\nprovider type.",
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "description": "Options are an enumerated field's canonical values, for a client to\noffer as a choice. It is not a whitelist — providers accept further\nspellings of each, and upserts are not rejected for using one. An empty\nvalue always means \"provider default\", so it is never listed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      },
+      "admin.providerCredentialTypeResponse": {
+        "type": "object",
+        "properties": {
+          "default_base_url": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/admin.providerCredentialFieldResponse"
+            }
+          },
+          "type": {
             "type": "string"
           }
         }

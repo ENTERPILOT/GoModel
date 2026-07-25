@@ -143,6 +143,18 @@ func (s *CredentialsService) RegisteredTypes() []string {
 	return s.factory.RegisteredTypes()
 }
 
+// CredentialSchemas returns the credential form of every registered provider
+// type, so the admin create/edit form can offer exactly the fields the
+// selected type uses.
+func (s *CredentialsService) CredentialSchemas() []CredentialSchema {
+	return s.factory.CredentialSchemas()
+}
+
+// CredentialSchema returns one provider type's credential form.
+func (s *CredentialsService) CredentialSchema(providerType string) CredentialSchema {
+	return credentialSchema(providerType, s.factory.discoveryConfig(providerType))
+}
+
 // IsManaged reports whether name is declared in config.yaml/env, making it
 // read-only from the admin API's point of view.
 func (s *CredentialsService) IsManaged(name string) bool {
@@ -201,41 +213,48 @@ func (s *CredentialsService) Get(ctx context.Context, name string) (*ManagedProv
 func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCredential) error {
 	name := strings.TrimSpace(cred.Name)
 	if name == "" {
-		return fmt.Errorf("provider name is required")
+		return &CredentialFieldError{Field: "name", Message: "provider name is required"}
 	}
 	if s.IsManaged(name) {
 		return fmt.Errorf("provider %q is managed by config/env and is read-only", name)
 	}
 	if strings.TrimSpace(cred.Type) == "" {
-		return fmt.Errorf("provider type is required")
+		return &CredentialFieldError{Field: "type", Message: "provider type is required"}
 	}
 	// "/" is the model-selector qualifier delimiter ("name/model"); a name
 	// containing one would make the provider unreachable or ambiguous
 	// through that syntax.
 	if strings.Contains(name, "/") {
-		return fmt.Errorf("provider name %q must not contain '/'", name)
+		return &CredentialFieldError{Field: "name", Message: fmt.Sprintf("provider name %q must not contain '/'", name)}
 	}
 	if !s.factory.knowsType(cred.Type) {
-		return fmt.Errorf("unknown provider type: %s", cred.Type)
+		return &CredentialFieldError{Field: "type", Message: "unknown provider type: " + cred.Type}
 	}
 	cred.Name = name
+	if err := validateCredential(cred, s.CredentialSchema(cred.Type)); err != nil {
+		return err
+	}
+
+	// Resolve and construct the adapter before persisting or touching the
+	// registry: an unresolvable row is not worth storing, and if this is an
+	// edit, whatever is currently registered under this name -- possibly a
+	// working provider actively serving traffic -- must keep serving rather
+	// than being unregistered out from under a failed edit.
+	var provider core.Provider
+	var cfg ProviderConfig
+	if cred.Enabled {
+		var err error
+		provider, cfg, err = s.buildProvider(cred)
+		if err != nil {
+			return unappliableCredentialError(cred, s.CredentialSchema(cred.Type), err)
+		}
+	}
 
 	if err := s.store.Upsert(ctx, cred); err != nil {
 		return err
 	}
 
 	if cred.Enabled {
-		// Resolve and construct the replacement adapter before touching the
-		// registry: if this credential doesn't resolve (e.g. an edit
-		// stripped the only API key), whatever is currently registered under
-		// this name -- possibly a working provider actively serving traffic
-		// -- must keep serving rather than being unregistered out from
-		// under a failed edit. The row is still persisted above, so a
-		// follow-up correction picks it straight up.
-		provider, cfg, err := s.buildProvider(cred)
-		if err != nil {
-			return fmt.Errorf("provider %q was saved but not applied: %w", name, err)
-		}
 		s.install(name, provider, cfg)
 	} else {
 		s.registry.UnregisterProvider(name)

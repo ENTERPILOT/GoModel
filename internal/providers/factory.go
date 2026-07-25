@@ -39,7 +39,9 @@ func (o ProviderOptions) Keyring(apiKey string) *Keyring {
 // ProviderConstructor is the constructor signature for providers.
 type ProviderConstructor func(cfg ProviderConfig, opts ProviderOptions) core.Provider
 
-// DiscoveryConfig describes how a provider participates in config resolution.
+// DiscoveryConfig describes how a provider participates in config resolution,
+// and — from the same facts — which credential fields it accepts, so the admin
+// form and env/YAML resolution can never disagree about what a type needs.
 // Env var names are derived by convention from Registration.Type.
 type DiscoveryConfig struct {
 	DefaultBaseURL     string
@@ -47,6 +49,13 @@ type DiscoveryConfig struct {
 	AllowAPIKeyless    bool
 	SupportsAPIVersion bool
 	NameSeparator      string
+
+	// CredentialFields declares the credential form of provider types that do
+	// not fit the plain "API key against one endpoint" shape (Google's
+	// project/service-account auth, an endpoint mode selector, ...), in display
+	// order. Leave it nil to derive the form from the flags above; the model
+	// list is always appended. See credentialSchema.
+	CredentialFields []CredentialField
 }
 
 // Registration contains metadata for registering a provider with the factory.
@@ -142,6 +151,14 @@ func (f *ProviderFactory) discoveryConfigsSnapshot() map[string]DiscoveryConfig 
 	snapshot := make(map[string]DiscoveryConfig, len(f.discoveryConfigs))
 	maps.Copy(snapshot, f.discoveryConfigs)
 	return snapshot
+}
+
+// discoveryConfig returns one provider type's discovery metadata; the zero
+// value for a type that is not registered.
+func (f *ProviderFactory) discoveryConfig(providerType string) DiscoveryConfig {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.discoveryConfigs[providerType]
 }
 
 // knowsType reports whether a builder is registered for the given provider
