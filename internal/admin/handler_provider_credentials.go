@@ -24,6 +24,7 @@ type ProviderCredentialsAdmin interface {
 	Delete(ctx context.Context, name string) error
 	IsManaged(name string) bool
 	RegisteredTypes() []string
+	CredentialSchemas() []providers.CredentialSchema
 }
 
 // redactedCredentialValue replaces secret values (API keys, service account
@@ -53,6 +54,30 @@ type upsertProviderCredentialRequest struct {
 	GCPScope                 string   `json:"gcp_scope,omitempty"`
 	Models                   []string `json:"models,omitempty"`
 	Enabled                  *bool    `json:"enabled,omitempty"`
+}
+
+// providerCredentialFieldResponse describes one credential field a provider
+// type accepts. `name` doubles as the upsert payload key and as the `param` of
+// a validation error about that field.
+type providerCredentialFieldResponse struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	// Advanced marks a field most operators leave at its default for this
+	// provider type.
+	Advanced bool `json:"advanced"`
+	// Options are an enumerated field's canonical values, for a client to
+	// offer as a choice. It is not a whitelist — providers accept further
+	// spellings of each, and upserts are not rejected for using one. An empty
+	// value always means "provider default", so it is never listed.
+	Options []string `json:"options,omitempty"`
+}
+
+// providerCredentialTypeResponse is one constructible provider type and the
+// credential form it accepts.
+type providerCredentialTypeResponse struct {
+	Type           string                            `json:"type"`
+	DefaultBaseURL string                            `json:"default_base_url,omitempty"`
+	Fields         []providerCredentialFieldResponse `json:"fields"`
 }
 
 // providerCredentialViewResponse is the admin view of one provider
@@ -129,11 +154,12 @@ func (h *Handler) ListProviderCredentials(c *echo.Context) error {
 
 // ProviderCredentialTypes handles GET /admin/provider-credentials/types.
 //
-// @Summary      List provider types the gateway can construct
+// @Summary      List provider types the gateway can construct, with their credential forms
+// @Description  Each entry names a constructible provider type and the credential fields it accepts, so a client offers only the fields that type uses.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
-// @Success      200  {array}   string
+// @Success      200  {array}   providerCredentialTypeResponse
 // @Failure      401  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/provider-credentials/types [get]
@@ -141,9 +167,25 @@ func (h *Handler) ProviderCredentialTypes(c *echo.Context) error {
 	if h.providerCredentials == nil {
 		return handleError(c, featureUnavailableError("provider credentials feature is unavailable"))
 	}
-	types := h.providerCredentials.RegisteredTypes()
-	sort.Strings(types)
-	return c.JSON(http.StatusOK, types)
+	schemas := h.providerCredentials.CredentialSchemas()
+	result := make([]providerCredentialTypeResponse, 0, len(schemas))
+	for _, schema := range schemas {
+		fields := make([]providerCredentialFieldResponse, 0, len(schema.Fields))
+		for _, field := range schema.Fields {
+			fields = append(fields, providerCredentialFieldResponse{
+				Name:     field.Name,
+				Required: field.Required,
+				Advanced: field.Advanced,
+				Options:  field.Options,
+			})
+		}
+		result = append(result, providerCredentialTypeResponse{
+			Type:           schema.Type,
+			DefaultBaseURL: schema.DefaultBaseURL,
+			Fields:         fields,
+		})
+	}
+	return c.JSON(http.StatusOK, result)
 }
 
 // UpsertProviderCredential handles PUT /admin/provider-credentials.
@@ -172,24 +214,24 @@ func (h *Handler) UpsertProviderCredential(c *echo.Context) error {
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return handleError(c, core.NewInvalidRequestError("name is required", nil))
+		return handleError(c, core.NewInvalidRequestError("name is required", nil).WithParam("name"))
 	}
 	// "/" is the model-selector qualifier delimiter ("name/model"); a name
 	// containing one would make the provider unreachable or ambiguous
 	// through that syntax. CredentialsService.Upsert enforces this too, but
 	// checking here gets a clean 400 instead of a 502-wrapped service error.
 	if strings.Contains(name, "/") {
-		return handleError(c, core.NewInvalidRequestError("name must not contain '/'", nil))
+		return handleError(c, core.NewInvalidRequestError("name must not contain '/'", nil).WithParam("name"))
 	}
 	providerType := strings.TrimSpace(req.Type)
 	if providerType == "" {
-		return handleError(c, core.NewInvalidRequestError("type is required", nil))
+		return handleError(c, core.NewInvalidRequestError("type is required", nil).WithParam("type"))
 	}
 	if !slices.Contains(h.providerCredentials.RegisteredTypes(), providerType) {
-		return handleError(c, core.NewInvalidRequestError("unknown provider type: "+providerType, nil))
+		return handleError(c, core.NewInvalidRequestError("unknown provider type: "+providerType, nil).WithParam("type"))
 	}
 	if h.providerCredentials.IsManaged(name) {
-		return handleError(c, core.NewInvalidRequestError("provider "+name+" is managed by config/env and is read-only", nil))
+		return handleError(c, core.NewInvalidRequestError("provider "+name+" is managed by config/env and is read-only", nil).WithParam("name"))
 	}
 
 	// Serialize provider-credential mutations: buildProviderCredentialUpsert
@@ -251,11 +293,11 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 	if err != nil {
 		return providers.ManagedProviderCredential{}, err
 	}
-	serviceAccountJSON, err := mergeRedactedValue(req.ServiceAccountJSON, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ServiceAccountJSON }))
+	serviceAccountJSON, err := mergeRedactedValue(providers.CredentialFieldServiceAccountJSON, req.ServiceAccountJSON, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ServiceAccountJSON }))
 	if err != nil {
 		return providers.ManagedProviderCredential{}, err
 	}
-	serviceAccountJSONBase64, err := mergeRedactedValue(req.ServiceAccountJSONBase64, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ServiceAccountJSONBase64 }))
+	serviceAccountJSONBase64, err := mergeRedactedValue(providers.CredentialFieldServiceAccountJSONBase64, req.ServiceAccountJSONBase64, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ServiceAccountJSONBase64 }))
 	if err != nil {
 		return providers.ManagedProviderCredential{}, err
 	}
@@ -320,7 +362,8 @@ func mergeRedactedList(incoming, stored []string) ([]string, error) {
 			continue
 		}
 		if i >= len(stored) {
-			return nil, core.NewInvalidRequestError("api_keys entry is redacted but has no stored value to preserve; provide the real value", nil)
+			return nil, core.NewInvalidRequestError("api_keys entry is redacted but has no stored value to preserve; provide the real value", nil).
+				WithParam(providers.CredentialFieldAPIKeys)
 		}
 		merged[i] = stored[i]
 	}
@@ -328,13 +371,14 @@ func mergeRedactedList(incoming, stored []string) ([]string, error) {
 }
 
 // mergeRedactedValue resolves a single all-asterisk placeholder against the
-// stored value.
-func mergeRedactedValue(incoming, stored string) (string, error) {
+// stored value. field names the credential field for the error's `param`.
+func mergeRedactedValue(field, incoming, stored string) (string, error) {
 	if !isRedactedCredentialValue(incoming) {
 		return incoming, nil
 	}
 	if stored == "" {
-		return "", core.NewInvalidRequestError("value is redacted but has no stored value to preserve; provide the real value", nil)
+		return "", core.NewInvalidRequestError(field+" is redacted but has no stored value to preserve; provide the real value", nil).
+			WithParam(field)
 	}
 	return stored, nil
 }
@@ -419,10 +463,21 @@ func redactList(values []string) []string {
 }
 
 // providerCredentialWriteError surfaces store/registry failures as 502,
-// mirroring mcpServerWriteError.
+// mirroring mcpServerWriteError. A credential the operator can fix is a 400
+// instead, carrying the offending field as `param` so a client can point at
+// that input rather than at the form as a whole.
 func providerCredentialWriteError(err error) error {
 	if err == nil {
 		return nil
+	}
+	var fieldErr *providers.CredentialFieldError
+	if errors.As(err, &fieldErr) {
+		invalid := core.NewInvalidRequestError(fieldErr.Message, err)
+		if fieldErr.Field == "" {
+			// Bad input the form cannot pin on one input; still a 400.
+			return invalid
+		}
+		return invalid.WithParam(fieldErr.Field)
 	}
 	return core.NewProviderError("provider_credentials", http.StatusBadGateway, err.Error(), err)
 }
