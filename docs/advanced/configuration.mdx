@@ -122,12 +122,12 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
   **Upgrading a PostgreSQL deployment past v0.1.59.** The `workflow_versions`
   table stored `created_at` as `TIMESTAMPTZ` on PostgreSQL and as unix seconds
   on SQLite. The two are now unified on unix seconds, and the first startup
-  converts the column in place — no action needed, but the change is one-way.
-  An older binary started against a converted database fails to boot, so roll
-  back by restoring a dump taken before the upgrade rather than by swapping the
-  binary. Workflow `created_at` values keep their instant but lose sub-second
-  precision and are rendered in UTC. SQLite and MongoDB deployments are
-  unaffected.
+  converts the column in place. No manual migration is needed, but the change
+  is one-way: an older binary started against a converted database fails to
+  boot. Take a backup before upgrading if you may need to roll back, and roll
+  back by restoring it rather than by swapping the binary. Workflow
+  `created_at` values are floored to whole seconds and rendered in UTC.
+  SQLite and MongoDB deployments are unaffected.
 </Warning>
 
 #### Audit Logging

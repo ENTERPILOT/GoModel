@@ -139,8 +139,11 @@ Recording these because each marks a real gap, not just a fixed bug.
 
    **Two consequences operators need to know.** The conversion keeps the
    instant but not the representation: a workflow's `created_at` in
-   `GET /admin/workflows` loses sub-second precision and renders as UTC
-   (`2026-07-25T14:04:29.08001+02:00` becomes `2026-07-25T12:04:29Z`). Nothing
+   `GET /admin/workflows` is floored to whole seconds and renders as UTC
+   (`2026-07-25T14:04:29.08001+02:00` becomes `2026-07-25T12:04:29Z`). It
+   floors rather than casts because `EXTRACT(EPOCH FROM ...)::bigint` *rounds*
+   — a `.6`-second row would land a second in the future and disagree with the
+   truncation `time.Unix` performs on every row written afterwards. Nothing
    depends on the lost precision — `active` is enforced by a unique partial
    index, so the one `ORDER BY created_at DESC ... LIMIT 1` query cannot tie —
    and this is the granularity SQLite always had. And the conversion is

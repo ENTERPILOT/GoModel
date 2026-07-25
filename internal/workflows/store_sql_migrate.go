@@ -17,9 +17,12 @@ import (
 // table is converted in place rather than left with a column the shared scan
 // cannot read.
 //
-// EXTRACT(EPOCH FROM ...) yields the same instant, so timestamps survive the
-// conversion. The table holds one row per published workflow version, so the
-// rewrite is small.
+// A TIMESTAMPTZ can carry sub-second precision that unix seconds cannot, so
+// the conversion floors rather than casts: `EXTRACT(EPOCH FROM ...)::bigint`
+// would *round*, moving a `.6`-second timestamp one second into the future,
+// while Go's time.Unix truncates. Flooring keeps a migrated row consistent
+// with every row this store writes afterwards. The table holds one row per
+// published workflow version, so the rewrite is small.
 func migrateCreatedAtToUnixSeconds(ctx context.Context, db sqlx.DB) error {
 	if db.Dialect() != sqlx.PostgreSQL {
 		return nil
@@ -36,7 +39,7 @@ func migrateCreatedAtToUnixSeconds(ctx context.Context, db sqlx.DB) error {
 			) THEN
 				ALTER TABLE workflow_versions
 					ALTER COLUMN created_at TYPE BIGINT
-					USING EXTRACT(EPOCH FROM created_at)::bigint;
+					USING FLOOR(EXTRACT(EPOCH FROM created_at))::bigint;
 			END IF;
 		END $$;
 	`

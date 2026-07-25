@@ -275,27 +275,45 @@ func TestNewSQLStoreConvertsTimestamptzCreatedAt(t *testing.T) {
 			)`); err != nil {
 			t.Fatalf("create legacy table: %v", err)
 		}
-		if _, err := db.Exec(ctx, `
-			INSERT INTO workflow_versions (
-				id, scope_key, version, active, managed_default, name,
-				workflow_payload, workflow_hash, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, to_timestamp(?))
-		`, "legacy-id", "global", 1, true, false, "legacy",
-			`{"schema_version":1}`, "hash-legacy", 1700000000); err != nil {
-			t.Fatalf("seed legacy row: %v", err)
+		// The fractional row is the interesting one: a plain
+		// EXTRACT(EPOCH ...)::bigint rounds, which would push .6 seconds a
+		// whole second into the future and disagree with the truncation every
+		// later write performs through time.Unix.
+		seeded := []struct {
+			id      string
+			scope   string
+			epoch   float64
+			wantSec int64
+		}{
+			{"legacy-whole", "global", 1700000000, 1700000000},
+			{"legacy-frac-up", "openai", 1700000000.6, 1700000000},
+			{"legacy-frac-down", "groq", 1700000000.4, 1700000000},
+		}
+		for _, row := range seeded {
+			if _, err := db.Exec(ctx, `
+				INSERT INTO workflow_versions (
+					id, scope_key, version, active, managed_default, name,
+					workflow_payload, workflow_hash, created_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, to_timestamp(?))
+			`, row.id, row.scope, 1, true, false, "legacy",
+				`{"schema_version":1}`, "hash-"+row.id, row.epoch); err != nil {
+				t.Fatalf("seed legacy row %s: %v", row.id, err)
+			}
 		}
 
 		store, err := NewSQLStore(ctx, db)
 		if err != nil {
 			t.Fatalf("NewSQLStore: %v", err)
 		}
-		got, err := store.Get(ctx, "legacy-id")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		// The instant must survive the conversion, not just the column type.
-		if got.CreatedAt.Unix() != 1700000000 {
-			t.Errorf("CreatedAt = %d, want 1700000000 preserved", got.CreatedAt.Unix())
+		for _, row := range seeded {
+			got, err := store.Get(ctx, row.id)
+			if err != nil {
+				t.Fatalf("Get %s: %v", row.id, err)
+			}
+			// The instant must survive the conversion, not just the column type.
+			if got.CreatedAt.Unix() != row.wantSec {
+				t.Errorf("%s CreatedAt = %d, want %d", row.id, got.CreatedAt.Unix(), row.wantSec)
+			}
 		}
 	})
 }

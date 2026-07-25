@@ -60,7 +60,10 @@ WORK="$ROOT_WORK/$BACKEND"
 build_binaries() {
   mkdir -p "$ROOT_WORK"
 
-  [[ -x "$NEW_BIN" ]] || (cd "$REPO_ROOT" && make build)
+  # Always rebuild: an existing bin/gomodel from an earlier session would make
+  # this harness validate a binary that predates the change under test, and
+  # report a pass for it.
+  (cd "$REPO_ROOT" && make build)
 
   # A worktree, not a checkout: the working tree must stay on its own branch.
   if [[ ! -d "$BASELINE_TREE" ]]; then
@@ -367,6 +370,12 @@ write_check "workflow create" jpost /admin/workflows '{"scope_provider":"openai"
 write_check "chat completion (usage + audit)" vpost /v1/chat/completions '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly UPGRADE_OK"}],"max_tokens":16,"temperature":0}'
 write_check "response snapshot" vpost /v1/responses '{"model":"gpt-4.1-nano","input":"Reply with exactly UPGRADE_RESP_OK","store":true,"max_output_tokens":16}'
 write_check "conversation create" vpost /v1/conversations '{"metadata":{"purpose":"post-upgrade"}}'
+
+upload_file() {
+  curl -fsS -X POST "$BASE/v1/files?provider=openai" -H "Authorization: Bearer $(api_key)" \
+    -F purpose=batch -F "file=@$WORK/batch.jsonl"
+}
+write_check "file upload" upload_file
 
 stop_gw
 
