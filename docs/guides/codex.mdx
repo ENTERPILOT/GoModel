@@ -120,6 +120,12 @@ See the [DeepSeek guide](/providers/deepseek) for the full reasoning effort
 mapping table (DeepSeek V4 only accepts `high` and `max`, so GoModel maps
 `low` and `medium` up to `high`).
 
+Codex attaches `include: ["reasoning.encrypted_content"]` to every Responses
+request. GoModel ignores it on chat-translated providers, so the response
+carries no encrypted reasoning items. See
+[Responses compatibility](/advanced/responses-compatibility) for the full
+feature matrix.
+
 Then use the DeepSeek model name in Codex:
 
 ```toml

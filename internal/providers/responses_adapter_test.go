@@ -414,6 +414,113 @@ func TestConvertResponsesRequestToChat_MapsPortableAgentsSDKFields(t *testing.T)
 	}
 }
 
+func TestConvertResponsesRequestToChat_AcceptsAnnotationOnlyInclude(t *testing.T) {
+	tests := []struct {
+		name    string
+		include []string
+	}{
+		{name: "encrypted reasoning", include: []string{"reasoning.encrypted_content"}},
+		{name: "hosted tool annotations", include: []string{"web_search_call.action.sources", "file_search_call.results", "code_interpreter_call.outputs"}},
+		{name: "input echo annotations", include: []string{"message.input_image.image_url", "computer_call_output.output.image_url"}},
+		{name: "unrecognized future value", include: []string{"some_future_call.details"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ResponsesRequest{Model: "test-model", Input: "Hello", Include: tt.include}
+
+			chatReq, err := ConvertResponsesRequestToChat(req)
+			if err != nil {
+				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+			}
+			if len(chatReq.Messages) != 1 || chatReq.Messages[0].Content != "Hello" {
+				t.Fatalf("Messages = %#v, want the single user message", chatReq.Messages)
+			}
+			if !chatReq.ExtraFields.IsEmpty() {
+				t.Fatalf("ExtraFields = %#v, want include dropped rather than forwarded", chatReq.ExtraFields)
+			}
+			if len(req.Include) != len(tt.include) {
+				t.Fatalf("req.Include = %#v, want the caller's request left unmutated", req.Include)
+			}
+		})
+	}
+}
+
+// TestConvertResponsesRequestToChat_TranslatesCodexRequest locks the payload
+// Codex sends over wire_api = "responses". Codex always attaches
+// include: ["reasoning.encrypted_content"], which used to fail the whole
+// request against chat-translated providers such as DeepSeek (issue #532).
+func TestConvertResponsesRequestToChat_TranslatesCodexRequest(t *testing.T) {
+	const body = `{
+  "model": "deepseek-v4-pro",
+  "instructions": "You are Codex.",
+  "input": [
+    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Reply with exactly ok"}]}
+  ],
+  "tools": [
+    {"type": "function", "name": "shell", "description": "run", "strict": false,
+     "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}}
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "reasoning": {"effort": "medium"},
+  "store": false,
+  "stream": true,
+  "include": ["reasoning.encrypted_content"],
+  "text": {"verbosity": "medium"}
+}`
+
+	var req core.ResponsesRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	chatReq, err := ConvertResponsesRequestToChat(&req)
+	if err != nil {
+		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+	}
+	if len(chatReq.Messages) != 2 || chatReq.Messages[0].Role != "system" || chatReq.Messages[1].Role != "user" {
+		t.Fatalf("Messages = %#v, want instructions as system plus the user turn", chatReq.Messages)
+	}
+	if len(chatReq.Tools) != 1 {
+		t.Fatalf("Tools = %#v, want the shell function tool", chatReq.Tools)
+	}
+	if _, ok := chatReq.Tools[0]["function"]; !ok {
+		t.Fatalf("Tools[0] = %#v, want chat-shaped function member", chatReq.Tools[0])
+	}
+	if chatReq.Reasoning == nil || chatReq.Reasoning.Effort != "medium" {
+		t.Fatalf("Reasoning = %#v, want effort medium", chatReq.Reasoning)
+	}
+	if !chatReq.Stream {
+		t.Fatal("Stream = false, want true")
+	}
+}
+
+func TestConvertResponsesRequestToChat_RejectsOutputLogprobsInclude(t *testing.T) {
+	tests := []struct {
+		name    string
+		include []string
+	}{
+		{name: "alone", include: []string{"message.output_text.logprobs"}},
+		{name: "mixed with droppable values", include: []string{"reasoning.encrypted_content", "message.output_text.logprobs"}},
+		{name: "padded", include: []string{" message.output_text.logprobs "}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ResponsesRequest{Model: "test-model", Input: "Hello", Include: tt.include}
+
+			_, err := ConvertResponsesRequestToChat(req)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "include") {
+				t.Fatalf("error = %v, want mention %q", err, "include")
+			}
+		})
+	}
+}
+
 func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T) {
 	tests := []struct {
 		name string
