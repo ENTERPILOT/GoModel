@@ -1,6 +1,7 @@
 package sqlx
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -138,5 +139,30 @@ func TestExpandTypesLeavesUnrelatedBracesAlone(t *testing.T) {
 		if !strings.Contains(got, `DEFAULT '{}'`) {
 			t.Errorf("%s: default was rewritten: %s", dialect, got)
 		}
+	}
+}
+
+// TestIsDuplicateColumnError pins the "already exists" arm to column context.
+// AddColumns swallows whatever this matches, so a table-level already-exists
+// failure must not look like an applied migration.
+func TestIsDuplicateColumnError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"sqlite duplicate column", errors.New("duplicate column name: user_path"), true},
+		{"postgres column exists", errors.New(`column "user_path" of relation "auth_keys" already exists`), true},
+		{"table exists is not a column", errors.New("table guardrail_definitions already exists"), false},
+		{"unrelated failure", errors.New("connection refused"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsDuplicateColumnError(tt.err); got != tt.want {
+				t.Errorf("IsDuplicateColumnError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
