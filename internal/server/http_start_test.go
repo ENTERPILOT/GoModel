@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -50,6 +51,25 @@ func TestNewGatewayStartConfig_AppliesTimeoutOverrides(t *testing.T) {
 	if got := server.WriteTimeout; got != inboundServerWriteTimeout {
 		t.Fatalf("WriteTimeout = %v, want %v", got, inboundServerWriteTimeout)
 	}
+}
+
+// Leaving GracefulTimeout unset takes Echo's implicit 10s default and reports
+// the cutoff through Echo's own logger as a bare "context deadline exceeded",
+// which is what an operator saw on Ctrl+C while a stream was open. The drain
+// window has to be the gateway's own decision, and sized against the
+// application shutdown budget that has to contain it.
+func TestNewGatewayStartConfig_ConfiguresGracefulDrain(t *testing.T) {
+	cfg := newGatewayStartConfig(":0")
+
+	if cfg.GracefulTimeout != gracefulDrainTimeout {
+		t.Fatalf("GracefulTimeout = %v, want %v", cfg.GracefulTimeout, gracefulDrainTimeout)
+	}
+	if cfg.OnShutdownError == nil {
+		t.Fatal("OnShutdownError = nil, want the drain cutoff reported by the gateway")
+	}
+	// A nil handler is Echo's signal to log it itself; ours must absorb the
+	// error without panicking on the deadline it will actually be handed.
+	cfg.OnShutdownError(context.DeadlineExceeded)
 }
 
 func TestModelInteractionWriteDeadlineMiddleware_ClearsDeadlineForModelRoutes(t *testing.T) {

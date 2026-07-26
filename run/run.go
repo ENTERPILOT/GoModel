@@ -189,18 +189,9 @@ func Run(ctx context.Context, opts Options) error {
 
 	signalCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	go func() {
-		<-signalCtx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-
-		if err := shutdownApplication(application, shutdownCtx); err != nil {
-			slog.Error("application shutdown error", "error", err)
-		}
-	}()
 
 	addr := ":" + result.Config.Server.Port
-	if err := startApplication(application, addr); err != nil {
+	if err := serveUntilShutdown(signalCtx, application, addr); err != nil {
 		slog.Error("application failed", "error", err)
 		return err
 	}
@@ -215,6 +206,41 @@ func versionLine(productName string) string {
 type lifecycleApp interface {
 	Start(ctx context.Context, addr string) error
 	Shutdown(ctx context.Context) error
+}
+
+// serveUntilShutdown starts the application and returns only once the server
+// has stopped *and* the teardown that stopped it has finished.
+//
+// The teardown has to run on its own goroutine because Start blocks until the
+// server stops and Shutdown is what stops it. Waiting for that goroutine here
+// is the load-bearing part: the process exits the moment Run returns, so
+// anything Shutdown had not reached yet — the buffered usage and audit
+// records, the database handle — would be dropped on every Ctrl+C.
+//
+// Shutdown also runs when Start returns on its own, so a server that stops
+// without a signal still releases its resources. App.Shutdown is idempotent,
+// which makes that harmless when startApplication has already torn down after
+// a failed start.
+func serveUntilShutdown(ctx context.Context, application lifecycleApp, addr string) error {
+	serverReturned := make(chan struct{})
+	shutdownDone := make(chan error, 1)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-serverReturned:
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		shutdownDone <- shutdownApplication(application, shutdownCtx)
+	}()
+
+	startErr := startApplication(application, addr)
+	close(serverReturned)
+
+	if err := <-shutdownDone; err != nil {
+		slog.Error("application shutdown error", "error", err)
+	}
+	return startErr
 }
 
 func shutdownApplication(application lifecycleApp, ctx context.Context) error {
