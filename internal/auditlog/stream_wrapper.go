@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -234,17 +235,25 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 		Stream:     true, // Mark as streaming
 	}
 
+	// This is a whitelist copy, so every request-side field of LogData must be
+	// listed here or it is silently lost: the stream observer completes and
+	// writes THIS copy, and the base entry is never persisted. Only the
+	// response-side fields may be omitted — ResponseBody, ErrorMessage,
+	// ErrorCode and ResponseBodyTooBigToHandle are all filled in later, once
+	// the stream closes. Anything already known at ingress belongs below.
 	if baseEntry.Data != nil {
 		entryCopy.Data = &LogData{
-			UserAgent:       baseEntry.Data.UserAgent,
-			APIKeyHash:      baseEntry.Data.APIKeyHash,
-			Labels:          baseEntry.Data.Labels,
-			Temperature:     baseEntry.Data.Temperature,
-			MaxTokens:       baseEntry.Data.MaxTokens,
-			RequestHeaders:  copyMap(baseEntry.Data.RequestHeaders),
-			ResponseHeaders: copyMap(baseEntry.Data.ResponseHeaders),
-			RequestBody:     baseEntry.Data.RequestBody,
-			Attempts:        normalizeAttemptSnapshots(baseEntry.Data.Attempts),
+			UserAgent:                 baseEntry.Data.UserAgent,
+			APIKeyHash:                baseEntry.Data.APIKeyHash,
+			Labels:                    baseEntry.Data.Labels,
+			Temperature:               baseEntry.Data.Temperature,
+			MaxTokens:                 baseEntry.Data.MaxTokens,
+			RequestHeaders:            copyMap(baseEntry.Data.RequestHeaders),
+			ResponseHeaders:           copyMap(baseEntry.Data.ResponseHeaders),
+			RequestBody:               baseEntry.Data.RequestBody,
+			RequestBodyTooBigToHandle: baseEntry.Data.RequestBodyTooBigToHandle,
+			RequestRevisions:          copyRequestRevisions(baseEntry.Data.RequestRevisions),
+			Attempts:                  normalizeAttemptSnapshots(baseEntry.Data.Attempts),
 		}
 		if baseEntry.Data.WorkflowFeatures != nil {
 			snapshot := *baseEntry.Data.WorkflowFeatures
@@ -257,6 +266,17 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 	}
 
 	return entryCopy
+}
+
+// copyRequestRevisions copies the ingress rewrite chain so the streamed entry
+// owns its own slice. The chain is complete before the stream opens, but the
+// copy keeps this consistent with the map copying above and leaves no shared
+// backing array between the base entry and the entry the observer writes.
+func copyRequestRevisions(revisions []RequestRevisionSnapshot) []RequestRevisionSnapshot {
+	if revisions == nil {
+		return nil
+	}
+	return slices.Clone(revisions)
 }
 
 // copyMap creates a shallow copy of a string map
