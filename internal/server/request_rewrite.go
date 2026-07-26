@@ -51,17 +51,21 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 				if rwErr != nil {
 					return handleError(c, rewriterGatewayError(rw.Name(), rwErr))
 				}
-				if res == nil {
+				if res != nil {
+					applyRewriteResponseHeaders(c, res.ResponseHeader)
+				}
+				if res == nil || res.Body == nil {
+					// The rewriter ran and left the request alone. Record the
+					// step anyway so the audit trail distinguishes "compression
+					// found nothing" from "compression never ran".
+					recordUnchangedRequestRevision(c, auditLogger, rw.Name(), len(in.Body), res)
 					continue
 				}
-				applyRewriteResponseHeaders(c, res.ResponseHeader)
-				if res.Body != nil {
-					recordRequestRevision(c, auditLogger, rw.Name(), len(in.Body), res)
-					in.Body = res.Body
-					changed = true
-					if res.TokensSaved > 0 {
-						tokensSaved += res.TokensSaved
-					}
+				recordRequestRevision(c, auditLogger, rw.Name(), len(in.Body), res)
+				in.Body = res.Body
+				changed = true
+				if res.TokensSaved > 0 {
+					tokensSaved += res.TokensSaved
 				}
 			}
 
@@ -125,13 +129,10 @@ func applyRewrittenBody(c *echo.Context, body []byte) {
 // change detail, and — only when body logging is enabled and the body is
 // within the capture limit — the rewritten body itself.
 func recordRequestRevision(c *echo.Context, auditLogger auditlog.LoggerInterface, name string, bytesBefore int, res *ext.Result) {
-	if auditLogger == nil {
+	if !auditCaptureEnabled(auditLogger) {
 		return
 	}
 	cfg := auditLogger.Config()
-	if !cfg.Enabled {
-		return
-	}
 
 	revision := auditlog.RequestRevisionSnapshot{
 		Rewriter:    name,
@@ -144,6 +145,34 @@ func recordRequestRevision(c *echo.Context, auditLogger auditlog.LoggerInterface
 		revision.Body = auditlog.CaptureLoggedBody(res.Body)
 	}
 	auditlog.EnrichEntryWithRequestRevision(c, revision)
+}
+
+// recordUnchangedRequestRevision appends a no-change entry to the audit
+// trail's request-revision chain: the rewriter ran, inspected the request and
+// forwarded it byte-identical. The entry carries no body — there is no new one
+// — and exists so operators can tell a rewriter that found nothing to do from
+// one that never ran at all. res is nil when the rewriter declined outright;
+// when it returned a result without a body, its Detail is kept, since that is
+// where a rewriter explains why it changed nothing.
+func recordUnchangedRequestRevision(c *echo.Context, auditLogger auditlog.LoggerInterface, name string, bytes int, res *ext.Result) {
+	if !auditCaptureEnabled(auditLogger) {
+		return
+	}
+	revision := auditlog.RequestRevisionSnapshot{
+		Rewriter:    name,
+		BytesBefore: bytes,
+		BytesAfter:  bytes,
+		NoChange:    true,
+	}
+	if res != nil {
+		revision.Detail = res.Detail
+	}
+	auditlog.EnrichEntryWithRequestRevision(c, revision)
+}
+
+// auditCaptureEnabled reports whether an audit logger is present and enabled.
+func auditCaptureEnabled(auditLogger auditlog.LoggerInterface) bool {
+	return auditLogger != nil && auditLogger.Config().Enabled
 }
 
 // pinOriginalAuditRequestBody captures the pre-rewrite request into the live

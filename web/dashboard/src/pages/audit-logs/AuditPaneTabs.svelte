@@ -61,6 +61,9 @@
             >{p.pane.kind}</span
           >
         {/if}
+        {#each p.pane.noChangeSteps || [] as step (step.id)}
+          <span class="audit-step-pill" title={step.title}>{step.label}</span>
+        {/each}
         {#if p.pane.savingsLabel}
           <span
             class="audit-savings-pill mono"
@@ -215,6 +218,19 @@
     color: var(--prompt-cache-color);
     font-size: 11px;
     font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  /* An ingress rewriter that ran and changed nothing. Deliberately quieter
+     than the savings pill: it reports a step that happened, not a result. */
+  .audit-step-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border: 1px dashed var(--border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 11px;
     letter-spacing: 0.02em;
   }
 </style>

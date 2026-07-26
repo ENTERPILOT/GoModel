@@ -11183,7 +11183,7 @@
             }
           },
           "request_revisions": {
-            "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that changed the body, in application order.\nRequestBody always remains the original client request; the last\nrevision is what was forwarded downstream.",
+            "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that ran, in application order. Rewriters that\nchanged the body carry the rewritten body; those that left it alone are\nrecorded with NoChange so the audit trail still shows the step ran.\nRequestBody always remains the original client request; the last\nchanged revision is what was forwarded downstream — when every rewriter\nwas a no-op there is no such revision and the original body is what\nwent upstream.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/auditlog.RequestRevisionSnapshot"
@@ -11330,6 +11330,10 @@
           },
           "detail": {
             "description": "Detail is an optional rewriter-provided structured summary of what\nchanged (for example a compression block report)."
+          },
+          "no_change": {
+            "description": "NoChange marks a rewriter that ran and left the body untouched. Such\nrevisions record the step for operators — BytesAfter equals BytesBefore,\nBody is empty and TokensSaved is zero, though Detail may explain why\nnothing changed — but are not part of the chain that produced the\nforwarded request. Absent on entries written before no-change steps were\ntracked, which is why the flag is positive: an old revision always\nchanged the body.",
+            "type": "boolean"
           },
           "rewriter": {
             "type": "string"
