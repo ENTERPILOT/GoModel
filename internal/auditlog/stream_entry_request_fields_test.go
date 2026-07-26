@@ -58,11 +58,29 @@ func TestCreateStreamEntryPreservesRequestRevisions(t *testing.T) {
 		t.Error("RequestBodyTooBigToHandle dropped")
 	}
 
-	// The copy must own its slice, so later appends to the base entry cannot
-	// reach into the entry the observer is writing.
-	base.Data.RequestRevisions = append(base.Data.RequestRevisions, RequestRevisionSnapshot{Seq: 2})
-	if len(streamEntry.Data.RequestRevisions) != 1 {
+	// The copy must own its slice. Appending to the base entry would not show
+	// that: the source literal has no spare capacity, so append reallocates and
+	// leaves the copy alone whether or not the two share an array. Writing
+	// through an existing element is what actually distinguishes them.
+	base.Data.RequestRevisions[0].Rewriter = "mutated"
+	if streamEntry.Data.RequestRevisions[0].Rewriter != "pro-token-compression" {
 		t.Error("stream entry shares its revision backing array with the base entry")
+	}
+}
+
+// The nil case is the one the stream observer sees most often — most requests
+// carry no rewriter — and it must stay nil rather than becoming an empty slice,
+// so a streamed entry without rewrites serializes the same as it always did.
+func TestCreateStreamEntryLeavesAbsentRequestRevisionsNil(t *testing.T) {
+	streamEntry := CreateStreamEntry(&LogEntry{ID: "entry-1", Data: &LogData{UserAgent: "curl/8"}})
+	if streamEntry == nil || streamEntry.Data == nil {
+		t.Fatal("expected a stream entry with data")
+	}
+	if streamEntry.Data.RequestRevisions != nil {
+		t.Errorf("RequestRevisions = %#v, want nil", streamEntry.Data.RequestRevisions)
+	}
+	if streamEntry.Data.UserAgent != "curl/8" {
+		t.Errorf("UserAgent = %q, want %q", streamEntry.Data.UserAgent, "curl/8")
 	}
 }
 
