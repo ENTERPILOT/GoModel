@@ -9,11 +9,13 @@ import {
   auditCacheRatioLabel,
   auditCacheRatioPillLabel,
   auditCacheSharePercent,
+  auditChangedRequestRevisions,
   auditEntryErrorMessage,
   auditEntryLiveInProgress,
   auditHasCachedTokens,
   auditLogAllowsLiveEntries,
   auditLogWithLiveEntries,
+  auditNoChangeSteps,
   auditPanes,
   auditPromptCacheHighlight,
   auditRequestPane,
@@ -578,6 +580,70 @@ test("auditPanes inserts request revision tabs between request and response", ()
     "request,revision-1,revision-2,response",
   );
   assert.equal(auditRequestRevisionPane(entry, revision).seq, 1);
+});
+
+test("rewriters that changed nothing become Request-tab pills, not tabs", () => {
+  const entry = {
+    data: {
+      request_body: { model: "gpt-5" },
+      response_body: { ok: true },
+      request_revisions: [
+        {
+          seq: 1,
+          rewriter: "pro-token-compression",
+          bytes_before: 165689,
+          bytes_after: 165689,
+          no_change: true,
+        },
+      ],
+    },
+  };
+
+  // The step is recorded, but it spends no tab.
+  assert.equal(
+    auditPanes(entry)
+      .map((p) => p.id)
+      .join(","),
+    "request,response",
+  );
+  assert.equal(auditChangedRequestRevisions(entry).length, 0);
+
+  const steps = auditNoChangeSteps(entry);
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].id, "step-1");
+  assert.equal(steps[0].rewriter, "pro-token-compression");
+  assert.equal(steps[0].label, "pro-token-compression: no change");
+  assert.match(steps[0].title, /forwarded the request unchanged/);
+  assert.deepEqual(auditRequestPane(entry).noChangeSteps, steps);
+
+  // Mixed chains: only the rewrite that changed the body gets a pane, and a
+  // lone changed revision still hides its #seq chip.
+  entry.data.request_revisions.push({
+    seq: 2,
+    rewriter: "swap",
+    bytes_before: 165689,
+    bytes_after: 120000,
+  });
+  assert.equal(
+    auditPanes(entry)
+      .map((p) => p.id)
+      .join(","),
+    "request,revision-2,response",
+  );
+  assert.equal(auditNoChangeSteps(entry).length, 1);
+  assert.equal(
+    auditRequestRevisionPane(entry, entry.data.request_revisions[1]).seq,
+    0,
+  );
+
+  // Entries written before no-change tracking have no flag and stay tabs.
+  const legacy = {
+    data: {
+      request_revisions: [{ seq: 1, rewriter: "swap", bytes_before: 10, bytes_after: 8 }],
+    },
+  };
+  assert.equal(auditChangedRequestRevisions(legacy).length, 1);
+  assert.equal(auditNoChangeSteps(legacy).length, 0);
 });
 
 test("auditRevisionPercentLabel reports the share of the body removed", () => {

@@ -543,6 +543,32 @@ export function auditRequestRevisions(entry) {
     : [];
 }
 
+// auditChangedRequestRevisions returns the revisions that actually rewrote the
+// body — the ones worth their own pane. Rewriters that ran and changed nothing
+// are recorded too (no_change), but they get a pill on the Request tab instead.
+export function auditChangedRequestRevisions(entry) {
+  return auditRequestRevisions(entry).filter(
+    (revision) => !(revision && revision.no_change),
+  );
+}
+
+// auditNoChangeSteps summarizes the rewriters that inspected the request and
+// left it byte-identical, so the tab strip can show the step ran without
+// spending a tab on an empty pane.
+export function auditNoChangeSteps(entry) {
+  return auditRequestRevisions(entry)
+    .filter((revision) => revision && revision.no_change)
+    .map((revision) => {
+      const rewriter = String(revision.rewriter || "rewriter");
+      return {
+        id: "step-" + Number(revision.seq || 0),
+        rewriter,
+        label: rewriter + ": no change",
+        title: rewriter + " ran and forwarded the request unchanged",
+      };
+    });
+}
+
 // auditRevisionPercentLabel renders how much of the request body this revision
 // removed (e.g. "-44%"), or '' when sizes are missing or the revision didn't
 // shrink the body.
@@ -565,7 +591,7 @@ export function auditRevisionPercentLabel(revision) {
 export function auditRequestRevisionPane(entry, revision) {
   const body = revision && revision.body;
   const hasBody = body != null && body !== "";
-  const single = auditRequestRevisions(entry).length <= 1;
+  const single = auditChangedRequestRevisions(entry).length <= 1;
   const summary = {
     rewriter: (revision && revision.rewriter) || "",
     bytes:
@@ -721,6 +747,9 @@ export function auditRequestPane(entry, extractSegments) {
     body: data && data.request_body,
     bodyCacheRatioLabel: auditCacheRatioPillLabel(entry),
     promptCacheHighlight: auditPromptCacheHighlight(entry, extractSegments),
+    // Ingress rewriters that ran without changing anything, rendered as muted
+    // pills on the tab so the step is visible but costs no tab.
+    noChangeSteps: auditNoChangeSteps(entry),
     showEmpty: empty && !pending,
     emptyMessage: "Request details were not captured.",
     showPending: pending,
@@ -767,7 +796,7 @@ export function auditResponsePane(entry) {
 // either the single response or one pane per provider attempt.
 export function auditPanes(entry, extractSegments) {
   const panes = [{ id: "request", pane: auditRequestPane(entry, extractSegments) }];
-  auditRequestRevisions(entry).forEach((revision) => {
+  auditChangedRequestRevisions(entry).forEach((revision) => {
     panes.push({
       id: "revision-" + Number((revision && revision.seq) || 0),
       pane: auditRequestRevisionPane(entry, revision),

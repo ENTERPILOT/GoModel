@@ -437,6 +437,69 @@ func TestRequestRewriteMiddlewareRecordsRevisions(t *testing.T) {
 	})
 }
 
+func TestRequestRewriteMiddlewareRecordsNoChangeRevisions(t *testing.T) {
+	// A rewriter that inspects the request and forwards it untouched is
+	// still a step operators need to see, so it gets a no-change revision.
+	quiet := &stubRewriter{name: "quiet"}
+	// Response headers without a body change (a rewriter annotating why it
+	// did nothing) must not turn the step into a real revision.
+	annotating := &stubRewriter{
+		name: "annotating",
+		rewrite: func(ext.Input) (*ext.Result, error) {
+			header := http.Header{}
+			header.Set("X-Test-Rewriter", "skipped")
+			return &ext.Result{ResponseHeader: header}, nil
+		},
+	}
+
+	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true}}
+	srv := New(newRewriteTestProvider(), &Config{
+		AuditLogger: auditLogger,
+		RequestRewriters: []ext.RequestRewriter{
+			quiet,
+			replaceBodyRewriter("swap", "PING", "PONG"),
+			annotating,
+		},
+	})
+	rec := postJSON(t, srv, "/v1/chat/completions",
+		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"PING"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("X-Test-Rewriter") != "skipped" {
+		t.Error("response headers from a no-change rewriter must still be applied")
+	}
+	if len(auditLogger.entries) == 0 {
+		t.Fatal("expected an audit entry")
+	}
+
+	revisions := auditLogger.entries[0].Data.RequestRevisions
+	if len(revisions) != 3 {
+		t.Fatalf("expected 3 revisions (2 no-change + 1 rewrite), got %d: %+v", len(revisions), revisions)
+	}
+	for i, want := range []struct {
+		rewriter string
+		noChange bool
+	}{{"quiet", true}, {"swap", false}, {"annotating", true}} {
+		got := revisions[i]
+		if got.Seq != i+1 || got.Rewriter != want.rewriter || got.NoChange != want.noChange {
+			t.Errorf("revision %d = %+v, want rewriter %q no_change=%v", i+1, got, want.rewriter, want.noChange)
+		}
+	}
+
+	quietRev := revisions[0]
+	if quietRev.BytesBefore == 0 || quietRev.BytesAfter != quietRev.BytesBefore {
+		t.Errorf("no-change revision must report equal sizes: %+v", quietRev)
+	}
+	if quietRev.Body != nil || quietRev.TokensSaved != 0 {
+		t.Errorf("no-change revision must carry no body or savings: %+v", quietRev)
+	}
+	// The trailing no-change step sees the body the previous rewriter produced.
+	if revisions[2].BytesBefore != revisions[1].BytesAfter {
+		t.Errorf("no-change revision must measure the current body: %+v", revisions[2])
+	}
+}
+
 func TestRequestRewriteMiddlewareStoresTokensSavedInContext(t *testing.T) {
 	compressor := &stubRewriter{
 		name: "compressor",
