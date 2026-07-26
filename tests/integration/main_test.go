@@ -52,6 +52,14 @@ const (
 func TestMain(m *testing.M) {
 	testCtx, cancelFunc = context.WithTimeout(context.Background(), 10*time.Minute)
 
+	// Pull before starting anything: the containers come up concurrently below,
+	// and two simultaneous anonymous pulls trip the registry's rate limit.
+	if err := dockerPullImages(testCtx, postgresImage, mongoImage); err != nil {
+		log.Printf("Image pull failed: %v", err)
+		cancelFunc()
+		os.Exit(1)
+	}
+
 	// Start containers in parallel
 	errCh := make(chan error, 2)
 

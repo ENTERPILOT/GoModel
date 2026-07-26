@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -15,6 +16,54 @@ import (
 
 type dockerContainer struct {
 	id string
+}
+
+const (
+	dockerPullAttempts = 4
+	dockerPullBackoff  = 3 * time.Second
+)
+
+// dockerPullImages fetches images up front, one at a time, rather than letting
+// `docker run` pull them as a side effect.
+//
+// Two things make the implicit pull unreliable in CI. The containers start
+// concurrently, so both pulls would leave at the same instant, and registries
+// meter anonymous pulls per second — ECR Public rejects the second one with
+// "toomanyrequests: Rate exceeded". Separately, an implicit pull gets no retry
+// of its own, so a single transient registry error fails the whole suite before
+// a test has run. Pulling serially with backoff addresses both.
+func dockerPullImages(ctx context.Context, images ...string) error {
+	for _, image := range images {
+		if err := dockerPullImage(ctx, image); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func dockerPullImage(ctx context.Context, image string) error {
+	var lastErr error
+
+	for attempt := 1; attempt <= dockerPullAttempts; attempt++ {
+		if _, err := runDocker(ctx, "pull", image); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+
+		if attempt == dockerPullAttempts {
+			break
+		}
+
+		log.Printf("Pull of %s failed (attempt %d/%d), retrying: %v", image, attempt, dockerPullAttempts, lastErr)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("pull %s: %w: last error: %v", image, ctx.Err(), lastErr)
+		case <-time.After(time.Duration(attempt) * dockerPullBackoff):
+		}
+	}
+
+	return fmt.Errorf("pull %s after %d attempts: %w", image, dockerPullAttempts, lastErr)
 }
 
 func dockerRunDetached(ctx context.Context, options []string, image string, command ...string) (*dockerContainer, error) {
