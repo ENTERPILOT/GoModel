@@ -465,6 +465,32 @@ run_release_budget_enforcement() {
     all(.budgets[]?; .user_path != $user_path)
   ' "$budget_json_file" >/dev/null
 }
+
+# Start a freshly created budget from zero spend.
+#
+# Spend is a SUM over usage rows, so deleting and recreating a budget does not
+# forget what an earlier run charged against the same subject. A scenario that
+# exits part-way on a failed assertion skips its own cleanup, and the rerun this
+# file recommends — same --qa-suffix, so the same labels — would then meet an
+# already-exhausted tiny budget and get 429 on its first request, failing for a
+# reason that has nothing to do with what it tests. Resetting after creation
+# makes that first request behave the same on the first run and the fifth.
+reset_release_budget() {
+  local base_url="$1"
+  local scope="$2"
+  local subject="$3"
+  local auth_header="${4:-}"
+
+  if [ -n "$auth_header" ]; then
+    curl -fsS -H "$auth_header" -X POST "$base_url/admin/budgets/reset-one" \
+      -H 'Content-Type: application/json' \
+      -d "{\"scope\":\"$scope\",\"subject\":\"$subject\",\"period\":\"daily\"}" >/dev/null
+  else
+    curl -fsS -X POST "$base_url/admin/budgets/reset-one" \
+      -H 'Content-Type: application/json' \
+      -d "{\"scope\":\"$scope\",\"subject\":\"$subject\",\"period\":\"daily\"}" >/dev/null
+  fi
+}
 ```
 
 ## Auth-enabled runtime environment
@@ -4791,9 +4817,18 @@ curl -fsS -H "$ADMIN_AUTH_HEADER" "$AUTH_BASE_URL/admin/provider-credentials" \
 ## 27. Budgets scoped to labels
 
 These scenarios exercise scoping a budget to a request label (`scope: "label"`)
-rather than a `user_path` subtree. Each scenario uses `$QA_SUFFIX`-scoped
-labels and tagging headers, and restores an empty tagging rule set and deletes
-its own budgets, so they are self-contained and rerunnable in any order.
+rather than a `user_path` subtree. Every label is `$QA_SUFFIX`-scoped and every
+scenario deletes the budgets it created. How a label reaches the request varies:
+S198, S199, S201 and S203 configure a tagging header and restore an empty rule
+set afterwards; S200 uses the labels on the managed key that authenticated the
+request and needs no tagging rule at all; S197 and S204 are admin-only and send
+no model traffic.
+
+Each scenario that depends on starting from zero spend calls
+`reset_release_budget` right after creating its budget, so a rerun following a
+part-way failure — which skips the failed scenario's cleanup — does not inherit
+the previous run's spend. Together that makes them self-contained and rerunnable
+in any order.
 
 ### S197 Label budget admin CRUD and validation negatives
 
@@ -4859,6 +4894,7 @@ curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
 curl -fsS -X PUT "$BASE_URL/admin/budgets" \
   -H 'Content-Type: application/json' \
   -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+reset_release_budget "$BASE_URL" label "$QA_LBL"
 
 REQ1="qa-budget-label-$QA_SUFFIX-1"
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s198.headers.XXXXXX")
@@ -4916,6 +4952,8 @@ curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
   -d "{\"scope\":\"label\",\"subject\":\"$LBL_A\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
 curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
   -d "{\"scope\":\"label\",\"subject\":\"$LBL_B\",\"budget_key\":{\"period\":\"daily\"},\"amount\":1000}" >/dev/null
+reset_release_budget "$BASE_URL" label "$LBL_A"
+reset_release_budget "$BASE_URL" label "$LBL_B"
 
 REQ1="qa-budget-multi-$QA_SUFFIX-1"
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s199.body.XXXXXX")
@@ -4982,6 +5020,7 @@ KEY_ID=$(echo "$KEY_JSON" | jq -r '.id')
 
 curl -fsS -H "$ADMIN_AUTH_HEADER" -X PUT "$AUTH_BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
   -d "{\"scope\":\"label\",\"subject\":\"$KEYLABEL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+reset_release_budget "$AUTH_BASE_URL" label "$KEYLABEL" "$ADMIN_AUTH_HEADER"
 
 REQ1="qa-budget-key-$QA_SUFFIX-1"
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s200.body.XXXXXX")
@@ -5029,6 +5068,8 @@ curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
   -d "{\"scope\":\"user_path\",\"subject\":\"$MIX_PATH\",\"budget_key\":{\"period\":\"daily\"},\"amount\":1000}" >/dev/null
 curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
   -d "{\"scope\":\"label\",\"subject\":\"$MIX_LABEL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+reset_release_budget "$BASE_URL" user_path "$MIX_PATH"
+reset_release_budget "$BASE_URL" label "$MIX_LABEL"
 
 REQ1="qa-budget-mix-$QA_SUFFIX-1"
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s201.body.XXXXXX")
@@ -5077,6 +5118,7 @@ curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" -H 'Content-Type: applicatio
   -d "{\"headers\":[{\"header\":\"$TAG_HDR\"}]}" >/dev/null
 curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
   -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+reset_release_budget "$BASE_URL" label "$QA_LBL"
 
 REQ1="qa-budget-reset-$QA_SUFFIX-1"
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s202.body.XXXXXX")
@@ -5123,6 +5165,7 @@ for TARGET in "$PG_BASE_URL|pg" "$MONGO_BASE_URL|mongo"; do
     -d "{\"headers\":[{\"header\":\"$HDR\"}]}" >/dev/null
   curl -fsS -X PUT "$URL/admin/budgets" -H 'Content-Type: application/json' \
     -d "{\"scope\":\"label\",\"subject\":\"$LBL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+  reset_release_budget "$URL" label "$LBL"
 
   REQ="qa-budget-$TAG-$QA_SUFFIX"
   BODY_FILE=$(mktemp "$QA_RUN_DIR/s203.$TAG.body.XXXXXX")
