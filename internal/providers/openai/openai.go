@@ -81,9 +81,17 @@ func isOSeriesModel(model string) bool {
 	return len(m) >= 2 && m[0] == 'o' && m[1] >= '0' && m[1] <= '9'
 }
 
+// isGPT5Model reports whether the model belongs to the GPT-5 family. Both the
+// hyphenated variants (gpt-5-mini) and the dot-versioned releases
+// (gpt-5.1, gpt-5.6-terra) follow the reasoning chat parameter rules, while
+// unrelated names that merely start with the same bytes (gpt-50) do not.
 func isGPT5Model(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
-	return m == "gpt-5" || strings.HasPrefix(m, "gpt-5-")
+	rest, ok := strings.CutPrefix(m, "gpt-5")
+	if !ok {
+		return false
+	}
+	return rest == "" || rest[0] == '-' || rest[0] == '.'
 }
 
 // isReasoningChatModel reports whether the model follows OpenAI's reasoning

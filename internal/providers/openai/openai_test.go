@@ -1596,8 +1596,13 @@ func TestIsReasoningChatModel(t *testing.T) {
 		{"gpt-5-mini", true},
 		{"gpt-5-nano", true},
 		{"gpt-5-chat-latest", true},
+		{"gpt-5.1", true},
+		{"gpt-5.6-terra", true},
+		{"gpt-5.6", true},
+		{"GPT-5.6-Terra", true},
 		{"gpt-4o", false},
 		{"gpt-4.1", false},
+		{"gpt-50", false},
 		{"claude-sonnet-4-6", false},
 		{"", false},
 	}
