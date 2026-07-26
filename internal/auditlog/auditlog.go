@@ -141,7 +141,9 @@ type LogData struct {
 	// changed the body carry the rewritten body; those that left it alone are
 	// recorded with NoChange so the audit trail still shows the step ran.
 	// RequestBody always remains the original client request; the last
-	// changed revision is what was forwarded downstream.
+	// changed revision is what was forwarded downstream — when every rewriter
+	// was a no-op there is no such revision and the original body is what
+	// went upstream.
 	RequestRevisions []RequestRevisionSnapshot `json:"request_revisions,omitempty" bson:"request_revisions,omitempty"`
 
 	// Request parameters
@@ -210,10 +212,12 @@ type RequestRevisionSnapshot struct {
 	Detail any `json:"detail,omitempty" bson:"detail,omitempty"`
 
 	// NoChange marks a rewriter that ran and left the body untouched. Such
-	// revisions record the step for operators (BytesAfter equals BytesBefore,
-	// no Body) but are not part of the chain that produced the forwarded
-	// request. Absent on entries written before no-change steps were tracked,
-	// which is why the flag is positive: an old revision always changed the body.
+	// revisions record the step for operators — BytesAfter equals BytesBefore,
+	// Body is empty and TokensSaved is zero, though Detail may explain why
+	// nothing changed — but are not part of the chain that produced the
+	// forwarded request. Absent on entries written before no-change steps were
+	// tracked, which is why the flag is positive: an old revision always
+	// changed the body.
 	NoChange bool `json:"no_change,omitempty" bson:"no_change,omitempty"`
 }
 

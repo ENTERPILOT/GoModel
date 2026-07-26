@@ -441,14 +441,18 @@ func TestRequestRewriteMiddlewareRecordsNoChangeRevisions(t *testing.T) {
 	// A rewriter that inspects the request and forwards it untouched is
 	// still a step operators need to see, so it gets a no-change revision.
 	quiet := &stubRewriter{name: "quiet"}
-	// Response headers without a body change (a rewriter annotating why it
-	// did nothing) must not turn the step into a real revision.
+	// Response headers and a structured detail without a body change (a
+	// rewriter annotating why it did nothing) must not turn the step into a
+	// real revision — but the detail is the explanation, so it is kept.
 	annotating := &stubRewriter{
 		name: "annotating",
 		rewrite: func(ext.Input) (*ext.Result, error) {
 			header := http.Header{}
 			header.Set("X-Test-Rewriter", "skipped")
-			return &ext.Result{ResponseHeader: header}, nil
+			return &ext.Result{
+				ResponseHeader: header,
+				Detail:         map[string]any{"reason": "nothing to compress"},
+			}, nil
 		},
 	}
 
@@ -497,6 +501,14 @@ func TestRequestRewriteMiddlewareRecordsNoChangeRevisions(t *testing.T) {
 	// The trailing no-change step sees the body the previous rewriter produced.
 	if revisions[2].BytesBefore != revisions[1].BytesAfter {
 		t.Errorf("no-change revision must measure the current body: %+v", revisions[2])
+	}
+	// A rewriter that reports why it changed nothing keeps that explanation.
+	detail, ok := revisions[2].Detail.(map[string]any)
+	if !ok || detail["reason"] != "nothing to compress" {
+		t.Errorf("no-change revision must keep the rewriter detail, got %+v", revisions[2].Detail)
+	}
+	if quietRev.Detail != nil {
+		t.Errorf("a rewriter that returned no result has no detail to record: %+v", quietRev)
 	}
 }
 
