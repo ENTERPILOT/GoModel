@@ -21,6 +21,11 @@
     "api": {
         "url": "full"
     },
+    "seo": {
+        "metatags": {
+            "canonical": "https://gomodel.enterpilot.io/docs"
+        }
+    },
     "integrations": {
         "posthog": {
             "apiKey": "phc_pHSTwDSn6q3sB9jcMfAUGFCG8WjgSqAMERjRsMKDyie9"
