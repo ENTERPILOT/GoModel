@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 196 end-to-end curl scenarios for release validation.
+This file contains 204 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -118,6 +118,15 @@ Stateful note:
   PostgreSQL/MongoDB parity, admin-auth gating); each registers
   `$QA_SUFFIX`-scoped provider names against unreachable base URLs and deletes
   them, so they are self-contained and rerunnable in any order
+- `S197`-`S204` exercise budgets scoped to a request label rather than a
+  `user_path` subtree (admin CRUD and validation negatives, tagging-header
+  label enforcement with verbatim/case-sensitive matching, multi-label
+  charging in one lookup, managed-API-key label charging, a request matched by
+  both a `user_path` and a `label` budget at once, reset-one, PostgreSQL/MongoDB
+  parity, and auth gating); each is self-contained and rerunnable in any
+  order. `S200` deliberately registers its managed key on the auth-enabled
+  gateway rather than the no-master-key main SQLite gateway — see the note on
+  that scenario for why
 - For stateful partial reruns, prefer a contiguous range that includes the
   prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
   `--keep-artifacts`
@@ -4777,4 +4786,391 @@ curl -fsS -H "$ADMIN_AUTH_HEADER" "$AUTH_BASE_URL/admin/provider-credentials/typ
 
 curl -fsS -H "$ADMIN_AUTH_HEADER" "$AUTH_BASE_URL/admin/provider-credentials" \
   | jq -e 'type == "array" and any(.[]?; .managed == true)' >/dev/null
+```
+
+## 27. Budgets scoped to labels
+
+These scenarios exercise scoping a budget to a request label (`scope: "label"`)
+rather than a `user_path` subtree. Each scenario uses `$QA_SUFFIX`-scoped
+labels and tagging headers, and restores an empty tagging rule set and deletes
+its own budgets, so they are self-contained and rerunnable in any order.
+
+### S197 Label budget admin CRUD and validation negatives
+
+A label-scoped budget round-trips through the admin API with no `user_path`
+field in its response, and the request is rejected when the scope/subject
+combination is invalid.
+
+```bash
+QA_LBL="QaBudgetLabel-$QA_SUFFIX"
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s197.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s197.body.XXXXXX")
+
+curl -fsS -X PUT "$BASE_URL/admin/budgets" \
+  -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":25.5}" \
+  | jq -e --arg l "$QA_LBL" '
+      any(.budgets[]?; .scope == "label" and .subject == $l and .amount == 25.5 and .source == "manual" and (has("user_path") | not))
+    ' >/dev/null
+
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/budgets" \
+  -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"user_path\":\"/qa-conflict\",\"budget_key\":{\"period\":\"daily\"},\"amount\":5}"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.message | test("user_path")' "$BODY_FILE" >/dev/null
+
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/budgets" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":"label","budget_key":{"period":"daily"},"amount":5}'
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.message | test("subject is required")' "$BODY_FILE" >/dev/null
+
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/budgets" \
+  -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"bogus\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":5}"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.message | test("scope must be one of")' "$BODY_FILE" >/dev/null
+
+curl -fsS -X DELETE "$BASE_URL/admin/budgets" \
+  -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"}}" \
+  | jq -e --arg l "$QA_LBL" 'all(.budgets[]?; .subject != $l)' >/dev/null
+
+STATUS=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X DELETE "$BASE_URL/admin/budgets" \
+  -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"qa-budget-label-absent-$QA_SUFFIX\",\"budget_key\":{\"period\":\"daily\"}}")
+[ "$STATUS" = "404" ]
+jq -e '.error.code == "budget_not_found"' "$BODY_FILE" >/dev/null
+```
+
+### S198 Label budget blocks a request once exhausted, matched verbatim
+
+A tagging rule extracts a label header onto the request; a tiny label budget
+lets the first request through and records spend, then blocks a second request
+carrying the same label with a `budget_exceeded` 429. A third request carrying
+a different-case spelling of the label is not blocked, since label matching
+never folds case.
+
+```bash
+TAG_HDR="X-Qa-Budget-Label-$QA_SUFFIX"
+QA_LBL="QaBudgetLabel2-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
+  -H 'Content-Type: application/json' -d "{\"headers\":[{\"header\":\"$TAG_HDR\"}]}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/budgets" \
+  -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+
+REQ1="qa-budget-label-$QA_SUFFIX-1"
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s198.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s198.body.XXXXXX")
+curl -fsS -o "$BODY_FILE" -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQ1" -H "$TAG_HDR: $QA_LBL" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_LABEL_OK"}],"max_tokens":20,"temperature":0}'
+assert_chat_response_contains "$BODY_FILE" "" "QA_BUDGET_LABEL_OK"
+
+USAGE_FILE="$QA_RUN_DIR/s198.usage.json"
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/budgets" > "$BODY_FILE"
+  if jq -e --arg l "$QA_LBL" 'any(.budgets[]?; .scope == "label" and .subject == $l and .spent > 0)' "$BODY_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg l "$QA_LBL" '
+  any(.budgets[]?; .scope == "label" and .subject == $l and .spent > 0 and .has_usage == true and .remaining < 0 and .usage_ratio > 1)
+' "$BODY_FILE" >/dev/null
+
+REQ2="qa-budget-label-$QA_SUFFIX-2"
+STATUS=$(curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -w '%{http_code}' -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQ2" -H "$TAG_HDR: $QA_LBL" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_LABEL_BLOCK"}],"max_tokens":20,"temperature":0}')
+[ "$STATUS" = "429" ]
+grep -Eiq '^Retry-After: *[0-9]+' "$HEADERS_FILE"
+jq -e --arg l "$QA_LBL" '.error.type == "rate_limit_error" and .error.code == "budget_exceeded" and (.error.message | test("label " + $l))' "$BODY_FILE" >/dev/null
+
+REQ3="qa-budget-label-$QA_SUFFIX-3"
+STATUS=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQ3" -H "$TAG_HDR: $(printf '%s' "$QA_LBL" | tr '[:upper:]' '[:lower:]')" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_LABEL_CASE_OK"}],"max_tokens":20,"temperature":0}')
+[ "$STATUS" = "200" ]
+
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
+```
+
+### S199 A request carrying several labels is charged against every matching budget
+
+Two label budgets exist; a single request carrying both labels records spend
+on both in one lookup, and a later request that would breach only one of them
+is still blocked, naming the exhausted label rather than the healthy one.
+
+```bash
+TAG_HDR_A="X-Qa-Budget-Multi-A-$QA_SUFFIX"
+TAG_HDR_B="X-Qa-Budget-Multi-B-$QA_SUFFIX"
+LBL_A="QaBudgetMultiA-$QA_SUFFIX"
+LBL_B="QaBudgetMultiB-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" -H 'Content-Type: application/json' \
+  -d "{\"headers\":[{\"header\":\"$TAG_HDR_A\"},{\"header\":\"$TAG_HDR_B\"}]}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$LBL_A\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$LBL_B\",\"budget_key\":{\"period\":\"daily\"},\"amount\":1000}" >/dev/null
+
+REQ1="qa-budget-multi-$QA_SUFFIX-1"
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s199.body.XXXXXX")
+curl -fsS -o "$BODY_FILE" -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQ1" -H "$TAG_HDR_A: $LBL_A" -H "$TAG_HDR_B: $LBL_B" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_MULTI_OK"}],"max_tokens":20,"temperature":0}'
+assert_chat_response_contains "$BODY_FILE" "" "QA_BUDGET_MULTI_OK"
+
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/budgets" > "$BODY_FILE"
+  if jq -e --arg a "$LBL_A" --arg b "$LBL_B" '
+    (any(.budgets[]?; .subject == $a and .spent > 0)) and (any(.budgets[]?; .subject == $b and .spent > 0))
+  ' "$BODY_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg a "$LBL_A" --arg b "$LBL_B" '
+  (any(.budgets[]?; .subject == $a and .spent > 0 and .has_usage == true)) and
+  (any(.budgets[]?; .subject == $b and .spent > 0 and .has_usage == true))
+' "$BODY_FILE" >/dev/null
+
+REQ2="qa-budget-multi-$QA_SUFFIX-2"
+STATUS=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQ2" -H "$TAG_HDR_A: $LBL_A" -H "$TAG_HDR_B: $LBL_B" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_MULTI_BLOCK"}],"max_tokens":20,"temperature":0}')
+[ "$STATUS" = "429" ]
+jq -e --arg a "$LBL_A" --arg b "$LBL_B" '
+  (.error.message | test("label " + $a)) and (.error.message | test("label " + $b) | not)
+' "$BODY_FILE" >/dev/null
+
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$LBL_A\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$LBL_B\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
+```
+
+### S200 A managed API key's labels charge a label budget without any tagging header
+
+Labels attached to the managed key that authenticated the request are merged
+into the request's labels the same way header-extracted labels are, so a
+label budget matches even when no tagging rule is configured. This runs on the
+auth-enabled gateway (which already requires a master key for every request)
+rather than the main SQLite gateway: on a gateway with no `GOMODEL_MASTER_KEY`,
+creating a managed key switches every endpoint, including `/v1/*`, to require
+bearer auth from then on, and managed keys have no delete endpoint (only
+`deactivate`, which does not undo the switch since it counts stored keys, not
+active ones) — so registering one on the open gateway would leave it
+permanently locked down for every later scenario. The auth-enabled gateway
+also has the exact response cache on, so both chat replies are suffixed with
+`$QA_BUDGET_SUFFIX`: a fixed reply string would be served from a prior run's
+cached response on a rerun, bypassing usage tracking entirely and making the
+budget never show spend (response cache hits return before budget/usage
+enforcement by design).
+
+```bash
+KEYNAME="qa-budget-key-$QA_SUFFIX"
+KEYLABEL="QaBudgetKeyLabel-$QA_SUFFIX"
+KEY_JSON=$(curl -fsS -H "$ADMIN_AUTH_HEADER" -X POST "$AUTH_BASE_URL/admin/auth-keys" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$KEYNAME\",\"labels\":[\"$KEYLABEL\"]}")
+KEY_VALUE=$(echo "$KEY_JSON" | jq -r '.value')
+KEY_ID=$(echo "$KEY_JSON" | jq -r '.id')
+
+curl -fsS -H "$ADMIN_AUTH_HEADER" -X PUT "$AUTH_BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$KEYLABEL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+
+REQ1="qa-budget-key-$QA_SUFFIX-1"
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s200.body.XXXXXX")
+curl -fsS -o "$BODY_FILE" -X POST "$AUTH_BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $KEY_VALUE" \
+  -H "X-Request-ID: $REQ1" \
+  -d "{\"model\":\"gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly QA_BUDGET_KEYLABEL_OK_$QA_BUDGET_SUFFIX\"}],\"max_tokens\":20,\"temperature\":0}"
+assert_chat_response_contains "$BODY_FILE" "" "QA_BUDGET_KEYLABEL_OK_$QA_BUDGET_SUFFIX"
+
+for _ in $(seq 1 15); do
+  curl -fsS -H "$ADMIN_AUTH_HEADER" "$AUTH_BASE_URL/admin/budgets" > "$BODY_FILE"
+  if jq -e --arg l "$KEYLABEL" 'any(.budgets[]?; .subject == $l and .spent > 0)' "$BODY_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg l "$KEYLABEL" 'any(.budgets[]?; .subject == $l and .spent > 0 and .has_usage == true)' "$BODY_FILE" >/dev/null
+
+REQ2="qa-budget-key-$QA_SUFFIX-2"
+STATUS=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X POST "$AUTH_BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $KEY_VALUE" \
+  -H "X-Request-ID: $REQ2" \
+  -d "{\"model\":\"gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly QA_BUDGET_KEYLABEL_BLOCK_$QA_BUDGET_SUFFIX\"}],\"max_tokens\":20,\"temperature\":0}")
+[ "$STATUS" = "429" ]
+
+curl -fsS -H "$ADMIN_AUTH_HEADER" -X DELETE "$AUTH_BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$KEYLABEL\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
+curl -fsS -H "$ADMIN_AUTH_HEADER" -X POST "$AUTH_BASE_URL/admin/auth-keys/$KEY_ID/deactivate" >/dev/null
+```
+
+### S201 A request matching both a user_path and a label budget is blocked by whichever is exhausted
+
+One generous `user_path` budget and one tiny `label` budget both match the
+same request; once the label budget is exhausted, the request is blocked even
+though the user-path budget still has ample room, and the error names the
+exhausted label rather than the path.
+
+```bash
+MIX_PATH="/qa-budget-mix-$QA_SUFFIX"
+MIX_LABEL="QaBudgetMixLabel-$QA_SUFFIX"
+MIX_HDR="X-Qa-Budget-Mix-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" -H 'Content-Type: application/json' \
+  -d "{\"headers\":[{\"header\":\"$MIX_HDR\"}]}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"user_path\",\"subject\":\"$MIX_PATH\",\"budget_key\":{\"period\":\"daily\"},\"amount\":1000}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$MIX_LABEL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+
+REQ1="qa-budget-mix-$QA_SUFFIX-1"
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s201.body.XXXXXX")
+curl -fsS -o "$BODY_FILE" -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQ1" -H "X-GoModel-User-Path: $MIX_PATH" -H "$MIX_HDR: $MIX_LABEL" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_MIX_OK"}],"max_tokens":20,"temperature":0}'
+assert_chat_response_contains "$BODY_FILE" "" "QA_BUDGET_MIX_OK"
+
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/budgets" > "$BODY_FILE"
+  if jq -e --arg l "$MIX_LABEL" 'any(.budgets[]?; .subject == $l and .spent > 0)' "$BODY_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+
+REQ2="qa-budget-mix-$QA_SUFFIX-2"
+STATUS=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQ2" -H "X-GoModel-User-Path: $MIX_PATH" -H "$MIX_HDR: $MIX_LABEL" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_MIX_BLOCK"}],"max_tokens":20,"temperature":0}')
+[ "$STATUS" = "429" ]
+jq -e --arg l "$MIX_LABEL" --arg p "$MIX_PATH" '
+  (.error.message | test("label " + $l)) and (.error.message | test($p) | not)
+' "$BODY_FILE" >/dev/null
+
+# The user-path budget was charged by the same request and still has room, so
+# the block above came from the label budget alone.
+curl -fsS "$BASE_URL/admin/budgets" > "$BODY_FILE"
+jq -e --arg p "$MIX_PATH" '
+  any(.budgets[]?; .user_path == $p and .spent > 0 and .remaining > 0 and .usage_ratio < 1)
+' "$BODY_FILE" >/dev/null
+
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"user_path\",\"subject\":\"$MIX_PATH\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$MIX_LABEL\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
+```
+
+### S202 Reset-one clears spend for a label budget and lets the next request through
+
+```bash
+QA_LBL="QaBudgetReset-$QA_SUFFIX"
+TAG_HDR="X-Qa-Budget-Reset-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" -H 'Content-Type: application/json' \
+  -d "{\"headers\":[{\"header\":\"$TAG_HDR\"}]}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+
+REQ1="qa-budget-reset-$QA_SUFFIX-1"
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s202.body.XXXXXX")
+curl -fsS -o "$BODY_FILE" -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQ1" -H "$TAG_HDR: $QA_LBL" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_RESET_OK"}],"max_tokens":20,"temperature":0}'
+assert_chat_response_contains "$BODY_FILE" "" "QA_BUDGET_RESET_OK"
+
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/budgets" > "$BODY_FILE"
+  if jq -e --arg l "$QA_LBL" 'any(.budgets[]?; .subject == $l and .spent > 0)' "$BODY_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+
+curl -fsS -X POST "$BASE_URL/admin/budgets/reset-one" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"period\":\"daily\"}" \
+  | jq -e --arg l "$QA_LBL" 'any(.budgets[]?; .subject == $l and .spent == 0 and .has_usage == false)' >/dev/null
+
+REQ2="qa-budget-reset-$QA_SUFFIX-2"
+STATUS=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQ2" -H "$TAG_HDR: $QA_LBL" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_RESET_OK2"}],"max_tokens":20,"temperature":0}')
+[ "$STATUS" = "200" ]
+
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
+```
+
+### S203 Label budget enforcement on PostgreSQL and MongoDB
+
+The same tagging-header-driven label budget enforcement flow runs against the
+PostgreSQL- and MongoDB-backed gateways.
+
+```bash
+for TARGET in "$PG_BASE_URL|pg" "$MONGO_BASE_URL|mongo"; do
+  URL="${TARGET%%|*}"
+  TAG="${TARGET##*|}"
+  LBL="QaBudget${TAG}Label-$QA_SUFFIX"
+  HDR="X-Qa-Budget-$TAG-$QA_SUFFIX"
+  curl -fsS -X PUT "$URL/admin/tagging/settings" -H 'Content-Type: application/json' \
+    -d "{\"headers\":[{\"header\":\"$HDR\"}]}" >/dev/null
+  curl -fsS -X PUT "$URL/admin/budgets" -H 'Content-Type: application/json' \
+    -d "{\"scope\":\"label\",\"subject\":\"$LBL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" >/dev/null
+
+  REQ="qa-budget-$TAG-$QA_SUFFIX"
+  BODY_FILE=$(mktemp "$QA_RUN_DIR/s203.$TAG.body.XXXXXX")
+  curl -fsS -o "$BODY_FILE" -X POST "$URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -H "X-Request-ID: $REQ-1" -H "$HDR: $LBL" \
+    -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_BACKEND_OK"}],"max_tokens":20,"temperature":0}'
+  assert_chat_response_contains "$BODY_FILE" "" "QA_BUDGET_BACKEND_OK"
+
+  for _ in $(seq 1 15); do
+    curl -fsS "$URL/admin/budgets" > "$BODY_FILE"
+    if jq -e --arg l "$LBL" 'any(.budgets[]?; .subject == $l and .spent > 0)' "$BODY_FILE" >/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  jq -e --arg l "$LBL" 'any(.budgets[]?; .subject == $l and .spent > 0 and .has_usage == true)' "$BODY_FILE" >/dev/null
+
+  STATUS=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X POST "$URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -H "X-Request-ID: $REQ-2" -H "$HDR: $LBL" \
+    -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply exactly QA_BUDGET_BACKEND_BLOCK"}],"max_tokens":20,"temperature":0}')
+  [ "$STATUS" = "429" ]
+
+  curl -fsS -X PUT "$URL/admin/tagging/settings" -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
+  curl -fsS -X DELETE "$URL/admin/budgets" -H 'Content-Type: application/json' \
+    -d "{\"scope\":\"label\",\"subject\":\"$LBL\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
+done
+```
+
+### S204 Budgets admin API requires auth on the auth-enabled gateway, for label scope too
+
+```bash
+STATUS=$(curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/budgets")
+[ "$STATUS" = "401" ]
+
+STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -H "$ADMIN_AUTH_HEADER" "$AUTH_BASE_URL/admin/budgets")
+[ "$STATUS" = "200" ]
+
+QA_LBL="QaBudgetAuth-$QA_SUFFIX"
+STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$AUTH_BASE_URL/admin/budgets" \
+  -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":5}")
+[ "$STATUS" = "401" ]
+
+curl -fsS -H "$ADMIN_AUTH_HEADER" -X PUT "$AUTH_BASE_URL/admin/budgets" \
+  -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":5}" \
+  | jq -e --arg l "$QA_LBL" 'any(.budgets[]?; .subject == $l)' >/dev/null
+curl -fsS -H "$ADMIN_AUTH_HEADER" -X DELETE "$AUTH_BASE_URL/admin/budgets" \
+  -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
 ```
