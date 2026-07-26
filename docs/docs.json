@@ -23,7 +23,8 @@
     },
     "seo": {
         "metatags": {
-            "canonical": "https://gomodel.enterpilot.io/docs"
+            "canonical": "https://gomodel.enterpilot.io/docs",
+            "google-site-verification": "EhaMJtqC22YnPJetcCW5SCi3fdJF2BOai2WHjae8ymY"
         }
     },
     "integrations": {
