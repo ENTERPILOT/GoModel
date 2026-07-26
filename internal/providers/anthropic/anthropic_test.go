@@ -4307,6 +4307,12 @@ func TestIsAdaptiveThinkingModel(t *testing.T) {
 	}{
 		{"claude-fable-5", true},
 		{"claude-fable-5-20260601", true},
+		{"claude-opus-5", true},
+		{"claude-opus-5-20260601", true},
+		{"claude-sonnet-5", true},
+		{"claude-sonnet-5-20260601", true},
+		// Haiku 4.5 predates adaptive thinking and stays on manual budgets.
+		{"claude-haiku-4-5-20251001", false},
 		{"claude-opus-4-8", true},
 		{"claude-opus-4-8-20260301", true},
 		{"claude-opus-4-7", true},
