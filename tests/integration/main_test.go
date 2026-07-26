@@ -38,9 +38,27 @@ var (
 
 const mongoReplicaSetName = "rs"
 
+// Images come from the AWS ECR Public mirror of Docker Hub's official library,
+// not from Docker Hub. Anonymous pulls of registry-1.docker.io intermittently
+// time out on GitHub runners and fail the job before a single test runs; the
+// mirror carries the same images over a different path and without Docker Hub's
+// anonymous pull limit.
+const (
+	postgresImage = "public.ecr.aws/docker/library/postgres:16-alpine"
+	mongoImage    = "public.ecr.aws/docker/library/mongo:7"
+)
+
 // TestMain sets up and tears down the Docker-backed test databases.
 func TestMain(m *testing.M) {
 	testCtx, cancelFunc = context.WithTimeout(context.Background(), 10*time.Minute)
+
+	// Pull before starting anything: the containers come up concurrently below,
+	// and two simultaneous anonymous pulls trip the registry's rate limit.
+	if err := dockerPullImages(testCtx, postgresImage, mongoImage); err != nil {
+		log.Printf("Image pull failed: %v", err)
+		cancelFunc()
+		os.Exit(1)
+	}
 
 	// Start containers in parallel
 	errCh := make(chan error, 2)
@@ -87,7 +105,7 @@ func setupPostgreSQL(ctx context.Context) error {
 			"-e", "POSTGRES_USER=test",
 			"-e", "POSTGRES_PASSWORD=test",
 		},
-		"postgres:16-alpine",
+		postgresImage,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to start PostgreSQL container: %w", err)
@@ -128,7 +146,7 @@ func setupMongoDB(ctx context.Context) error {
 	mongoContainer, err = dockerRunDetached(
 		ctx,
 		[]string{"-P"},
-		"mongo:7",
+		mongoImage,
 		"--replSet", mongoReplicaSetName,
 		"--bind_ip_all",
 	)

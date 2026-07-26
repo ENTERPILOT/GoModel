@@ -40,18 +40,24 @@ jobs:
           # the schema fetch is reliable again; track in this PR/branch discussion.
           verify: false
 
-  # Unit, E2E, integration, and contract suites share identical setup and
-  # differ only in the test command, so they run as one matrix.
-  go-tests:
-    name: ${{ matrix.name }}
+  # The unit suite is the only one that needs a database service: one store
+  # implementation now serves SQLite and PostgreSQL, and without this service
+  # GOMODEL_TEST_POSTGRES_URL is unset, every PostgreSQL subtest skips, and CI
+  # stays green while covering only SQLite.
+  #
+  # It runs on its own rather than in the matrix below because a service
+  # container is pulled before the job starts, so a registry hiccup fails the
+  # job outright. Attaching it to suites that never open a database put three
+  # extra jobs at that risk for no coverage.
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
-    # One store implementation now serves SQLite and PostgreSQL, so the store
-    # suites run against both. Without this service GOMODEL_TEST_POSTGRES_URL
-    # is unset, every PostgreSQL subtest skips, and CI stays green while
-    # covering only SQLite.
     services:
       postgres:
-        image: postgres:18-alpine
+        # Mirrors Docker Hub's official image. Anonymous pulls of
+        # registry-1.docker.io intermittently time out on GitHub runners, which
+        # fails the job before a single test runs.
+        image: public.ecr.aws/docker/library/postgres:18-alpine
         env:
           POSTGRES_USER: gomodel
           POSTGRES_PASSWORD: gomodel
@@ -63,13 +69,40 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run tests
+        run: make test-race
+        env:
+          # Deliberately not POSTGRES_URL: the suite creates and drops schemas,
+          # so pointing it at a configured application database is opt-in.
+          GOMODEL_TEST_POSTGRES_URL: postgres://gomodel:gomodel@localhost:5432/gomodel
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v7
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
+        continue-on-error: true
+
+  # The E2E, integration, and contract suites share identical setup and differ
+  # only in the test command, so they run as one matrix. None of them reads
+  # GOMODEL_TEST_POSTGRES_URL — the integration suite brings up its own
+  # containers in TestMain — so none takes a service container.
+  go-tests:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Unit Tests
-            cmd: make test-race
-            coverage: true
           - name: E2E Tests
             cmd: go test -v -tags=e2e -timeout=5m ./tests/e2e/...
           - name: Integration Tests
@@ -87,18 +120,6 @@ jobs:
 
       - name: Run tests
         run: ${{ matrix.cmd }}
-        env:
-          # Deliberately not POSTGRES_URL: the suite creates and drops schemas,
-          # so pointing it at a configured application database is opt-in.
-          GOMODEL_TEST_POSTGRES_URL: postgres://gomodel:gomodel@localhost:5432/gomodel
-
-      - name: Upload coverage
-        if: matrix.coverage
-        uses: codecov/codecov-action@v7
-        with:
-          files: ./coverage.out
-          fail_ci_if_error: false
-        continue-on-error: true
 
   test-dashboard:
     name: Dashboard Unit Tests
