@@ -61,8 +61,8 @@ func TestNewGatewayStartConfig_AppliesTimeoutOverrides(t *testing.T) {
 func TestNewGatewayStartConfig_ConfiguresGracefulDrain(t *testing.T) {
 	cfg := newGatewayStartConfig(":0")
 
-	if cfg.GracefulTimeout != gracefulDrainTimeout {
-		t.Fatalf("GracefulTimeout = %v, want %v", cfg.GracefulTimeout, gracefulDrainTimeout)
+	if cfg.GracefulTimeout != GracefulDrainTimeout {
+		t.Fatalf("GracefulTimeout = %v, want %v", cfg.GracefulTimeout, GracefulDrainTimeout)
 	}
 	if cfg.OnShutdownError == nil {
 		t.Fatal("OnShutdownError = nil, want the drain cutoff reported by the gateway")

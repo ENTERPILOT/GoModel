@@ -35,7 +35,7 @@ build:
 # handling instead of behind a supervisor.
 run:
 	go build -tags=swagger -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
-	LOG_LEVEL=$(LOG_LEVEL) SWAGGER_ENABLED=$(SWAGGER_ENABLED) exec ./bin/gomodel
+	LOG_LEVEL="$(LOG_LEVEL)" SWAGGER_ENABLED="$(SWAGGER_ENABLED)" exec ./bin/gomodel
 
 # Seed the local SQLite database and start GoModel with a populated dashboard.
 demo: seed-demo-data

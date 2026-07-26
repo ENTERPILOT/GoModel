@@ -217,10 +217,12 @@ type lifecycleApp interface {
 // anything Shutdown had not reached yet — the buffered usage and audit
 // records, the database handle — would be dropped on every Ctrl+C.
 //
-// Shutdown also runs when Start returns on its own, so a server that stops
-// without a signal still releases its resources. App.Shutdown is idempotent,
-// which makes that harmless when startApplication has already torn down after
-// a failed start.
+// This is the only caller of shutdownApplication, so teardown runs exactly
+// once per exit and on a single shutdownTimeout budget, whichever way the
+// server ended: a signal, a stop of its own accord, or a Start that never got
+// off the ground all converge here. Routing the failed-start path through the
+// same place is what removes the second teardown that used to run alongside
+// it, and with it any reliance on Shutdown being idempotent.
 func serveUntilShutdown(ctx context.Context, application lifecycleApp, addr string) error {
 	serverReturned := make(chan struct{})
 	shutdownDone := make(chan error, 1)
@@ -234,7 +236,7 @@ func serveUntilShutdown(ctx context.Context, application lifecycleApp, addr stri
 		shutdownDone <- shutdownApplication(application, shutdownCtx)
 	}()
 
-	startErr := startApplication(application, addr)
+	startErr := application.Start(context.Background(), addr)
 	close(serverReturned)
 
 	if err := <-shutdownDone; err != nil {
@@ -255,20 +257,4 @@ func shutdownApplication(application lifecycleApp, ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-// startApplication calls lifecycleApp.Start and, if Start fails, attempts a
-// graceful shutdown via shutdownApplication using shutdownTimeout before
-// returning the original start error or a combined start/shutdown error.
-func startApplication(application lifecycleApp, addr string) error {
-	if err := application.Start(context.Background(), addr); err != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-
-		if shutdownErr := shutdownApplication(application, shutdownCtx); shutdownErr != nil {
-			return fmt.Errorf("server failed to start: %w", errors.Join(err, fmt.Errorf("shutdown after start failure: %w", shutdownErr)))
-		}
-		return err
-	}
-	return nil
 }
