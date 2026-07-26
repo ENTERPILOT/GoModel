@@ -189,18 +189,9 @@ func Run(ctx context.Context, opts Options) error {
 
 	signalCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	go func() {
-		<-signalCtx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-
-		if err := shutdownApplication(application, shutdownCtx); err != nil {
-			slog.Error("application shutdown error", "error", err)
-		}
-	}()
 
 	addr := ":" + result.Config.Server.Port
-	if err := startApplication(application, addr); err != nil {
+	if err := serveUntilShutdown(signalCtx, application, addr); err != nil {
 		slog.Error("application failed", "error", err)
 		return err
 	}
@@ -217,6 +208,43 @@ type lifecycleApp interface {
 	Shutdown(ctx context.Context) error
 }
 
+// serveUntilShutdown starts the application and returns only once the server
+// has stopped *and* the teardown that stopped it has finished.
+//
+// The teardown has to run on its own goroutine because Start blocks until the
+// server stops and Shutdown is what stops it. Waiting for that goroutine here
+// is the load-bearing part: the process exits the moment Run returns, so
+// anything Shutdown had not reached yet — the buffered usage and audit
+// records, the database handle — would be dropped on every Ctrl+C.
+//
+// This is the only caller of shutdownApplication, so teardown runs exactly
+// once per exit and on a single shutdownTimeout budget, whichever way the
+// server ended: a signal, a stop of its own accord, or a Start that never got
+// off the ground all converge here. Routing the failed-start path through the
+// same place is what removes the second teardown that used to run alongside
+// it, and with it any reliance on Shutdown being idempotent.
+func serveUntilShutdown(ctx context.Context, application lifecycleApp, addr string) error {
+	serverReturned := make(chan struct{})
+	shutdownDone := make(chan error, 1)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-serverReturned:
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		shutdownDone <- shutdownApplication(application, shutdownCtx)
+	}()
+
+	startErr := application.Start(context.Background(), addr)
+	close(serverReturned)
+
+	if err := <-shutdownDone; err != nil {
+		slog.Error("application shutdown error", "error", err)
+	}
+	return startErr
+}
+
 func shutdownApplication(application lifecycleApp, ctx context.Context) error {
 	done := make(chan error, 1)
 	go func() {
@@ -229,20 +257,4 @@ func shutdownApplication(application lifecycleApp, ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-// startApplication calls lifecycleApp.Start and, if Start fails, attempts a
-// graceful shutdown via shutdownApplication using shutdownTimeout before
-// returning the original start error or a combined start/shutdown error.
-func startApplication(application lifecycleApp, addr string) error {
-	if err := application.Start(context.Background(), addr); err != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-
-		if shutdownErr := shutdownApplication(application, shutdownCtx); shutdownErr != nil {
-			return fmt.Errorf("server failed to start: %w", errors.Join(err, fmt.Errorf("shutdown after start failure: %w", shutdownErr)))
-		}
-		return err
-	}
-	return nil
 }

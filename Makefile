@@ -26,9 +26,16 @@ install-tools:
 
 build:
 	go build -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
-# Run the application
+# Run the application.
+#
+# Built and exec'd rather than `go run`: `go run` exits 1 when it is
+# interrupted, even after the program it supervises shuts down cleanly, so
+# Ctrl+C always ended in a bogus "make: *** [run] Error 1". exec replaces the
+# recipe shell, which also puts the gateway directly under make's signal
+# handling instead of behind a supervisor.
 run:
-	LOG_LEVEL=$(LOG_LEVEL) SWAGGER_ENABLED=$(SWAGGER_ENABLED) go run -tags=swagger ./cmd/gomodel
+	go build -tags=swagger -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
+	LOG_LEVEL="$(LOG_LEVEL)" SWAGGER_ENABLED="$(SWAGGER_ENABLED)" exec ./bin/gomodel
 
 # Seed the local SQLite database and start GoModel with a populated dashboard.
 demo: seed-demo-data

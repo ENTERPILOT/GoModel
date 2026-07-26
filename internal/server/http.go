@@ -45,6 +45,20 @@ const (
 	inboundServerReadTimeout       = 30 * time.Second
 	inboundServerReadHeaderTimeout = 10 * time.Second
 	inboundServerWriteTimeout      = 30 * time.Second
+
+	// GracefulDrainTimeout bounds how long the HTTP server waits for in-flight
+	// requests to finish once shutdown begins. Streamed model responses run far
+	// longer than any drain window worth waiting for, so this is deliberately a
+	// cutoff rather than a promise: past it the remaining connections are cut
+	// and shutdown moves on to flushing usage and audit records. It is sized
+	// for the short requests that can actually finish — a dashboard fetch, a
+	// health check — not for model traffic.
+	//
+	// It must stay below run.shutdownTimeout, which covers this drain plus
+	// those flushes and the database close that follow it. Exported so that
+	// relationship is checked rather than merely asserted here — see
+	// TestGracefulDrainFitsInsideTheShutdownBudget in the run package.
+	GracefulDrainTimeout = 10 * time.Second
 )
 
 // Config holds server configuration options
@@ -555,6 +569,17 @@ func newGatewayStartConfig(addr string) echo.StartConfig {
 		HideBanner: true,
 		BeforeServeFunc: func(server *http.Server) error {
 			return configureGatewayHTTPServer(server)
+		},
+		// Echo's own default is an implicit 10s that reports the cutoff as an
+		// unexplained error. Both are set here so the drain window is sized
+		// against the application's shutdown budget and so cutting a stream
+		// short on Ctrl+C reads as the routine event it is.
+		GracefulTimeout: GracefulDrainTimeout,
+		OnShutdownError: func(err error) {
+			slog.Warn("closing requests still in flight at the shutdown deadline",
+				"graceful_timeout", GracefulDrainTimeout,
+				"error", err,
+			)
 		},
 	}
 }
