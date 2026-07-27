@@ -40,12 +40,31 @@ func (s *stickySessions) clock() time.Time {
 	return time.Now()
 }
 
+// lookup returns and refreshes a viable existing pin. It lets callers avoid
+// running their selection strategy for requests that are already pinned.
+func (s *stickySessions) lookup(source, session string, viable func(string) bool) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := stickyKey{source: source, session: session}
+	now := s.clock()
+	existing, ok := s.entries[key]
+	if !ok {
+		return "", false
+	}
+	if !existing.expires.After(now) || !viable(existing.qualified) {
+		delete(s.entries, key)
+		return "", false
+	}
+	existing.expires = now.Add(stickySessionTTL)
+	s.entries[key] = existing
+	return existing.qualified, true
+}
+
 // resolve returns the target serving a session: the existing pin when it is
-// still viable (refreshing its TTL), otherwise whatever choose picks, pinned
-// when pin is true. Lookup, choice, and assignment share one critical section
-// so concurrent first requests of a session agree on a single target instead
-// of racing lookup-miss → choose → overwrite each other's pins.
-func (s *stickySessions) resolve(source, session string, viable func(string) bool, choose func() string, pin bool) string {
+// still viable (refreshing its TTL), otherwise candidate, pinned when pin is
+// true. It rechecks the pin after strategy selection so concurrent first
+// requests agree on the first pinned target.
+func (s *stickySessions) resolve(source, session string, viable func(string) bool, candidate string, pin bool) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := stickyKey{source: source, session: session}
@@ -56,11 +75,10 @@ func (s *stickySessions) resolve(source, session string, viable func(string) boo
 			s.entries[key] = existing
 			return existing.qualified
 		}
-		// Expired, or the pinned target is gone/saturated: re-pick and re-pin.
+		// Expired, or the pinned target is gone/saturated: re-pin the candidate.
 		delete(s.entries, key)
 	}
-	qualified := choose()
-	if pin && qualified != "" {
+	if pin && candidate != "" {
 		if s.entries == nil {
 			s.entries = make(map[stickyKey]stickyPin)
 		}
@@ -69,11 +87,11 @@ func (s *stickySessions) resolve(source, session string, viable func(string) boo
 			s.evictSoonestLocked()
 		}
 		s.entries[key] = stickyPin{
-			qualified: qualified,
+			qualified: candidate,
 			expires:   now.Add(stickySessionTTL),
 		}
 	}
-	return qualified
+	return candidate
 }
 
 // prune drops expired pins and pins for redirect sources no longer present in

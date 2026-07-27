@@ -18,6 +18,11 @@
 
 const LIVE_LOGS_STREAM_PATH = "/admin/live/logs?types=audit,usage";
 
+function matchesLiveAuditKey(entry, id, requestID) {
+    return (!!id && String(entry && entry.id || '').trim() === id) ||
+        (!!requestID && String(entry && entry.request_id || '').trim() === requestID);
+}
+
 // liveLogsStreamPath builds the stream path with the replay cursor:
 // '/admin/live/logs?types=audit,usage[&cursor=N]'.
 export function liveLogsStreamPath(lastSeq) {
@@ -123,11 +128,9 @@ export function liveLogsMethods() {
             if (!incoming || typeof incoming !== 'object') return;
             const key = String(incoming.id || incoming.request_id || '').trim();
             if (!key) return;
+            const requestID = String(incoming.request_id || '').trim();
             const currentEntries = (this.auditLog && Array.isArray(this.auditLog.entries)) ? this.auditLog.entries : [];
-            const index = currentEntries.findIndex((entry) => {
-                return String(entry.id || '').trim() === key ||
-                    (incoming.request_id && String(entry.request_id || '').trim() === String(incoming.request_id).trim());
-            });
+            const index = currentEntries.findIndex((entry) => matchesLiveAuditKey(entry, key, requestID));
             const previous = index >= 0 ? currentEntries[index] || {} : {};
             if (eventType === 'audit.detail') {
                 const patch = { ...incoming, _detail_loaded: true, _response_partial: false };
@@ -219,10 +222,7 @@ export function liveLogsMethods() {
             for (let i = 0; i < sessionIds.length; i++) {
                 const list = lists[sessionIds[i]];
                 const entries = list && Array.isArray(list.entries) ? list.entries : [];
-                const index = entries.findIndex((entry) => {
-                    return (id && String(entry.id || '').trim() === id) ||
-                        (requestID && String(entry.request_id || '').trim() === requestID);
-                });
+                const index = entries.findIndex((entry) => matchesLiveAuditKey(entry, id, requestID));
                 if (index < 0) continue;
                 const merged = this.mergeLiveAuditPatch(entries[index] || {}, patch);
                 const nextEntries = [...entries];
@@ -321,11 +321,7 @@ export function liveLogsMethods() {
             Object.keys(lists).forEach((sessionId) => {
                 const list = lists[sessionId];
                 const entries = list && Array.isArray(list.entries) ? list.entries : [];
-                const next = entries.filter((entry) => {
-                    if (id && String(entry.id || '').trim() === id) return false;
-                    if (requestID && String(entry.request_id || '').trim() === requestID) return false;
-                    return true;
-                });
+                const next = entries.filter((entry) => !matchesLiveAuditKey(entry, id, requestID));
                 const removed = entries.length - next.length;
                 if (removed === 0) return;
                 this.auditThreadChildren = {
@@ -436,11 +432,7 @@ export function liveLogsMethods() {
             const id = String(incoming.id || '').trim();
             const requestID = String(incoming.request_id || '').trim();
             if (!id && !requestID) return;
-            const next = this.auditLog.entries.filter((entry) => {
-                if (id && String(entry.id || '').trim() === id) return false;
-                if (requestID && String(entry.request_id || '').trim() === requestID) return false;
-                return true;
-            });
+            const next = this.auditLog.entries.filter((entry) => !matchesLiveAuditKey(entry, id, requestID));
             const removedCount = this.auditLog.entries.length - next.length;
             if (removedCount > 0) {
                 this.auditLog.entries = next;

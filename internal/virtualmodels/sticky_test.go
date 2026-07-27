@@ -158,18 +158,15 @@ func TestSticky_TTLExpiry(t *testing.T) {
 // stickyProbe resolves without picking: it reports the existing viable pin or
 // "" and never assigns, so tests can inspect state through the public seam.
 func stickyProbe(sticky *stickySessions, source, session string) string {
-	return sticky.resolve(source, session,
-		func(string) bool { return true },
-		func() string { return "" },
-		false,
-	)
+	qualified, _ := sticky.lookup(source, session, func(string) bool { return true })
+	return qualified
 }
 
 // stickyAssign resolves with a fixed choice, pinning it.
 func stickyAssign(sticky *stickySessions, source, session, qualified string) string {
 	return sticky.resolve(source, session,
 		func(string) bool { return true },
-		func() string { return qualified },
+		qualified,
 		true,
 	)
 }
@@ -192,8 +189,8 @@ func TestSticky_ResolveRefreshesTTL(t *testing.T) {
 	}
 }
 
-// Concurrent first requests of one session must agree on a single target:
-// lookup, strategy choice, and pin share one critical section.
+// Concurrent first requests of one session must agree on a single target even
+// though strategy choice happens before the atomic pin lookup and assignment.
 func TestSticky_ConcurrentFirstRequestsAgree(t *testing.T) {
 	t.Parallel()
 	svc := newBalancingService(t)
@@ -223,6 +220,22 @@ func TestSticky_ConcurrentFirstRequestsAgree(t *testing.T) {
 		if results[i] != results[0] {
 			t.Fatalf("concurrent resolutions disagree: %q vs %q", results[i], results[0])
 		}
+	}
+}
+
+func TestSticky_PinnedRequestsDoNotAdvanceRoundRobin(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	upsertBalancedVM(t, svc, StrategyRoundRobin, nil)
+
+	if got := resolveSession(t, svc, "smart", "sess-a"); got != "openai/gpt-4o" {
+		t.Fatalf("first session target = %q, want openai/gpt-4o", got)
+	}
+	for range 2 {
+		resolveSession(t, svc, "smart", "sess-a")
+	}
+	if got := resolveSession(t, svc, "smart", "sess-b"); got != "anthropic/claude" {
+		t.Fatalf("second session target = %q, want anthropic/claude", got)
 	}
 }
 

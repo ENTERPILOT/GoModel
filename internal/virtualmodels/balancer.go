@@ -72,7 +72,6 @@ func (s *Service) balancedResolution(entry redirectEntry, sessionID string) (cor
 			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))]
 		}
 	}
-
 	// Affinity is keyed to the redirect's CONFIGURED shape, not the targets
 	// currently available: with only one target momentarily supported (provider
 	// outage, startup) the session must still pin its serving target, or the
@@ -81,17 +80,29 @@ func (s *Service) balancedResolution(entry redirectEntry, sessionID string) (cor
 	// honest 429, not to serve the session.
 	affinity := sessionID != "" && entry.sessionAffinity() && len(entry.targets) > 1
 	if affinity {
+		viable := func(candidate string) bool {
+			_, ok := poolTarget(pool, candidate)
+			return ok
+		}
+		if qualified, ok := s.sticky.lookup(entry.vm.Source, sessionID, viable); ok {
+			if target, found := poolTarget(pool, qualified); found {
+				return target.selector, true
+			}
+		}
+
+		// Strategy selection may read the model catalog, so keep it outside the
+		// sticky lock. resolve rechecks the pin atomically in case another first
+		// request selected and pinned a target concurrently.
+		choice := pick()
 		qualified := s.sticky.resolve(entry.vm.Source, sessionID,
-			func(candidate string) bool {
-				_, ok := poolTarget(pool, candidate)
-				return ok
-			},
-			func() string { return pick().qualified },
+			viable,
+			choice.qualified,
 			!saturatedFallback,
 		)
 		if target, ok := poolTarget(pool, qualified); ok {
 			return target.selector, true
 		}
+		return choice.selector, true
 	}
 	return pick().selector, true
 }
