@@ -100,12 +100,15 @@ var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 
 // scopeSessionID namespaces non-UUID ids by user path. UUIDs are globally
 // unique already and stay raw so operators can correlate them with client-side
-// session identifiers.
+// session identifiers. Weak ids are hashed together with the user path (as
+// distinct values — plain concatenation would be ambiguous, since both parts
+// are client-influenced) so they cannot collide across tenants.
 func scopeSessionID(id, userPath string) string {
 	if userPath == "" || uuidRegex.MatchString(id) {
 		return id
 	}
-	return userPath + "|" + id
+	sum := sha256.Sum256([]byte(userPath + "\x00" + id))
+	return "scoped-" + hex.EncodeToString(sum[:8])
 }
 
 // contentAnchor is the stable prefix of a conversation used to derive a

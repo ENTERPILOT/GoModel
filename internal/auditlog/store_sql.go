@@ -110,7 +110,9 @@ var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_user_path ON audit_logs(user_path)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_session_id ON audit_logs(session_id)",
+	// Composite: serves both the session_id equality filter and its per-thread
+	// timestamp ordering (thread detail and the sessions grouping query).
+	"CREATE INDEX IF NOT EXISTS idx_audit_session_id ON audit_logs(session_id, timestamp)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_error_type ON audit_logs(error_type)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON audit_log_attempts(audit_log_id, seq)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_provider ON audit_log_attempts(provider_type)",

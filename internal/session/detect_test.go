@@ -147,8 +147,18 @@ func TestDetectUserPathScoping(t *testing.T) {
 	}
 
 	weakHeaders := map[string][]string{"Agent-Session-Id": {"20260727_3"}}
-	if got := detector.Detect(chatSnapshot(weakHeaders, `{}`), "team/app"); got != "team/app|20260727_3" {
-		t.Fatalf("weak id must be user-path scoped, got %q", got)
+	scoped := detector.Detect(chatSnapshot(weakHeaders, `{}`), "team/app")
+	if !strings.HasPrefix(scoped, "scoped-") {
+		t.Fatalf("weak id must be user-path scoped, got %q", scoped)
+	}
+	if again := detector.Detect(chatSnapshot(weakHeaders, `{}`), "team/app"); again != scoped {
+		t.Fatalf("scoping must be deterministic: %q vs %q", scoped, again)
+	}
+	// Hash scoping (with the \x00 separator plus cleanSessionID's control-char
+	// rejection) is unambiguous: no path/id split can forge another tenant's
+	// id the way plain "path|id" concatenation could.
+	if other := detector.Detect(chatSnapshot(weakHeaders, `{}`), "team/other"); other == scoped {
+		t.Fatal("same weak id under different user paths must not collide")
 	}
 	if got := detector.Detect(chatSnapshot(weakHeaders, `{}`), ""); got != "20260727_3" {
 		t.Fatalf("weak id without user path stays raw, got %q", got)

@@ -223,7 +223,14 @@ class AuditListStore {
       const result = await getJSON("/admin/audit/log?" + qs, {
         label: "audit session",
       });
-      if (result.stale) return;
+      if (result.stale) {
+        // Silently drop the loading placeholder so the next toggle retries
+        // (leaving it would render a spinner forever).
+        const next = { ...liveLogs.auditThreadChildren };
+        delete next[sessionId];
+        liveLogs.auditThreadChildren = next;
+        return;
+      }
       if (!result.ok) throw new Error("audit session fetch failed");
       liveLogs.auditThreadChildren = {
         ...liveLogs.auditThreadChildren,

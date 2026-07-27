@@ -9,8 +9,10 @@ import (
 
 // SessionCapture detects the client session id for model interaction requests
 // and attaches it to the request context. It runs after RequestSnapshotCapture
-// (detection reads the captured headers and body) and before audit logging so
-// entries carry the session id from creation.
+// (detection reads the captured headers and body) and after authentication so
+// weak ids and auto-detected ids are scoped by the effective user path,
+// including a managed key's bound path. Audit entries pick the id up in the
+// post-handler re-read.
 func SessionCapture(detector *session.Detector) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {

@@ -95,7 +95,7 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 			Keys: bson.D{{Key: "user_path", Value: 1}},
 		},
 		{
-			Keys: bson.D{{Key: "session_id", Value: 1}},
+			Keys: bson.D{{Key: "session_id", Value: 1}, {Key: "timestamp", Value: -1}},
 		},
 		{
 			Keys: bson.D{{Key: "error_type", Value: 1}},

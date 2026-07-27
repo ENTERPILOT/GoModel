@@ -326,13 +326,6 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.Use(TaggingCapture(cfg.Tagging))
 	}
 
-	// Session identification runs after snapshot capture (it reads the captured
-	// headers and body) and before audit logging so entries carry the session id
-	// from creation.
-	if cfg != nil && cfg.SessionDetector != nil {
-		e.Use(SessionCapture(cfg.SessionDetector))
-	}
-
 	if cfg != nil && len(cfg.PassthroughSemanticEnrichers) > 0 {
 		e.Use(PassthroughSemanticEnrichment(provider, cfg.PassthroughSemanticEnrichers, passthroughV1PrefixNormalizationEnabled(cfg)))
 	}
@@ -356,6 +349,16 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Authentication (skips public paths)
 	if cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil) {
 		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths, userPathHeaderName))
+	}
+
+	// Session identification runs after auth so session ids are scoped by the
+	// EFFECTIVE user path (a managed key's bound path, not the ingress header)
+	// and before workflow resolution, which consumes the id for sticky
+	// virtual-model routing. The audit middleware re-reads the id after the
+	// handler returns, so persisted entries carry it even though they are
+	// created earlier in the chain.
+	if cfg != nil && cfg.SessionDetector != nil {
+		e.Use(SessionCapture(cfg.SessionDetector))
 	}
 
 	// Request rewriters run post-auth (rewriters only see authenticated

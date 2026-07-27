@@ -72,7 +72,6 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				Method:    req.Method,
 				Path:      req.URL.Path,
 				UserPath:  userPath,
-				SessionID: core.SessionIDFromContext(req.Context()),
 				Data: &LogData{
 					UserAgent: req.UserAgent(),
 					Labels:    core.RequestLabelsFromContext(req.Context()),
@@ -211,8 +210,8 @@ func applyAuthentication(entry *LogEntry, ctx context.Context) {
 	if userPath := strings.TrimSpace(core.UserPathFromContext(ctx)); userPath != "" {
 		entry.UserPath = userPath
 	}
-	// Session detection runs before this middleware, but re-read defensively in
-	// case a later stage attached or refined the session id.
+	// Session detection runs after authentication (deeper in the chain than
+	// this middleware), so the id only exists on the post-handler context.
 	if sessionID := core.SessionIDFromContext(ctx); sessionID != "" {
 		entry.SessionID = sessionID
 	}
