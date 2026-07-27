@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -23,6 +24,12 @@ const maxAuditLogLimit = 100
 // It mirrors the reader's pagination default so the disabled-reader fast path
 // reports the same limit an enabled reader would.
 const defaultAuditLogLimit = 25
+
+// conversationBuildTimeout bounds the response-chain walk behind
+// /admin/audit/conversation. Indexed lookups finish in milliseconds; the
+// deadline exists so a degraded store (mis-planned query, lock contention,
+// pool starvation) yields a partial thread instead of an endless request.
+const conversationBuildTimeout = 10 * time.Second
 
 // AuditLog handles GET /admin/audit/log
 //
@@ -340,8 +347,19 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 		})
 	}
 
-	result, err := h.auditReader.GetConversation(c.Request().Context(), logID, limit)
+	// The chain walk runs up to ~2×limit sequential store lookups; without a
+	// deadline one slow lookup holds the request open until a fronting proxy
+	// kills it. Under the deadline the builder returns the partial thread it
+	// collected (Truncated=true); only a timeout before the anchor loads
+	// surfaces as an error.
+	ctx, cancel := context.WithTimeout(c.Request().Context(), conversationBuildTimeout)
+	defer cancel()
+	result, err := h.auditReader.GetConversation(ctx, logID, limit)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			return handleError(c, core.NewProviderError("", http.StatusGatewayTimeout,
+				"audit conversation lookup timed out", err))
+		}
 		return handleError(c, err)
 	}
 	if result == nil {

@@ -8007,6 +8007,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/auditlog.LogEntry"
                     }
+                },
+                "truncated": {
+                    "description": "Truncated reports that the thread walk stopped early because the\ncaller's deadline expired; the entries collected up to that point are\nreturned rather than failing the whole request.",
+                    "type": "boolean"
                 }
             }
         },
