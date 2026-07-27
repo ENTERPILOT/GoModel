@@ -2,6 +2,7 @@
     "$schema": "https://mintlify.com/docs.json",
     "theme": "maple",
     "name": "GoModel",
+    "description": "GoModel is an open-source, OpenAI-compatible AI gateway that routes requests to any LLM provider, with failover, budgets, rate limits, caching, and usage tracking.",
     "logo": {
         "light": "/wordmark-light.svg",
         "dark": "/wordmark-dark.svg"
@@ -25,7 +26,20 @@
         "metatags": {
             "canonical": "https://gomodel.enterpilot.io/docs",
             "google-site-verification": "EhaMJtqC22YnPJetcCW5SCi3fdJF2BOai2WHjae8ymY"
+        },
+        "organization": {
+            "id": "https://enterpilot.io/#organization",
+            "name": "Enterpilot",
+            "legalName": "enterpilot, Inc.",
+            "url": "https://enterpilot.io",
+            "logo": "https://gomodel.enterpilot.io/docs/logo.svg",
+            "sameAs": [
+                "https://github.com/ENTERPILOT/GoModel"
+            ]
         }
+    },
+    "metadata": {
+        "timestamp": true
     },
     "integrations": {
         "posthog": {

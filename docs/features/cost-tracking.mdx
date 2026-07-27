@@ -1,18 +1,18 @@
 ---
-title: "GoModel Cost tracking: AI Gateway Configuration Guide"
-description: "How GoModel estimates request costs, where pricing comes from, how to override it, and how to recalculate stored costs. Read the complete setup guide."
-keywords: ["GoModel", "AI gateway", "cost tracking"]
+title: "Cost tracking"
+description: "How GoModel estimates request costs, where pricing comes from, how to override it, and how to recalculate stored costs."
 icon: "calculator"
+keywords: ["cost tracking", "LLM cost", "token pricing", "spend", "pricing override", "cost estimate"]
 ---
 
 GoModel estimates the cost of every tracked request from model pricing and shows the totals on the dashboard.
 
 <Warning>
-  These costs are **estimates**, not a billing record. GoModel computes them from
-  catalog pricing and the token counts each provider reports, which can differ
-  from a provider's own billing because of promotions, rounding, cache rules,
-  currency conversion, or plan discounts. Treat the provider's dashboard as the
-  source of truth and do not use GoModel figures for invoicing or reconciliation.
+  These costs are **estimates**, not a billing record. Unless a provider reports
+  an exact cost, GoModel multiplies the tokens a provider reports by that model's
+  configured rates, so discounts, promotions, and provider-side rounding are not
+  reflected. Treat the provider's dashboard as the source of truth, and check
+  GoModel figures against it before using them for invoicing or reconciliation.
 </Warning>
 
 ## How costs are estimated
@@ -25,9 +25,8 @@ For each request GoModel prices:
 When a provider returns an exact cost (OpenRouter credits, xAI `cost_in_usd_ticks`), GoModel uses that value instead of catalog pricing. Each row records which method was used in its `cost_source` field: `model_pricing`, `openrouter_credits`, or `xai_cost_in_usd_ticks`.
 
 <Note>
-  A cached-token discount only applies when the model's pricing includes a
-  `cached_input_per_mtok` rate. If that rate is missing from the catalog, cached
-  tokens are priced at the full input rate.
+  Cached tokens are discounted only when the model's pricing includes a
+  `cached_input_per_mtok` rate. Without it, they are priced at the full input rate.
 </Note>
 
 ## Where pricing comes from
@@ -72,8 +71,8 @@ A `---` value means the cost is unknown because no pricing was available, which 
 Recalculating recomputes the stored cost of matching usage rows from current pricing. Use it after changing an override, or when pricing was unavailable at the time a request ran. The action is enabled by default (`USAGE_PRICING_RECALCULATION_ENABLED`); on the usage view, choose **Recalculate**, then type `recalculate` to confirm. It is scoped to the selected date range, provider or model, and user path.
 
 <Warning>
-  Recalculation **overwrites** the cost fields of every matching row. If a row's
-  model no longer resolves to any pricing, its cost is **cleared** rather than
-  left unchanged, and the result reports how many rows still lack pricing. Token
-  counts are never modified.
+  Recalculation **overwrites** the cost fields of every matching row, and
+  **clears** the cost of any row whose model no longer resolves to pricing. The
+  result reports how many rows still lack pricing. Token counts are never
+  modified.
 </Warning>
