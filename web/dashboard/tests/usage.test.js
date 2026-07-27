@@ -259,6 +259,28 @@ test("Pro Saved value and share follow the Tokens/Costs mode", () => {
   assert.equal(proSavedPercent(unpriced, "costs"), null);
   assert.equal(proSavedPercentText(unpriced, "tokens"), "10.0% less");
 
+  // Priced savings against an unpriced period: the baseline is unknown, not
+  // zero, so the value still renders but the share must stay suppressed
+  // rather than claim the period was all savings.
+  const savedButUnpriced = {
+    total_tokens: 900,
+    total_cost: null,
+    rewrite_tokens_saved: 100,
+    rewrite_cost_saved: 0.02,
+  };
+  assert.equal(proSavedValueText(savedButUnpriced, "costs"), "$0.02");
+  assert.equal(proSavedPercent(savedButUnpriced, "costs"), null);
+  assert.equal(proSavedPercentText(savedButUnpriced, "costs"), "");
+
+  // Same for a missing token baseline.
+  assert.equal(proSavedPercentText({ rewrite_tokens_saved: 100 }, "tokens"), "");
+
+  // A genuinely zero baseline is knowable, so the share still renders.
+  assert.equal(
+    proSavedPercentText({ total_tokens: 0, rewrite_tokens_saved: 100 }, "tokens"),
+    "100.0% less",
+  );
+
   // No savings at all: nothing to show in either mode.
   assert.equal(proSavedPercentText({ total_tokens: 500 }, "tokens"), "");
   assert.equal(proSavedPercentText({}, "costs"), "");

@@ -136,13 +136,15 @@ export function proSavedPercent(summary, mode) {
   const costs = mode === "costs";
   const saved = costs ? Number(rewriteCostSaved(summary)) : rewriteTokensSaved(summary);
   if (!Number.isFinite(saved) || saved <= 0) return null;
-  const recorded = Number(
-    (summary && (costs ? summary.total_cost : summary.total_tokens)) || 0,
-  );
+  // Read the baseline before coercing: a null total_cost means "not priced",
+  // and coercing it to 0 would put the whole baseline in the savings and
+  // claim "100% less" for a period whose spend is simply unknown.
+  const raw = summary && (costs ? summary.total_cost : summary.total_tokens);
+  if (raw === null || raw === undefined) return null;
+  const recorded = Number(raw);
   if (!Number.isFinite(recorded) || recorded < 0) return null;
-  const baseline = recorded + saved;
-  if (baseline <= 0) return null;
-  return (saved / baseline) * 100;
+  // saved > 0 and recorded >= 0, so the baseline is positive by construction.
+  return (saved / (recorded + saved)) * 100;
 }
 
 export function proSavedPercentText(summary, mode) {
