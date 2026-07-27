@@ -196,6 +196,101 @@ export function buildAuditLogQuery({
   return qs;
 }
 
+// buildAuditSessionQuery renders the thread-children fetch for one session:
+// GET /admin/audit/log?session_id=…  Deliberately no date window, so an
+// expanded thread shows the whole session even when older requests fall
+// outside the date picker's range.
+export function buildAuditSessionQuery({ sessionId, limit }) {
+  return (
+    "session_id=" +
+    encodeURIComponent(sessionId) +
+    "&limit=" +
+    (limit || 100) +
+    "&offset=0"
+  );
+}
+
+// --- Session grouping -------------------------------------------------------
+// Grouped mode reuses the flat list shape: entries hold thread HEADS (each a
+// normal audit entry plus `session_count`), total counts threads.
+
+export function auditSessionId(entry) {
+  return String((entry && entry.session_id) || "").trim();
+}
+
+export function auditSessionCount(entry) {
+  const count = Number(entry && entry.session_count);
+  return Number.isFinite(count) && count > 1 ? count : 1;
+}
+
+// auditIsThreadHead reports whether a row gets the expander: it belongs to a
+// session with more entries than itself.
+export function auditIsThreadHead(entry) {
+  return !!auditSessionId(entry) && auditSessionCount(entry) > 1;
+}
+
+// auditLogFromSessions maps the GET /admin/audit/sessions payload into the
+// shared list shape: one head entry per thread, newest-activity first.
+export function auditLogFromSessions(payload) {
+  const sessions = Array.isArray(payload && payload.sessions)
+    ? payload.sessions
+    : [];
+  return {
+    entries: sessions
+      .filter((session) => session && session.latest)
+      .map((session) => ({
+        ...session.latest,
+        session_id: auditSessionId(session.latest) || String(session.session_id || "").trim(),
+        session_count: Number(session.count || 1),
+      })),
+    total: Number((payload && payload.total) || 0),
+    limit: Number((payload && payload.limit) || 25),
+    offset: Number((payload && payload.offset) || 0),
+  };
+}
+
+// auditThreadChildEntries drops the head row from a session_id page so the
+// unfolded children list holds only the older requests.
+export function auditThreadChildEntries(entries, head) {
+  const headKeys = new Set(auditEntryIdentityKeys(head));
+  return (Array.isArray(entries) ? entries : []).filter((entry) => {
+    return !auditEntryIdentityKeys(entry).some((key) => headKeys.has(key));
+  });
+}
+
+export function toggleExpandedThread(expanded, sessionId) {
+  const current = expanded || {};
+  if (!sessionId) return current;
+  if (current[sessionId]) {
+    const next = { ...current };
+    delete next[sessionId];
+    return next;
+  }
+  return { ...current, [sessionId]: true };
+}
+
+// pruneThreadMap keeps only keys whose session still appears among the current
+// head entries, so open threads survive refetches of the same page but stale
+// state is dropped once a thread leaves the page.
+export function pruneThreadMap(map, entries) {
+  const current = map || {};
+  const active = new Set(
+    (Array.isArray(entries) ? entries : [])
+      .map((entry) => auditSessionId(entry))
+      .filter(Boolean),
+  );
+  const next = {};
+  let changed = false;
+  Object.keys(current).forEach((key) => {
+    if (active.has(key)) {
+      next[key] = current[key];
+      return;
+    }
+    changed = true;
+  });
+  return changed ? next : current;
+}
+
 // --- Live-entry merge -------------------------------------------------------
 // `filters` carries the current consolidated filters plus the custom date
 // range: { search, method, statusCode, stream, customStartDate, customEndDate }.
@@ -279,6 +374,65 @@ export function auditLogWithLiveEntries(payload, currentEntries, filters) {
   if (prepend.length === 0) return next;
 
   next.entries = [...prepend, ...entries].slice(0, next.limit || 25);
+  next.total = Number(next.total || 0) + prepend.length;
+  return next;
+}
+
+// auditGroupedLogWithLiveEntries is auditLogWithLiveEntries for grouped mode:
+// a still-pending live preview folds into its session's fetched head (keeping
+// the larger count) instead of duplicating the thread; previews without an
+// on-screen thread prepend as singleton heads.
+export function auditGroupedLogWithLiveEntries(payload, currentEntries, filters) {
+  const next =
+    payload && typeof payload === "object"
+      ? { ...payload }
+      : { entries: [], total: 0, limit: 25, offset: 0 };
+  const entries = Array.isArray(next.entries) ? next.entries : [];
+  next.entries = entries;
+  if (!auditLogAllowsLiveEntries(next, filters)) return next;
+
+  const liveEntries = (Array.isArray(currentEntries) ? currentEntries : []).filter(
+    (entry) => auditEntryLivePreviewPending(entry),
+  );
+  if (liveEntries.length === 0) return next;
+
+  const persistedKeys = new Set(
+    entries.flatMap((entry) => auditEntryIdentityKeys(entry)),
+  );
+  const headBySession = new Map();
+  entries.forEach((entry, index) => {
+    const sid = auditSessionId(entry);
+    if (sid && !headBySession.has(sid)) headBySession.set(sid, index);
+  });
+
+  const prepend = [];
+  let merged = entries;
+  liveEntries.forEach((entry) => {
+    const keys = auditEntryIdentityKeys(entry);
+    if (keys.length === 0) return;
+    // The persisted page already carries this request (as a head): keep it.
+    if (keys.some((key) => persistedKeys.has(key))) return;
+    const sid = auditSessionId(entry);
+    if (sid && headBySession.has(sid)) {
+      // Fold into the fetched thread: the pending preview is newer than the
+      // persisted head, so it becomes the head and keeps the thread's count.
+      const index = headBySession.get(sid);
+      if (merged === entries) merged = [...entries];
+      merged[index] = {
+        ...entry,
+        session_count: Math.max(
+          auditSessionCount(merged[index]),
+          auditSessionCount(entry),
+        ),
+      };
+      keys.forEach((key) => persistedKeys.add(key));
+      return;
+    }
+    keys.forEach((key) => persistedKeys.add(key));
+    prepend.push(entry);
+  });
+
+  next.entries = [...prepend, ...merged].slice(0, next.limit || 25);
   next.total = Number(next.total || 0) + prepend.length;
   return next;
 }

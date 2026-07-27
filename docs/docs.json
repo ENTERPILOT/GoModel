@@ -87,6 +87,7 @@
                         "icon": "sparkles",
                         "pages": [
                             "features/virtual-models",
+                            "features/session-keeping",
                             "features/user-path",
                             "features/passthrough-api",
                             "features/budgets",

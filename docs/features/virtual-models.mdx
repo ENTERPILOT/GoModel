@@ -72,6 +72,13 @@ Targets that the gateway cannot currently serve (unknown model, provider down)
 are skipped automatically, so a redirect keeps working as long as one target is
 available. A redirect with a single target behaves exactly like a plain alias.
 
+Requests belonging to one detected client session stick to the target that
+served the session first (**Session keeping**, on by default), so
+conversations keep their provider prompt cache warm across turns. Untick the
+editor's **Session keeping** checkbox (or set `session_affinity: false`) to
+restore stateless balancing — see
+[Session Keeping](/features/session-keeping).
+
 ```json
 {
   "model": "smart",
@@ -135,7 +142,9 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 ```
 
 Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
-`strategy` (`round_robin` or `cost`), `user_paths`, `description`, and `enabled`.
+`strategy` (`round_robin` or `cost`), `session_affinity` (default `true`; see
+[Session Keeping](/features/session-keeping)), `user_paths`, `description`, and
+`enabled`.
 Leave the targets empty to declare an access policy on the `source` selector. An
 invalid declaration (unknown strategy, missing or self-referential target, or a
 target `provider` that matches no configured provider — a typo) fails startup

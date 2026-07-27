@@ -38,6 +38,7 @@ type mongoLogRow struct {
 	Method            string    `bson:"method"`
 	Path              string    `bson:"path"`
 	UserPath          string    `bson:"user_path"`
+	SessionID         string    `bson:"session_id"`
 	Stream            bool      `bson:"stream"`
 	ErrorType         string    `bson:"error_type"`
 	Data              *LogData  `bson:"data"`
@@ -63,6 +64,7 @@ func (r mongoLogRow) toLogEntry() *LogEntry {
 		Method:            r.Method,
 		Path:              r.Path,
 		UserPath:          r.UserPath,
+		SessionID:         r.SessionID,
 		Stream:            r.Stream,
 		ErrorType:         r.ErrorType,
 		Data:              sanitizeLogData(r.Data),
@@ -112,84 +114,9 @@ func mongoUserPathMatchFilter(userPath string) bson.E {
 func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
-	matchFilters := bson.D{}
-
-	if tsFilter := mongoDateRangeFilter(params.QueryParams); tsFilter != nil {
-		matchFilters = append(matchFilters, bson.E{Key: "timestamp", Value: tsFilter})
-	}
-	if params.RequestedModel != "" {
-		matchFilters = append(matchFilters, bson.E{
-			Key: "$or",
-			Value: bson.A{
-				bson.D{{Key: "requested_model", Value: bson.D{
-					{Key: "$regex", Value: regexp.QuoteMeta(params.RequestedModel)},
-					{Key: "$options", Value: "i"},
-				}}},
-				bson.D{{Key: "model", Value: bson.D{
-					{Key: "$regex", Value: regexp.QuoteMeta(params.RequestedModel)},
-					{Key: "$options", Value: "i"},
-				}}},
-			},
-		})
-	}
-	if params.Provider != "" {
-		regex := bson.D{
-			{Key: "$regex", Value: regexp.QuoteMeta(params.Provider)},
-			{Key: "$options", Value: "i"},
-		}
-		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
-			bson.D{{Key: "provider", Value: regex}},
-			bson.D{{Key: "provider_name", Value: regex}},
-		}})
-	}
-	if params.Method != "" {
-		matchFilters = append(matchFilters, bson.E{Key: "method", Value: params.Method})
-	}
-	if params.Path != "" {
-		matchFilters = append(matchFilters, bson.E{
-			Key: "path",
-			Value: bson.D{
-				{Key: "$regex", Value: regexp.QuoteMeta(params.Path)},
-				{Key: "$options", Value: "i"},
-			},
-		})
-	}
-	if userPath, err := normalizeAuditUserPathFilter(params.UserPath); err != nil {
-		return nil, core.NewInvalidRequestError(err.Error(), err)
-	} else if userPath != "" {
-		matchFilters = append(matchFilters, mongoUserPathMatchFilter(userPath))
-	}
-	if params.ErrorType != "" {
-		matchFilters = append(matchFilters, bson.E{
-			Key: "error_type",
-			Value: bson.D{
-				{Key: "$regex", Value: regexp.QuoteMeta(params.ErrorType)},
-				{Key: "$options", Value: "i"},
-			},
-		})
-	}
-	if params.StatusCode != nil {
-		matchFilters = append(matchFilters, bson.E{Key: "status_code", Value: *params.StatusCode})
-	}
-	if params.Stream != nil {
-		matchFilters = append(matchFilters, bson.E{Key: "stream", Value: *params.Stream})
-	}
-	if params.Search != "" {
-		pattern := regexp.QuoteMeta(params.Search)
-		regex := bson.D{{Key: "$regex", Value: pattern}, {Key: "$options", Value: "i"}}
-		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
-			bson.D{{Key: "request_id", Value: regex}},
-			bson.D{{Key: "auth_key_id", Value: regex}},
-			bson.D{{Key: "requested_model", Value: regex}},
-			bson.D{{Key: "model", Value: regex}},
-			bson.D{{Key: "provider", Value: regex}},
-			bson.D{{Key: "provider_name", Value: regex}},
-			bson.D{{Key: "method", Value: regex}},
-			bson.D{{Key: "path", Value: regex}},
-			bson.D{{Key: "user_path", Value: regex}},
-			bson.D{{Key: "error_type", Value: regex}},
-			bson.D{{Key: "data.error_message", Value: regex}},
-		}})
+	matchFilters, err := mongoLogMatchFilters(params)
+	if err != nil {
+		return nil, err
 	}
 
 	pipeline := bson.A{}
@@ -250,6 +177,96 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 		Limit:   limit,
 		Offset:  offset,
 	}, nil
+}
+
+// mongoLogMatchFilters builds the $match document for a log query, shared by
+// the paginated list and the sessions aggregation.
+func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
+	matchFilters := bson.D{}
+
+	if tsFilter := mongoDateRangeFilter(params.QueryParams); tsFilter != nil {
+		matchFilters = append(matchFilters, bson.E{Key: "timestamp", Value: tsFilter})
+	}
+	if params.RequestedModel != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "$or",
+			Value: bson.A{
+				bson.D{{Key: "requested_model", Value: bson.D{
+					{Key: "$regex", Value: regexp.QuoteMeta(params.RequestedModel)},
+					{Key: "$options", Value: "i"},
+				}}},
+				bson.D{{Key: "model", Value: bson.D{
+					{Key: "$regex", Value: regexp.QuoteMeta(params.RequestedModel)},
+					{Key: "$options", Value: "i"},
+				}}},
+			},
+		})
+	}
+	if params.Provider != "" {
+		regex := bson.D{
+			{Key: "$regex", Value: regexp.QuoteMeta(params.Provider)},
+			{Key: "$options", Value: "i"},
+		}
+		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
+			bson.D{{Key: "provider", Value: regex}},
+			bson.D{{Key: "provider_name", Value: regex}},
+		}})
+	}
+	if params.Method != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "method", Value: params.Method})
+	}
+	if params.Path != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "path",
+			Value: bson.D{
+				{Key: "$regex", Value: regexp.QuoteMeta(params.Path)},
+				{Key: "$options", Value: "i"},
+			},
+		})
+	}
+	if userPath, err := normalizeAuditUserPathFilter(params.UserPath); err != nil {
+		return nil, core.NewInvalidRequestError(err.Error(), err)
+	} else if userPath != "" {
+		matchFilters = append(matchFilters, mongoUserPathMatchFilter(userPath))
+	}
+	if params.ErrorType != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "error_type",
+			Value: bson.D{
+				{Key: "$regex", Value: regexp.QuoteMeta(params.ErrorType)},
+				{Key: "$options", Value: "i"},
+			},
+		})
+	}
+	if params.SessionID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "session_id", Value: params.SessionID})
+	}
+	if params.StatusCode != nil {
+		matchFilters = append(matchFilters, bson.E{Key: "status_code", Value: *params.StatusCode})
+	}
+	if params.Stream != nil {
+		matchFilters = append(matchFilters, bson.E{Key: "stream", Value: *params.Stream})
+	}
+	if params.Search != "" {
+		pattern := regexp.QuoteMeta(params.Search)
+		regex := bson.D{{Key: "$regex", Value: pattern}, {Key: "$options", Value: "i"}}
+		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
+			bson.D{{Key: "request_id", Value: regex}},
+			bson.D{{Key: "auth_key_id", Value: regex}},
+			bson.D{{Key: "requested_model", Value: regex}},
+			bson.D{{Key: "model", Value: regex}},
+			bson.D{{Key: "provider", Value: regex}},
+			bson.D{{Key: "provider_name", Value: regex}},
+			bson.D{{Key: "method", Value: regex}},
+			bson.D{{Key: "path", Value: regex}},
+			bson.D{{Key: "user_path", Value: regex}},
+			bson.D{{Key: "session_id", Value: regex}},
+			bson.D{{Key: "error_type", Value: regex}},
+			bson.D{{Key: "data.error_message", Value: regex}},
+		}})
+	}
+
+	return matchFilters, nil
 }
 
 func firstNonEmpty(values ...string) string {

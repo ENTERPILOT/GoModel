@@ -12,7 +12,9 @@
   import { extractRequestPromptTextSegments } from "./conversation-helpers.js";
   import { auditPanes } from "./audit-logic.js";
 
-  let { entry } = $props();
+  // `thread` is set on session-thread head rows (grouped mode): the summary
+  // then renders the expander + count badge. { count, expanded, ontoggle }.
+  let { entry, thread = null } = $props();
 
   const expanded = $derived(auditList.isAuditEntryExpanded(entry));
   const panes = $derived(
@@ -42,7 +44,7 @@
 </script>
 
 <details class="audit-entry" ontoggle={onToggle}>
-  <AuditEntrySummary {entry} />
+  <AuditEntrySummary {entry} {thread} />
   {#if expanded}
     <div class="audit-entry-details">
       {#if workflowChart}

@@ -22,6 +22,7 @@
 
 import { untrack } from "svelte";
 import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
+import { readStored } from "$lib/utils/storage.js";
 import { auth } from "$lib/stores/auth.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
@@ -41,6 +42,15 @@ class LiveLogsStore {
   auditMethod = $state("");
   auditStatusCode = $state("");
   auditStream = $state("");
+
+  // Session grouping view preference (default ON) and the lazily-fetched
+  // per-thread children lists ({ [session_id]: {loading, entries, total} }).
+  // Both live here so the live merge engine can fold displaced heads into a
+  // thread's children.
+  auditGroupSessions = $state(
+    readStored("gomodel_audit_group_sessions", "true") !== "false",
+  );
+  auditThreadChildren = $state({});
   usageLogSearch = $state("");
   usageFilterModel = $state("");
   usageFilterProvider = $state("");

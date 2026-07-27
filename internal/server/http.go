@@ -28,6 +28,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
+	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -112,6 +113,7 @@ type Config struct {
 	ExtraRoutes                     []func(*echo.Echo)                     // Optional: extension route registration callbacks invoked after core routes
 	ExtraAuthSkipPaths              []string                               // Optional: extension paths appended to the auth skip list ("/*" suffix matches a prefix)
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
+	SessionDetector                 *session.Detector                      // Optional: client session identification for sticky routing and audit grouping
 }
 
 // ReadinessProbe verifies that a dependency the gateway owns is reachable.
@@ -322,6 +324,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// entries can record the labels)
 	if cfg != nil && cfg.Tagging != nil {
 		e.Use(TaggingCapture(cfg.Tagging))
+	}
+
+	// Session identification runs after snapshot capture (it reads the captured
+	// headers and body) and before audit logging so entries carry the session id
+	// from creation.
+	if cfg != nil && cfg.SessionDetector != nil {
+		e.Use(SessionCapture(cfg.SessionDetector))
 	}
 
 	if cfg != nil && len(cfg.PassthroughSemanticEnrichers) > 0 {

@@ -19,6 +19,11 @@ type VirtualModelConfig struct {
 	// (default) or "cost". Ignored for single-target aliases and access policies.
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
 
+	// SessionAffinity keeps requests of one detected client session on the
+	// target that served it before, while that target stays available. Defaults
+	// to true when omitted; set false to restore stateless balancing.
+	SessionAffinity *bool `yaml:"session_affinity,omitempty" json:"session_affinity,omitempty"`
+
 	// Target is shorthand for a single-target alias, e.g. "openai/gpt-4o". Use
 	// Targets instead to load balance across several models.
 	Target string `yaml:"target,omitempty" json:"target,omitempty"`

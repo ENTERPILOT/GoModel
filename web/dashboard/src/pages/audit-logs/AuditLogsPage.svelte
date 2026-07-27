@@ -13,6 +13,7 @@
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import AuditFilters from "./AuditFilters.svelte";
   import AuditEntryRow from "./AuditEntryRow.svelte";
+  import AuditThreadGroup from "./AuditThreadGroup.svelte";
   import ConversationDrawer from "./ConversationDrawer.svelte";
   import { auditList } from "./auditList.svelte.js";
   import { liveLogs } from "./liveLogs.svelte.js";
@@ -104,7 +105,8 @@
         Showing {auditList.auditLog.offset + 1}-{Math.min(
           auditList.auditLog.offset + auditList.auditLog.limit,
           auditList.auditLog.total,
-        )} of {auditList.auditLog.total} logs
+        )} of {auditList.auditLog.total}
+        {auditList.auditGroupSessions ? "sessions" : "logs"}
       </p>
     {/if}
 
@@ -115,7 +117,11 @@
     {:else if auditList.auditLog.entries.length > 0}
       <div class="audit-log-list">
         {#each auditList.auditLog.entries as entry (entry.id)}
-          <AuditEntryRow {entry} />
+          {#if auditList.auditGroupSessions}
+            <AuditThreadGroup {entry} />
+          {:else}
+            <AuditEntryRow {entry} />
+          {/if}
         {/each}
       </div>
     {/if}

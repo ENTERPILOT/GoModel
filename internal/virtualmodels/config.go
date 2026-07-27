@@ -26,13 +26,14 @@ func configModel(entry config.VirtualModelConfig) VirtualModel {
 		enabled = *entry.Enabled
 	}
 	return VirtualModel{
-		Source:      entry.Source,
-		Strategy:    entry.Strategy,
-		Targets:     configTargets(entry),
-		UserPaths:   entry.UserPaths,
-		Description: entry.Description,
-		Enabled:     enabled,
-		Managed:     true,
+		Source:          entry.Source,
+		Strategy:        entry.Strategy,
+		SessionAffinity: entry.SessionAffinity,
+		Targets:         configTargets(entry),
+		UserPaths:       entry.UserPaths,
+		Description:     entry.Description,
+		Enabled:         enabled,
+		Managed:         true,
 	}
 }
 

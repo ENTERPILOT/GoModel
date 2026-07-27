@@ -36,6 +36,7 @@ type Config struct {
 	Workflows  WorkflowsConfig  `yaml:"workflows"`
 	Resilience ResilienceConfig `yaml:"resilience"`
 	Tagging    TaggingConfig    `yaml:"tagging"`
+	Session    SessionConfig    `yaml:"session"`
 	MCP        MCPConfig        `yaml:"mcp"`
 
 	// VirtualModels declares redirects, load balancers, and access policies as
@@ -149,6 +150,11 @@ func buildDefaultConfig() *Config {
 			LiveLogsHeartbeatSeconds: 15,
 		},
 		Guardrails: GuardrailsConfig{},
+		Session: SessionConfig{
+			Enabled:      true,
+			AutoDetect:   true,
+			BuiltinRules: true,
+		},
 		MCP: MCPConfig{
 			Enabled: true,
 		},
@@ -193,6 +199,12 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := normalizeTaggingConfig(&cfg.Tagging); err != nil {
+		return nil, err
+	}
+	if err := applySessionEnv(cfg); err != nil {
+		return nil, err
+	}
+	if err := normalizeSessionConfig(&cfg.Session); err != nil {
 		return nil, err
 	}
 	if err := applyMCPEnv(cfg); err != nil {

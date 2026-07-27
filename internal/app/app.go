@@ -40,6 +40,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
@@ -543,6 +544,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		UserPathHeader:                  appCfg.Server.UserPathHeader,
 		SwaggerEnabled:                  swaggerEnabled,
 		Tagging:                         taggingResult.Service,
+		SessionDetector:                 session.NewDetectorFromConfig(appCfg.Session),
 		MCPEnabled:                      appCfg.MCP.Enabled,
 	}
 	if mcpResult != nil {

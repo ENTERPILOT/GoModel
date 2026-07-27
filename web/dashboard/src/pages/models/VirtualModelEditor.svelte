@@ -120,6 +120,16 @@
             <option value="cost">Lowest cost (cheapest target per request)</option>
           </select>
         </div>
+        <div class="form-field">
+          <label class="vm-session-affinity-checkbox">
+            <input
+              type="checkbox"
+              bind:checked={vm.vmForm.session_affinity}
+              disabled={vm.vmFormManaged}
+            />
+            <span>Session keeping (route a detected client session to the target that served it)</span>
+          </label>
+        </div>
       {/if}
 
       <div class="form-field">
@@ -222,3 +232,20 @@
     </form>
   </div>
 </Modal>
+
+<style>
+  .vm-session-affinity-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .vm-session-affinity-checkbox input {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+</style>

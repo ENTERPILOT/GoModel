@@ -38,10 +38,11 @@ const defaultAuditLogLimit = 25
 // @Param        method       query     string  false  "Filter by HTTP method"
 // @Param        path         query     string  false  "Filter by request path"
 // @Param        user_path    query     string  false  "Filter by tracked user path subtree"
+// @Param        session_id   query     string  false  "Filter by exact session id"
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
 // @Param        stream       query     bool    false  "Filter by stream mode (true/false)"
-// @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/error_type/error_message"
+// @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message"
 // @Param        limit        query     int     false  "Page size (default 25, max 100)"
 // @Param        offset       query     int     false  "Offset for pagination"
 // @Success      200  {object}  auditLogListResponse
@@ -52,66 +53,9 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
 	// always get a 400 for malformed inputs, regardless of whether audit
 	// logging is configured.
-	dateRange, err := parseDateRangeParams(c)
+	params, err := parseAuditLogQueryParams(c)
 	if err != nil {
 		return handleError(c, err)
-	}
-	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	requestedModel := c.QueryParam("requested_model")
-	if requestedModel == "" {
-		requestedModel = c.QueryParam("model")
-	}
-
-	params := auditlog.LogQueryParams{
-		QueryParams: auditlog.QueryParams{
-			StartDate: dateRange.StartDate,
-			EndDate:   dateRange.EndDate,
-		},
-		RequestedModel: requestedModel,
-		Provider:       c.QueryParam("provider"),
-		Method:         strings.ToUpper(c.QueryParam("method")),
-		Path:           c.QueryParam("path"),
-		UserPath:       userPath,
-		ErrorType:      c.QueryParam("error_type"),
-		Search:         c.QueryParam("search"),
-	}
-
-	if sc := c.QueryParam("status_code"); sc != "" {
-		parsed, err := strconv.Atoi(sc)
-		if err != nil {
-			return handleError(c, core.NewInvalidRequestError("invalid status_code, expected integer", nil))
-		}
-		params.StatusCode = &parsed
-	}
-
-	if stream := c.QueryParam("stream"); stream != "" {
-		parsed, err := strconv.ParseBool(stream)
-		if err != nil {
-			return handleError(c, core.NewInvalidRequestError("invalid stream value, expected true or false", nil))
-		}
-		params.Stream = &parsed
-	}
-
-	if l := c.QueryParam("limit"); l != "" {
-		parsed, err := strconv.Atoi(l)
-		if err != nil || parsed <= 0 {
-			return handleError(c, core.NewInvalidRequestError("invalid limit, expected positive integer", nil))
-		}
-		if parsed > maxAuditLogLimit {
-			return handleError(c, core.NewInvalidRequestError("invalid limit parameter: limit must be between 1 and 100", nil))
-		}
-		params.Limit = parsed
-	}
-	if o := c.QueryParam("offset"); o != "" {
-		parsed, err := strconv.Atoi(o)
-		if err != nil || parsed < 0 {
-			return handleError(c, core.NewInvalidRequestError("invalid offset, expected non-negative integer", nil))
-		}
-		params.Offset = parsed
 	}
 
 	if h.auditReader == nil {
@@ -143,6 +87,159 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	response, err := h.auditLogResponse(c.Request().Context(), result)
 	if err != nil {
 		return handleError(c, err)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+// parseAuditLogQueryParams parses and validates the shared audit log filter,
+// search, and pagination query parameters.
+func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) {
+	var params auditlog.LogQueryParams
+
+	dateRange, err := parseDateRangeParams(c)
+	if err != nil {
+		return params, err
+	}
+	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
+	if err != nil {
+		return params, err
+	}
+
+	requestedModel := c.QueryParam("requested_model")
+	if requestedModel == "" {
+		requestedModel = c.QueryParam("model")
+	}
+
+	params = auditlog.LogQueryParams{
+		QueryParams: auditlog.QueryParams{
+			StartDate: dateRange.StartDate,
+			EndDate:   dateRange.EndDate,
+		},
+		RequestedModel: requestedModel,
+		Provider:       c.QueryParam("provider"),
+		Method:         strings.ToUpper(c.QueryParam("method")),
+		Path:           c.QueryParam("path"),
+		UserPath:       userPath,
+		SessionID:      strings.TrimSpace(c.QueryParam("session_id")),
+		ErrorType:      c.QueryParam("error_type"),
+		Search:         c.QueryParam("search"),
+	}
+
+	if sc := c.QueryParam("status_code"); sc != "" {
+		parsed, err := strconv.Atoi(sc)
+		if err != nil {
+			return params, core.NewInvalidRequestError("invalid status_code, expected integer", nil)
+		}
+		params.StatusCode = &parsed
+	}
+
+	if stream := c.QueryParam("stream"); stream != "" {
+		parsed, err := strconv.ParseBool(stream)
+		if err != nil {
+			return params, core.NewInvalidRequestError("invalid stream value, expected true or false", nil)
+		}
+		params.Stream = &parsed
+	}
+
+	if l := c.QueryParam("limit"); l != "" {
+		parsed, err := strconv.Atoi(l)
+		if err != nil || parsed <= 0 {
+			return params, core.NewInvalidRequestError("invalid limit, expected positive integer", nil)
+		}
+		if parsed > maxAuditLogLimit {
+			return params, core.NewInvalidRequestError("invalid limit parameter: limit must be between 1 and 100", nil)
+		}
+		params.Limit = parsed
+	}
+	if o := c.QueryParam("offset"); o != "" {
+		parsed, err := strconv.Atoi(o)
+		if err != nil || parsed < 0 {
+			return params, core.NewInvalidRequestError("invalid offset, expected non-negative integer", nil)
+		}
+		params.Offset = parsed
+	}
+	return params, nil
+}
+
+// AuditSessions handles GET /admin/audit/sessions
+//
+// @Summary      Get paginated audit sessions (threads)
+// @Description  Groups audit log entries by session id into threads and returns
+// @Description  one summary per thread — its latest entry, entry count, and time
+// @Description  span — ordered by latest activity. Entries without a session id
+// @Description  appear as single-entry threads. Filters apply to entries before
+// @Description  grouping.
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Param        days         query     int     false  "Number of days (default 30)"
+// @Param        start_date   query     string  false  "Start date (YYYY-MM-DD)"
+// @Param        end_date     query     string  false  "End date (YYYY-MM-DD)"
+// @Param        requested_model  query     string  false  "Filter by requested model selector"
+// @Param        provider     query     string  false  "Filter by provider name or provider type"
+// @Param        method       query     string  false  "Filter by HTTP method"
+// @Param        path         query     string  false  "Filter by request path"
+// @Param        user_path    query     string  false  "Filter by tracked user path subtree"
+// @Param        error_type   query     string  false  "Filter by error type"
+// @Param        status_code  query     int     false  "Filter by status code"
+// @Param        stream       query     bool    false  "Filter by stream mode (true/false)"
+// @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message"
+// @Param        limit        query     int     false  "Page size in threads (default 25, max 100)"
+// @Param        offset       query     int     false  "Offset for pagination"
+// @Success      200  {object}  auditSessionsListResponse
+// @Failure      400  {object}  core.GatewayError
+// @Failure      401  {object}  core.GatewayError
+// @Router       /admin/audit/sessions [get]
+func (h *Handler) AuditSessions(c *echo.Context) error {
+	params, err := parseAuditLogQueryParams(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	if h.auditReader == nil {
+		limit := params.Limit
+		if limit <= 0 {
+			limit = defaultAuditLogLimit
+		}
+		return c.JSON(http.StatusOK, auditSessionsListResponse{
+			Sessions: []auditSessionResponse{},
+			Limit:    limit,
+			Offset:   params.Offset,
+		})
+	}
+
+	result, err := h.auditReader.GetSessions(c.Request().Context(), params)
+	if err != nil {
+		return handleError(c, err)
+	}
+	if result == nil {
+		result = &auditlog.SessionListResult{}
+	}
+
+	// Reuse the entry response builder for usage enrichment of the latest entries.
+	latest := make([]auditlog.LogEntry, len(result.Sessions))
+	for i := range result.Sessions {
+		latest[i] = result.Sessions[i].Latest
+	}
+	enriched, err := h.auditLogResponse(c.Request().Context(), &auditlog.LogListResult{Entries: latest})
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	response := auditSessionsListResponse{
+		Sessions: make([]auditSessionResponse, len(result.Sessions)),
+		Total:    result.Total,
+		Limit:    result.Limit,
+		Offset:   result.Offset,
+	}
+	for i, session := range result.Sessions {
+		response.Sessions[i] = auditSessionResponse{
+			SessionID:      session.SessionID,
+			Count:          session.Count,
+			FirstTimestamp: session.FirstTimestamp,
+			LastTimestamp:  session.LastTimestamp,
+			Latest:         enriched.Entries[i],
+		}
 	}
 	return c.JSON(http.StatusOK, response)
 }

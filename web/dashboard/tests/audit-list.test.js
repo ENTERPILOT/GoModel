@@ -26,8 +26,17 @@ import {
   auditRetentionPrefix,
   auditRetentionText,
   auditRevisionPercentLabel,
+  auditGroupedLogWithLiveEntries,
+  auditIsThreadHead,
+  auditLogFromSessions,
+  auditSessionCount,
+  auditSessionId,
   auditTabKeydownTarget,
+  auditThreadChildEntries,
   buildAuditLogQuery,
+  buildAuditSessionQuery,
+  pruneThreadMap,
+  toggleExpandedThread,
   formatDurationNs,
   formatJSON,
   markExpandedEntry,
@@ -688,4 +697,139 @@ test("formatJSON pretty-prints JSON strings and objects, passing other text thro
   assert.equal(formatJSON('{"a":1}'), '{\n  "a": 1\n}');
   assert.equal(formatJSON("plain text"), "plain text");
   assert.equal(formatJSON({ a: 1 }), '{\n  "a": 1\n}');
+});
+
+// --- Session grouping helpers ------------------------------------------------
+
+test("buildAuditSessionQuery encodes the session id and omits the date window", () => {
+  const qs = buildAuditSessionQuery({ sessionId: "team/app|s 1", limit: 100 });
+  assert.equal(qs, "session_id=team%2Fapp%7Cs%201&limit=100&offset=0");
+});
+
+test("session head helpers handle missing ids and counts", () => {
+  assert.equal(auditSessionId({ session_id: " s-1 " }), "s-1");
+  assert.equal(auditSessionId({}), "");
+  assert.equal(auditSessionCount({ session_count: 5 }), 5);
+  assert.equal(auditSessionCount({ session_count: 0 }), 1);
+  assert.equal(auditSessionCount({}), 1);
+  assert.equal(auditIsThreadHead({ session_id: "s-1", session_count: 2 }), true);
+  assert.equal(auditIsThreadHead({ session_id: "s-1", session_count: 1 }), false);
+  assert.equal(auditIsThreadHead({ session_count: 3 }), false);
+});
+
+test("auditLogFromSessions maps thread summaries into head entries", () => {
+  const payload = {
+    sessions: [
+      {
+        session_id: "s-1",
+        count: 3,
+        latest: { id: "log-3", session_id: "s-1", status_code: 200 },
+      },
+      { count: 1, latest: { id: "solo", status_code: 200 } },
+      { count: 2 }, // no latest: dropped
+    ],
+    total: 12,
+    limit: 25,
+    offset: 25,
+  };
+  const mapped = auditLogFromSessions(payload);
+  assert.equal(mapped.entries.length, 2);
+  assert.equal(mapped.entries[0].id, "log-3");
+  assert.equal(mapped.entries[0].session_count, 3);
+  assert.equal(mapped.entries[1].id, "solo");
+  assert.equal(mapped.entries[1].session_count, 1);
+  assert.equal(mapped.total, 12);
+  assert.equal(mapped.offset, 25);
+});
+
+test("auditThreadChildEntries drops the head by id and request_id", () => {
+  const head = { id: "log-3", request_id: "req-3" };
+  const children = auditThreadChildEntries(
+    [
+      { id: "log-3", request_id: "req-3" },
+      { id: "log-2", request_id: "req-2" },
+      { id: "other", request_id: "req-3" },
+      { id: "log-1" },
+    ],
+    head,
+  );
+  assert.deepEqual(
+    children.map((entry) => entry.id),
+    ["log-2", "log-1"],
+  );
+});
+
+test("toggleExpandedThread flips per-session and pruneThreadMap drops off-page threads", () => {
+  let map = toggleExpandedThread({}, "s-1");
+  assert.deepEqual(map, { "s-1": true });
+  map = toggleExpandedThread(map, "s-2");
+  map = toggleExpandedThread(map, "s-1");
+  assert.deepEqual(map, { "s-2": true });
+  assert.equal(toggleExpandedThread(map, ""), map);
+
+  const pruned = pruneThreadMap(
+    { "s-2": true, gone: true },
+    [{ session_id: "s-2" }, { id: "solo" }],
+  );
+  assert.deepEqual(pruned, { "s-2": true });
+  // No change returns the same instance (reactivity-friendly).
+  const same = { "s-2": true };
+  assert.equal(pruneThreadMap(same, [{ session_id: "s-2" }]), same);
+});
+
+test("auditGroupedLogWithLiveEntries folds pending previews into fetched heads", () => {
+  const payload = {
+    entries: [
+      { id: "head-a", session_id: "s-a", session_count: 3 },
+      { id: "solo", session_id: "" },
+    ],
+    total: 2,
+    limit: 25,
+    offset: 0,
+  };
+  const pendingSameSession = {
+    id: "live-1",
+    session_id: "s-a",
+    session_count: 4,
+    _live: true,
+    _live_pending: true,
+  };
+  const pendingNewSession = {
+    id: "live-2",
+    session_id: "s-b",
+    _live: true,
+    _live_pending: true,
+  };
+  const next = auditGroupedLogWithLiveEntries(
+    payload,
+    [pendingSameSession, pendingNewSession],
+    {},
+  );
+  // s-b preview prepends as a new singleton thread; s-a preview replaces its head.
+  assert.deepEqual(
+    next.entries.map((entry) => entry.id),
+    ["live-2", "live-1", "solo"],
+  );
+  assert.equal(next.entries[1].session_count, 4);
+  assert.equal(next.total, 3);
+});
+
+test("auditGroupedLogWithLiveEntries keeps persisted rows over matching previews", () => {
+  const payload = {
+    entries: [{ id: "head-a", request_id: "req-1", session_id: "s-a", session_count: 2 }],
+    total: 1,
+    limit: 25,
+    offset: 0,
+  };
+  const pending = {
+    id: "head-a",
+    request_id: "req-1",
+    session_id: "s-a",
+    _live: true,
+    _live_pending: true,
+  };
+  const next = auditGroupedLogWithLiveEntries(payload, [pending], {});
+  assert.deepEqual(next.entries.map((entry) => entry.id), ["head-a"]);
+  assert.equal(next.entries[0].session_count, 2);
+  assert.equal(next.total, 1);
 });

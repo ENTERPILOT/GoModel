@@ -232,6 +232,7 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 		Method:     baseEntry.Method,
 		Path:       baseEntry.Path,
 		UserPath:   baseEntry.UserPath,
+		SessionID:  baseEntry.SessionID,
 		Stream:     true, // Mark as streaming
 	}
 

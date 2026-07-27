@@ -587,6 +587,7 @@ class VirtualModelsStore {
       target_weight: primaryWeight,
       targets: extraTargets,
       strategy: alias.strategy || "round_robin",
+      session_affinity: alias.session_affinity !== false,
       user_paths: (Array.isArray(alias.user_paths) ? alias.user_paths : []).join("\n"),
       description: alias.description || "",
       enabled: alias.enabled !== false,

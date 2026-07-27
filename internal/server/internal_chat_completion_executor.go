@@ -212,6 +212,7 @@ func (e *InternalChatCompletionExecutor) newAuditEntry(
 		Method:    http.MethodPost,
 		Path:      "/v1/chat/completions",
 		UserPath:  userPath,
+		SessionID: core.SessionIDFromContext(ctx),
 		Data:      &auditlog.LogData{Labels: core.RequestLabelsFromContext(ctx)},
 	}
 	if requestedModel := requested.RequestedQualifiedModel(); requestedModel != "" {

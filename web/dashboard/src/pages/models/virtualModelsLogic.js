@@ -184,6 +184,8 @@ export function mapRedirectView(view) {
     target_model: target.model || "",
     targets,
     strategy: view.strategy || "",
+    // Tri-state on the wire; only explicit false disables session affinity.
+    session_affinity: view.session_affinity !== false,
     description: view.description || "",
     enabled: view.enabled !== false,
     managed: Boolean(view.managed),
@@ -698,6 +700,7 @@ export function defaultVirtualModelForm() {
     target_weight: 1,
     targets: [],
     strategy: "round_robin",
+    session_affinity: true,
     user_paths: "",
     description: "",
     enabled: true,
@@ -811,6 +814,10 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       payload.targets =
         strategy === "cost" ? targets.map((target) => ({ model: target.model })) : targets;
       payload.strategy = strategy;
+      // Affinity defaults to on server-side; only an explicit opt-out is sent.
+      if (form && form.session_affinity === false) {
+        payload.session_affinity = false;
+      }
     } else {
       // A single target stays a plain alias on the back-compat field.
       payload.target_model = targets[0].model;
@@ -832,6 +839,9 @@ export function buildAliasTogglePayload(alias) {
   const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
   if (lbTargets.length > 1) {
     payload.strategy = alias.strategy || "round_robin";
+    if (alias.session_affinity === false) {
+      payload.session_affinity = false;
+    }
     // Weight only biases round-robin, so cost balancers persist weight-less
     // targets — same contract as the editor save path.
     payload.targets =

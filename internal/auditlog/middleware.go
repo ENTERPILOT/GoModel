@@ -72,6 +72,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				Method:    req.Method,
 				Path:      req.URL.Path,
 				UserPath:  userPath,
+				SessionID: core.SessionIDFromContext(req.Context()),
 				Data: &LogData{
 					UserAgent: req.UserAgent(),
 					Labels:    core.RequestLabelsFromContext(req.Context()),
@@ -209,6 +210,11 @@ func applyAuthentication(entry *LogEntry, ctx context.Context) {
 	}
 	if userPath := strings.TrimSpace(core.UserPathFromContext(ctx)); userPath != "" {
 		entry.UserPath = userPath
+	}
+	// Session detection runs before this middleware, but re-read defensively in
+	// case a later stage attached or refined the session id.
+	if sessionID := core.SessionIDFromContext(ctx); sessionID != "" {
+		entry.SessionID = sessionID
 	}
 	// The entry snapshots labels before authentication runs, so auth-key
 	// labels merged into the context during auth are re-read here.
