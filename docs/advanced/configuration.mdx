@@ -137,6 +137,7 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | --------------------------------- | ------------------------------------------ | ------- |
 | `LOGGING_ENABLED`                 | Enable audit logging                       | `true`  |
 | `LOGGING_LOG_BODIES`              | Log request/response bodies                | `true`  |
+| `LOGGING_LOG_REVISION_BODIES`     | Log rewritten bodies from request rewriters | `true`  |
 | `LOGGING_LOG_AUDIO_BODIES`        | Log audio endpoint inputs/outputs          | `false` |
 | `LOGGING_LOG_HEADERS`             | Log headers (sensitive ones auto-redacted) | `true`  |
 | `LOGGING_ONLY_MODEL_INTERACTIONS` | Only log AI model endpoints                | `true`  |
@@ -155,6 +156,16 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   in full. These may contain sensitive data such as PII or API keys embedded in
   prompts.
 </Warning>
+
+<Note>
+  `LOGGING_LOG_REVISION_BODIES` refines `LOGGING_LOG_BODIES` for the ingress
+  request-rewrite chain — it has no effect unless body logging is enabled. With
+  both on, every rewriter that changed a request (for example GoModel Pro token
+  compression) stores the full rewritten body alongside the original client
+  body in the audit entry. Disabling it keeps the revision metadata (rewriter
+  name, byte sizes, tokens saved, change detail) but drops the extra body copy,
+  roughly halving audit storage per rewritten request.
+</Note>
 
 <Note>
   `LOGGING_LOG_AUDIO_BODIES` refines `LOGGING_LOG_BODIES` for audio endpoints —

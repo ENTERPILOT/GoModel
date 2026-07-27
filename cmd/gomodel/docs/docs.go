@@ -18,6 +18,7 @@ const docTemplate = `{
     "paths": {
         "/admin/audit/conversation": {
             "get": {
+                "description": "Thread entries carry the request/response bodies the\ntranscript is built from; attempts, request revisions, and\nheader maps are omitted.",
                 "produces": [
                     "application/json"
                 ],
@@ -127,6 +128,7 @@ const docTemplate = `{
         },
         "/admin/audit/log": {
             "get": {
+                "description": "Entries are slimmed for the wire: request/response bodies,\nper-attempt error bodies, and rewritten revision bodies are\nomitted (bodies_omitted=true). Fetch /admin/audit/detail for\nthe full payload of one entry.",
                 "produces": [
                     "application/json"
                 ],
@@ -6783,11 +6785,19 @@ const docTemplate = `{
                 "auth_method": {
                     "type": "string"
                 },
+                "bodies_omitted": {
+                    "description": "BodiesOmitted marks a list entry whose request/response bodies (and\nother heavy payloads) were stripped server-side; the full entry is\navailable from GET /admin/audit/detail. It also tells the dashboard\nthe entry is persisted — a slim entry is never an in-flight request.",
+                    "type": "boolean"
+                },
                 "cache_type": {
                     "type": "string"
                 },
                 "client_ip": {
                     "type": "string"
+                },
+                "conversation_payload": {
+                    "description": "ConversationPayload reports that the entry's (stripped) bodies were\nshaped like a conversation, preserving the Interactions-drawer\neligibility signal the dashboard otherwise sniffs from the bodies.",
+                    "type": "boolean"
                 },
                 "data": {
                     "description": "Data contains flexible request/response information as JSON",
@@ -8173,6 +8183,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/auditlog.LogEntry"
                     }
+                },
+                "truncated": {
+                    "description": "Truncated reports that the thread walk stopped early because the\ncaller's deadline expired; the entries collected up to that point are\nreturned rather than failing the whole request.",
+                    "type": "boolean"
                 }
             }
         },

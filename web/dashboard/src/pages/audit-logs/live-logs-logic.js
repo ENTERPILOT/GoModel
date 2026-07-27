@@ -133,7 +133,9 @@ export function liveLogsMethods() {
             const index = currentEntries.findIndex((entry) => matchesLiveAuditKey(entry, key, requestID));
             const previous = index >= 0 ? currentEntries[index] || {} : {};
             if (eventType === 'audit.detail') {
-                const patch = { ...incoming, _detail_loaded: true, _response_partial: false };
+                // The detail entry carries the full payload, so the slim-list
+                // marker must not survive the merge from the previous row.
+                const patch = { ...incoming, _detail_loaded: true, _response_partial: false, bodies_omitted: false };
                 if (index >= 0) {
                     const merged = this.mergeLiveAuditPatch(previous, patch);
                     currentEntries.splice(index, 1, merged);
@@ -643,6 +645,10 @@ export function liveLogsMethods() {
             if (!entry || entry._detail_loading || entry._detail_loaded) return false;
             if (this.auditEntryLiveDetailPending(entry)) return false;
             if (this.auditEntryNeedsPersistedLiveDetail(entry)) return true;
+            // The list endpoint ships slim entries (bodies stripped
+            // server-side); the flag is the explicit signal that the full
+            // payload lives behind the detail endpoint.
+            if (entry.bodies_omitted) return true;
             return !this.auditEntryHasDetailData(entry);
         },
 

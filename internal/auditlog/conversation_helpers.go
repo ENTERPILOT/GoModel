@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 
@@ -10,6 +11,16 @@ import (
 
 type entryLookup func(ctx context.Context, id string) (*LogEntry, error)
 
+// buildConversationThread walks the response-ID chain outward from the anchor
+// entry: backward via previous_response_id, then forward via the entries that
+// chain onto the anchor's response ID.
+//
+// The anchor lookup is load-bearing — without it there is no thread, so its
+// error (including a deadline) fails the build. Every later hop is an
+// extension: when the caller's deadline expires mid-walk, the thread built so
+// far is returned with Truncated set instead of an error. The drawer then
+// renders the turns nearest the anchor rather than nothing — before this,
+// one slow hop could hold the request open until a fronting proxy killed it.
 func buildConversationThread(ctx context.Context, logID string, limit int, getByID func(ctx context.Context, id string) (*LogEntry, error), findByResponseID, findByPreviousResponseID entryLookup) (*ConversationResult, error) {
 	limit = clampConversationLimit(limit)
 
@@ -26,6 +37,7 @@ func buildConversationThread(ctx context.Context, logID string, limit int, getBy
 
 	thread := []*LogEntry{anchor}
 	seen := map[string]struct{}{anchor.ID: {}}
+	truncated := false
 
 	current := anchor
 	for len(thread) < limit {
@@ -35,6 +47,10 @@ func buildConversationThread(ctx context.Context, logID string, limit int, getBy
 		}
 		parent, err := findByResponseID(ctx, prevID)
 		if err != nil {
+			if deadlineExpired(ctx, err) {
+				truncated = true
+				break
+			}
 			return nil, err
 		}
 		if parent == nil {
@@ -49,13 +65,17 @@ func buildConversationThread(ctx context.Context, logID string, limit int, getBy
 	}
 
 	current = anchor
-	for len(thread) < limit {
+	for !truncated && len(thread) < limit {
 		respID := extractResponseID(current)
 		if respID == "" {
 			break
 		}
 		child, err := findByPreviousResponseID(ctx, respID)
 		if err != nil {
+			if deadlineExpired(ctx, err) {
+				truncated = true
+				break
+			}
 			return nil, err
 		}
 		if child == nil {
@@ -81,9 +101,21 @@ func buildConversationThread(ctx context.Context, logID string, limit int, getBy
 	}
 
 	return &ConversationResult{
-		AnchorID: anchor.ID,
-		Entries:  entries,
+		AnchorID:  anchor.ID,
+		Entries:   entries,
+		Truncated: truncated,
 	}, nil
+}
+
+// deadlineExpired reports whether a lookup failure is attributable to the
+// caller's context rather than the store: either the error itself is a
+// context error, or the context expired while the query ran (drivers commonly
+// wrap or replace the cancellation cause, so the context is checked too).
+func deadlineExpired(ctx context.Context, err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	return ctx.Err() != nil
 }
 
 func extractResponseID(entry *LogEntry) string {

@@ -141,7 +141,7 @@ func recordRequestRevision(c *echo.Context, auditLogger auditlog.LoggerInterface
 		TokensSaved: res.TokensSaved,
 		Detail:      res.Detail,
 	}
-	if cfg.LogBodies && int64(len(res.Body)) <= auditlog.MaxBodyCapture {
+	if cfg.LogBodies && cfg.LogRevisionBodies && int64(len(res.Body)) <= auditlog.MaxBodyCapture {
 		revision.Body = auditlog.CaptureLoggedBody(res.Body)
 	}
 	auditlog.EnrichEntryWithRequestRevision(c, revision)

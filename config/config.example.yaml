@@ -156,6 +156,7 @@ storage:
 logging:
   enabled: true
   log_bodies: true # WARNING: may contain sensitive data
+  log_revision_bodies: true # store rewritten bodies from request rewriters (needs log_bodies)
   log_headers: true
   buffer_size: 1000
   flush_interval: 5 # seconds

@@ -1018,8 +1018,12 @@ func TestAuditLog_Success(t *testing.T) {
 	if result.Entries[0].ID != "log-1" {
 		t.Errorf("expected entry id log-1, got %s", result.Entries[0].ID)
 	}
-	if result.Entries[0].Data == nil || result.Entries[0].Data.RequestBody == nil {
-		t.Errorf("expected request body data to be present")
+	// List entries are slim: bodies live behind /admin/audit/detail.
+	if result.Entries[0].Data == nil {
+		t.Fatal("expected entry data to be present")
+	}
+	if result.Entries[0].Data.RequestBody != nil || result.Entries[0].Data.ResponseBody != nil {
+		t.Errorf("expected list entry bodies to be stripped, got %+v", result.Entries[0].Data)
 	}
 }
 

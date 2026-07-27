@@ -131,6 +131,17 @@ type providerStatusResponse struct {
 type auditLogEntryResponse struct {
 	auditlog.LogEntry
 	Usage *usage.RequestUsageSummary `json:"usage,omitempty"`
+
+	// BodiesOmitted marks a list entry whose request/response bodies (and
+	// other heavy payloads) were stripped server-side; the full entry is
+	// available from GET /admin/audit/detail. It also tells the dashboard
+	// the entry is persisted — a slim entry is never an in-flight request.
+	BodiesOmitted bool `json:"bodies_omitted,omitempty"`
+
+	// ConversationPayload reports that the entry's (stripped) bodies were
+	// shaped like a conversation, preserving the Interactions-drawer
+	// eligibility signal the dashboard otherwise sniffs from the bodies.
+	ConversationPayload bool `json:"conversation_payload,omitempty"`
 }
 
 type auditLogListResponse struct {

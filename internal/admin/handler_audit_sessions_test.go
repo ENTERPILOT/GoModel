@@ -106,6 +106,51 @@ func TestAuditSessions_Success(t *testing.T) {
 	}
 }
 
+func TestAuditSessions_SlimsLatestEntries(t *testing.T) {
+	entry := fullAuditEntry("log-1")
+	entry.SessionID = "sess-a"
+	reader := &mockAuditReader{
+		sessionsResult: &auditlog.SessionListResult{
+			Sessions: []auditlog.SessionSummary{{
+				SessionID:      "sess-a",
+				Count:          2,
+				FirstTimestamp: entry.Timestamp.Add(-time.Minute),
+				LastTimestamp:  entry.Timestamp,
+				Latest:         entry,
+			}},
+			Total: 1,
+			Limit: 25,
+		},
+	}
+	h := NewHandler(nil, nil, WithAuditReader(reader))
+	c, rec := newHandlerContext("/admin/audit/sessions")
+
+	if err := h.AuditSessions(c); err != nil {
+		t.Fatalf("AuditSessions() error = %v", err)
+	}
+	var result struct {
+		Sessions []struct {
+			Latest struct {
+				auditlog.LogEntry
+				BodiesOmitted bool `json:"bodies_omitted"`
+			} `json:"latest"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	latest := result.Sessions[0].Latest
+	if latest.SessionID != "sess-a" {
+		t.Fatalf("session id = %q, want sess-a", latest.SessionID)
+	}
+	if latest.Data == nil || latest.Data.RequestBody != nil || latest.Data.ResponseBody != nil {
+		t.Fatal("session head must use the slim list payload")
+	}
+	if !latest.BodiesOmitted {
+		t.Fatal("session head with stripped bodies must set bodies_omitted")
+	}
+}
+
 func TestAuditLog_SessionIDFilterForwarded(t *testing.T) {
 	reader := &mockAuditReader{logResult: &auditlog.LogListResult{}}
 	h := NewHandler(nil, nil, WithAuditReader(reader))

@@ -373,9 +373,9 @@ func TestRequestRewriteMiddlewareRecordsRevisions(t *testing.T) {
 		},
 	}
 
-	run := func(t *testing.T, logBodies bool) *auditlog.LogEntry {
+	run := func(t *testing.T, logBodies, logRevisionBodies bool) *auditlog.LogEntry {
 		t.Helper()
-		auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: logBodies}}
+		auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: logBodies, LogRevisionBodies: logRevisionBodies}}
 		srv := New(newRewriteTestProvider(), &Config{
 			AuditLogger: auditLogger,
 			RequestRewriters: []ext.RequestRewriter{
@@ -395,7 +395,7 @@ func TestRequestRewriteMiddlewareRecordsRevisions(t *testing.T) {
 	}
 
 	t.Run("with body logging", func(t *testing.T) {
-		entry := run(t, true)
+		entry := run(t, true, true)
 		revisions := entry.Data.RequestRevisions
 		if len(revisions) != 2 {
 			t.Fatalf("expected 2 revisions, got %d", len(revisions))
@@ -421,7 +421,7 @@ func TestRequestRewriteMiddlewareRecordsRevisions(t *testing.T) {
 	})
 
 	t.Run("without body logging", func(t *testing.T) {
-		entry := run(t, false)
+		entry := run(t, false, true)
 		revisions := entry.Data.RequestRevisions
 		if len(revisions) != 2 {
 			t.Fatalf("expected 2 revisions, got %d", len(revisions))
@@ -432,6 +432,27 @@ func TestRequestRewriteMiddlewareRecordsRevisions(t *testing.T) {
 			}
 			if revision.BytesBefore == 0 || revision.BytesAfter == 0 {
 				t.Errorf("revision %d sizes missing", revision.Seq)
+			}
+		}
+	})
+
+	// LOGGING_LOG_REVISION_BODIES=false keeps the revision metadata but
+	// drops the rewritten body copy even though body logging is on.
+	t.Run("without revision body logging", func(t *testing.T) {
+		entry := run(t, true, false)
+		revisions := entry.Data.RequestRevisions
+		if len(revisions) != 2 {
+			t.Fatalf("expected 2 revisions, got %d", len(revisions))
+		}
+		for _, revision := range revisions {
+			if revision.Body != nil {
+				t.Errorf("revision %d must not capture the body when revision body logging is off", revision.Seq)
+			}
+			if revision.BytesBefore == 0 || revision.BytesAfter == 0 {
+				t.Errorf("revision %d sizes missing", revision.Seq)
+			}
+			if revision.Detail == nil && revision.Rewriter == "swap" {
+				t.Error("rewriter detail must survive without the body")
 			}
 		}
 	})

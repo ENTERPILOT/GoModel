@@ -21,6 +21,16 @@ type LogConfig struct {
 	// Default: false
 	LogAudioBodies bool `yaml:"log_audio_bodies" env:"LOGGING_LOG_AUDIO_BODIES"`
 
+	// LogRevisionBodies refines LogBodies for the request-revision chain:
+	// when both are enabled, every request rewriter that changed the body
+	// (for example GoModel Pro token compression) stores the full rewritten
+	// body alongside the original in the audit entry. Requires LogBodies.
+	// Disabling it keeps the revision metadata (rewriter name, sizes, tokens
+	// saved, change detail) but drops the rewritten body copy — roughly
+	// halving audit storage per compressed request.
+	// Default: true
+	LogRevisionBodies bool `yaml:"log_revision_bodies" env:"LOGGING_LOG_REVISION_BODIES"`
+
 	// LogHeaders enables logging of request/response headers
 	// Sensitive headers (Authorization, Cookie, etc.) are auto-redacted
 	// Default: true

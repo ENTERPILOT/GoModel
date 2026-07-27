@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -24,9 +25,19 @@ const maxAuditLogLimit = 100
 // reports the same limit an enabled reader would.
 const defaultAuditLogLimit = 25
 
+// conversationBuildTimeout bounds the response-chain walk behind
+// /admin/audit/conversation. Indexed lookups finish in milliseconds; the
+// deadline exists so a degraded store (mis-planned query, lock contention,
+// pool starvation) yields a partial thread instead of an endless request.
+const conversationBuildTimeout = 10 * time.Second
+
 // AuditLog handles GET /admin/audit/log
 //
 // @Summary      Get paginated audit log entries
+// @Description  Entries are slimmed for the wire: request/response bodies,
+// @Description  per-attempt error bodies, and rewritten revision bodies are
+// @Description  omitted (bodies_omitted=true). Fetch /admin/audit/detail for
+// @Description  the full payload of one entry.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -87,6 +98,11 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	response, err := h.auditLogResponse(c.Request().Context(), result)
 	if err != nil {
 		return handleError(c, err)
+	}
+	// The list ships scalar metadata only; full payloads stay behind
+	// /admin/audit/detail (see slimAuditListEntry).
+	for i := range response.Entries {
+		slimAuditListEntry(&response.Entries[i])
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -246,6 +262,9 @@ func (h *Handler) AuditSessions(c *echo.Context) error {
 		Offset:   result.Offset,
 	}
 	for i, session := range result.Sessions {
+		// Session heads are list rows too. Keep the default grouped view on the
+		// same slim payload contract as /admin/audit/log.
+		slimAuditListEntry(&enriched.Entries[i])
 		response.Sessions[i] = auditSessionResponse{
 			SessionID:      session.SessionID,
 			Count:          session.Count,
@@ -401,6 +420,9 @@ func (h *Handler) AuditLogDetail(c *echo.Context) error {
 // AuditConversation handles GET /admin/audit/conversation
 //
 // @Summary      Get conversation thread around an audit log entry
+// @Description  Thread entries carry the request/response bodies the
+// @Description  transcript is built from; attempts, request revisions, and
+// @Description  header maps are omitted.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -438,8 +460,19 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 		})
 	}
 
-	result, err := h.auditReader.GetConversation(c.Request().Context(), logID, limit)
+	// The chain walk runs up to ~2×limit sequential store lookups; without a
+	// deadline one slow lookup holds the request open until a fronting proxy
+	// kills it. Under the deadline the builder returns the partial thread it
+	// collected (Truncated=true); only a timeout before the anchor loads
+	// surfaces as an error.
+	ctx, cancel := context.WithTimeout(c.Request().Context(), conversationBuildTimeout)
+	defer cancel()
+	result, err := h.auditReader.GetConversation(ctx, logID, limit)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			return handleError(c, core.NewProviderError("", http.StatusGatewayTimeout,
+				"audit conversation lookup timed out", err))
+		}
 		return handleError(c, err)
 	}
 	if result == nil {
@@ -450,6 +483,9 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 	}
 	if result.Entries == nil {
 		result.Entries = []auditlog.LogEntry{}
+	}
+	for i := range result.Entries {
+		slimConversationEntry(&result.Entries[i])
 	}
 
 	return c.JSON(http.StatusOK, result)

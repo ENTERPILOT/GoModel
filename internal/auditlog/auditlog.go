@@ -380,6 +380,11 @@ type Config struct {
 	// this is off, audio responses are recorded as a lightweight placeholder.
 	LogAudioBodies bool
 
+	// LogRevisionBodies refines LogBodies for the request-revision chain:
+	// rewriters that changed the body store the full rewritten copy only when
+	// both are enabled. Revision metadata is always kept.
+	LogRevisionBodies bool
+
 	// LogHeaders enables logging of request/response headers
 	LogHeaders bool
 

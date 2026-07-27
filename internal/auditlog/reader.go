@@ -60,6 +60,11 @@ type SessionListResult struct {
 type ConversationResult struct {
 	AnchorID string     `json:"anchor_id"`
 	Entries  []LogEntry `json:"entries"`
+
+	// Truncated reports that the thread walk stopped early because the
+	// caller's deadline expired; the entries collected up to that point are
+	// returned rather than failing the whole request.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // Reader provides read access to audit log data for the admin API.
