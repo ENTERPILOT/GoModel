@@ -108,7 +108,7 @@ func scopeSessionID(id, userPath string) string {
 		return id
 	}
 	sum := sha256.Sum256([]byte(userPath + "\x00" + id))
-	return "scoped-" + hex.EncodeToString(sum[:8])
+	return "scoped-" + hex.EncodeToString(sum[:16])
 }
 
 // contentAnchor is the stable prefix of a conversation used to derive a
@@ -160,7 +160,7 @@ func contentSessionID(snapshot *core.RequestSnapshot, body []byte, userPath stri
 		return ""
 	}
 	sum := sha256.Sum256(payload)
-	return "auto-" + hex.EncodeToString(sum[:8])
+	return "auto-" + hex.EncodeToString(sum[:16])
 }
 
 // maxOpeningMessages bounds the anchor when a conversation opens with an

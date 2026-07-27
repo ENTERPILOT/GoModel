@@ -58,24 +58,6 @@ func TestMongoDBReader_GetSessions(t *testing.T) {
 			t.Fatalf("sessions[2] = %+v", result.Sessions[2])
 		}
 
-		status := 500
-		filtered, err := reader.GetSessions(ctx, LogQueryParams{StatusCode: &status, Limit: 10})
-		if err != nil {
-			t.Fatalf("GetSessions with filter failed: %v", err)
-		}
-		if filtered.Total != 1 || len(filtered.Sessions) != 1 || filtered.Sessions[0].SessionID != "sess-b" {
-			t.Fatalf("filtered result = %+v", filtered)
-		}
-
-		bySession, err := reader.GetSessions(ctx, LogQueryParams{SessionID: "sess-a", Limit: 10})
-		if err != nil {
-			t.Fatalf("GetSessions with session filter failed: %v", err)
-		}
-		if bySession.Total != 1 || len(bySession.Sessions) != 1 {
-			t.Fatalf("session-filtered result = %+v", bySession)
-		}
-		if got := bySession.Sessions[0]; got.SessionID != "sess-a" || got.Count != 2 || got.Latest.ID != "a-2" {
-			t.Fatalf("session-filtered thread = %+v", got)
-		}
+		assertGetSessionsFilters(t, reader)
 	})
 }

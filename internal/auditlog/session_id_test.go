@@ -117,28 +117,54 @@ func TestSQLReader_GetSessions(t *testing.T) {
 			t.Fatalf("sessions[2] = %+v", result.Sessions[2])
 		}
 
-		// Filters apply to entries before grouping: only sess-b has a 500.
-		status := 500
-		filtered, err := reader.GetSessions(ctx, LogQueryParams{StatusCode: &status, Limit: 10})
-		if err != nil {
-			t.Fatalf("GetSessions with filter failed: %v", err)
-		}
-		if filtered.Total != 1 || len(filtered.Sessions) != 1 || filtered.Sessions[0].SessionID != "sess-b" {
-			t.Fatalf("filtered result = %+v", filtered)
-		}
-
-		// The SessionID filter narrows the grouped view to one thread.
-		bySession, err := reader.GetSessions(ctx, LogQueryParams{SessionID: "sess-a", Limit: 10})
-		if err != nil {
-			t.Fatalf("GetSessions with session filter failed: %v", err)
-		}
-		if bySession.Total != 1 || len(bySession.Sessions) != 1 {
-			t.Fatalf("session-filtered result = %+v", bySession)
-		}
-		if got := bySession.Sessions[0]; got.SessionID != "sess-a" || got.Count != 2 || got.Latest.ID != "a-2" {
-			t.Fatalf("session-filtered thread = %+v", got)
-		}
+		// Filters apply to entries before grouping.
+		assertGetSessionsFilters(t, reader)
 	})
+}
+
+// assertGetSessionsFilters runs the shared filtered-grouping cases against a
+// reader, so both backends prove filters apply to entries before grouping.
+func assertGetSessionsFilters(t *testing.T, reader Reader) {
+	t.Helper()
+	status := 500
+	tests := []struct {
+		name          string
+		params        LogQueryParams
+		wantSessionID string
+		wantCount     int
+		wantLatestID  string
+	}{
+		{
+			name:          "status filter keeps only the thread with a 500",
+			params:        LogQueryParams{StatusCode: &status, Limit: 10},
+			wantSessionID: "sess-b",
+			wantCount:     1,
+			wantLatestID:  "b-1",
+		},
+		{
+			name:          "session filter narrows the grouped view to one thread",
+			params:        LogQueryParams{SessionID: "sess-a", Limit: 10},
+			wantSessionID: "sess-a",
+			wantCount:     2,
+			wantLatestID:  "a-2",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := reader.GetSessions(context.Background(), tt.params)
+			if err != nil {
+				t.Fatalf("GetSessions() error = %v", err)
+			}
+			if result.Total != 1 || len(result.Sessions) != 1 {
+				t.Fatalf("result = %+v, want exactly one thread", result)
+			}
+			got := result.Sessions[0]
+			if got.SessionID != tt.wantSessionID || got.Count != tt.wantCount || got.Latest.ID != tt.wantLatestID {
+				t.Fatalf("thread = %+v, want session %q count %d latest %q",
+					got, tt.wantSessionID, tt.wantCount, tt.wantLatestID)
+			}
+		})
+	}
 }
 
 func TestCreateStreamEntryPreservesSessionID(t *testing.T) {
