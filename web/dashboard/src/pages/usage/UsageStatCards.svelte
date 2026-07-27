@@ -7,10 +7,10 @@
   import { formatCost, formatNumber } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
   import {
-    rewriteCostSaved,
-    rewriteSavedTitle,
+    proSavedPercentText,
+    proSavedTitle,
+    proSavedValueText,
     rewriteSavingsVisible,
-    rewriteTokensSaved,
     usagePageCostTitle,
     usagePageRequestsTitle,
     usagePageTotalRequests,
@@ -18,6 +18,13 @@
   import CacheOverviewCards from "./CacheOverviewCards.svelte";
 
   const savingsVisible = $derived(rewriteSavingsVisible(usagePage.usageSummary));
+  // One savings number, in whatever unit the page's Tokens/Costs toggle is on.
+  const savedValue = $derived(
+    proSavedValueText(usagePage.usageSummary, usagePage.usageMode),
+  );
+  const savedPercent = $derived(
+    proSavedPercentText(usagePage.usageSummary, usagePage.usageMode),
+  );
 </script>
 
 <div class="cards">
@@ -56,17 +63,35 @@
   </div>
   {#if savingsVisible}
     <div class="card">
-      <div class="card-label">Rewrite Saved</div>
-      <div class="card-value" title={rewriteSavedTitle(usagePage.usageSummary)}>
-        {formatCost(rewriteCostSaved(usagePage.usageSummary))}
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-label">Tokens Saved</div>
-      <div class="card-value" title={rewriteSavedTitle(usagePage.usageSummary)}>
-        {formatNumber(rewriteTokensSaved(usagePage.usageSummary))}
+      <div class="card-label">Pro Saved</div>
+      <div
+        class="card-value pro-saved-value"
+        title={proSavedTitle(usagePage.usageSummary, usagePage.usageMode)}
+      >
+        <span>{savedValue}</span>
+        {#if savedPercent}
+          <span class="pro-saved-delta">{savedPercent}</span>
+        {/if}
       </div>
     </div>
   {/if}
   <CacheOverviewCards />
 </div>
+
+<style>
+  /* The savings share trails the value on the same line, sized down so the
+     card still reads as one number. */
+  .pro-saved-value {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .pro-saved-delta {
+    color: var(--success);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+</style>
