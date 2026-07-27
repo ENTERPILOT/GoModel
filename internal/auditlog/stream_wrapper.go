@@ -1,10 +1,13 @@
 package auditlog
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // Note: MaxContentCapture and LogEntryStreamingKey constants are defined in constants.go
@@ -205,9 +208,18 @@ func (b *streamResponseBuilder) buildResponsesAPIResponse() map[string]any {
 
 // CreateStreamEntry creates a new log entry for a streaming request.
 // This should be called before starting the stream.
-func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
+//
+// ctx is the request context at stream start: the copy is what the stream
+// observer persists (the base entry never reaches the terminal write), and it
+// is taken before the audit middleware's post-handler enrichment runs — so
+// context-derived fields the middleware would apply later, like the session
+// id, must be captured here.
+func CreateStreamEntry(ctx context.Context, baseEntry *LogEntry) *LogEntry {
 	if baseEntry == nil {
 		return nil
+	}
+	if baseEntry.SessionID == "" && ctx != nil {
+		baseEntry.SessionID = core.SessionIDFromContext(ctx)
 	}
 
 	// Create a copy of the entry for the stream.

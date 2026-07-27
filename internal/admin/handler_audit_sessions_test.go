@@ -118,3 +118,27 @@ func TestAuditLog_SessionIDFilterForwarded(t *testing.T) {
 		t.Errorf("session_id filter not forwarded: %q", reader.lastQuery.SessionID)
 	}
 }
+
+// A session_id filter without explicit date parameters queries the whole
+// session; explicit dates still apply so the two can be combined.
+func TestAuditLog_SessionIDSkipsDefaultDateWindow(t *testing.T) {
+	reader := &mockAuditReader{logResult: &auditlog.LogListResult{}}
+	h := NewHandler(nil, nil, WithAuditReader(reader))
+
+	c, _ := newHandlerContext("/admin/audit/log?session_id=sess-a")
+	if err := h.AuditLog(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reader.lastQuery.StartDate.IsZero() || !reader.lastQuery.EndDate.IsZero() {
+		t.Fatalf("session-only query must be unbounded, got %v..%v",
+			reader.lastQuery.StartDate, reader.lastQuery.EndDate)
+	}
+
+	c, _ = newHandlerContext("/admin/audit/log?session_id=sess-a&days=7")
+	if err := h.AuditLog(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reader.lastQuery.StartDate.IsZero() || reader.lastQuery.EndDate.IsZero() {
+		t.Fatal("explicit days must still bound a session query")
+	}
+}

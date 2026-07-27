@@ -913,3 +913,48 @@ test("audit.removed cleans children lists and decrements the head count", () => 
   // Head list itself is untouched by a child removal.
   assert.equal(app.auditLog.total, 1);
 });
+
+test("a sessionless live row re-folds into its thread once a later event adds the session id", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [{ id: "head-a", session_id: "s-a", session_count: 2 }];
+  app.auditLog.total = 1;
+  app.auditThreadChildren = {
+    "s-a": { loading: false, entries: [{ id: "old-child" }], total: 2 },
+  };
+
+  // audit.started fires before session detection: the row arrives sessionless
+  // and prepends as its own singleton thread.
+  app.mergeLiveAuditEntry({ id: "live-1", request_id: "req-1" }, "audit.started");
+  assert.equal(app.auditLog.entries.length, 2);
+  assert.equal(app.auditLog.total, 2);
+
+  // The terminal event delivers the session id: the row folds into its thread.
+  app.mergeLiveAuditEntry(
+    { id: "live-1", request_id: "req-1", session_id: "s-a", status_code: 200 },
+    "audit.flushed",
+  );
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["live-1"]);
+  assert.equal(app.auditLog.entries[0].session_count, 3);
+  assert.equal(app.auditLog.total, 1);
+  // The displaced head moved into the loaded children.
+  assert.deepEqual(
+    app.auditThreadChildren["s-a"].entries.map((entry) => entry.id),
+    ["head-a", "old-child"],
+  );
+});
+
+test("re-fold leaves rows alone in flat mode and without a matching head", () => {
+  const flat = createLiveLogsApp({ auditGroupSessions: false });
+  flat.auditLog.entries = [{ id: "row-a", session_id: "s-a" }];
+  flat.auditLog.total = 1;
+  flat.mergeLiveAuditEntry({ id: "row-a", session_id: "s-a", status_code: 200 }, "audit.flushed");
+  assert.equal(flat.auditLog.entries.length, 1);
+
+  const grouped = createLiveLogsApp({ auditGroupSessions: true });
+  grouped.auditLog.entries = [{ id: "solo", session_id: "s-new" }];
+  grouped.auditLog.total = 1;
+  grouped.mergeLiveAuditEntry({ id: "solo", session_id: "s-new", status_code: 200 }, "audit.flushed");
+  assert.deepEqual(grouped.auditLog.entries.map((entry) => entry.id), ["solo"]);
+  assert.equal(grouped.auditLog.total, 1);
+});

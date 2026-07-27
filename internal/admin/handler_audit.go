@@ -93,12 +93,28 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 
 // parseAuditLogQueryParams parses and validates the shared audit log filter,
 // search, and pagination query parameters.
+//
+// A session_id filter without explicit date parameters queries the whole
+// session rather than the default trailing window: the thread view must show
+// every request of a session regardless of the date range the list was
+// browsed with, and the result set is already bounded by the session id.
 func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) {
 	var params auditlog.LogQueryParams
 
-	dateRange, err := parseDateRangeParams(c)
-	if err != nil {
-		return params, err
+	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
+	explicitDates := c.QueryParam("days") != "" ||
+		strings.TrimSpace(c.QueryParam("start_date")) != "" ||
+		strings.TrimSpace(c.QueryParam("end_date")) != ""
+	var dates auditlog.QueryParams
+	if sessionID == "" || explicitDates {
+		dateRange, err := parseDateRangeParams(c)
+		if err != nil {
+			return params, err
+		}
+		dates = auditlog.QueryParams{
+			StartDate: dateRange.StartDate,
+			EndDate:   dateRange.EndDate,
+		}
 	}
 	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
 	if err != nil {
@@ -111,16 +127,13 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 	}
 
 	params = auditlog.LogQueryParams{
-		QueryParams: auditlog.QueryParams{
-			StartDate: dateRange.StartDate,
-			EndDate:   dateRange.EndDate,
-		},
+		QueryParams:    dates,
 		RequestedModel: requestedModel,
 		Provider:       c.QueryParam("provider"),
 		Method:         strings.ToUpper(c.QueryParam("method")),
 		Path:           c.QueryParam("path"),
 		UserPath:       userPath,
-		SessionID:      strings.TrimSpace(c.QueryParam("session_id")),
+		SessionID:      sessionID,
 		ErrorType:      c.QueryParam("error_type"),
 		Search:         c.QueryParam("search"),
 	}

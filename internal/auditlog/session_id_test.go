@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
@@ -173,11 +174,26 @@ func TestCreateStreamEntryPreservesSessionID(t *testing.T) {
 		Path:      "/v1/chat/completions",
 		SessionID: "sess-42",
 	}
-	streamEntry := CreateStreamEntry(base)
+	streamEntry := CreateStreamEntry(context.Background(), base)
 	if streamEntry == nil {
 		t.Fatal("expected a stream entry")
 	}
 	if streamEntry.SessionID != "sess-42" {
 		t.Fatalf("SessionID = %q, want %q (lost in the whitelist copy)", streamEntry.SessionID, "sess-42")
+	}
+}
+
+// The stream copy is created mid-handler, before the audit middleware's
+// post-handler enrichment stamps the session id onto the base entry — so
+// CreateStreamEntry must capture it from the request context itself, or every
+// streamed request loses its session id.
+func TestCreateStreamEntryCapturesSessionIDFromContext(t *testing.T) {
+	ctx := core.WithSessionID(context.Background(), "sess-ctx")
+	streamEntry := CreateStreamEntry(ctx, &LogEntry{ID: "entry-1", Path: "/v1/chat/completions"})
+	if streamEntry == nil {
+		t.Fatal("expected a stream entry")
+	}
+	if streamEntry.SessionID != "sess-ctx" {
+		t.Fatalf("SessionID = %q, want context-derived %q", streamEntry.SessionID, "sess-ctx")
 	}
 }

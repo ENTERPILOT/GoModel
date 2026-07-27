@@ -214,3 +214,34 @@ func TestSticky_EvictsSoonestAtCapacity(t *testing.T) {
 		t.Fatal("soonest-expiring pin survived eviction")
 	}
 }
+
+// A multi-target redirect with only one target momentarily available must
+// still pin: otherwise a target coming back online would let the strategy
+// move an active session mid-conversation.
+func TestSticky_PinsWhenOnlyOneTargetSupported(t *testing.T) {
+	t.Parallel()
+	catalog := balancingCatalog()
+	catalog.stale = map[string]bool{"anthropic/claude": true, "groq/llama": true}
+	svc, err := NewService(newSQLVMStore(t), catalog, true)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	upsertBalancedVM(t, svc, StrategyRoundRobin, nil)
+
+	if got := resolveSession(t, svc, "smart", "sess-a"); got != "openai/gpt-4o" {
+		t.Fatalf("sole supported target = %q, want openai/gpt-4o", got)
+	}
+	if got := len(svc.sticky.entries); got != 1 {
+		t.Fatalf("sticky entries = %d, want the sole viable target pinned", got)
+	}
+
+	// The other targets recover (the service shares the stale map): the
+	// session stays where it was served.
+	delete(catalog.stale, "anthropic/claude")
+	delete(catalog.stale, "groq/llama")
+	for i := range 4 {
+		if got := resolveSession(t, svc, "smart", "sess-a"); got != "openai/gpt-4o" {
+			t.Fatalf("resolution %d = %q, session moved after targets recovered", i, got)
+		}
+	}
+}

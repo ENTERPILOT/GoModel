@@ -58,7 +58,11 @@ func (s *Service) balancedResolution(entry redirectEntry, sessionID string) (cor
 		pool = supported[:1]
 	}
 
-	affinity := sessionID != "" && entry.sessionAffinity() && len(supported) > 1
+	// Affinity is keyed to the redirect's CONFIGURED shape, not the targets
+	// currently available: with only one target momentarily supported (provider
+	// outage, startup) the session must still pin its serving target, or the
+	// strategy could move an active conversation once the others come back.
+	affinity := sessionID != "" && entry.sessionAffinity() && len(entry.targets) > 1
 	if affinity {
 		if qualified, ok := s.sticky.lookup(entry.vm.Source, sessionID); ok {
 			if target, ok := poolTarget(pool, qualified); ok {
