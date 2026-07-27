@@ -30,6 +30,7 @@
         "organization": {
             "id": "https://enterpilot.io/#organization",
             "name": "Enterpilot",
+            "legalName": "enterpilot, Inc.",
             "url": "https://enterpilot.io",
             "logo": "https://gomodel.enterpilot.io/docs/logo.svg",
             "sameAs": [
