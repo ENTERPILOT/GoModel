@@ -1,0 +1,129 @@
+---
+title: "GoModel Pro"
+description: "GoModel Pro is the commercial distribution of GoModel: the same gateway plus licensed features. Token compression, how it works, and how to turn it off."
+icon: "gem"
+noindex: true
+keywords: ["GoModel Pro", "token compression", "prompt compression", "license"]
+---
+
+## What Pro is
+
+GoModel Pro is the same gateway as open-source GoModel, in one binary, plus
+licensed features. Every core capability — routing, failover, budgets, rate
+limits, virtual models, caching, audit, the dashboard — works identically and
+is configured the same way.
+
+Without a valid license the binary starts as the plain open-source core. Pro
+never blocks traffic.
+
+## Token compression
+
+The one Pro feature available today. It rewrites each inference request
+before it reaches the provider, cutting prompt-token spend on agentic
+traffic.
+
+Two passes run on every request:
+
+**Normalization** removes structure that costs tokens but carries no
+information:
+
+- the line-number gutter on file reads becomes a single `lines N-M:` header
+- replayed reasoning is dropped from assistant history (chat-completions only)
+- tool-result envelopes collapse to a `# path` header
+- search results, command logs and unified diffs each get a content-aware
+  cleanup
+
+**Deduplication** then replaces repeated runs of lines with a reference to
+their first occurrence:
+
+```
+(Open file: /src/marshmallow/fields.py)… (same as message 16, 3 lines)
+```
+
+Measured on a corpus of real agent conversations at default settings:
+**-19.4% of request bytes**, up to -49.3% on the heaviest sessions.
+
+### What it never touches
+
+- tool-call arguments, non-text content parts, and unknown JSON fields
+- first occurrences — only later duplicates are replaced
+- anything, if estimated savings fall below the threshold; the request
+  passes through byte-identical
+
+Compression is a pure function of the request body, so the same request
+always compresses the same way and the provider's prompt-cache prefix stays
+stable as a conversation grows. It fails open: if the engine errors, the
+request is forwarded unchanged.
+
+Covered endpoints: `POST /v1/chat/completions` and `POST /v1/messages`.
+
+## Turn it off
+
+Four levels, narrowest to broadest.
+
+**One request** — send a header:
+
+```http
+X-GoModel-Compression: off
+```
+
+**Specific models** — comma-separated globs, matched against the model the
+client asked for:
+
+```bash
+PRO_COMPRESSION_EXCLUDE_MODELS="ollama/*,gpt-4o-mini"
+```
+
+**The whole gateway**:
+
+```bash
+PRO_COMPRESSION_ENABLED=false
+```
+
+Startup then logs `token compression disabled via
+PRO_COMPRESSION_ENABLED=false`, and no rewriter is placed in the request
+path at all.
+
+**The entitlement** — run a license without the `compression` feature, or no
+license. The gateway starts as open-source core.
+
+<Note>
+  Settings are read once at startup. Changing one needs a gateway restart.
+</Note>
+
+If you want compression but no rewriting of already-sent history, use
+`PRO_COMPRESSION_SCOPE=new_messages_only` instead of disabling it. Only
+messages after the last assistant turn are rewritten — lower savings, maximum
+prompt-cache reuse.
+
+## Main settings
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `PRO_COMPRESSION_ENABLED` | `true` | Master switch |
+| `PRO_COMPRESSION_SCOPE` | `full_history` | `new_messages_only` rewrites only after the last assistant turn |
+| `PRO_COMPRESSION_EXCLUDE_MODELS` | — | Model globs to skip |
+| `PRO_COMPRESSION_MIN_SAVINGS_TOKENS` | `64` | Minimum estimated savings to rewrite at all |
+| `PRO_COMPRESSION_NORMALIZE` | `true` | Master switch for the normalization pass |
+| `PRO_COMPRESSION_STRIP_LINE_NUMBERS` | `true` | Strip the line-number gutter from file reads |
+| `PRO_COMPRESSION_DROP_REASONING` | `true` | Drop replayed reasoning from assistant history |
+
+Each normalization transform has its own `PRO_COMPRESSION_*` flag if you
+need to disable just one.
+
+## Seeing what it did
+
+**Per request** — the response carries:
+
+```http
+X-GoModel-Pro-Tokens-Saved: 1843
+X-GoModel-Pro-Compression-Blocks: 12
+```
+
+Audit entries keep the **original** client request plus a revision chain
+showing exactly what each rewriter changed, so the full before/after is
+always recoverable.
+
+**Aggregate** — Prometheus counters on `/metrics`, all prefixed
+`gomodel_pro_compression_`, and the dashboard **Usage** page shows "Tokens
+Saved" and "Rewrite Saved" (estimated money) next to Estimated Cost.
