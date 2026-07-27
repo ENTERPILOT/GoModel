@@ -182,6 +182,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --verify-tag
 
+  deploy-demo:
+    name: Update demo.enterpilot.io
+    runs-on: ubuntu-latest
+    # Must run after tag promotion: the demo pulls :latest, which is what
+    # docker-promote pushes.
+    needs: docker-promote
+    # :latest is only promoted for stable releases (see "Detect prerelease
+    # tag"), so skip prereleases like v1.2.3-rc1 — the demo wouldn't change.
+    if: ${{ !contains(github.ref_name, '-') }}
+    # Best-effort: a demo host outage must not fail the release
+    continue-on-error: true
+    steps:
+      - name: Trigger demo deploy webhook
+        env:
+          DEMO_HOOK_TOKEN: ${{ secrets.DEMO_HOOK_TOKEN }}
+        run: |
+          curl -fsS --retry 3 --retry-delay 5 -X PUT \
+            -H "X-Hook-Token: ${DEMO_HOOK_TOKEN}" \
+            -d "deploy ${GITHUB_REF_NAME}" \
+            https://demo.enterpilot.io/hooks/update-demo
+
   publish-mcp:
     name: Publish to MCP Registry
     runs-on: ubuntu-latest
