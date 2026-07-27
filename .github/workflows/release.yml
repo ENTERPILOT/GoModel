@@ -198,7 +198,8 @@ jobs:
         env:
           DEMO_HOOK_TOKEN: ${{ secrets.DEMO_HOOK_TOKEN }}
         run: |
-          curl -fsS --retry 3 --retry-delay 5 -X PUT \
+          curl -fsS --connect-timeout 10 --max-time 20 --retry-max-time 40 \
+            --retry 3 --retry-delay 5 -X PUT \
             -H "X-Hook-Token: ${DEMO_HOOK_TOKEN}" \
             -d "deploy ${GITHUB_REF_NAME}" \
             https://demo.enterpilot.io/hooks/update-demo
