@@ -27,6 +27,10 @@ const defaultAuditLogLimit = 25
 // AuditLog handles GET /admin/audit/log
 //
 // @Summary      Get paginated audit log entries
+// @Description  Entries are slimmed for the wire: request/response bodies,
+// @Description  per-attempt error bodies, and rewritten revision bodies are
+// @Description  omitted (bodies_omitted=true). Fetch /admin/audit/detail for
+// @Description  the full payload of one entry.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -143,6 +147,11 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	response, err := h.auditLogResponse(c.Request().Context(), result)
 	if err != nil {
 		return handleError(c, err)
+	}
+	// The list ships scalar metadata only; full payloads stay behind
+	// /admin/audit/detail (see slimAuditListEntry).
+	for i := range response.Entries {
+		slimAuditListEntry(&response.Entries[i])
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -291,6 +300,9 @@ func (h *Handler) AuditLogDetail(c *echo.Context) error {
 // AuditConversation handles GET /admin/audit/conversation
 //
 // @Summary      Get conversation thread around an audit log entry
+// @Description  Thread entries carry the request/response bodies the
+// @Description  transcript is built from; attempts, request revisions, and
+// @Description  header maps are omitted.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -340,6 +352,9 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 	}
 	if result.Entries == nil {
 		result.Entries = []auditlog.LogEntry{}
+	}
+	for i := range result.Entries {
+		slimConversationEntry(&result.Entries[i])
 	}
 
 	return c.JSON(http.StatusOK, result)

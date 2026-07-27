@@ -102,6 +102,7 @@ func buildDefaultConfig() *Config {
 		Logging: LogConfig{
 			Enabled:               true,
 			LogBodies:             true,
+			LogRevisionBodies:     true,
 			LogHeaders:            true,
 			BufferSize:            1000,
 			FlushInterval:         5,
