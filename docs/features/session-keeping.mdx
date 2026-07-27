@@ -50,9 +50,9 @@ The first matching signal wins:
 Body-based signals and automatic detection read request bodies up to 1 MiB
 (chunked requests included); larger bodies fall back to header signals.
 
-Session ids that are not UUIDs are scoped by [user path](/features/user-path),
-so weak client ids (for example Goose's date-counter format) cannot collide
-across tenants.
+Client-provided session ids are scoped by [user path](/features/user-path),
+including UUID-shaped values, so one tenant cannot collide with another by
+reusing the same id.
 
 ## Sticky load balancing
 

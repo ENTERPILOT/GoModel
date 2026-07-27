@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"regexp"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -40,9 +39,9 @@ func NewDetector(rules []Rule, autoDetect bool) *Detector {
 }
 
 // Detect returns the stable session id for the captured request, or "" when
-// the request carries no session signal. Explicit ids that are not UUIDs are
-// scoped by user path so weak client ids (for example Goose's date-counter
-// format) cannot collide across tenants.
+// the request carries no session signal. Explicit client-provided ids are
+// scoped by user path so no caller-controlled value can collide across
+// tenants.
 func (d *Detector) Detect(snapshot *core.RequestSnapshot, userPath string) string {
 	if d == nil || snapshot == nil {
 		return ""
@@ -96,15 +95,12 @@ func (d *Detector) detectFromBody(body []byte) string {
 	return ""
 }
 
-var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-
-// scopeSessionID namespaces non-UUID ids by user path. UUIDs are globally
-// unique already and stay raw so operators can correlate them with client-side
-// session identifiers. Weak ids are hashed together with the user path (as
-// distinct values — plain concatenation would be ambiguous, since both parts
-// are client-influenced) so they cannot collide across tenants.
+// scopeSessionID namespaces every client-provided id by user path. UUID syntax
+// does not prove uniqueness because the value is still caller-controlled.
+// The id and path are hashed as distinct values — plain concatenation would be
+// ambiguous, since both parts are client-influenced.
 func scopeSessionID(id, userPath string) string {
-	if userPath == "" || uuidRegex.MatchString(id) {
+	if userPath == "" {
 		return id
 	}
 	sum := sha256.Sum256([]byte(userPath + "\x00" + id))

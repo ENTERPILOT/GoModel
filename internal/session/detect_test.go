@@ -142,8 +142,12 @@ func TestDetectUserPathScoping(t *testing.T) {
 	detector := newBuiltinDetector(true)
 
 	uuidHeaders := map[string][]string{"X-Session-Id": {"11111111-2222-3333-4444-555555555555"}}
-	if got := detector.Detect(chatSnapshot(uuidHeaders, `{}`), "team/app"); got != "11111111-2222-3333-4444-555555555555" {
-		t.Fatalf("uuid id must stay raw, got %q", got)
+	scopedUUID := detector.Detect(chatSnapshot(uuidHeaders, `{}`), "team/app")
+	if !strings.HasPrefix(scopedUUID, "scoped-") {
+		t.Fatalf("uuid-shaped client id must be user-path scoped, got %q", scopedUUID)
+	}
+	if other := detector.Detect(chatSnapshot(uuidHeaders, `{}`), "team/other"); other == scopedUUID {
+		t.Fatal("same UUID-shaped id under different user paths must not collide")
 	}
 
 	weakHeaders := map[string][]string{"Agent-Session-Id": {"20260727_3"}}
@@ -162,6 +166,9 @@ func TestDetectUserPathScoping(t *testing.T) {
 	}
 	if got := detector.Detect(chatSnapshot(weakHeaders, `{}`), ""); got != "20260727_3" {
 		t.Fatalf("weak id without user path stays raw, got %q", got)
+	}
+	if got := detector.Detect(chatSnapshot(uuidHeaders, `{}`), ""); got != "11111111-2222-3333-4444-555555555555" {
+		t.Fatalf("UUID-shaped id without user path stays raw, got %q", got)
 	}
 }
 
