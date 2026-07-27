@@ -257,6 +257,10 @@ function isConversationalPath(path) {
 }
 
 function hasConversationPayload(entry) {
+    // Slim list entries carry the server-computed signal instead of the
+    // bodies it was derived from.
+    if (entry && entry.conversation_payload) return true;
+
     const requestBody = entry && entry.data ? entry.data.request_body : null;
     const responseBody = entry && entry.data ? entry.data.response_body : null;
 

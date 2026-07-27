@@ -449,12 +449,22 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// need dashboard access to pass the gate; the master key always does.
 	if cfg != nil && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		adminGate := AdminAccessMiddleware()
-		cfg.AdminHandler.RegisterRoutes(e.Group("/admin", adminGate))
+		// Admin responses are large, highly compressible JSON (audit entries
+		// carrying request/response bodies, usage aggregates), so gzip cuts
+		// the wire size roughly an order of magnitude. The live-log SSE
+		// stream is exempt: each event must flush to the client immediately,
+		// and buffering it behind a compressor delays delivery.
+		adminGzip := middleware.GzipWithConfig(middleware.GzipConfig{
+			Skipper: func(c *echo.Context) bool {
+				return strings.HasSuffix(c.Request().URL.Path, "/live/logs")
+			},
+		})
+		cfg.AdminHandler.RegisterRoutes(e.Group("/admin", adminGate, adminGzip))
 
 		// Legacy alias under /admin/api/v1/* — accepted until adminLegacySunset
 		// to give operators a window to migrate. Responses carry Deprecation,
 		// Sunset, and Link headers per RFC 8594 / draft-ietf-httpapi-deprecation-header.
-		legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware, adminGate)
+		legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware, adminGate, adminGzip)
 		cfg.AdminHandler.RegisterRoutes(legacy)
 		// DashboardConfig moved within /admin from /dashboard/config to
 		// /runtime/config; preserve the historical legacy path explicitly.

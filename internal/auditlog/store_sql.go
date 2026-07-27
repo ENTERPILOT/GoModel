@@ -164,17 +164,31 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 
 // jsonPathIndexes index the two JSON fields the Responses lookups filter on.
 // The expression is engine-specific, so it is built rather than tokenised.
+//
+// The indexes are composite on (expression, timestamp) because the lookups
+// run `WHERE <expr> = ? ORDER BY timestamp ASC LIMIT 1`: with a bare
+// expression index, PostgreSQL's planner routinely prefers walking the
+// timestamp index and filtering — which detoasts the JSON blob of every row
+// it passes and can scan the whole table when the value is rare. Measured on
+// a user deployment, one such lookup held /admin/audit/conversation open
+// until the fronting proxy gave up. The composite index satisfies both the
+// filter and the order, so that plan is never attractive. The old
+// single-expression indexes are dropped on startup.
 func jsonPathIndexes(dialect sqlx.Dialect) []string {
 	switch dialect {
 	case sqlx.SQLite:
 		return []string{
-			`CREATE INDEX IF NOT EXISTS idx_audit_response_id ON audit_logs(json_extract(data, '$.response_body.id'))`,
-			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id ON audit_logs(json_extract(data, '$.request_body.previous_response_id'))`,
+			`DROP INDEX IF EXISTS idx_audit_response_id`,
+			`DROP INDEX IF EXISTS idx_audit_previous_response_id`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_response_id_ts ON audit_logs(json_extract(data, '$.response_body.id'), timestamp)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id_ts ON audit_logs(json_extract(data, '$.request_body.previous_response_id'), timestamp)`,
 		}
 	case sqlx.PostgreSQL:
 		return []string{
-			`CREATE INDEX IF NOT EXISTS idx_audit_response_id ON audit_logs((data #>> '{response_body,id}'))`,
-			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id ON audit_logs((data #>> '{request_body,previous_response_id}'))`,
+			`DROP INDEX IF EXISTS idx_audit_response_id`,
+			`DROP INDEX IF EXISTS idx_audit_previous_response_id`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_response_id_ts ON audit_logs((data #>> '{response_body,id}'), timestamp)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id_ts ON audit_logs((data #>> '{request_body,previous_response_id}'), timestamp)`,
 		}
 	default:
 		return nil
