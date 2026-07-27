@@ -40,42 +40,40 @@ func (s *stickySessions) clock() time.Time {
 	return time.Now()
 }
 
-// lookup returns the pinned target for a session, refreshing its TTL. Expired
-// pins are dropped on read.
-func (s *stickySessions) lookup(source, session string) (string, bool) {
+// resolve returns the target serving a session: the existing pin when it is
+// still viable (refreshing its TTL), otherwise whatever choose picks, pinned
+// when pin is true. Lookup, choice, and assignment share one critical section
+// so concurrent first requests of a session agree on a single target instead
+// of racing lookup-miss → choose → overwrite each other's pins.
+func (s *stickySessions) resolve(source, session string, viable func(string) bool, choose func() string, pin bool) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := stickyKey{source: source, session: session}
-	pin, ok := s.entries[key]
-	if !ok {
-		return "", false
-	}
 	now := s.clock()
-	if !pin.expires.After(now) {
+	if existing, ok := s.entries[key]; ok {
+		if existing.expires.After(now) && viable(existing.qualified) {
+			existing.expires = now.Add(stickySessionTTL)
+			s.entries[key] = existing
+			return existing.qualified
+		}
+		// Expired, or the pinned target is gone/saturated: re-pick and re-pin.
 		delete(s.entries, key)
-		return "", false
 	}
-	pin.expires = now.Add(stickySessionTTL)
-	s.entries[key] = pin
-	return pin.qualified, true
-}
-
-// pin remembers the target chosen for a session.
-func (s *stickySessions) pin(source, session, qualified string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.clock()
-	if s.entries == nil {
-		s.entries = make(map[stickyKey]stickyPin)
+	qualified := choose()
+	if pin && qualified != "" {
+		if s.entries == nil {
+			s.entries = make(map[stickyKey]stickyPin)
+		}
+		s.pruneLocked(now)
+		if len(s.entries) >= maxStickySessions {
+			s.evictSoonestLocked()
+		}
+		s.entries[key] = stickyPin{
+			qualified: qualified,
+			expires:   now.Add(stickySessionTTL),
+		}
 	}
-	s.pruneLocked(now)
-	if len(s.entries) >= maxStickySessions {
-		s.evictSoonestLocked()
-	}
-	s.entries[stickyKey{source: source, session: session}] = stickyPin{
-		qualified: qualified,
-		expires:   now.Add(stickySessionTTL),
-	}
+	return qualified
 }
 
 // prune drops expired pins and pins for redirect sources no longer present in

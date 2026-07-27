@@ -958,3 +958,30 @@ test("re-fold leaves rows alone in flat mode and without a matching head", () =>
   assert.deepEqual(grouped.auditLog.entries.map((entry) => entry.id), ["solo"]);
   assert.equal(grouped.auditLog.total, 1);
 });
+
+test("re-fold keeps the newest request as head when completions arrive out of order", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  // A starts first, B starts later; both sessionless.
+  app.mergeLiveAuditEntry(
+    { id: "req-a", timestamp: "2026-07-27T10:00:00Z" },
+    "audit.started",
+  );
+  app.mergeLiveAuditEntry(
+    { id: "req-b", timestamp: "2026-07-27T10:00:05Z" },
+    "audit.started",
+  );
+  // B completes first and gains the session id (no other head yet: stays put).
+  app.mergeLiveAuditEntry(
+    { id: "req-b", timestamp: "2026-07-27T10:00:05Z", session_id: "s-a", status_code: 200 },
+    "audit.flushed",
+  );
+  // A completes last: it must fold UNDER B, which is the newer request.
+  app.mergeLiveAuditEntry(
+    { id: "req-a", timestamp: "2026-07-27T10:00:00Z", session_id: "s-a", status_code: 200 },
+    "audit.flushed",
+  );
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["req-b"]);
+  assert.equal(app.auditLog.entries[0].session_count, 2);
+  assert.equal(app.auditLog.total, 1);
+});

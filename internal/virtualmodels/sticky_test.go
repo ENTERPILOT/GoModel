@@ -3,6 +3,7 @@ package virtualmodels
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -154,21 +155,74 @@ func TestSticky_TTLExpiry(t *testing.T) {
 	}
 }
 
-func TestSticky_LookupRefreshesTTL(t *testing.T) {
+// stickyProbe resolves without picking: it reports the existing viable pin or
+// "" and never assigns, so tests can inspect state through the public seam.
+func stickyProbe(sticky *stickySessions, source, session string) string {
+	return sticky.resolve(source, session,
+		func(string) bool { return true },
+		func() string { return "" },
+		false,
+	)
+}
+
+// stickyAssign resolves with a fixed choice, pinning it.
+func stickyAssign(sticky *stickySessions, source, session, qualified string) string {
+	return sticky.resolve(source, session,
+		func(string) bool { return true },
+		func() string { return qualified },
+		true,
+	)
+}
+
+func TestSticky_ResolveRefreshesTTL(t *testing.T) {
 	t.Parallel()
 	sticky := &stickySessions{}
 	current := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	sticky.now = func() time.Time { return current }
 
-	sticky.pin("smart", "sess-a", "openai/gpt-4o")
+	stickyAssign(sticky, "smart", "sess-a", "openai/gpt-4o")
 	// Touch the pin just before expiry, then advance past the original TTL.
 	current = current.Add(stickySessionTTL - time.Minute)
-	if _, ok := sticky.lookup("smart", "sess-a"); !ok {
+	if got := stickyProbe(sticky, "smart", "sess-a"); got == "" {
 		t.Fatal("pin expired early")
 	}
 	current = current.Add(stickySessionTTL - time.Minute)
-	if _, ok := sticky.lookup("smart", "sess-a"); !ok {
-		t.Fatal("refreshed pin expired: lookup must extend the TTL")
+	if got := stickyProbe(sticky, "smart", "sess-a"); got == "" {
+		t.Fatal("refreshed pin expired: resolve must extend the TTL")
+	}
+}
+
+// Concurrent first requests of one session must agree on a single target:
+// lookup, strategy choice, and pin share one critical section.
+func TestSticky_ConcurrentFirstRequestsAgree(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	upsertBalancedVM(t, svc, StrategyRoundRobin, nil)
+
+	const workers = 16
+	results := make([]string, workers)
+	errs := make([]error, workers)
+	var wg sync.WaitGroup
+	for i := range workers {
+		wg.Go(func() {
+			resolution, _, err := svc.resolveRequested(
+				core.NewRequestedModelSelector("smart", ""), "", false, "sess-a")
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			results[i] = resolution.Resolved.QualifiedModel()
+		})
+	}
+	wg.Wait()
+
+	for i := range workers {
+		if errs[i] != nil {
+			t.Fatalf("resolveRequested() error = %v", errs[i])
+		}
+		if results[i] != results[0] {
+			t.Fatalf("concurrent resolutions disagree: %q vs %q", results[i], results[0])
+		}
 	}
 }
 
@@ -196,21 +250,21 @@ func TestSticky_EvictsSoonestAtCapacity(t *testing.T) {
 	sticky.now = func() time.Time { return current }
 
 	for i := range maxStickySessions {
-		sticky.pin("smart", "sess-"+strconv.Itoa(i), "openai/gpt-4o")
+		stickyAssign(sticky, "smart", "sess-"+strconv.Itoa(i), "openai/gpt-4o")
 		current = current.Add(time.Millisecond)
 	}
 	if len(sticky.entries) != maxStickySessions {
 		t.Fatalf("entries = %d, want %d", len(sticky.entries), maxStickySessions)
 	}
-	sticky.pin("smart", "one-more", "openai/gpt-4o")
+	stickyAssign(sticky, "smart", "one-more", "openai/gpt-4o")
 	if len(sticky.entries) != maxStickySessions {
 		t.Fatalf("entries = %d after eviction, want %d", len(sticky.entries), maxStickySessions)
 	}
 	// The oldest pin was evicted; the newest survives.
-	if _, ok := sticky.lookup("smart", "one-more"); !ok {
+	if got := stickyProbe(sticky, "smart", "one-more"); got == "" {
 		t.Fatal("newest pin missing after eviction")
 	}
-	if _, ok := sticky.lookup("smart", "sess-0"); ok {
+	if got := stickyProbe(sticky, "smart", "sess-0"); got != "" {
 		t.Fatal("soonest-expiring pin survived eviction")
 	}
 }

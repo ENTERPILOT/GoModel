@@ -197,3 +197,28 @@ func TestCreateStreamEntryCapturesSessionIDFromContext(t *testing.T) {
 		t.Fatalf("SessionID = %q, want context-derived %q", streamEntry.SessionID, "sess-ctx")
 	}
 }
+
+// The stream copy must finalize every context-derived identity field the
+// audit middleware would apply post-handler — not only the session id.
+// Managed-key labels merge into the context during authentication, after the
+// base entry snapshotted its pre-auth labels.
+func TestCreateStreamEntryFinalizesContextIdentity(t *testing.T) {
+	ctx := core.WithSessionID(context.Background(), "sess-ctx")
+	ctx = core.WithAuthKeyID(ctx, "key-1")
+	ctx = core.WithRequestLabels(ctx, []string{"team-a", "billing"})
+
+	streamEntry := CreateStreamEntry(ctx, &LogEntry{
+		ID:   "entry-1",
+		Path: "/v1/chat/completions",
+		Data: &LogData{Labels: []string{"pre-auth"}},
+	})
+	if streamEntry == nil || streamEntry.Data == nil {
+		t.Fatal("expected a stream entry with data")
+	}
+	if streamEntry.SessionID != "sess-ctx" || streamEntry.AuthKeyID != "key-1" {
+		t.Fatalf("identity not finalized: session=%q auth=%q", streamEntry.SessionID, streamEntry.AuthKeyID)
+	}
+	if len(streamEntry.Data.Labels) != 2 || streamEntry.Data.Labels[0] != "team-a" {
+		t.Fatalf("managed-key labels lost on the stream copy: %#v", streamEntry.Data.Labels)
+	}
+}

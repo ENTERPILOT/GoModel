@@ -19,16 +19,44 @@ func SessionCapture(detector *session.Detector) echo.MiddlewareFunc {
 			if detector == nil {
 				return next(c)
 			}
-			req := c.Request()
-			ctx := req.Context()
-			snapshot := core.GetRequestSnapshot(ctx)
+			snapshot := core.GetRequestSnapshot(c.Request().Context())
 			if snapshot == nil || !core.IsModelInteractionPath(snapshot.Path) {
 				return next(c)
 			}
+			snapshot = sessionDetectionSnapshot(c, snapshot)
+			req := c.Request()
+			ctx := req.Context()
 			if id := detector.Detect(snapshot, core.UserPathFromContext(ctx)); id != "" {
 				c.SetRequest(req.WithContext(core.WithSessionID(ctx, id)))
 			}
 			return next(c)
 		}
 	}
+}
+
+// sessionDetectionSnapshot returns a snapshot whose body is available for
+// session detection. Ingress capture only inlines bodies with a known
+// Content-Length of at most 64 KiB, which would silently disable body-signal
+// and content detection exactly where sessions matter most — large or chunked
+// agent conversations. For chat and responses requests (whose handlers fully
+// materialize the body anyway) the shared body materialization runs early, so
+// detection, the handler, and audit capture reuse one buffered read. Bodies
+// beyond the audit capture bound stay uncaptured and fall back to header
+// signals.
+func sessionDetectionSnapshot(c *echo.Context, snapshot *core.RequestSnapshot) *core.RequestSnapshot {
+	if len(snapshot.CapturedBodyView()) > 0 {
+		return snapshot
+	}
+	switch core.DescribeEndpoint(snapshot.Method, snapshot.Path).Operation {
+	case core.OperationChatCompletions, core.OperationResponses:
+	default:
+		return snapshot
+	}
+	if _, err := requestBodyBytes(c); err != nil {
+		return snapshot
+	}
+	if refreshed := core.GetRequestSnapshot(c.Request().Context()); refreshed != nil {
+		return refreshed
+	}
+	return snapshot
 }

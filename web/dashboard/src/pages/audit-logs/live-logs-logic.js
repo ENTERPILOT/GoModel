@@ -135,9 +135,11 @@ export function liveLogsMethods() {
                     const merged = this.mergeLiveAuditPatch(previous, patch);
                     currentEntries.splice(index, 1, merged);
                     this.auditLog.entries = [...currentEntries];
-                    const regrouped = this.regroupLiveAuditHead(merged) || merged;
-                    this.notifyLiveConversation(regrouped);
-                    return regrouped;
+                    // Regrouping may demote this row to a thread child; the
+                    // conversation hook still targets the updated row itself.
+                    this.regroupLiveAuditHead(merged);
+                    this.notifyLiveConversation(merged);
+                    return merged;
                 }
                 const child = this.mergeLiveAuditChild(incoming, patch);
                 if (child) {
@@ -170,10 +172,12 @@ export function liveLogsMethods() {
                 const merged = this.mergeLiveAuditPatch(previous, patch);
                 currentEntries.splice(index, 1, merged);
                 this.auditLog.entries = [...currentEntries];
-                const regrouped = this.regroupLiveAuditHead(merged) || merged;
-                this.fetchExpandedAuditDetailIfReady(regrouped);
-                this.notifyLiveConversation(regrouped);
-                return regrouped;
+                // Regrouping may demote this row to a thread child; the detail
+                // and conversation hooks still target the updated row itself.
+                this.regroupLiveAuditHead(merged);
+                this.fetchExpandedAuditDetailIfReady(merged);
+                this.notifyLiveConversation(merged);
+                return merged;
             }
             const child = this.mergeLiveAuditChild(incoming, patch);
             if (child) {
@@ -233,9 +237,10 @@ export function liveLogsMethods() {
         // the same session after an in-place merge. This is how a live row
         // inserted sessionless (audit.started fires before session detection
         // stamps the context) joins its thread once a later event delivers the
-        // session id: the updated row becomes the thread head, the other head
-        // moves into the loaded children, and the two rows collapse into one
-        // thread (total shrinks by one).
+        // session id: the NEWEST of the two rows becomes the thread head — the
+        // event that happens to complete last is not necessarily the newest
+        // request — the other moves into the loaded children, and the two rows
+        // collapse into one thread (total shrinks by one).
         regroupLiveAuditHead(entry) {
             if (!this.auditGroupSessions) return null;
             const sessionId = String((entry && entry.session_id) || '').trim();
@@ -249,8 +254,14 @@ export function liveLogsMethods() {
             });
             if (otherIndex < 0) return null;
             const other = entries[otherIndex];
+            const otherTime = Date.parse(other && other.timestamp);
+            const entryTime = Date.parse(entry && entry.timestamp);
+            const otherIsNewer =
+                Number.isFinite(otherTime) && Number.isFinite(entryTime) && otherTime > entryTime;
+            const head = otherIsNewer ? other : entry;
+            const child = otherIsNewer ? entry : other;
             const merged = {
-                ...entry,
+                ...head,
                 session_count:
                     Math.max(1, Number(other.session_count || 1)) +
                     Math.max(1, Number(entry.session_count || 1))
@@ -259,7 +270,7 @@ export function liveLogsMethods() {
             next.unshift(merged);
             this.auditLog.entries = next;
             this.auditLog.total = Math.max(0, Number(this.auditLog.total || 0) - 1);
-            this.prependLiveAuditThreadChild(sessionId, other);
+            this.prependLiveAuditThreadChild(sessionId, child);
             return merged;
         },
 

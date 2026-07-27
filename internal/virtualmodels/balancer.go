@@ -58,41 +58,42 @@ func (s *Service) balancedResolution(entry redirectEntry, sessionID string) (cor
 		pool = supported[:1]
 	}
 
+	// pick applies the redirect's strategy to the viable pool. A single viable
+	// target needs no strategy and must not advance round-robin state, so an
+	// alias and a one-target-available redirect behave identically.
+	pick := func() resolvedTarget {
+		if len(pool) == 1 {
+			return pool[0]
+		}
+		switch normalizeStrategy(entry.strategy) {
+		case StrategyCost:
+			return s.cheapestTarget(pool)
+		default: // StrategyRoundRobin
+			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))]
+		}
+	}
+
 	// Affinity is keyed to the redirect's CONFIGURED shape, not the targets
 	// currently available: with only one target momentarily supported (provider
 	// outage, startup) the session must still pin its serving target, or the
 	// strategy could move an active conversation once the others come back.
+	// The saturated fallback is never pinned: it was chosen to produce an
+	// honest 429, not to serve the session.
 	affinity := sessionID != "" && entry.sessionAffinity() && len(entry.targets) > 1
 	if affinity {
-		if qualified, ok := s.sticky.lookup(entry.vm.Source, sessionID); ok {
-			if target, ok := poolTarget(pool, qualified); ok {
-				return target.selector, true
-			}
-			// The pinned target is gone or saturated: fall through to the
-			// strategy and re-pin whatever it picks.
+		qualified := s.sticky.resolve(entry.vm.Source, sessionID,
+			func(candidate string) bool {
+				_, ok := poolTarget(pool, candidate)
+				return ok
+			},
+			func() string { return pick().qualified },
+			!saturatedFallback,
+		)
+		if target, ok := poolTarget(pool, qualified); ok {
+			return target.selector, true
 		}
 	}
-
-	var choice resolvedTarget
-	if len(pool) == 1 {
-		// A single viable target needs no strategy and must not advance
-		// round-robin state, so an alias and a one-target-available redirect
-		// behave identically.
-		choice = pool[0]
-	} else {
-		switch normalizeStrategy(entry.strategy) {
-		case StrategyCost:
-			choice = s.cheapestTarget(pool)
-		default: // StrategyRoundRobin
-			choice = pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))]
-		}
-	}
-	// Never pin the saturated fallback: it was chosen to produce an honest 429,
-	// not to serve the session.
-	if affinity && !saturatedFallback {
-		s.sticky.pin(entry.vm.Source, sessionID, choice.qualified)
-	}
-	return choice.selector, true
+	return pick().selector, true
 }
 
 // poolTarget finds a qualified model among the viable targets.

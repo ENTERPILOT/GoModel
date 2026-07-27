@@ -1,8 +1,10 @@
 package server
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -81,5 +83,47 @@ func TestSessionCaptureNilDetectorIsNoOp(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("next handler not called")
+	}
+}
+
+// Bodies over the 64 KiB ingress capture limit (or chunked requests) are not
+// on the snapshot when SessionCapture runs; chat/responses requests must
+// materialize the body so body signals and content detection still work.
+func TestSessionCaptureMaterializesLargeBodies(t *testing.T) {
+	detector := session.NewDetector(session.BuiltinRules(), true)
+
+	padding := strings.Repeat("x", 80*1024)
+	body := `{"model":"gpt-4o","session_id":"big-body-session","messages":[{"role":"user","content":"` + padding + `"}]}`
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	// Ingress declined the body (over the inline capture limit).
+	snapshot := core.NewRequestSnapshot(
+		http.MethodPost, "/v1/chat/completions", nil, nil, req.Header,
+		"application/json", nil, true, "req-1", nil,
+	)
+	c.SetRequest(req.WithContext(core.WithRequestSnapshot(req.Context(), snapshot)))
+
+	var got string
+	handler := SessionCapture(detector)(func(c *echo.Context) error {
+		got = core.SessionIDFromContext(c.Request().Context())
+		// The handler must still be able to read the full body afterwards.
+		remaining, err := io.ReadAll(c.Request().Body)
+		if err != nil {
+			t.Fatalf("body read after capture: %v", err)
+		}
+		if len(remaining) != len(body) {
+			t.Fatalf("body truncated after capture: %d != %d", len(remaining), len(body))
+		}
+		return nil
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if got != "big-body-session" {
+		t.Fatalf("session id = %q, want body signal from a large body", got)
 	}
 }
