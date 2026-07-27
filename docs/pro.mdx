@@ -125,5 +125,8 @@ showing exactly what each rewriter changed, so the full before/after is
 always recoverable.
 
 **Aggregate** — Prometheus counters on `/metrics`, all prefixed
-`gomodel_pro_compression_`, and the dashboard **Usage** page shows "Tokens
-Saved" and "Rewrite Saved" (estimated money) next to Estimated Cost.
+`gomodel_pro_compression_`, and the dashboard **Usage** page shows a "Pro
+Saved" card next to Estimated Cost: removed prompt tokens in Tokens mode,
+the money they would have cost in Costs mode, each followed by the share of
+the period it saved — Costs mode shows the value alone when the models in
+play have no pricing configured.

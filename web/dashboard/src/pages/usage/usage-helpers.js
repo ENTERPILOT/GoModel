@@ -1,7 +1,7 @@
 // Pure logic for the Usage page.
 // Kept free of Svelte/DOM dependencies so node:test can exercise it.
 
-import { formatCost, formatNumber } from "../../lib/utils/format.js";
+import { formatCost, formatNumber, formatTokensShort } from "../../lib/utils/format.js";
 
 // emptyUsagePageSummary: the filtered usage-page summaries carry the cache
 // split and rewrite-savings fields on top of the shared totals.
@@ -100,9 +100,12 @@ export function usagePageCostTitle(summary) {
   return formatCost(s.total_input_cost) + " input + " + formatCost(s.total_output_cost) + " output";
 }
 
-// --- Rewrite savings (request rewriters, e.g. token compression) ---
-// Savings ride on provider usage rows, so the uncached summary holds the full
-// totals. Cards only appear once a rewriter reported savings.
+// --- Rewrite savings ("Pro Saved" card) ---
+// Request rewriters (e.g. GoModel Pro token compression) strip prompt tokens
+// before the request leaves the gateway. Savings ride on provider usage rows,
+// so the uncached summary holds the full totals, and the card only appears
+// once a rewriter reported savings. A single card follows the page's
+// Tokens/Costs mode instead of showing the same saving twice.
 export function rewriteTokensSaved(summary) {
   const saved = Number((summary && summary.rewrite_tokens_saved) || 0);
   return Number.isFinite(saved) && saved > 0 ? saved : 0;
@@ -117,13 +120,56 @@ export function rewriteCostSaved(summary) {
   return s.rewrite_cost_saved === undefined ? null : s.rewrite_cost_saved;
 }
 
-export function rewriteSavedTitle(summary) {
+// Card value: priced savings in costs mode, removed prompt tokens otherwise.
+// Tokens use the short form the overview cards and chart axes use — the exact
+// count stays in the tooltip.
+export function proSavedValueText(summary, mode) {
+  if (mode === "costs") return formatCost(rewriteCostSaved(summary));
+  return formatTokensShort(rewriteTokensSaved(summary));
+}
+
+// Share of the pre-rewrite total that the rewriters removed:
+// saved / (recorded + saved) — what the period would have cost or weighed
+// without them. Null when the baseline is unknown (costs mode with no
+// pricing), so the card shows the value alone instead of a bogus 0%.
+export function proSavedPercent(summary, mode) {
+  const costs = mode === "costs";
+  const saved = costs ? Number(rewriteCostSaved(summary)) : rewriteTokensSaved(summary);
+  if (!Number.isFinite(saved) || saved <= 0) return null;
+  // Read the baseline before coercing: a null total_cost means "not priced",
+  // and coercing it to 0 would put the whole baseline in the savings and
+  // claim "100% less" for a period whose spend is simply unknown.
+  const raw = summary && (costs ? summary.total_cost : summary.total_tokens);
+  if (raw === null || raw === undefined) return null;
+  const recorded = Number(raw);
+  if (!Number.isFinite(recorded) || recorded < 0) return null;
+  // saved > 0 and recorded >= 0, so the baseline is positive by construction.
+  return (saved / (recorded + saved)) * 100;
+}
+
+export function proSavedPercentText(summary, mode) {
+  const pct = proSavedPercent(summary, mode);
+  if (pct === null) return "";
+  return (pct < 0.1 ? "<0.1" : pct.toFixed(1)) + "% less";
+}
+
+export function proSavedTitle(summary, mode) {
   const tokens = rewriteTokensSaved(summary);
   if (tokens <= 0) return "";
-  return (
-    formatNumber(tokens) +
-    " prompt tokens removed by request rewriters before reaching providers"
-  );
+  const lines = [
+    formatNumber(tokens) + " prompt tokens removed by request rewriters before reaching providers",
+  ];
+  const cost = rewriteCostSaved(summary);
+  if (cost !== null && cost !== undefined) {
+    lines.push(formatCost(cost) + " saved at the requests' input pricing");
+  }
+  const pct = proSavedPercentText(summary, mode);
+  if (pct) {
+    lines.push(
+      pct + " than the same traffic without rewriting (" + (mode === "costs" ? "cost" : "tokens") + ")",
+    );
+  }
+  return lines.join("\n");
 }
 
 // --- Request-log entry helpers ---

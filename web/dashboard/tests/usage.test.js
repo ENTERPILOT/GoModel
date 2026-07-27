@@ -16,8 +16,11 @@ import {
   labelColor,
   providerCacheLabel,
   providerCacheTitle,
+  proSavedPercent,
+  proSavedPercentText,
+  proSavedTitle,
+  proSavedValueText,
   rewriteCostSaved,
-  rewriteSavedTitle,
   rewriteSavingsVisible,
   rewriteTokensSaved,
   usageEntryCached,
@@ -194,30 +197,93 @@ test("usage page stat cards follow the log cache scope and derive hits from the 
   assert.equal(usagePageCostTitle({}), "");
 });
 
-test("usage page rewrite savings cards show only when rewriters saved tokens", () => {
-  // No savings reported: cards hidden, zero-safe values.
+test("usage page Pro Saved card shows only when rewriters saved tokens", () => {
+  // No savings reported: card hidden, zero-safe values.
   assert.equal(rewriteSavingsVisible({ total_requests: 10 }), false);
   assert.equal(rewriteTokensSaved({ total_requests: 10 }), 0);
   assert.equal(rewriteCostSaved({ total_requests: 10 }), null);
-  assert.equal(rewriteSavedTitle({ total_requests: 10 }), "");
+  assert.equal(proSavedTitle({ total_requests: 10 }, "tokens"), "");
 
-  // Savings with pricing: both cards visible with tokens and cost.
+  // Savings with pricing: card visible, tokens and cost both available.
   const withSavings = { rewrite_tokens_saved: 4200, rewrite_cost_saved: 0.0125 };
   assert.equal(rewriteSavingsVisible(withSavings), true);
   assert.equal(rewriteTokensSaved(withSavings), 4200);
   assert.equal(rewriteCostSaved(withSavings), 0.0125);
-  assert.equal(
-    rewriteSavedTitle(withSavings),
-    "4,200 prompt tokens removed by request rewriters before reaching providers",
+  assert.match(
+    proSavedTitle(withSavings, "tokens"),
+    /^4,200 prompt tokens removed by request rewriters before reaching providers\n\$0\.0125 saved/,
   );
 
-  // Savings without pricing: tokens card carries the value, cost stays null.
+  // Savings without pricing: tokens still surface, cost stays null.
   assert.equal(rewriteSavingsVisible({ rewrite_tokens_saved: 100, rewrite_cost_saved: null }), true);
   assert.equal(rewriteCostSaved({ rewrite_tokens_saved: 100, rewrite_cost_saved: null }), null);
 
   // Defensive: negative or garbage totals never surface.
   assert.equal(rewriteSavingsVisible({ rewrite_tokens_saved: -5 }), false);
   assert.equal(rewriteSavingsVisible({ rewrite_tokens_saved: "NaN?" }), false);
+});
+
+test("Pro Saved value and share follow the Tokens/Costs mode", () => {
+  const summary = {
+    total_tokens: 8000,
+    total_cost: 0.08,
+    rewrite_tokens_saved: 2000,
+    rewrite_cost_saved: 0.02,
+  };
+
+  // Tokens mode: removed prompt tokens in the overview's short form,
+  // 2000 / (8000 + 2000) = 20%.
+  assert.equal(proSavedValueText(summary, "tokens"), "2K");
+  assert.equal(proSavedPercentText(summary, "tokens"), "20.0% less");
+
+  // Short form scales like the overview cards; exact counts live in the title.
+  assert.equal(proSavedValueText({ rewrite_tokens_saved: 2186 }, "tokens"), "2.2K");
+  assert.equal(proSavedValueText({ rewrite_tokens_saved: 3_400_000 }, "tokens"), "3.4M");
+  assert.equal(proSavedValueText({ rewrite_tokens_saved: 840 }, "tokens"), "840");
+  assert.match(proSavedTitle({ rewrite_tokens_saved: 2186 }, "tokens"), /^2,186 prompt tokens/);
+
+  // Costs mode: priced savings against the recorded spend, same 20%.
+  assert.equal(proSavedValueText(summary, "costs"), "$0.02");
+  assert.equal(proSavedPercentText(summary, "costs"), "20.0% less");
+
+  // Tiny but non-zero shares stay visible rather than rounding to 0.0%.
+  assert.equal(
+    proSavedPercentText({ total_tokens: 10_000_000, rewrite_tokens_saved: 1 }, "tokens"),
+    "<0.1% less",
+  );
+
+  // No pricing in costs mode: the value renders, the share is suppressed.
+  const unpriced = { total_tokens: 900, total_cost: null, rewrite_tokens_saved: 100 };
+  assert.equal(proSavedValueText(unpriced, "costs"), "---");
+  assert.equal(proSavedPercentText(unpriced, "costs"), "");
+  assert.equal(proSavedPercent(unpriced, "costs"), null);
+  assert.equal(proSavedPercentText(unpriced, "tokens"), "10.0% less");
+
+  // Priced savings against an unpriced period: the baseline is unknown, not
+  // zero, so the value still renders but the share must stay suppressed
+  // rather than claim the period was all savings.
+  const savedButUnpriced = {
+    total_tokens: 900,
+    total_cost: null,
+    rewrite_tokens_saved: 100,
+    rewrite_cost_saved: 0.02,
+  };
+  assert.equal(proSavedValueText(savedButUnpriced, "costs"), "$0.02");
+  assert.equal(proSavedPercent(savedButUnpriced, "costs"), null);
+  assert.equal(proSavedPercentText(savedButUnpriced, "costs"), "");
+
+  // Same for a missing token baseline.
+  assert.equal(proSavedPercentText({ rewrite_tokens_saved: 100 }, "tokens"), "");
+
+  // A genuinely zero baseline is knowable, so the share still renders.
+  assert.equal(
+    proSavedPercentText({ total_tokens: 0, rewrite_tokens_saved: 100 }, "tokens"),
+    "100.0% less",
+  );
+
+  // No savings at all: nothing to show in either mode.
+  assert.equal(proSavedPercentText({ total_tokens: 500 }, "tokens"), "");
+  assert.equal(proSavedPercentText({}, "costs"), "");
 });
 
 test("emptyUsagePageSummary carries the cache split and rewrite fields", () => {
