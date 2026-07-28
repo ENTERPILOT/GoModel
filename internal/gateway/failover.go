@@ -230,6 +230,55 @@ func tryFailoverStream(
 	return nil, "", "", "", "", lastErr
 }
 
+// Message fragments that mark an error as failover-eligible when they appear
+// alongside the anchor word checked in ShouldAttemptFailover.
+var (
+	// modelUnavailableFragments signal the model itself is gone or refused,
+	// regardless of the status code the provider chose.
+	modelUnavailableFragments = []string{
+		"not found",
+		"does not exist",
+		"unsupported",
+		"unavailable",
+		"not available",
+		"deprecated",
+		"retired",
+		"disabled",
+	}
+	// upstreamFailureFragments signal an aggregator-style provider (OpenCode
+	// Zen, OpenRouter) relaying a transient failure of *its* upstream, e.g.
+	// OpenCode's 400 "Upstream request failed". These are server-side
+	// failures wearing a client-error status, so a failover target may still
+	// succeed.
+	upstreamFailureFragments = []string{
+		"failed",
+		"error",
+		"unavailable",
+		"timed out",
+		"timeout",
+	}
+	// retiredModel404Fragments cover 404s with availability phrasing but no
+	// literal "model": providers report retired models this way. Plain
+	// endpoint 404s must not match — those are genuine routing misses.
+	retiredModel404Fragments = []string{
+		"unsupported",
+		"unavailable",
+		"not available",
+		"deprecated",
+		"retired",
+		"disabled",
+	}
+)
+
+func containsAny(message string, fragments []string) bool {
+	for _, fragment := range fragments {
+		if strings.Contains(message, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
 // ShouldAttemptFailover reports whether err should trigger translated failover.
 func ShouldAttemptFailover(err error) bool {
 	var gatewayErr *core.GatewayError
@@ -252,36 +301,14 @@ func ShouldAttemptFailover(err error) bool {
 	}
 
 	message := strings.ToLower(strings.TrimSpace(gatewayErr.Message))
-	if strings.Contains(message, "model") {
-		for _, fragment := range []string{
-			"not found",
-			"does not exist",
-			"unsupported",
-			"unavailable",
-			"not available",
-			"deprecated",
-			"retired",
-			"disabled",
-		} {
-			if strings.Contains(message, fragment) {
-				return true
-			}
-		}
+	if strings.Contains(message, "model") && containsAny(message, modelUnavailableFragments) {
+		return true
 	}
-
-	if status == http.StatusNotFound {
-		for _, fragment := range []string{
-			"unsupported",
-			"unavailable",
-			"not available",
-			"deprecated",
-			"retired",
-			"disabled",
-		} {
-			if strings.Contains(message, fragment) {
-				return true
-			}
-		}
+	if strings.Contains(message, "upstream") && containsAny(message, upstreamFailureFragments) {
+		return true
+	}
+	if status == http.StatusNotFound && containsAny(message, retiredModel404Fragments) {
+		return true
 	}
 
 	return false
