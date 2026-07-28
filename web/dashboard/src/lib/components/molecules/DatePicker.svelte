@@ -1,10 +1,10 @@
 <script>
   // Date-range picker over the shared dateRange store. onchange fires when
   // the window changes so the host page can refetch its data.
-  import { dateRange } from "$lib/stores/dateRange.svelte.js";
-  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { dateRange } from "$lib/stores/dateRange.svelte.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.ts";
   import DatePickerCalendar from "./DatePickerCalendar.svelte";
-  import { shiftMonth } from "./datePickerLogic.js";
+  import { shiftMonth } from "./datePickerLogic.ts";
 
   let { onchange } = $props();
 

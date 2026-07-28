@@ -6,7 +6,7 @@
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { modelsStore } from "$lib/stores/models.svelte.ts";
   import { failover } from "./failover.svelte.js";
   import { qualifiedModelName } from "./failover-logic.js";
 </script>

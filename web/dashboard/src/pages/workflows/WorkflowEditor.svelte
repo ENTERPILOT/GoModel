@@ -6,9 +6,9 @@
   import Modal from "$lib/components/atoms/Modal.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { auth } from "$lib/stores/auth.svelte.js";
-  import { router } from "$lib/stores/router.svelte.js";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { router } from "$lib/stores/router.svelte.ts";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
   import { workflowsStore as wf } from "./workflows.svelte.js";
   import WorkflowCard from "./WorkflowCard.svelte";
 

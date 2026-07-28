@@ -3,7 +3,7 @@
 // Keep this file free of Svelte-runtime imports so node:test can import it
 // directly.
 
-import { formatNumber } from "../../lib/utils/format.js";
+import { formatNumber } from "../../lib/utils/format.ts";
 
 function tryParseJSON(value) {
   try {

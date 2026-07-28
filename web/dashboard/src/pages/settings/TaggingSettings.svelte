@@ -3,9 +3,9 @@
   // Declarative (config.yaml / TAGGING_HEADER_* env) rows come back with
   // managed=true and stay read-only; credential-header rejection happens
   // server-side and its message is surfaced from the PUT response.
-  import { auth } from "$lib/stores/auth.svelte.js";
-  import { flash } from "$lib/stores/flash.svelte.js";
-  import { getJSON, sendJSON } from "$lib/api/client.js";
+  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { flash } from "$lib/stores/flash.svelte.ts";
+  import { getJSON, sendJSON } from "$lib/api/client.ts";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";

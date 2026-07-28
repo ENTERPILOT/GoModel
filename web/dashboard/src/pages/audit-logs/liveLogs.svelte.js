@@ -21,12 +21,12 @@
 // 30s, attempt cap 6) and heartbeat handling.
 
 import { untrack } from "svelte";
-import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
-import { readStored } from "$lib/utils/storage.js";
-import { auth } from "$lib/stores/auth.svelte.js";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
-import { router } from "$lib/stores/router.svelte.js";
-import { dateRange } from "$lib/stores/dateRange.svelte.js";
+import { apiFetch, getJSON, isAbortError } from "$lib/api/client.ts";
+import { readStored } from "$lib/utils/storage.ts";
+import { auth } from "$lib/stores/auth.svelte.ts";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+import { router } from "$lib/stores/router.svelte.ts";
+import { dateRange } from "$lib/stores/dateRange.svelte.ts";
 import { liveLogsMethods, liveLogsStreamPath } from "./live-logs-logic.js";
 
 class LiveLogsStore {

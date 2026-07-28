@@ -6,7 +6,7 @@
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
-  import { auth } from "$lib/stores/auth.svelte.js";
+  import { auth } from "$lib/stores/auth.svelte.ts";
   import { authKeysStore as store } from "./authKeys.svelte.js";
 
   function onclose() {

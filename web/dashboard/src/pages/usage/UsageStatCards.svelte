@@ -4,7 +4,7 @@
   // cost comes from the uncached summary so cached rows' avoided cost never
   // inflates it.
   import Spinner from "$lib/components/atoms/Spinner.svelte";
-  import { formatCost, formatNumber } from "$lib/utils/format.js";
+  import { formatCost, formatNumber } from "$lib/utils/format.ts";
   import { usagePage } from "./usage.svelte.js";
   import {
     proSavedPercentText,

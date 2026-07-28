@@ -5,7 +5,7 @@
   // are alone in their session render as a plain row.
   import { slide } from "svelte/transition";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
-  import { motionDuration } from "$lib/utils/motion.js";
+  import { motionDuration } from "$lib/utils/motion.ts";
   import AuditEntryRow from "./AuditEntryRow.svelte";
   import { auditList } from "./auditList.svelte.js";
   import {

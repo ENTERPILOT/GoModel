@@ -7,8 +7,8 @@
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import { untrack } from "svelte";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
-  import { modals } from "$lib/stores/ui.svelte.js";
-  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { modals } from "$lib/stores/ui.svelte.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.ts";
 
   const drawer = conversationDrawer;
 

@@ -1,11 +1,11 @@
 <script>
   import Icon from "$lib/components/atoms/Icon.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
-  import { router } from "$lib/stores/router.svelte.js";
-  import { sidebar } from "$lib/stores/ui.svelte.js";
-  import { auth } from "$lib/stores/auth.svelte.js";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
-  import { gomodelPath } from "$lib/api/paths.js";
+  import { router } from "$lib/stores/router.svelte.ts";
+  import { sidebar } from "$lib/stores/ui.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+  import { gomodelPath } from "$lib/api/paths.ts";
 
   const navItems = $derived(
     [

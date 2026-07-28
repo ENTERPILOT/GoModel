@@ -2,9 +2,9 @@
   // Requests by Status + Provider Latency charts fed by /admin/audit/stats.
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
-  import { chartColors, resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
-  import { formatNumber } from "$lib/utils/format.js";
-  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { chartColors, resolveCssColor as resolveColor } from "$lib/utils/chartTheme.ts";
+  import { formatNumber } from "$lib/utils/format.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.ts";
   import { auditStatsState } from "./overviewState.svelte.js";
   import {
     auditStatsHasData,

@@ -1,7 +1,7 @@
 <script>
   // "Authentication required" page banner with the Enter-API-key button.
   // Owns its own visibility (auth.authError), so pages just drop it in.
-  import { auth } from "$lib/stores/auth.svelte.js";
+  import { auth } from "$lib/stores/auth.svelte.ts";
 </script>
 
 {#if auth.authError}

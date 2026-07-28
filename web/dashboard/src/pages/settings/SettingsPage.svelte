@@ -3,11 +3,11 @@
   // rules, usage pricing recalculation, runtime refresh, and the version
   // footer. Each section fetches its own data when the page becomes active
   // or auth.refreshTick changes.
-  import { router } from "$lib/stores/router.svelte.js";
-  import { auth } from "$lib/stores/auth.svelte.js";
-  import { timezone } from "$lib/stores/timezone.svelte.js";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
-  import { appVersion } from "$lib/api/paths.js";
+  import { router } from "$lib/stores/router.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.ts";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+  import { appVersion } from "$lib/api/paths.ts";
   import TimezoneSettings from "./TimezoneSettings.svelte";
   import FailoverSettings from "./FailoverSettings.svelte";
   import BudgetSettings from "./BudgetSettings.svelte";

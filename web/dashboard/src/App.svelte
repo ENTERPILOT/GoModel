@@ -4,12 +4,12 @@
   import TypedConfirmationDialog from "$lib/components/organisms/TypedConfirmationDialog.svelte";
   import FlashMessages from "$lib/components/organisms/FlashMessages.svelte";
   import DemoModeBanner from "$lib/components/molecules/DemoModeBanner.svelte";
-  import { router } from "$lib/stores/router.svelte.js";
-  import { auth } from "$lib/stores/auth.svelte.js";
-  import { themeStore, sidebar, modals } from "$lib/stores/ui.svelte.js";
-  import { timezone } from "$lib/stores/timezone.svelte.js";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
-  import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { router } from "$lib/stores/router.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { themeStore, sidebar, modals } from "$lib/stores/ui.svelte.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.ts";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+  import { modelsStore } from "$lib/stores/models.svelte.ts";
 
   import OverviewPage from "$pages/overview/OverviewPage.svelte";
   import UsagePage from "$pages/usage/UsagePage.svelte";

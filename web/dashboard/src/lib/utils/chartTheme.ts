@@ -2,13 +2,22 @@
 // so they follow the active theme, plus the shared Chart.js style fragments
 // that keep every chart on the dashboard reading as one family.
 
-export function cssVar(name) {
+export function cssVar(name: string): string {
   return getComputedStyle(document.documentElement)
     .getPropertyValue(name)
     .trim();
 }
 
-export function chartColors() {
+export interface ChartColors {
+  grid: string;
+  text: string;
+  dayMarker: string;
+  tooltipBg: string;
+  tooltipBorder: string;
+  tooltipText: string;
+}
+
+export function chartColors(): ChartColors {
   return {
     grid: cssVar("--chart-grid"),
     text: cssVar("--chart-text"),
@@ -19,11 +28,13 @@ export function chartColors() {
   };
 }
 
-export function chartTickFont() {
+export function chartTickFont(): { size: number; family: string } {
   return { size: 11, family: "'SF Mono', Menlo, Consolas, monospace" };
 }
 
-export function chartTooltip(colors, callbacks) {
+// The tooltip fragment of a Chart.js options object. Callbacks stay untyped:
+// each chart supplies its own Chart.js callback map.
+export function chartTooltip(colors: ChartColors, callbacks?: unknown) {
   return {
     backgroundColor: colors.tooltipBg,
     borderColor: colors.tooltipBorder,
@@ -38,7 +49,7 @@ export function chartTooltip(colors, callbacks) {
 // browser compute it on a throwaway element (handles var()/color-mix(), which
 // canvas fillStyle may not accept directly). Returns the input unchanged
 // without a DOM, so config builders stay testable under node:test.
-export function resolveCssColor(expr) {
+export function resolveCssColor(expr: string): string {
   if (typeof document === "undefined" || !document.body) {
     return expr;
   }
@@ -66,13 +77,13 @@ const PALETTE = [
   "#c49a6c",
 ];
 
-export function barColors() {
+export function barColors(): string[] {
   return [...PALETTE];
 }
 
 // Deterministic label -> palette color (djb2), so a label keeps one color
 // across the usage charts and every chip on the dashboard.
-export function labelColor(label) {
+export function labelColor(label: unknown): string {
   let hash = 5381;
   const text = String(label || "");
   for (let i = 0; i < text.length; i++) {
@@ -82,6 +93,6 @@ export function labelColor(label) {
 }
 
 // Inline style string for a usage-label chip (drives --label-color).
-export function labelChipStyle(label) {
+export function labelChipStyle(label: unknown): string {
   return "--label-color: " + labelColor(label);
 }

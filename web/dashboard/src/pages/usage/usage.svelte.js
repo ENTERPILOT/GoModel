@@ -4,12 +4,12 @@
 // shared cache overview lives in usageData (this page passes its filter
 // query through fetchCacheOverview).
 
-import { getJSON, isAbortError } from "$lib/api/client.js";
-import { router } from "$lib/stores/router.svelte.js";
-import { dateRange } from "$lib/stores/dateRange.svelte.js";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
-import { usageData } from "$lib/stores/usageData.svelte.js";
-import { providerDisplayValue } from "$lib/utils/format.js";
+import { getJSON, isAbortError } from "$lib/api/client.ts";
+import { router } from "$lib/stores/router.svelte.ts";
+import { dateRange } from "$lib/stores/dateRange.svelte.ts";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+import { usageData } from "$lib/stores/usageData.svelte.ts";
+import { providerDisplayValue } from "$lib/utils/format.ts";
 import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
 import {
   emptyUsageLog,

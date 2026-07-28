@@ -4,7 +4,7 @@
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { formatPriceFine } from "$lib/utils/format.js";
+  import { formatPriceFine } from "$lib/utils/format.ts";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
 
   const po = pricingOverrides;

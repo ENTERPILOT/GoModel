@@ -2,9 +2,9 @@
 // of the shared admin API client. Pure helpers live in ./mcp-servers.js so
 // tests can exercise them without Svelte.
 
-import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.js";
-import { flash } from "$lib/stores/flash.svelte.js";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.ts";
+import { flash } from "$lib/stores/flash.svelte.ts";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
 import {
   buildMcpServerPayload,
   defaultMcpCatalog,

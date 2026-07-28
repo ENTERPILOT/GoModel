@@ -1,6 +1,6 @@
 // Clipboard helper with an execCommand fallback for non-secure contexts.
 
-export function writeTextToClipboard(value) {
+export function writeTextToClipboard(value: unknown): Promise<void> {
   const payload = String(value == null ? "" : value);
   const clipboard =
     typeof navigator !== "undefined" ? navigator.clipboard : null;
@@ -39,11 +39,20 @@ export function writeTextToClipboard(value) {
   return Promise.resolve();
 }
 
+export interface CopyState {
+  readonly copied: boolean;
+  readonly error: boolean;
+  reset(): void;
+  copy(value: unknown, formatValue?: (value: unknown) => string): Promise<void>;
+}
+
 // createCopyState returns reactive-friendly copy feedback state. Use from a
 // component: const copy = createCopyState(); await copy.copy(value).
-export function createCopyState({ resetDelayMs = 2000, logPrefix } = {}) {
+export function createCopyState(
+  { resetDelayMs = 2000, logPrefix }: { resetDelayMs?: number; logPrefix?: string } = {},
+): CopyState {
   const state = $state({ copied: false, error: false });
-  let resetTimer = null;
+  let resetTimer: ReturnType<typeof setTimeout> | null = null;
 
   function clearResetTimer() {
     if (resetTimer !== null) {
@@ -73,7 +82,7 @@ export function createCopyState({ resetDelayMs = 2000, logPrefix } = {}) {
       state.copied = false;
       state.error = false;
     },
-    async copy(value, formatValue) {
+    async copy(value: unknown, formatValue?: (value: unknown) => string) {
       if (value == null || value === "") {
         return;
       }

@@ -8,8 +8,8 @@
 // refetches to keep the window scrolling. stop() closes the SSE stream,
 // clears every timer, and frees the bucket buffer when navigating away.
 
-import { getJSON, apiFetch, isAbortError } from "$lib/api/client.js";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { getJSON, apiFetch, isAbortError } from "$lib/api/client.ts";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
 import { GRANULARITIES } from "./liveTokensLogic.js";
 
 const USAGE_FLUSH_DEBOUNCE_MS = 900;

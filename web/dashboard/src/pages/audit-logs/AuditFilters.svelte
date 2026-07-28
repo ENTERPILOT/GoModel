@@ -3,7 +3,7 @@
   // the Clear button.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
-  import { debounced } from "$lib/utils/debounce.js";
+  import { debounced } from "$lib/utils/debounce.ts";
   import { auditList } from "./auditList.svelte.js";
 
   const onSearchInput = debounced(() => auditList.fetchAuditLog(true));

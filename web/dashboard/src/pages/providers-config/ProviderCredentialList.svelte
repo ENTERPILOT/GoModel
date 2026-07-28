@@ -3,7 +3,7 @@
   // vars) show a Config badge and expose no edit/delete actions.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { timezone } from "$lib/stores/timezone.svelte.ts";
   import { providersConfig } from "./providersConfig.svelte.js";
   import {
     providerCredentialAuthLabel,

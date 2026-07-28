@@ -2,8 +2,8 @@
 // Pure helpers (bucket aggregation, labels, chart config); the polling/SSE
 // engine lives in liveTokensState.svelte.js.
 
-import { formatTokensShort } from "../../lib/utils/format.js";
-import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
+import { formatTokensShort } from "../../lib/utils/format.ts";
+import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.ts";
 import { tokenAxisTicks } from "./chartStyle.js";
 
 // apiName: backend granularity; refreshMs: how often to refetch to scroll the

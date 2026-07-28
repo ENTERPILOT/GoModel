@@ -4,9 +4,9 @@
   // status/latency charts, and the providers overview grid.
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import { untrack } from "svelte";
-  import { router } from "$lib/stores/router.svelte.js";
-  import { auth } from "$lib/stores/auth.svelte.js";
-  import { usageData } from "$lib/stores/usageData.svelte.js";
+  import { router } from "$lib/stores/router.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { usageData } from "$lib/stores/usageData.svelte.ts";
   import DatePicker from "$lib/components/molecules/DatePicker.svelte";
   import LiveTokens from "./LiveTokens.svelte";
   import SummaryCards from "./SummaryCards.svelte";

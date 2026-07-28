@@ -2,8 +2,8 @@
   // One provider card in the Providers Overview grid: status pill, runtime
   // meta, and the expandable details (reason, request health, config).
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { timezone } from "$lib/stores/timezone.svelte.js";
-  import { formatNumber } from "$lib/utils/format.js";
+  import { timezone } from "$lib/stores/timezone.svelte.ts";
+  import { formatNumber } from "$lib/utils/format.ts";
   import { providerStatusState } from "./overviewState.svelte.js";
   import {
     providerStatusBadgeClass,

@@ -5,9 +5,9 @@
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import { untrack } from "svelte";
-  import { auth } from "$lib/stores/auth.svelte.js";
-  import { router } from "$lib/stores/router.svelte.js";
-  import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { router } from "$lib/stores/router.svelte.ts";
+  import { modelsStore } from "$lib/stores/models.svelte.ts";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";

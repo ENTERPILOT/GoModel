@@ -101,7 +101,7 @@ export function deriveMcpServerSlug(name) {
   return "mcp-" + hash.toString(16).padStart(8, "0");
 }
 
-import { splitCommaList } from "../../lib/utils/format.js";
+import { splitCommaList } from "../../lib/utils/format.ts";
 
 export { splitCommaList };
 

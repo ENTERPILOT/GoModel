@@ -7,8 +7,8 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
-  import { auth } from "$lib/stores/auth.svelte.js";
-  import { router } from "$lib/stores/router.svelte.js";
+  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { router } from "$lib/stores/router.svelte.ts";
   import McpCatalogModal from "./McpCatalogModal.svelte";
   import McpServerEditor from "./McpServerEditor.svelte";
   import McpServerList from "./McpServerList.svelte";

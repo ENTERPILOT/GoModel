@@ -4,8 +4,8 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
-  import { router } from "$lib/stores/router.svelte.js";
-  import { auth } from "$lib/stores/auth.svelte.js";
+  import { router } from "$lib/stores/router.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.ts";
   import { rateLimits } from "./rateLimits.svelte.js";
   import RateLimitEditor from "./RateLimitEditor.svelte";
   import RateLimitList from "./RateLimitList.svelte";

@@ -2,14 +2,14 @@
   // Overview summary cards: token totals, requests, cache hits, cost, the
   // prompt-cache gauge, and the provider/MCP status flags.
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
-  import { router } from "$lib/stores/router.svelte.js";
-  import { usageData } from "$lib/stores/usageData.svelte.js";
+  import { router } from "$lib/stores/router.svelte.ts";
+  import { usageData } from "$lib/stores/usageData.svelte.ts";
   import {
     formatNumber,
     formatCost,
     formatTokensShort,
     tokenCountTitle,
-  } from "$lib/utils/format.js";
+  } from "$lib/utils/format.ts";
   import {
     summaryTotalTokens,
     summaryTotalRequests,
@@ -34,7 +34,7 @@
     mcpOverviewSummaryText,
   } from "./mcpOverviewLogic.js";
   import { providerStatusState, mcpServersState } from "./overviewState.svelte.js";
-  import { resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
+  import { resolveCssColor as resolveColor } from "$lib/utils/chartTheme.ts";
 
   const summary = $derived(usageData.summary);
   const cacheOverview = $derived(usageData.cacheOverview);

@@ -5,7 +5,7 @@
   import Modal from "$lib/components/atoms/Modal.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { modelsStore } from "$lib/stores/models.svelte.ts";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { qualifiedModelName } from "./virtualModelsLogic.js";
   import VmTargetRow from "./VmTargetRow.svelte";

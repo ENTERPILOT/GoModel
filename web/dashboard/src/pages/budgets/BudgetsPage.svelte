@@ -2,8 +2,8 @@
   // Budgets page (list, editor, per-budget reset, delete flows).
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
-  import { router } from "$lib/stores/router.svelte.js";
-  import { auth } from "$lib/stores/auth.svelte.js";
+  import { router } from "$lib/stores/router.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.ts";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";

@@ -1,9 +1,9 @@
 <script>
   // One month grid inside the DatePicker dropdown. `offset` is the month
   // shift from the picker's anchor month (-1 = left pane, 0 = right pane).
-  import { dateRange } from "$lib/stores/dateRange.svelte.js";
-  import { timezone } from "$lib/stores/timezone.svelte.js";
-  import { calendarDays, calendarTitle, isSameMonth } from "./datePickerLogic.js";
+  import { dateRange } from "$lib/stores/dateRange.svelte.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.ts";
+  import { calendarDays, calendarTitle, isSameMonth } from "./datePickerLogic.ts";
 
   let { calendarMonth, offset = 0, onprev, onnext, onselect } = $props();
 

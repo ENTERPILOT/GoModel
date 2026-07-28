@@ -6,7 +6,7 @@ import {
   calendarTitle,
   isSameMonth,
   shiftMonth,
-} from "../src/lib/components/molecules/datePickerLogic.js";
+} from "../src/lib/components/molecules/datePickerLogic.ts";
 
 const utc = (y, m, d = 1) => new Date(Date.UTC(y, m, d));
 const key = (d) => d.toISOString().slice(0, 10);

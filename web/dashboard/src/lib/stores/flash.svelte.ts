@@ -7,21 +7,27 @@
 const SUCCESS_TIMEOUT_MS = 5000;
 const ERROR_TIMEOUT_MS = 8000;
 
+export interface Toast {
+  id: number;
+  kind: "success" | "error";
+  text: string;
+}
+
 class FlashStore {
-  toasts = $state([]);
+  toasts = $state<Toast[]>([]);
 
   #seq = 0;
-  #timers = new Map();
+  #timers = new Map<number, ReturnType<typeof setTimeout>>();
 
-  success(message) {
+  success(message: string): void {
     this.#push("success", message, SUCCESS_TIMEOUT_MS);
   }
 
-  error(message) {
+  error(message: string): void {
     this.#push("error", message, ERROR_TIMEOUT_MS);
   }
 
-  dismiss(id) {
+  dismiss(id: number): void {
     const timer = this.#timers.get(id);
     if (timer) {
       clearTimeout(timer);
@@ -30,7 +36,7 @@ class FlashStore {
     this.toasts = this.toasts.filter((toast) => toast.id !== id);
   }
 
-  #push(kind, message, timeoutMs) {
+  #push(kind: Toast["kind"], message: string, timeoutMs: number): void {
     const text = String(message || "").trim();
     if (!text) {
       return;

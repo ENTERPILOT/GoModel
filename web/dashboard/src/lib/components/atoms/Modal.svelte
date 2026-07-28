@@ -5,7 +5,7 @@
   // Children render inside the shell; give the top-level child the dialog
   // role/class (e.g. <section class="model-editor" role="dialog">).
   import { tick, untrack } from "svelte";
-  import { modals } from "$lib/stores/ui.svelte.js";
+  import { modals } from "$lib/stores/ui.svelte.ts";
 
   let {
     open = false,

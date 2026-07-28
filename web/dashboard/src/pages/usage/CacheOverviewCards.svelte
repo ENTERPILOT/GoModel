@@ -2,8 +2,8 @@
   // Cache overview stat cards (rendered inside the page's .cards grid).
   // Values come from the shared cacheOverview, which the usage page fetches
   // with its facet filters applied.
-  import { usageData } from "$lib/stores/usageData.svelte.js";
-  import { formatCost, formatNumber } from "$lib/utils/format.js";
+  import { usageData } from "$lib/stores/usageData.svelte.ts";
+  import { formatCost, formatNumber } from "$lib/utils/format.ts";
 </script>
 
 {#if usageData.cacheAnalyticsEnabled()}

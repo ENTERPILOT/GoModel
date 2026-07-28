@@ -5,8 +5,8 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
-  import { router } from "$lib/stores/router.svelte.js";
-  import { auth } from "$lib/stores/auth.svelte.js";
+  import { router } from "$lib/stores/router.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.ts";
   import { providersConfig } from "./providersConfig.svelte.js";
   import ProviderCredentialList from "./ProviderCredentialList.svelte";
   import ProviderCredentialEditor from "./ProviderCredentialEditor.svelte";

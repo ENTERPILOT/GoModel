@@ -2,7 +2,7 @@
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { confirmDialog } from "$lib/stores/confirm.svelte.js";
+  import { confirmDialog } from "$lib/stores/confirm.svelte.ts";
 
   const dialog = $derived(confirmDialog.state);
 </script>

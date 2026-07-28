@@ -1,6 +1,6 @@
 // splitCommaList turns a comma-separated input into a trimmed array,
 // dropping empty items.
-export function splitCommaList(value) {
+export function splitCommaList(value: unknown): string[] {
   return String(value || "")
     .split(",")
     .map((item) => item.trim())
@@ -9,12 +9,12 @@ export function splitCommaList(value) {
 
 // Shared display formatters.
 
-export function formatNumber(n) {
+export function formatNumber(n: number | null | undefined): string {
   if (n == null || n === undefined) return "-";
   return n.toLocaleString();
 }
 
-export function formatCost(v) {
+export function formatCost(v: number | string | null | undefined): string {
   if (v == null) return "---";
   const cost = Number(v);
   if (!Number.isFinite(cost)) return "---";
@@ -22,18 +22,18 @@ export function formatCost(v) {
   return "$" + cost.toFixed(4).replace(/(\.\d{2}\d*?)0+$/, "$1");
 }
 
-export function formatPrice(v) {
+export function formatPrice(v: number | null | undefined): string {
   if (v == null || v === undefined) return "—";
   return "$" + v.toFixed(2);
 }
 
-export function formatPriceFine(v) {
+export function formatPriceFine(v: number | null | undefined): string {
   if (v == null || v === undefined) return "—";
   if (v < 0.01) return "$" + v.toFixed(6);
   return "$" + v.toFixed(4);
 }
 
-export function formatTokensShort(n) {
+export function formatTokensShort(n: number | string | null | undefined): string {
   if (n == null || n === "") return "-";
   const value = Number(n);
   if (!Number.isFinite(value)) return "-";
@@ -57,7 +57,10 @@ export function formatTokensShort(n) {
   return String(value);
 }
 
-export function tokenCountTitle(label, n) {
+export function tokenCountTitle(
+  label: string,
+  n: number | string | null | undefined,
+): string {
   const value = n == null || n === "" ? NaN : Number(n);
   const exact = Number.isFinite(value) ? formatNumber(value) : "-";
   return String(label || "Tokens") + ": " + exact;
@@ -65,7 +68,7 @@ export function tokenCountTitle(label, n) {
 
 // formatDateParam renders a Date (or passes a string through) as the UTC
 // yyyy-mm-dd used in admin query parameters.
-export function formatDateParam(date) {
+export function formatDateParam(date: Date | string | null | undefined): string {
   if (!date) return "";
   if (typeof date === "string") return date;
   return (
@@ -77,7 +80,7 @@ export function formatDateParam(date) {
   );
 }
 
-export function formatDateUTC(ts) {
+export function formatDateUTC(ts: string | number | Date | null | undefined): string {
   if (!ts) return "-";
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "-";
@@ -90,7 +93,7 @@ export function formatDateUTC(ts) {
   );
 }
 
-export function formatTimestampUTC(ts) {
+export function formatTimestampUTC(ts: string | number | Date | null | undefined): string {
   if (!ts) return "-";
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "-";
@@ -110,19 +113,32 @@ export function formatTimestampUTC(ts) {
   );
 }
 
+// A value carrying "provider/model" naming fields, as found on usage rows,
+// audit entries, and catalog entries. All fields optional: helpers render
+// whatever is present.
+export interface ProviderModelRef {
+  provider?: string | null;
+  provider_name?: string | null;
+  model?: string | null;
+  resolved_model?: string | null;
+}
+
 // providerTypeValue / providerDisplayValue / qualified* render "provider/model"
 // pairs consistently across tables, pills, and dropdowns.
-export function providerTypeValue(value) {
+export function providerTypeValue(value: ProviderModelRef | null | undefined): string {
   return String((value && value.provider) || "").trim();
 }
 
-export function providerDisplayValue(value) {
+export function providerDisplayValue(value: ProviderModelRef | null | undefined): string {
   const providerName = String((value && value.provider_name) || "").trim();
   if (providerName) return providerName;
   return providerTypeValue(value);
 }
 
-export function qualifiedModelValueDisplay(value, modelValue) {
+export function qualifiedModelValueDisplay(
+  value: ProviderModelRef | null | undefined,
+  modelValue: string | null | undefined,
+): string {
   const model = String(modelValue || "").trim();
   if (!model) return "-";
   const provider = providerDisplayValue(value);
@@ -131,19 +147,28 @@ export function qualifiedModelValueDisplay(value, modelValue) {
   return provider + "/" + model;
 }
 
-export function qualifiedModelDisplay(value) {
+export function qualifiedModelDisplay(value: ProviderModelRef | null | undefined): string {
   return qualifiedModelValueDisplay(value, value && value.model);
 }
 
-export function qualifiedResolvedModelDisplay(value) {
+export function qualifiedResolvedModelDisplay(
+  value: ProviderModelRef | null | undefined,
+): string {
   return qualifiedModelValueDisplay(value, value && value.resolved_model);
+}
+
+// The audit-entry fields auditModelDisplay reads; the real entries carry more.
+export interface AuditEntryModelRef extends ProviderModelRef {
+  requested_model?: string | null;
+  alias_used?: boolean;
+  data?: { failover?: { target_model?: string | null } | null } | null;
 }
 
 // auditModelDisplay renders the audit summary pill. When the request was
 // redirected — a runtime failover or a redirect/alias — it shows
 // "requested ⮕ target"; otherwise a single value, so direct calls stay
 // unchanged.
-export function auditModelDisplay(entry) {
+export function auditModelDisplay(entry: AuditEntryModelRef | null | undefined): string {
   const requested = String(
     (entry && (entry.requested_model || entry.model)) || "",
   ).trim();

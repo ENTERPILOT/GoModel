@@ -2,9 +2,9 @@
 // gauge buttons and the effective-limits inspector. Pure logic lives in
 // ./rateLimitsLogic.js.
 
-import { errorMessage, getJSON, sendJSON } from "$lib/api/client.js";
-import { flash } from "$lib/stores/flash.svelte.js";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { errorMessage, getJSON, sendJSON } from "$lib/api/client.ts";
+import { flash } from "$lib/stores/flash.svelte.ts";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
 import * as logic from "./rateLimitsLogic.js";
 
 class RateLimitsStore {

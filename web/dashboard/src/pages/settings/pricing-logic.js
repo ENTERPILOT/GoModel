@@ -1,6 +1,6 @@
 // Pure pricing-recalculation logic.
 
-import { formatDateParam } from "../../lib/utils/format.js";
+import { formatDateParam } from "../../lib/utils/format.ts";
 
 export { formatDateParam };
 

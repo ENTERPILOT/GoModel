@@ -7,10 +7,10 @@
 //   PUT    /admin/provider-credentials          — upsert one row
 //   DELETE /admin/provider-credentials/{name}   — delete one row
 
-import { errorPayloadMessage, getJSON, sendJSON, isAbortError } from "$lib/api/client.js";
-import { confirmDialog } from "$lib/stores/confirm.svelte.js";
-import { flash } from "$lib/stores/flash.svelte.js";
-import { modelsStore } from "$lib/stores/models.svelte.js";
+import { errorPayloadMessage, getJSON, sendJSON, isAbortError } from "$lib/api/client.ts";
+import { confirmDialog } from "$lib/stores/confirm.svelte.ts";
+import { flash } from "$lib/stores/flash.svelte.ts";
+import { modelsStore } from "$lib/stores/models.svelte.ts";
 import {
   defaultProviderCredentialForm,
   filterProviderCredentials,

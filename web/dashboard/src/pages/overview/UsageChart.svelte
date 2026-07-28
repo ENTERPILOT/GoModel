@@ -4,10 +4,10 @@
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import NoDataIllustration from "$lib/components/atoms/NoDataIllustration.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
-  import { chartColors, resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
-  import { auth } from "$lib/stores/auth.svelte.js";
-  import { dateRange } from "$lib/stores/dateRange.svelte.js";
-  import { usageData } from "$lib/stores/usageData.svelte.js";
+  import { chartColors, resolveCssColor as resolveColor } from "$lib/utils/chartTheme.ts";
+  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { dateRange } from "$lib/stores/dateRange.svelte.ts";
+  import { usageData } from "$lib/stores/usageData.svelte.ts";
   import {
     fillMissingDays,
     buildOverviewSeries,

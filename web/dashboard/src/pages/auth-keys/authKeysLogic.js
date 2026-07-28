@@ -219,4 +219,4 @@ export function countInactiveAuthKeys(keys, now = Date.now()) {
 }
 
 // Label chips share the dashboard-wide palette and chip styling.
-export { labelChipStyle, labelColor } from "../../lib/utils/chartTheme.js";
+export { labelChipStyle, labelColor } from "../../lib/utils/chartTheme.ts";

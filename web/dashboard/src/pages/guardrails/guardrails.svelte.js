@@ -2,8 +2,8 @@
 // Handles the /admin/guardrails endpoints, 503 "feature unavailable"
 // responses, and the notice/error flow.
 
-import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.js";
-import { flash } from "$lib/stores/flash.svelte.js";
+import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.ts";
+import { flash } from "$lib/stores/flash.svelte.ts";
 import {
   buildGuardrailPayload,
   defaultGuardrailConfig,

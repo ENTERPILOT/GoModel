@@ -1,4 +1,4 @@
-// Pure failover logic (qualifiedModelName is not in $lib/utils/format.js,
+// Pure failover logic (qualifiedModelName is not in $lib/utils/format.ts,
 // which only has value-shaped variants). Kept rune-free so node:test can
 // exercise it directly; the failover store delegates here.
 

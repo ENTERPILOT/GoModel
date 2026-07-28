@@ -13,9 +13,9 @@
 // `session_count`); a thread's older entries are fetched lazily into
 // `liveLogs.auditThreadChildren` when the user unfolds it.
 
-import { getJSON } from "$lib/api/client.js";
-import { writeStored } from "$lib/utils/storage.js";
-import { dateRange } from "$lib/stores/dateRange.svelte.js";
+import { getJSON } from "$lib/api/client.ts";
+import { writeStored } from "$lib/utils/storage.ts";
+import { dateRange } from "$lib/stores/dateRange.svelte.ts";
 import { liveLogs } from "./liveLogs.svelte.js";
 import { auditWorkflows } from "./audit-workflows.svelte.js";
 import {

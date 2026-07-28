@@ -2,9 +2,9 @@
 // on top of the shared admin API client (401s and stale-auth are handled by
 // the client).
 
-import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.js";
-import { flash } from "$lib/stores/flash.svelte.js";
-import { createCopyState } from "$lib/utils/clipboard.svelte.js";
+import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.ts";
+import { flash } from "$lib/stores/flash.svelte.ts";
+import { createCopyState } from "$lib/utils/clipboard.svelte.ts";
 import {
   buildCreateAuthKeyPayload,
   countInactiveAuthKeys,

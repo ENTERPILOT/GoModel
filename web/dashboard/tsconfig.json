@@ -3,14 +3,20 @@
     "moduleResolution": "bundler",
     "target": "ES2022",
     "module": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "checkJs": false,
     "allowJs": true,
+    "skipLibCheck": true,
     "verbatimModuleSyntax": true,
+    "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
       "$lib/*": ["src/lib/*"],
       "$pages/*": ["src/pages/*"]
     }
   },
-  "include": ["src/**/*.js", "src/**/*.svelte"]
+  "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte"]
 }

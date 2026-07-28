@@ -3,7 +3,7 @@
   // costs mode toggle and a hover tooltip.
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
-  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { timezone } from "$lib/stores/timezone.svelte.ts";
   import { calendarState } from "./overviewState.svelte.js";
   import {
     buildCalendarGrid,

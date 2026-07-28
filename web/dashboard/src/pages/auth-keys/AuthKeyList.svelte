@@ -2,8 +2,8 @@
   // API keys table.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { timezone } from "$lib/stores/timezone.svelte.js";
-  import { formatDateUTC, formatTimestampUTC } from "$lib/utils/format.js";
+  import { timezone } from "$lib/stores/timezone.svelte.ts";
+  import { formatDateUTC, formatTimestampUTC } from "$lib/utils/format.ts";
   import { authKeyDeactivated, authKeyExpired, labelChipStyle } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
 </script>
