@@ -47,6 +47,10 @@ Measured on a corpus of real agent conversations at default settings:
 
 - tool-call arguments, non-text content parts, and unknown JSON fields
 - first occurrences — only later duplicates are replaced
+- on `/v1/responses`: replayed reasoning items (the API requires them back
+  verbatim when `store` is off, so `PRO_COMPRESSION_DROP_REASONING` has no
+  effect there) and text parts carrying citation annotations, whose
+  start/end offsets a rewrite would break
 - anything, if estimated savings fall below the threshold; the request
   passes through byte-identical
 
@@ -55,7 +59,9 @@ always compresses the same way and the provider's prompt-cache prefix stays
 stable as a conversation grows. It fails open: if the engine errors, the
 request is forwarded unchanged.
 
-Covered endpoints: `POST /v1/chat/completions` and `POST /v1/messages`.
+Covered endpoints: `POST /v1/chat/completions`, `POST /v1/messages`, and
+`POST /v1/responses` — including function and custom tool-call outputs on
+the Responses API.
 
 ## Turn it off
 
@@ -122,7 +128,10 @@ X-GoModel-Pro-Compression-Blocks: 12
 
 Audit entries keep the **original** client request plus a revision chain
 showing exactly what each rewriter changed, so the full before/after is
-always recoverable.
+always recoverable. Storing the rewritten body copy is governed by
+`LOGGING_LOG_REVISION_BODIES` (default `true`): turning it off keeps the
+revision metadata — rewriter, sizes, tokens saved, the block report — while
+roughly halving audit storage per compressed request.
 
 **Aggregate** — Prometheus counters on `/metrics`, all prefixed
 `gomodel_pro_compression_`, and the dashboard **Usage** page shows a "Pro
