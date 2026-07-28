@@ -132,47 +132,14 @@ export function liveLogsMethods() {
             const currentEntries = (this.auditLog && Array.isArray(this.auditLog.entries)) ? this.auditLog.entries : [];
             const index = currentEntries.findIndex((entry) => matchesLiveAuditKey(entry, key, requestID));
             const previous = index >= 0 ? currentEntries[index] || {} : {};
-            if (eventType === 'audit.detail') {
+            // A detail event IS the fetched detail: re-triggering the detail
+            // fetch for it would loop.
+            const isDetail = eventType === 'audit.detail';
+            const patch = isDetail
                 // The detail entry carries the full payload, so the slim-list
                 // marker must not survive the merge from the previous row.
-                const patch = { ...incoming, _detail_loaded: true, _response_partial: false, bodies_omitted: false };
-                if (index >= 0) {
-                    const merged = this.mergeLiveAuditPatch(previous, patch);
-                    currentEntries.splice(index, 1, merged);
-                    this.auditLog.entries = [...currentEntries];
-                    // Regrouping may demote this row to a thread child; the
-                    // conversation hook still targets the updated row itself.
-                    this.regroupLiveAuditHead(merged);
-                    this.notifyLiveConversation(merged);
-                    return merged;
-                }
-                const child = this.mergeLiveAuditChild(incoming, patch);
-                if (child) {
-                    this.notifyLiveConversation(child);
-                    return child;
-                }
-                if (!this.auditLiveInsertAllowed()) return;
-                this.auditLog.entries = [this.mergeLiveAuditUsagePatch(patch), ...currentEntries].slice(0, this.auditLog.limit || 25);
-                this.auditLog.total = Number(this.auditLog.total || 0) + 1;
-                return this.auditLog.entries[0];
-            }
-            const liveState = this.liveAuditStateAfter(previous._live_state, eventType);
-            const auditFlushed = this.liveAuditEventFlushed(previous._live_state) || this.liveAuditEventFlushed(liveState);
-            const patch = { ...incoming, _live: true, _live_state: liveState, _audit_flushed: auditFlushed };
-            if (!auditFlushed) {
-                patch._live_pending = true;
-            } else {
-                patch._live_pending = false;
-            }
-            // A stream event's response body is a partial reconstruction of a
-            // still-running stream; the flag drops once a settled state
-            // delivers the real body. Other events leave the previous flag
-            // untouched.
-            if (eventType === 'audit.stream') {
-                patch._response_partial = true;
-            } else if (this.liveAuditStateSettled(eventType)) {
-                patch._response_partial = false;
-            }
+                ? { ...incoming, _detail_loaded: true, _response_partial: false, bodies_omitted: false }
+                : this.liveAuditPatch(previous, incoming, eventType);
             if (index >= 0) {
                 const merged = this.mergeLiveAuditPatch(previous, patch);
                 currentEntries.splice(index, 1, merged);
@@ -180,18 +147,18 @@ export function liveLogsMethods() {
                 // Regrouping may demote this row to a thread child; the detail
                 // and conversation hooks still target the updated row itself.
                 this.regroupLiveAuditHead(merged);
-                this.fetchExpandedAuditDetailIfReady(merged);
+                if (!isDetail) this.fetchExpandedAuditDetailIfReady(merged);
                 this.notifyLiveConversation(merged);
                 return merged;
             }
             const child = this.mergeLiveAuditChild(incoming, patch);
             if (child) {
-                this.fetchExpandedAuditDetailIfReady(child);
+                if (!isDetail) this.fetchExpandedAuditDetailIfReady(child);
                 this.notifyLiveConversation(child);
                 return child;
             }
             if (!this.auditLiveInsertAllowed()) return;
-            if (this.auditGroupSessions) {
+            if (!isDetail && this.auditGroupSessions) {
                 const folded = this.foldLiveAuditIntoThread(patch);
                 if (folded) {
                     this.fetchExpandedAuditDetailIfReady(folded);
@@ -202,9 +169,33 @@ export function liveLogsMethods() {
             this.auditLog.entries = [this.mergeLiveAuditUsagePatch(patch), ...currentEntries].slice(0, this.auditLog.limit || 25);
             this.auditLog.total = Number(this.auditLog.total || 0) + 1;
             const inserted = this.auditLog.entries[0];
-            this.fetchExpandedAuditDetailIfReady(inserted);
+            if (!isDetail) this.fetchExpandedAuditDetailIfReady(inserted);
             this.notifyLiveConversation(inserted);
             return inserted;
+        },
+
+        // liveAuditPatch stamps the live lifecycle state onto an incoming
+        // event's data, ratcheting _live_state forward from the previous row.
+        liveAuditPatch(previous, incoming, eventType) {
+            const liveState = this.liveAuditStateAfter(previous._live_state, eventType);
+            const auditFlushed = this.liveAuditEventFlushed(previous._live_state) || this.liveAuditEventFlushed(liveState);
+            const patch = {
+                ...incoming,
+                _live: true,
+                _live_state: liveState,
+                _audit_flushed: auditFlushed,
+                _live_pending: !auditFlushed
+            };
+            // A stream event's response body is a partial reconstruction of a
+            // still-running stream; the flag drops once a settled state
+            // delivers the real body. Other events leave the previous flag
+            // untouched.
+            if (eventType === 'audit.stream') {
+                patch._response_partial = true;
+            } else if (this.liveAuditStateSettled(eventType)) {
+                patch._response_partial = false;
+            }
+            return patch;
         },
 
         // --- Session-thread grouping ---------------------------------------
@@ -241,8 +232,8 @@ export function liveLogsMethods() {
         // stamps the context) joins its thread once a later event delivers the
         // session id: the NEWEST of the two rows becomes the thread head — the
         // event that happens to complete last is not necessarily the newest
-        // request — the other moves into the loaded children, and the two rows
-        // collapse into one thread (total shrinks by one).
+        // request — the other is retained in the thread's children slot, and
+        // the two rows collapse into one thread (total shrinks by one).
         regroupLiveAuditHead(entry) {
             if (!this.auditGroupSessions) return null;
             const sessionId = String((entry && entry.session_id) || '').trim();
@@ -300,21 +291,25 @@ export function liveLogsMethods() {
             return newHead;
         },
 
+        // prependLiveAuditThreadChild retains a displaced thread member in the
+        // session's children slot. When the thread was never expanded it
+        // creates a partial list (loaded: false, so expanding still triggers
+        // the full fetch) — dropping the entry instead would make its later
+        // live events look like brand-new requests and inflate the thread
+        // count on every event.
         prependLiveAuditThreadChild(sessionId, entry) {
-            const lists = this.auditThreadChildren;
-            const list = lists && lists[sessionId];
-            // Not loaded yet: the lazy children fetch will include this entry.
-            if (!list || !Array.isArray(list.entries)) return;
+            const lists = this.auditThreadChildren || {};
+            const list = lists[sessionId];
             const child = { ...entry };
             delete child.session_count;
-            this.auditThreadChildren = {
-                ...lists,
-                [sessionId]: {
+            const next = list && Array.isArray(list.entries)
+                ? {
                     ...list,
                     entries: [child, ...list.entries],
                     total: Number(list.total || list.entries.length) + 1
                 }
-            };
+                : { loading: false, loaded: false, entries: [child], total: 1 };
+            this.auditThreadChildren = { ...lists, [sessionId]: next };
         },
 
         removeLiveAuditThreadChild(id, requestID) {

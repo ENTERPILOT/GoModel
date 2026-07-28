@@ -24,10 +24,10 @@ import {
   auditLogFromSessions,
   auditLogWithLiveEntries,
   auditSessionId,
-  auditThreadChildEntries,
   buildAuditLogQuery,
   buildAuditSessionQuery,
   markExpandedEntry,
+  mergeAuditThreadChildren,
   pruneExpandedEntries,
   pruneThreadMap,
   toggleExpandedThread,
@@ -203,7 +203,10 @@ class AuditListStore {
       this.auditExpandedThreads,
       sessionId,
     );
-    if (expandedNow && !liveLogs.auditThreadChildren[sessionId]) {
+    // A partial list (loaded: false) holds only live-displaced entries; the
+    // full session page still needs the fetch.
+    const list = liveLogs.auditThreadChildren[sessionId];
+    if (expandedNow && !(list && (list.loaded || list.loading))) {
       await this.fetchThreadEntries(entry);
     }
   }
@@ -211,9 +214,36 @@ class AuditListStore {
   async fetchThreadEntries(head) {
     const sessionId = auditSessionId(head);
     if (!sessionId) return;
+    const previous = liveLogs.auditThreadChildren[sessionId];
     liveLogs.auditThreadChildren = {
       ...liveLogs.auditThreadChildren,
-      [sessionId]: { loading: true, entries: [], total: 0 },
+      [sessionId]: {
+        loading: true,
+        loaded: false,
+        entries:
+          previous && Array.isArray(previous.entries) ? previous.entries : [],
+        total: Number((previous && previous.total) || 0),
+      },
+    };
+    // On a failed/stale fetch, keep any live-displaced entries but drop the
+    // loading placeholder so the next toggle retries (leaving it would render
+    // a spinner forever).
+    const restore = () => {
+      const lists = { ...liveLogs.auditThreadChildren };
+      const current = lists[sessionId];
+      const entries =
+        current && Array.isArray(current.entries) ? current.entries : [];
+      if (entries.length > 0) {
+        lists[sessionId] = {
+          loading: false,
+          loaded: false,
+          entries,
+          total: entries.length,
+        };
+      } else {
+        delete lists[sessionId];
+      }
+      liveLogs.auditThreadChildren = lists;
     };
     try {
       const qs = buildAuditSessionQuery({
@@ -224,28 +254,33 @@ class AuditListStore {
         label: "audit session",
       });
       if (result.stale) {
-        // Silently drop the loading placeholder so the next toggle retries
-        // (leaving it would render a spinner forever).
-        const next = { ...liveLogs.auditThreadChildren };
-        delete next[sessionId];
-        liveLogs.auditThreadChildren = next;
+        restore();
         return;
       }
       if (!result.ok) throw new Error("audit session fetch failed");
+      // Re-read the slot and the on-screen head: live events during the fetch
+      // may have displaced more rows into it or replaced the thread head.
+      const current = liveLogs.auditThreadChildren[sessionId];
+      const currentHead = this.auditLog.entries.find(
+        (entry) => auditSessionId(entry) === sessionId,
+      );
+      const merged = mergeAuditThreadChildren(
+        current,
+        result.data.entries,
+        currentHead && currentHead !== head ? [head, currentHead] : [head],
+      );
       liveLogs.auditThreadChildren = {
         ...liveLogs.auditThreadChildren,
         [sessionId]: {
           loading: false,
-          entries: auditThreadChildEntries(result.data.entries, head),
-          total: Number(result.data.total || 0),
+          loaded: true,
+          entries: merged.entries,
+          total: Number(result.data.total || 0) + merged.preservedCount,
         },
       };
     } catch (e) {
       console.error("Failed to fetch audit session entries:", e);
-      // Drop the placeholder so the next toggle retries the fetch.
-      const next = { ...liveLogs.auditThreadChildren };
-      delete next[sessionId];
-      liveLogs.auditThreadChildren = next;
+      restore();
     }
   }
 
