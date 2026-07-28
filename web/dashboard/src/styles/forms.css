@@ -1,0 +1,360 @@
+.model-editor {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 16px;
+}
+
+.alias-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.form h3 {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.form-kicker,
+.form-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.alias-actions-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.model-list-actions {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.model-list-actions .table-icon-btn {
+  flex: 0 0 32px;
+}
+
+.model-list-actions .alias-toggle {
+  flex: 0 0 auto;
+}
+
+.alias-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.alias-toggle:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+}
+
+.alias-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.alias-toggle-track {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--border) 80%, var(--bg));
+  transition: background 0.15s;
+}
+
+.alias-toggle-thumb {
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 6px;
+  background: var(--text-muted);
+  transition:
+    transform 0.15s,
+    background 0.15s;
+}
+
+.alias-toggle.enabled {
+  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+}
+
+.alias-toggle.enabled .alias-toggle-track {
+  background: color-mix(in srgb, var(--success) 55%, var(--bg));
+}
+
+.alias-toggle.enabled .alias-toggle-thumb {
+  transform: translateX(14px);
+  background: #fff;
+}
+
+/* Restricted: an enabled model scoped to specific user paths. Reuses the
+   accent color of the former access-state pill, on the toggle itself. */
+.alias-toggle.restricted {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+.alias-toggle.restricted .alias-toggle-track {
+  background: color-mix(in srgb, var(--accent) 55%, var(--bg));
+}
+
+.editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-key-editor {
+  background: color-mix(in srgb, var(--bg-surface) 82%, var(--bg) 18%);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-field-label {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+/* One load-balancing target row: model selector, weight, and remove button. */
+.vm-target-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.vm-target-row .vm-target-model {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.vm-target-row .vm-target-weight {
+  flex: 0 0 88px;
+  width: 88px;
+}
+
+/* Default/effective summary on the left, the enable toggle on the right. */
+.vm-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vm-status-row .vm-status-toggle {
+  margin-left: auto;
+}
+
+.form-error {
+  padding: 10px 12px;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-surface));
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.form-error:empty {
+  display: none;
+}
+
+/* Per-field validation message, shown in place of the field's hint so the
+   complaint sits where the value that caused it is. */
+.form-field-error {
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.form-field-required {
+  margin-left: 3px;
+  color: var(--danger);
+}
+
+:is(input, textarea, select)[aria-invalid="true"] {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+}
+
+:is(input, textarea, select)[aria-invalid="true"]:focus {
+  border-color: var(--danger);
+}
+
+textarea {
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+textarea:focus {
+  border-color: var(--accent);
+}
+
+.form-input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.form-input:focus {
+  border-color: var(--accent);
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.failover-target-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.data-table tr.alias-row.is-valid td {
+  background: var(--alias-row-valid-bg);
+}
+
+.data-table tr.alias-row.is-valid:hover td {
+  background: var(--alias-row-valid-bg-hover);
+}
+
+.data-table tr.alias-row:not(.is-valid) td {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-surface));
+}
+
+.data-table tr.alias-row:not(.is-valid):hover td {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-surface-hover));
+}
+
+.data-table tr.alias-row.is-disabled td {
+  background: var(--bg-surface);
+  opacity: 0.58;
+}
+
+.data-table tr.alias-row.is-disabled:hover td {
+  background: var(--bg-surface-hover);
+  opacity: 0.72;
+}
+
+.data-table tr.model-access-disabled-row td {
+  background: color-mix(in srgb, var(--danger) 6%, var(--bg-surface));
+}
+
+.data-table tr.model-access-disabled-row:hover td {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-surface-hover));
+}
+
+.workflow-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workflow-section-head h4 {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.workflow-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workflow-feature-toggles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workflow-feature-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.workflow-feature-toggle input {
+  width: 16px;
+  height: 16px;
+}
