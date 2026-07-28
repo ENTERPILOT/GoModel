@@ -1,9 +1,11 @@
 <script>
-  // Budget editor modal + the "override existing budget" confirmation dialog.
+  // Budget editor modal (EditorDialog shell) + the "override existing budget"
+  // confirmation dialog.
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { auth } from "$lib/stores/auth.svelte.ts";
+  import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
+  import FormField from "$lib/components/molecules/FormField.svelte";
   import { budgetsStore as store } from "./budgets.svelte.js";
   import {
     budgetOverrideDialogMessage,
@@ -13,14 +15,6 @@
     budgetSubjectPlaceholder,
   } from "./budgets-helpers.js";
 
-  // Escape handling: the editor only closes when neither the auth dialog
-  // nor the override dialog sits on top of it.
-  function onEditorClose() {
-    if (!store.overrideDialogOpen && !auth.dialogOpen) {
-      store.closeForm();
-    }
-  }
-
   function onSubjectInput(event) {
     store.setFormSubject(event.target.value);
     // Keep the input strictly controlled.
@@ -28,135 +22,90 @@
   }
 </script>
 
-<Modal open={store.formOpen} variant="editor" onclose={onEditorClose}>
-  <div
-    class="model-editor budget-editor"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Budget editor"
-  >
-    <form
-      class="form"
-      onsubmit={(event) => {
-        event.preventDefault();
-        store.submitForm();
-      }}
-    >
-      <div class="editor-header">
-        <div>
-          <h3>{store.editing ? "Edit Budget" : "Create Budget"}</h3>
-        </div>
-        <DialogCloseButton
-          label="Close budget editor"
-          onclick={() => store.closeForm()}
-          iconClass=""
+<EditorDialog
+  open={store.formOpen}
+  title={store.editing ? "Edit Budget" : "Create Budget"}
+  ariaLabel="Budget editor"
+  error={store.formError}
+  submitting={store.formSubmitting}
+  submitLabel="Save Budget"
+  dialogClass="budget-editor"
+  canClose={() => !store.overrideDialogOpen}
+  onclose={() => store.closeForm()}
+  onsubmit={() => store.submitForm()}
+>
+  <div class="form-grid">
+    <FormField id="budget-scope" label="Scope">
+      <select
+        id="budget-scope"
+        class="form-select settings-select"
+        bind:value={store.form.scope}
+        disabled={store.editing}
+        onchange={() => store.syncScope()}
+      >
+        {#each budgetScopeOptions() as option (option.value)}
+          <option value={option.value}>{option.label}</option>
+        {/each}
+      </select>
+    </FormField>
+    <FormField id="budget-subject" label={budgetSubjectFieldLabel(store.form)}>
+      <input
+        id="budget-subject"
+        class="form-input"
+        type="text"
+        placeholder={budgetSubjectPlaceholder(store.form)}
+        value={store.form.subject}
+        oninput={onSubjectInput}
+        disabled={store.editing}
+        data-modal-autofocus={!store.editing || undefined}
+      />
+    </FormField>
+    <FormField id="budget-period" label="Period">
+      <select
+        id="budget-period"
+        class="form-select settings-select"
+        bind:value={store.form.period}
+        disabled={store.editing}
+        onchange={() => store.syncPeriodSeconds()}
+      >
+        {#each budgetPeriodOptions() as option (option.value)}
+          <option value={option.value}>{option.label}</option>
+        {/each}
+      </select>
+    </FormField>
+    {#if store.form.period === "custom"}
+      <FormField id="budget-period-seconds" label="Period Seconds">
+        <input
+          id="budget-period-seconds"
+          class="form-input"
+          type="number"
+          min="1"
+          step="1"
+          bind:value={store.form.period_seconds}
+          disabled={store.editing}
         />
-      </div>
-
-      <div class="form-grid">
-        <div class="form-field">
-          <label class="form-field-label" for="budget-scope">Scope</label>
-          <select
-            id="budget-scope"
-            class="form-select settings-select"
-            bind:value={store.form.scope}
-            disabled={store.editing}
-            onchange={() => store.syncScope()}
-          >
-            {#each budgetScopeOptions() as option (option.value)}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-field-label" for="budget-subject">
-            {budgetSubjectFieldLabel(store.form)}
-          </label>
-          <input
-            id="budget-subject"
-            class="form-input"
-            type="text"
-            placeholder={budgetSubjectPlaceholder(store.form)}
-            value={store.form.subject}
-            oninput={onSubjectInput}
-            disabled={store.editing}
-            data-modal-autofocus={!store.editing || undefined}
-          />
-        </div>
-        <div class="form-field">
-          <label class="form-field-label" for="budget-period">Period</label>
-          <select
-            id="budget-period"
-            class="form-select settings-select"
-            bind:value={store.form.period}
-            disabled={store.editing}
-            onchange={() => store.syncPeriodSeconds()}
-          >
-            {#each budgetPeriodOptions() as option (option.value)}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
-        </div>
-        {#if store.form.period === "custom"}
-          <div class="form-field">
-            <label class="form-field-label" for="budget-period-seconds">
-              Period Seconds
-            </label>
-            <input
-              id="budget-period-seconds"
-              class="form-input"
-              type="number"
-              min="1"
-              step="1"
-              bind:value={store.form.period_seconds}
-              disabled={store.editing}
-            />
-          </div>
-        {/if}
-        <div class="form-field">
-          <label class="form-field-label" for="budget-amount">Amount</label>
-          <input
-            id="budget-amount"
-            class="form-input"
-            type="number"
-            min="0"
-            step="0.0001"
-            placeholder="10.00"
-            bind:value={store.form.amount}
-            data-modal-autofocus={store.editing || undefined}
-          />
-        </div>
-      </div>
-      {#if store.editing}
-        <p class="form-hint">
-          Editing a budget updates its limit only. Use Reset to start a new
-          budget period.
-        </p>
-      {/if}
-
-      {#if store.formError}
-        <p class="form-error" role="alert" aria-live="assertive">
-          {store.formError}
-        </p>
-      {/if}
-      <div class="form-actions">
-        <button
-          type="button"
-          class="btn"
-          onclick={() => store.closeForm()}>Cancel</button
-        >
-        <button
-          type="submit"
-          class="btn btn-primary btn-with-icon"
-          disabled={store.formSubmitting}
-        >
-          <Icon name="save" class="form-action-icon" />
-          <span>{store.formSubmitting ? "Saving..." : "Save Budget"}</span>
-        </button>
-      </div>
-    </form>
+      </FormField>
+    {/if}
+    <FormField id="budget-amount" label="Amount">
+      <input
+        id="budget-amount"
+        class="form-input"
+        type="number"
+        min="0"
+        step="0.0001"
+        placeholder="10.00"
+        bind:value={store.form.amount}
+        data-modal-autofocus={store.editing || undefined}
+      />
+    </FormField>
   </div>
-</Modal>
+  {#if store.editing}
+    <p class="form-hint">
+      Editing a budget updates its limit only. Use Reset to start a new
+      budget period.
+    </p>
+  {/if}
+</EditorDialog>
 
 <Modal
   open={store.overrideDialogOpen}
