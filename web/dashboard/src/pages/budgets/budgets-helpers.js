@@ -2,7 +2,7 @@
 // exercise them directly (the relative format.js import resolves under both
 // Vite and plain node).
 
-import { formatCost } from "../../lib/utils/format.ts";
+import { formatCost } from "../../lib/utils/format.js";
 
 export function defaultBudgetForm() {
   return {

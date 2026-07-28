@@ -1,5 +1,5 @@
 <script>
-  import { demoMode } from "$lib/api/paths.ts";
+  import { demoMode } from "$lib/api/paths.js";
 </script>
 
 {#if demoMode()}

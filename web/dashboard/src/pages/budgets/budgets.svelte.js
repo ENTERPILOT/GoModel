@@ -1,11 +1,11 @@
 // Budgets page state (the budgets-page portion; budget settings live with
 // the Settings page). Talks to the /admin/budgets endpoints.
 
-import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.ts";
-import { flash } from "$lib/stores/flash.svelte.ts";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
-import { router } from "$lib/stores/router.svelte.ts";
-import { confirmDialog } from "$lib/stores/confirm.svelte.ts";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
+import { flash } from "$lib/stores/flash.svelte.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { router } from "$lib/stores/router.svelte.js";
+import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import {
   budgetDeleteBody,
   budgetInputUserPath,

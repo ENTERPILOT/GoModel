@@ -9,8 +9,8 @@
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { auth } from "$lib/stores/auth.svelte.ts";
-  import { router } from "$lib/stores/router.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.js";
+  import { router } from "$lib/stores/router.svelte.js";
   import { rateLimits } from "./rateLimits.svelte.js";
 
   function onclose() {

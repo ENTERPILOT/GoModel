@@ -8,7 +8,7 @@
 // `param` of a validation error, which is what lets a server-side rejection
 // land on the input that caused it.
 
-import { splitCommaList } from "../../lib/utils/format.ts";
+import { splitCommaList } from "../../lib/utils/format.js";
 
 export { splitCommaList };
 

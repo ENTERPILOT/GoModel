@@ -3,8 +3,8 @@
   // (deep link /admin/dashboard/usage/costs).
   import DatePicker from "$lib/components/molecules/DatePicker.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
-  import { auth } from "$lib/stores/auth.svelte.ts";
-  import { router } from "$lib/stores/router.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.js";
+  import { router } from "$lib/stores/router.svelte.js";
   import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
   import { usagePage } from "./usage.svelte.js";
   import FacetFilters from "./FacetFilters.svelte";

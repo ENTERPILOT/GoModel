@@ -4,7 +4,7 @@
   // own notice/error banners.
   import { fly, fade } from "svelte/transition";
   import { backOut } from "svelte/easing";
-  import { flash } from "$lib/stores/flash.svelte.ts";
+  import { flash } from "$lib/stores/flash.svelte.js";
 </script>
 
 <div class="flash-region">

@@ -2,8 +2,8 @@
   // The collapsed row of one audit entry: status/method/model/path on the
   // left, attempt pips, timing and the interactions trigger on the right.
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { timezone } from "$lib/stores/timezone.svelte.ts";
-  import { auditModelDisplay, formatTimestampUTC } from "$lib/utils/format.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { auditModelDisplay, formatTimestampUTC } from "$lib/utils/format.js";
   import AuditAttemptTrack from "./AuditAttemptTrack.svelte";
   import { auditList } from "./auditList.svelte.js";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";

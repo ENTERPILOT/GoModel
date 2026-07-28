@@ -2,8 +2,8 @@
 // building — the caller supplies theme colors and a CSS color resolver, so
 // node:test can exercise it without a DOM.
 
-import { formatTokensShort } from "../../lib/utils/format.ts";
-import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.ts";
+import { formatTokensShort } from "../../lib/utils/format.js";
+import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 
 // Horizontal input/output bars: one row per entity (model, user path, label).
 // In the default diverging view the input-side series (paid input,

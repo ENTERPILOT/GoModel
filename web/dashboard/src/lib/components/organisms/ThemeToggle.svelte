@@ -4,7 +4,7 @@
   // `compact` forces the narrow form regardless of viewport (collapsed
   // sidebar); below 768px it is used regardless.
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { themeStore } from "$lib/stores/ui.svelte.ts";
+  import { themeStore } from "$lib/stores/ui.svelte.js";
 
   let { compact = false } = $props();
 

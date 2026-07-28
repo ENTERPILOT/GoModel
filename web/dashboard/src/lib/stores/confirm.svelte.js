@@ -2,23 +2,7 @@
 // with confirmDialog.open({...}); the onConfirm callback runs on submit and
 // is responsible for closing the dialog when its action succeeds.
 
-export interface ConfirmDialogState {
-  open: boolean;
-  title: string;
-  titleId: string;
-  inputId: string;
-  message: string;
-  requiredText: string;
-  value: string;
-  confirmLabel: string;
-  icon: string;
-  dialogClass: string;
-  loading: boolean;
-  onConfirm: (() => void | Promise<void>) | null;
-  onClose: (() => void) | null;
-}
-
-function emptyState(): ConfirmDialogState {
+function emptyState() {
   return {
     open: false,
     title: "",
@@ -41,12 +25,12 @@ class ConfirmDialogStore {
   // Inline error text surfaced by the opener, kept local to the dialog.
   error = $state("");
 
-  open(options?: Partial<ConfirmDialogState>): void {
+  open(options) {
     this.error = "";
     this.state = { ...emptyState(), open: true, ...(options || {}) };
   }
 
-  close(): void {
+  close() {
     const current = this.state;
     if (typeof current.onClose === "function") {
       current.onClose();
@@ -55,7 +39,7 @@ class ConfirmDialogStore {
     this.error = "";
   }
 
-  ready(): boolean {
+  ready() {
     return (
       String(this.state.value || "")
         .trim()
@@ -66,13 +50,13 @@ class ConfirmDialogStore {
     );
   }
 
-  inputLabel(): string {
+  inputLabel() {
     return (
       "Type " + String(this.state.requiredText || "").trim() + " to confirm"
     );
   }
 
-  async submit(): Promise<void> {
+  async submit() {
     if (!this.ready()) {
       this.error = this.inputLabel() + ".";
       return;

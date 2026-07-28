@@ -8,7 +8,7 @@
   import EnabledToggle from "$lib/components/atoms/EnabledToggle.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { modelsStore } from "$lib/stores/models.svelte.ts";
+  import { modelsStore } from "$lib/stores/models.svelte.js";
   import { failover } from "./failover.svelte.js";
   import { qualifiedModelName } from "./failover-logic.js";
 </script>

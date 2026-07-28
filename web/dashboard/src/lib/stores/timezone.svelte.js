@@ -2,35 +2,29 @@
 // rides on every admin request as the X-GoModel-Timezone header so
 // server-side day grouping matches the UI.
 
-import { browserStorage } from "$lib/utils/storage.ts";
+import { browserStorage } from "$lib/utils/storage.js";
 
 const DEFAULT_TIMEZONE = "UTC";
 const TIMEZONE_STORAGE_KEY = "gomodel_timezone_override";
-const formatterCache = new Map<string, Intl.DateTimeFormat>();
-const supportedTimeZoneCache = new Map<string, boolean>();
+const formatterCache = new Map();
+const supportedTimeZoneCache = new Map();
 
-function pad(value: number): string {
+function pad(value) {
   return String(value).padStart(2, "0");
 }
 
-function getCachedFormatter(
-  locale: string,
-  options: Intl.DateTimeFormatOptions,
-): Intl.DateTimeFormat {
+function getCachedFormatter(locale, options) {
   const cacheKey = locale + "|" + JSON.stringify(options);
-  let formatter = formatterCache.get(cacheKey);
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat(locale, options);
-    formatterCache.set(cacheKey, formatter);
+  if (!formatterCache.has(cacheKey)) {
+    formatterCache.set(cacheKey, new Intl.DateTimeFormat(locale, options));
   }
-  return formatter;
+  return formatterCache.get(cacheKey);
 }
 
-export function isSupportedTimeZone(zone: string | null | undefined): boolean {
+export function isSupportedTimeZone(zone) {
   if (!zone) return false;
-  const cached = supportedTimeZoneCache.get(zone);
-  if (cached !== undefined) {
-    return cached;
+  if (supportedTimeZoneCache.has(zone)) {
+    return supportedTimeZoneCache.get(zone);
   }
   try {
     getCachedFormatter("en-US", { timeZone: zone }).format(new Date());
@@ -42,7 +36,7 @@ export function isSupportedTimeZone(zone: string | null | undefined): boolean {
   }
 }
 
-function detectBrowserTimeZone(): string {
+function detectBrowserTimeZone() {
   try {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (isSupportedTimeZone(zone)) {
@@ -54,7 +48,7 @@ function detectBrowserTimeZone(): string {
   return DEFAULT_TIMEZONE;
 }
 
-function loadTimezonePreference(): string {
+function loadTimezonePreference() {
   const storage = browserStorage();
   if (!storage) return "";
   let saved = "";
@@ -66,67 +60,55 @@ function loadTimezonePreference(): string {
   return isSupportedTimeZone(saved) ? saved : "";
 }
 
-function formatToPartsMap(
-  formatter: Intl.DateTimeFormat,
-  date: Date,
-): Record<string, string> {
-  const byType: Record<string, string> = {};
-  formatter.formatToParts(date).forEach((part) => {
-    byType[part.type] = part.value;
-  });
-  return byType;
-}
-
 class TimezoneStore {
   detectedTimezone = $state(DEFAULT_TIMEZONE);
   override = $state("");
-  options = $state<{ value: string; label: string }[]>([]);
+  options = $state([]);
   optionsLoaded = $state(false);
 
-  init(): void {
+  init() {
     this.detectedTimezone = detectBrowserTimeZone();
     this.override = loadTimezonePreference();
   }
 
-  effectiveTimezone(): string {
+  effectiveTimezone() {
     return this.override || this.detectedTimezone || DEFAULT_TIMEZONE;
   }
 
-  dateKeyInTimeZone(date: Date, timeZone: string): string {
+  dateKeyInTimeZone(date, timeZone) {
     const zone = isSupportedTimeZone(timeZone) ? timeZone : DEFAULT_TIMEZONE;
-    const byType = formatToPartsMap(
-      getCachedFormatter("en-CA", {
-        timeZone: zone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }),
-      date,
-    );
+    const parts = getCachedFormatter("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const byType = {};
+    parts.forEach((part) => {
+      byType[part.type] = part.value;
+    });
     return byType.year + "-" + byType.month + "-" + byType.day;
   }
 
-  formatTimestampInTimeZone(
-    ts: string | number | Date | null | undefined,
-    timeZone: string,
-  ): string {
+  formatTimestampInTimeZone(ts, timeZone) {
     if (ts === null || ts === undefined) return "-";
     const date = new Date(ts);
     if (Number.isNaN(date.getTime())) return "-";
     const zone = isSupportedTimeZone(timeZone) ? timeZone : DEFAULT_TIMEZONE;
-    const byType = formatToPartsMap(
-      getCachedFormatter("en-CA", {
-        timeZone: zone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hourCycle: "h23",
-      }),
-      date,
-    );
+    const parts = getCachedFormatter("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
+    const byType = {};
+    parts.forEach((part) => {
+      byType[part.type] = part.value;
+    });
     return (
       byType.year +
       "-" +
@@ -142,15 +124,15 @@ class TimezoneStore {
     );
   }
 
-  formatTimestamp(ts: string | number | Date | null | undefined): string {
+  formatTimestamp(ts) {
     return this.formatTimestampInTimeZone(ts, this.effectiveTimezone());
   }
 
-  currentDateKey(now?: Date): string {
+  currentDateKey(now) {
     return this.dateKeyInTimeZone(now || new Date(), this.effectiveTimezone());
   }
 
-  dateKeyToDate(key: string | null | undefined): Date | null {
+  dateKeyToDate(key) {
     if (!key) return null;
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
     if (!match) return null;
@@ -159,7 +141,7 @@ class TimezoneStore {
     );
   }
 
-  dateToDateKey(date: Date | null | undefined): string {
+  dateToDateKey(date) {
     if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
       return "";
     }
@@ -172,25 +154,23 @@ class TimezoneStore {
     );
   }
 
-  addDaysToDateKey(key: string, days: number): string {
+  addDaysToDateKey(key, days) {
     const date = this.dateKeyToDate(key);
     if (!date) return "";
     date.setUTCDate(date.getUTCDate() + days);
     return this.dateToDateKey(date);
   }
 
-  // currentDateKey always yields a parseable key, so this never returns null
-  // in practice; the fallback keeps the signature honest.
-  todayDate(): Date | null {
+  todayDate() {
     return this.dateKeyToDate(this.currentDateKey());
   }
 
-  startOfMonthDate(date?: Date | null): Date {
-    const value = date instanceof Date ? date : (this.todayDate() as Date);
+  startOfMonthDate(date) {
+    const value = date instanceof Date ? date : this.todayDate();
     return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
   }
 
-  timeZoneOffsetLabel(zone: string, now?: Date): string {
+  timeZoneOffsetLabel(zone, now) {
     const timeZone = isSupportedTimeZone(zone) ? zone : DEFAULT_TIMEZONE;
     try {
       const parts = getCachedFormatter("en-US", {
@@ -211,7 +191,7 @@ class TimezoneStore {
     }
   }
 
-  timeZoneOffsetMinutes(zone: string, now?: Date): number {
+  timeZoneOffsetMinutes(zone, now) {
     const match = /^UTC([+-])(\d{2}):(\d{2})$/.exec(
       this.timeZoneOffsetLabel(zone, now),
     );
@@ -220,22 +200,22 @@ class TimezoneStore {
     return match[1] === "-" ? -minutes : minutes;
   }
 
-  timeZoneOptionLabel(zone: string, now?: Date): string {
+  timeZoneOptionLabel(zone, now) {
     return zone + " (" + this.timeZoneOffsetLabel(zone, now) + ")";
   }
 
-  detectedTimeZoneLabel(): string {
+  detectedTimeZoneLabel() {
     return this.timeZoneOptionLabel(this.detectedTimezone);
   }
 
-  effectiveTimeZoneLabel(): string {
+  effectiveTimeZoneLabel() {
     return this.timeZoneOptionLabel(this.effectiveTimezone());
   }
 
-  ensureOptions(): void {
+  ensureOptions() {
     if (this.optionsLoaded) return;
     const now = new Date();
-    let zones: string[] = [];
+    let zones = [];
     try {
       if (typeof Intl.supportedValuesOf === "function") {
         zones = Intl.supportedValuesOf("timeZone");
@@ -263,7 +243,7 @@ class TimezoneStore {
     this.optionsLoaded = true;
   }
 
-  saveOverride(): void {
+  saveOverride() {
     const storage = browserStorage();
     if (storage) {
       if (this.override && isSupportedTimeZone(this.override)) {
@@ -285,7 +265,7 @@ class TimezoneStore {
     this.ensureOptions();
   }
 
-  clearOverride(): void {
+  clearOverride() {
     const storage = browserStorage();
     if (storage) {
       try {
@@ -297,7 +277,7 @@ class TimezoneStore {
     this.override = "";
   }
 
-  calendarTimeZoneText(): string {
+  calendarTimeZoneText() {
     const suffix = this.override ? "manual override" : "auto-detected";
     return (
       "Activity grouped by " + this.effectiveTimeZoneLabel() + " (" + suffix + ")"

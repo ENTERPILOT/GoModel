@@ -3,7 +3,7 @@
   // configured budget via the shared budgets store's typed confirmation.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { budgetsStore } from "$pages/budgets/budgets.svelte.js";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 </script>
 
 {#if runtimeConfig.budgetsVisible()}

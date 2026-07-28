@@ -5,7 +5,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
-  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.js";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
 </script>
 

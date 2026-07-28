@@ -5,7 +5,7 @@
   // data, options, plugins); it runs inside an effect so reactive reads are
   // tracked automatically.
   import Chart from "chart.js/auto";
-  import { themeStore } from "$lib/stores/ui.svelte.ts";
+  import { themeStore } from "$lib/stores/ui.svelte.js";
 
   let { build, class: className = "", ariaLabel = "" } = $props();
 

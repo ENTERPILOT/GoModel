@@ -5,7 +5,7 @@
 
 const API_KEY_STORAGE_KEY = "gomodel_api_key";
 
-export function normalizeApiKey(value: unknown): string {
+export function normalizeApiKey(value) {
   const key = String(value || "").trim();
   if (/^Bearer\s*$/i.test(key)) {
     return "";
@@ -26,7 +26,7 @@ class AuthStore {
   // timezone change, runtime refresh). Pages watch this in an $effect.
   refreshTick = $state(0);
 
-  init(): void {
+  init() {
     try {
       this.apiKey = normalizeApiKey(
         localStorage.getItem(API_KEY_STORAGE_KEY) || "",
@@ -36,11 +36,11 @@ class AuthStore {
     }
   }
 
-  hasApiKey(): boolean {
+  hasApiKey() {
     return normalizeApiKey(this.apiKey) !== "";
   }
 
-  save(): void {
+  save() {
     this.apiKey = normalizeApiKey(this.apiKey);
     try {
       localStorage.setItem(API_KEY_STORAGE_KEY, this.apiKey);
@@ -49,16 +49,16 @@ class AuthStore {
     }
   }
 
-  openDialog(): void {
+  openDialog() {
     this.dialogOpen = true;
   }
 
-  closeDialog(): void {
+  closeDialog() {
     this.dialogOpen = false;
   }
 
   // submit applies a newly entered key and triggers a global refresh.
-  submit(): boolean {
+  submit() {
     const apiKey = normalizeApiKey(this.apiKey);
     if (!apiKey) {
       this.apiKey = "";
@@ -79,7 +79,7 @@ class AuthStore {
     return true;
   }
 
-  refresh(): void {
+  refresh() {
     this.refreshTick++;
   }
 
@@ -87,7 +87,7 @@ class AuthStore {
   // key. Stale responses (older generation) are ignored silently. An optional
   // message replaces the generic dialog error text (e.g. a valid key that
   // lacks dashboard access).
-  handleUnauthorized(requestGeneration?: number, message = ""): boolean {
+  handleUnauthorized(requestGeneration, message = "") {
     if (
       typeof requestGeneration === "number" &&
       requestGeneration < this.generation

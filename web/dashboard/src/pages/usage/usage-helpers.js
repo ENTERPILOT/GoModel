@@ -1,7 +1,7 @@
 // Pure logic for the Usage page.
 // Kept free of Svelte/DOM dependencies so node:test can exercise it.
 
-import { formatCost, formatNumber, formatTokensShort } from "../../lib/utils/format.ts";
+import { formatCost, formatNumber, formatTokensShort } from "../../lib/utils/format.js";
 
 // emptyUsagePageSummary: the filtered usage-page summaries carry the cache
 // split and rewrite-savings fields on top of the shared totals.
@@ -382,4 +382,4 @@ export function chartWrapHeight(labelCount) {
 
 // --- Label chips ---
 
-export { labelColor } from "../../lib/utils/chartTheme.ts";
+export { labelColor } from "../../lib/utils/chartTheme.js";

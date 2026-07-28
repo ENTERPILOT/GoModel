@@ -2,12 +2,12 @@
 // /admin/workflows. Pure form/scope/payload rules live in workflowsLogic.js;
 // runtime feature gates come from the shared runtimeConfig store. The
 // request guard ladder (stale → unavailable → error) lives in
-// $lib/api/adminCrud.ts.
+// $lib/api/adminCrud.js.
 
-import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.ts";
-import { flash } from "$lib/stores/flash.svelte.ts";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
-import { modelsStore } from "$lib/stores/models.svelte.ts";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
+import { flash } from "$lib/stores/flash.svelte.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { modelsStore } from "$lib/stores/models.svelte.js";
 import {
   defaultWorkflowForm,
   emptyHydratedScope,

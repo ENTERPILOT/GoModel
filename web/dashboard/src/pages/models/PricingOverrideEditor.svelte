@@ -4,7 +4,7 @@
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { formatPriceFine } from "$lib/utils/format.ts";
+  import { formatPriceFine } from "$lib/utils/format.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
 
   const po = pricingOverrides;

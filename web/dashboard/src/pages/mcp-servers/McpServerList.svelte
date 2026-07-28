@@ -4,8 +4,8 @@
   // rows are read-only: no edit or delete buttons.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { timezone } from "$lib/stores/timezone.svelte.ts";
-  import { formatNumber } from "$lib/utils/format.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { formatNumber } from "$lib/utils/format.js";
   import { mcpServers } from "./mcpServers.svelte.js";
   import {
     mcpServerEndpointLabel,

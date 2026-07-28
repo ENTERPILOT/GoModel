@@ -1,5 +1,5 @@
 // Duration for fast UI transitions, honoring prefers-reduced-motion.
-export function motionDuration(ms: number): number {
+export function motionDuration(ms) {
   if (
     typeof window !== "undefined" &&
     typeof window.matchMedia === "function" &&

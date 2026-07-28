@@ -1,21 +1,14 @@
 // Sidebar navigation registry: the ordered list of dashboard pages with
 // their lucide icon names and optional runtime-config visibility gates.
-// `visible` reads the runtimeConfig runes store, so call it inside a
-// reactive context (Sidebar's $derived) to re-filter when flags load.
+// Each item is { page, label, icon, visible? }: `page` is the route id under
+// /admin/dashboard/{page} (see $lib/stores/router), `icon` a kebab-case
+// lucide name for the Icon atom, and `visible` an optional feature gate —
+// it reads the runtimeConfig runes store, so call it inside a reactive
+// context (Sidebar's $derived) to re-filter when flags load.
 
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 
-export interface NavItem {
-  /** Route id under /admin/dashboard/{page} (see $lib/stores/router). */
-  page: string;
-  label: string;
-  /** kebab-case lucide icon name for the Icon atom. */
-  icon: string;
-  /** Feature gate; omitted means always visible. Evaluate reactively. */
-  visible?: () => boolean;
-}
-
-export const NAV_ITEMS: NavItem[] = [
+export const NAV_ITEMS = [
   { page: "overview", label: "Overview", icon: "layout-dashboard" },
   { page: "providers-config", label: "Providers", icon: "server-cog" },
   { page: "models", label: "Models", icon: "box" },

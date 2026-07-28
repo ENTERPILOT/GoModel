@@ -1,7 +1,7 @@
 <script>
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
-  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.js";
   import { workflowsStore as wf } from "./workflows.svelte.js";
   import WorkflowEditor from "./WorkflowEditor.svelte";
   import WorkflowList from "./WorkflowList.svelte";

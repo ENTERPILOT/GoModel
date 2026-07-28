@@ -1,10 +1,10 @@
 // Guardrails page state: definitions list + schema-driven editor form.
 // Handles the /admin/guardrails endpoints, 503 "feature unavailable"
 // responses, and the notice/error flow. The request guard ladder
-// (stale → unavailable → error) lives in $lib/api/adminCrud.ts.
+// (stale → unavailable → error) lives in $lib/api/adminCrud.js.
 
-import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.ts";
-import { flash } from "$lib/stores/flash.svelte.ts";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import {
   buildGuardrailPayload,
   defaultGuardrailConfig,

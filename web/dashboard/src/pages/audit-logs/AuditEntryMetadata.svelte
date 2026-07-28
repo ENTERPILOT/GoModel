@@ -1,6 +1,6 @@
 <script>
   // Metadata badge strip under an expanded audit entry.
-  import { providerDisplayValue, qualifiedResolvedModelDisplay } from "$lib/utils/format.ts";
+  import { providerDisplayValue, qualifiedResolvedModelDisplay } from "$lib/utils/format.js";
   import { workflowFailoverTarget } from "./audit-logic.js";
 
   let { entry } = $props();

@@ -2,9 +2,9 @@
 // /admin/dashboard/audit -> audit-logs,
 // /admin/dashboard/settings/guardrails -> guardrails.
 
-import { gomodelPath, unprefixedPath } from "$lib/api/paths.ts";
+import { gomodelPath, unprefixedPath } from "$lib/api/paths.js";
 
-export const PAGES: string[] = [
+export const PAGES = [
   "overview",
   "usage",
   "budgets",
@@ -19,15 +19,10 @@ export const PAGES: string[] = [
   "settings",
 ];
 
-export interface Route {
-  page: string;
-  sub: string | null;
-}
-
 // stripViteBase removes the Vite base prefix when the app is served under
 // one (defensive: shouldn't occur since dev runs at "/", but keeps routes
 // working if the page is ever opened via the asset base path).
-function stripViteBase(path: string): string {
+function stripViteBase(path) {
   const base = import.meta.env.BASE_URL || "/";
   if (base !== "/" && path.startsWith(base)) {
     return "/" + path.slice(base.length).replace(/^\/+/, "");
@@ -35,7 +30,7 @@ function stripViteBase(path: string): string {
   return path;
 }
 
-export function parseRoute(pathname: string): Route {
+export function parseRoute(pathname) {
   const path = stripViteBase(unprefixedPath(pathname)).replace(/\/$/, "");
   const rest = path.replace("/admin/dashboard", "").replace(/^\//, "");
   const parts = rest.split("/");
@@ -53,9 +48,9 @@ export function parseRoute(pathname: string): Route {
 
 class Router {
   page = $state("overview");
-  sub = $state<string | null>(null);
+  sub = $state(null);
 
-  init(): void {
+  init() {
     const { page, sub } = parseRoute(window.location.pathname);
     this.page = page;
     this.sub = sub;
@@ -66,7 +61,7 @@ class Router {
     });
   }
 
-  navigate(page: string, sub: string | null = null): void {
+  navigate(page, sub = null) {
     const suffix = sub ? "/" + sub : "";
     history.pushState(
       null,

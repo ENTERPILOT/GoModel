@@ -1,7 +1,7 @@
 // Overview usage chart + prompt-cache gauge logic.
 // Pure functions so the chart math is testable with node.
 
-import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.ts";
+import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 import { tokenAxisTicks } from "./chartStyle.js";
 
 function dateToKey(date) {

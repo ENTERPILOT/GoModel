@@ -2,31 +2,16 @@
 // timezone header, and stale-auth handling. Pages should use getJSON /
 // sendJSON; apiFetch is the low-level escape hatch (SSE, blobs, ...).
 
-import { gomodelPath } from "./paths.ts";
-import { auth, normalizeApiKey } from "$lib/stores/auth.svelte.ts";
-import { timezone } from "$lib/stores/timezone.svelte.ts";
+import { gomodelPath } from "./paths.js";
+import { auth, normalizeApiKey } from "$lib/stores/auth.svelte.js";
+import { timezone } from "$lib/stores/timezone.svelte.js";
 
 // STALE marks a response that belongs to a previous API key; callers must
 // leave their state untouched when they see it.
 export const STALE = Symbol("stale-auth-response");
 
-// The envelope every getJSON/sendJSON call resolves to. `stale === true`
-// means the response was issued under an older API key: leave state alone.
-export interface ApiResult<T = unknown> {
-  ok: boolean;
-  stale: boolean;
-  status: number;
-  data: T | null;
-  res: Response;
-}
-
-// fetch() init plus the console label used when a request fails.
-export interface ApiRequestOptions extends RequestInit {
-  label?: string;
-}
-
-export function apiHeaders(): Record<string, string> {
-  const h: Record<string, string> = { "Content-Type": "application/json" };
+export function apiHeaders() {
+  const h = { "Content-Type": "application/json" };
   const apiKey = normalizeApiKey(auth.apiKey);
   if (apiKey) {
     h.Authorization = "Bearer " + apiKey;
@@ -36,21 +21,14 @@ export function apiHeaders(): Record<string, string> {
 }
 
 // apiFetch performs a raw fetch with auth headers against an app path.
-export function apiFetch(
-  path: string,
-  options: ApiRequestOptions = {},
-): Promise<Response> {
+export function apiFetch(path, options = {}) {
   return fetch(gomodelPath(path), {
     ...options,
     headers: { ...apiHeaders(), ...(options.headers || {}) },
   });
 }
 
-async function request(
-  path: string,
-  options: ApiRequestOptions,
-  { label = path, parse = true }: { label?: string; parse?: boolean } = {},
-): Promise<ApiResult> {
+async function request(path, options, { label = path, parse = true } = {}) {
   const generation = auth.generation;
   const res = await apiFetch(path, options);
   if (res.status === 401) {
@@ -59,7 +37,7 @@ async function request(
   }
   const stale = generation < auth.generation;
   if (!res.ok) {
-    let data: unknown = null;
+    let data = null;
     try {
       data = await res.json();
     } catch {
@@ -67,8 +45,7 @@ async function request(
     }
     // A valid key without dashboard access is as unusable as a wrong key:
     // reopen the auth dialog with a message explaining why.
-    const code = (data as { error?: { code?: string } } | null)?.error?.code;
-    if (res.status === 403 && code === "dashboard_access_denied") {
+    if (res.status === 403 && data?.error?.code === "dashboard_access_denied") {
       auth.handleUnauthorized(
         generation,
         "This API key does not have dashboard access. Use the master key or a key with dashboard access.",
@@ -80,7 +57,7 @@ async function request(
     }
     return { ok: false, stale, status: res.status, data, res };
   }
-  let data: unknown = null;
+  let data = null;
   if (parse) {
     try {
       data = await res.json();
@@ -93,10 +70,7 @@ async function request(
 
 // getJSON fetches JSON from an admin endpoint.
 // Returns { ok, stale, status, data, res }. Network errors propagate.
-export function getJSON(
-  path: string,
-  options: ApiRequestOptions = {},
-): Promise<ApiResult> {
+export function getJSON(path, options = {}) {
   return request(path, { ...options, method: options.method || "GET" }, {
     label: options.label || path,
   });
@@ -104,13 +78,8 @@ export function getJSON(
 
 // sendJSON sends a JSON body (POST/PUT/DELETE) and parses a JSON response
 // when one is present.
-export function sendJSON(
-  path: string,
-  method: string,
-  body?: unknown,
-  options: ApiRequestOptions = {},
-): Promise<ApiResult> {
-  const init: ApiRequestOptions = { ...options, method };
+export function sendJSON(path, method, body, options = {}) {
+  const init = { ...options, method };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
@@ -118,9 +87,8 @@ export function sendJSON(
 }
 
 // errorMessage extracts a human-readable message from an admin error payload.
-export { errorMessage, errorPayloadMessage } from "./errors.ts";
+export { errorMessage, errorPayloadMessage } from "./errors.js";
 
-export function isAbortError(error: unknown): boolean {
-  const e = error as { name?: string; code?: number } | null | undefined;
-  return Boolean(e) && (e?.name === "AbortError" || e?.code === 20);
+export function isAbortError(error) {
+  return Boolean(error) && (error.name === "AbortError" || error.code === 20);
 }

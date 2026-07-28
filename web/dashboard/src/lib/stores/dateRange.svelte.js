@@ -2,18 +2,18 @@
 // the overview, usage, audit, and settings pages. All math is UTC-day based
 // in the effective timezone.
 
-import { timezone } from "./timezone.svelte.ts";
-import { formatDateParam } from "$lib/utils/format.ts";
+import { timezone } from "./timezone.svelte.js";
+import { formatDateParam } from "$lib/utils/format.js";
 
 class DateRangeStore {
   days = $state("30");
   selectedPreset = $state("30");
-  customStartDate = $state<Date | null>(null);
-  customEndDate = $state<Date | null>(null);
+  customStartDate = $state(null);
+  customEndDate = $state(null);
   interval = $state("daily");
 
   // queryStr renders the window as usage-endpoint query params.
-  queryStr(): string {
+  queryStr() {
     if (this.customStartDate && this.customEndDate) {
       return (
         "start_date=" +
@@ -25,14 +25,14 @@ class DateRangeStore {
     return "days=" + this.days;
   }
 
-  selectPreset(days: string): void {
+  selectPreset(days) {
     this.selectedPreset = days;
     this.customStartDate = null;
     this.customEndDate = null;
     this.days = days;
   }
 
-  dateRangeLabel(): string {
+  dateRangeLabel() {
     if (this.selectedPreset) return "Last " + this.selectedPreset + " days";
     if (this.customStartDate && this.customEndDate) {
       return (
@@ -47,7 +47,7 @@ class DateRangeStore {
     return "Last 30 days";
   }
 
-  formatDateShort(date: Date): string {
+  formatDateShort(date) {
     const months = [
       "Jan",
       "Feb",
@@ -71,7 +71,7 @@ class DateRangeStore {
     );
   }
 
-  rangeStart(): Date | null {
+  rangeStart() {
     if (this.customStartDate) return this.customStartDate;
     if (this.selectedPreset) {
       return timezone.dateKeyToDate(
@@ -84,7 +84,7 @@ class DateRangeStore {
     return null;
   }
 
-  rangeEnd(): Date | null {
+  rangeEnd() {
     if (this.customEndDate) return this.customEndDate;
     if (this.customStartDate || this.selectedPreset) {
       return timezone.todayDate();
@@ -92,8 +92,8 @@ class DateRangeStore {
     return null;
   }
 
-  chartTitle(): string {
-    const titles: Record<string, string> = {
+  chartTitle() {
+    const titles = {
       daily: "Daily",
       weekly: "Weekly",
       monthly: "Monthly",

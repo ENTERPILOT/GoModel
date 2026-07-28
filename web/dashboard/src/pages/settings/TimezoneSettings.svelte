@@ -2,8 +2,8 @@
   // Timezone override selector bound to the shared timezone store. Saving or
   // clearing the override triggers a global data refresh so every page
   // refetches in the new effective timezone.
-  import { auth } from "$lib/stores/auth.svelte.ts";
-  import { timezone } from "$lib/stores/timezone.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.js";
+  import { timezone } from "$lib/stores/timezone.svelte.js";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
 
   function save() {

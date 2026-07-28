@@ -1,7 +1,7 @@
 // Summary-card totals + cache meter math. Pure functions taking the usage
 // summary / cache overview payloads.
 
-import { formatNumber } from "../../lib/utils/format.ts";
+import { formatNumber } from "../../lib/utils/format.js";
 
 export function summaryTotalTokens(summary) {
   const s = summary || {};

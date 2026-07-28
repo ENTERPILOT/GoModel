@@ -2,7 +2,7 @@
   // Page-level data filters: every widget on the usage page follows them.
   // Each facet dropdown honors every filter except its own (faceted search).
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
-  import { debounced } from "$lib/utils/debounce.ts";
+  import { debounced } from "$lib/utils/debounce.js";
   import { usagePage } from "./usage.svelte.js";
 
   const onUserPathInput = debounced(() => usagePage.onUsageFilterChanged());

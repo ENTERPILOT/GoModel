@@ -4,8 +4,8 @@
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
-  import { router } from "$lib/stores/router.svelte.ts";
-  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { router } from "$lib/stores/router.svelte.js";
+  import { auth } from "$lib/stores/auth.svelte.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
   import AuthKeyEditor from "./AuthKeyEditor.svelte";
   import AuthKeyLabelsEditor from "./AuthKeyLabelsEditor.svelte";

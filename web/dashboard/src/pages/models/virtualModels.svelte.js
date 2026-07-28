@@ -1,9 +1,9 @@
 // Virtual models (redirects/aliases, load balancers, access policies) state
 // for the Models page.
 
-import { errorMessage, getJSON, sendJSON } from "$lib/api/client.ts";
-import { flash } from "$lib/stores/flash.svelte.ts";
-import { modelsStore } from "$lib/stores/models.svelte.ts";
+import { errorMessage, getJSON, sendJSON } from "$lib/api/client.js";
+import { flash } from "$lib/stores/flash.svelte.js";
+import { modelsStore } from "$lib/stores/models.svelte.js";
 import {
   GLOBAL_OVERRIDE_SELECTOR,
   aliasFormTargets,

@@ -8,7 +8,7 @@
 // registers itself as the live-conversation sink (refreshLiveConversation),
 // so an open live conversation re-renders as stream chunks arrive.
 
-import { getJSON } from "$lib/api/client.ts";
+import { getJSON } from "$lib/api/client.js";
 import { liveLogs } from "./liveLogs.svelte.js";
 import {
   buildConversationMessages,

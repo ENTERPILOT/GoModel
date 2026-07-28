@@ -2,11 +2,11 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import GoModelLogo from "$lib/components/atoms/GoModelLogo.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
-  import { router } from "$lib/stores/router.svelte.ts";
-  import { sidebar } from "$lib/stores/ui.svelte.ts";
-  import { auth } from "$lib/stores/auth.svelte.ts";
-  import { gomodelPath } from "$lib/api/paths.ts";
-  import { NAV_ITEMS } from "./navigation.ts";
+  import { router } from "$lib/stores/router.svelte.js";
+  import { sidebar } from "$lib/stores/ui.svelte.js";
+  import { auth } from "$lib/stores/auth.svelte.js";
+  import { gomodelPath } from "$lib/api/paths.js";
+  import { NAV_ITEMS } from "./navigation.js";
 
   // Visibility gates read the runtimeConfig store, so this re-filters when
   // the flags load.

@@ -2,7 +2,7 @@
   // The workflow-id pill in the pipeline chart's top-right corner. Collapsed
   // to "id: ..." until hovered/focused, and click-to-copy.
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { createCopyState } from "$lib/utils/clipboard.svelte.ts";
+  import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 
   let { workflowID = "" } = $props();
 

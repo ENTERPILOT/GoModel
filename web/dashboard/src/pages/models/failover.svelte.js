@@ -1,9 +1,9 @@
 // Failover rules store (editor modal + generated-drafts modal).
 
-import { getJSON, sendJSON } from "$lib/api/client.ts";
-import { flash } from "$lib/stores/flash.svelte.ts";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
-import { confirmDialog } from "$lib/stores/confirm.svelte.ts";
+import { getJSON, sendJSON } from "$lib/api/client.js";
+import { flash } from "$lib/stores/flash.svelte.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import {
   qualifiedModelName,
   failoverPrimaryModel,

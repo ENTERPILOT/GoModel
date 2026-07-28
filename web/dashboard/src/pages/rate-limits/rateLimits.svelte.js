@@ -2,9 +2,9 @@
 // gauge buttons and the effective-limits inspector. Pure logic lives in
 // ./rateLimitsLogic.js.
 
-import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.ts";
-import { flash } from "$lib/stores/flash.svelte.ts";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
+import { flash } from "$lib/stores/flash.svelte.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import * as logic from "./rateLimitsLogic.js";
 
 class RateLimitsStore {

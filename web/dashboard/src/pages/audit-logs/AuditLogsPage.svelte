@@ -6,10 +6,10 @@
   import { untrack } from "svelte";
   import { flip } from "svelte/animate";
   import { slide } from "svelte/transition";
-  import { motionDuration } from "$lib/utils/motion.ts";
-  import { auth } from "$lib/stores/auth.svelte.ts";
-  import { router } from "$lib/stores/router.svelte.ts";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+  import { motionDuration } from "$lib/utils/motion.js";
+  import { auth } from "$lib/stores/auth.svelte.js";
+  import { router } from "$lib/stores/router.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import DatePicker from "$lib/components/molecules/DatePicker.svelte";
   import Pagination from "$lib/components/molecules/Pagination.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";

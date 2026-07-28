@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { errorMessage, errorPayloadMessage } from "../src/lib/api/errors.ts";
+import { errorMessage, errorPayloadMessage } from "../src/lib/api/errors.js";
 
 test("errorPayloadMessage extracts the admin error payload message", () => {
   assert.equal(

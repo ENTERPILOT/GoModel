@@ -3,7 +3,7 @@
   // switches its columns per category.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
-  import { modelsStore } from "$lib/stores/models.svelte.ts";
+  import { modelsStore } from "$lib/stores/models.svelte.js";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";

@@ -5,8 +5,8 @@
 // workflowChartLogic.workflowAuditChart(entry, source, caps)); this store owns
 // the version cache the audit page resolves `source` from.
 
-import { getJSON } from "$lib/api/client.ts";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+import { getJSON } from "$lib/api/client.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 
 class AuditWorkflowsStore {
   // workflow_version_id → workflow version, or null for known-missing

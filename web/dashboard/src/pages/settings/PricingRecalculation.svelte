@@ -2,13 +2,13 @@
   // Usage pricing recalculation (POST /admin/usage/recalculate-pricing),
   // gated on the USAGE_PRICING_RECALCULATION_ENABLED runtime flag and
   // guarded by the shared typed-confirmation dialog ("recalculate").
-  import { flash } from "$lib/stores/flash.svelte.ts";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
-  import { dateRange } from "$lib/stores/dateRange.svelte.ts";
-  import { timezone } from "$lib/stores/timezone.svelte.ts";
-  import { confirmDialog } from "$lib/stores/confirm.svelte.ts";
-  import { usageData } from "$lib/stores/usageData.svelte.ts";
-  import { sendJSON } from "$lib/api/client.ts";
+  import { flash } from "$lib/stores/flash.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+  import { dateRange } from "$lib/stores/dateRange.svelte.js";
+  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { confirmDialog } from "$lib/stores/confirm.svelte.js";
+  import { usageData } from "$lib/stores/usageData.svelte.js";
+  import { sendJSON } from "$lib/api/client.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import DatePicker from "$lib/components/molecules/DatePicker.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";

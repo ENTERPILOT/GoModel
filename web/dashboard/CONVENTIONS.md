@@ -35,22 +35,15 @@ follow these rules so the pages compose into one coherent app.
      `ProviderStatusCard`) cannot hand that CSS to a child component.
 4. **Svelte 5 runes only.** `$state`, `$derived`, `$effect`, `$props`,
    snippets/`{@render}`. No legacy `$:` reactivity, no svelte/store.
-5. **The foundation is TypeScript.** Everything under `src/lib` (except
-   `.svelte` components) is strict `.ts`/`.svelte.ts` checked via
-   `tsconfig.json`; import it with explicit `.ts` specifiers
-   (`$lib/api/client.ts`) — node runs them directly via type stripping.
-   Page code under `src/pages` stays JS (`allowJs`, unchecked) until a
-   page is deliberately converted; convert a page's modules wholesale when
-   you do, don't mix.
-6. **Files:** page code lives in `src/pages/<page>/`. The entry component is
+5. **Files:** page code lives in `src/pages/<page>/`. The entry component is
    `<Pascal>Page.svelte`. Split big pages into sub-components in the same
    directory (atomic design: compose from
    `$lib/components/atoms|molecules|organisms`). Keep files under ~400 lines
    where practical.
-7. **Shared foundation code lives in `src/lib/`** (plus `src/App.svelte`) —
+6. **Shared foundation code lives in `src/lib/`** (plus `src/App.svelte`) —
    changes there affect every page, so keep them deliberate. Page-specific
    helpers belong in the page directory.
-8. **Do NOT add new npm dependencies.**
+7. **Do NOT add new npm dependencies.**
 
 ## Foundation — use it, don't re-implement
 
@@ -58,11 +51,11 @@ Imports use the `$lib` alias. **Each module documents its own exports and
 props in its header comment** — read those for the details; this list exists
 so you know what already exists.
 
-### HTTP: `$lib/api/client.ts`
+### HTTP: `$lib/api/client.js`
 
 ```js
 const result = await getJSON("/admin/foo?x=1", { label: "foo", signal });
-// result = { ok, stale, status, data, res }  (ApiResult)
+// result = { ok, stale, status, data, res }
 const saved = await sendJSON("/admin/foo", "POST", payload, { label: "save foo" });
 ```
 
@@ -71,17 +64,17 @@ const saved = await sendJSON("/admin/foo", "POST", payload, { label: "save foo" 
 - 401s are handled globally (the auth dialog opens); `result.ok` is `false`.
 - `errorMessage(result, fallback)` reads a result envelope;
   `errorPayloadMessage(data, fallback)` reads a raw `{error:{message}}` body.
-  Both really live in `$lib/api/errors.ts`, which imports no Svelte runtime —
+  Both really live in `$lib/api/errors.js`, which imports no Svelte runtime —
   pure page logic and its `node:test` suite import them from there directly.
 - `apiFetch(path, options)` is the raw escape hatch (SSE, blobs); it adds auth
   + timezone headers and the base path. Never call `fetch` on `/admin/...`.
-- **CRUD stores use `$lib/api/adminCrud.ts`**: `loadAdminList` /
+- **CRUD stores use `$lib/api/adminCrud.js`**: `loadAdminList` /
   `sendAdminMutation` reduce a request to an outcome object with the guard
   ladder applied in the one correct order (stale first, then
   unavailable-503, then errors; 401 loads stay silent). Apply the outcome
   to your `$state` fields instead of re-implementing the branches.
 
-### Stores (`$lib/stores/*.svelte.ts`) — all singletons
+### Stores (`$lib/stores/*.svelte.js`) — all singletons
 
 `auth` · `router` · `themeStore` (bump `tick` to rebuild charts) · `sidebar` ·
 `modals` (owned by the `Modal` atom — don't touch) · `timezone` ·
@@ -97,7 +90,7 @@ confirmations).
 - **molecules** — `LoadingState`, `Pagination`, `DatePicker`, `FilterInput`,
   `InlineHelpSection`, `ChartCanvas`, `DemoModeBanner`, `FormField`.
 - **organisms** — `AuthBanner`, `AuthDialog`, `Sidebar` (nav items in
-  `navigation.ts`), `ThemeToggle`, `FlashMessages`,
+  `navigation.js`), `ThemeToggle`, `FlashMessages`,
   `TypedConfirmationDialog`, `EditorDialog`.
 
 `Modal` handles Escape/backdrop/scroll-lock and autofocuses
@@ -109,11 +102,11 @@ cells inside — never hand-roll that shell again.
 
 ### Utils
 
-`format.ts` (numbers, costs, tokens, UTC dates and date params, comma lists,
+`format.js` (numbers, costs, tokens, UTC dates and date params, comma lists,
 provider/model display) ·
-`chartTheme.ts` (theme colors + the shared Chart.js style fragments) ·
-`clipboard.svelte.ts` · `debounce.ts` · `storage.ts` (localStorage can be
-absent or blocked — never touch it directly) · `api/paths.ts` (`gomodelPath`).
+`chartTheme.js` (theme colors + the shared Chart.js style fragments) ·
+`clipboard.svelte.js` · `debounce.js` · `storage.js` (localStorage can be
+absent or blocked — never touch it directly) · `api/paths.js` (`gomodelPath`).
 
 ## Page skeleton
 
@@ -153,10 +146,8 @@ using `node:test` + `assert` (ESM imports; no DOM).
 
 Those `.js` files must use **relative** imports, not `$lib` — node runs them
 without Vite, so the alias does not resolve. That also means they cannot
-import a `.svelte.js`/`.svelte.ts` store (runes need the compiler); keep
-shared helpers they need in a plain module. Importing the plain `.ts`
-foundation modules (e.g. `../../lib/api/errors.ts`) is fine — node strips
-the types natively.
+import a `.svelte.js` store (runes need the compiler); keep shared helpers
+they need in a plain module.
 
 ## Verification
 

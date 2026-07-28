@@ -2,7 +2,7 @@
   // One request/response pane inside an expanded audit entry. `pane` is an
   // object built by audit-logic.js.
   import CopyButton from "$lib/components/atoms/CopyButton.svelte";
-  import { createCopyState } from "$lib/utils/clipboard.svelte.ts";
+  import { createCopyState } from "$lib/utils/clipboard.svelte.js";
   import { formatJSON } from "./audit-logic.js";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import { isAudioBody, renderAudioBody } from "./conversation-helpers.js";

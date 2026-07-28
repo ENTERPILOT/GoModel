@@ -13,60 +13,35 @@
 //
 // The helpers never touch store state themselves — each store applies the
 // returned outcome to its own $state fields, so public store APIs stay put.
+//
+// Outcomes: loadAdminList resolves to { status, items, error, result } and
+// sendAdminMutation to { status, error, result }, where status is one of
+// "ok" | "stale" | "unavailable" | "error", `error` is the message for the
+// page/form error slot (empty unless status === "error", except the
+// unavailable mutation message), and `result` is the raw getJSON/sendJSON
+// envelope (null when the request itself threw).
 
-import {
-  getJSON,
-  isAbortError,
-  sendJSON,
-  type ApiResult,
-  type ApiRequestOptions,
-} from "./client.ts";
-import { errorPayloadMessage } from "./errors.ts";
-
-export type AdminOutcomeStatus = "ok" | "stale" | "unavailable" | "error";
-
-export interface AdminListOutcome<T = unknown> {
-  status: AdminOutcomeStatus;
-  /** Normalized rows; empty on unavailable/error, untouched rows on ok. */
-  items: T[];
-  /** Message for the page's inline error slot; empty unless status === "error". */
-  error: string;
-  result: ApiResult | null;
-}
-
-export interface AdminMutationOutcome {
-  status: AdminOutcomeStatus;
-  /** Message for the form's error slot; empty unless status === "error". */
-  error: string;
-  result: ApiResult | null;
-}
-
-interface LoadAdminListOptions<T> {
-  /** Console/error label ("budgets"). */
-  label: string;
-  /** Inline error fallback; defaults to "Unable to load {label}.". */
-  errorFallback?: string;
-  /** Statuses meaning "feature disabled" (default [503]). */
-  unavailableStatuses?: number[];
-  /** Maps the raw payload to rows; defaults to as-is array (else []). */
-  normalize?: (data: unknown) => T[];
-  /** Extra fetch options (signal, ...). */
-  options?: ApiRequestOptions;
-}
+import { getJSON, isAbortError, sendJSON } from "./client.js";
+import { errorPayloadMessage } from "./errors.js";
 
 // loadAdminList GETs an admin collection and reduces the response to an
-// outcome the store can apply in a few lines.
-export async function loadAdminList<T = unknown>(
-  path: string,
+// outcome the store can apply in a few lines. Options:
+//   label               — console/error label ("budgets")
+//   errorFallback       — inline error fallback (default "Unable to load {label}.")
+//   unavailableStatuses — statuses meaning "feature disabled" (default [503])
+//   normalize           — maps the raw payload to rows (default as-is array, else [])
+//   options             — extra fetch options (signal, ...)
+export async function loadAdminList(
+  path,
   {
     label,
     errorFallback = `Unable to load ${label}.`,
     unavailableStatuses = [503],
-    normalize = (data: unknown) => (Array.isArray(data) ? (data as T[]) : []),
+    normalize = (data) => (Array.isArray(data) ? data : []),
     options,
-  }: LoadAdminListOptions<T>,
-): Promise<AdminListOutcome<T>> {
-  let result: ApiResult;
+  },
+) {
+  let result;
   try {
     result = await getJSON(path, { ...(options || {}), label });
   } catch (e) {
@@ -93,35 +68,27 @@ export async function loadAdminList<T = unknown>(
   return { status: "ok", items: normalize(result.data), error: "", result };
 }
 
-interface SendAdminMutationOptions {
-  /** Console/error label ("save budget"). */
-  label: string;
-  /** Form error fallback; defaults to "Unable to {label}.". */
-  errorFallback?: string;
-  /** Statuses meaning "feature disabled" (default [503]). */
-  unavailableStatuses?: number[];
-  /** Form error text used for the unavailable outcome. */
-  unavailableMessage?: string;
-  /** Extra fetch options. */
-  options?: ApiRequestOptions;
-}
-
 // sendAdminMutation wraps sendJSON (PUT/POST/DELETE) with the same ladder.
 // Flash messages, closing forms, and refetching stay in the store — only the
-// guard boilerplate lives here.
+// guard boilerplate lives here. Options:
+//   label               — console/error label ("save budget")
+//   errorFallback       — form error fallback (default "Unable to {label}.")
+//   unavailableStatuses — statuses meaning "feature disabled" (default [503])
+//   unavailableMessage  — form error text for the unavailable outcome
+//   options             — extra fetch options
 export async function sendAdminMutation(
-  path: string,
-  method: string,
-  body: unknown,
+  path,
+  method,
+  body,
   {
     label,
     errorFallback = `Unable to ${label}.`,
     unavailableStatuses = [503],
     unavailableMessage = "This feature is unavailable on the gateway.",
     options,
-  }: SendAdminMutationOptions,
-): Promise<AdminMutationOutcome> {
-  let result: ApiResult;
+  },
+) {
+  let result;
   try {
     result = await sendJSON(path, method, body, { ...(options || {}), label });
   } catch (e) {

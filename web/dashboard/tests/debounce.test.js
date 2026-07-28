@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { debounced } from "../src/lib/utils/debounce.ts";
+import { debounced } from "../src/lib/utils/debounce.js";
 
 const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

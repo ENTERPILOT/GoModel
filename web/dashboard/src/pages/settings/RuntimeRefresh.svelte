@@ -3,9 +3,9 @@
   // provider inventory, API keys, aliases, access rules, guardrails, and
   // workflows, then renders the per-step report. A successful refresh bumps
   // auth.refreshTick so every page refetches.
-  import { auth } from "$lib/stores/auth.svelte.ts";
-  import { flash } from "$lib/stores/flash.svelte.ts";
-  import { sendJSON } from "$lib/api/client.ts";
+  import { auth } from "$lib/stores/auth.svelte.js";
+  import { flash } from "$lib/stores/flash.svelte.js";
+  import { sendJSON } from "$lib/api/client.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import {

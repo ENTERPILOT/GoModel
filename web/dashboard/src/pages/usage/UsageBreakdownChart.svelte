@@ -4,13 +4,13 @@
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
-  import { chartColors, resolveCssColor } from "$lib/utils/chartTheme.ts";
+  import { chartColors, resolveCssColor } from "$lib/utils/chartTheme.js";
   import {
     formatCost,
     formatNumber,
     providerDisplayValue,
     qualifiedModelDisplay,
-  } from "$lib/utils/format.ts";
+  } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
   import {
     chartWrapHeight,

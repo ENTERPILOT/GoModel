@@ -1,7 +1,7 @@
 <script>
   // Active workflow card grid with loading/empty states.
   import Spinner from "$lib/components/atoms/Spinner.svelte";
-  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.js";
   import { workflowsStore as wf } from "./workflows.svelte.js";
   import WorkflowCard from "./WorkflowCard.svelte";
 </script>

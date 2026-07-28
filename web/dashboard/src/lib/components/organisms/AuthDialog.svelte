@@ -2,7 +2,7 @@
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { auth } from "$lib/stores/auth.svelte.ts";
+  import { auth } from "$lib/stores/auth.svelte.js";
 </script>
 
 <Modal

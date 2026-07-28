@@ -4,7 +4,7 @@
 // a failed load leaves the store unloaded so the next caller retries instead
 // of trusting an empty config.
 
-import { getJSON } from "$lib/api/client.ts";
+import { getJSON } from "$lib/api/client.js";
 
 const CONFIG_KEYS = [
   "DEMO_MODE",
@@ -24,18 +24,18 @@ const CONFIG_KEYS = [
 ];
 
 class RuntimeConfigStore {
-  config = $state<Record<string, string>>({});
+  config = $state({});
   loaded = $state(false);
-  #inflight: Promise<void> | null = null;
+  #inflight = null;
 
-  flag(name: string): string {
+  flag(name) {
     const value = this.config && this.config[name];
     return String(value || "")
       .trim()
       .toLowerCase();
   }
 
-  booleanFlag(name: string, defaultValue?: boolean): boolean {
+  booleanFlag(name, defaultValue) {
     const value = this.flag(name);
     if (value === "") {
       return !!defaultValue;
@@ -45,7 +45,7 @@ class RuntimeConfigStore {
 
   // cacheVisible is a tri-source gate: an explicit CACHE_ENABLED wins;
   // otherwise Redis/semantic-cache presence decides.
-  cacheVisible(): boolean {
+  cacheVisible() {
     const explicit = this.flag("CACHE_ENABLED");
     if (explicit !== "") {
       return this.booleanFlag("CACHE_ENABLED", false);
@@ -61,35 +61,35 @@ class RuntimeConfigStore {
     );
   }
 
-  auditVisible(): boolean {
+  auditVisible() {
     return this.booleanFlag("LOGGING_ENABLED", true);
   }
 
-  usageVisible(): boolean {
+  usageVisible() {
     return this.booleanFlag("USAGE_ENABLED", true);
   }
 
-  budgetsVisible(): boolean {
+  budgetsVisible() {
     return this.booleanFlag("BUDGETS_ENABLED", true);
   }
 
-  rateLimitsVisible(): boolean {
+  rateLimitsVisible() {
     return this.booleanFlag("RATE_LIMITS_ENABLED", true);
   }
 
-  guardrailsVisible(): boolean {
+  guardrailsVisible() {
     return this.booleanFlag("GUARDRAILS_ENABLED", true);
   }
 
-  mcpVisible(): boolean {
+  mcpVisible() {
     return this.booleanFlag("MCP_ENABLED", true);
   }
 
-  liveLogsVisible(): boolean {
+  liveLogsVisible() {
     return this.booleanFlag("DASHBOARD_LIVE_LOGS_ENABLED", true);
   }
 
-  fetch(): Promise<void> {
+  fetch() {
     if (this.#inflight) {
       return this.#inflight;
     }
@@ -101,7 +101,7 @@ class RuntimeConfigStore {
 
   // ensureLoaded resolves once the flags have loaded successfully at least
   // once, so gated callers never fall back to defaults by accident.
-  async ensureLoaded(): Promise<void> {
+  async ensureLoaded() {
     if (this.#inflight) {
       await this.#inflight;
       return;
@@ -112,7 +112,7 @@ class RuntimeConfigStore {
     await this.fetch();
   }
 
-  async #load(): Promise<void> {
+  async #load() {
     const controller =
       typeof AbortController === "function" ? new AbortController() : null;
     const timeoutID = controller
@@ -132,13 +132,16 @@ class RuntimeConfigStore {
         return;
       }
       const payload = result.data;
-      const next: Record<string, string> = {};
-      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-        const record = payload as Record<string, unknown>;
-        for (const key of CONFIG_KEYS) {
-          if (record[key] !== undefined && record[key] !== null) {
-            next[key] = String(record[key]).trim();
-          }
+      const next = {};
+      for (const key of CONFIG_KEYS) {
+        if (
+          payload &&
+          typeof payload === "object" &&
+          !Array.isArray(payload) &&
+          payload[key] !== undefined &&
+          payload[key] !== null
+        ) {
+          next[key] = String(payload[key]).trim();
         }
       }
       this.config = next;

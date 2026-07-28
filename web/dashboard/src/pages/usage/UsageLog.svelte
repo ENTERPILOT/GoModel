@@ -5,15 +5,15 @@
   import NoDataIllustration from "$lib/components/atoms/NoDataIllustration.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
-  import { debounced } from "$lib/utils/debounce.ts";
+  import { debounced } from "$lib/utils/debounce.js";
   import Pagination from "$lib/components/molecules/Pagination.svelte";
-  import { timezone } from "$lib/stores/timezone.svelte.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.js";
   import {
     formatCost,
     formatNumber,
     formatTimestampUTC,
     providerDisplayValue,
-  } from "$lib/utils/format.ts";
+  } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
   import {
     cachedCostTitle,

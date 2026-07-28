@@ -17,18 +17,11 @@ const MONTH_NAMES = [
 ];
 
 /** Month heading for `calendarMonth` shifted by `offset` months. */
-export function calendarTitle(calendarMonth: Date, offset: number): string {
+export function calendarTitle(calendarMonth, offset) {
   const d = new Date(
     Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth() + offset, 1),
   );
   return MONTH_NAMES[d.getUTCMonth()] + " " + d.getUTCFullYear();
-}
-
-export interface CalendarDay {
-  day: number;
-  date: Date;
-  current: boolean;
-  key: string;
 }
 
 /**
@@ -36,17 +29,13 @@ export interface CalendarDay {
  * `dateKey` maps a Date to the store's canonical day key and is only used to
  * build stable {#each} keys. Cells outside the month carry `current: false`.
  */
-export function calendarDays(
-  calendarMonth: Date,
-  offset: number,
-  dateKey: (date: Date) => string,
-): CalendarDay[] {
+export function calendarDays(calendarMonth, offset, dateKey) {
   const year = calendarMonth.getUTCFullYear();
   const month = calendarMonth.getUTCMonth() + offset;
   const first = new Date(Date.UTC(year, month, 1));
   const last = new Date(Date.UTC(year, month + 1, 0));
   const leadingBlanks = (first.getUTCDay() + 6) % 7;
-  const days: CalendarDay[] = [];
+  const days = [];
 
   const prevLast = new Date(Date.UTC(year, month, 0));
   for (let i = leadingBlanks - 1; i >= 0; i--) {
@@ -67,11 +56,7 @@ export function calendarDays(
 }
 
 /** `calendarMonth` shifted by `step` months, clamped to `limit` (inclusive). */
-export function shiftMonth(
-  calendarMonth: Date,
-  step: number,
-  limit?: Date | null,
-): Date {
+export function shiftMonth(calendarMonth, step, limit) {
   const next = new Date(
     Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth() + step, 1),
   );
@@ -80,7 +65,7 @@ export function shiftMonth(
 }
 
 /** True when `calendarMonth` is the month `today` falls in. */
-export function isSameMonth(calendarMonth: Date, today: Date): boolean {
+export function isSameMonth(calendarMonth, today) {
   return (
     calendarMonth.getUTCFullYear() === today.getUTCFullYear() &&
     calendarMonth.getUTCMonth() === today.getUTCMonth()

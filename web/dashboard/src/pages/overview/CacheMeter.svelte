@@ -1,8 +1,8 @@
 <script>
   // Tokens cache meter: share of input tokens over the selected period split
   // into regular / prompt-cached / locally-cached segments.
-  import { usageData } from "$lib/stores/usageData.svelte.ts";
-  import { formatNumber } from "$lib/utils/format.ts";
+  import { usageData } from "$lib/stores/usageData.svelte.js";
+  import { formatNumber } from "$lib/utils/format.js";
   import {
     cacheMeterCategories,
     cacheMeterSegments,

@@ -3,7 +3,7 @@
 // the two can never drift. Each column: headerLines (multi-line headers
 // render with <br>), optional cell class, and value(row, pricing).
 // Relative import (not $lib) so node:test can resolve this module too.
-import { formatPrice, formatPriceFine } from "../../lib/utils/format.ts";
+import { formatPrice, formatPriceFine } from "../../lib/utils/format.js";
 
 const modes = {
   headerLines: ["Modes"],

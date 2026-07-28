@@ -7,8 +7,8 @@
   // (providerStatusBadgeClass), so its palette rules must stay in this file
   // where the compiler can see the pill markup.
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { timezone } from "$lib/stores/timezone.svelte.ts";
-  import { formatNumber } from "$lib/utils/format.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { formatNumber } from "$lib/utils/format.js";
   import { providerStatusState } from "./overviewState.svelte.js";
   import ProviderStatusCardDetails from "./ProviderStatusCardDetails.svelte";
   import {

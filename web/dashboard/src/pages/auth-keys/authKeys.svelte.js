@@ -2,9 +2,9 @@
 // on top of the shared admin API client (401s and stale-auth are handled by
 // the client).
 
-import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.ts";
-import { flash } from "$lib/stores/flash.svelte.ts";
-import { createCopyState } from "$lib/utils/clipboard.svelte.ts";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
+import { flash } from "$lib/stores/flash.svelte.js";
+import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import {
   buildCreateAuthKeyPayload,
   countInactiveAuthKeys,

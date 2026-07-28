@@ -2,9 +2,9 @@
   // Budget rows with usage/period progress bars.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { timezone } from "$lib/stores/timezone.svelte.ts";
-  import { formatCost } from "$lib/utils/format.ts";
-  import { labelColor } from "$lib/utils/chartTheme.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { formatCost } from "$lib/utils/format.js";
+  import { labelColor } from "$lib/utils/chartTheme.js";
   import { budgetsStore as store } from "./budgets.svelte.js";
   import {
     budgetKey,

@@ -2,37 +2,11 @@
 // and usage pages. Pages layer their own filters via the extraQuery argument
 // (the usage page filters everything; the overview stays unfiltered).
 
-import { getJSON, isAbortError } from "$lib/api/client.ts";
-import { dateRange } from "./dateRange.svelte.ts";
-import { runtimeConfig } from "./runtimeConfig.svelte.ts";
+import { getJSON, isAbortError } from "$lib/api/client.js";
+import { dateRange } from "./dateRange.svelte.js";
+import { runtimeConfig } from "./runtimeConfig.svelte.js";
 
-export interface UsageSummary {
-  total_requests: number;
-  total_input_tokens: number;
-  total_output_tokens: number;
-  total_tokens: number;
-  total_input_cost: number | null;
-  total_output_cost: number | null;
-  total_cost: number | null;
-  [key: string]: unknown;
-}
-
-export interface CacheOverview {
-  summary: {
-    total_hits: number;
-    exact_hits: number;
-    semantic_hits: number;
-    total_input_tokens: number;
-    total_output_tokens: number;
-    total_tokens: number;
-    total_saved_cost: number | null;
-    [key: string]: unknown;
-  };
-  daily: unknown[];
-  [key: string]: unknown;
-}
-
-export function emptyUsageSummary(): UsageSummary {
+export function emptyUsageSummary() {
   return {
     total_requests: 0,
     total_input_tokens: 0,
@@ -44,7 +18,7 @@ export function emptyUsageSummary(): UsageSummary {
   };
 }
 
-export function emptyCacheOverview(): CacheOverview {
+export function emptyCacheOverview() {
   return {
     summary: {
       total_hits: 0,
@@ -61,17 +35,17 @@ export function emptyCacheOverview(): CacheOverview {
 
 class UsageDataStore {
   summary = $state(emptyUsageSummary());
-  daily = $state<unknown[]>([]);
+  daily = $state([]);
   cacheOverview = $state(emptyCacheOverview());
   loading = $state(false);
-  #usageController: AbortController | null = null;
-  #cacheController: AbortController | null = null;
+  #usageController = null;
+  #cacheController = null;
 
-  cacheAnalyticsEnabled(): boolean {
+  cacheAnalyticsEnabled() {
     return runtimeConfig.cacheVisible();
   }
 
-  async fetchUsage(): Promise<void> {
+  async fetchUsage() {
     if (this.#usageController) this.#usageController.abort();
     const controller = new AbortController();
     this.#usageController = controller;
@@ -99,7 +73,7 @@ class UsageDataStore {
         this.cacheOverview = emptyCacheOverview();
         return;
       }
-      this.summary = (summaryResult.data as UsageSummary) || emptyUsageSummary();
+      this.summary = summaryResult.data || emptyUsageSummary();
       this.daily = Array.isArray(dailyResult.data) ? dailyResult.data : [];
     } catch (e) {
       if (isAbortError(e)) return;
@@ -116,7 +90,7 @@ class UsageDataStore {
 
   // fetchCacheOverview loads cache analytics for the current window.
   // extraQuery: additional &facet=value filters (usage page only).
-  async fetchCacheOverview(extraQuery = ""): Promise<void> {
+  async fetchCacheOverview(extraQuery = "") {
     await runtimeConfig.ensureLoaded();
     if (!this.cacheAnalyticsEnabled()) {
       this.cacheOverview = emptyCacheOverview();
@@ -140,7 +114,7 @@ class UsageDataStore {
       }
       const payload =
         result.data && typeof result.data === "object"
-          ? (result.data as CacheOverview)
+          ? result.data
           : emptyCacheOverview();
       if (!payload.summary) {
         payload.summary = emptyCacheOverview().summary;

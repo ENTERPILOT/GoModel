@@ -8,7 +8,7 @@
   import { untrack } from "svelte";
   import ChatMessage from "./ChatMessage.svelte";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
-  import { modals } from "$lib/stores/ui.svelte.ts";
+  import { modals } from "$lib/stores/ui.svelte.js";
 
   const drawer = conversationDrawer;
 

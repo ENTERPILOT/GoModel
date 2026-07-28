@@ -2,13 +2,13 @@
 // app is mounted under a sub-path; every URL the SPA touches goes through
 // these helpers (fetch/history are never monkey-patched).
 
-export function basePath(): string {
+export function basePath() {
   if (typeof window === "undefined") return "/";
   return window.GOMODEL_BASE_PATH || "/";
 }
 
 // gomodelPath prefixes an absolute app path with the configured base path.
-export function gomodelPath(urlPath: string): string {
+export function gomodelPath(urlPath) {
   const base = basePath();
   if (
     !urlPath ||
@@ -25,7 +25,7 @@ export function gomodelPath(urlPath: string): string {
 }
 
 // unprefixedPath strips the base path from a location pathname.
-export function unprefixedPath(path: string): string {
+export function unprefixedPath(path) {
   const base = basePath();
   if (base === "/" || !path) {
     return path;
@@ -39,12 +39,12 @@ export function unprefixedPath(path: string): string {
   return path;
 }
 
-export function appVersion(): string {
+export function appVersion() {
   if (typeof window === "undefined") return "";
   return window.GOMODEL_VERSION || "";
 }
 
-export function demoMode(): boolean {
+export function demoMode() {
   if (typeof window === "undefined") return false;
   return window.GOMODEL_DEMO_MODE === true;
 }

@@ -2,9 +2,9 @@
 // card expand preferences), audit stats, the MCP servers summary, and the
 // activity-calendar data.
 
-import { getJSON, isAbortError } from "$lib/api/client.ts";
-import { dateRange } from "$lib/stores/dateRange.svelte.ts";
-import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+import { getJSON, isAbortError } from "$lib/api/client.js";
+import { dateRange } from "$lib/stores/dateRange.svelte.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
   emptyProviderStatus,
   providerStatusNeedsPolling,
@@ -15,7 +15,7 @@ import {
   PROVIDER_STATUS_POLL_MS,
 } from "./providersLogic.js";
 import { emptyAuditStats, normalizeAuditStats } from "./auditStatsLogic.js";
-import { browserStorage } from "$lib/utils/storage.ts";
+import { browserStorage } from "$lib/utils/storage.js";
 
 class ProviderStatusState {
   status = $state(emptyProviderStatus());

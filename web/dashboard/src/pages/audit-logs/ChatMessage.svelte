@@ -4,7 +4,7 @@
   // is a computed string (base + roleClass + is-anchor), which keeps the
   // compiler from pruning the role/anchor selectors below — those rules must
   // live here, next to the element they scope to (CONVENTIONS rule 3).
-  import { timezone } from "$lib/stores/timezone.svelte.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.js";
   import { functionExpandedContent } from "./conversation-helpers.js";
 
   let { msg } = $props();

@@ -7,11 +7,11 @@
 //   PUT    /admin/provider-credentials          — upsert one row
 //   DELETE /admin/provider-credentials/{name}   — delete one row
 
-import { errorPayloadMessage } from "$lib/api/client.ts";
-import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.ts";
-import { confirmDialog } from "$lib/stores/confirm.svelte.ts";
-import { flash } from "$lib/stores/flash.svelte.ts";
-import { modelsStore } from "$lib/stores/models.svelte.ts";
+import { errorPayloadMessage } from "$lib/api/client.js";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
+import { confirmDialog } from "$lib/stores/confirm.svelte.js";
+import { flash } from "$lib/stores/flash.svelte.js";
+import { modelsStore } from "$lib/stores/models.svelte.js";
 import {
   defaultProviderCredentialForm,
   filterProviderCredentials,

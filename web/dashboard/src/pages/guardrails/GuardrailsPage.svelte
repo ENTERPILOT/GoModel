@@ -2,10 +2,10 @@
   // Guardrails page: definitions library + schema-driven editor. Port of
   // templates/page-guardrails.html + static/js/modules/guardrails.js.
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
-  import { router } from "$lib/stores/router.svelte.ts";
-  import { auth } from "$lib/stores/auth.svelte.ts";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
-  import { formatNumber } from "$lib/utils/format.ts";
+  import { router } from "$lib/stores/router.svelte.js";
+  import { auth } from "$lib/stores/auth.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+  import { formatNumber } from "$lib/utils/format.js";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import GuardrailList from "./GuardrailList.svelte";
   import GuardrailEditor from "./GuardrailEditor.svelte";

@@ -4,8 +4,8 @@
   // footer-less live preview card used inside the editor.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
-  import { timezone } from "$lib/stores/timezone.svelte.ts";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
+  import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { workflowsStore as wf } from "./workflows.svelte.js";
   import WorkflowChart from "./WorkflowChart.svelte";
   import {

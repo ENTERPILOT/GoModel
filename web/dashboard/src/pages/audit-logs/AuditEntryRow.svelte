@@ -7,7 +7,7 @@
   // its close, and the CSS ::details-content transition needs
   // interpolate-size, which Firefox lacks. transition:slide works everywhere.
   import { slide } from "svelte/transition";
-  import { motionDuration } from "$lib/utils/motion.ts";
+  import { motionDuration } from "$lib/utils/motion.js";
   import WorkflowChart from "$pages/workflows/WorkflowChart.svelte";
   import { workflowAuditChart } from "$pages/workflows/workflowChartLogic.js";
   import AuditEntryMetadata from "./AuditEntryMetadata.svelte";
