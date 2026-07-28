@@ -80,6 +80,9 @@ Failover is attempted only after the primary request returns:
 - `5xx`
 - `429`
 - model unavailable, unsupported, or not found style errors
+- upstream failure messages relayed with a `4xx` status (aggregator providers
+  such as OpenCode Zen can report a transient failure of their own upstream as
+  `400 "Upstream request failed"`)
 
 It currently applies to translated `/v1/chat/completions`, `/v1/responses`,
 and `/v1/messages` requests, not `/v1/embeddings`.

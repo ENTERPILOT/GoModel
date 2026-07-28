@@ -196,6 +196,16 @@ func TestShouldAttemptFailover(t *testing.T) {
 		{"route 404", http.StatusNotFound, "404 page not found", false},
 		{"unknown path 404", http.StatusNotFound, "no route for /v1/foo", false},
 
+		// Aggregator providers relay transient failures of their own upstream
+		// as 4xx client errors; those must fall back (issue #605).
+		{"opencode upstream 400", http.StatusBadRequest, "Error from provider (Console Go): Upstream request failed", true},
+		{"upstream timeout 400", http.StatusBadRequest, "upstream timed out", true},
+		{"upstream unavailable 400", http.StatusBadRequest, "upstream provider is currently unavailable", true},
+
+		// Mentioning an upstream without failure phrasing is a genuine
+		// validation error and must NOT fall back.
+		{"upstream capability 400", http.StatusBadRequest, "parameter tools is not supported by the upstream provider", false},
+
 		// A plain client error without availability phrasing is not retried.
 		{"plain 400", http.StatusBadRequest, "invalid request", false},
 	}
