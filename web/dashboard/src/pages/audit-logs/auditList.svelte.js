@@ -26,8 +26,8 @@ import {
   auditSessionId,
   buildAuditLogQuery,
   buildAuditSessionQuery,
-  markExpandedEntry,
   mergeAuditThreadChildren,
+  toggleExpandedEntry,
   pruneExpandedEntries,
   pruneThreadMap,
   toggleExpandedThread,
@@ -326,11 +326,24 @@ class AuditListStore {
     return !!(this.auditExpandedEntries && this.auditExpandedEntries[key]);
   }
 
-  markAuditEntryExpanded(entry) {
-    this.auditExpandedEntries = markExpandedEntry(
+  // toggleAuditEntryExpanded flips a row's expanded state (the expansion is
+  // Svelte-controlled, not the native <details> toggle, so the open and close
+  // can animate in every browser). Opening also fetches the persisted detail
+  // — list entries are slim.
+  toggleAuditEntryExpanded(entry) {
+    this.auditExpandedEntries = toggleExpandedEntry(
       this.auditExpandedEntries,
       entry,
     );
+    const expanded = this.isAuditEntryExpanded(entry);
+    if (expanded && typeof liveLogs.fetchAuditEntryDetail === "function") {
+      void liveLogs.fetchAuditEntryDetail(entry);
+    }
+    return expanded;
+  }
+
+  expandAuditEntry(entry) {
+    if (!this.isAuditEntryExpanded(entry)) this.toggleAuditEntryExpanded(entry);
   }
 }
 

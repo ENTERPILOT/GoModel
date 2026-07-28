@@ -38,7 +38,7 @@ import {
   toggleExpandedThread,
   formatDurationNs,
   formatJSON,
-  markExpandedEntry,
+  toggleExpandedEntry,
   mergeAuditThreadChildren,
   pruneExpandedEntries,
 } from "../src/pages/audit-logs/audit-logic.js";
@@ -485,13 +485,13 @@ test("buildAuditLogQuery omits unset filters", () => {
   assert.equal(qs, "start_date=2026-07-01&end_date=2026-07-15&limit=25&offset=50");
 });
 
-test("markExpandedEntry lazily marks an opened audit row for details rendering", () => {
-  const next = markExpandedEntry({}, { id: "audit-1" });
+test("toggleExpandedEntry flips an audit row's expanded state per id", () => {
+  const next = toggleExpandedEntry({}, { id: "audit-1" });
   assert.deepEqual(next, { "audit-1": true });
 
-  // Already-expanded rows and keyless entries leave the map untouched.
-  assert.equal(markExpandedEntry(next, { id: "audit-1" }), next);
-  assert.equal(markExpandedEntry(next, {}), next);
+  // A second toggle collapses; keyless entries leave the map untouched.
+  assert.deepEqual(toggleExpandedEntry(next, { id: "audit-1" }), {});
+  assert.equal(toggleExpandedEntry(next, {}), next);
 });
 
 test("pruneExpandedEntries drops expanded state for rows no longer on the page", () => {

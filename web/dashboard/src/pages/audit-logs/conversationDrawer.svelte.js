@@ -71,7 +71,7 @@ class ConversationDrawerStore {
     if (!el) return;
     event.preventDefault();
     event.stopPropagation();
-    this.openConversation(entry, null, false, el);
+    this.openConversation(entry, el);
   }
 
   // handleErrorConversationClick opens the interactions preview from an
@@ -86,7 +86,7 @@ class ConversationDrawerStore {
     if (!this.canShowConversation(entry)) return;
     event.preventDefault();
     event.stopPropagation();
-    this.openConversation(entry, null, false, event.currentTarget);
+    this.openConversation(entry, event.currentTarget);
   }
 
   formatJSON(value) {
@@ -101,11 +101,8 @@ class ConversationDrawerStore {
     });
   }
 
-  async openConversation(entry, detailsEl, expandEntry, triggerEl) {
+  async openConversation(entry, triggerEl) {
     if (!entry || !entry.id || !this.canShowConversation(entry)) return;
-    if (expandEntry && detailsEl && !detailsEl.open) {
-      detailsEl.open = true;
-    }
 
     const activeEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (triggerEl instanceof HTMLElement) {

@@ -465,10 +465,15 @@ export function auditGroupedLogWithLiveEntries(payload, currentEntries, filters)
 
 // --- Expanded-entry map -----------------------------------------------------
 
-export function markExpandedEntry(expanded, entry) {
+export function toggleExpandedEntry(expanded, entry) {
   const key = auditEntryKey(entry);
   const current = expanded || {};
-  if (!key || current[key]) return current;
+  if (!key) return current;
+  if (current[key]) {
+    const next = { ...current };
+    delete next[key];
+    return next;
+  }
   return { ...current, [key]: true };
 }
 
