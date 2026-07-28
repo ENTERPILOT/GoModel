@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modelselectors"
 )
@@ -33,6 +34,10 @@ type Service struct {
 	// redirects stay valid. Set once during startup, before serving.
 	targetCapacity func(qualifiedModel string) bool
 
+	// routeSelector optionally delegates target choice for redirects using
+	// the adaptive strategy. Set once during startup, before serving.
+	routeSelector ext.RouteSelector
+
 	balancer  roundRobin
 	sticky    stickySessions
 	current   atomic.Value // snapshot
@@ -46,6 +51,16 @@ func (s *Service) SetTargetCapacity(capacity func(qualifiedModel string) bool) {
 		return
 	}
 	s.targetCapacity = capacity
+}
+
+// SetRouteSelector installs the extension route selector consulted by
+// redirects using the adaptive strategy. Must be called before the service
+// starts resolving requests.
+func (s *Service) SetRouteSelector(selector ext.RouteSelector) {
+	if s == nil {
+		return
+	}
+	s.routeSelector = selector
 }
 
 // NewService creates a virtual models service backed by the store and catalog.

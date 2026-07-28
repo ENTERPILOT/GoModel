@@ -70,6 +70,11 @@ func (s *Service) balancedResolution(entry redirectEntry, sessionID string) (cor
 		switch normalizeStrategy(entry.strategy) {
 		case StrategyCost:
 			return s.cheapestTarget(pool)
+		case StrategyAdaptive:
+			if target, ok := s.adaptiveTarget(entry, sessionID, pool); ok {
+				return target
+			}
+			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))]
 		default: // StrategyRoundRobin
 			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))]
 		}

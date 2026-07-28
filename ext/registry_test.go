@@ -78,6 +78,29 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 	assert.Len(t, reg.PublicPaths(), workers)
 }
 
+type namedSelector struct{ name string }
+
+func (s *namedSelector) Name() string                       { return s.name }
+func (s *namedSelector) Select(RouteRequest) (string, bool) { return "", false }
+func (s *namedSelector) OnAttemptStart(RouteTarget)         {}
+func (s *namedSelector) OnAttemptEnd(RouteOutcome)          {}
+
+func TestRegistryRouteSelectorSingleSlot(t *testing.T) {
+	reg := &Registry{}
+	assert.Nil(t, reg.RouteSelector())
+
+	reg.RegisterRouteSelector(&namedSelector{name: "first"})
+	reg.RegisterRouteSelector(&namedSelector{name: "second"})
+
+	require.NotNil(t, reg.RouteSelector())
+	assert.Equal(t, "second", reg.RouteSelector().Name(), "later registration replaces earlier one")
+}
+
+func TestRouteTargetQualified(t *testing.T) {
+	target := RouteTarget{Provider: "openai", Model: "gpt-4o"}
+	assert.Equal(t, "openai/gpt-4o", target.Qualified())
+}
+
 func TestRejectionErrorMessage(t *testing.T) {
 	err := &RejectionError{Status: 422, Code: "policy_violation", Message: "blocked by policy"}
 	assert.Equal(t, "request rejected (422 policy_violation): blocked by policy", err.Error())

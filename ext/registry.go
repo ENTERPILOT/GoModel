@@ -11,11 +11,12 @@ import (
 // Register everything before the server is constructed (before run.Run or
 // app.New); core snapshots the registry once and never consults it again.
 type Registry struct {
-	mu          sync.Mutex
-	rewriters   []RequestRewriter
-	middleware  []echo.MiddlewareFunc
-	routes      []func(*echo.Echo)
-	publicPaths []string
+	mu            sync.Mutex
+	rewriters     []RequestRewriter
+	middleware    []echo.MiddlewareFunc
+	routes        []func(*echo.Echo)
+	publicPaths   []string
+	routeSelector RouteSelector
 }
 
 // RegisterRewriter adds a request rewriter. Rewriters run in registration
@@ -51,6 +52,15 @@ func (r *Registry) AddPublicPaths(paths ...string) {
 	r.publicPaths = append(r.publicPaths, paths...)
 }
 
+// RegisterRouteSelector installs the route selector consulted by virtual
+// models using the "adaptive" load-balancing strategy. Only one selector can
+// be active; a later registration replaces an earlier one.
+func (r *Registry) RegisterRouteSelector(sel RouteSelector) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.routeSelector = sel
+}
+
 // Rewriters returns a defensive copy of the registered rewriters.
 func (r *Registry) Rewriters() []RequestRewriter {
 	r.mu.Lock()
@@ -79,6 +89,13 @@ func (r *Registry) PublicPaths() []string {
 	return slices.Clone(r.publicPaths)
 }
 
+// RouteSelector returns the registered route selector, or nil.
+func (r *Registry) RouteSelector() RouteSelector {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.routeSelector
+}
+
 // Default is the process-wide registry used by package-level helpers and, by
 // default, by run.Run.
 var Default = &Registry{}
@@ -94,3 +111,6 @@ func RegisterRoutes(fn func(e *echo.Echo)) { Default.RegisterRoutes(fn) }
 
 // AddPublicPaths registers auth-skip paths on the Default registry.
 func AddPublicPaths(paths ...string) { Default.AddPublicPaths(paths...) }
+
+// RegisterRouteSelector installs a route selector on the Default registry.
+func RegisterRouteSelector(sel RouteSelector) { Default.RegisterRouteSelector(sel) }
