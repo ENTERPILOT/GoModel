@@ -51,8 +51,11 @@ func (s *stickySessions) lookup(source, session string, viable func(string) bool
 	if !ok {
 		return "", false
 	}
-	if !existing.expires.After(now) || !viable(existing.qualified) {
+	if !existing.expires.After(now) {
 		delete(s.entries, key)
+		return "", false
+	}
+	if !viable(existing.qualified) {
 		return "", false
 	}
 	existing.expires = now.Add(stickySessionTTL)
@@ -61,10 +64,10 @@ func (s *stickySessions) lookup(source, session string, viable func(string) bool
 }
 
 // resolve returns the target serving a session: the existing pin when it is
-// still viable (refreshing its TTL), otherwise candidate, pinned when pin is
-// true. It rechecks the pin after strategy selection so concurrent first
-// requests agree on the first pinned target.
-func (s *stickySessions) resolve(source, session string, viable func(string) bool, candidate string, pin bool) string {
+// still viable (refreshing its TTL), otherwise candidate, which it pins. It
+// rechecks after strategy selection so concurrent first requests agree on the
+// first pinned target.
+func (s *stickySessions) resolve(source, session string, viable func(string) bool, candidate string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := stickyKey{source: source, session: session}
@@ -78,7 +81,7 @@ func (s *stickySessions) resolve(source, session string, viable func(string) boo
 		// Expired, or the pinned target is gone/saturated: re-pin the candidate.
 		delete(s.entries, key)
 	}
-	if pin && candidate != "" {
+	if candidate != "" {
 		if s.entries == nil {
 			s.entries = make(map[stickyKey]stickyPin)
 		}

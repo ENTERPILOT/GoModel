@@ -53,9 +53,11 @@ func (s *Service) balancedResolution(entry redirectEntry, sessionID string) (cor
 	// admission and receives an honest 429 with Retry-After (or defers to
 	// failover) instead of the all-targets-down error path.
 	pool := s.targetsWithCapacity(supported)
-	saturatedFallback := len(pool) == 0
-	if saturatedFallback {
-		pool = supported[:1]
+	if len(pool) == 0 {
+		// This target is selected only to reach admission and produce the 429.
+		// Do not run affinity resolution: a transient capacity burst must not
+		// discard or replace the target that actually served the session.
+		return supported[0].selector, true
 	}
 
 	// pick applies the redirect's strategy to the viable pool. A single viable
@@ -76,8 +78,6 @@ func (s *Service) balancedResolution(entry redirectEntry, sessionID string) (cor
 	// currently available: with only one target momentarily supported (provider
 	// outage, startup) the session must still pin its serving target, or the
 	// strategy could move an active conversation once the others come back.
-	// The saturated fallback is never pinned: it was chosen to produce an
-	// honest 429, not to serve the session.
 	affinity := sessionID != "" && entry.sessionAffinity() && len(entry.targets) > 1
 	if affinity {
 		viable := func(candidate string) bool {
@@ -97,7 +97,6 @@ func (s *Service) balancedResolution(entry redirectEntry, sessionID string) (cor
 		qualified := s.sticky.resolve(entry.vm.Source, sessionID,
 			viable,
 			choice.qualified,
-			!saturatedFallback,
 		)
 		if target, ok := poolTarget(pool, qualified); ok {
 			return target.selector, true

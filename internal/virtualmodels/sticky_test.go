@@ -137,6 +137,33 @@ func TestSticky_SaturatedFallbackDoesNotPin(t *testing.T) {
 	}
 }
 
+func TestSticky_SaturatedFallbackPreservesExistingPin(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	upsertBalancedVM(t, svc, StrategyRoundRobin, nil)
+
+	saturated := map[string]bool{}
+	svc.SetTargetCapacity(func(qualified string) bool { return !saturated[qualified] })
+
+	resolveSession(t, svc, "smart", "sess-a") // consume the first round-robin target
+	pinned := resolveSession(t, svc, "smart", "sess-b")
+	if pinned != "anthropic/claude" {
+		t.Fatalf("initial pin = %q, want anthropic/claude", pinned)
+	}
+
+	for _, target := range []string{"openai/gpt-4o", "anthropic/claude", "groq/llama"} {
+		saturated[target] = true
+	}
+	if got := resolveSession(t, svc, "smart", "sess-b"); got != "openai/gpt-4o" {
+		t.Fatalf("saturated fallback = %q, want first declared target", got)
+	}
+
+	clear(saturated)
+	if got := resolveSession(t, svc, "smart", "sess-b"); got != pinned {
+		t.Fatalf("session moved from %q to %q after capacity recovered", pinned, got)
+	}
+}
+
 func TestSticky_TTLExpiry(t *testing.T) {
 	t.Parallel()
 	svc := newBalancingService(t)
@@ -167,7 +194,6 @@ func stickyAssign(sticky *stickySessions, source, session, qualified string) str
 	return sticky.resolve(source, session,
 		func(string) bool { return true },
 		qualified,
-		true,
 	)
 }
 
