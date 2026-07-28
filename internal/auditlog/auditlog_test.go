@@ -1401,7 +1401,7 @@ func TestNewStreamLogObserverNilInputs(t *testing.T) {
 
 func TestCreateStreamEntry(t *testing.T) {
 	// Test nil input
-	result := CreateStreamEntry(nil)
+	result := CreateStreamEntry(context.Background(), nil)
 	if result != nil {
 		t.Error("expected nil for nil input")
 	}
@@ -1445,7 +1445,7 @@ func TestCreateStreamEntry(t *testing.T) {
 		},
 	}
 
-	streamEntry := CreateStreamEntry(baseEntry)
+	streamEntry := CreateStreamEntry(context.Background(), baseEntry)
 	if streamEntry == nil {
 		t.Fatal("expected non-nil stream entry")
 		return

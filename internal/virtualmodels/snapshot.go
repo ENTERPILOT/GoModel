@@ -25,6 +25,12 @@ type redirectEntry struct {
 	strategy string
 }
 
+// sessionAffinity reports whether this redirect keeps sessions pinned to the
+// target that served them. Enabled unless explicitly disabled.
+func (e redirectEntry) sessionAffinity() bool {
+	return e.vm.SessionAffinity == nil || *e.vm.SessionAffinity
+}
+
 // representative returns the first declared target, used where a redirect needs
 // a stable stand-in independent of catalog availability or load-balancing state.
 func (e redirectEntry) representative() (resolvedTarget, bool) {

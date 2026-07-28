@@ -13,12 +13,12 @@ import (
 )
 
 // SQLite allows 999 bindable parameters per statement
-// (SQLITE_MAX_VARIABLE_NUMBER). At 21 columns per entry that is 47 entries,
+// (SQLITE_MAX_VARIABLE_NUMBER). At 22 columns per entry that is 45 entries,
 // so larger batches are chunked. PostgreSQL's limit is far higher, but one
 // chunk size keeps the write path identical on both.
 const (
 	maxSQLParams       = 999
-	columnsPerEntry    = 21
+	columnsPerEntry    = 22
 	maxEntriesPerBatch = maxSQLParams / columnsPerEntry
 )
 
@@ -52,6 +52,7 @@ var sqlTables = []string{
 		method TEXT,
 		path TEXT,
 		user_path TEXT,
+		session_id TEXT,
 		stream ` + sqlx.TypeBool + ` DEFAULT FALSE,
 		error_type TEXT,
 		data ` + sqlx.TypeJSON + `
@@ -89,6 +90,7 @@ var sqlMigrations = []string{
 	"ALTER TABLE audit_logs ADD COLUMN auth_key_id TEXT",
 	"ALTER TABLE audit_logs ADD COLUMN auth_method TEXT",
 	"ALTER TABLE audit_logs ADD COLUMN user_path TEXT",
+	"ALTER TABLE audit_logs ADD COLUMN session_id TEXT",
 	"ALTER TABLE audit_log_attempts ADD COLUMN response_body TEXT",
 	"ALTER TABLE audit_log_attempts ADD COLUMN response_headers TEXT",
 }
@@ -108,6 +110,12 @@ var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_user_path ON audit_logs(user_path)",
+	// Composite: serves both the session_id equality filter and its per-thread
+	// timestamp ordering (thread detail and the sessions grouping query). The
+	// drop retires the single-column predecessor, which IF NOT EXISTS would
+	// otherwise leave in place on databases that created it.
+	"DROP INDEX IF EXISTS idx_audit_session_id",
+	"CREATE INDEX IF NOT EXISTS idx_audit_session_timestamp ON audit_logs(session_id, timestamp)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_error_type ON audit_logs(error_type)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON audit_log_attempts(audit_log_id, seq)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_provider ON audit_log_attempts(provider_type)",
@@ -118,7 +126,7 @@ const insertAuditLogPrefix = `INSERT INTO audit_logs (
 	id, timestamp, duration_ns, requested_model, resolved_model, provider,
 	provider_name, alias_used, workflow_version_id, cache_type, status_code,
 	request_id, auth_key_id, auth_method, client_ip, method, path, user_path,
-	stream, error_type, data
+	session_id, stream, error_type, data
 ) VALUES `
 
 const insertAttemptSQL = `
@@ -208,7 +216,7 @@ func (s *SQLStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
 		placeholders := make([]string, len(chunk))
 		values := make([]any, 0, len(chunk)*columnsPerEntry)
 		for j, e := range chunk {
-			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 			values = append(values, auditLogValues(dialect, e)...)
 		}
 
@@ -257,6 +265,7 @@ func auditLogValues(dialect sqlx.Dialect, e *LogEntry) []any {
 		e.Method,
 		e.Path,
 		userPathValue,
+		e.SessionID,
 		e.Stream,
 		e.ErrorType,
 		dataValue,

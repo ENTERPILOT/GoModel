@@ -87,10 +87,12 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 
 const sqliteTimestampBoundaryLayout = "2006-01-02T15:04:05"
 
-const selectLogColumns = `SELECT id, timestamp, duration_ns, requested_model, resolved_model,
+const logColumns = `id, timestamp, duration_ns, requested_model, resolved_model,
 	provider, provider_name, alias_used, workflow_version_id, cache_type, status_code,
-	request_id, auth_key_id, auth_method, client_ip, method, path, user_path, stream,
-	error_type, data
+	request_id, auth_key_id, auth_method, client_ip, method, path, user_path, session_id,
+	stream, error_type, data`
+
+const selectLogColumns = `SELECT ` + logColumns + `
 	FROM audit_logs`
 
 // GetLogs returns a paginated list of audit log entries.
@@ -179,6 +181,9 @@ func (r *SQLReader) logFilters(params LogQueryParams) ([]string, []any, error) {
 	if params.ErrorType != "" {
 		add(r.likeClause("error_type"), contains(params.ErrorType))
 	}
+	if params.SessionID != "" {
+		add("session_id = ?", params.SessionID)
+	}
 	if params.StatusCode != nil {
 		add("status_code = ?", *params.StatusCode)
 	}
@@ -188,7 +193,7 @@ func (r *SQLReader) logFilters(params LogQueryParams) ([]string, []any, error) {
 	if params.Search != "" {
 		searchColumns := []string{
 			"request_id", "auth_key_id", "requested_model", "provider", "provider_name",
-			"method", "path", "user_path", "error_type", r.dialect.errorMessage,
+			"method", "path", "user_path", "session_id", "error_type", r.dialect.errorMessage,
 		}
 		clauses := make([]string, 0, len(searchColumns))
 		values := make([]any, 0, len(searchColumns))
@@ -318,6 +323,7 @@ func scanSQLLogEntry(scanner sqlx.Row) (*LogEntry, error) {
 		authKeyID         *string
 		authMethod        *string
 		userPath          *string
+		sessionID         *string
 		errorType         *string
 		dataJSON          *string
 	)
@@ -326,7 +332,7 @@ func scanSQLLogEntry(scanner sqlx.Row) (*LogEntry, error) {
 		&entry.ID, &timestamp, &entry.DurationNs, &entry.RequestedModel, &entry.ResolvedModel,
 		&entry.Provider, &providerName, &entry.AliasUsed, &workflowVersionID, &cacheType,
 		&entry.StatusCode, &entry.RequestID, &authKeyID, &authMethod, &entry.ClientIP,
-		&entry.Method, &entry.Path, &userPath, &entry.Stream, &errorType, &dataJSON,
+		&entry.Method, &entry.Path, &userPath, &sessionID, &entry.Stream, &errorType, &dataJSON,
 	); err != nil {
 		return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 	}
@@ -339,6 +345,7 @@ func scanSQLLogEntry(scanner sqlx.Row) (*LogEntry, error) {
 	entry.AuthKeyID = derefString(authKeyID)
 	entry.AuthMethod = derefString(authMethod)
 	entry.UserPath = derefString(userPath)
+	entry.SessionID = derefString(sessionID)
 	entry.ErrorType = derefString(errorType)
 	entry.CacheType = normalizeCacheType(derefString(cacheType))
 	entry.ProviderName = displayAuditProviderName(derefString(providerName), entry.Provider)

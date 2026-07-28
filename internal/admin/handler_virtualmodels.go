@@ -21,9 +21,12 @@ type upsertVirtualModelRequest struct {
 	TargetModel string                      `json:"target_model,omitempty"`
 	Targets     []virtualModelTargetRequest `json:"targets,omitempty"`
 	Strategy    string                      `json:"strategy,omitempty"`
-	UserPaths   []string                    `json:"user_paths,omitempty"`
-	Description string                      `json:"description,omitempty"`
-	Enabled     *bool                       `json:"enabled,omitempty"`
+	// SessionAffinity keeps a detected session on the target that served it
+	// before. Omitted means enabled; false restores stateless balancing.
+	SessionAffinity *bool    `json:"session_affinity,omitempty"`
+	UserPaths       []string `json:"user_paths,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	Enabled         *bool    `json:"enabled,omitempty"`
 }
 
 // virtualModelTargetRequest is one load-balancing destination. Model may be a
@@ -154,11 +157,12 @@ func (h *Handler) DeleteVirtualModel(c *echo.Context) error {
 // defaults to true, preserving the existing value when omitted.
 func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelRequest) (virtualmodels.VirtualModel, error) {
 	vm := virtualmodels.VirtualModel{
-		Source:      source,
-		Strategy:    strings.TrimSpace(req.Strategy),
-		UserPaths:   req.UserPaths,
-		Description: strings.TrimSpace(req.Description),
-		Enabled:     h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),
+		Source:          source,
+		Strategy:        strings.TrimSpace(req.Strategy),
+		SessionAffinity: req.SessionAffinity,
+		UserPaths:       req.UserPaths,
+		Description:     strings.TrimSpace(req.Description),
+		Enabled:         h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),
 	}
 
 	targets, err := buildVirtualModelTargets(req)

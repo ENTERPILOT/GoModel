@@ -19,6 +19,7 @@ type LogQueryParams struct {
 	Method         string
 	Path           string
 	UserPath       string
+	SessionID      string // exact-match session id filter
 	ErrorType      string
 	Search         string
 	StatusCode     *int
@@ -33,6 +34,26 @@ type LogListResult struct {
 	Total   int        `json:"total"`
 	Limit   int        `json:"limit"`
 	Offset  int        `json:"offset"`
+}
+
+// SessionSummary describes one session (thread) of audit log entries: its
+// latest entry plus aggregate span and count. Entries without a session id
+// form singleton threads whose SessionID is empty.
+type SessionSummary struct {
+	SessionID      string    `json:"session_id,omitempty"`
+	Count          int       `json:"count"`
+	FirstTimestamp time.Time `json:"first_timestamp"`
+	LastTimestamp  time.Time `json:"last_timestamp"`
+	Latest         LogEntry  `json:"latest"`
+}
+
+// SessionListResult holds a paginated list of session summaries ordered by
+// latest activity.
+type SessionListResult struct {
+	Sessions []SessionSummary `json:"sessions"`
+	Total    int              `json:"total"`
+	Limit    int              `json:"limit"`
+	Offset   int              `json:"offset"`
 }
 
 // ConversationResult holds a linear conversation thread centered around an anchor log.
@@ -50,6 +71,12 @@ type ConversationResult struct {
 type Reader interface {
 	// GetLogs returns a paginated list of audit log entries with optional filtering.
 	GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error)
+
+	// GetSessions returns a paginated list of audit sessions (threads): one
+	// summary per distinct session id, plus singleton threads for entries
+	// without one, ordered by latest activity. Filters apply to entries before
+	// grouping, so a thread's Latest and Count reflect the matching entries.
+	GetSessions(ctx context.Context, params LogQueryParams) (*SessionListResult, error)
 
 	// GetLogByID returns a single audit log entry by ID.
 	// Returns (nil, nil) when no entry exists for the given ID.

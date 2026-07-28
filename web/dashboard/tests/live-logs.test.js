@@ -28,6 +28,8 @@ function createLiveLogsApp(overrides = {}) {
     usageFilterLabel: "",
     usageFilterUserPath: "",
     usageLogHideCached: false,
+    auditGroupSessions: false,
+    auditThreadChildren: {},
     customStartDate: null,
     customEndDate: null,
     page: "audit-logs",
@@ -758,4 +760,290 @@ test("audit detail fetch gating: skips captured data, waits for live flush", () 
     id: "audit-1",
     data: { workflow_features: { cache: true } },
   }), true);
+});
+
+// --- Session-thread grouping -------------------------------------------------
+
+test("grouped mode folds a new live entry into its on-screen thread", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [
+    { id: "head-a", request_id: "req-1", session_id: "s-a", session_count: 2 },
+    { id: "other", session_id: "s-b", session_count: 1 },
+  ];
+  app.auditLog.total = 2;
+  app.auditThreadChildren = {
+    "s-a": { loading: false, entries: [{ id: "old-child" }], total: 2 },
+  };
+
+  app.mergeLiveAuditEntry(
+    { id: "live-3", request_id: "req-3", session_id: "s-a", path: "/v1/chat/completions" },
+    "audit.started",
+  );
+
+  // Thread bubbles to the top with the new entry as head and count bumped.
+  assert.deepEqual(
+    app.auditLog.entries.map((entry) => entry.id),
+    ["live-3", "other"],
+  );
+  assert.equal(app.auditLog.entries[0].session_count, 3);
+  assert.equal(app.auditLog.entries[0]._live_pending, true);
+  // Total is unchanged: same number of threads.
+  assert.equal(app.auditLog.total, 2);
+  // The displaced head moved into the loaded children list, count-free.
+  const children = app.auditThreadChildren["s-a"];
+  assert.deepEqual(children.entries.map((entry) => entry.id), ["head-a", "old-child"]);
+  assert.equal(children.entries[0].session_count, undefined);
+  assert.equal(children.total, 3);
+});
+
+test("grouped fold leaves unloaded children lists alone", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [
+    { id: "head-a", session_id: "s-a", session_count: 2 },
+  ];
+  app.auditLog.total = 1;
+
+  app.mergeLiveAuditEntry({ id: "live-2", session_id: "s-a" }, "audit.started");
+
+  assert.equal(app.auditLog.entries[0].id, "live-2");
+  assert.equal(app.auditLog.entries[0].session_count, 3);
+  assert.deepEqual(app.auditThreadChildren, {});
+});
+
+test("grouped mode without a matching thread prepends a singleton head", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [{ id: "head-a", session_id: "s-a", session_count: 2 }];
+  app.auditLog.total = 1;
+
+  app.mergeLiveAuditEntry({ id: "live-9", session_id: "s-new" }, "audit.started");
+
+  assert.deepEqual(
+    app.auditLog.entries.map((entry) => entry.id),
+    ["live-9", "head-a"],
+  );
+  assert.equal(app.auditLog.total, 2);
+});
+
+test("flat mode never folds by session", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: false });
+  app.auditLog.entries = [{ id: "row-1", session_id: "s-a" }];
+  app.auditLog.total = 1;
+
+  app.mergeLiveAuditEntry({ id: "row-2", session_id: "s-a" }, "audit.started");
+
+  assert.deepEqual(
+    app.auditLog.entries.map((entry) => entry.id),
+    ["row-2", "row-1"],
+  );
+  assert.equal(app.auditLog.total, 2);
+});
+
+test("grouped fold respects the live insert gate", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true, auditSearch: "x" });
+  app.auditLog.entries = [{ id: "head-a", session_id: "s-a", session_count: 2 }];
+  app.auditLog.total = 1;
+
+  app.mergeLiveAuditEntry({ id: "live-3", session_id: "s-a" }, "audit.started");
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["head-a"]);
+  assert.equal(app.auditLog.entries[0].session_count, 2);
+});
+
+test("live updates merge into displaced entries living in children lists", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [{ id: "head", session_id: "s-a", session_count: 2 }];
+  app.auditThreadChildren = {
+    "s-a": {
+      loading: false,
+      entries: [{ id: "child-1", request_id: "req-c1", status_code: null }],
+      total: 2,
+    },
+  };
+
+  app.mergeLiveAuditEntry(
+    { id: "child-1", request_id: "req-c1", status_code: 200 },
+    "audit.flushed",
+  );
+
+  const child = app.auditThreadChildren["s-a"].entries[0];
+  assert.equal(child.status_code, 200);
+  assert.equal(child._audit_flushed, true);
+  // The head list is untouched.
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["head"]);
+});
+
+test("late usage updates enrich displaced entries living in children lists", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [{ id: "head", request_id: "req-head", session_id: "s-a", session_count: 2 }];
+  app.auditThreadChildren = {
+    "s-a": {
+      loading: false,
+      entries: [{ id: "child-1", request_id: "req-c1" }],
+      total: 2,
+    },
+  };
+
+  app.mergeLiveUsageEntry(
+    { id: "usage-1", request_id: "req-c1", input_tokens: 10, output_tokens: 4 },
+    "usage.completed",
+  );
+
+  const child = app.auditThreadChildren["s-a"].entries[0];
+  assert.equal(child.usage.input_tokens, 10);
+  assert.equal(child.usage.output_tokens, 4);
+  assert.equal(child.usage.total_tokens, 14);
+  assert.equal(app.auditLog.entries[0].usage, undefined);
+});
+
+test("audit.detail events hydrate children-list entries", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditThreadChildren = {
+    "s-a": { loading: false, entries: [{ id: "child-1" }], total: 2 },
+  };
+
+  const merged = app.mergeLiveAuditEntry(
+    { id: "child-1", data: { request_body: { model: "gpt-4o" } } },
+    "audit.detail",
+  );
+
+  assert.equal(merged._detail_loaded, true);
+  assert.deepEqual(
+    app.auditThreadChildren["s-a"].entries[0].data.request_body,
+    { model: "gpt-4o" },
+  );
+});
+
+test("audit.removed cleans children lists and decrements the head count", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [{ id: "head", session_id: "s-a", session_count: 3 }];
+  app.auditLog.total = 1;
+  app.auditThreadChildren = {
+    "s-a": {
+      loading: false,
+      entries: [{ id: "child-1" }, { id: "child-2" }],
+      total: 3,
+    },
+  };
+
+  app.removeLiveAuditEntry({ id: "child-1" });
+
+  assert.deepEqual(
+    app.auditThreadChildren["s-a"].entries.map((entry) => entry.id),
+    ["child-2"],
+  );
+  assert.equal(app.auditThreadChildren["s-a"].total, 2);
+  assert.equal(app.auditLog.entries[0].session_count, 2);
+  // Head list itself is untouched by a child removal.
+  assert.equal(app.auditLog.total, 1);
+});
+
+test("audit.removed promotes a loaded child when a grouped head disappears", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [{ id: "head", session_id: "s-a", session_count: 3 }];
+  app.auditLog.total = 1;
+  app.auditThreadChildren = {
+    "s-a": {
+      loading: false,
+      entries: [
+        { id: "child-2", session_id: "s-a" },
+        { id: "child-1", session_id: "s-a" },
+      ],
+      total: 3,
+    },
+  };
+
+  app.removeLiveAuditEntry({ id: "head" });
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["child-2"]);
+  assert.equal(app.auditLog.entries[0].session_count, 2);
+  assert.equal(app.auditLog.total, 1);
+  assert.deepEqual(
+    app.auditThreadChildren["s-a"].entries.map((entry) => entry.id),
+    ["child-1"],
+  );
+  assert.equal(app.auditThreadChildren["s-a"].total, 2);
+});
+
+test("audit.removed reloads an unexpanded grouped thread when its head disappears", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [{ id: "head", session_id: "s-a", session_count: 3 }];
+  app.auditLog.total = 1;
+
+  app.removeLiveAuditEntry({ id: "head" });
+
+  assert.deepEqual(app.auditLog.entries, []);
+  assert.equal(app.auditLog.total, 1);
+  assert.equal(app.fetchAuditCalls, 1);
+});
+
+test("a sessionless live row re-folds into its thread once a later event adds the session id", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [{ id: "head-a", session_id: "s-a", session_count: 2 }];
+  app.auditLog.total = 1;
+  app.auditThreadChildren = {
+    "s-a": { loading: false, entries: [{ id: "old-child" }], total: 2 },
+  };
+
+  // audit.started fires before session detection: the row arrives sessionless
+  // and prepends as its own singleton thread.
+  app.mergeLiveAuditEntry({ id: "live-1", request_id: "req-1" }, "audit.started");
+  assert.equal(app.auditLog.entries.length, 2);
+  assert.equal(app.auditLog.total, 2);
+
+  // The terminal event delivers the session id: the row folds into its thread.
+  app.mergeLiveAuditEntry(
+    { id: "live-1", request_id: "req-1", session_id: "s-a", status_code: 200 },
+    "audit.flushed",
+  );
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["live-1"]);
+  assert.equal(app.auditLog.entries[0].session_count, 3);
+  assert.equal(app.auditLog.total, 1);
+  // The displaced head moved into the loaded children.
+  assert.deepEqual(
+    app.auditThreadChildren["s-a"].entries.map((entry) => entry.id),
+    ["head-a", "old-child"],
+  );
+});
+
+test("re-fold leaves rows alone in flat mode and without a matching head", () => {
+  const flat = createLiveLogsApp({ auditGroupSessions: false });
+  flat.auditLog.entries = [{ id: "row-a", session_id: "s-a" }];
+  flat.auditLog.total = 1;
+  flat.mergeLiveAuditEntry({ id: "row-a", session_id: "s-a", status_code: 200 }, "audit.flushed");
+  assert.equal(flat.auditLog.entries.length, 1);
+
+  const grouped = createLiveLogsApp({ auditGroupSessions: true });
+  grouped.auditLog.entries = [{ id: "solo", session_id: "s-new" }];
+  grouped.auditLog.total = 1;
+  grouped.mergeLiveAuditEntry({ id: "solo", session_id: "s-new", status_code: 200 }, "audit.flushed");
+  assert.deepEqual(grouped.auditLog.entries.map((entry) => entry.id), ["solo"]);
+  assert.equal(grouped.auditLog.total, 1);
+});
+
+test("re-fold keeps the newest request as head when completions arrive out of order", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  // A starts first, B starts later; both sessionless.
+  app.mergeLiveAuditEntry(
+    { id: "req-a", timestamp: "2026-07-27T10:00:00Z" },
+    "audit.started",
+  );
+  app.mergeLiveAuditEntry(
+    { id: "req-b", timestamp: "2026-07-27T10:00:05Z" },
+    "audit.started",
+  );
+  // B completes first and gains the session id (no other head yet: stays put).
+  app.mergeLiveAuditEntry(
+    { id: "req-b", timestamp: "2026-07-27T10:00:05Z", session_id: "s-a", status_code: 200 },
+    "audit.flushed",
+  );
+  // A completes last: it must fold UNDER B, which is the newer request.
+  app.mergeLiveAuditEntry(
+    { id: "req-a", timestamp: "2026-07-27T10:00:00Z", session_id: "s-a", status_code: 200 },
+    "audit.flushed",
+  );
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["req-b"]);
+  assert.equal(app.auditLog.entries[0].session_count, 2);
+  assert.equal(app.auditLog.total, 1);
 });

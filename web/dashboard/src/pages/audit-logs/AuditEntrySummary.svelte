@@ -1,6 +1,7 @@
 <script>
   // The collapsed row of one audit entry: status/method/model/path on the
   // left, attempt pips, timing and the interactions trigger on the right.
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { auditModelDisplay, formatTimestampUTC } from "$lib/utils/format.js";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
@@ -15,7 +16,17 @@
     statusCodeClass,
   } from "./audit-logic.js";
 
-  let { entry } = $props();
+  // `thread` marks a session-thread head row (grouped mode):
+  // { count, expanded, ontoggle }.
+  let { entry, thread = null } = $props();
+
+  // The expander is a button nested in <summary>, so it must not toggle the
+  // entry's own details element — same treatment as openConversation.
+  function toggleThread(event) {
+    event.stopPropagation();
+    event.preventDefault();
+    thread.ontoggle();
+  }
 
   function openConversation(event) {
     event.stopPropagation();
@@ -34,6 +45,25 @@
   class:audit-entry-summary-live-in-progress={auditEntryLiveInProgress(entry)}
 >
   <div class="audit-entry-left">
+    {#if thread}
+      <button
+        type="button"
+        class="audit-thread-expander"
+        aria-expanded={thread.expanded}
+        title={"Session with " + thread.count + " requests"}
+        aria-label={"Session with " +
+          thread.count +
+          " requests, " +
+          (thread.expanded ? "collapse" : "expand")}
+        onclick={toggleThread}
+      >
+        <Icon
+          name={thread.expanded ? "chevron-down" : "chevron-right"}
+          class="audit-thread-expander-svg"
+        />
+        <span class="audit-thread-count mono">{thread.count}</span>
+      </button>
+    {/if}
     <span class="audit-status-badge {statusCodeClass(entry.status_code)}"
       >{entry.status_code || "-"}</span
     >
@@ -137,6 +167,41 @@
     color: var(--text-muted);
     flex-shrink: 0;
     min-height: 28px;
+  }
+
+  /* Thread expander: chevron + entry count, sized like the interactions
+     trigger for a consistent hit target. */
+  .audit-thread-expander {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0 7px 0 4px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      background 0.1s ease-out,
+      color 0.1s ease-out;
+  }
+
+  .audit-thread-expander:hover {
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+    color: var(--accent);
+  }
+
+  .audit-thread-expander :global(.audit-thread-expander-svg) {
+    width: 14px;
+    height: 14px;
+  }
+
+  .audit-thread-count {
+    font-size: 11px;
+    font-weight: 600;
   }
 
   .audit-conversation-trigger {

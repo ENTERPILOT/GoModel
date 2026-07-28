@@ -1,6 +1,7 @@
 package auditlog
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
@@ -39,7 +40,7 @@ func TestCreateStreamEntryPreservesRequestRevisions(t *testing.T) {
 		},
 	}
 
-	streamEntry := CreateStreamEntry(base)
+	streamEntry := CreateStreamEntry(context.Background(), base)
 	if streamEntry == nil || streamEntry.Data == nil {
 		t.Fatal("expected a stream entry with data")
 	}
@@ -72,7 +73,7 @@ func TestCreateStreamEntryPreservesRequestRevisions(t *testing.T) {
 // carry no rewriter — and it must stay nil rather than becoming an empty slice,
 // so a streamed entry without rewrites serializes the same as it always did.
 func TestCreateStreamEntryLeavesAbsentRequestRevisionsNil(t *testing.T) {
-	streamEntry := CreateStreamEntry(&LogEntry{ID: "entry-1", Data: &LogData{UserAgent: "curl/8"}})
+	streamEntry := CreateStreamEntry(context.Background(), &LogEntry{ID: "entry-1", Data: &LogData{UserAgent: "curl/8"}})
 	if streamEntry == nil || streamEntry.Data == nil {
 		t.Fatal("expected a stream entry with data")
 	}
@@ -104,7 +105,7 @@ func TestCreateStreamEntryCopiesEveryRequestSideField(t *testing.T) {
 		}
 	}
 
-	streamEntry := CreateStreamEntry(&LogEntry{ID: "entry-1", Data: populated})
+	streamEntry := CreateStreamEntry(context.Background(), &LogEntry{ID: "entry-1", Data: populated})
 	if streamEntry == nil || streamEntry.Data == nil {
 		t.Fatal("expected a stream entry with data")
 	}

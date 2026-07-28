@@ -20,6 +20,7 @@ var sqlSchema = []string{
 		source TEXT PRIMARY KEY,
 		targets TEXT NOT NULL DEFAULT '[]',
 		strategy TEXT NOT NULL DEFAULT '',
+		session_affinity TEXT NOT NULL DEFAULT '',
 		provider_name TEXT NOT NULL DEFAULT '',
 		model TEXT NOT NULL DEFAULT '',
 		user_paths TEXT NOT NULL DEFAULT '[]',
@@ -34,20 +35,26 @@ var sqlSchema = []string{
 	`CREATE INDEX IF NOT EXISTS idx_virtual_models_updated_at ON virtual_models(updated_at DESC)`,
 }
 
+// virtualModelMigrations backfill columns added after the table's first release.
+var virtualModelMigrations = []string{
+	"ALTER TABLE virtual_models ADD COLUMN session_affinity TEXT NOT NULL DEFAULT ''",
+}
+
 const selectVirtualModelColumns = `
-	SELECT source, targets, strategy, provider_name, model, user_paths,
+	SELECT source, targets, strategy, session_affinity, provider_name, model, user_paths,
 		description, enabled, created_at, updated_at
 	FROM virtual_models
 `
 
 const upsertVirtualModelSQL = `
 	INSERT INTO virtual_models (
-		source, targets, strategy, provider_name, model, user_paths, description, enabled, created_at, updated_at
+		source, targets, strategy, session_affinity, provider_name, model, user_paths, description, enabled, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source) DO UPDATE SET
 		targets = excluded.targets,
 		strategy = excluded.strategy,
+		session_affinity = excluded.session_affinity,
 		provider_name = excluded.provider_name,
 		model = excluded.model,
 		user_paths = excluded.user_paths,
@@ -63,6 +70,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	}
 	if err := db.Schema(ctx, sqlSchema...); err != nil {
 		return nil, fmt.Errorf("failed to create virtual_models table: %w", err)
+	}
+	if err := sqlx.AddColumns(ctx, db, virtualModelMigrations...); err != nil {
+		return nil, err
 	}
 	return &SQLStore{db: db}, nil
 }
@@ -156,6 +166,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 		strings.TrimSpace(vm.Source),
 		targetsJSON,
 		vm.Strategy,
+		encodeTriStateBool(vm.SessionAffinity),
 		vm.ProviderName,
 		vm.Model,
 		pathsJSON,
@@ -169,11 +180,13 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	var vm VirtualModel
 	var targets, userPaths []byte
+	var sessionAffinity string
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&vm.Source,
 		&targets,
 		&vm.Strategy,
+		&sessionAffinity,
 		&vm.ProviderName,
 		&vm.Model,
 		&userPaths,
@@ -191,7 +204,33 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	if vm.UserPaths, err = decodeUserPaths(userPaths); err != nil {
 		return VirtualModel{}, err
 	}
+	vm.SessionAffinity = decodeTriStateBool(sessionAffinity)
 	vm.CreatedAt = time.Unix(createdAt, 0).UTC()
 	vm.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return vm, nil
+}
+
+// encodeTriStateBool stores a *bool as "", "true", or "false" so the unset
+// (default) state survives a roundtrip on both SQL engines.
+func encodeTriStateBool(value *bool) string {
+	if value == nil {
+		return ""
+	}
+	if *value {
+		return "true"
+	}
+	return "false"
+}
+
+func decodeTriStateBool(value string) *bool {
+	switch value {
+	case "true":
+		result := true
+		return &result
+	case "false":
+		result := false
+		return &result
+	default:
+		return nil
+	}
 }

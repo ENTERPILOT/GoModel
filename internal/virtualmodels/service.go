@@ -34,6 +34,7 @@ type Service struct {
 	targetCapacity func(qualifiedModel string) bool
 
 	balancer  roundRobin
+	sticky    stickySessions
 	current   atomic.Value // snapshot
 	refreshMu sync.Mutex
 }
@@ -91,6 +92,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	}
 	s.current.Store(next)
 	s.balancer.prune(next.redirects)
+	s.sticky.prune(next.redirects)
 	return nil
 }
 
@@ -223,10 +225,11 @@ func (s *Service) ListViews() []View {
 	views := make([]View, 0, len(rows))
 	for _, vm := range rows {
 		view := View{
-			Source:       vm.Source,
-			Kind:         vm.Kind(),
-			Targets:      vm.Targets,
-			Strategy:     vm.Strategy,
+			Source:          vm.Source,
+			Kind:            vm.Kind(),
+			Targets:         vm.Targets,
+			Strategy:        vm.Strategy,
+			SessionAffinity: vm.SessionAffinity,
 			ProviderName: vm.ProviderName,
 			Model:        vm.Model,
 			UserPaths:    vm.UserPaths,

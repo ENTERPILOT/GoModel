@@ -105,6 +105,7 @@ type LogEntry struct {
 	Method     string `json:"method,omitempty" bson:"method,omitempty"`
 	Path       string `json:"path,omitempty" bson:"path,omitempty"`
 	UserPath   string `json:"user_path,omitempty" bson:"user_path,omitempty"`
+	SessionID  string `json:"session_id,omitempty" bson:"session_id,omitempty"`
 	Stream     bool   `json:"stream,omitempty" bson:"stream,omitempty"`
 	ErrorType  string `json:"error_type,omitempty" bson:"error_type,omitempty"`
 

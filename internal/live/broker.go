@@ -585,6 +585,7 @@ type auditPreview struct {
 	Method            string            `json:"method,omitempty"`
 	Path              string            `json:"path,omitempty"`
 	UserPath          string            `json:"user_path,omitempty"`
+	SessionID         string            `json:"session_id,omitempty"`
 	Stream            bool              `json:"stream,omitempty"`
 	ErrorType         string            `json:"error_type,omitempty"`
 	ErrorMessage      string            `json:"error_message,omitempty"`
@@ -642,6 +643,7 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 		Method:            entry.Method,
 		Path:              entry.Path,
 		UserPath:          entry.UserPath,
+		SessionID:         entry.SessionID,
 		Stream:            entry.Stream,
 		ErrorType:         entry.ErrorType,
 		LiveState:         eventType,

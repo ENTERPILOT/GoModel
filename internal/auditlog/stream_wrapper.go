@@ -1,6 +1,7 @@
 package auditlog
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"sort"
@@ -205,9 +206,19 @@ func (b *streamResponseBuilder) buildResponsesAPIResponse() map[string]any {
 
 // CreateStreamEntry creates a new log entry for a streaming request.
 // This should be called before starting the stream.
-func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
+//
+// ctx is the request context at stream start: the copy is what the stream
+// observer persists (the base entry never reaches the terminal write), and it
+// is taken before the audit middleware's post-handler enrichment runs — so
+// every context-derived field the middleware would apply later (auth key id,
+// effective user path, managed-key labels, session id) must be finalized on
+// the base entry here, through the same helper the middleware uses.
+func CreateStreamEntry(ctx context.Context, baseEntry *LogEntry) *LogEntry {
 	if baseEntry == nil {
 		return nil
+	}
+	if ctx != nil {
+		EnrichLogEntryWithRequestContext(baseEntry, ctx)
 	}
 
 	// Create a copy of the entry for the stream.
@@ -232,6 +243,7 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 		Method:     baseEntry.Method,
 		Path:       baseEntry.Path,
 		UserPath:   baseEntry.UserPath,
+		SessionID:  baseEntry.SessionID,
 		Stream:     true, // Mark as streaming
 	}
 

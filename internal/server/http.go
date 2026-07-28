@@ -28,6 +28,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
+	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -112,6 +113,7 @@ type Config struct {
 	ExtraRoutes                     []func(*echo.Echo)                     // Optional: extension route registration callbacks invoked after core routes
 	ExtraAuthSkipPaths              []string                               // Optional: extension paths appended to the auth skip list ("/*" suffix matches a prefix)
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
+	SessionDetector                 *session.Detector                      // Optional: client session identification for sticky routing and audit grouping
 }
 
 // ReadinessProbe verifies that a dependency the gateway owns is reachable.
@@ -347,6 +349,16 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Authentication (skips public paths)
 	if cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil) {
 		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths, userPathHeaderName))
+	}
+
+	// Session identification runs after auth so session ids are scoped by the
+	// EFFECTIVE user path (a managed key's bound path, not the ingress header)
+	// and before workflow resolution, which consumes the id for sticky
+	// virtual-model routing. The audit middleware re-reads the id after the
+	// handler returns, so persisted entries carry it even though they are
+	// created earlier in the chain.
+	if cfg != nil && cfg.SessionDetector != nil {
+		e.Use(SessionCapture(cfg.SessionDetector))
 	}
 
 	// Request rewriters run post-auth (rewriters only see authenticated

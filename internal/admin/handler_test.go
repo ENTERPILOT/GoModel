@@ -62,6 +62,8 @@ type mockAuditReader struct {
 	statsResult         *auditlog.RequestStats
 	statsErr            error
 	lastStatsParams     auditlog.RequestStatsParams
+	sessionsResult      *auditlog.SessionListResult
+	sessionsErr         error
 }
 
 type mockRuntimeRefresher struct {
@@ -150,6 +152,14 @@ func (m *mockAuditReader) GetLogs(_ context.Context, params auditlog.LogQueryPar
 		return nil, m.logErr
 	}
 	return m.logResult, nil
+}
+
+func (m *mockAuditReader) GetSessions(_ context.Context, params auditlog.LogQueryParams) (*auditlog.SessionListResult, error) {
+	m.lastQuery = params
+	if m.sessionsErr != nil {
+		return nil, m.sessionsErr
+	}
+	return m.sessionsResult, nil
 }
 
 func (m *mockAuditReader) GetLogByID(_ context.Context, _ string) (*auditlog.LogEntry, error) {

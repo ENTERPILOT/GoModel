@@ -39,8 +39,11 @@ func (r *roundRobin) prune(active map[string]redirectEntry) {
 
 // balancedResolution chooses one concrete target for a request through entry,
 // applying its load-balancing strategy across the targets the catalog currently
-// supports. It reports false when no target is available.
-func (s *Service) balancedResolution(entry redirectEntry) (core.ModelSelector, bool) {
+// supports. When the request carries a session id and the redirect keeps
+// session affinity (the default), the target that served the session before is
+// preferred while it stays viable; otherwise the strategy picks and the choice
+// is re-pinned. It reports false when no target is available.
+func (s *Service) balancedResolution(entry redirectEntry, sessionID string) (core.ModelSelector, bool) {
 	supported := entry.supportedTargets(s.catalog)
 	if len(supported) == 0 {
 		return core.ModelSelector{}, false
@@ -51,22 +54,66 @@ func (s *Service) balancedResolution(entry redirectEntry) (core.ModelSelector, b
 	// failover) instead of the all-targets-down error path.
 	pool := s.targetsWithCapacity(supported)
 	if len(pool) == 0 {
-		pool = supported[:1]
-	}
-	if len(pool) == 1 {
-		// A single viable target needs no strategy and must not advance
-		// round-robin state, so an alias and a one-target-available redirect
-		// behave identically.
-		return pool[0].selector, true
+		// This target is selected only to reach admission and produce the 429.
+		// Do not run affinity resolution: a transient capacity burst must not
+		// discard or replace the target that actually served the session.
+		return supported[0].selector, true
 	}
 
-	switch normalizeStrategy(entry.strategy) {
-	case StrategyCost:
-		return s.cheapestTarget(pool).selector, true
-	default: // StrategyRoundRobin
-		index := weightedIndex(pool, s.balancer.next(entry.vm.Source))
-		return pool[index].selector, true
+	// pick applies the redirect's strategy to the viable pool. A single viable
+	// target needs no strategy and must not advance round-robin state, so an
+	// alias and a one-target-available redirect behave identically.
+	pick := func() resolvedTarget {
+		if len(pool) == 1 {
+			return pool[0]
+		}
+		switch normalizeStrategy(entry.strategy) {
+		case StrategyCost:
+			return s.cheapestTarget(pool)
+		default: // StrategyRoundRobin
+			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))]
+		}
 	}
+	// Affinity is keyed to the redirect's CONFIGURED shape, not the targets
+	// currently available: with only one target momentarily supported (provider
+	// outage, startup) the session must still pin its serving target, or the
+	// strategy could move an active conversation once the others come back.
+	affinity := sessionID != "" && entry.sessionAffinity() && len(entry.targets) > 1
+	if affinity {
+		viable := func(candidate string) bool {
+			_, ok := poolTarget(pool, candidate)
+			return ok
+		}
+		if qualified, ok := s.sticky.lookup(entry.vm.Source, sessionID, viable); ok {
+			if target, found := poolTarget(pool, qualified); found {
+				return target.selector, true
+			}
+		}
+
+		// Strategy selection may read the model catalog, so keep it outside the
+		// sticky lock. resolve rechecks the pin atomically in case another first
+		// request selected and pinned a target concurrently.
+		choice := pick()
+		qualified := s.sticky.resolve(entry.vm.Source, sessionID,
+			viable,
+			choice.qualified,
+		)
+		if target, ok := poolTarget(pool, qualified); ok {
+			return target.selector, true
+		}
+		return choice.selector, true
+	}
+	return pick().selector, true
+}
+
+// poolTarget finds a qualified model among the viable targets.
+func poolTarget(pool []resolvedTarget, qualified string) (resolvedTarget, bool) {
+	for _, target := range pool {
+		if target.qualified == qualified {
+			return target, true
+		}
+	}
+	return resolvedTarget{}, false
 }
 
 // targetsWithCapacity filters targets through the optional rate-limit capacity

@@ -268,7 +268,7 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 		if auditEnabled && entry != nil {
 			auditlog.PopulateRequestData(entry, c.Request(), s.logger.Config())
 		}
-		streamEntry := auditlog.CreateStreamEntry(entry)
+		streamEntry := auditlog.CreateStreamEntry(c.Request().Context(), entry)
 		if streamEntry != nil {
 			streamEntry.StatusCode = resp.StatusCode
 		}

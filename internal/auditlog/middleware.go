@@ -210,6 +210,11 @@ func applyAuthentication(entry *LogEntry, ctx context.Context) {
 	if userPath := strings.TrimSpace(core.UserPathFromContext(ctx)); userPath != "" {
 		entry.UserPath = userPath
 	}
+	// Session detection runs after authentication (deeper in the chain than
+	// this middleware), so the id only exists on the post-handler context.
+	if sessionID := core.SessionIDFromContext(ctx); sessionID != "" {
+		entry.SessionID = sessionID
+	}
 	// The entry snapshots labels before authentication runs, so auth-key
 	// labels merged into the context during auth are re-read here.
 	if entry.Data != nil {

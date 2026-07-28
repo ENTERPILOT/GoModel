@@ -187,6 +187,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by exact session id",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by error type",
                         "name": "error_type",
                         "in": "query"
@@ -205,7 +211,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Search across request_id/requested_model/provider/method/path/error_type/error_message",
+                        "description": "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message",
                         "name": "search",
                         "in": "query"
                     },
@@ -227,6 +233,129 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/admin.auditLogListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/audit/sessions": {
+            "get": {
+                "description": "Groups audit log entries by session id into threads and returns\none summary per thread — its latest entry, entry count, and time\nspan — ordered by latest activity. Entries without a session id\nappear as single-entry threads. Filters apply to entries before\ngrouping.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get paginated audit sessions (threads)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by requested model selector",
+                        "name": "requested_model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by HTTP method",
+                        "name": "method",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request path",
+                        "name": "path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by tracked user path subtree",
+                        "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by error type",
+                        "name": "error_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by status code",
+                        "name": "status_code",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter by stream mode (true/false)",
+                        "name": "stream",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size in threads (default 25, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset for pagination",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.auditSessionsListResponse"
                         }
                     },
                     "400": {
@@ -6713,6 +6842,9 @@ const docTemplate = `{
                 "resolved_model": {
                     "type": "string"
                 },
+                "session_id": {
+                    "type": "string"
+                },
                 "status_code": {
                     "type": "integer"
                 },
@@ -6748,6 +6880,46 @@ const docTemplate = `{
                 },
                 "offset": {
                     "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "admin.auditSessionResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "first_timestamp": {
+                    "type": "string"
+                },
+                "last_timestamp": {
+                    "type": "string"
+                },
+                "latest": {
+                    "$ref": "#/definitions/admin.auditLogEntryResponse"
+                },
+                "session_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.auditSessionsListResponse": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "sessions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.auditSessionResponse"
+                    }
                 },
                 "total": {
                     "type": "integer"
@@ -7558,6 +7730,10 @@ const docTemplate = `{
                 "old_source": {
                     "type": "string"
                 },
+                "session_affinity": {
+                    "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
+                    "type": "boolean"
+                },
                 "source": {
                     "type": "string"
                 },
@@ -8168,6 +8344,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "resolved_model": {
+                    "type": "string"
+                },
+                "session_id": {
                     "type": "string"
                 },
                 "status_code": {
@@ -10950,6 +11129,9 @@ const docTemplate = `{
                 "scope_kind": {
                     "type": "string"
                 },
+                "session_affinity": {
+                    "type": "boolean"
+                },
                 "source": {
                     "type": "string"
                 },
@@ -10997,6 +11179,10 @@ const docTemplate = `{
                 },
                 "provider_name": {
                     "type": "string"
+                },
+                "session_affinity": {
+                    "description": "SessionAffinity keeps requests of one detected session on the target that\nserved it before, while that target stays available. Tri-state: nil means\nenabled (the default); explicit false restores stateless balancing.",
+                    "type": "boolean"
                 },
                 "source": {
                     "type": "string"

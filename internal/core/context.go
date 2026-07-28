@@ -27,6 +27,8 @@ const (
 
 	// requestLabelsKey stores labels extracted from configured tagging headers.
 	requestLabelsKey contextKey = "request-labels"
+	// sessionIDKey stores the client session id detected for the request.
+	sessionIDKey contextKey = "session-id"
 	// taggingStripHeadersKey stores canonical tagging header names that must not
 	// be forwarded to upstream providers.
 	taggingStripHeadersKey contextKey = "tagging-strip-headers"
@@ -129,6 +131,25 @@ func GetWorkflow(ctx context.Context) *Workflow {
 		}
 	}
 	return nil
+}
+
+// WithSessionID returns a new context with the detected client session id attached.
+func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	if sessionID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, sessionIDKey, sessionID)
+}
+
+// SessionIDFromContext retrieves the detected client session id, or "" when
+// the request carries no session signal.
+func SessionIDFromContext(ctx context.Context) string {
+	if v := ctx.Value(sessionIDKey); v != nil {
+		if id, ok := v.(string); ok {
+			return id
+		}
+	}
+	return ""
 }
 
 // WithAuthKeyID returns a new context with the authenticated managed auth key id attached.

@@ -4,7 +4,8 @@
 // singleton (liveLogs.svelte.js) and the node:test suite share the identical
 // implementation. The host (`this`) must provide:
 //   - state: auditLog {entries,total,limit,offset}, usageLog {…},
-//     skippedLiveUsageByRequestId, liveLogsLastSeq
+//     skippedLiveUsageByRequestId, liveLogsLastSeq, auditGroupSessions,
+//     auditThreadChildren ({ [session_id]: {loading, entries, total} })
 //   - insert-gate fields: auditSearch, auditMethod, auditStatusCode,
 //     auditStream, customStartDate, customEndDate, usageLogSearch,
 //     usageFilterModel, usageFilterProvider, usageFilterLabel,
@@ -16,6 +17,11 @@
 // No Svelte runes and no imports here: node --test runs this file directly.
 
 const LIVE_LOGS_STREAM_PATH = "/admin/live/logs?types=audit,usage";
+
+function matchesLiveAuditKey(entry, id, requestID) {
+    return (!!id && String(entry && entry.id || '').trim() === id) ||
+        (!!requestID && String(entry && entry.request_id || '').trim() === requestID);
+}
 
 // liveLogsStreamPath builds the stream path with the replay cursor:
 // '/admin/live/logs?types=audit,usage[&cursor=N]'.
@@ -122,11 +128,9 @@ export function liveLogsMethods() {
             if (!incoming || typeof incoming !== 'object') return;
             const key = String(incoming.id || incoming.request_id || '').trim();
             if (!key) return;
+            const requestID = String(incoming.request_id || '').trim();
             const currentEntries = (this.auditLog && Array.isArray(this.auditLog.entries)) ? this.auditLog.entries : [];
-            const index = currentEntries.findIndex((entry) => {
-                return String(entry.id || '').trim() === key ||
-                    (incoming.request_id && String(entry.request_id || '').trim() === String(incoming.request_id).trim());
-            });
+            const index = currentEntries.findIndex((entry) => matchesLiveAuditKey(entry, key, requestID));
             const previous = index >= 0 ? currentEntries[index] || {} : {};
             if (eventType === 'audit.detail') {
                 // The detail entry carries the full payload, so the slim-list
@@ -136,8 +140,16 @@ export function liveLogsMethods() {
                     const merged = this.mergeLiveAuditPatch(previous, patch);
                     currentEntries.splice(index, 1, merged);
                     this.auditLog.entries = [...currentEntries];
+                    // Regrouping may demote this row to a thread child; the
+                    // conversation hook still targets the updated row itself.
+                    this.regroupLiveAuditHead(merged);
                     this.notifyLiveConversation(merged);
                     return merged;
+                }
+                const child = this.mergeLiveAuditChild(incoming, patch);
+                if (child) {
+                    this.notifyLiveConversation(child);
+                    return child;
                 }
                 if (!this.auditLiveInsertAllowed()) return;
                 this.auditLog.entries = [this.mergeLiveAuditUsagePatch(patch), ...currentEntries].slice(0, this.auditLog.limit || 25);
@@ -165,17 +177,171 @@ export function liveLogsMethods() {
                 const merged = this.mergeLiveAuditPatch(previous, patch);
                 currentEntries.splice(index, 1, merged);
                 this.auditLog.entries = [...currentEntries];
+                // Regrouping may demote this row to a thread child; the detail
+                // and conversation hooks still target the updated row itself.
+                this.regroupLiveAuditHead(merged);
                 this.fetchExpandedAuditDetailIfReady(merged);
                 this.notifyLiveConversation(merged);
                 return merged;
             }
+            const child = this.mergeLiveAuditChild(incoming, patch);
+            if (child) {
+                this.fetchExpandedAuditDetailIfReady(child);
+                this.notifyLiveConversation(child);
+                return child;
+            }
             if (!this.auditLiveInsertAllowed()) return;
+            if (this.auditGroupSessions) {
+                const folded = this.foldLiveAuditIntoThread(patch);
+                if (folded) {
+                    this.fetchExpandedAuditDetailIfReady(folded);
+                    this.notifyLiveConversation(folded);
+                    return folded;
+                }
+            }
             this.auditLog.entries = [this.mergeLiveAuditUsagePatch(patch), ...currentEntries].slice(0, this.auditLog.limit || 25);
             this.auditLog.total = Number(this.auditLog.total || 0) + 1;
             const inserted = this.auditLog.entries[0];
             this.fetchExpandedAuditDetailIfReady(inserted);
             this.notifyLiveConversation(inserted);
             return inserted;
+        },
+
+        // --- Session-thread grouping ---------------------------------------
+        // With "Group by session" on, list entries are thread heads (carrying
+        // session_count) and each unfolded thread keeps its older entries in
+        // auditThreadChildren[session_id].
+
+        // mergeLiveAuditChild merges a live patch into an entry living in a
+        // loaded thread-children list (a request that was displaced from head
+        // position, or an expanded child whose detail arrived).
+        mergeLiveAuditChild(incoming, patch) {
+            const lists = this.auditThreadChildren;
+            if (!lists || typeof lists !== 'object') return null;
+            const id = String(incoming.id || '').trim();
+            const requestID = String(incoming.request_id || '').trim();
+            const sessionIds = Object.keys(lists);
+            for (let i = 0; i < sessionIds.length; i++) {
+                const list = lists[sessionIds[i]];
+                const entries = list && Array.isArray(list.entries) ? list.entries : [];
+                const index = entries.findIndex((entry) => matchesLiveAuditKey(entry, id, requestID));
+                if (index < 0) continue;
+                const merged = this.mergeLiveAuditPatch(entries[index] || {}, patch);
+                const nextEntries = [...entries];
+                nextEntries.splice(index, 1, merged);
+                this.auditThreadChildren = { ...lists, [sessionIds[i]]: { ...list, entries: nextEntries } };
+                return merged;
+            }
+            return null;
+        },
+
+        // regroupLiveAuditHead folds a list row into another on-screen head of
+        // the same session after an in-place merge. This is how a live row
+        // inserted sessionless (audit.started fires before session detection
+        // stamps the context) joins its thread once a later event delivers the
+        // session id: the NEWEST of the two rows becomes the thread head — the
+        // event that happens to complete last is not necessarily the newest
+        // request — the other moves into the loaded children, and the two rows
+        // collapse into one thread (total shrinks by one).
+        regroupLiveAuditHead(entry) {
+            if (!this.auditGroupSessions) return null;
+            const sessionId = String((entry && entry.session_id) || '').trim();
+            if (!sessionId) return null;
+            const entries = (this.auditLog && Array.isArray(this.auditLog.entries)) ? this.auditLog.entries : [];
+            const id = String(entry.id || '').trim();
+            const myIndex = entries.findIndex((candidate) => String(candidate.id || '').trim() === id);
+            if (myIndex < 0) return null;
+            const otherIndex = entries.findIndex((candidate, index) => {
+                return index !== myIndex && String(candidate.session_id || '').trim() === sessionId;
+            });
+            if (otherIndex < 0) return null;
+            const other = entries[otherIndex];
+            const otherTime = Date.parse(other && other.timestamp);
+            const entryTime = Date.parse(entry && entry.timestamp);
+            const otherIsNewer =
+                Number.isFinite(otherTime) && Number.isFinite(entryTime) && otherTime > entryTime;
+            const head = otherIsNewer ? other : entry;
+            const child = otherIsNewer ? entry : other;
+            const merged = {
+                ...head,
+                session_count:
+                    Math.max(1, Number(other.session_count || 1)) +
+                    Math.max(1, Number(entry.session_count || 1))
+            };
+            const next = entries.filter((_, index) => index !== myIndex && index !== otherIndex);
+            next.unshift(merged);
+            this.auditLog.entries = next;
+            this.auditLog.total = Math.max(0, Number(this.auditLog.total || 0) - 1);
+            this.prependLiveAuditThreadChild(sessionId, child);
+            return merged;
+        },
+
+        // foldLiveAuditIntoThread makes a fresh live request the new head of
+        // its on-screen thread: the old head moves into the loaded children
+        // list (or waits for the lazy fetch) and the thread bubbles to the
+        // top with its count bumped. Total is unchanged (same thread count).
+        foldLiveAuditIntoThread(patch) {
+            const sessionId = String((patch && patch.session_id) || '').trim();
+            if (!sessionId) return null;
+            const entries = (this.auditLog && Array.isArray(this.auditLog.entries)) ? this.auditLog.entries : [];
+            const headIndex = entries.findIndex((entry) => String(entry.session_id || '').trim() === sessionId);
+            if (headIndex < 0) return null;
+            const oldHead = entries[headIndex];
+            const oldCount = Number(oldHead.session_count);
+            const newHead = this.mergeLiveAuditUsagePatch({
+                ...patch,
+                session_count: (Number.isFinite(oldCount) && oldCount > 0 ? oldCount : 1) + 1
+            });
+            const next = [...entries];
+            next.splice(headIndex, 1);
+            next.unshift(newHead);
+            this.auditLog.entries = next;
+            this.prependLiveAuditThreadChild(sessionId, oldHead);
+            return newHead;
+        },
+
+        prependLiveAuditThreadChild(sessionId, entry) {
+            const lists = this.auditThreadChildren;
+            const list = lists && lists[sessionId];
+            // Not loaded yet: the lazy children fetch will include this entry.
+            if (!list || !Array.isArray(list.entries)) return;
+            const child = { ...entry };
+            delete child.session_count;
+            this.auditThreadChildren = {
+                ...lists,
+                [sessionId]: {
+                    ...list,
+                    entries: [child, ...list.entries],
+                    total: Number(list.total || list.entries.length) + 1
+                }
+            };
+        },
+
+        removeLiveAuditThreadChild(id, requestID) {
+            const lists = this.auditThreadChildren;
+            if (!lists || typeof lists !== 'object') return;
+            Object.keys(lists).forEach((sessionId) => {
+                const list = lists[sessionId];
+                const entries = list && Array.isArray(list.entries) ? list.entries : [];
+                const next = entries.filter((entry) => !matchesLiveAuditKey(entry, id, requestID));
+                const removed = entries.length - next.length;
+                if (removed === 0) return;
+                this.auditThreadChildren = {
+                    ...this.auditThreadChildren,
+                    [sessionId]: { ...list, entries: next, total: Math.max(0, Number(list.total || entries.length) - removed) }
+                };
+                this.decrementLiveAuditThreadCount(sessionId, removed);
+            });
+        },
+
+        decrementLiveAuditThreadCount(sessionId, count) {
+            const entries = (this.auditLog && Array.isArray(this.auditLog.entries)) ? this.auditLog.entries : [];
+            const index = entries.findIndex((entry) => String(entry.session_id || '').trim() === sessionId);
+            if (index < 0) return;
+            const head = entries[index];
+            const next = [...entries];
+            next.splice(index, 1, { ...head, session_count: Math.max(1, Number(head.session_count || 1) - count) });
+            this.auditLog.entries = next;
         },
 
         mergeLiveAuditPatch(previous, patch) {
@@ -268,15 +434,54 @@ export function liveLogsMethods() {
             const id = String(incoming.id || '').trim();
             const requestID = String(incoming.request_id || '').trim();
             if (!id && !requestID) return;
-            const next = this.auditLog.entries.filter((entry) => {
-                if (id && String(entry.id || '').trim() === id) return false;
-                if (requestID && String(entry.request_id || '').trim() === requestID) return false;
-                return true;
+            const current = this.auditLog.entries;
+            const next = [];
+            let removedCount = 0;
+            let preservedThreads = 0;
+            let reloadGroupedList = false;
+            current.forEach((entry) => {
+                if (!matchesLiveAuditKey(entry, id, requestID)) {
+                    next.push(entry);
+                    return;
+                }
+                removedCount++;
+                const sessionId = String(entry.session_id || '').trim();
+                const sessionCount = Math.max(1, Number(entry.session_count || 1));
+                if (!this.auditGroupSessions || !sessionId || sessionCount <= 1) return;
+
+                // Removing a live thread head does not remove the persisted
+                // session behind it. Promote the newest loaded child; if the
+                // thread was never expanded, refetch the grouped source.
+                preservedThreads++;
+                const list = this.auditThreadChildren && this.auditThreadChildren[sessionId];
+                const children = list && Array.isArray(list.entries)
+                    ? list.entries.filter((child) => !matchesLiveAuditKey(child, id, requestID))
+                    : [];
+                if (children.length === 0) {
+                    reloadGroupedList = true;
+                    return;
+                }
+                const promoted = { ...children[0], session_id: sessionId, session_count: sessionCount - 1 };
+                next.push(promoted);
+                this.auditThreadChildren = {
+                    ...this.auditThreadChildren,
+                    [sessionId]: {
+                        ...list,
+                        entries: children.slice(1),
+                        total: Math.max(0, Number(list.total || sessionCount) - 1)
+                    }
+                };
             });
-            const removedCount = this.auditLog.entries.length - next.length;
             if (removedCount > 0) {
                 this.auditLog.entries = next;
-                this.auditLog.total = Math.max(0, Number(this.auditLog.total || 0) - removedCount);
+                this.auditLog.total = Math.max(
+                    0,
+                    Number(this.auditLog.total || 0) - removedCount + preservedThreads
+                );
+            }
+            this.removeLiveAuditThreadChild(id, requestID);
+            if (reloadGroupedList && typeof this.fetchAuditLog === 'function') {
+                this.fetchAuditLog(true);
             }
         },
 
@@ -415,10 +620,33 @@ export function liveLogsMethods() {
             const requestID = String(usageEntry && usageEntry.request_id || '').trim();
             if (!requestID || !this.auditLog || !Array.isArray(this.auditLog.entries)) return;
             const index = this.auditLog.entries.findIndex((entry) => String(entry.request_id || '').trim() === requestID);
-            if (index < 0) return;
-            const entry = this.auditLog.entries[index];
-            this.auditLog.entries.splice(index, 1, this.auditEntryWithLiveUsage(entry, usageEntry));
-            this.auditLog.entries = [...this.auditLog.entries];
+            if (index >= 0) {
+                const entry = this.auditLog.entries[index];
+                this.auditLog.entries.splice(index, 1, this.auditEntryWithLiveUsage(entry, usageEntry));
+                this.auditLog.entries = [...this.auditLog.entries];
+            }
+
+            const lists = this.auditThreadChildren;
+            if (!lists || typeof lists !== 'object') return;
+            let nextLists = lists;
+            let changed = false;
+            Object.keys(lists).forEach((sessionId) => {
+                const list = nextLists[sessionId];
+                const entries = list && Array.isArray(list.entries) ? list.entries : [];
+                const childIndex = entries.findIndex((entry) => String(entry.request_id || '').trim() === requestID);
+                if (childIndex < 0) return;
+                const nextEntries = [...entries];
+                nextEntries.splice(
+                    childIndex,
+                    1,
+                    this.auditEntryWithLiveUsage(entries[childIndex], usageEntry)
+                );
+                nextLists = { ...nextLists, [sessionId]: { ...list, entries: nextEntries } };
+                changed = true;
+            });
+            if (changed) {
+                this.auditThreadChildren = nextLists;
+            }
         },
 
         auditEntryWithLiveUsage(entry, usageEntry) {

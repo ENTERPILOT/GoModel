@@ -48,8 +48,14 @@ type VirtualModel struct {
 	UserPaths    []string  `json:"user_paths,omitempty" bson:"user_paths,omitempty"`
 	Description  string    `json:"description,omitempty" bson:"description,omitempty"`
 	Enabled      bool      `json:"enabled" bson:"enabled"`
-	CreatedAt    time.Time `json:"created_at" bson:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at" bson:"updated_at"`
+
+	// SessionAffinity keeps requests of one detected session on the target that
+	// served it before, while that target stays available. Tri-state: nil means
+	// enabled (the default); explicit false restores stateless balancing.
+	SessionAffinity *bool `json:"session_affinity,omitempty" bson:"session_affinity,omitempty"`
+
+	CreatedAt time.Time `json:"created_at" bson:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" bson:"updated_at"`
 
 	// Managed marks a virtual model supplied declaratively through config.yaml or
 	// the VIRTUAL_MODELS env var rather than the admin store. It is an in-memory
@@ -108,6 +114,10 @@ func (v VirtualModel) clone() VirtualModel {
 	if len(v.UserPaths) > 0 {
 		v.UserPaths = append([]string(nil), v.UserPaths...)
 	}
+	if v.SessionAffinity != nil {
+		affinity := *v.SessionAffinity
+		v.SessionAffinity = &affinity
+	}
 	return v
 }
 
@@ -121,8 +131,9 @@ const (
 type View struct {
 	Source        string    `json:"source"`
 	Kind          string    `json:"kind"`
-	Targets       []Target  `json:"targets,omitempty"`
-	Strategy      string    `json:"strategy,omitempty"`
+	Targets         []Target `json:"targets,omitempty"`
+	Strategy        string   `json:"strategy,omitempty"`
+	SessionAffinity *bool    `json:"session_affinity,omitempty"`
 	ProviderName  string    `json:"provider_name,omitempty"`
 	Model         string    `json:"model,omitempty"`
 	UserPaths     []string  `json:"user_paths,omitempty"`

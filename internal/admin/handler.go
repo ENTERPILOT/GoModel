@@ -151,6 +151,21 @@ type auditLogListResponse struct {
 	Offset  int                     `json:"offset"`
 }
 
+type auditSessionResponse struct {
+	SessionID      string                `json:"session_id,omitempty"`
+	Count          int                   `json:"count"`
+	FirstTimestamp time.Time             `json:"first_timestamp"`
+	LastTimestamp  time.Time             `json:"last_timestamp"`
+	Latest         auditLogEntryResponse `json:"latest"`
+}
+
+type auditSessionsListResponse struct {
+	Sessions []auditSessionResponse `json:"sessions"`
+	Total    int                    `json:"total"`
+	Limit    int                    `json:"limit"`
+	Offset   int                    `json:"offset"`
+}
+
 const (
 	RuntimeRefreshStatusOK      = "ok"
 	RuntimeRefreshStatusPartial = "partial"

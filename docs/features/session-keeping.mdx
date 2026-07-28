@@ -1,0 +1,130 @@
+---
+title: "Session Keeping"
+description: "Group requests from one client session for sticky load balancing and threaded audit logs"
+---
+
+Coding agents and chat apps send many requests that belong to one logical
+session — one conversation, one agent task. GoModel detects that session and
+uses it in two places:
+
+- **Sticky load balancing** — a load-balanced virtual model routes every
+  request of a session to the target that served it first, which keeps provider
+  prompt caches warm and model behavior consistent mid-conversation.
+- **Threaded audit logs** — the dashboard's Audit Logs page groups a session's
+  requests into one thread: the latest request as the row, with an expander
+  that unfolds the older requests beneath it.
+
+Session keeping works with zero configuration. Defaults fit most setups; the
+options below exist for the rare cases they don't.
+
+## How a session is identified
+
+The first matching signal wins:
+
+1. **Session headers** — a built-in registry covers the headers known tools
+   send, plus gateway conventions:
+
+   | Header | Sent by |
+   |---|---|
+   | `X-Session-Id` | OpenCode, Kilo Code, generic clients |
+   | `X-Claude-Code-Session-Id` | Claude Code (documented for gateways) |
+   | `Session-Id` / `Session_id` | Codex CLI (current / older), Roo Code |
+   | `X-Litellm-Session-Id` | LiteLLM convention |
+   | `Helicone-Session-Id` | Helicone convention |
+   | `Agent-Session-Id` | Goose |
+
+2. **Body fields** — for clients that mark sessions in the request body:
+   Anthropic `metadata.user_id` (Claude Code embeds its session UUID there,
+   both current and legacy formats are parsed), `session_id` (OpenRouter
+   convention), `litellm_session_id`, `prompt_cache_key` (Zed and other OpenAI
+   clients that reuse a cache key per conversation), and `/v1/responses`
+   `conversation` references.
+
+3. **Automatic detection** — chat and responses requests with no explicit
+   signal are grouped by their conversation opening: the model, system
+   context, tools, and the messages through the first user turn. Follow-up
+   requests resend that prefix unchanged, so an agent that simply replays its
+   history (Aider, Cline, Continue, …) still gets a stable session id
+   (`auto-…`) with no client changes.
+
+Body-based signals and automatic detection read request bodies up to 1 MiB
+(chunked requests included); larger bodies fall back to header signals.
+
+Client-provided session ids are scoped by [user path](/features/user-path),
+including UUID-shaped values, so one tenant cannot collide with another by
+reusing the same id.
+
+## Sticky load balancing
+
+When a request carries a session and resolves through a
+[virtual model](/features/virtual-models) with several targets, the first
+request picks a target via the redirect's strategy (`round_robin` or `cost`)
+and later requests stick to it. If the pinned target becomes unavailable or
+saturated, the strategy picks again and the session re-pins — a session is
+never glued to a dead target, and the all-saturated honest-429 behavior is
+unchanged.
+
+Affinity is on by default and can be disabled per redirect:
+
+```yaml
+virtual_models:
+  - source: "smart"
+    strategy: round_robin
+    session_affinity: false   # default: true
+    targets:
+      - model: "openai/gpt-4o"
+      - model: "anthropic/claude-sonnet-5"
+```
+
+The same flag is available in the dashboard's virtual model editor ("Session
+keeping") and on the admin API (`session_affinity` on
+`PUT /admin/virtual-models`).
+
+Pins are in-memory per instance (like rate-limit counters): after a restart or
+on another replica, the next request of a session simply re-pins. Idle
+sessions expire after 6 hours.
+
+## Threaded audit logs
+
+Audit entries record the session id (`session_id`), and the Audit Logs page
+groups them by default ("Group by session" toggle). Each thread shows its
+latest request with a count badge; the expander on the left unfolds the older
+requests. `GET /admin/audit/sessions` serves the thread list;
+`GET /admin/audit/log?session_id=…` returns one session's entries.
+
+## Configuration
+
+Everything is on by default.
+
+```bash
+# Master switch for session identification
+SESSION_KEEPING_ENABLED=true
+# Content-based detection for requests with no explicit signal
+SESSION_AUTO_DETECT=true
+# The built-in header/body-field registry
+SESSION_BUILTIN_RULES=true
+# Extra session headers (numbered from 1), merged over the built-ins.
+# The optional transform "session-uuid" extracts a session_<uuid> value.
+SESSION_HEADER_1=X-My-Session
+SESSION_HEADER_1_TRANSFORM=
+```
+
+Or in `config.yaml`:
+
+```yaml
+session:
+  enabled: true
+  auto_detect: true
+  builtin_rules: true
+  headers:
+    - header: X-My-Session
+```
+
+Credential-bearing headers (`Authorization`, API-key headers, …) are rejected
+as session sources, since the session id is persisted on audit and usage
+records.
+
+**When to change the defaults:** set `SESSION_AUTO_DETECT=false` if you only
+want explicitly-tagged sessions grouped; set `session_affinity: false` on a
+redirect when you prefer strict load spreading over cache affinity (for
+example pure round-robin capacity balancing across identical deployments).
