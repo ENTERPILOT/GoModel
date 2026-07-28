@@ -1,58 +1,24 @@
 <script>
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import GoModelLogo from "$lib/components/atoms/GoModelLogo.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
   import { router } from "$lib/stores/router.svelte.ts";
   import { sidebar } from "$lib/stores/ui.svelte.ts";
   import { auth } from "$lib/stores/auth.svelte.ts";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
   import { gomodelPath } from "$lib/api/paths.ts";
+  import { NAV_ITEMS } from "./navigation.ts";
 
+  // Visibility gates read the runtimeConfig store, so this re-filters when
+  // the flags load.
   const navItems = $derived(
-    [
-      { page: "overview", label: "Overview", icon: "layout-dashboard" },
-      { page: "providers-config", label: "Providers", icon: "server-cog" },
-      { page: "models", label: "Models", icon: "box" },
-      { page: "audit-logs", label: "Audit Logs", icon: "history" },
-      { page: "usage", label: "Usage", icon: "chart-column" },
-      {
-        page: "budgets",
-        label: "Budgets",
-        icon: "wallet",
-        visible: runtimeConfig.budgetsVisible(),
-      },
-      {
-        page: "rate-limits",
-        label: "Rate Limits",
-        icon: "gauge",
-        visible: runtimeConfig.rateLimitsVisible(),
-      },
-      { page: "auth-keys", label: "API Keys", icon: "key-round" },
-      { page: "workflows", label: "Workflows", icon: "workflow" },
-      {
-        page: "guardrails",
-        label: "Guardrails (experimental)",
-        icon: "shield-check",
-        visible: runtimeConfig.guardrailsVisible(),
-      },
-      {
-        page: "mcp-servers",
-        label: "MCP Servers",
-        icon: "plug",
-        visible: runtimeConfig.mcpVisible(),
-      },
-      { page: "settings", label: "Settings", icon: "settings" },
-    ].filter((item) => item.visible !== false),
+    NAV_ITEMS.filter((item) => !item.visible || item.visible()),
   );
 </script>
 
 <aside class="sidebar" class:sidebar-collapsed={sidebar.collapsed}>
   <div class="sidebar-header">
     <div class="sidebar-logo">
-      <svg viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M15 3L25.39 9L25.39 21L15 27L4.61 21L4.61 9Z" stroke="currentColor" stroke-width="2" fill="none"/>
-        <circle cx="15" cy="15" r="4" fill="currentColor" opacity="0.3"/>
-        <path d="M15 9.5L15 6M15 20.5L15 24M19.76 12.25L22.79 10.5M10.24 17.75L7.21 19.5M19.76 17.75L22.79 19.5M10.24 12.25L7.21 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
+      <GoModelLogo />
     </div>
     <h1>GoModel</h1>
     <span class="badge">Admin</span>
