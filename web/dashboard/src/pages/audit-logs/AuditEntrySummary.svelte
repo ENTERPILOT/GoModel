@@ -4,6 +4,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { auditModelDisplay, formatTimestampUTC } from "$lib/utils/format.js";
+  import { auditList } from "./auditList.svelte.js";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import {
     auditAttemptSegmentTitle,
@@ -17,11 +18,19 @@
   } from "./audit-logic.js";
 
   // `thread` marks a session-thread head row (grouped mode):
-  // { count, expanded, ontoggle }.
-  let { entry, thread = null } = $props();
+  // { count, expanded, ontoggle }. `expanded`/`onactivate` wire the
+  // Svelte-controlled row expansion: the click is intercepted (the parent
+  // <details> stays open so the close can animate) and the state lives in
+  // auditList.
+  let { entry, thread = null, expanded = false, onactivate = null } = $props();
+
+  function onSummaryClick(event) {
+    event.preventDefault();
+    if (onactivate) onactivate();
+  }
 
   // The expander is a button nested in <summary>, so it must not toggle the
-  // entry's own details element — same treatment as openConversation.
+  // entry's own expansion — same treatment as openConversation.
   function toggleThread(event) {
     event.stopPropagation();
     event.preventDefault();
@@ -31,18 +40,16 @@
   function openConversation(event) {
     event.stopPropagation();
     event.preventDefault();
-    conversationDrawer.openConversation(
-      entry,
-      event.currentTarget.closest("details"),
-      true,
-      event.currentTarget,
-    );
+    auditList.expandAuditEntry(entry);
+    conversationDrawer.openConversation(entry, event.currentTarget);
   }
 </script>
 
 <summary
   class="audit-entry-summary"
   class:audit-entry-summary-live-in-progress={auditEntryLiveInProgress(entry)}
+  aria-expanded={expanded}
+  onclick={onSummaryClick}
 >
   <div class="audit-entry-left">
     {#if thread}

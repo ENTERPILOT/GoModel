@@ -3,7 +3,9 @@
   // (with an expander + count badge) and, once unfolded, the session's older
   // requests indented beneath it with L-shaped connector lines. Entries that
   // are alone in their session render as a plain row.
+  import { slide } from "svelte/transition";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
+  import { motionDuration } from "$lib/utils/motion.js";
   import AuditEntryRow from "./AuditEntryRow.svelte";
   import { auditList } from "./auditList.svelte.js";
   import {
@@ -37,7 +39,10 @@
       }}
     />
     {#if expanded}
-      <div class="audit-thread-children">
+      <div
+        class="audit-thread-children"
+        transition:slide={{ duration: motionDuration(150) }}
+      >
         {#if children && children.loading}
           <div class="audit-thread-loading">
             <Spinner size={14} label="Loading session requests" />

@@ -1,6 +1,13 @@
 <script>
   // One expandable audit-log entry: collapsed summary row plus, once opened,
   // the workflow chart, request/response tabs and metadata strip.
+  //
+  // The expansion is Svelte-controlled (the <details> stays open and the
+  // summary click is intercepted): a native <details> toggle cannot animate
+  // its close, and the CSS ::details-content transition needs
+  // interpolate-size, which Firefox lacks. transition:slide works everywhere.
+  import { slide } from "svelte/transition";
+  import { motionDuration } from "$lib/utils/motion.js";
   import WorkflowChart from "$pages/workflows/WorkflowChart.svelte";
   import { workflowAuditChart } from "$pages/workflows/workflowChartLogic.js";
   import AuditEntryMetadata from "./AuditEntryMetadata.svelte";
@@ -8,7 +15,6 @@
   import AuditPaneTabs from "./AuditPaneTabs.svelte";
   import { auditList } from "./auditList.svelte.js";
   import { auditWorkflows } from "./audit-workflows.svelte.js";
-  import { liveLogs } from "./liveLogs.svelte.js";
   import { extractRequestPromptTextSegments } from "./conversation-helpers.js";
   import { auditPanes } from "./audit-logic.js";
 
@@ -33,20 +39,18 @@
       : null,
   );
 
-  function onToggle(event) {
-    const detailsEl = event && event.currentTarget;
-    if (!detailsEl || !detailsEl.open) return;
-    auditList.markAuditEntryExpanded(entry);
-    if (typeof liveLogs.fetchAuditEntryDetail === "function") {
-      liveLogs.fetchAuditEntryDetail(entry);
-    }
+  function toggleExpanded() {
+    auditList.toggleAuditEntryExpanded(entry);
   }
 </script>
 
-<details class="audit-entry" ontoggle={onToggle}>
-  <AuditEntrySummary {entry} {thread} />
+<details class="audit-entry" open>
+  <AuditEntrySummary {entry} {thread} {expanded} onactivate={toggleExpanded} />
   {#if expanded}
-    <div class="audit-entry-details">
+    <div
+      class="audit-entry-details"
+      transition:slide={{ duration: motionDuration(150) }}
+    >
       {#if workflowChart}
         <WorkflowChart chart={workflowChart} />
       {/if}

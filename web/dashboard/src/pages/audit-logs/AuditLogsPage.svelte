@@ -4,6 +4,9 @@
   import NoDataIllustration from "$lib/components/atoms/NoDataIllustration.svelte";
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import { untrack } from "svelte";
+  import { flip } from "svelte/animate";
+  import { slide } from "svelte/transition";
+  import { motionDuration } from "$lib/utils/motion.js";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
@@ -116,12 +119,20 @@
       </div>
     {:else if auditList.auditLog.entries.length > 0}
       <div class="audit-log-list">
+        <!-- Live rows slide in and neighbours shift down via FLIP; fetched
+             pages (not _live) render instantly, and neither plays on the
+             initial mount (transitions are local). -->
         {#each auditList.auditLog.entries as entry (entry.id)}
-          {#if auditList.auditGroupSessions}
-            <AuditThreadGroup {entry} />
-          {:else}
-            <AuditEntryRow {entry} />
-          {/if}
+          <div
+            animate:flip={{ duration: motionDuration(150) }}
+            in:slide={{ duration: motionDuration(entry._live ? 150 : 0) }}
+          >
+            {#if auditList.auditGroupSessions}
+              <AuditThreadGroup {entry} />
+            {:else}
+              <AuditEntryRow {entry} />
+            {/if}
+          </div>
         {/each}
       </div>
     {/if}
