@@ -790,6 +790,31 @@ test("mergeAuditThreadChildren preserves unpersisted live entries on top", () =>
   assert.equal(merged.preservedCount, 1);
 });
 
+test("mergeAuditThreadChildren keeps a head demoted while the fetch was in flight", () => {
+  // Race: a new live request replaced the thread head during the session-page
+  // fetch. The original head is now a demoted child — excluding only the
+  // CURRENT head must keep it in the merged children.
+  const originalHead = { id: "old-head", request_id: "req-old" };
+  const currentHead = { id: "new-head", request_id: "req-new" };
+  const previous = {
+    loading: true,
+    loaded: false,
+    // foldLiveAuditIntoThread prepended the demoted head into the slot.
+    entries: [{ ...originalHead }],
+    total: 1,
+  };
+  const merged = mergeAuditThreadChildren(
+    previous,
+    [{ ...originalHead }, { id: "old-1", request_id: "req-1" }],
+    [currentHead],
+  );
+  assert.deepEqual(
+    merged.entries.map((entry) => entry.id),
+    ["old-head", "old-1"],
+  );
+  assert.equal(merged.preservedCount, 0);
+});
+
 test("toggleExpandedThread flips per-session and pruneThreadMap drops off-page threads", () => {
   let map = toggleExpandedThread({}, "s-1");
   assert.deepEqual(map, { "s-1": true });

@@ -226,8 +226,10 @@ class AuditListStore {
       },
     };
     // On a failed/stale fetch, keep any live-displaced entries but drop the
-    // loading placeholder so the next toggle retries (leaving it would render
-    // a spinner forever).
+    // loading placeholder so the next expand retries (leaving it would render
+    // a spinner forever). With nothing to show, also collapse the thread —
+    // left expanded, the next click would read as a collapse and push the
+    // retry two clicks away.
     const restore = () => {
       const lists = { ...liveLogs.auditThreadChildren };
       const current = lists[sessionId];
@@ -242,6 +244,12 @@ class AuditListStore {
         };
       } else {
         delete lists[sessionId];
+        if (this.auditExpandedThreads[sessionId]) {
+          this.auditExpandedThreads = toggleExpandedThread(
+            this.auditExpandedThreads,
+            sessionId,
+          );
+        }
       }
       liveLogs.auditThreadChildren = lists;
     };
@@ -260,6 +268,9 @@ class AuditListStore {
       if (!result.ok) throw new Error("audit session fetch failed");
       // Re-read the slot and the on-screen head: live events during the fetch
       // may have displaced more rows into it or replaced the thread head.
+      // Only the CURRENT head is excluded from the children — when the head
+      // changed mid-flight, the original head is now a demoted child that the
+      // fetched page must keep contributing.
       const current = liveLogs.auditThreadChildren[sessionId];
       const currentHead = this.auditLog.entries.find(
         (entry) => auditSessionId(entry) === sessionId,
@@ -267,7 +278,7 @@ class AuditListStore {
       const merged = mergeAuditThreadChildren(
         current,
         result.data.entries,
-        currentHead && currentHead !== head ? [head, currentHead] : [head],
+        currentHead ? [currentHead] : [head],
       );
       liveLogs.auditThreadChildren = {
         ...liveLogs.auditThreadChildren,
