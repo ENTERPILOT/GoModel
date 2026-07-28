@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.ENTERPILOT%2Fgomodel.svg)](https://mcptoplist.com/server/io.github.ENTERPILOT%2Fgomodel)
+
 <p align="center">
   <img alt="GoModel logo" src="docs/logo.svg" width="96">
 </p>
