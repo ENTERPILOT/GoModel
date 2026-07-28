@@ -119,6 +119,40 @@ func TestRequestRewriteMiddlewareRewritesChatCompletions(t *testing.T) {
 	}
 }
 
+func TestRequestRewriteMiddlewareExposesSessionID(t *testing.T) {
+	provider := newRewriteTestProvider()
+	var seenSession string
+	capturing := &stubRewriter{
+		name: "capture-session",
+		rewrite: func(in ext.Input) (*ext.Result, error) {
+			seenSession = in.SessionID
+			return nil, nil
+		},
+	}
+	// Session detection runs before rewriters and stamps the request context;
+	// ExtraMiddleware runs even earlier, so it stands in for the detector here.
+	stampSession := func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			req := c.Request()
+			c.SetRequest(req.WithContext(core.WithSessionID(req.Context(), "sess-42")))
+			return next(c)
+		}
+	}
+	srv := New(provider, &Config{
+		RequestRewriters: []ext.RequestRewriter{capturing},
+		ExtraMiddleware:  []echo.MiddlewareFunc{stampSession},
+	})
+
+	rec := postJSON(t, srv, "/v1/chat/completions",
+		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if seenSession != "sess-42" {
+		t.Errorf("rewriter saw SessionID %q, want %q", seenSession, "sess-42")
+	}
+}
+
 func TestRequestRewriteMiddlewareRewritesMessages(t *testing.T) {
 	provider := newRewriteTestProvider()
 	srv := New(provider, &Config{

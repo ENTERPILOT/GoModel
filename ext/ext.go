@@ -41,6 +41,10 @@ type Input struct {
 	UserPath string
 	// RequestID is the request correlation ID (X-Request-ID).
 	RequestID string
+	// SessionID is the detected client session, when present, already scoped
+	// by the effective user path. Session detection runs before rewriters, so
+	// a rewriter can keep its decisions stable across a conversation.
+	SessionID string
 }
 
 // Result carries a rewritten body and response-header annotations.
