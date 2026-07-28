@@ -45,17 +45,22 @@ type RouteTarget struct {
 // Qualified returns the "provider/model" key matching RouteCandidate.Qualified.
 func (t RouteTarget) Qualified() string { return t.Provider + "/" + t.Model }
 
-// RouteOutcome describes one completed upstream attempt. Every attempt is
-// reported — primaries, retries, and failover attempts alike — so selectors
-// learn from traffic they did not steer.
+// RouteOutcome describes one completed upstream call. Every call is
+// reported — primaries and failover attempts alike — so selectors learn from
+// traffic they did not steer. Transport-level retries inside the provider
+// client are aggregated into their call's single outcome: StatusCode and Err
+// reflect the final result, and Duration spans the whole call including
+// retry backoff, so a target that only succeeds after internal retries still
+// scores slower than a target that succeeds at once.
 type RouteOutcome struct {
 	RouteTarget
 	// Endpoint is the upstream API endpoint (e.g. "/chat/completions").
 	Endpoint string
-	// StatusCode is the upstream HTTP status; 0 on a network error.
+	// StatusCode is the final upstream HTTP status; 0 on a network error.
 	StatusCode int
-	// Duration is the attempt duration. For streaming requests it measures
-	// time to stream establishment, not the full stream lifetime.
+	// Duration is the call duration, including any transport-level retries.
+	// For streaming requests it measures time to stream establishment, not
+	// the full stream lifetime.
 	Duration time.Duration
 	Stream   bool
 	// Err is the client-layer error, nil on success.
@@ -72,9 +77,10 @@ type RouteOutcome struct {
 // (_, false) answer — and any answer naming a model outside Candidates —
 // falls back to weighted round robin, so selectors fail open by declining.
 //
-// OnAttemptStart and OnAttemptEnd observe the upstream client lifecycle for
-// every attempt. For streaming requests OnAttemptEnd fires when the stream is
-// established, not when it closes.
+// OnAttemptStart and OnAttemptEnd observe the upstream client lifecycle,
+// once per upstream call (transport-level retries within a call are
+// aggregated — see RouteOutcome). For streaming requests OnAttemptEnd fires
+// when the stream is established, not when it closes.
 type RouteSelector interface {
 	Name() string
 	Select(req RouteRequest) (qualified string, ok bool)

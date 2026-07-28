@@ -61,7 +61,7 @@ models:
 #   - source: regular # a plain alias
 #     target: anthropic/claude-sonnet-4-6
 #   - source: smart # weighted round-robin load balancer
-#     strategy: round_robin # round_robin (default) | cost | adaptive (needs a routing extension; falls back to round_robin)
+#     strategy: round_robin # round_robin (default) | cost | adaptive (uses a routing extension when registered; otherwise falls back to round_robin)
 #     targets:
 #       - { model: openai/gpt-4o, weight: 2 }
 #       - { model: anthropic/claude-sonnet-4-6 }

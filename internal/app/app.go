@@ -117,12 +117,17 @@ func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 // routeSelectorHooks adapts upstream client lifecycle events into route
 // selector observations. Selector callbacks are extension code running on
 // the request path, so panics are contained rather than failing the request.
+// The selector's name is captured once, panic-safe, and the recovery path
+// logs only fixed metadata: it never calls back into extension code
+// mid-panic, and never logs the recovered value, which the extension
+// controls and could fill with request data.
 func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
+	name := selectorLabel(selector)
 	observe := func(event string, fn func()) {
 		defer func() {
-			if r := recover(); r != nil {
+			if recover() != nil {
 				slog.Error("route selector panicked during observation",
-					"selector", selector.Name(), "event", event, "panic", r)
+					"selector", name, "event", event)
 			}
 		}()
 		fn()
@@ -147,6 +152,20 @@ func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
 			})
 		},
 	}
+}
+
+// selectorLabel returns the selector's name for logs, tolerating a panicking
+// Name implementation, so recovery paths never re-enter extension code.
+func selectorLabel(selector ext.RouteSelector) (name string) {
+	if selector == nil {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			name = "unknown"
+		}
+	}()
+	return selector.Name()
 }
 
 // New creates a new App with all dependencies initialized.

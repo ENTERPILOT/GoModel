@@ -86,19 +86,47 @@ func (s *namedSelector) OnAttemptStart(RouteTarget)         {}
 func (s *namedSelector) OnAttemptEnd(RouteOutcome)          {}
 
 func TestRegistryRouteSelectorSingleSlot(t *testing.T) {
-	reg := &Registry{}
-	assert.Nil(t, reg.RouteSelector())
-
-	reg.RegisterRouteSelector(&namedSelector{name: "first"})
-	reg.RegisterRouteSelector(&namedSelector{name: "second"})
-
-	require.NotNil(t, reg.RouteSelector())
-	assert.Equal(t, "second", reg.RouteSelector().Name(), "later registration replaces earlier one")
+	tests := []struct {
+		name     string
+		register []RouteSelector
+		want     string // Name() of the expected selector; "" means nil
+	}{
+		{name: "unset", register: nil, want: ""},
+		{name: "single registration", register: []RouteSelector{&namedSelector{name: "only"}}, want: "only"},
+		{name: "later registration replaces earlier", register: []RouteSelector{&namedSelector{name: "first"}, &namedSelector{name: "second"}}, want: "second"},
+		{name: "nil registration resets the slot", register: []RouteSelector{&namedSelector{name: "first"}, nil}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := &Registry{}
+			for _, sel := range tt.register {
+				reg.RegisterRouteSelector(sel)
+			}
+			got := reg.RouteSelector()
+			if tt.want == "" {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tt.want, got.Name())
+		})
+	}
 }
 
 func TestRouteTargetQualified(t *testing.T) {
-	target := RouteTarget{Provider: "openai", Model: "gpt-4o"}
-	assert.Equal(t, "openai/gpt-4o", target.Qualified())
+	tests := []struct {
+		name   string
+		target RouteTarget
+		want   string
+	}{
+		{name: "provider and model", target: RouteTarget{Provider: "openai", Model: "gpt-4o"}, want: "openai/gpt-4o"},
+		{name: "empty provider keeps the separator", target: RouteTarget{Model: "gpt-4o"}, want: "/gpt-4o"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.target.Qualified())
+		})
+	}
 }
 
 func TestRejectionErrorMessage(t *testing.T) {

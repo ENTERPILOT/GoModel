@@ -18,9 +18,12 @@ func (s *Service) adaptiveTarget(entry redirectEntry, sessionID string, pool []r
 		return resolvedTarget{}, false
 	}
 	defer func() {
-		if r := recover(); r != nil {
+		// The recovered value is extension-controlled and may carry request
+		// data, and calling back into the selector (even Name) mid-panic
+		// could panic again — log only fixed metadata captured at install.
+		if recover() != nil {
 			slog.Error("route selector panicked; falling back to round robin",
-				"selector", selector.Name(), "source", entry.vm.Source, "panic", r)
+				"selector", s.routeSelectorName, "source", entry.vm.Source)
 			target, ok = resolvedTarget{}, false
 		}
 	}()
@@ -38,8 +41,10 @@ func (s *Service) adaptiveTarget(entry redirectEntry, sessionID string, pool []r
 			Weight:    t.weight,
 		}
 		if model, found := s.catalog.LookupModel(t.qualified); found && model != nil && model.Metadata != nil && model.Metadata.Pricing != nil {
-			candidate.InputPerMtok = model.Metadata.Pricing.InputPerMtok
-			candidate.OutputPerMtok = model.Metadata.Pricing.OutputPerMtok
+			// Copies, not the catalog's pointers: extension code must not be
+			// able to mutate shared pricing (or race catalog updates).
+			candidate.InputPerMtok = copyPrice(model.Metadata.Pricing.InputPerMtok)
+			candidate.OutputPerMtok = copyPrice(model.Metadata.Pricing.OutputPerMtok)
 		}
 		req.Candidates[i] = candidate
 	}
@@ -49,4 +54,13 @@ func (s *Service) adaptiveTarget(entry redirectEntry, sessionID string, pool []r
 		return resolvedTarget{}, false
 	}
 	return poolTarget(pool, qualified)
+}
+
+// copyPrice clones an optional per-Mtok price.
+func copyPrice(price *float64) *float64 {
+	if price == nil {
+		return nil
+	}
+	v := *price
+	return &v
 }

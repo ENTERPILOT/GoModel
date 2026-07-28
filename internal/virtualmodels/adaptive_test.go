@@ -2,6 +2,9 @@ package virtualmodels
 
 import (
 	"context"
+	"fmt"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -15,10 +18,16 @@ type scriptedSelector struct {
 	answer    string
 	decline   bool
 	panicking bool
+	panicName bool
 	requests  []ext.RouteRequest
 }
 
-func (s *scriptedSelector) Name() string { return "scripted" }
+func (s *scriptedSelector) Name() string {
+	if s.panicName {
+		panic("scripted Name panic")
+	}
+	return "scripted"
+}
 
 func (s *scriptedSelector) Select(req ext.RouteRequest) (string, bool) {
 	s.mu.Lock()
@@ -76,15 +85,53 @@ func TestBalancer_AdaptiveDelegatesToSelector(t *testing.T) {
 		t.Fatalf("selector saw %d requests, want 4", len(requests))
 	}
 	req := requests[0]
-	if req.Source != "smart" || len(req.Candidates) != 3 {
-		t.Fatalf("RouteRequest = %+v, want source smart with 3 candidates", req)
+	if req.Source != "smart" {
+		t.Fatalf("RouteRequest source = %q, want smart", req.Source)
 	}
-	first := req.Candidates[0]
-	if first.Qualified != "openai/gpt-4o" || first.Provider != "openai" || first.Model != "gpt-4o" {
-		t.Fatalf("candidate[0] = %+v, want openai/gpt-4o split into provider and model", first)
+	want := []ext.RouteCandidate{
+		{Provider: "openai", Model: "gpt-4o", Qualified: "openai/gpt-4o", InputPerMtok: new(2.5), OutputPerMtok: new(10.0)},
+		{Provider: "anthropic", Model: "claude", Qualified: "anthropic/claude", InputPerMtok: new(3.0), OutputPerMtok: new(15.0)},
+		{Provider: "groq", Model: "llama", Qualified: "groq/llama", InputPerMtok: new(0.5), OutputPerMtok: new(0.8)},
 	}
-	if first.InputPerMtok == nil || *first.InputPerMtok != 2.5 {
-		t.Fatalf("candidate[0] pricing = %+v, want registry input price 2.5", first.InputPerMtok)
+	if !reflect.DeepEqual(req.Candidates, want) {
+		t.Fatalf("candidates = %s, want %s", formatCandidates(req.Candidates), formatCandidates(want))
+	}
+}
+
+func formatCandidates(candidates []ext.RouteCandidate) string {
+	out := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		in, priced := "nil", "nil"
+		if c.InputPerMtok != nil {
+			in = fmt.Sprintf("%v", *c.InputPerMtok)
+		}
+		if c.OutputPerMtok != nil {
+			priced = fmt.Sprintf("%v", *c.OutputPerMtok)
+		}
+		out = append(out, fmt.Sprintf("{%s w=%v in=%s out=%s}", c.Qualified, c.Weight, in, priced))
+	}
+	return strings.Join(out, " ")
+}
+
+// The catalog's pricing must not be reachable through candidates: a selector
+// writing through the pointers it receives must not change what the cost
+// strategy later reads.
+func TestBalancer_AdaptiveCandidatePricingIsCopied(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	selector := &scriptedSelector{answer: "groq/llama"}
+	svc.SetRouteSelector(selector)
+	upsertAdaptive(t, svc)
+
+	resolvedModels(t, svc, "smart", 1)
+	*selector.seen()[0].Candidates[0].InputPerMtok = 999
+
+	model, ok := svc.catalog.LookupModel("openai/gpt-4o")
+	if !ok || model.Metadata.Pricing.InputPerMtok == nil {
+		t.Fatal("catalog lost the priced model")
+	}
+	if got := *model.Metadata.Pricing.InputPerMtok; got != 2.5 {
+		t.Fatalf("catalog input price = %v after selector mutation, want 2.5 (defensive copy)", got)
 	}
 }
 
@@ -98,6 +145,7 @@ func TestBalancer_AdaptiveFallsBackToRoundRobin(t *testing.T) {
 		{name: "selector declines", selector: &scriptedSelector{decline: true}},
 		{name: "selector answers outside pool", selector: &scriptedSelector{answer: "nonexistent/model"}},
 		{name: "selector panics", selector: &scriptedSelector{panicking: true}},
+		{name: "selector and its Name both panic", selector: &scriptedSelector{panicking: true, panicName: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

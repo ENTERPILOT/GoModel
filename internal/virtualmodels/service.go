@@ -36,7 +36,10 @@ type Service struct {
 
 	// routeSelector optionally delegates target choice for redirects using
 	// the adaptive strategy. Set once during startup, before serving.
-	routeSelector ext.RouteSelector
+	// routeSelectorName is captured panic-safe at install time so failure
+	// paths never call back into extension code.
+	routeSelector     ext.RouteSelector
+	routeSelectorName string
 
 	balancer  roundRobin
 	sticky    stickySessions
@@ -61,6 +64,21 @@ func (s *Service) SetRouteSelector(selector ext.RouteSelector) {
 		return
 	}
 	s.routeSelector = selector
+	s.routeSelectorName = selectorLabel(selector)
+}
+
+// selectorLabel returns the selector's name for logs, tolerating a panicking
+// Name implementation, so recovery paths never re-enter extension code.
+func selectorLabel(selector ext.RouteSelector) (name string) {
+	if selector == nil {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			name = "unknown"
+		}
+	}()
+	return selector.Name()
 }
 
 // NewService creates a virtual models service backed by the store and catalog.
