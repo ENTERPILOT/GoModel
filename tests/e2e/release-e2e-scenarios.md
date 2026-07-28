@@ -1619,7 +1619,7 @@ fi
 
 ### S70 Audit evidence for managed-key scoped workflow
 
-Confirms through audit-log search that auth method, managed auth key ID, normalized user path, workflow ID, and no cache hit are all recorded together.
+Confirms through audit-log search that auth method, managed auth key ID, normalized user path, workflow ID, and no cache hit are all recorded together. The list projection is slimmed (`bodies_omitted: true`), so the response body is asserted through `/admin/audit/detail`.
 
 ```bash
 sleep 6
@@ -1634,7 +1634,7 @@ AUDIT_JSON_FILE="$QA_RUN_DIR/s70.audit.json"
 curl -fsS "$AUTH_BASE_URL/admin/audit/log?search=$QA_AUTH_REQ2&limit=5" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$AUDIT_JSON_FILE"
-jq --arg request_id "$QA_AUTH_REQ2" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,status_code,auth_method,auth_key_id,user_path,workflow_version_id,cache_type,answer:.data.response_body.choices[0].message.content}))}' "$AUDIT_JSON_FILE"
+jq --arg request_id "$QA_AUTH_REQ2" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,status_code,auth_method,auth_key_id,user_path,workflow_version_id,cache_type,bodies_omitted}))}' "$AUDIT_JSON_FILE"
 jq -e \
     --arg request_id "$QA_AUTH_REQ2" \
     --arg auth_key_id "$AUTH_KEY_ID" \
@@ -1648,9 +1648,15 @@ jq -e \
       and .user_path == $user_path
       and .workflow_version_id == $workflow_id
       and .cache_type == null
-      and .data.response_body.choices[0].message.content == "QA_AUTH_CACHE_OFF_OK"
+      and .bodies_omitted == true
     )
   ' "$AUDIT_JSON_FILE" >/dev/null
+AUDIT_ID=$(jq -er --arg request_id "$QA_AUTH_REQ2" '[.entries[] | select(.request_id == $request_id)][0].id' "$AUDIT_JSON_FILE")
+DETAIL_JSON_FILE="$QA_RUN_DIR/s70.detail.json"
+curl -fsS "$AUTH_BASE_URL/admin/audit/detail?log_id=$AUDIT_ID" \
+  -H "$ADMIN_AUTH_HEADER" \
+  > "$DETAIL_JSON_FILE"
+jq -e '.data.response_body.choices[0].message.content == "QA_AUTH_CACHE_OFF_OK"' "$DETAIL_JSON_FILE" >/dev/null
 ```
 
 ### S71 Global cache warm request with explicit user path
@@ -3436,7 +3442,7 @@ FIREWORKS_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
 RESP_FILE="$QA_RUN_DIR/s153.chat.json"
 curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d "{\"model\":\"$FIREWORKS_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_FIREWORKS_OK\"}],\"max_tokens\":40}" \
+  -d "{\"model\":\"$FIREWORKS_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_FIREWORKS_OK\"}],\"max_tokens\":2000}" \
   > "$RESP_FILE"
 jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
 assert_chat_response_contains "$RESP_FILE" "fireworks" "QA_FIREWORKS_OK"
@@ -3460,7 +3466,7 @@ FIREWORKS_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
 SSE_FILE="$QA_RUN_DIR/s154.chat.sse"
 curl -fsS --no-buffer "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d "{\"model\":\"$FIREWORKS_MODEL\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_FIREWORKS_STREAM_OK\"}],\"max_tokens\":40}" \
+  -d "{\"model\":\"$FIREWORKS_MODEL\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_FIREWORKS_STREAM_OK\"}],\"max_tokens\":2000}" \
   > "$SSE_FILE"
 sed -n '1,8p' "$SSE_FILE"
 assert_chat_stream_contains "$SSE_FILE" "QA_FIREWORKS_STREAM_OK"
@@ -3949,7 +3955,9 @@ mcp_post "$BASE_URL/mcp" "$NSID" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}
 
 With `LOGGING_LOG_BODIES` on, an MCP `tools/call` audit entry is labelled with
 the tool name and `provider="mcp"`, and captures both the JSON-RPC request
-frame and the SSE-decoded response frame. The MCP response also carries
+frame and the SSE-decoded response frame. The list projection omits bodies
+(`bodies_omitted: true`), so the frames are asserted through
+`/admin/audit/detail`. The MCP response also carries
 `X-Content-Type-Options: nosniff`.
 
 ```bash
@@ -3985,9 +3993,7 @@ for _ in $(seq 1 15); do
       .request_id == $rid
       and .provider == "mcp"
       and .requested_model == $tool
-      and .status_code == 200
-      and ((.data.request_body | tojson) | contains("QA_MCP_AUDIT_BODY_OK"))
-      and ((.data.response_body | tojson) | (contains("echo:") and contains("QA_MCP_AUDIT_BODY_OK"))))
+      and .status_code == 200)
   ' "$AUDIT_FILE" >/dev/null; then
     FOUND=1
     break
@@ -3996,9 +4002,16 @@ for _ in $(seq 1 15); do
 done
 if [ "$FOUND" -ne 1 ]; then
   jq '.' "$AUDIT_FILE" >&2 || true
-  echo "error: MCP audit entry with bodies was not flushed for $REQ_ID" >&2
+  echo "error: MCP audit entry was not flushed for $REQ_ID" >&2
   exit 1
 fi
+AUDIT_ID=$(jq -er --arg rid "$REQ_ID" '[.entries[] | select(.request_id == $rid)][0].id' "$AUDIT_FILE")
+DETAIL_FILE="$QA_RUN_DIR/s167.detail.json"
+curl -fsS "$BASE_URL/admin/audit/detail?log_id=$AUDIT_ID" > "$DETAIL_FILE"
+jq -e '
+  ((.data.request_body | tojson) | contains("QA_MCP_AUDIT_BODY_OK"))
+  and ((.data.response_body | tojson) | (contains("echo:") and contains("QA_MCP_AUDIT_BODY_OK")))
+' "$DETAIL_FILE" >/dev/null
 ```
 
 ### S168 MCP negatives: unknown server, unknown tool, session identity binding, header-principal enforcement, stdio rejected
