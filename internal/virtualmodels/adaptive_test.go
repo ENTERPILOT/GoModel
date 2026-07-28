@@ -124,14 +124,29 @@ func TestBalancer_AdaptiveCandidatePricingIsCopied(t *testing.T) {
 	upsertAdaptive(t, svc)
 
 	resolvedModels(t, svc, "smart", 1)
-	*selector.seen()[0].Candidates[0].InputPerMtok = 999
-
-	model, ok := svc.catalog.LookupModel("openai/gpt-4o")
-	if !ok || model.Metadata.Pricing.InputPerMtok == nil {
-		t.Fatal("catalog lost the priced model")
+	for _, candidate := range selector.seen()[0].Candidates {
+		if candidate.InputPerMtok != nil {
+			*candidate.InputPerMtok = 999
+		}
+		if candidate.OutputPerMtok != nil {
+			*candidate.OutputPerMtok = 999
+		}
 	}
-	if got := *model.Metadata.Pricing.InputPerMtok; got != 2.5 {
-		t.Fatalf("catalog input price = %v after selector mutation, want 2.5 (defensive copy)", got)
+
+	want := map[string][2]float64{
+		"openai/gpt-4o":    {2.5, 10},
+		"anthropic/claude": {3, 15},
+		"groq/llama":       {0.5, 0.8},
+	}
+	for qualified, prices := range want {
+		model, ok := svc.catalog.LookupModel(qualified)
+		if !ok || model.Metadata.Pricing.InputPerMtok == nil || model.Metadata.Pricing.OutputPerMtok == nil {
+			t.Fatalf("catalog lost the priced model %s", qualified)
+		}
+		if in, out := *model.Metadata.Pricing.InputPerMtok, *model.Metadata.Pricing.OutputPerMtok; in != prices[0] || out != prices[1] {
+			t.Fatalf("catalog prices for %s = %v/%v after selector mutation, want %v/%v (defensive copies)",
+				qualified, in, out, prices[0], prices[1])
+		}
 	}
 }
 
