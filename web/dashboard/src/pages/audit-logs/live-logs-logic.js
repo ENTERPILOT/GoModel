@@ -434,13 +434,55 @@ export function liveLogsMethods() {
             const id = String(incoming.id || '').trim();
             const requestID = String(incoming.request_id || '').trim();
             if (!id && !requestID) return;
-            const next = this.auditLog.entries.filter((entry) => !matchesLiveAuditKey(entry, id, requestID));
-            const removedCount = this.auditLog.entries.length - next.length;
+            const current = this.auditLog.entries;
+            const next = [];
+            let removedCount = 0;
+            let preservedThreads = 0;
+            let reloadGroupedList = false;
+            current.forEach((entry) => {
+                if (!matchesLiveAuditKey(entry, id, requestID)) {
+                    next.push(entry);
+                    return;
+                }
+                removedCount++;
+                const sessionId = String(entry.session_id || '').trim();
+                const sessionCount = Math.max(1, Number(entry.session_count || 1));
+                if (!this.auditGroupSessions || !sessionId || sessionCount <= 1) return;
+
+                // Removing a live thread head does not remove the persisted
+                // session behind it. Promote the newest loaded child; if the
+                // thread was never expanded, refetch the grouped source.
+                preservedThreads++;
+                const list = this.auditThreadChildren && this.auditThreadChildren[sessionId];
+                const children = list && Array.isArray(list.entries)
+                    ? list.entries.filter((child) => !matchesLiveAuditKey(child, id, requestID))
+                    : [];
+                if (children.length === 0) {
+                    reloadGroupedList = true;
+                    return;
+                }
+                const promoted = { ...children[0], session_id: sessionId, session_count: sessionCount - 1 };
+                next.push(promoted);
+                this.auditThreadChildren = {
+                    ...this.auditThreadChildren,
+                    [sessionId]: {
+                        ...list,
+                        entries: children.slice(1),
+                        total: Math.max(0, Number(list.total || sessionCount) - 1)
+                    }
+                };
+            });
             if (removedCount > 0) {
                 this.auditLog.entries = next;
-                this.auditLog.total = Math.max(0, Number(this.auditLog.total || 0) - removedCount);
+                this.auditLog.total = Math.max(
+                    0,
+                    Number(this.auditLog.total || 0) - removedCount + preservedThreads
+                );
             }
             this.removeLiveAuditThreadChild(id, requestID);
+            if (reloadGroupedList && typeof this.fetchAuditLog === 'function') {
+                this.fetchAuditLog(true);
+            }
         },
 
         mergeLiveUsageEntry(incoming, eventType) {
@@ -578,10 +620,33 @@ export function liveLogsMethods() {
             const requestID = String(usageEntry && usageEntry.request_id || '').trim();
             if (!requestID || !this.auditLog || !Array.isArray(this.auditLog.entries)) return;
             const index = this.auditLog.entries.findIndex((entry) => String(entry.request_id || '').trim() === requestID);
-            if (index < 0) return;
-            const entry = this.auditLog.entries[index];
-            this.auditLog.entries.splice(index, 1, this.auditEntryWithLiveUsage(entry, usageEntry));
-            this.auditLog.entries = [...this.auditLog.entries];
+            if (index >= 0) {
+                const entry = this.auditLog.entries[index];
+                this.auditLog.entries.splice(index, 1, this.auditEntryWithLiveUsage(entry, usageEntry));
+                this.auditLog.entries = [...this.auditLog.entries];
+            }
+
+            const lists = this.auditThreadChildren;
+            if (!lists || typeof lists !== 'object') return;
+            let nextLists = lists;
+            let changed = false;
+            Object.keys(lists).forEach((sessionId) => {
+                const list = nextLists[sessionId];
+                const entries = list && Array.isArray(list.entries) ? list.entries : [];
+                const childIndex = entries.findIndex((entry) => String(entry.request_id || '').trim() === requestID);
+                if (childIndex < 0) return;
+                const nextEntries = [...entries];
+                nextEntries.splice(
+                    childIndex,
+                    1,
+                    this.auditEntryWithLiveUsage(entries[childIndex], usageEntry)
+                );
+                nextLists = { ...nextLists, [sessionId]: { ...list, entries: nextEntries } };
+                changed = true;
+            });
+            if (changed) {
+                this.auditThreadChildren = nextLists;
+            }
         },
 
         auditEntryWithLiveUsage(entry, usageEntry) {
