@@ -249,13 +249,39 @@ export function auditLogFromSessions(payload) {
   };
 }
 
-// auditThreadChildEntries drops the head row from a session_id page so the
-// unfolded children list holds only the older requests.
-export function auditThreadChildEntries(entries, head) {
-  const headKeys = new Set(auditEntryIdentityKeys(head));
-  return (Array.isArray(entries) ? entries : []).filter((entry) => {
-    return !auditEntryIdentityKeys(entry).some((key) => headKeys.has(key));
-  });
+// mergeAuditThreadChildren folds a fetched session_id page into a thread's
+// children slot: head rows are dropped (the unfolded list holds only the
+// older requests), and still-live entries from the previous partial list that
+// the server does not return yet (displaced from the head list before being
+// persisted) are preserved on top. preservedCount lets the caller keep the
+// thread total honest.
+export function mergeAuditThreadChildren(previousList, fetchedEntries, heads) {
+  const headKeys = new Set(
+    (Array.isArray(heads) ? heads : []).flatMap((head) =>
+      auditEntryIdentityKeys(head),
+    ),
+  );
+  const fetched = (Array.isArray(fetchedEntries) ? fetchedEntries : []).filter(
+    (entry) => !auditEntryIdentityKeys(entry).some((key) => headKeys.has(key)),
+  );
+  const knownKeys = new Set([
+    ...headKeys,
+    ...fetched.flatMap((entry) => auditEntryIdentityKeys(entry)),
+  ]);
+  const preserved = (
+    previousList && Array.isArray(previousList.entries)
+      ? previousList.entries
+      : []
+  ).filter(
+    (entry) =>
+      entry &&
+      entry._live &&
+      !auditEntryIdentityKeys(entry).some((key) => knownKeys.has(key)),
+  );
+  return {
+    entries: [...preserved, ...fetched],
+    preservedCount: preserved.length,
+  };
 }
 
 export function toggleExpandedThread(expanded, sessionId) {

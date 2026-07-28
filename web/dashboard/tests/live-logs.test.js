@@ -796,7 +796,7 @@ test("grouped mode folds a new live entry into its on-screen thread", () => {
   assert.equal(children.total, 3);
 });
 
-test("grouped fold leaves unloaded children lists alone", () => {
+test("grouped fold retains the displaced head of an unexpanded thread", () => {
   const app = createLiveLogsApp({ auditGroupSessions: true });
   app.auditLog.entries = [
     { id: "head-a", session_id: "s-a", session_count: 2 },
@@ -807,7 +807,15 @@ test("grouped fold leaves unloaded children lists alone", () => {
 
   assert.equal(app.auditLog.entries[0].id, "live-2");
   assert.equal(app.auditLog.entries[0].session_count, 3);
-  assert.deepEqual(app.auditThreadChildren, {});
+  // The displaced head lands in a partial children list (loaded: false keeps
+  // the lazy full fetch armed) so its later live events merge in place
+  // instead of re-counting as new session members.
+  const children = app.auditThreadChildren["s-a"];
+  assert.equal(children.loaded, false);
+  assert.equal(children.loading, false);
+  assert.deepEqual(children.entries.map((entry) => entry.id), ["head-a"]);
+  assert.equal(children.entries[0].session_count, undefined);
+  assert.equal(children.total, 1);
 });
 
 test("grouped mode without a matching thread prepends a singleton head", () => {
@@ -1019,6 +1027,65 @@ test("re-fold leaves rows alone in flat mode and without a matching head", () =>
   grouped.mergeLiveAuditEntry({ id: "solo", session_id: "s-new", status_code: 200 }, "audit.flushed");
   assert.deepEqual(grouped.auditLog.entries.map((entry) => entry.id), ["solo"]);
   assert.equal(grouped.auditLog.total, 1);
+});
+
+test("interleaved first-session requests do not inflate the thread count", () => {
+  // Regression: two live requests open a brand-new session while the page is
+  // watching. Both audit.started events arrive sessionless, later events
+  // deliver the session id, and the demoted row keeps producing lifecycle
+  // events. Before the fix each late event for a displaced (and dropped) row
+  // re-counted it as a new session member, inflating the badge 2x-3x.
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+
+  app.mergeLiveAuditEntry(
+    { id: "a", request_id: "req-a", timestamp: "2026-07-28T10:00:00Z" },
+    "audit.started",
+  );
+  app.mergeLiveAuditEntry(
+    { id: "b", request_id: "req-b", timestamp: "2026-07-28T10:00:02Z" },
+    "audit.started",
+  );
+  app.mergeLiveAuditEntry(
+    { id: "b", request_id: "req-b", session_id: "s-1", timestamp: "2026-07-28T10:00:02Z" },
+    "audit.updated",
+  );
+  // A gains the session id: the two rows collapse into one thread and A is
+  // demoted under B (the newer request).
+  app.mergeLiveAuditEntry(
+    { id: "a", request_id: "req-a", session_id: "s-1", timestamp: "2026-07-28T10:00:00Z" },
+    "audit.updated",
+  );
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["b"]);
+  assert.equal(app.auditLog.entries[0].session_count, 2);
+  assert.equal(app.auditLog.total, 1);
+
+  // Late lifecycle events for both requests merge in place: the count and the
+  // thread total must not move again.
+  app.mergeLiveAuditEntry(
+    { id: "a", request_id: "req-a", session_id: "s-1", status_code: 200 },
+    "audit.completed",
+  );
+  app.mergeLiveAuditEntry(
+    { id: "b", request_id: "req-b", session_id: "s-1", status_code: 200 },
+    "audit.completed",
+  );
+  app.mergeLiveAuditEntry(
+    { id: "a", request_id: "req-a", session_id: "s-1", status_code: 200 },
+    "audit.flushed",
+  );
+  app.mergeLiveAuditEntry(
+    { id: "b", request_id: "req-b", session_id: "s-1", status_code: 200 },
+    "audit.flushed",
+  );
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["b"]);
+  assert.equal(app.auditLog.entries[0].session_count, 2);
+  assert.equal(app.auditLog.entries[0]._audit_flushed, true);
+  assert.equal(app.auditLog.total, 1);
+  const children = app.auditThreadChildren["s-1"];
+  assert.deepEqual(children.entries.map((entry) => entry.id), ["a"]);
+  assert.equal(children.entries[0]._audit_flushed, true);
+  assert.equal(children.loaded, false);
 });
 
 test("re-fold keeps the newest request as head when completions arrive out of order", () => {
