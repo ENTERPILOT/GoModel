@@ -1,7 +1,7 @@
 // Budgets page state (the budgets-page portion; budget settings live with
 // the Settings page). Talks to the /admin/budgets endpoints.
 
-import { errorMessage, getJSON, sendJSON } from "$lib/api/client.ts";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.ts";
 import { flash } from "$lib/stores/flash.svelte.ts";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
 import { router } from "$lib/stores/router.svelte.ts";
@@ -80,29 +80,32 @@ class BudgetsStore {
   async fetchBudgets() {
     this.loading = true;
     this.error = "";
-    try {
-      const result = await getJSON("/admin/budgets", { label: "budgets" });
-      if (result.status === 503) {
-        this.budgetsAvailable = false;
-        this.budgets = [];
-        return;
-      }
-      if (result.stale) {
-        return;
-      }
-      this.budgetsAvailable = true;
-      if (!result.ok) {
-        this.error = "Unable to load budgets.";
-        return;
-      }
-      this.budgets = normalizeBudgetListPayload(result.data);
-    } catch (e) {
-      console.error("Failed to fetch budgets:", e);
-      this.budgets = [];
-      this.error = "Unable to load budgets.";
-    } finally {
-      this.loading = false;
+    const outcome = await loadAdminList("/admin/budgets", {
+      label: "budgets",
+      errorFallback: "Unable to load budgets.",
+      normalize: normalizeBudgetListPayload,
+    });
+    this.loading = false;
+    if (outcome.status === "stale") {
+      return;
     }
+    if (outcome.status === "unavailable") {
+      this.budgetsAvailable = false;
+      this.budgets = [];
+      return;
+    }
+    if (!outcome.result) {
+      // Network failure: clear the rows, keep the availability flag as-is.
+      this.budgets = [];
+      this.error = outcome.error;
+      return;
+    }
+    this.budgetsAvailable = true;
+    if (outcome.status === "error") {
+      this.error = outcome.error;
+      return;
+    }
+    this.budgets = outcome.items;
   }
 
   openForm(item) {
@@ -180,35 +183,33 @@ class BudgetsStore {
     }
     this.formSubmitting = true;
     this.formError = "";
-    try {
-      const result = await sendJSON(
-        "/admin/budgets",
-        "PUT",
-        budgetPutBody(payload),
-        { label: "budget" },
-      );
-      if (result.status === 503) {
-        this.budgetsAvailable = false;
-        this.formError = "Budget management is unavailable.";
-        return;
-      }
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        this.formError = errorMessage(result, "Unable to save budget.");
-        return;
-      }
-      this.closeForm();
-      // Flash before the refetch so feedback is instant.
-      flash.success("Budget saved.");
-      void this.fetchBudgets();
-    } catch (e) {
-      console.error("Failed to save budget:", e);
-      this.formError = "Unable to save budget.";
-    } finally {
-      this.formSubmitting = false;
+    const outcome = await sendAdminMutation(
+      "/admin/budgets",
+      "PUT",
+      budgetPutBody(payload),
+      {
+        label: "save budget",
+        errorFallback: "Unable to save budget.",
+        unavailableMessage: "Budget management is unavailable.",
+      },
+    );
+    this.formSubmitting = false;
+    if (outcome.status === "stale") {
+      return;
     }
+    if (outcome.status === "unavailable") {
+      this.budgetsAvailable = false;
+      this.formError = outcome.error;
+      return;
+    }
+    if (outcome.status === "error") {
+      this.formError = outcome.error;
+      return;
+    }
+    this.closeForm();
+    // Flash before the refetch so feedback is instant.
+    flash.success("Budget saved.");
+    void this.fetchBudgets();
   }
 
   openOverrideDialog(existing, payload) {
@@ -246,33 +247,31 @@ class BudgetsStore {
       return;
     }
     this.resettingKey = key;
-    try {
-      const result = await sendJSON(
-        "/admin/budgets/reset-one",
-        "POST",
-        budgetResetOneBody(item),
-        { label: "budget reset" },
-      );
-      if (result.status === 503) {
-        this.budgetsAvailable = false;
-        flash.error("Budget management is unavailable.");
-        return;
-      }
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        flash.error(errorMessage(result, "Unable to reset budget."));
-        return;
-      }
-      flash.success("Budget reset.");
-      void this.fetchBudgets();
-    } catch (e) {
-      console.error("Failed to reset budget:", e);
-      flash.error("Unable to reset budget.");
-    } finally {
-      this.resettingKey = "";
+    const outcome = await sendAdminMutation(
+      "/admin/budgets/reset-one",
+      "POST",
+      budgetResetOneBody(item),
+      {
+        label: "reset budget",
+        errorFallback: "Unable to reset budget.",
+        unavailableMessage: "Budget management is unavailable.",
+      },
+    );
+    this.resettingKey = "";
+    if (outcome.status === "stale") {
+      return;
     }
+    if (outcome.status === "unavailable") {
+      this.budgetsAvailable = false;
+      flash.error(outcome.error);
+      return;
+    }
+    if (outcome.status === "error") {
+      flash.error(outcome.error);
+      return;
+    }
+    flash.success("Budget reset.");
+    void this.fetchBudgets();
   }
 
   async deleteBudget(item) {
@@ -288,33 +287,31 @@ class BudgetsStore {
       return;
     }
     this.deletingKey = key;
-    try {
-      const result = await sendJSON(
-        "/admin/budgets",
-        "DELETE",
-        budgetDeleteBody(item),
-        { label: "budget delete" },
-      );
-      if (result.status === 503) {
-        this.budgetsAvailable = false;
-        flash.error("Budget management is unavailable.");
-        return;
-      }
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        flash.error(errorMessage(result, "Unable to delete budget."));
-        return;
-      }
-      this.budgets = normalizeBudgetListPayload(result.data);
-      flash.success("Budget deleted.");
-    } catch (e) {
-      console.error("Failed to delete budget:", e);
-      flash.error("Unable to delete budget.");
-    } finally {
-      this.deletingKey = "";
+    const outcome = await sendAdminMutation(
+      "/admin/budgets",
+      "DELETE",
+      budgetDeleteBody(item),
+      {
+        label: "delete budget",
+        errorFallback: "Unable to delete budget.",
+        unavailableMessage: "Budget management is unavailable.",
+      },
+    );
+    this.deletingKey = "";
+    if (outcome.status === "stale") {
+      return;
     }
+    if (outcome.status === "unavailable") {
+      this.budgetsAvailable = false;
+      flash.error(outcome.error);
+      return;
+    }
+    if (outcome.status === "error") {
+      flash.error(outcome.error);
+      return;
+    }
+    this.budgets = normalizeBudgetListPayload(outcome.result.data);
+    flash.success("Budget deleted.");
   }
 
   // Reset-all budgets: typed-confirmation dialog ("type reset"). The
@@ -338,30 +335,29 @@ class BudgetsStore {
       return;
     }
     this.resetAllLoading = true;
-    try {
-      const result = await sendJSON(
-        "/admin/budgets/reset",
-        "POST",
-        { confirmation: "reset" },
-        { label: "budget reset" },
-      );
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        confirmDialog.error = "Unable to reset budgets.";
-        return;
-      }
-      confirmDialog.close();
-      flash.success("Budgets reset.");
-      if (router.page === "budgets") {
-        void this.fetchBudgets();
-      }
-    } catch (e) {
-      console.error("Failed to reset budgets:", e);
-      confirmDialog.error = "Unable to reset budgets.";
-    } finally {
-      this.resetAllLoading = false;
+    const outcome = await sendAdminMutation(
+      "/admin/budgets/reset",
+      "POST",
+      { confirmation: "reset" },
+      {
+        label: "reset budgets",
+        errorFallback: "Unable to reset budgets.",
+        // Reset-all never had a dedicated 503 branch; keep 503 an error.
+        unavailableStatuses: [],
+      },
+    );
+    this.resetAllLoading = false;
+    if (outcome.status === "stale") {
+      return;
+    }
+    if (outcome.status !== "ok") {
+      confirmDialog.error = outcome.error;
+      return;
+    }
+    confirmDialog.close();
+    flash.success("Budgets reset.");
+    if (router.page === "budgets") {
+      void this.fetchBudgets();
     }
   }
 }

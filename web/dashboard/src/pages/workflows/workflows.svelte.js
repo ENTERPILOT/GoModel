@@ -1,8 +1,10 @@
 // Workflows page state: list fetch, editor form, CRUD against
 // /admin/workflows. Pure form/scope/payload rules live in workflowsLogic.js;
-// runtime feature gates come from the shared runtimeConfig store.
+// runtime feature gates come from the shared runtimeConfig store. The
+// request guard ladder (stale → unavailable → error) lives in
+// $lib/api/adminCrud.ts.
 
-import { errorMessage, getJSON, isAbortError, sendJSON } from "$lib/api/client.ts";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.ts";
 import { flash } from "$lib/stores/flash.svelte.ts";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.ts";
 import { modelsStore } from "$lib/stores/models.svelte.ts";
@@ -210,51 +212,38 @@ class WorkflowsStore {
     this.error = "";
     // 10s watchdog: a hung request surfaces a timeout error.
     const timeoutID = setTimeout(() => controller.abort(), 10000);
-    try {
-      const result = await getJSON("/admin/workflows", {
-        label: "workflows",
-        signal: controller.signal,
-      });
-      if (result.stale) return;
-      if (result.status === 503) {
-        this.available = false;
-        this.workflows = [];
-        return;
-      }
-      this.available = true;
-      if (!result.ok) {
-        this.workflows = [];
-        return;
-      }
-      this.workflows = Array.isArray(result.data) ? result.data : [];
-    } catch (e) {
-      // A newer fetch superseded this one: keep its state untouched.
-      if (isAbortError(e) && this.#listController !== controller) return;
-      console.error("Failed to fetch workflows:", e);
+    const outcome = await loadAdminList("/admin/workflows", {
+      label: "workflows",
+      options: { signal: controller.signal },
+    });
+    clearTimeout(timeoutID);
+    // A newer fetch superseded (and aborted) this one: keep state untouched.
+    if (this.#listController !== controller) return;
+    this.#listController = null;
+    this.loading = false;
+    if (outcome.status === "stale") return;
+    if (outcome.status === "unavailable") {
+      this.available = false;
       this.workflows = [];
-      this.error = isAbortError(e)
-        ? "Loading workflows timed out."
-        : "Unable to load workflows.";
-    } finally {
-      clearTimeout(timeoutID);
-      if (this.#listController === controller) {
-        this.#listController = null;
-        this.loading = false;
-      }
+      return;
     }
+    this.available = true;
+    if (outcome.status === "error") {
+      this.workflows = [];
+      this.error = controller.signal.aborted
+        ? "Loading workflows timed out."
+        : outcome.error;
+      return;
+    }
+    this.workflows = outcome.items;
   }
 
   async fetchGuardrailRefs() {
-    try {
-      const result = await getJSON("/admin/workflows/guardrails", {
-        label: "workflow guardrails",
-      });
-      if (result.stale) return;
-      this.guardrailRefs = result.ok && Array.isArray(result.data) ? result.data : [];
-    } catch (e) {
-      console.error("Failed to fetch workflow guardrails:", e);
-      this.guardrailRefs = [];
-    }
+    const outcome = await loadAdminList("/admin/workflows/guardrails", {
+      label: "workflow guardrails",
+    });
+    if (outcome.status === "stale") return;
+    this.guardrailRefs = outcome.items;
   }
 
   async fetchPage() {
@@ -285,24 +274,23 @@ class WorkflowsStore {
 
     this.submitting = true;
     try {
-      const result = await sendJSON("/admin/workflows", "POST", payload, {
+      const outcome = await sendAdminMutation("/admin/workflows", "POST", payload, {
         label: "create workflow",
+        // 503 carries a server-provided message; surface it like any error.
+        unavailableStatuses: [],
       });
-      if (result.stale || result.status === 401) {
+      // 401 stays silent here: the global auth dialog owns it.
+      if (outcome.status === "stale" || (outcome.result && outcome.result.status === 401)) {
         return;
       }
-      if (!result.ok) {
-        this.formError = errorMessage(result, "Unable to create workflow.");
-        console.error("Failed to create workflow:", result.status, this.formError);
+      if (outcome.status === "error") {
+        this.formError = outcome.error;
         return;
       }
 
       flash.success("Workflow created and activated.");
       this.closeForm();
       void this.fetchPage();
-    } catch (e) {
-      console.error("Failed to create workflow:", e);
-      this.formError = "Unable to create workflow.";
     } finally {
       this.submitting = false;
     }
@@ -326,27 +314,27 @@ class WorkflowsStore {
 
     this.deactivatingID = workflowID;
     try {
-      const result = await sendJSON(
+      const outcome = await sendAdminMutation(
         "/admin/workflows/" + encodeURIComponent(workflowID) + "/deactivate",
         "POST",
         undefined,
-        { label: "deactivate workflow" },
+        {
+          label: "deactivate workflow",
+          // 503 carries a server-provided message; surface it like any error.
+          unavailableStatuses: [],
+        },
       );
-      if (result.stale || result.status === 401) {
+      // 401 stays silent here: the global auth dialog owns it.
+      if (outcome.status === "stale" || (outcome.result && outcome.result.status === 401)) {
         return;
       }
-      if (!result.ok) {
-        const message = errorMessage(result, "Unable to deactivate workflow.");
-        console.error("Failed to deactivate workflow:", result.status, message);
-        flash.error(message);
+      if (outcome.status === "error") {
+        flash.error(outcome.error);
         return;
       }
 
       flash.success("Workflow deactivated.");
       void this.fetchPage();
-    } catch (e) {
-      console.error("Failed to deactivate workflow:", e);
-      flash.error("Unable to deactivate workflow.");
     } finally {
       this.deactivatingID = "";
     }
