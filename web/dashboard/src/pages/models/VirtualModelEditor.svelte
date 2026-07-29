@@ -45,8 +45,8 @@
             balance across them, then pick a strategy: <code>round_robin</code> rotates across targets
             (weight biases the share) and <code>cost</code> always routes to the cheapest available
             target.{#if vm.vmStrategyOptions().some((option) => option.value === "adaptive")}
-              <code>adaptive</code> routes on live health, latency, and cost, learned from real
-              traffic.{/if} Leave <strong>Targets</strong> empty to make it only an access policy on the
+              <code>adaptive</code> lets the registered routing extension pick the target per
+              request.{/if} Leave <strong>Targets</strong> empty to make it only an access policy on the
             <code>Source</code> selector. The selector uses <code>/</code> for all providers and
             models, <code>{"{provider_name}"}/</code> for one provider, or
             <code>{"{provider_name}"}/{"{model}"}</code> for one model. <code>user_paths</code> is

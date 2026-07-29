@@ -171,7 +171,7 @@ function strategyLabel(strategy) {
 const STRATEGY_OPTION_LABELS = {
   round_robin: "Round-robin (rotate across targets; honors weights)",
   cost: "Lowest cost (cheapest target per request)",
-  adaptive: "Adaptive (live health, latency, and cost via routing extension)",
+  adaptive: "Adaptive (target chosen by the registered routing extension)",
 };
 
 // strategyOptions builds the editor dropdown from the deployment's supported
