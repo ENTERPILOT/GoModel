@@ -64,12 +64,10 @@ class AuthKeysStore {
         return;
       }
       if (outcome.status === "error") {
-        // A gateway error keeps the last-known rows; a network failure
-        // (result === null) clears them and leaves availability as-is.
+        // Any load failure keeps the last-known rows next to the inline
+        // error; only an answered request proves availability.
         if (outcome.result) {
           this.available = true;
-        } else {
-          this.keys = [];
         }
         this.error = outcome.error;
         return;
