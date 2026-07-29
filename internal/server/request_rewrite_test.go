@@ -161,6 +161,10 @@ func TestRequestRewriteMiddlewareExposesSessionID(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
 			}
+			// The empty-session expectation must not pass vacuously.
+			if capturing.calls != 1 {
+				t.Fatalf("rewriter called %d times, want 1", capturing.calls)
+			}
 			if seenSession != tt.want {
 				t.Errorf("rewriter saw SessionID %q, want %q", seenSession, tt.want)
 			}
