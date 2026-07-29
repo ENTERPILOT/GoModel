@@ -77,6 +77,7 @@ const (
 	DashboardConfigPricingRecalculation = "USAGE_PRICING_RECALCULATION_ENABLED"
 	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
 	DashboardConfigMCPEnabled           = "MCP_ENABLED"
+	DashboardConfigVMStrategies         = "VIRTUAL_MODEL_STRATEGIES"
 )
 
 // statusClientClosedRequest is the de facto status used by proxies for client-aborted requests.
@@ -98,6 +99,11 @@ type DashboardConfigResponse struct {
 	PricingRecalculation string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
 	LiveLogsEnabled      string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
 	MCPEnabled           string `json:"MCP_ENABLED,omitempty"`
+	// VirtualModelStrategies is the comma-separated list of load-balancing
+	// strategies this deployment supports. "adaptive" appears only when a
+	// route-selector extension is registered, so the dashboard never offers
+	// a strategy that would silently fall back to round robin.
+	VirtualModelStrategies string `json:"VIRTUAL_MODEL_STRATEGIES,omitempty"`
 }
 
 type providerStatusSummaryResponse struct {

@@ -6,11 +6,20 @@
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { qualifiedModelName } from "./virtualModelsLogic.js";
   import VmTargetRow from "./VmTargetRow.svelte";
 
   const vm = virtualModels;
+
+  // The strategy dropdown is server-driven (VIRTUAL_MODEL_STRATEGIES); make
+  // sure the runtime config is loaded by the time the editor shows it.
+  $effect(() => {
+    if (vm.vmFormOpen) {
+      runtimeConfig.ensureLoaded();
+    }
+  });
 </script>
 
 <Modal open={vm.vmFormOpen} onclose={() => vm.closeVirtualModelForm()}>
@@ -35,7 +44,9 @@
             Add one <strong>target</strong> to make this a redirect/alias, or two or more to load
             balance across them, then pick a strategy: <code>round_robin</code> rotates across targets
             (weight biases the share) and <code>cost</code> always routes to the cheapest available
-            target. Leave <strong>Targets</strong> empty to make it only an access policy on the
+            target.{#if vm.vmStrategyOptions().some((option) => option.value === "adaptive")}
+              <code>adaptive</code> routes on live health, latency, and cost, learned from real
+              traffic.{/if} Leave <strong>Targets</strong> empty to make it only an access policy on the
             <code>Source</code> selector. The selector uses <code>/</code> for all providers and
             models, <code>{"{provider_name}"}/</code> for one provider, or
             <code>{"{provider_name}"}/{"{model}"}</code> for one model. <code>user_paths</code> is
@@ -116,8 +127,9 @@
             bind:value={vm.vmForm.strategy}
             disabled={vm.vmFormManaged}
           >
-            <option value="round_robin">Round-robin (rotate across targets; honors weights)</option>
-            <option value="cost">Lowest cost (cheapest target per request)</option>
+            {#each vm.vmStrategyOptions() as option (option.value)}
+              <option value={option.value}>{option.label}</option>
+            {/each}
           </select>
         </div>
         <div class="form-field">

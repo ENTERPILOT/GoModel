@@ -442,14 +442,14 @@ func TestDashboardRuntimeConfig_ExposesFailoverEnabled(t *testing.T) {
 		},
 	}
 
-	values := dashboardRuntimeConfig(cfg, false, false)
+	values := dashboardRuntimeConfig(cfg, false, false, false)
 	if got := values.FailoverEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigFailoverEnabled, got)
 	}
 }
 
 func TestDashboardRuntimeConfig_ExposesDemoMode(t *testing.T) {
-	values := dashboardRuntimeConfig(&config.Config{}, false, true)
+	values := dashboardRuntimeConfig(&config.Config{}, false, true, false)
 	if got := values.DemoMode; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigDemoMode, got)
 	}
@@ -462,7 +462,7 @@ func TestDashboardRuntimeConfig_FailoverDisabled(t *testing.T) {
 		},
 	}
 
-	values := dashboardRuntimeConfig(cfg, false, false)
+	values := dashboardRuntimeConfig(cfg, false, false, false)
 	if got := values.FailoverEnabled; got != "off" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigFailoverEnabled, got)
 	}
@@ -476,7 +476,7 @@ func TestDashboardRuntimeConfig_DefaultModeDoesNotEnableFailover(t *testing.T) {
 		},
 	}
 
-	values := dashboardRuntimeConfig(cfg, false, false)
+	values := dashboardRuntimeConfig(cfg, false, false, false)
 	if got := values.FailoverEnabled; got != "off" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigFailoverEnabled, got)
 	}
@@ -516,7 +516,7 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 		},
 	}
 
-	values := dashboardRuntimeConfig(cfg, true, false)
+	values := dashboardRuntimeConfig(cfg, true, false, false)
 	if got := values.LoggingEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLoggingEnabled, got)
 	}
@@ -550,7 +550,7 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 }
 
 func TestDashboardRuntimeConfig_ExposesIndefiniteLoggingRetention(t *testing.T) {
-	values := dashboardRuntimeConfig(&config.Config{}, false, false)
+	values := dashboardRuntimeConfig(&config.Config{}, false, false, false)
 	if got := values.LoggingRetentionDays; got != "0" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want 0", admin.DashboardConfigLoggingRetentionDays, got)
 	}
@@ -559,9 +559,28 @@ func TestDashboardRuntimeConfig_ExposesIndefiniteLoggingRetention(t *testing.T) 
 func TestDashboardRuntimeConfig_HidesMCPWhenDisabled(t *testing.T) {
 	values := dashboardRuntimeConfig(&config.Config{
 		MCP: config.MCPConfig{Enabled: false},
-	}, false, false)
+	}, false, false, false)
 	if got := values.MCPEnabled; got != "off" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigMCPEnabled, got)
+	}
+}
+
+func TestDashboardRuntimeConfig_VirtualModelStrategies(t *testing.T) {
+	tests := []struct {
+		name            string
+		adaptiveRouting bool
+		want            string
+	}{
+		{name: "core strategies without a route selector", adaptiveRouting: false, want: "round_robin,cost"},
+		{name: "adaptive offered with a route selector", adaptiveRouting: true, want: "round_robin,cost,adaptive"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := dashboardRuntimeConfig(&config.Config{}, false, false, tt.adaptiveRouting)
+			if got := values.VirtualModelStrategies; got != tt.want {
+				t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigVMStrategies, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -581,7 +600,7 @@ func TestDashboardRuntimeConfig_HidesCacheAnalyticsWhenUsageDisabled(t *testing.
 		},
 	}
 
-	values := dashboardRuntimeConfig(cfg, false, false)
+	values := dashboardRuntimeConfig(cfg, false, false, false)
 	if got := values.UsageEnabled; got != "off" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigUsageEnabled, got)
 	}

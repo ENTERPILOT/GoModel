@@ -669,7 +669,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			mcpResult,
 			app.providerCredentials,
 			app,
-			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, cfg.DemoMode),
+			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, cfg.DemoMode, routeSelector != nil),
 			app.live,
 			requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
@@ -1251,22 +1251,35 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 	}
 }
 
-func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode bool) admin.DashboardConfigResponse {
+func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptiveRouting bool) admin.DashboardConfigResponse {
 	return admin.DashboardConfigResponse{
-		DemoMode:             dashboardEnabledValue(demoMode),
-		FailoverEnabled:      dashboardEnabledValue(failoverFeatureEnabledGlobally(cfg)),
-		LoggingEnabled:       dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
-		LoggingRetentionDays: dashboardLoggingRetentionDays(cfg),
-		UsageEnabled:         dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
-		BudgetsEnabled:       dashboardEnabledValue(cfg != nil && cfg.Budgets.Enabled),
-		RateLimitsEnabled:    dashboardEnabledValue(cfg != nil && cfg.RateLimits.Enabled),
-		GuardrailsEnabled:    dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
-		CacheEnabled:         dashboardEnabledValue(cacheAnalyticsConfigured(cfg, usageEnabled)),
-		RedisURL:             dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
-		SemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
-		LiveLogsEnabled:      dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
-		MCPEnabled:           dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
+		DemoMode:               dashboardEnabledValue(demoMode),
+		FailoverEnabled:        dashboardEnabledValue(failoverFeatureEnabledGlobally(cfg)),
+		LoggingEnabled:         dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
+		LoggingRetentionDays:   dashboardLoggingRetentionDays(cfg),
+		UsageEnabled:           dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
+		BudgetsEnabled:         dashboardEnabledValue(cfg != nil && cfg.Budgets.Enabled),
+		RateLimitsEnabled:      dashboardEnabledValue(cfg != nil && cfg.RateLimits.Enabled),
+		GuardrailsEnabled:      dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
+		CacheEnabled:           dashboardEnabledValue(cacheAnalyticsConfigured(cfg, usageEnabled)),
+		RedisURL:               dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
+		SemanticCacheEnabled:   dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
+		LiveLogsEnabled:        dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
+		MCPEnabled:             dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
+		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting),
 	}
+}
+
+// dashboardVirtualModelStrategies lists the load-balancing strategies the
+// dashboard should offer. Core accepts "adaptive" regardless (it falls back
+// to round robin without a selector), but the UI only advertises it when a
+// route-selector extension is actually registered.
+func dashboardVirtualModelStrategies(adaptiveRouting bool) string {
+	strategies := []string{virtualmodels.StrategyRoundRobin, virtualmodels.StrategyCost}
+	if adaptiveRouting {
+		strategies = append(strategies, virtualmodels.StrategyAdaptive)
+	}
+	return strings.Join(strategies, ",")
 }
 
 func dashboardLoggingRetentionDays(cfg *config.Config) string {
