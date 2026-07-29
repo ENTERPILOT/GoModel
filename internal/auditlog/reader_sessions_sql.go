@@ -10,8 +10,10 @@ import (
 
 // auditThreadKey groups entries into threads: the session id when present,
 // otherwise the entry's own id, which makes sessionless entries singleton
-// threads in the same page.
-const auditThreadKey = `COALESCE(NULLIF(session_id, ''), id)`
+// threads in the same page. The cast matters: PostgreSQL databases created
+// before the unified schema have a uuid id column, and COALESCE cannot match
+// uuid against the text session_id without it.
+const auditThreadKey = `COALESCE(NULLIF(session_id, ''), CAST(id AS TEXT))`
 
 // GetSessions returns a paginated list of audit sessions ordered by latest
 // activity. One window-function pass ranks each thread's entries by recency
