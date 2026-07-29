@@ -227,7 +227,11 @@ class WorkflowsStore {
       this.workflows = [];
       return;
     }
-    this.available = true;
+    // Only a real gateway response proves the feature is back — a thrown
+    // request (offline, watchdog abort) must not undo an earlier 503.
+    if (outcome.result) {
+      this.available = true;
+    }
     if (outcome.status === "error") {
       this.workflows = [];
       this.error = controller.signal.aborted

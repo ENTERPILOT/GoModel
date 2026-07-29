@@ -148,7 +148,11 @@ class GuardrailsStore {
         this.types = [];
         return;
       }
-      this.available = true;
+      // Only a real gateway response proves the feature is back — a thrown
+      // request (offline, DNS) must not undo an earlier 503 unavailable.
+      if (outcome.result) {
+        this.available = true;
+      }
       this.types = outcome.items;
       if (outcome.status === "error") {
         this.error = outcome.error;
@@ -182,7 +186,10 @@ class GuardrailsStore {
         this.guardrails = [];
         return;
       }
-      this.available = true;
+      // Same offline guard as fetchTypes: only trust an answered request.
+      if (outcome.result) {
+        this.available = true;
+      }
       this.guardrails = outcome.items;
       this.error = outcome.error;
     } finally {

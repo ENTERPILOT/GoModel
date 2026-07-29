@@ -186,7 +186,7 @@
                   class="workflow-step-input"
                   id={"workflow-guardrail-step-" + index}
                   min="0"
-                  step="10"
+                  step="1"
                   placeholder="Step"
                   bind:value={step.step}
                   aria-label={"Guardrail step " + (index + 1)}

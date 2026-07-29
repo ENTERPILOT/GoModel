@@ -17,11 +17,9 @@
   open={failover.failoverFormOpen}
   ariaLabel="Failover editor"
   error={failover.failoverError}
-  submitting={failover.failoverSaving ||
-    failover.failoverGenerating ||
-    failover.failoverFormManaged}
+  submitting={failover.failoverSaving}
+  submitDisabled={failover.failoverGenerating || failover.failoverFormManaged}
   submitLabel="Save"
-  submittingLabel={failover.failoverSaving ? "Saving..." : "Save"}
   onclose={() => failover.closeFailoverForm()}
   onsubmit={() => failover.submitFailoverForm()}
 >

@@ -18,13 +18,9 @@
   open={vm.vmFormOpen}
   ariaLabel="Virtual model editor"
   error={vm.vmFormError}
-  submitting={vm.vmSubmitting || vm.vmDeleting || vm.vmFormManaged}
+  submitting={vm.vmSubmitting}
+  submitDisabled={vm.vmDeleting || vm.vmFormManaged}
   submitLabel={vm.vmFormMode === "edit" ? "Save" : "Create"}
-  submittingLabel={vm.vmSubmitting
-    ? "Saving..."
-    : vm.vmFormMode === "edit"
-      ? "Save"
-      : "Create"}
   submitIcon={vm.vmFormMode !== "edit" ? "plus" : "save"}
   onclose={() => vm.closeVirtualModelForm()}
   onsubmit={() => vm.submitVirtualModelForm()}

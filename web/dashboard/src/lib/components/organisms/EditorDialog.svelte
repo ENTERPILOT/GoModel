@@ -8,7 +8,10 @@
   //   title       — heading text ("Edit Budget"); also the default aria-label
   //   ariaLabel   — accessible dialog name when it should differ from title
   //   error       — form-level error text (rendered above the actions row)
-  //   submitting  — disables the submit button and swaps its label
+  //   submitting  — request in flight: disables the submit button and swaps
+  //                 its label to submittingLabel
+  //   submitDisabled — disables submit without the label swap (read-only
+  //                 config-managed rows, a pending delete, ...)
   //   submitLabel / submittingLabel / submitIcon — submit button content
   //   cancel      — set false to drop the Cancel button (default true)
   //   dialogClass — extra classes on the dialog shell next to .model-editor
@@ -36,6 +39,7 @@
     ariaLabel = "",
     error = "",
     submitting = false,
+    submitDisabled = false,
     submitLabel = "Save",
     submittingLabel = "Saving...",
     submitIcon = "save",
@@ -107,7 +111,7 @@
         <button
           type="submit"
           class="btn btn-primary btn-with-icon"
-          disabled={submitting}
+          disabled={submitting || submitDisabled}
         >
           <Icon name={submitIcon} class="form-action-icon" />
           <span>{submitting ? submittingLabel : submitLabel}</span>

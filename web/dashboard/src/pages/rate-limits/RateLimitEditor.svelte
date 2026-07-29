@@ -7,9 +7,9 @@
   import { rateLimits } from "./rateLimits.svelte.js";
 </script>
 
-<!-- novalidate: the concurrent period keeps 0 in the hidden period-seconds
-     input (min=1), and native validation silently blocks submit on hidden
-     invalid controls. Validation lives in rateLimitFormPayload(). -->
+<!-- novalidate: validation lives in rateLimitFormPayload(), which surfaces
+     the store's error copy; native constraint checks (e.g. a 0 typed into a
+     min=1 number field) would block the submit before it runs. -->
 <EditorDialog
   open={rateLimits.rateLimitFormOpen}
   title={rateLimits.rateLimitEditing ? "Edit Rate Limit" : "Create Rate Limit"}
