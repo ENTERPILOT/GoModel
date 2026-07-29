@@ -126,6 +126,9 @@ sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN rewrite_cost_saved REAL;" 2>/de
 sqlite3 "$db_path" "ALTER TABLE mcp_servers ADD COLUMN display_name TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN user_path TEXT;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN labels JSON;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN dashboard_access INTEGER NOT NULL DEFAULT 0;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE audit_logs ADD COLUMN session_id TEXT;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE virtual_models ADD COLUMN session_affinity TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
 
 # make demo seeds before app startup, so migrate the rate-limit table here
 # when the database predates scoped user-path/provider/model rules.
@@ -209,9 +212,31 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   method TEXT,
   path TEXT,
   user_path TEXT,
+  session_id TEXT,
   stream INTEGER DEFAULT 0,
   error_type TEXT,
   data JSON
+);
+
+CREATE TABLE IF NOT EXISTS audit_log_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  audit_log_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  provider_type TEXT,
+  provider_name TEXT,
+  model TEXT,
+  status_code INTEGER DEFAULT 0,
+  success INTEGER DEFAULT FALSE,
+  error_type TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  response_body TEXT,
+  response_headers TEXT,
+  started_at DATETIME,
+  duration_ns INTEGER DEFAULT 0,
+  UNIQUE(audit_log_id, seq),
+  FOREIGN KEY(audit_log_id) REFERENCES audit_logs(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS budgets (
@@ -265,6 +290,7 @@ CREATE TABLE IF NOT EXISTS auth_keys (
   description TEXT NOT NULL DEFAULT '',
   user_path TEXT,
   labels JSON,
+  dashboard_access INTEGER NOT NULL DEFAULT 0,
   redacted_value TEXT NOT NULL,
   secret_hash TEXT NOT NULL UNIQUE,
   enabled INTEGER NOT NULL DEFAULT 1,
@@ -278,12 +304,19 @@ CREATE TABLE IF NOT EXISTS virtual_models (
   source TEXT PRIMARY KEY,
   targets TEXT NOT NULL DEFAULT '[]',
   strategy TEXT NOT NULL DEFAULT '',
+  session_affinity TEXT NOT NULL DEFAULT '',
   provider_name TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '',
   user_paths TEXT NOT NULL DEFAULT '[]',
   description TEXT NOT NULL DEFAULT '',
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tagging_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
 
@@ -307,6 +340,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id);
 CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path);
 CREATE INDEX IF NOT EXISTS idx_audit_user_path ON audit_logs(user_path);
 CREATE INDEX IF NOT EXISTS idx_audit_cache_type ON audit_logs(cache_type);
+CREATE INDEX IF NOT EXISTS idx_audit_session_timestamp ON audit_logs(session_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON audit_log_attempts(audit_log_id, seq);
 CREATE INDEX IF NOT EXISTS idx_budgets_user_path ON budgets(user_path);
 CREATE INDEX IF NOT EXISTS idx_budgets_period_seconds ON budgets(period_seconds);
 CREATE INDEX IF NOT EXISTS idx_rate_limits_subject ON rate_limits(scope, subject);
@@ -321,6 +356,7 @@ CREATE INDEX IF NOT EXISTS idx_failover_rules_updated_at ON failover_rules(updat
 
 BEGIN IMMEDIATE;
 
+DELETE FROM audit_log_attempts WHERE audit_log_id GLOB '${prefix}-*';
 DELETE FROM audit_logs WHERE id GLOB '${prefix}-*';
 DELETE FROM usage WHERE id GLOB '${prefix}-*';
 DELETE FROM budgets WHERE source = '${prefix}';
@@ -416,6 +452,7 @@ SELECT
   abs(random()) % 10000 AS prompt_bucket,
   abs(random()) % 10000 AS rewrite_bucket,
   abs(random()) % 10000 AS label_bucket,
+  abs(random()) % 10000 AS session_bucket,
   abs(random()) % 86400 AS second_of_day,
   abs(random()) AS token_noise
 FROM demo_days d
@@ -427,6 +464,8 @@ WITH chosen AS (
   SELECT
     b.*,
     p.user_path,
+    p.min_bucket AS path_min,
+    t.min_bucket AS template_min,
     t.label,
     t.endpoint,
     t.provider,
@@ -492,6 +531,16 @@ prompt_parts AS (
       ELSE 0
     END AS prompt_cache_write_tokens
   FROM rewrite_decisions
+),
+-- Requests in the same 3-hour window on the same day, user path, and template
+-- share one session key, so audit entries group into multi-turn threads of
+-- organic sizes. The key stays below 2^31 so the hex mixing below cannot
+-- overflow SQLite's 64-bit integer arithmetic.
+session_keys AS (
+  SELECT
+    *,
+    (((day_idx * 13 + (second_of_day / 10800)) * 131071 + path_min) * 8191 + template_min) % 2147483647 AS session_key
+  FROM prompt_parts
 )
 SELECT
   *,
@@ -500,12 +549,30 @@ SELECT
     WHEN rewrite_hit = 1 THEN CAST(input_tokens * (8 + ((token_noise / 17) % 23)) / 100 AS INTEGER)
     ELSE 0
   END AS rewrite_tokens_saved,
+  -- Session ids mirror the detector's real formats: chat and responses traffic
+  -- always carries a content-derived auto id, most /v1/messages traffic sends
+  -- a client id that arrives path-scoped, and the rest stays sessionless.
+  CASE
+    WHEN label IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian', 'responses') THEN
+      'auto-' || printf('%08x%08x%08x%08x',
+        (session_key * 2654435761 + 97) % 4294967296,
+        (session_key * 2246822519 + 193) % 4294967296,
+        (session_key * 3266489917 + 389) % 4294967296,
+        (session_key * 668265263 + 769) % 4294967296)
+    WHEN label = 'messages' AND session_bucket < 7000 THEN
+      'scoped-' || printf('%08x%08x%08x%08x',
+        (session_key * 2654435761 + 131) % 4294967296,
+        (session_key * 2246822519 + 263) % 4294967296,
+        (session_key * 3266489917 + 523) % 4294967296,
+        (session_key * 668265263 + 1049) % 4294967296)
+    ELSE NULL
+  END AS session_id,
   strftime('%Y-%m-%dT%H:%M:%fZ', day || ' 00:00:00', '+' || second_of_day || ' seconds') AS timestamp,
   '${prefix}-usage-' || day_idx || '-' || slot_idx AS usage_id,
   '${prefix}-audit-' || day_idx || '-' || slot_idx AS audit_id,
   '${prefix}-req-' || day_idx || '-' || slot_idx AS request_id,
   '${prefix}-provider-' || day_idx || '-' || slot_idx AS provider_id
-FROM prompt_parts;
+FROM session_keys;
 
 INSERT INTO usage (
   id, request_id, provider_id, timestamp, model, provider, provider_name,
@@ -604,7 +671,7 @@ FROM demo_generated;
 INSERT INTO audit_logs (
   id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name,
   alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id,
-  auth_method, client_ip, method, path, user_path, stream, error_type, data
+  auth_method, client_ip, method, path, user_path, session_id, stream, error_type, data
 )
 SELECT
   audit_id,
@@ -639,6 +706,7 @@ SELECT
   'POST',
   endpoint,
   user_path,
+  session_id,
   0,
   CASE
     WHEN abs(token_noise / 131) % 1000 < 985 THEN ''
@@ -867,6 +935,62 @@ SELECT
   )
 FROM demo_generated;
 
+-- Attempt trails feed the request drawer's failover pips. Failed entries show
+-- a primary attempt plus a cross-provider failover that also failed (the
+-- failover order matches the seeded failover_rules); a slice of successful
+-- uncached entries shows a rate-limited primary followed by a clean retry.
+INSERT INTO audit_log_attempts (
+  audit_log_id, seq, kind, provider_type, provider_name, model,
+  status_code, success, error_type, error_code, error_message,
+  started_at, duration_ns
+)
+SELECT
+  audit_id, 1, 'primary', provider, provider_name, model,
+  502, 0, 'provider_error', 'upstream_error',
+  'Synthetic upstream 502 from ' || provider_name || ' for demo failover inspection.',
+  timestamp, 90000000 + (token_noise % 140000000)
+FROM demo_generated
+WHERE abs(token_noise / 131) % 1000 >= 994
+UNION ALL
+SELECT
+  audit_id, 2, 'failover',
+  CASE provider WHEN 'openai' THEN 'groq' WHEN 'groq' THEN 'gemini' WHEN 'gemini' THEN 'groq' WHEN 'bailian' THEN 'groq' ELSE 'openai' END,
+  CASE provider WHEN 'openai' THEN 'groq' WHEN 'groq' THEN 'gemini' WHEN 'gemini' THEN 'groq' WHEN 'bailian' THEN 'groq' ELSE 'openai' END,
+  CASE provider
+    WHEN 'openai' THEN 'llama-3.1-8b-instant'
+    WHEN 'groq' THEN 'gemini-2.5-flash-lite'
+    WHEN 'gemini' THEN 'llama-3.1-8b-instant'
+    WHEN 'bailian' THEN 'llama-3.1-8b-instant'
+    ELSE 'gpt-5-nano-2025-08-07'
+  END,
+  500, 0, 'provider_error', 'upstream_error',
+  'Synthetic failover attempt also failed upstream for demo inspection.',
+  strftime('%Y-%m-%dT%H:%M:%fZ', day || ' 00:00:00', '+' || (second_of_day + 1) || ' seconds'),
+  80000000 + (token_noise % 110000000)
+FROM demo_generated
+WHERE abs(token_noise / 131) % 1000 >= 994;
+
+INSERT INTO audit_log_attempts (
+  audit_log_id, seq, kind, provider_type, provider_name, model,
+  status_code, success, error_type, error_code, error_message,
+  started_at, duration_ns
+)
+SELECT
+  audit_id, 1, 'primary', provider, provider_name, model,
+  429, 0, 'rate_limit_exceeded', 'rate_limited',
+  'Provider returned 429 for demo inspection; the gateway retried with backoff.',
+  timestamp, 40000000 + (token_noise % 50000000)
+FROM demo_generated
+WHERE abs(token_noise / 131) % 1000 < 985 AND cache_type IS NULL AND token_noise % 37 = 0
+UNION ALL
+SELECT
+  audit_id, 2, 'retry', provider, provider_name, model,
+  200, 1, NULL, NULL, NULL,
+  strftime('%Y-%m-%dT%H:%M:%fZ', day || ' 00:00:00', '+' || (second_of_day + 1) || ' seconds'),
+  90000000 + (token_noise % 200000000)
+FROM demo_generated
+WHERE abs(token_noise / 131) % 1000 < 985 AND cache_type IS NULL AND token_noise % 37 = 0;
+
 DROP TABLE IF EXISTS temp.demo_budget_paths;
 CREATE TEMP TABLE demo_budget_paths(user_path TEXT, daily_amount REAL, weekly_amount REAL, monthly_amount REAL);
 INSERT INTO demo_budget_paths VALUES
@@ -1006,10 +1130,12 @@ VALUES
   );
 
 -- Active keys use fresh random secrets on every seed. Their plaintext values
--- are printed once below, matching the admin API's issue-once behavior.
+-- are printed once below, matching the admin API's issue-once behavior. The
+-- engineering key carries dashboard_access so the per-key admin-API toggle
+-- shows both states.
 INSERT INTO auth_keys (
-  id, name, description, user_path, labels, redacted_value, secret_hash,
-  enabled, expires_at, deactivated_at, created_at, updated_at
+  id, name, description, user_path, labels, dashboard_access, redacted_value,
+  secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
 )
 VALUES
   (
@@ -1018,6 +1144,7 @@ VALUES
     'Demo key for interactive agent and research requests.',
     '/agents/team1',
     json_array('env:demo', 'team:agents-1'),
+    0,
     '${demo_key_redacted_team1}',
     '${demo_key_hash_team1}',
     1, NULL, NULL,
@@ -1029,6 +1156,7 @@ VALUES
     'Demo key for engineering evaluations and automated jobs.',
     '/engineering/ai',
     json_array('env:demo', 'team:engineering', 'priority:high'),
+    1,
     '${demo_key_redacted_engineering}',
     '${demo_key_hash_engineering}',
     1, NULL, NULL,
@@ -1040,16 +1168,28 @@ VALUES
     'Demo key for CRM summaries and sales-assistant traffic.',
     '/sales/john',
     json_array('env:demo', 'team:sales'),
+    0,
     '${demo_key_redacted_sales}',
     '${demo_key_hash_sales}',
     1, NULL, NULL,
     strftime('%s', 'now'), strftime('%s', 'now')
   );
 
+-- Tagging rules explain where the labels on generated usage rows come from.
+-- INSERT OR IGNORE keeps operator-edited rules untouched on reseed.
+INSERT OR IGNORE INTO tagging_settings (key, value, updated_at)
+VALUES (
+  'headers',
+  '[{"header":"X-Demo-Labels","delimiter":","},{"header":"X-Demo-Experiment","prefix":"exp-","do_not_pass":true}]',
+  strftime('%s', 'now')
+);
+
 -- Named virtual models demonstrate aliases plus cost- and latency-oriented
--- target pools. Existing operator-owned aliases with these names win.
+-- target pools. Existing operator-owned aliases with these names win. Session
+-- affinity stays on its default (sticky) except for 'cheap', which opts out so
+-- the editor's "Session keeping" checkbox shows both states.
 INSERT OR IGNORE INTO virtual_models (
-  source, targets, strategy, provider_name, model, user_paths,
+  source, targets, strategy, session_affinity, provider_name, model, user_paths,
   description, enabled, created_at, updated_at
 )
 VALUES
@@ -1061,14 +1201,14 @@ VALUES
       json_object('provider', 'gemini', 'model', 'gemini-2.5-flash-lite', 'weight', 1),
       json_object('provider', 'bailian', 'model', 'qwen-flash', 'weight', 1)
     ),
-    'cost', '', '', '[]',
+    'cost', '', '', '', '[]',
     '${prefix}: balanced cost-aware model pool',
     1, strftime('%s', 'now'), strftime('%s', 'now')
   ),
   (
     'normal',
     json_array(json_object('provider', 'openai', 'model', 'gpt-5-nano-2025-08-07', 'weight', 1)),
-    'round_robin', '', '', '[]',
+    'round_robin', '', '', '', '[]',
     '${prefix}: stable default model alias',
     1, strftime('%s', 'now'), strftime('%s', 'now')
   ),
@@ -1079,7 +1219,7 @@ VALUES
       json_object('provider', 'gemini', 'model', 'gemini-2.5-flash-lite', 'weight', 2),
       json_object('provider', 'bailian', 'model', 'qwen-flash', 'weight', 2)
     ),
-    'round_robin', '', '', '[]',
+    'round_robin', '', '', '', '[]',
     '${prefix}: latency-oriented weighted model pool',
     1, strftime('%s', 'now'), strftime('%s', 'now')
   ),
@@ -1091,7 +1231,7 @@ VALUES
       json_object('provider', 'gemini', 'model', 'gemini-2.5-flash-lite', 'weight', 1),
       json_object('provider', 'bailian', 'model', 'qwen-flash', 'weight', 1)
     ),
-    'cost', '', '', '[]',
+    'cost', 'false', '', '', '[]',
     '${prefix}: lowest-cost available target',
     1, strftime('%s', 'now'), strftime('%s', 'now')
   ),
@@ -1101,7 +1241,7 @@ VALUES
       json_object('provider', 'anthropic', 'model', 'claude-haiku-4-5-20251001', 'weight', 2),
       json_object('provider', 'openai', 'model', 'gpt-5-nano-2025-08-07', 'weight', 1)
     ),
-    'round_robin', '', '', json_array('/engineering', '/agents'),
+    'round_robin', '', '', '', json_array('/engineering', '/agents'),
     '${prefix}: quality-oriented pool scoped to engineering and agents',
     1, strftime('%s', 'now'), strftime('%s', 'now')
   );
@@ -1144,6 +1284,15 @@ SELECT 'seed_prefix', '${prefix}';
 SELECT 'date_range', min(date(REPLACE(timestamp, 'T', ' '))), max(date(REPLACE(timestamp, 'T', ' '))) FROM usage WHERE id GLOB '${prefix}-*';
 SELECT 'usage_rows', count(*), coalesce(sum(total_tokens), 0) FROM usage WHERE id GLOB '${prefix}-*';
 SELECT 'audit_rows', count(*) FROM audit_logs WHERE id GLOB '${prefix}-*';
+SELECT 'session_threads', count(DISTINCT session_id), count(*) FROM audit_logs
+WHERE id GLOB '${prefix}-*' AND session_id IS NOT NULL;
+SELECT 'session_thread_sizes', min(n), max(n), round(avg(n), 1)
+FROM (
+  SELECT count(*) AS n FROM audit_logs
+  WHERE id GLOB '${prefix}-*' AND session_id IS NOT NULL
+  GROUP BY session_id
+);
+SELECT 'attempt_rows', count(*) FROM audit_log_attempts WHERE audit_log_id GLOB '${prefix}-*';
 SELECT 'budget_rows', count(*) FROM budgets WHERE source = '${prefix}';
 SELECT 'rate_limit_rows', count(*) FROM rate_limits WHERE source = '${prefix}';
 SELECT 'mcp_server_rows', count(*) FROM mcp_servers
@@ -1195,6 +1344,10 @@ Generated demo API keys (replaced on every seed):
 Open the dashboard and use a recent 90-day date range. To replace this generated
 dataset, rerun the script with the same DEMO_SEED_PREFIX. To keep multiple
 datasets side by side, use a different DEMO_SEED_PREFIX.
+
+Audit entries carry session ids, so the Audit Logs page groups them into
+threads by default ("Group by session"); failed and retried requests carry
+attempt trails visible in the request drawer.
 
 Rate-limit counters are live process state and start at zero when GoModel starts.
 Use the generated API keys to make requests and populate those counters.
