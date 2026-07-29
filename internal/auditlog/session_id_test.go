@@ -210,11 +210,20 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 		if result.Total != 2 || len(result.Sessions) != 2 {
 			t.Fatalf("total=%d sessions=%d, want 2/2", result.Total, len(result.Sessions))
 		}
-		if got := result.Sessions[0].Latest.ID; got != "b32d7a52-0000-4000-8000-000000000003" {
-			t.Fatalf("sessions[0].Latest.ID = %q, want the singleton entry", got)
+		want := []struct {
+			latestID  string
+			sessionID string
+			count     int
+		}{
+			{"b32d7a52-0000-4000-8000-000000000003", "", 1},
+			{"b32d7a52-0000-4000-8000-000000000002", "sess-a", 2},
 		}
-		if got := result.Sessions[1]; got.SessionID != "sess-a" || got.Count != 2 {
-			t.Fatalf("sess-a summary = %+v", got)
+		for i, tt := range want {
+			got := result.Sessions[i]
+			if got.Latest.ID != tt.latestID || got.SessionID != tt.sessionID || got.Count != tt.count {
+				t.Fatalf("sessions[%d] = %+v, want latest %q session %q count %d",
+					i, got, tt.latestID, tt.sessionID, tt.count)
+			}
 		}
 	})
 }
