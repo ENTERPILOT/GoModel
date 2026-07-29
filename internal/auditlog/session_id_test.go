@@ -123,6 +123,102 @@ func TestSQLReader_GetSessions(t *testing.T) {
 	})
 }
 
+// PostgreSQL databases created before the unified schema keep their original
+// uuid id column — CREATE TABLE IF NOT EXISTS never retypes it. The session
+// thread key coalesces id with the text session_id, so without a cast every
+// GetSessions call on such a database fails with SQLSTATE 42804 ("COALESCE
+// types text and uuid cannot be matched").
+func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("only pre-unification PostgreSQL schemas used a uuid id column")
+		}
+
+		ctx := context.Background()
+		// The audit_logs table exactly as the standalone PostgreSQL store
+		// created it; session_id is absent and arrives via migration.
+		if err := db.Schema(ctx, `
+			CREATE TABLE audit_logs (
+				id UUID PRIMARY KEY,
+				timestamp TIMESTAMPTZ NOT NULL,
+				duration_ns BIGINT DEFAULT 0,
+				requested_model TEXT,
+				resolved_model TEXT,
+				provider TEXT,
+				provider_name TEXT,
+				alias_used BOOLEAN DEFAULT FALSE,
+				workflow_version_id TEXT,
+				cache_type TEXT,
+				status_code INTEGER DEFAULT 0,
+				request_id TEXT,
+				auth_key_id TEXT,
+				auth_method TEXT,
+				client_ip TEXT,
+				method TEXT,
+				path TEXT,
+				user_path TEXT,
+				stream BOOLEAN DEFAULT FALSE,
+				error_type TEXT,
+				data JSONB
+			)`, `
+			CREATE TABLE audit_log_attempts (
+				id BIGSERIAL PRIMARY KEY,
+				audit_log_id UUID NOT NULL REFERENCES audit_logs(id) ON DELETE CASCADE,
+				seq INTEGER NOT NULL,
+				kind TEXT NOT NULL,
+				provider_type TEXT,
+				provider_name TEXT,
+				model TEXT,
+				status_code INTEGER DEFAULT 0,
+				success BOOLEAN DEFAULT FALSE,
+				error_type TEXT,
+				error_code TEXT,
+				error_message TEXT,
+				response_body TEXT,
+				response_headers TEXT,
+				started_at TIMESTAMPTZ,
+				duration_ns BIGINT DEFAULT 0,
+				UNIQUE(audit_log_id, seq)
+			)`); err != nil {
+			t.Fatalf("create legacy tables: %v", err)
+		}
+
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+		defer store.Close()
+
+		base := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+		entries := []*LogEntry{
+			{ID: "b32d7a52-0000-4000-8000-000000000001", Timestamp: base, Provider: "openai", SessionID: "sess-a", StatusCode: 200},
+			{ID: "b32d7a52-0000-4000-8000-000000000002", Timestamp: base.Add(time.Minute), Provider: "openai", SessionID: "sess-a", StatusCode: 200},
+			{ID: "b32d7a52-0000-4000-8000-000000000003", Timestamp: base.Add(2 * time.Minute), Provider: "openai", StatusCode: 200},
+		}
+		if err := store.WriteBatch(ctx, entries); err != nil {
+			t.Fatalf("WriteBatch failed: %v", err)
+		}
+
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
+		result, err := reader.GetSessions(ctx, LogQueryParams{Limit: 10})
+		if err != nil {
+			t.Fatalf("GetSessions failed: %v", err)
+		}
+		if result.Total != 2 || len(result.Sessions) != 2 {
+			t.Fatalf("total=%d sessions=%d, want 2/2", result.Total, len(result.Sessions))
+		}
+		if got := result.Sessions[0].Latest.ID; got != "b32d7a52-0000-4000-8000-000000000003" {
+			t.Fatalf("sessions[0].Latest.ID = %q, want the singleton entry", got)
+		}
+		if got := result.Sessions[1]; got.SessionID != "sess-a" || got.Count != 2 {
+			t.Fatalf("sess-a summary = %+v", got)
+		}
+	})
+}
+
 // assertGetSessionsFilters runs the shared filtered-grouping cases against a
 // reader, so both backends prove filters apply to entries before grouping.
 func assertGetSessionsFilters(t *testing.T, reader Reader) {
