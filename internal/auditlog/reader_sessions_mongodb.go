@@ -22,6 +22,12 @@ var mongoThreadKeyExpr = bson.D{{Key: "$cond", Value: bson.A{
 // GetSessions returns a paginated list of audit sessions ordered by latest
 // activity, mirroring the SQL reader's window-function query with a $group
 // aggregation.
+//
+// Like the SQL reader, the grouping pass carries ID AND TIMESTAMP ONLY: the
+// $project ahead of the $sort is what keeps whole audit documents — request
+// and response bodies included — out of the sort and out of the group state
+// ($first: "$$ROOT" retained one per thread). The page's documents are then
+// fetched by _id in a second round trip.
 func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) (*SessionListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
@@ -35,12 +41,16 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
 	pipeline = append(pipeline,
-		bson.D{{Key: "$addFields", Value: bson.D{{Key: "thread_key", Value: mongoThreadKeyExpr}}}},
+		bson.D{{Key: "$project", Value: bson.D{
+			{Key: "_id", Value: 1},
+			{Key: "session_id", Value: 1},
+			{Key: "timestamp", Value: 1},
+		}}},
 		// Sort before $group so $first picks each thread's newest entry.
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "timestamp", Value: -1}, {Key: "_id", Value: -1}}}},
 		bson.D{{Key: "$group", Value: bson.D{
-			{Key: "_id", Value: "$thread_key"},
-			{Key: "latest", Value: bson.D{{Key: "$first", Value: "$$ROOT"}}},
+			{Key: "_id", Value: mongoThreadKeyExpr},
+			{Key: "latest_id", Value: bson.D{{Key: "$first", Value: "$_id"}}},
 			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
 			{Key: "first_ts", Value: bson.D{{Key: "$min", Value: "$timestamp"}}},
 			{Key: "last_ts", Value: bson.D{{Key: "$max", Value: "$timestamp"}}},
@@ -65,10 +75,10 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 
 	var facetResult struct {
 		Data []struct {
-			Latest  mongoLogRow `bson:"latest"`
-			Count   int         `bson:"count"`
-			FirstTS time.Time   `bson:"first_ts"`
-			LastTS  time.Time   `bson:"last_ts"`
+			LatestID string    `bson:"latest_id"`
+			Count    int       `bson:"count"`
+			FirstTS  time.Time `bson:"first_ts"`
+			LastTS   time.Time `bson:"last_ts"`
 		} `bson:"data"`
 		Total []struct {
 			Count int `bson:"count"`
@@ -88,9 +98,18 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		total = facetResult.Total[0].Count
 	}
 
+	ids := make([]string, 0, len(facetResult.Data))
+	for _, row := range facetResult.Data {
+		ids = append(ids, row.LatestID)
+	}
+	heads, err := r.logEntriesByID(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
 	sessions := make([]SessionSummary, 0, len(facetResult.Data))
 	for _, row := range facetResult.Data {
-		entry := row.Latest.toLogEntry()
+		entry := heads[row.LatestID]
 		if entry == nil {
 			continue
 		}
@@ -103,4 +122,34 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		})
 	}
 	return &SessionListResult{Sessions: sessions, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+// logEntriesByID fetches the full documents behind a page of thread heads,
+// keyed by id. Audit documents are written with the entry id as _id, which
+// mongoLogRow already decodes as a string.
+func (r *MongoDBReader) logEntriesByID(ctx context.Context, ids []string) (map[string]*LogEntry, error) {
+	entries := make(map[string]*LogEntry, len(ids))
+	if len(ids) == 0 {
+		return entries, nil
+	}
+
+	cursor, err := r.collection.Find(ctx, bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch audit session heads: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	for cursor.Next(ctx) {
+		var row mongoLogRow
+		if err := cursor.Decode(&row); err != nil {
+			return nil, fmt.Errorf("failed to decode audit session head: %w", err)
+		}
+		if entry := row.toLogEntry(); entry != nil {
+			entries[entry.ID] = entry
+		}
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating audit session heads: %w", err)
+	}
+	return entries, nil
 }

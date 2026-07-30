@@ -22,12 +22,7 @@ func TestMongoDBReader_GetSessions(t *testing.T) {
 		defer store.Close()
 
 		base := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
-		entries := []*LogEntry{
-			{ID: "a-1", Timestamp: base, Provider: "openai", SessionID: "sess-a", StatusCode: 200},
-			{ID: "a-2", Timestamp: base.Add(2 * time.Minute), Provider: "openai", SessionID: "sess-a", StatusCode: 200},
-			{ID: "b-1", Timestamp: base.Add(time.Minute), Provider: "anthropic", SessionID: "sess-b", StatusCode: 500},
-			{ID: "solo", Timestamp: base.Add(3 * time.Minute), Provider: "openai", StatusCode: 200},
-		}
+		entries := sessionThreadFixture(base)
 		if err := store.WriteBatch(ctx, entries); err != nil {
 			t.Fatalf("WriteBatch failed: %v", err)
 		}
@@ -58,6 +53,8 @@ func TestMongoDBReader_GetSessions(t *testing.T) {
 			t.Fatalf("sessions[2] = %+v", result.Sessions[2])
 		}
 
+		assertGetSessionsHeadPayload(t, reader)
+		assertGetSessionsPaging(t, reader)
 		assertGetSessionsFilters(t, reader)
 	})
 }
