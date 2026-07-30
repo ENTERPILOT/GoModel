@@ -1,0 +1,63 @@
+/* Content */
+.content {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 32px;
+  transition: width 0.2s;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.page-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+/* Page Header Controls (interval + date picker wrapper) */
+.page-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.page-with-sticky-date {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
+}
+
+.page-with-sticky-date > * {
+  grid-column: 1 / -1;
+}
+
+.page-with-sticky-date > .date-range-page-header {
+  grid-column: 1;
+}
+
+.page-with-sticky-date > .sticky-date-range {
+  position: sticky;
+  top: 16px;
+  z-index: 8;
+  grid-column: 2;
+  justify-self: end;
+}
+
+.model-count {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.provider-status-section {
+  margin-top: 28px;
+  scroll-margin-top: 24px;
+}

@@ -2,7 +2,8 @@
 // of the shared admin API client. Pure helpers live in ./mcp-servers.js so
 // tests can exercise them without Svelte.
 
-import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.js";
+import { errorPayloadMessage, getJSON } from "$lib/api/client.js";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
@@ -60,33 +61,31 @@ class McpServersState {
     this.loading = true;
     this.error = "";
     try {
-      const result = await getJSON("/admin/mcp-servers", {
+      const outcome = await loadAdminList("/admin/mcp-servers", {
         label: "mcp servers",
+        errorFallback: "Failed to load MCP servers.",
+        unavailableStatuses: [503, 404],
       });
-      if (result.stale) {
+      if (outcome.status === "stale") {
         return;
       }
-      if (result.status === 503 || result.status === 404) {
+      if (outcome.status === "unavailable") {
         this.available = false;
         this.servers = [];
         return;
       }
-      this.available = true;
-      if (!result.ok) {
-        this.servers = [];
-        if (result.status !== 401) {
-          this.error = errorPayloadMessage(
-            result.data,
-            "Failed to load MCP servers.",
-          );
+      if (outcome.status === "error") {
+        // A gateway response proves the endpoint exists; a network failure
+        // (result === null) leaves the availability flag as-is.
+        if (outcome.result) {
+          this.available = true;
         }
+        this.servers = [];
+        this.error = outcome.error;
         return;
       }
-      this.servers = Array.isArray(result.data) ? result.data : [];
-    } catch (e) {
-      console.error("Failed to fetch MCP servers:", e);
-      this.servers = [];
-      this.error = "Unable to load MCP servers.";
+      this.available = true;
+      this.servers = outcome.items;
     } finally {
       this.loading = false;
     }
@@ -155,31 +154,32 @@ class McpServersState {
     this.formSubmitting = true;
 
     try {
-      const result = await sendJSON("/admin/mcp-servers", "PUT", built.payload, {
-        label: "save mcp server",
-      });
-      if (result.stale) {
+      const outcome = await sendAdminMutation(
+        "/admin/mcp-servers",
+        "PUT",
+        built.payload,
+        {
+          label: "save mcp server",
+          errorFallback: "Failed to save MCP server.",
+          unavailableMessage: "MCP server management is unavailable.",
+        },
+      );
+      if (outcome.status === "stale") {
         return;
       }
-      if (result.status === 503) {
+      if (outcome.status === "unavailable") {
         this.available = false;
-        this.error = "MCP server management is unavailable.";
+        this.error = outcome.error;
         return;
       }
-      if (!result.ok) {
-        this.error =
-          result.status === 401
-            ? "Authentication required."
-            : errorPayloadMessage(result.data, "Failed to save MCP server.");
+      if (outcome.status === "error") {
+        this.error = outcome.error;
         return;
       }
 
       flash.success('MCP server "' + built.payload.name + '" saved.');
       this.closeForm();
       void this.fetchServers();
-    } catch (e) {
-      console.error("Failed to save MCP server:", e);
-      this.error = "Failed to save MCP server.";
     } finally {
       this.formSubmitting = false;
     }
@@ -206,29 +206,26 @@ class McpServersState {
     this.deletingName = slug;
 
     try {
-      const result = await sendJSON(
+      const outcome = await sendAdminMutation(
         "/admin/mcp-servers/" + encodeURIComponent(slug),
         "DELETE",
         undefined,
-        { label: "delete mcp server" },
+        {
+          label: "delete mcp server",
+          errorFallback: "Failed to delete MCP server.",
+          unavailableMessage: "MCP server management is unavailable.",
+        },
       );
-      if (result.stale) {
+      if (outcome.status === "stale") {
         return;
       }
-      if (result.status === 503) {
+      if (outcome.status === "unavailable") {
         this.available = false;
-        flash.error("MCP server management is unavailable.");
+        flash.error(outcome.error);
         return;
       }
-      if (!result.ok) {
-        flash.error(
-          result.status === 401
-            ? "Authentication required."
-            : errorPayloadMessage(
-                result.data,
-                "Failed to delete MCP server.",
-              ),
-        );
+      if (outcome.status === "error") {
+        flash.error(outcome.error);
         return;
       }
 
@@ -237,9 +234,6 @@ class McpServersState {
         this.closeForm();
       }
       void this.fetchServers();
-    } catch (e) {
-      console.error("Failed to delete MCP server:", e);
-      flash.error("Failed to delete MCP server.");
     } finally {
       this.deletingName = "";
     }
@@ -255,33 +249,30 @@ class McpServersState {
     this.reconnectingName = slug;
 
     try {
-      const result = await sendJSON(
+      const outcome = await sendAdminMutation(
         "/admin/mcp-servers/" + encodeURIComponent(slug) + "/reconnect",
         "POST",
         undefined,
-        { label: "reconnect mcp server" },
+        {
+          label: "reconnect mcp server",
+          errorFallback: "Failed to reconnect MCP server.",
+          unavailableMessage: "MCP server management is unavailable.",
+        },
       );
-      if (result.stale) {
+      if (outcome.status === "stale") {
         return;
       }
-      if (result.status === 503) {
+      if (outcome.status === "unavailable") {
         this.available = false;
-        flash.error("MCP server management is unavailable.");
+        flash.error(outcome.error);
         return;
       }
-      if (!result.ok) {
-        flash.error(
-          result.status === 401
-            ? "Authentication required."
-            : errorPayloadMessage(
-                result.data,
-                "Failed to reconnect MCP server.",
-              ),
-        );
+      if (outcome.status === "error") {
+        flash.error(outcome.error);
         return;
       }
 
-      const refreshed = result.data;
+      const refreshed = outcome.result.data;
       const status = mcpServerStatus(refreshed);
       if (status === "connected") {
         flash.success('MCP server "' + name + '" reconnected.');
@@ -305,15 +296,15 @@ class McpServersState {
       } else {
         void this.fetchServers();
       }
-    } catch (e) {
-      console.error("Failed to reconnect MCP server:", e);
-      flash.error("Failed to reconnect MCP server.");
     } finally {
       this.reconnectingName = "";
     }
   }
 
   // --- catalog inspector -------------------------------------------------
+  // Hand-rolled on purpose: a single-resource GET whose 404 means "this
+  // server does not exist" (with its own message), not "feature disabled",
+  // so it does not map onto the shared list/mutation ladder.
 
   async openCatalog(server) {
     const name = String((server && server.name) || "").trim();

@@ -2,7 +2,7 @@
 // gauge buttons and the effective-limits inspector. Pure logic lives in
 // ./rateLimitsLogic.js.
 
-import { errorMessage, getJSON, sendJSON } from "$lib/api/client.js";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import * as logic from "./rateLimitsLogic.js";
@@ -142,31 +142,32 @@ class RateLimitsStore {
   async fetchRateLimits() {
     this.rateLimitsLoading = true;
     this.rateLimitError = "";
-    try {
-      const result = await getJSON("/admin/rate-limits", {
-        label: "rate limits",
-      });
-      if (result.status === 503) {
-        this.rateLimitsAvailable = false;
-        this.rateLimits = [];
-        return;
-      }
-      if (result.stale) {
-        return;
-      }
-      this.rateLimitsAvailable = true;
-      if (!result.ok) {
-        this.rateLimitError = "Unable to load rate limits.";
-        return;
-      }
-      this.rateLimits = logic.normalizeRateLimitListPayload(result.data);
-    } catch (e) {
-      console.error("Failed to fetch rate limits:", e);
-      this.rateLimits = [];
-      this.rateLimitError = "Unable to load rate limits.";
-    } finally {
-      this.rateLimitsLoading = false;
+    const outcome = await loadAdminList("/admin/rate-limits", {
+      label: "rate limits",
+      errorFallback: "Unable to load rate limits.",
+      normalize: logic.normalizeRateLimitListPayload,
+    });
+    this.rateLimitsLoading = false;
+    if (outcome.status === "stale") {
+      return;
     }
+    if (outcome.status === "unavailable") {
+      this.rateLimitsAvailable = false;
+      this.rateLimits = [];
+      return;
+    }
+    if (!outcome.result) {
+      // Network failure: clear the rows, keep the availability flag as-is.
+      this.rateLimits = [];
+      this.rateLimitError = outcome.error;
+      return;
+    }
+    this.rateLimitsAvailable = true;
+    if (outcome.status === "error") {
+      this.rateLimitError = outcome.error;
+      return;
+    }
+    this.rateLimits = outcome.items;
   }
 
   openRateLimitForm(item) {
@@ -244,20 +245,20 @@ class RateLimitsStore {
     this.rateLimitFormSubmitting = true;
     this.rateLimitFormError = "";
     try {
-      const result = await sendJSON("/admin/rate-limits", "PUT", payload, {
-        label: "rate limit save",
+      const outcome = await sendAdminMutation("/admin/rate-limits", "PUT", payload, {
+        label: "save rate limit",
+        errorFallback: "Unable to save rate limit.",
+        // Rate-limit mutations never had a dedicated 503 branch; keep 503 an error.
+        unavailableStatuses: [],
       });
-      if (result.stale) {
+      if (outcome.status === "stale") {
         return;
       }
-      if (!result.ok) {
-        this.rateLimitFormError = errorMessage(
-          result,
-          "Unable to save rate limit.",
-        );
+      if (outcome.status !== "ok") {
+        this.rateLimitFormError = outcome.error;
         return;
       }
-      this.rateLimits = logic.normalizeRateLimitListPayload(result.data);
+      this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
       // Identity change = move: the new rule exists, now drop
       // the one it replaces. The new rule is created first so a
       // failed delete can never lose the rule.
@@ -270,41 +271,36 @@ class RateLimitsStore {
           ? "Rate limit moved; live counters restarted."
           : "Rate limit saved.",
       );
-    } catch (e) {
-      console.error("Failed to save rate limit:", e);
-      this.rateLimitFormError = "Unable to save rate limit.";
     } finally {
       this.rateLimitFormSubmitting = false;
     }
   }
 
   async deleteMovedRateLimitOriginal(original) {
-    try {
-      const result = await sendJSON(
-        "/admin/rate-limits",
-        "DELETE",
-        {
-          scope: original.scope,
-          subject: original.subject,
-          limit_key: { period_seconds: Number(original.period_seconds || 0) },
-        },
-        { label: "rate limit move" },
-      );
-      if (!result.ok) {
-        this.rateLimitFormError = errorMessage(
-          result,
+    const outcome = await sendAdminMutation(
+      "/admin/rate-limits",
+      "DELETE",
+      {
+        scope: original.scope,
+        subject: original.subject,
+        limit_key: { period_seconds: Number(original.period_seconds || 0) },
+      },
+      {
+        label: "remove the moved rate limit",
+        errorFallback:
           "The new rule was saved, but the previous one could not be removed. Delete it manually.",
-        );
-        return false;
-      }
-      this.rateLimits = logic.normalizeRateLimitListPayload(result.data);
-      return true;
-    } catch (e) {
-      console.error("Failed to remove the moved rate limit:", e);
-      this.rateLimitFormError =
-        "The new rule was saved, but the previous one could not be removed. Delete it manually.";
+        unavailableStatuses: [],
+      },
+    );
+    if (outcome.status === "stale") {
       return false;
     }
+    if (outcome.status !== "ok") {
+      this.rateLimitFormError = outcome.error;
+      return false;
+    }
+    this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
+    return true;
   }
 
   async deleteRateLimit(item) {
@@ -313,32 +309,30 @@ class RateLimitsStore {
       return;
     }
     this.rateLimitDeletingKey = key;
-    try {
-      const result = await sendJSON(
-        "/admin/rate-limits",
-        "DELETE",
-        {
-          scope: logic.rateLimitScope(item),
-          subject: logic.rateLimitSubject(item),
-          limit_key: { period_seconds: Number(item.period_seconds || 0) },
-        },
-        { label: "rate limit delete" },
-      );
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        flash.error(errorMessage(result, "Unable to delete rate limit."));
-        return;
-      }
-      this.rateLimits = logic.normalizeRateLimitListPayload(result.data);
-      flash.success("Rate limit deleted.");
-    } catch (e) {
-      console.error("Failed to delete rate limit:", e);
-      flash.error("Unable to delete rate limit.");
-    } finally {
-      this.rateLimitDeletingKey = "";
+    const outcome = await sendAdminMutation(
+      "/admin/rate-limits",
+      "DELETE",
+      {
+        scope: logic.rateLimitScope(item),
+        subject: logic.rateLimitSubject(item),
+        limit_key: { period_seconds: Number(item.period_seconds || 0) },
+      },
+      {
+        label: "delete rate limit",
+        errorFallback: "Unable to delete rate limit.",
+        unavailableStatuses: [],
+      },
+    );
+    this.rateLimitDeletingKey = "";
+    if (outcome.status === "stale") {
+      return;
     }
+    if (outcome.status !== "ok") {
+      flash.error(outcome.error);
+      return;
+    }
+    this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
+    flash.success("Rate limit deleted.");
   }
 
   async resetRateLimit(item) {
@@ -347,32 +341,30 @@ class RateLimitsStore {
       return;
     }
     this.rateLimitResettingKey = key;
-    try {
-      const result = await sendJSON(
-        "/admin/rate-limits/reset-one",
-        "POST",
-        {
-          scope: logic.rateLimitScope(item),
-          subject: logic.rateLimitSubject(item),
-          period_seconds: Number(item.period_seconds || 0),
-        },
-        { label: "rate limit reset" },
-      );
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        flash.error(errorMessage(result, "Unable to reset rate limit."));
-        return;
-      }
-      this.rateLimits = logic.normalizeRateLimitListPayload(result.data);
-      flash.success("Rate limit counters reset.");
-    } catch (e) {
-      console.error("Failed to reset rate limit:", e);
-      flash.error("Unable to reset rate limit.");
-    } finally {
-      this.rateLimitResettingKey = "";
+    const outcome = await sendAdminMutation(
+      "/admin/rate-limits/reset-one",
+      "POST",
+      {
+        scope: logic.rateLimitScope(item),
+        subject: logic.rateLimitSubject(item),
+        period_seconds: Number(item.period_seconds || 0),
+      },
+      {
+        label: "reset rate limit",
+        errorFallback: "Unable to reset rate limit.",
+        unavailableStatuses: [],
+      },
+    );
+    this.rateLimitResettingKey = "";
+    if (outcome.status === "stale") {
+      return;
     }
+    if (outcome.status !== "ok") {
+      flash.error(outcome.error);
+      return;
+    }
+    this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
+    flash.success("Rate limit counters reset.");
   }
 
   // --- Effective-limits inspector (Models page) ---
