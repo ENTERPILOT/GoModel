@@ -373,20 +373,21 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 
 func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
 	return DashboardConfigResponse{
-		DemoMode:             strings.TrimSpace(values.DemoMode),
-		FailoverEnabled:      strings.TrimSpace(values.FailoverEnabled),
-		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
-		LoggingRetentionDays: strings.TrimSpace(values.LoggingRetentionDays),
-		UsageEnabled:         strings.TrimSpace(values.UsageEnabled),
-		BudgetsEnabled:       strings.TrimSpace(values.BudgetsEnabled),
-		RateLimitsEnabled:    strings.TrimSpace(values.RateLimitsEnabled),
-		GuardrailsEnabled:    strings.TrimSpace(values.GuardrailsEnabled),
-		CacheEnabled:         strings.TrimSpace(values.CacheEnabled),
-		RedisURL:             strings.TrimSpace(values.RedisURL),
-		SemanticCacheEnabled: strings.TrimSpace(values.SemanticCacheEnabled),
-		PricingRecalculation: strings.TrimSpace(values.PricingRecalculation),
-		LiveLogsEnabled:      strings.TrimSpace(values.LiveLogsEnabled),
-		MCPEnabled:           strings.TrimSpace(values.MCPEnabled),
+		DemoMode:               strings.TrimSpace(values.DemoMode),
+		FailoverEnabled:        strings.TrimSpace(values.FailoverEnabled),
+		LoggingEnabled:         strings.TrimSpace(values.LoggingEnabled),
+		LoggingRetentionDays:   strings.TrimSpace(values.LoggingRetentionDays),
+		UsageEnabled:           strings.TrimSpace(values.UsageEnabled),
+		BudgetsEnabled:         strings.TrimSpace(values.BudgetsEnabled),
+		RateLimitsEnabled:      strings.TrimSpace(values.RateLimitsEnabled),
+		GuardrailsEnabled:      strings.TrimSpace(values.GuardrailsEnabled),
+		CacheEnabled:           strings.TrimSpace(values.CacheEnabled),
+		RedisURL:               strings.TrimSpace(values.RedisURL),
+		SemanticCacheEnabled:   strings.TrimSpace(values.SemanticCacheEnabled),
+		PricingRecalculation:   strings.TrimSpace(values.PricingRecalculation),
+		LiveLogsEnabled:        strings.TrimSpace(values.LiveLogsEnabled),
+		MCPEnabled:             strings.TrimSpace(values.MCPEnabled),
+		VirtualModelStrategies: strings.TrimSpace(values.VirtualModelStrategies),
 	}
 }
 
