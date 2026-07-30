@@ -26,8 +26,11 @@ var mongoThreadKeyExpr = bson.D{{Key: "$cond", Value: bson.A{
 // Like the SQL reader, the grouping pass carries ID AND TIMESTAMP ONLY: the
 // $project ahead of the $sort is what keeps whole audit documents — request
 // and response bodies included — out of the sort and out of the group state
-// ($first: "$$ROOT" retained one per thread). The page's documents are then
-// fetched by _id in a second round trip.
+// ($first: "$$ROOT" retained one per thread). The $lookup re-attaches the full
+// document for the page's threads alone, and lives inside the $facet so it
+// runs after $skip/$limit — and so the heads are read in the same pipeline
+// that chose them, rather than by a second query they could be deleted
+// between (retention runs continuously).
 func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) (*SessionListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
@@ -60,6 +63,13 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 			{Key: "data", Value: bson.A{
 				bson.D{{Key: "$skip", Value: offset}},
 				bson.D{{Key: "$limit", Value: limit}},
+				bson.D{{Key: "$lookup", Value: bson.D{
+					{Key: "from", Value: r.collection.Name()},
+					{Key: "localField", Value: "latest_id"},
+					{Key: "foreignField", Value: "_id"},
+					{Key: "as", Value: "latest"},
+				}}},
+				bson.D{{Key: "$unwind", Value: "$latest"}},
 			}},
 			{Key: "total", Value: bson.A{
 				bson.D{{Key: "$count", Value: "count"}},
@@ -75,10 +85,10 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 
 	var facetResult struct {
 		Data []struct {
-			LatestID string    `bson:"latest_id"`
-			Count    int       `bson:"count"`
-			FirstTS  time.Time `bson:"first_ts"`
-			LastTS   time.Time `bson:"last_ts"`
+			Latest  mongoLogRow `bson:"latest"`
+			Count   int         `bson:"count"`
+			FirstTS time.Time   `bson:"first_ts"`
+			LastTS  time.Time   `bson:"last_ts"`
 		} `bson:"data"`
 		Total []struct {
 			Count int `bson:"count"`
@@ -98,18 +108,9 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		total = facetResult.Total[0].Count
 	}
 
-	ids := make([]string, 0, len(facetResult.Data))
-	for _, row := range facetResult.Data {
-		ids = append(ids, row.LatestID)
-	}
-	heads, err := r.logEntriesByID(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-
 	sessions := make([]SessionSummary, 0, len(facetResult.Data))
 	for _, row := range facetResult.Data {
-		entry := heads[row.LatestID]
+		entry := row.Latest.toLogEntry()
 		if entry == nil {
 			continue
 		}
@@ -122,34 +123,4 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		})
 	}
 	return &SessionListResult{Sessions: sessions, Total: total, Limit: limit, Offset: offset}, nil
-}
-
-// logEntriesByID fetches the full documents behind a page of thread heads,
-// keyed by id. Audit documents are written with the entry id as _id, which
-// mongoLogRow already decodes as a string.
-func (r *MongoDBReader) logEntriesByID(ctx context.Context, ids []string) (map[string]*LogEntry, error) {
-	entries := make(map[string]*LogEntry, len(ids))
-	if len(ids) == 0 {
-		return entries, nil
-	}
-
-	cursor, err := r.collection.Find(ctx, bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}})
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch audit session heads: %w", err)
-	}
-	defer cursor.Close(ctx)
-
-	for cursor.Next(ctx) {
-		var row mongoLogRow
-		if err := cursor.Decode(&row); err != nil {
-			return nil, fmt.Errorf("failed to decode audit session head: %w", err)
-		}
-		if entry := row.toLogEntry(); entry != nil {
-			entries[entry.ID] = entry
-		}
-	}
-	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating audit session heads: %w", err)
-	}
-	return entries, nil
 }
