@@ -155,17 +155,15 @@ class AuditListStore {
       );
       // Expanded child rows must survive a heads refetch, so prune against
       // heads plus every loaded child.
+      const visible = [...next.entries, ...this.loadedThreadChildren()];
       this.auditExpandedEntries = pruneExpandedEntries(
         this.auditExpandedEntries,
-        [...next.entries, ...this.loadedThreadChildren()],
+        visible,
       );
       // Resolve workflow versions for the page so expanded entries can render
       // the pipeline chart; a prefetch failure must not clobber the payload.
       try {
-        await auditWorkflows.prefetchAuditWorkflows([
-          ...this.auditLog.entries,
-          ...this.loadedThreadChildren(),
-        ]);
+        await auditWorkflows.prefetchAuditWorkflows(visible);
       } catch (e) {
         console.error("Failed to prefetch audit workflows:", e);
       }

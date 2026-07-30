@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -72,12 +73,7 @@ func TestSQLReader_GetSessions(t *testing.T) {
 
 		ctx := context.Background()
 		base := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
-		entries := []*LogEntry{
-			{ID: "a-1", Timestamp: base, Provider: "openai", SessionID: "sess-a", StatusCode: 200},
-			{ID: "a-2", Timestamp: base.Add(2 * time.Minute), Provider: "openai", SessionID: "sess-a", StatusCode: 200},
-			{ID: "b-1", Timestamp: base.Add(time.Minute), Provider: "anthropic", SessionID: "sess-b", StatusCode: 500},
-			{ID: "solo", Timestamp: base.Add(3 * time.Minute), Provider: "openai", StatusCode: 200},
-		}
+		entries := sessionThreadFixture(base)
 		if err := store.WriteBatch(ctx, entries); err != nil {
 			t.Fatalf("WriteBatch failed: %v", err)
 		}
@@ -117,6 +113,11 @@ func TestSQLReader_GetSessions(t *testing.T) {
 		if result.Sessions[2].SessionID != "sess-b" {
 			t.Fatalf("sessions[2] = %+v", result.Sessions[2])
 		}
+
+		// The thread head is a full list row, not just the columns the
+		// grouping pass ranks on.
+		assertGetSessionsHeadPayload(t, reader)
+		assertGetSessionsPaging(t, reader)
 
 		// Filters apply to entries before grouping.
 		assertGetSessionsFilters(t, reader)
@@ -226,6 +227,68 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 			}
 		}
 	})
+}
+
+// sessionThreadFixture is the shared grouped-view corpus: a two-entry session,
+// a one-entry session and a sessionless request. The thread head (a-2) carries
+// list columns and a data payload so the readers' head re-read is checked.
+func sessionThreadFixture(base time.Time) []*LogEntry {
+	return []*LogEntry{
+		{ID: "a-1", Timestamp: base, Provider: "openai", SessionID: "sess-a", StatusCode: 200},
+		{
+			ID: "a-2", Timestamp: base.Add(2 * time.Minute), Provider: "openai",
+			SessionID: "sess-a", StatusCode: 200, Path: "/v1/chat/completions",
+			Data: &LogData{UserAgent: "probe/1.0"},
+		},
+		{ID: "b-1", Timestamp: base.Add(time.Minute), Provider: "anthropic", SessionID: "sess-b", StatusCode: 500},
+		{ID: "solo", Timestamp: base.Add(3 * time.Minute), Provider: "openai", StatusCode: 200},
+	}
+}
+
+// assertGetSessionsHeadPayload proves the grouped view returns complete
+// entries. Both readers rank threads over a narrow projection (id + timestamp)
+// and re-read the page's heads afterwards, so a broken re-read would surface
+// here as a head stripped of everything the ranking pass did not carry.
+func assertGetSessionsHeadPayload(t *testing.T, reader Reader) {
+	t.Helper()
+	result, err := reader.GetSessions(context.Background(), LogQueryParams{SessionID: "sess-a", Limit: 10})
+	if err != nil {
+		t.Fatalf("GetSessions() error = %v", err)
+	}
+	if len(result.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(result.Sessions))
+	}
+	head := result.Sessions[0].Latest
+	if head.Provider != "openai" || head.Path != "/v1/chat/completions" || head.StatusCode != 200 {
+		t.Fatalf("head lost list columns: %+v", head)
+	}
+	if head.Data == nil || head.Data.UserAgent != "probe/1.0" {
+		t.Fatalf("head lost its data payload: %+v", head.Data)
+	}
+}
+
+// assertGetSessionsPaging walks the thread list one page at a time: the window
+// pass and the head re-read must agree on the slice, and total must stay the
+// full thread count rather than the page size.
+func assertGetSessionsPaging(t *testing.T, reader Reader) {
+	t.Helper()
+	var ids []string
+	for offset := range 3 {
+		result, err := reader.GetSessions(context.Background(), LogQueryParams{Limit: 1, Offset: offset})
+		if err != nil {
+			t.Fatalf("GetSessions(offset=%d) error = %v", offset, err)
+		}
+		if result.Total != 3 {
+			t.Fatalf("offset %d: total = %d, want 3", offset, result.Total)
+		}
+		if len(result.Sessions) != 1 {
+			t.Fatalf("offset %d: sessions = %d, want 1", offset, len(result.Sessions))
+		}
+		ids = append(ids, result.Sessions[0].Latest.ID)
+	}
+	if want := []string{"solo", "a-2", "b-1"}; !slices.Equal(ids, want) {
+		t.Fatalf("paged heads = %v, want %v", ids, want)
+	}
 }
 
 // assertGetSessionsFilters runs the shared filtered-grouping cases against a

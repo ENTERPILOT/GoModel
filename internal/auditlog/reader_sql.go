@@ -95,6 +95,18 @@ const logColumns = `id, timestamp, duration_ns, requested_model, resolved_model,
 const selectLogColumns = `SELECT ` + logColumns + `
 	FROM audit_logs`
 
+// qualifiedLogColumns is logColumns with a table alias on every name, for the
+// queries that join audit_logs against a derived table carrying its own id.
+func qualifiedLogColumns(alias string) string {
+	names := strings.FieldsFunc(logColumns, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\n' || r == '\t'
+	})
+	for i, name := range names {
+		names[i] = alias + "." + name
+	}
+	return strings.Join(names, ", ")
+}
+
 // GetLogs returns a paginated list of audit log entries.
 func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)

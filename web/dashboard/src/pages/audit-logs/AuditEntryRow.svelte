@@ -5,8 +5,15 @@
   // The expansion is Svelte-controlled (the <details> stays open and the
   // summary click is intercepted): a native <details> toggle cannot animate
   // its close, and the CSS ::details-content transition needs
-  // interpolate-size, which Firefox lacks. transition:slide works everywhere.
-  import { slide } from "svelte/transition";
+  // interpolate-size, which Firefox lacks.
+  //
+  // The panel fades and lifts rather than sliding its height open. A height
+  // slide measures the target height once, when the transition starts — but
+  // opening also kicks off the /admin/audit/detail fetch, so the real bodies
+  // land mid-animation and the row slid to a stale height and then snapped to
+  // the true one, reading as two animations. Opacity + transform is immune to
+  // late-arriving content and stays off the layout path.
+  import { fly } from "svelte/transition";
   import { motionDuration } from "$lib/utils/motion.js";
   import WorkflowChart from "$pages/workflows/WorkflowChart.svelte";
   import { workflowAuditChart } from "$pages/workflows/workflowChartLogic.js";
@@ -49,7 +56,7 @@
   {#if expanded}
     <div
       class="audit-entry-details"
-      transition:slide={{ duration: motionDuration(150) }}
+      transition:fly={{ y: -6, duration: motionDuration(150) }}
     >
       {#if workflowChart}
         <WorkflowChart chart={workflowChart} />

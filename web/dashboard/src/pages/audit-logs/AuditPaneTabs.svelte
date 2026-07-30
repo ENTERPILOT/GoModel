@@ -10,7 +10,7 @@
 
   // Active tab; null falls back to the default tab until the user picks one.
   let activeTab = $state(null);
-  const effectiveTab = $derived(auditEffectiveTab(activeTab, entry));
+  const effectiveTab = $derived(auditEffectiveTab(activeTab, entry, panes));
 
   const tabId = (paneId) => "audit-tab-" + entry.id + "-" + paneId;
   const panelId = (paneId) => "audit-tabpanel-" + entry.id + "-" + paneId;

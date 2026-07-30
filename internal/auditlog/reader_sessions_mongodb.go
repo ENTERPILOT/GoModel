@@ -22,6 +22,15 @@ var mongoThreadKeyExpr = bson.D{{Key: "$cond", Value: bson.A{
 // GetSessions returns a paginated list of audit sessions ordered by latest
 // activity, mirroring the SQL reader's window-function query with a $group
 // aggregation.
+//
+// Like the SQL reader, the grouping pass carries ID AND TIMESTAMP ONLY: the
+// $project ahead of the $sort is what keeps whole audit documents — request
+// and response bodies included — out of the sort and out of the group state
+// ($first: "$$ROOT" retained one per thread). The $lookup re-attaches the full
+// document for the page's threads alone, and lives inside the $facet so it
+// runs after $skip/$limit — and so the heads are read in the same pipeline
+// that chose them, rather than by a second query they could be deleted
+// between (retention runs continuously).
 func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) (*SessionListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
@@ -35,12 +44,16 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
 	pipeline = append(pipeline,
-		bson.D{{Key: "$addFields", Value: bson.D{{Key: "thread_key", Value: mongoThreadKeyExpr}}}},
+		bson.D{{Key: "$project", Value: bson.D{
+			{Key: "_id", Value: 1},
+			{Key: "session_id", Value: 1},
+			{Key: "timestamp", Value: 1},
+		}}},
 		// Sort before $group so $first picks each thread's newest entry.
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "timestamp", Value: -1}, {Key: "_id", Value: -1}}}},
 		bson.D{{Key: "$group", Value: bson.D{
-			{Key: "_id", Value: "$thread_key"},
-			{Key: "latest", Value: bson.D{{Key: "$first", Value: "$$ROOT"}}},
+			{Key: "_id", Value: mongoThreadKeyExpr},
+			{Key: "latest_id", Value: bson.D{{Key: "$first", Value: "$_id"}}},
 			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
 			{Key: "first_ts", Value: bson.D{{Key: "$min", Value: "$timestamp"}}},
 			{Key: "last_ts", Value: bson.D{{Key: "$max", Value: "$timestamp"}}},
@@ -50,6 +63,13 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 			{Key: "data", Value: bson.A{
 				bson.D{{Key: "$skip", Value: offset}},
 				bson.D{{Key: "$limit", Value: limit}},
+				bson.D{{Key: "$lookup", Value: bson.D{
+					{Key: "from", Value: r.collection.Name()},
+					{Key: "localField", Value: "latest_id"},
+					{Key: "foreignField", Value: "_id"},
+					{Key: "as", Value: "latest"},
+				}}},
+				bson.D{{Key: "$unwind", Value: "$latest"}},
 			}},
 			{Key: "total", Value: bson.A{
 				bson.D{{Key: "$count", Value: "count"}},
