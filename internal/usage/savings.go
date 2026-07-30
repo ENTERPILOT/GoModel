@@ -98,6 +98,8 @@ func rewriteTokenInputCost(requestInputCost float64, rawData map[string]any, pro
 		}
 	}
 	if pricing != nil {
+		// Reuse the canonical calculator for both per-character and
+		// per-second input charges so savings cannot drift from usage costs.
 		audioInputCost, _, _ := applyAudioUnitCosts(rawData, pricing)
 		fixedCost += audioInputCost
 	}

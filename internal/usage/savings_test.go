@@ -92,69 +92,67 @@ func TestApplyRewriteSavings(t *testing.T) {
 		}
 	})
 
-	t.Run("observed rate excludes retained xAI image charges", func(t *testing.T) {
-		// The forwarded request costs $0.0002 for 100 text tokens plus $0.009
-		// for an unchanged image. Only the avoided text belongs in savings.
-		inputCost := 0.0092
-		pricing := &core.ModelPricing{
-			InputPerMtok:  new(2.0),
-			InputPerImage: new(0.009),
+	t.Run("observed rate excludes retained fixed input charges", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			provider  string
+			inputCost float64
+			pricing   *core.ModelPricing
+			rawData   map[string]any
+			want      float64
+		}{
+			{
+				name:      "xAI image",
+				provider:  "xai",
+				inputCost: 0.0092,
+				pricing: &core.ModelPricing{
+					InputPerMtok:  new(2.0),
+					InputPerImage: new(0.009),
+				},
+				rawData: map[string]any{"image_tokens": 1},
+				want:    0.0018,
+			},
+			{
+				name:      "audio second",
+				provider:  "openai",
+				inputCost: 0.0502,
+				pricing: &core.ModelPricing{
+					InputPerMtok:   new(2.0),
+					PerSecondInput: new(0.05),
+				},
+				rawData: map[string]any{rawKeyAudioSeconds: 1.0},
+				want:    0.0018,
+			},
+			{
+				name:      "input characters",
+				provider:  "openai",
+				inputCost: 0.0502,
+				pricing: &core.ModelPricing{
+					InputPerMtok:      new(2.0),
+					PerCharacterInput: new(0.00005),
+				},
+				rawData: map[string]any{rawKeyInputCharacters: 1000},
+				want:    0.0018,
+			},
 		}
-		entry := &UsageEntry{
-			Provider:    "xai",
-			InputTokens: 100,
-			InputCost:   &inputCost,
-			RawData:     map[string]any{"image_tokens": 1},
-		}
-		ApplyRewriteSavings(entry, 900, pricing)
-		if entry.RewriteCostSaved == nil {
-			t.Fatal("expected savings with a separable image charge")
-		}
-		if got, want := *entry.RewriteCostSaved, 0.0018; math.Abs(got-want) > 1e-9 {
-			t.Fatalf("cost saved = %v, want %v (retained image fee excluded)", got, want)
-		}
-	})
 
-	t.Run("observed rate excludes retained non-token audio charges", func(t *testing.T) {
-		// The one second audio fee remains after rewriting prompt text.
-		inputCost := 0.0502
-		pricing := &core.ModelPricing{
-			InputPerMtok:   new(2.0),
-			PerSecondInput: new(0.05),
-		}
-		entry := &UsageEntry{
-			Provider:    "openai",
-			InputTokens: 100,
-			InputCost:   &inputCost,
-			RawData:     map[string]any{rawKeyAudioSeconds: 1.0},
-		}
-		ApplyRewriteSavings(entry, 900, pricing)
-		if entry.RewriteCostSaved == nil {
-			t.Fatal("expected savings with a separable audio charge")
-		}
-		if got, want := *entry.RewriteCostSaved, 0.0018; math.Abs(got-want) > 1e-9 {
-			t.Fatalf("cost saved = %v, want %v (retained audio fee excluded)", got, want)
-		}
-	})
-
-	t.Run("observed rate excludes retained per-character charges", func(t *testing.T) {
-		inputCost := 0.0502
-		pricing := &core.ModelPricing{
-			InputPerMtok:      new(2.0),
-			PerCharacterInput: new(0.00005),
-		}
-		entry := &UsageEntry{
-			Provider:    "openai",
-			InputTokens: 100,
-			InputCost:   &inputCost,
-			RawData:     map[string]any{rawKeyInputCharacters: 1000},
-		}
-		ApplyRewriteSavings(entry, 900, pricing)
-		if entry.RewriteCostSaved == nil {
-			t.Fatal("expected savings with a separable per-character charge")
-		}
-		if got, want := *entry.RewriteCostSaved, 0.0018; math.Abs(got-want) > 1e-9 {
-			t.Fatalf("cost saved = %v, want %v (retained character fee excluded)", got, want)
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				inputCost := test.inputCost
+				entry := &UsageEntry{
+					Provider:    test.provider,
+					InputTokens: 100,
+					InputCost:   &inputCost,
+					RawData:     test.rawData,
+				}
+				ApplyRewriteSavings(entry, 900, test.pricing)
+				if entry.RewriteCostSaved == nil {
+					t.Fatal("expected savings with a separable fixed input charge")
+				}
+				if got, want := *entry.RewriteCostSaved, test.want; math.Abs(got-want) > 1e-9 {
+					t.Fatalf("cost saved = %v, want %v (retained fixed charge excluded)", got, want)
+				}
+			})
 		}
 	})
 
