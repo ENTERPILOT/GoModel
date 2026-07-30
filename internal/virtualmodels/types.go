@@ -72,6 +72,11 @@ const (
 	// StrategyCost always routes to the cheapest currently-available target, ranked
 	// by the model registry's per-token pricing.
 	StrategyCost = "cost"
+	// StrategyAdaptive delegates target choice to a route selector registered
+	// through the ext package (a pro extension). Without a registered selector
+	// it behaves exactly like round_robin, so configs stay portable between
+	// core and extended builds.
+	StrategyAdaptive = "adaptive"
 )
 
 // normalizeStrategy lower-cases and defaults a strategy string. An empty value
@@ -87,7 +92,7 @@ func normalizeStrategy(strategy string) string {
 // validStrategy reports whether strategy names a supported load-balancing mode.
 func validStrategy(strategy string) bool {
 	switch normalizeStrategy(strategy) {
-	case StrategyRoundRobin, StrategyCost:
+	case StrategyRoundRobin, StrategyCost, StrategyAdaptive:
 		return true
 	default:
 		return false

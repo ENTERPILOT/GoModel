@@ -165,6 +165,33 @@ function strategyLabel(strategy) {
   }
 }
 
+// Editor labels per strategy value. Values come from the backend
+// (VIRTUAL_MODEL_STRATEGIES); presentation stays here so copy does not ship
+// with the gateway. Unknown values fall back to the raw value.
+const STRATEGY_OPTION_LABELS = {
+  round_robin: "Round-robin (rotate across targets; honors weights)",
+  cost: "Lowest cost (cheapest target per request)",
+  adaptive: "Adaptive (target chosen by the registered routing extension)",
+};
+
+// strategyOptions builds the editor dropdown from the deployment's supported
+// strategies, always including the edited row's current value so an existing
+// virtual model never renders a blank select (and never gets silently
+// rewritten to another strategy on save).
+export function strategyOptions(supported, current) {
+  const values = Array.isArray(supported) ? [...supported] : [];
+  const active = String(current || "")
+    .trim()
+    .toLowerCase();
+  if (active && !values.includes(active)) {
+    values.push(active);
+  }
+  return values.map((value) => ({
+    value,
+    label: STRATEGY_OPTION_LABELS[value] || value,
+  }));
+}
+
 // ---- Views mapping ----
 
 // mapRedirectView maps a redirect View into the shape the renderer needs.

@@ -78,6 +78,57 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 	assert.Len(t, reg.PublicPaths(), workers)
 }
 
+type namedSelector struct{ name string }
+
+func (s *namedSelector) Name() string                       { return s.name }
+func (s *namedSelector) Select(RouteRequest) (string, bool) { return "", false }
+func (s *namedSelector) OnAttemptStart(RouteTarget)         {}
+func (s *namedSelector) OnAttemptEnd(RouteOutcome)          {}
+
+func TestRegistryRouteSelectorSingleSlot(t *testing.T) {
+	tests := []struct {
+		name     string
+		register []RouteSelector
+		want     string // Name() of the expected selector; "" means nil
+	}{
+		{name: "unset", register: nil, want: ""},
+		{name: "single registration", register: []RouteSelector{&namedSelector{name: "only"}}, want: "only"},
+		{name: "later registration replaces earlier", register: []RouteSelector{&namedSelector{name: "first"}, &namedSelector{name: "second"}}, want: "second"},
+		{name: "nil registration resets the slot", register: []RouteSelector{&namedSelector{name: "first"}, nil}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := &Registry{}
+			for _, sel := range tt.register {
+				reg.RegisterRouteSelector(sel)
+			}
+			got := reg.RouteSelector()
+			if tt.want == "" {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tt.want, got.Name())
+		})
+	}
+}
+
+func TestRouteTargetQualified(t *testing.T) {
+	tests := []struct {
+		name   string
+		target RouteTarget
+		want   string
+	}{
+		{name: "provider and model", target: RouteTarget{Provider: "openai", Model: "gpt-4o"}, want: "openai/gpt-4o"},
+		{name: "empty provider keeps the separator", target: RouteTarget{Model: "gpt-4o"}, want: "/gpt-4o"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.target.Qualified())
+		})
+	}
+}
+
 func TestRejectionErrorMessage(t *testing.T) {
 	err := &RejectionError{Status: 422, Code: "policy_violation", Message: "blocked by policy"}
 	assert.Equal(t, "request rejected (422 policy_violation): blocked by policy", err.Error())

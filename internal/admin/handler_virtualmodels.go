@@ -14,7 +14,7 @@ import (
 // upsertVirtualModelRequest is the unified admin upsert contract. Presence of
 // target_model or targets makes the row a redirect; absence makes it an access
 // policy. A single target_model is a plain alias; multiple targets are load
-// balanced across by strategy ("round_robin" or "cost").
+// balanced across by strategy ("round_robin", "cost", or "adaptive").
 type upsertVirtualModelRequest struct {
 	Source      string                      `json:"source"`
 	OldSource   string                      `json:"old_source,omitempty"`

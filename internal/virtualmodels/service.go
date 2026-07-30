@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modelselectors"
 )
@@ -33,6 +34,13 @@ type Service struct {
 	// redirects stay valid. Set once during startup, before serving.
 	targetCapacity func(qualifiedModel string) bool
 
+	// routeSelector optionally delegates target choice for redirects using
+	// the adaptive strategy. Set once during startup, before serving.
+	// routeSelectorName is captured panic-safe at install time so failure
+	// paths never call back into extension code.
+	routeSelector     ext.RouteSelector
+	routeSelectorName string
+
 	balancer  roundRobin
 	sticky    stickySessions
 	current   atomic.Value // snapshot
@@ -46,6 +54,31 @@ func (s *Service) SetTargetCapacity(capacity func(qualifiedModel string) bool) {
 		return
 	}
 	s.targetCapacity = capacity
+}
+
+// SetRouteSelector installs the extension route selector consulted by
+// redirects using the adaptive strategy. Must be called before the service
+// starts resolving requests.
+func (s *Service) SetRouteSelector(selector ext.RouteSelector) {
+	if s == nil {
+		return
+	}
+	s.routeSelector = selector
+	s.routeSelectorName = selectorLabel(selector)
+}
+
+// selectorLabel returns the selector's name for logs, tolerating a panicking
+// Name implementation, so recovery paths never re-enter extension code.
+func selectorLabel(selector ext.RouteSelector) (name string) {
+	if selector == nil {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			name = "unknown"
+		}
+	}()
+	return selector.Name()
 }
 
 // NewService creates a virtual models service backed by the store and catalog.

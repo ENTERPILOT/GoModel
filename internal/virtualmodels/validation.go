@@ -32,7 +32,7 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 	}
 	if !validStrategy(vm.Strategy) {
 		return VirtualModel{}, nil, newValidationError(
-			fmt.Sprintf("unknown load-balancing strategy %q (use %q or %q)", vm.Strategy, StrategyRoundRobin, StrategyCost), nil)
+			fmt.Sprintf("unknown load-balancing strategy %q (use %q, %q, or %q)", vm.Strategy, StrategyRoundRobin, StrategyCost, StrategyAdaptive), nil)
 	}
 	if len(vm.Targets) == 0 {
 		return VirtualModel{}, nil, newValidationError("at least one target is required", nil)

@@ -22,6 +22,7 @@ import {
   mapRedirectView,
   qualifiedModelName,
   removePrimaryTarget,
+  strategyOptions,
   rowIsManaged,
   rowRedirectCanRemove,
   splitVirtualModelViews,
@@ -687,4 +688,28 @@ test("render batching advances in paint-separated steps (50 / 100 / 130)", () =>
 
   // A catalog smaller than one batch renders fully with no follow-up batch.
   assert.deepEqual(initialRenderStep(75, 10), { limit: 10, rendering: false });
+});
+
+test("strategyOptions serves the deployment's strategies with labels", () => {
+  const options = strategyOptions(["round_robin", "cost", "adaptive"], "round_robin");
+  assert.deepEqual(
+    options.map((option) => option.value),
+    ["round_robin", "cost", "adaptive"],
+  );
+  for (const option of options) {
+    assert.notEqual(option.label, option.value, `expected a human label for ${option.value}`);
+  }
+});
+
+test("strategyOptions keeps the edited value selectable when unsupported", () => {
+  const options = strategyOptions(["round_robin", "cost"], "adaptive");
+  assert.deepEqual(
+    options.map((option) => option.value),
+    ["round_robin", "cost", "adaptive"],
+  );
+});
+
+test("strategyOptions labels unknown strategies with their raw value", () => {
+  const options = strategyOptions(["round_robin"], "experimental");
+  assert.deepEqual(options[1], { value: "experimental", label: "experimental" });
 });

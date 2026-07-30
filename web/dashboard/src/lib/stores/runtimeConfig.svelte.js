@@ -21,7 +21,12 @@ const CONFIG_KEYS = [
   "USAGE_PRICING_RECALCULATION_ENABLED",
   "DASHBOARD_LIVE_LOGS_ENABLED",
   "MCP_ENABLED",
+  "VIRTUAL_MODEL_STRATEGIES",
 ];
+
+// Strategies every gateway supports; used when the backend predates the
+// VIRTUAL_MODEL_STRATEGIES key.
+const DEFAULT_VM_STRATEGIES = ["round_robin", "cost"];
 
 class RuntimeConfigStore {
   config = $state({});
@@ -41,6 +46,18 @@ class RuntimeConfigStore {
       return !!defaultValue;
     }
     return value === "on" || value === "true" || value === "1";
+  }
+
+  // virtualModelStrategies lists the load-balancing strategies this
+  // deployment supports (comma-separated server-side). The backend is the
+  // source of truth so extension-provided strategies (e.g. "adaptive") only
+  // show up where they actually do something.
+  virtualModelStrategies() {
+    const list = this.flag("VIRTUAL_MODEL_STRATEGIES")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return list.length > 0 ? list : DEFAULT_VM_STRATEGIES;
   }
 
   // cacheVisible is a tri-source gate: an explicit CACHE_ENABLED wins;

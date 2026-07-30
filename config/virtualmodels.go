@@ -16,7 +16,9 @@ type VirtualModelConfig struct {
 	Source string `yaml:"source" json:"source"`
 
 	// Strategy selects load balancing across multiple targets: "round_robin"
-	// (default) or "cost". Ignored for single-target aliases and access policies.
+	// (default), "cost", or "adaptive" (delegates to a registered routing
+	// extension and falls back to round_robin without one). Ignored for
+	// single-target aliases and access policies.
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
 
 	// SessionAffinity keeps requests of one detected client session on the

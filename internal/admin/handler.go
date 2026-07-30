@@ -77,6 +77,7 @@ const (
 	DashboardConfigPricingRecalculation = "USAGE_PRICING_RECALCULATION_ENABLED"
 	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
 	DashboardConfigMCPEnabled           = "MCP_ENABLED"
+	DashboardConfigVMStrategies         = "VIRTUAL_MODEL_STRATEGIES"
 )
 
 // statusClientClosedRequest is the de facto status used by proxies for client-aborted requests.
@@ -98,6 +99,11 @@ type DashboardConfigResponse struct {
 	PricingRecalculation string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
 	LiveLogsEnabled      string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
 	MCPEnabled           string `json:"MCP_ENABLED,omitempty"`
+	// VirtualModelStrategies is the comma-separated list of load-balancing
+	// strategies this deployment supports. "adaptive" appears only when a
+	// route-selector extension is registered, so the dashboard never offers
+	// a strategy that would silently fall back to round robin.
+	VirtualModelStrategies string `json:"VIRTUAL_MODEL_STRATEGIES,omitempty"`
 }
 
 type providerStatusSummaryResponse struct {
@@ -367,20 +373,21 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 
 func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
 	return DashboardConfigResponse{
-		DemoMode:             strings.TrimSpace(values.DemoMode),
-		FailoverEnabled:      strings.TrimSpace(values.FailoverEnabled),
-		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
-		LoggingRetentionDays: strings.TrimSpace(values.LoggingRetentionDays),
-		UsageEnabled:         strings.TrimSpace(values.UsageEnabled),
-		BudgetsEnabled:       strings.TrimSpace(values.BudgetsEnabled),
-		RateLimitsEnabled:    strings.TrimSpace(values.RateLimitsEnabled),
-		GuardrailsEnabled:    strings.TrimSpace(values.GuardrailsEnabled),
-		CacheEnabled:         strings.TrimSpace(values.CacheEnabled),
-		RedisURL:             strings.TrimSpace(values.RedisURL),
-		SemanticCacheEnabled: strings.TrimSpace(values.SemanticCacheEnabled),
-		PricingRecalculation: strings.TrimSpace(values.PricingRecalculation),
-		LiveLogsEnabled:      strings.TrimSpace(values.LiveLogsEnabled),
-		MCPEnabled:           strings.TrimSpace(values.MCPEnabled),
+		DemoMode:               strings.TrimSpace(values.DemoMode),
+		FailoverEnabled:        strings.TrimSpace(values.FailoverEnabled),
+		LoggingEnabled:         strings.TrimSpace(values.LoggingEnabled),
+		LoggingRetentionDays:   strings.TrimSpace(values.LoggingRetentionDays),
+		UsageEnabled:           strings.TrimSpace(values.UsageEnabled),
+		BudgetsEnabled:         strings.TrimSpace(values.BudgetsEnabled),
+		RateLimitsEnabled:      strings.TrimSpace(values.RateLimitsEnabled),
+		GuardrailsEnabled:      strings.TrimSpace(values.GuardrailsEnabled),
+		CacheEnabled:           strings.TrimSpace(values.CacheEnabled),
+		RedisURL:               strings.TrimSpace(values.RedisURL),
+		SemanticCacheEnabled:   strings.TrimSpace(values.SemanticCacheEnabled),
+		PricingRecalculation:   strings.TrimSpace(values.PricingRecalculation),
+		LiveLogsEnabled:        strings.TrimSpace(values.LiveLogsEnabled),
+		MCPEnabled:             strings.TrimSpace(values.MCPEnabled),
+		VirtualModelStrategies: strings.TrimSpace(values.VirtualModelStrategies),
 	}
 }
 

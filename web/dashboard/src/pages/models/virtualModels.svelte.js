@@ -4,6 +4,7 @@
 import { errorMessage, getJSON, sendJSON } from "$lib/api/client.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
   GLOBAL_OVERRIDE_SELECTOR,
   aliasFormTargets,
@@ -27,6 +28,7 @@ import {
   rowAccessSelector,
   rowIsManaged,
   splitVirtualModelViews,
+  strategyOptions,
   vmFormHasPrimaryTarget,
   vmFormShowStrategy,
   vmFormShowWeights,
@@ -503,6 +505,13 @@ class VirtualModelsStore {
 
   vmFormShowStrategy() {
     return vmFormShowStrategy(this.vmForm);
+  }
+
+  // vmStrategyOptions builds the strategy dropdown from the strategies this
+  // deployment supports (server-driven), keeping the edited row's current
+  // value selectable even when the deployment no longer offers it.
+  vmStrategyOptions() {
+    return strategyOptions(runtimeConfig.virtualModelStrategies(), this.vmForm.strategy);
   }
 
   vmFormShowWeights() {

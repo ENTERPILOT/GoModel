@@ -31,6 +31,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -39,8 +40,8 @@ import (
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/server"
-	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/session"
+	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
@@ -111,6 +112,60 @@ func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
+}
+
+// routeSelectorHooks adapts upstream client lifecycle events into route
+// selector observations. Selector callbacks are extension code running on
+// the request path, so panics are contained rather than failing the request.
+// The selector's name is captured once, panic-safe, and the recovery path
+// logs only fixed metadata: it never calls back into extension code
+// mid-panic, and never logs the recovered value, which the extension
+// controls and could fill with request data.
+func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
+	name := selectorLabel(selector)
+	observe := func(event string, fn func()) {
+		defer func() {
+			if recover() != nil {
+				slog.Error("route selector panicked during observation",
+					"selector", name, "event", event)
+			}
+		}()
+		fn()
+	}
+	return llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+			observe("attempt_start", func() {
+				selector.OnAttemptStart(ext.RouteTarget{Provider: info.Provider, Model: info.Model})
+			})
+			return ctx
+		},
+		OnRequestEnd: func(_ context.Context, info llmclient.ResponseInfo) {
+			observe("attempt_end", func() {
+				selector.OnAttemptEnd(ext.RouteOutcome{
+					RouteTarget: ext.RouteTarget{Provider: info.Provider, Model: info.Model},
+					Endpoint:    info.Endpoint,
+					StatusCode:  info.StatusCode,
+					Duration:    info.Duration,
+					Stream:      info.Stream,
+					Err:         info.Error,
+				})
+			})
+		},
+	}
+}
+
+// selectorLabel returns the selector's name for logs, tolerating a panicking
+// Name implementation, so recovery paths never re-enter extension code.
+func selectorLabel(selector ext.RouteSelector) (name string) {
+	if selector == nil {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			name = "unknown"
+		}
+	}()
+	return selector.Name()
 }
 
 // New creates a new App with all dependencies initialized.
@@ -193,6 +248,17 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// provider status; hooks must be composed before any provider is created.
 	requestHealth := health.NewTracker()
 	cfg.Factory.AddHooks(requestHealth.Hooks())
+
+	// An extension route selector observes every upstream attempt — primaries,
+	// retries, and failovers — to steer adaptive load balancing. Like the
+	// health tracker, its hooks must be attached before any provider exists.
+	var routeSelector ext.RouteSelector
+	if cfg.Extensions != nil {
+		routeSelector = cfg.Extensions.RouteSelector()
+	}
+	if routeSelector != nil {
+		cfg.Factory.AddHooks(routeSelectorHooks(routeSelector))
+	}
 
 	providerResult, err := providers.Init(ctx, cfg.AppConfig, cfg.Factory)
 	if err != nil {
@@ -354,6 +420,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		vm.SetTargetCapacity(func(qualifiedModel string) bool {
 			return limiter.RouteAvailable(registry.GetProviderName(qualifiedModel), qualifiedModel)
 		})
+	}
+
+	// Redirects with the adaptive strategy delegate target choice to the
+	// extension route selector; without one they fall back to round robin
+	// inside the balancer, so the strategy stays valid in plain core builds.
+	if routeSelector != nil {
+		vm.SetRouteSelector(routeSelector)
 	}
 
 	var failoverResult *failover.Result
@@ -596,7 +669,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			mcpResult,
 			app.providerCredentials,
 			app,
-			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, cfg.DemoMode),
+			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, cfg.DemoMode, routeSelector != nil),
 			app.live,
 			requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
@@ -1178,22 +1251,35 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 	}
 }
 
-func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode bool) admin.DashboardConfigResponse {
+func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptiveRouting bool) admin.DashboardConfigResponse {
 	return admin.DashboardConfigResponse{
-		DemoMode:             dashboardEnabledValue(demoMode),
-		FailoverEnabled:      dashboardEnabledValue(failoverFeatureEnabledGlobally(cfg)),
-		LoggingEnabled:       dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
-		LoggingRetentionDays: dashboardLoggingRetentionDays(cfg),
-		UsageEnabled:         dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
-		BudgetsEnabled:       dashboardEnabledValue(cfg != nil && cfg.Budgets.Enabled),
-		RateLimitsEnabled:    dashboardEnabledValue(cfg != nil && cfg.RateLimits.Enabled),
-		GuardrailsEnabled:    dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
-		CacheEnabled:         dashboardEnabledValue(cacheAnalyticsConfigured(cfg, usageEnabled)),
-		RedisURL:             dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
-		SemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
-		LiveLogsEnabled:      dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
-		MCPEnabled:           dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
+		DemoMode:               dashboardEnabledValue(demoMode),
+		FailoverEnabled:        dashboardEnabledValue(failoverFeatureEnabledGlobally(cfg)),
+		LoggingEnabled:         dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
+		LoggingRetentionDays:   dashboardLoggingRetentionDays(cfg),
+		UsageEnabled:           dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
+		BudgetsEnabled:         dashboardEnabledValue(cfg != nil && cfg.Budgets.Enabled),
+		RateLimitsEnabled:      dashboardEnabledValue(cfg != nil && cfg.RateLimits.Enabled),
+		GuardrailsEnabled:      dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
+		CacheEnabled:           dashboardEnabledValue(cacheAnalyticsConfigured(cfg, usageEnabled)),
+		RedisURL:               dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
+		SemanticCacheEnabled:   dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
+		LiveLogsEnabled:        dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
+		MCPEnabled:             dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
+		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting),
 	}
+}
+
+// dashboardVirtualModelStrategies lists the load-balancing strategies the
+// dashboard should offer. Core accepts "adaptive" regardless (it falls back
+// to round robin without a selector), but the UI only advertises it when a
+// route-selector extension is actually registered.
+func dashboardVirtualModelStrategies(adaptiveRouting bool) string {
+	strategies := []string{virtualmodels.StrategyRoundRobin, virtualmodels.StrategyCost}
+	if adaptiveRouting {
+		strategies = append(strategies, virtualmodels.StrategyAdaptive)
+	}
+	return strings.Join(strategies, ",")
 }
 
 func dashboardLoggingRetentionDays(cfg *config.Config) string {
