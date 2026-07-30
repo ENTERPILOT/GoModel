@@ -42,6 +42,7 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 				Header:    redactCredentialHeaders(c.Request().Header),
 				UserPath:  core.UserPathFromContext(c.Request().Context()),
 				RequestID: core.GetRequestID(c.Request().Context()),
+				SessionID: core.SessionIDFromContext(c.Request().Context()),
 			}
 
 			changed := false

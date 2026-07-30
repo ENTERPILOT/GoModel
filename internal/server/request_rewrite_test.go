@@ -119,6 +119,59 @@ func TestRequestRewriteMiddlewareRewritesChatCompletions(t *testing.T) {
 	}
 }
 
+func TestRequestRewriteMiddlewareExposesSessionID(t *testing.T) {
+	tests := []struct {
+		name    string
+		session string // stamped into the context before rewriters; "" = not detected
+		want    string
+	}{
+		{name: "detected session propagates", session: "sess-42", want: "sess-42"},
+		{name: "no detected session yields empty", session: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := newRewriteTestProvider()
+			var seenSession string
+			capturing := &stubRewriter{
+				name: "capture-session",
+				rewrite: func(in ext.Input) (*ext.Result, error) {
+					seenSession = in.SessionID
+					return nil, nil
+				},
+			}
+			// Session detection runs before rewriters and stamps the request
+			// context; ExtraMiddleware runs even earlier, so it stands in for
+			// the detector here.
+			stampSession := func(next echo.HandlerFunc) echo.HandlerFunc {
+				return func(c *echo.Context) error {
+					if tt.session != "" {
+						req := c.Request()
+						c.SetRequest(req.WithContext(core.WithSessionID(req.Context(), tt.session)))
+					}
+					return next(c)
+				}
+			}
+			srv := New(provider, &Config{
+				RequestRewriters: []ext.RequestRewriter{capturing},
+				ExtraMiddleware:  []echo.MiddlewareFunc{stampSession},
+			})
+
+			rec := postJSON(t, srv, "/v1/chat/completions",
+				`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+			}
+			// The empty-session expectation must not pass vacuously.
+			if capturing.calls != 1 {
+				t.Fatalf("rewriter called %d times, want 1", capturing.calls)
+			}
+			if seenSession != tt.want {
+				t.Errorf("rewriter saw SessionID %q, want %q", seenSession, tt.want)
+			}
+		})
+	}
+}
+
 func TestRequestRewriteMiddlewareRewritesMessages(t *testing.T) {
 	provider := newRewriteTestProvider()
 	srv := New(provider, &Config{
