@@ -89,9 +89,10 @@ type UsageEntry struct {
 
 	// RewriteCostSaved is the estimated gross input cost avoided by removing
 	// those tokens. It uses the request's observed blended input rate when
-	// available, including its provider prompt-cache rate mix, and falls back
-	// to static model pricing. Prompt-cache changes caused by rewriting are
-	// not included (nil = cost unavailable).
+	// available, including its provider prompt-cache rate mix while excluding
+	// unchanged fixed input charges, and falls back to static model pricing.
+	// Prompt-cache changes caused by rewriting are not included
+	// (nil = cost unavailable).
 	RewriteCostSaved *float64 `json:"rewrite_cost_saved,omitempty" bson:"rewrite_cost_saved,omitempty"`
 }
 

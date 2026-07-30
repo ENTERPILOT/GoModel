@@ -98,7 +98,7 @@
     <InlineHelpSection
       copyId="pricing-recalculate-help-copy"
       label="pricing recalculation help"
-      text="Recalculate stored usage costs from the current model pricing metadata. Filters are applied to the selected date range, user path subtree, and provider/model selector or alias."
+      text="Recalculate stored input, output, total, and Pro Saved costs from the current model pricing metadata. This overwrites matching historical cost fields. Filters are applied to the selected date range, user path subtree, and provider/model selector or alias."
     >
       {#snippet title()}<h3>Usage Pricing Recalculation</h3>{/snippet}
     </InlineHelpSection>

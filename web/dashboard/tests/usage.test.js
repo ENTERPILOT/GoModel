@@ -216,7 +216,7 @@ test("usage page Pro Saved card shows only when rewriters saved tokens", () => {
   );
   assert.match(
     proSavedTitle(withSavings, "tokens"),
-    /^4,200 estimated prompt token-transmissions removed across provider requests\nEstimated at 4 net characters removed per token\nRepeated savings are counted on every request because conversation history is sent again\n\$0\.0125 estimated gross input cost avoided\nPrompt-cache changes caused by rewriting are not included/,
+    /^4,200 estimated prompt token-transmissions removed across provider requests\nEstimated at 4 net characters removed per token\nSavings are summed per provider request; resent conversation history is counted again\n\$0\.0125 estimated gross input cost avoided\nPrompt-cache changes caused by rewriting are not included/,
   );
 
   // Savings without pricing: tokens still surface, cost stays null.

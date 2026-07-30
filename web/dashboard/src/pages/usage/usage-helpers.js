@@ -167,7 +167,7 @@ export function proSavedTitle(summary, mode) {
   const lines = [
     formatNumber(tokens) + " estimated prompt token-transmissions removed across provider requests",
     rewriteTokenEstimateMethodText(),
-    "Repeated savings are counted on every request because conversation history is sent again",
+    "Savings are summed per provider request; resent conversation history is counted again",
   ];
   const cost = rewriteCostSaved(summary);
   if (cost !== null && cost !== undefined) {
