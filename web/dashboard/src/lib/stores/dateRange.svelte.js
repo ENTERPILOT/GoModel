@@ -13,6 +13,7 @@ import {
   DATE_RANGE_STORAGE_KEY,
   parseDateRange,
   rangeLabel,
+  rangeSpanLabel,
   serializeDateRange,
   windowEndingToday,
 } from "./dateRangePrefs.js";
@@ -28,6 +29,10 @@ class DateRangeStore {
   // True while the custom window ends on today, i.e. it follows the day.
   followsToday = $state(false);
   interval = $state("daily");
+  // Bumped whenever a day rollover moved the window on its own. DatePicker
+  // watches it and fires its onchange, so the page reloads its data instead
+  // of showing yesterday's numbers under today's dates.
+  syncTick = $state(0);
 
   // init restores the saved window and keeps a today-anchored one current.
   // Call after timezone.init(), since "today" is timezone dependent.
@@ -108,6 +113,7 @@ class DateRangeStore {
     this.customStartDate = timezone.dateKeyToDate(next.start);
     this.customEndDate = timezone.dateKeyToDate(next.end);
     this.persist();
+    this.syncTick++;
     return true;
   }
 
@@ -116,6 +122,17 @@ class DateRangeStore {
       selectedPreset: this.selectedPreset,
       startKey: timezone.dateToDateKey(this.customStartDate),
       endKey: timezone.dateToDateKey(this.customEndDate),
+      todayKey: timezone.currentDateKey(),
+    });
+  }
+
+  dateRangeSpanLabel() {
+    return rangeSpanLabel({
+      selectedPreset: this.selectedPreset,
+      startKey: timezone.dateToDateKey(this.customStartDate),
+      endKey: timezone.dateToDateKey(this.customEndDate),
+      followsToday: this.followsToday,
+      todayKey: timezone.currentDateKey(),
     });
   }
 

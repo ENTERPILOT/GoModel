@@ -7,12 +7,14 @@ import assert from "node:assert/strict";
 import {
   parseDateRange,
   rangeLabel,
+  rangeSpanLabel,
   serializeDateRange,
   windowEndingToday,
 } from "../src/lib/stores/dateRangePrefs.js";
 import {
   addDaysToDateKey,
   daysBetweenDateKeys,
+  isDateKey,
 } from "../src/lib/utils/dateKeys.js";
 
 test("serializeDateRange stores a preset as a relative window", () => {
@@ -122,6 +124,19 @@ test("rangeLabel shows one date when the window is a single day", () => {
   );
 });
 
+test("rangeLabel names today instead of dating it", () => {
+  const todayKey = "2026-07-30";
+  assert.equal(
+    rangeLabel({ startKey: todayKey, endKey: todayKey, todayKey }),
+    "Today",
+  );
+  assert.equal(
+    rangeLabel({ startKey: "2026-07-01", endKey: todayKey, todayKey }),
+    "Jul 1, 2026 – Today",
+  );
+  assert.equal(rangeLabel({ startKey: todayKey, todayKey }), "Today – ...");
+});
+
 test("rangeLabel shows both edges of a multi-day window", () => {
   assert.equal(
     rangeLabel({ startKey: "2026-07-01", endKey: "2026-07-29" }),
@@ -132,6 +147,67 @@ test("rangeLabel shows both edges of a multi-day window", () => {
 test("rangeLabel falls back while only the start is picked", () => {
   assert.equal(rangeLabel({ startKey: "2026-07-01" }), "Jul 1, 2026 – ...");
   assert.equal(rangeLabel({}), "Last 30 days");
+});
+
+test("rangeSpanLabel counts the last N days for a window tracking today", () => {
+  const todayKey = "2026-07-30";
+  assert.equal(rangeSpanLabel({ selectedPreset: "7" }), "Last 7 days");
+  assert.equal(
+    rangeSpanLabel({
+      startKey: "2026-07-11",
+      endKey: todayKey,
+      followsToday: true,
+      todayKey,
+    }),
+    "Last 20 days",
+  );
+  assert.equal(
+    rangeSpanLabel({
+      startKey: todayKey,
+      endKey: todayKey,
+      followsToday: true,
+      todayKey,
+    }),
+    "Today",
+  );
+});
+
+test("rangeSpanLabel states the plain length of a frozen window", () => {
+  const todayKey = "2026-07-30";
+  assert.equal(
+    rangeSpanLabel({ startKey: "2026-06-01", endKey: "2026-06-30", todayKey }),
+    "30 days",
+  );
+  assert.equal(
+    rangeSpanLabel({ startKey: "2026-06-09", endKey: "2026-06-09", todayKey }),
+    "1 day",
+  );
+  assert.equal(rangeSpanLabel({ startKey: "2026-06-09", todayKey }), "");
+});
+
+test("parseDateRange rejects keys that are not real calendar days", () => {
+  // Date.UTC would roll these over into a window the user never picked.
+  assert.equal(
+    parseDateRange('{"mode":"custom","start":"2026-02-30","end":"2026-02-30"}'),
+    null,
+  );
+  assert.equal(
+    parseDateRange('{"mode":"custom","start":"2026-99-99","end":"2026-99-99"}'),
+    null,
+  );
+  assert.equal(
+    parseDateRange('{"mode":"custom","start":"2025-02-29","end":"2025-03-01"}'),
+    null,
+  );
+});
+
+test("isDateKey accepts real days and rejects rolled-over ones", () => {
+  assert.equal(isDateKey("2024-02-29"), true);
+  assert.equal(isDateKey("2026-02-29"), false);
+  assert.equal(isDateKey("2026-13-01"), false);
+  assert.equal(isDateKey("2026-07-00"), false);
+  assert.equal(isDateKey("07/30/2026"), false);
+  assert.equal(isDateKey(""), false);
 });
 
 test("daysBetweenDateKeys counts inclusively and survives DST-shifted zones", () => {

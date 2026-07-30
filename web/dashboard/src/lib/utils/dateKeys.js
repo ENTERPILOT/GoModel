@@ -41,6 +41,16 @@ export function addDaysToDateKey(key, days) {
   return dateToDateKey(date);
 }
 
+/**
+ * True for a key naming a real calendar day. The shape alone is not enough:
+ * Date.UTC silently rolls "2026-02-30" over to March, so an impossible key
+ * has to be rejected by round-tripping it.
+ */
+export function isDateKey(key) {
+  const date = dateKeyToDate(key);
+  return !!date && dateToDateKey(date) === key;
+}
+
 /** Inclusive day count between two keys; 0 when either key is malformed. */
 export function daysBetweenDateKeys(startKey, endKey) {
   const start = dateKeyToDate(startKey);

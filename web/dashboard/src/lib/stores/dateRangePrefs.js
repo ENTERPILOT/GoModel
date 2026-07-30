@@ -10,6 +10,7 @@
 import {
   addDaysToDateKey,
   daysBetweenDateKeys,
+  isDateKey,
 } from "../utils/dateKeys.js";
 
 export const DATE_RANGE_STORAGE_KEY = "gomodel_date_range";
@@ -30,10 +31,6 @@ const MONTH_NAMES = [
   "Nov",
   "Dec",
 ];
-
-function isDateKey(value) {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
 
 /** The persisted payload for a window, or null when there is nothing to save. */
 export function serializeDateRange({
@@ -96,18 +93,44 @@ export function windowEndingToday(startKey, endKey, todayKey) {
   return { start: addDaysToDateKey(todayKey, -(span - 1)), end: todayKey };
 }
 
-function formatDateKeyShort(key) {
+function formatDateKeyShort(key, todayKey) {
+  if (key === todayKey) return "Today";
   const [year, month, day] = key.split("-");
   return MONTH_NAMES[Number(month) - 1] + " " + Number(day) + ", " + year;
 }
 
-/** Label for the picker trigger. A one-day window shows a single date. */
-export function rangeLabel({ selectedPreset, startKey, endKey }) {
+/**
+ * Tooltip for the picker trigger: how long the window is. A window that
+ * tracks today is "the last N days"; a fixed one is just N days long.
+ */
+export function rangeSpanLabel({
+  selectedPreset,
+  startKey,
+  endKey,
+  followsToday,
+  todayKey,
+}) {
   if (selectedPreset) return "Last " + selectedPreset + " days";
-  if (isDateKey(startKey) && isDateKey(endKey)) {
-    if (startKey === endKey) return formatDateKeyShort(startKey);
-    return formatDateKeyShort(startKey) + " – " + formatDateKeyShort(endKey);
+  if (!isDateKey(startKey) || !isDateKey(endKey)) return "";
+
+  const days = daysBetweenDateKeys(startKey, endKey);
+  if (followsToday || endKey === todayKey) {
+    return days === 1 ? "Today" : "Last " + days + " days";
   }
-  if (isDateKey(startKey)) return formatDateKeyShort(startKey) + " – ...";
+  return days === 1 ? "1 day" : days + " days";
+}
+
+/**
+ * Label for the picker trigger. A one-day window shows a single date, and
+ * today is named rather than dated.
+ */
+export function rangeLabel({ selectedPreset, startKey, endKey, todayKey }) {
+  if (selectedPreset) return "Last " + selectedPreset + " days";
+  const short = (key) => formatDateKeyShort(key, todayKey);
+  if (isDateKey(startKey) && isDateKey(endKey)) {
+    if (startKey === endKey) return short(startKey);
+    return short(startKey) + " – " + short(endKey);
+  }
+  if (isDateKey(startKey)) return short(startKey) + " – ...";
   return "Last 30 days";
 }
