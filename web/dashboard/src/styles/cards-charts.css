@@ -79,24 +79,42 @@
 
 .live-dot.is-streaming {
   background: var(--success);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 70%, transparent);
+  position: relative;
+}
+
+/* The expanding ring. It rides on a pseudo-element animating transform and
+   opacity — both compositor properties — because the equivalent box-shadow
+   keyframes repaint the dot on every frame, forever, for every streaming row.
+   The negative z-index puts it behind the dot's own background (.live-dot is
+   positioned but creates no stacking context), matching the old spread ring. */
+.live-dot.is-streaming::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--success) 55%, transparent);
   animation: live-dot-pulse 1.8s ease-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .live-dot.is-streaming {
+  .live-dot.is-streaming::after {
       animation: none;
+      opacity: 0;
     }
 }
 
 @keyframes live-dot-pulse {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 55%, transparent);
+    transform: scale(1);
+    opacity: 1;
   }
   70% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--success) 0%, transparent);
+    transform: scale(2.5);
+    opacity: 0;
   }
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 0%, transparent);
+    transform: scale(2.5);
+    opacity: 0;
   }
 }

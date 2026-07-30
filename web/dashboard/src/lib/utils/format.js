@@ -9,6 +9,34 @@ export function splitCommaList(value) {
 
 // Shared display formatters.
 
+// formatJSON pretty-prints a captured request/response payload, accepting both
+// the parsed object and the raw JSON string the store may hold. Non-JSON text
+// passes through untouched.
+export function formatJSON(v) {
+  if (v == null || v === "") return "Not captured";
+
+  if (typeof v === "string") {
+    const trimmed = v.trim();
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch {
+        return v;
+      }
+    }
+    return v;
+  }
+
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
 export function formatNumber(n) {
   if (n == null || n === undefined) return "-";
   return n.toLocaleString();

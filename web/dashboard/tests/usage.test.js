@@ -22,6 +22,7 @@ import {
   proSavedValueText,
   rewriteCostSaved,
   rewriteSavingsVisible,
+  rewriteTokenEstimateMethodText,
   rewriteTokensSaved,
   usageEntryCached,
   usageEntryCacheLabel,
@@ -209,9 +210,13 @@ test("usage page Pro Saved card shows only when rewriters saved tokens", () => {
   assert.equal(rewriteSavingsVisible(withSavings), true);
   assert.equal(rewriteTokensSaved(withSavings), 4200);
   assert.equal(rewriteCostSaved(withSavings), 0.0125);
+  assert.equal(
+    rewriteTokenEstimateMethodText(),
+    "Estimated at 4 net characters removed per token",
+  );
   assert.match(
     proSavedTitle(withSavings, "tokens"),
-    /^4,200 prompt tokens removed by request rewriters before reaching providers\n\$0\.0125 saved/,
+    /^4,200 estimated prompt token-transmissions removed across provider requests\nEstimated at 4 net characters removed per token\nSavings are summed per provider request; resent conversation history is counted again\n\$0\.0125 estimated gross input cost avoided\nPrompt-cache changes caused by rewriting are not included/,
   );
 
   // Savings without pricing: tokens still surface, cost stays null.
@@ -225,14 +230,16 @@ test("usage page Pro Saved card shows only when rewriters saved tokens", () => {
 
 test("Pro Saved value and share follow the Tokens/Costs mode", () => {
   const summary = {
-    total_tokens: 8000,
+    total_input_tokens: 8000,
+    total_output_tokens: 4000,
+    total_tokens: 12000,
     total_cost: 0.08,
     rewrite_tokens_saved: 2000,
     rewrite_cost_saved: 0.02,
   };
 
   // Tokens mode: removed prompt tokens in the overview's short form,
-  // 2000 / (8000 + 2000) = 20%.
+  // 2000 / (8000 input + 2000 saved) = 20%. Output is deliberately ignored.
   assert.equal(proSavedValueText(summary, "tokens"), "2K");
   assert.equal(proSavedPercentText(summary, "tokens"), "20.0% less");
 
@@ -240,7 +247,10 @@ test("Pro Saved value and share follow the Tokens/Costs mode", () => {
   assert.equal(proSavedValueText({ rewrite_tokens_saved: 2186 }, "tokens"), "2.2K");
   assert.equal(proSavedValueText({ rewrite_tokens_saved: 3_400_000 }, "tokens"), "3.4M");
   assert.equal(proSavedValueText({ rewrite_tokens_saved: 840 }, "tokens"), "840");
-  assert.match(proSavedTitle({ rewrite_tokens_saved: 2186 }, "tokens"), /^2,186 prompt tokens/);
+  assert.match(
+    proSavedTitle({ rewrite_tokens_saved: 2186 }, "tokens"),
+    /^2,186 estimated prompt token-transmissions/,
+  );
 
   // Costs mode: priced savings against the recorded spend, same 20%.
   assert.equal(proSavedValueText(summary, "costs"), "$0.02");
@@ -248,12 +258,19 @@ test("Pro Saved value and share follow the Tokens/Costs mode", () => {
 
   // Tiny but non-zero shares stay visible rather than rounding to 0.0%.
   assert.equal(
-    proSavedPercentText({ total_tokens: 10_000_000, rewrite_tokens_saved: 1 }, "tokens"),
+    proSavedPercentText(
+      { total_input_tokens: 10_000_000, rewrite_tokens_saved: 1 },
+      "tokens",
+    ),
     "<0.1% less",
   );
 
   // No pricing in costs mode: the value renders, the share is suppressed.
-  const unpriced = { total_tokens: 900, total_cost: null, rewrite_tokens_saved: 100 };
+  const unpriced = {
+    total_input_tokens: 900,
+    total_cost: null,
+    rewrite_tokens_saved: 100,
+  };
   assert.equal(proSavedValueText(unpriced, "costs"), "---");
   assert.equal(proSavedPercentText(unpriced, "costs"), "");
   assert.equal(proSavedPercent(unpriced, "costs"), null);
@@ -263,7 +280,7 @@ test("Pro Saved value and share follow the Tokens/Costs mode", () => {
   // zero, so the value still renders but the share must stay suppressed
   // rather than claim the period was all savings.
   const savedButUnpriced = {
-    total_tokens: 900,
+    total_input_tokens: 900,
     total_cost: null,
     rewrite_tokens_saved: 100,
     rewrite_cost_saved: 0.02,
@@ -277,12 +294,12 @@ test("Pro Saved value and share follow the Tokens/Costs mode", () => {
 
   // A genuinely zero baseline is knowable, so the share still renders.
   assert.equal(
-    proSavedPercentText({ total_tokens: 0, rewrite_tokens_saved: 100 }, "tokens"),
+    proSavedPercentText({ total_input_tokens: 0, rewrite_tokens_saved: 100 }, "tokens"),
     "100.0% less",
   );
 
   // No savings at all: nothing to show in either mode.
-  assert.equal(proSavedPercentText({ total_tokens: 500 }, "tokens"), "");
+  assert.equal(proSavedPercentText({ total_input_tokens: 500 }, "tokens"), "");
   assert.equal(proSavedPercentText({}, "costs"), "");
 });
 
