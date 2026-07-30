@@ -2264,20 +2264,21 @@ func TestBuildProviderStatusItem_ClassifyAndDisplayFallbacks(t *testing.T) {
 
 func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
-		DemoMode:             "on",
-		FailoverEnabled:      "on",
-		LoggingEnabled:       "on",
-		LoggingRetentionDays: "14",
-		UsageEnabled:         "off",
-		BudgetsEnabled:       "on",
-		RateLimitsEnabled:    "off",
-		GuardrailsEnabled:    "on",
-		CacheEnabled:         "on",
-		RedisURL:             "on",
-		SemanticCacheEnabled: "off",
-		PricingRecalculation: "on",
-		LiveLogsEnabled:      "on",
-		MCPEnabled:           "off",
+		DemoMode:               "on",
+		FailoverEnabled:        "on",
+		LoggingEnabled:         "on",
+		LoggingRetentionDays:   "14",
+		UsageEnabled:           "off",
+		BudgetsEnabled:         "on",
+		RateLimitsEnabled:      "off",
+		GuardrailsEnabled:      "on",
+		CacheEnabled:           "on",
+		RedisURL:               "on",
+		SemanticCacheEnabled:   "off",
+		PricingRecalculation:   "on",
+		LiveLogsEnabled:        "on",
+		MCPEnabled:             "off",
+		VirtualModelStrategies: "round_robin,cost,adaptive",
 	}))
 	c, rec := newHandlerContext("/admin/runtime/config")
 
@@ -2333,6 +2334,9 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	}
 	if got := body.MCPEnabled; got != "off" {
 		t.Fatalf("MCP_ENABLED = %q, want off", got)
+	}
+	if got := body.VirtualModelStrategies; got != "round_robin,cost,adaptive" {
+		t.Fatalf("VIRTUAL_MODEL_STRATEGIES = %q, want round_robin,cost,adaptive", got)
 	}
 	if rec.Body.String() == "" || strings.Contains(rec.Body.String(), "UNRELATED_FLAG") {
 		t.Fatal("UNRELATED_FLAG should not be exposed")
