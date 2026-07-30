@@ -73,14 +73,22 @@ func recalculateEntryCosts(entry recalculationEntry, resolver PricingResolver) r
 	effectivePricing := pricingForEndpoint(pricing, entry.Endpoint)
 	result := CalculateUsageCost(entry.InputTokens, entry.OutputTokens, entry.RawData, entry.Provider, effectivePricing)
 	return recalculationUpdate{
-		ID:               entry.ID,
-		InputCost:        result.InputCost,
-		OutputCost:       result.OutputCost,
-		TotalCost:        result.TotalCost,
-		RewriteCostSaved: rewriteCostSaved(entry.InputTokens, entry.OutputTokens, entry.RawData, entry.Provider, effectivePricing, entry.RewriteTokensSaved),
-		CostSource:       result.Source,
-		Caveat:           result.Caveat,
-		HasPricing:       result.TotalCost != nil || result.InputCost != nil || result.OutputCost != nil,
+		ID:         entry.ID,
+		InputCost:  result.InputCost,
+		OutputCost: result.OutputCost,
+		TotalCost:  result.TotalCost,
+		RewriteCostSaved: rewriteCostSaved(
+			entry.InputTokens,
+			entry.OutputTokens,
+			entry.RawData,
+			entry.Provider,
+			result.InputCost,
+			effectivePricing,
+			entry.RewriteTokensSaved,
+		),
+		CostSource: result.Source,
+		Caveat:     result.Caveat,
+		HasPricing: result.TotalCost != nil || result.InputCost != nil || result.OutputCost != nil,
 	}
 }
 
