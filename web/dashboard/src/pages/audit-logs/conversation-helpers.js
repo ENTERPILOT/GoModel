@@ -1,9 +1,14 @@
 // Pure conversation/message shaping helpers, ported verbatim from
 // internal/admin/dashboard/static/js/modules/conversation-helpers.js, plus
 // the pure message-building logic extracted from conversation-drawer.js
-// (buildConversationMessages, functionExpandedContent) and the formatJSON
-// helper the body renderer depends on (from audit-list.js).
-// Plain ESM — no runes, no imports — shared by the Svelte stores and tests.
+// (buildConversationMessages, functionExpandedContent).
+// Plain ESM — no runes — shared by the Svelte stores and tests.
+
+import { formatJSON } from "../../lib/utils/format.js";
+import { findNestedErrorMessage, tryParseJSON } from "./error-text.js";
+
+// Re-exported so the drawer store keeps one import for its formatting.
+export { formatJSON };
 
 const sectionKeys = new Set(['instructions', 'messages', 'input', 'previous_response_id', 'choices', 'output']);
 
@@ -126,81 +131,14 @@ export function extractRequestPromptTextSegments(body) {
         .filter((segment) => segment.length > 0);
 }
 
-function tryParseJSON(value) {
-    if (typeof value !== 'string') return null;
-    try {
-        return JSON.parse(value);
-    } catch {
-        return null;
-    }
-}
-
-function normalizeErrorMessageText(text, depth) {
-    const trimmed = String(text || '').trim();
-    if (!trimmed) return '';
-    if (depth >= 4) return trimmed;
-
-    const parsed = tryParseJSON(trimmed);
-    if (!parsed || typeof parsed !== 'object') {
-        return trimmed;
-    }
-
-    const nested = findNestedErrorMessage(parsed, depth + 1);
-    if (nested) return nested;
-
-    const fallback = extractText(parsed);
-    return fallback || trimmed;
-}
-
-function findNestedErrorMessage(value, depth = 0) {
-    const visited = new Set();
-    const stack = [value];
-
-    while (stack.length > 0) {
-        const current = stack.shift();
-        if (!current || typeof current !== 'object') continue;
-        if (visited.has(current)) continue;
-        visited.add(current);
-
-        if (Array.isArray(current)) {
-            for (let i = 0; i < current.length; i++) {
-                stack.push(current[i]);
-            }
-            continue;
-        }
-
-        const error = current.error;
-        if (typeof error === 'string' && error.trim()) {
-            return normalizeErrorMessageText(error, depth);
-        }
-        if (error && typeof error === 'object') {
-            if (typeof error.message === 'string' && error.message.trim()) {
-                return normalizeErrorMessageText(error.message, depth);
-            }
-            stack.push(error);
-        }
-
-        if (typeof current.message === 'string' && current.message.trim()) {
-            if (current.error !== undefined || current.code !== undefined || current.status !== undefined || current.type !== undefined) {
-                return normalizeErrorMessageText(current.message, depth);
-            }
-        }
-
-        const keys = Object.keys(current);
-        for (let i = 0; i < keys.length; i++) {
-            const key = keys[i];
-            if (key === 'error') continue;
-            stack.push(current[key]);
-        }
-    }
-
-    return '';
-}
+// extractText is the drawer's last resort once the shared walk finds no
+// error field: pull whatever readable content the payload carries.
+const errorTextFallback = (parsed) => extractText(parsed);
 
 export function extractConversationErrorMessage(entry) {
     if (!entry || !entry.data) return '';
 
-    const responseBodyMessage = findNestedErrorMessage(entry.data.response_body);
+    const responseBodyMessage = findNestedErrorMessage(entry.data.response_body, 0, errorTextFallback);
     if (responseBodyMessage) return responseBodyMessage;
 
     const rawError = entry.data.error_message;
@@ -211,12 +149,12 @@ export function extractConversationErrorMessage(entry) {
         if (!trimmed) return '';
 
         const parsed = tryParseJSON(trimmed);
-        const parsedMessage = findNestedErrorMessage(parsed);
+        const parsedMessage = findNestedErrorMessage(parsed, 0, errorTextFallback);
         if (parsedMessage) return parsedMessage;
         return trimmed;
     }
 
-    const structuredMessage = findNestedErrorMessage(rawError);
+    const structuredMessage = findNestedErrorMessage(rawError, 0, errorTextFallback);
     if (structuredMessage) return structuredMessage;
     return extractText(rawError);
 }
@@ -538,31 +476,6 @@ export function renderBodyWithConversationHighlights(entry, value, deps) {
     }
 
     return rendered.join('\n');
-}
-
-// formatJSON pretty-prints a captured body value ("Not captured" for empty);
-// the body renderer above and the drawer store use it as the default
-// formatter.
-export function formatJSON(v) {
-    if (v == null || v === undefined || v === '') return 'Not captured';
-
-    if (typeof v === 'string') {
-        const trimmed = v.trim();
-        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-            try {
-                return JSON.stringify(JSON.parse(trimmed), null, 2);
-            } catch {
-                return v;
-            }
-        }
-        return v;
-    }
-
-    try {
-        return JSON.stringify(v, null, 2);
-    } catch {
-        return String(v);
-    }
 }
 
 // ---------------------------------------------------------------------------
