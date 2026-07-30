@@ -53,6 +53,12 @@ test("serializeDateRange returns null for an incomplete window", () => {
   );
 });
 
+test("serializeDateRange only writes presets that parse back", () => {
+  assert.equal(serializeDateRange({ selectedPreset: "abc" }), null);
+  assert.equal(serializeDateRange({ selectedPreset: "0" }), null);
+  assert.equal(serializeDateRange({ selectedPreset: "-7" }), null);
+});
+
 test("parseDateRange round-trips both modes", () => {
   const preset = serializeDateRange({ selectedPreset: "30" });
   assert.deepEqual(parseDateRange(JSON.stringify(preset)), {

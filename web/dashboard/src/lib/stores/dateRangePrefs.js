@@ -15,7 +15,15 @@ import {
 
 export const DATE_RANGE_STORAGE_KEY = "gomodel_date_range";
 
+/** The window a dashboard with no saved preference opens on. */
+export const DEFAULT_PRESET_DAYS = "30";
+
 const STORAGE_VERSION = 1;
+
+/** A preset is a whole number of days; anything else never round-trips. */
+function isPresetDays(value) {
+  return /^[1-9]\d*$/.test(String(value ?? ""));
+}
 
 const MONTH_NAMES = [
   "Jan",
@@ -39,9 +47,11 @@ export function serializeDateRange({
   endKey,
   followsToday,
 }) {
-  if (selectedPreset) {
+  // Only persist what parseDateRange would accept back.
+  if (selectedPreset && isPresetDays(selectedPreset)) {
     return { v: STORAGE_VERSION, mode: "preset", days: String(selectedPreset) };
   }
+  if (selectedPreset) return null;
   if (isDateKey(startKey) && isDateKey(endKey)) {
     return {
       v: STORAGE_VERSION,
@@ -67,8 +77,9 @@ export function parseDateRange(raw) {
   if (!value || typeof value !== "object") return null;
 
   if (value.mode === "preset") {
-    const days = String(value.days ?? "");
-    return /^[1-9]\d*$/.test(days) ? { mode: "preset", days } : null;
+    return isPresetDays(value.days)
+      ? { mode: "preset", days: String(value.days) }
+      : null;
   }
   if (
     value.mode === "custom" &&
@@ -132,5 +143,5 @@ export function rangeLabel({ selectedPreset, startKey, endKey, todayKey }) {
     return short(startKey) + " – " + short(endKey);
   }
   if (isDateKey(startKey)) return short(startKey) + " – ...";
-  return "Last 30 days";
+  return "Last " + DEFAULT_PRESET_DAYS + " days";
 }

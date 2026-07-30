@@ -11,6 +11,7 @@ import { formatDateParam } from "$lib/utils/format.js";
 import { readStored, writeStored } from "$lib/utils/storage.js";
 import {
   DATE_RANGE_STORAGE_KEY,
+  DEFAULT_PRESET_DAYS,
   parseDateRange,
   rangeLabel,
   rangeSpanLabel,
@@ -22,8 +23,8 @@ import {
 const DAY_SYNC_INTERVAL_MS = 60_000;
 
 class DateRangeStore {
-  days = $state("30");
-  selectedPreset = $state("30");
+  days = $state(DEFAULT_PRESET_DAYS);
+  selectedPreset = $state(DEFAULT_PRESET_DAYS);
   customStartDate = $state(null);
   customEndDate = $state(null);
   // True while the custom window ends on today, i.e. it follows the day.
