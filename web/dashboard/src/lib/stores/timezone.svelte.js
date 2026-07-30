@@ -3,15 +3,16 @@
 // server-side day grouping matches the UI.
 
 import { browserStorage } from "$lib/utils/storage.js";
+import {
+  addDaysToDateKey,
+  dateKeyToDate,
+  dateToDateKey,
+} from "$lib/utils/dateKeys.js";
 
 const DEFAULT_TIMEZONE = "UTC";
 const TIMEZONE_STORAGE_KEY = "gomodel_timezone_override";
 const formatterCache = new Map();
 const supportedTimeZoneCache = new Map();
-
-function pad(value) {
-  return String(value).padStart(2, "0");
-}
 
 function getCachedFormatter(locale, options) {
   const cacheKey = locale + "|" + JSON.stringify(options);
@@ -133,32 +134,15 @@ class TimezoneStore {
   }
 
   dateKeyToDate(key) {
-    if (!key) return null;
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
-    if (!match) return null;
-    return new Date(
-      Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
-    );
+    return dateKeyToDate(key);
   }
 
   dateToDateKey(date) {
-    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-      return "";
-    }
-    return (
-      date.getUTCFullYear() +
-      "-" +
-      pad(date.getUTCMonth() + 1) +
-      "-" +
-      pad(date.getUTCDate())
-    );
+    return dateToDateKey(date);
   }
 
   addDaysToDateKey(key, days) {
-    const date = this.dateKeyToDate(key);
-    if (!date) return "";
-    date.setUTCDate(date.getUTCDate() + days);
-    return this.dateToDateKey(date);
+    return addDaysToDateKey(key, days);
   }
 
   todayDate() {

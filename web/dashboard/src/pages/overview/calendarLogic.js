@@ -2,45 +2,21 @@
 // grid is deterministic and testable with node. Date-key math is UTC-based,
 // matching timezone.js.
 
+import {
+  addDaysToDateKey,
+  dateKeyToDate,
+  dateToDateKey,
+} from "../../lib/utils/dateKeys.js";
+
+// Re-exported so calendar callers keep one import for the whole grid API.
+export { addDaysToDateKey, dateKeyToDate, dateToDateKey };
+
 // Number of active intensity levels (1..CALENDAR_LEVELS); level 0 means no
 // activity. Keep in sync with the --cal-level-* ramp and .level-N rules in
 // dashboard.css.
 const CALENDAR_LEVELS = 10;
 // Exponent (<1) for the intensity scale; see calendarLevel() for rationale.
 const CALENDAR_SCALE_EXPONENT = 0.7;
-
-function pad(n) {
-  return String(n).padStart(2, "0");
-}
-
-export function dateKeyToDate(key) {
-  if (!key) return null;
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
-  if (!match) return null;
-  return new Date(
-    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
-  );
-}
-
-export function dateToDateKey(date) {
-  if (!date || typeof date.getTime !== "function" || Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return (
-    date.getUTCFullYear() +
-    "-" +
-    pad(date.getUTCMonth() + 1) +
-    "-" +
-    pad(date.getUTCDate())
-  );
-}
-
-export function addDaysToDateKey(key, days) {
-  const date = dateKeyToDate(key);
-  if (!date) return "";
-  date.setUTCDate(date.getUTCDate() + days);
-  return dateToDateKey(date);
-}
 
 export function calendarLevel(value, max) {
   if (value <= 0 || max <= 0) return 0;
