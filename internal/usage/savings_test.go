@@ -51,7 +51,126 @@ func TestApplyRewriteSavings(t *testing.T) {
 		}
 	})
 
-	t.Run("tier crossing re-rates the whole input", func(t *testing.T) {
+	t.Run("observed blended rate includes OpenAI prompt-cache reads", func(t *testing.T) {
+		// 20k uncached at $3/Mtok + 80k cached at $0.30/Mtok = $0.084.
+		// The 10k removed tokens inherit that observed $0.84/Mtok blend.
+		inputCost := 0.084
+		entry := &UsageEntry{
+			Provider:    "openai",
+			InputTokens: 100_000,
+			InputCost:   &inputCost,
+			RawData:     map[string]any{"prompt_cached_tokens": 80_000},
+		}
+		ApplyRewriteSavings(entry, 10_000, nil)
+		if entry.RewriteCostSaved == nil {
+			t.Fatal("expected savings from the observed input rate without static pricing")
+		}
+		if got, want := *entry.RewriteCostSaved, 0.0084; math.Abs(got-want) > 1e-9 {
+			t.Fatalf("cost saved = %v, want %v (observed blended input rate)", got, want)
+		}
+	})
+
+	t.Run("observed blended rate includes Anthropic additive cache parts", func(t *testing.T) {
+		// Anthropic input_tokens is the 20k uncached portion; cache reads and
+		// writes are additive, making 110k full input parts behind $0.1215.
+		inputCost := 0.1215
+		entry := &UsageEntry{
+			Provider:    "anthropic",
+			InputTokens: 20_000,
+			InputCost:   &inputCost,
+			RawData: map[string]any{
+				"cache_read_input_tokens":     80_000,
+				"cache_creation_input_tokens": 10_000,
+			},
+		}
+		ApplyRewriteSavings(entry, 10_000, flatPricing)
+		if entry.RewriteCostSaved == nil {
+			t.Fatal("expected savings from the observed Anthropic input rate")
+		}
+		if got, want := *entry.RewriteCostSaved, inputCost*10_000/110_000; math.Abs(got-want) > 1e-9 {
+			t.Fatalf("cost saved = %v, want %v (all additive input parts)", got, want)
+		}
+	})
+
+	t.Run("observed rate excludes retained fixed input charges", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			provider  string
+			inputCost float64
+			pricing   *core.ModelPricing
+			rawData   map[string]any
+			want      float64
+		}{
+			{
+				name:      "xAI image",
+				provider:  "xai",
+				inputCost: 0.0092,
+				pricing: &core.ModelPricing{
+					InputPerMtok:  new(2.0),
+					InputPerImage: new(0.009),
+				},
+				rawData: map[string]any{"image_tokens": 1},
+				want:    0.0018,
+			},
+			{
+				name:      "audio second",
+				provider:  "openai",
+				inputCost: 0.0502,
+				pricing: &core.ModelPricing{
+					InputPerMtok:   new(2.0),
+					PerSecondInput: new(0.05),
+				},
+				rawData: map[string]any{rawKeyAudioSeconds: 1.0},
+				want:    0.0018,
+			},
+			{
+				name:      "input characters",
+				provider:  "openai",
+				inputCost: 0.0502,
+				pricing: &core.ModelPricing{
+					InputPerMtok:      new(2.0),
+					PerCharacterInput: new(0.00005),
+				},
+				rawData: map[string]any{rawKeyInputCharacters: 1000},
+				want:    0.0018,
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				inputCost := test.inputCost
+				entry := &UsageEntry{
+					Provider:    test.provider,
+					InputTokens: 100,
+					InputCost:   &inputCost,
+					RawData:     test.rawData,
+				}
+				ApplyRewriteSavings(entry, 900, test.pricing)
+				if entry.RewriteCostSaved == nil {
+					t.Fatal("expected savings with a separable fixed input charge")
+				}
+				if got, want := *entry.RewriteCostSaved, test.want; math.Abs(got-want) > 1e-9 {
+					t.Fatalf("cost saved = %v, want %v (retained fixed charge excluded)", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("unseparated fixed charges do not use the observed shortcut", func(t *testing.T) {
+		inputCost := 0.0092
+		entry := &UsageEntry{
+			Provider:    "xai",
+			InputTokens: 100,
+			InputCost:   &inputCost,
+			RawData:     map[string]any{"image_tokens": 1},
+		}
+		ApplyRewriteSavings(entry, 900, nil)
+		if entry.RewriteCostSaved != nil {
+			t.Fatalf("cost saved must stay nil when a fixed fee cannot be separated, got %v", *entry.RewriteCostSaved)
+		}
+	})
+
+	t.Run("tier crossing re-rates the whole input with a request cost present", func(t *testing.T) {
 		tiered := &core.ModelPricing{
 			InputPerMtok: new(10.0),
 			Tiers: []core.ModelPricingTier{
@@ -59,7 +178,13 @@ func TestApplyRewriteSavings(t *testing.T) {
 				{UpToTokens: new(float64(1_000_000)), InputPerMtok: new(3.0)},
 			},
 		}
-		entry := &UsageEntry{Endpoint: "/v1/chat/completions", Provider: "openai", InputTokens: 800}
+		inputCost := 0.0008
+		entry := &UsageEntry{
+			Endpoint:    "/v1/chat/completions",
+			Provider:    "openai",
+			InputTokens: 800,
+			InputCost:   &inputCost,
+		}
 		ApplyRewriteSavings(entry, 400, tiered)
 		if entry.RewriteCostSaved == nil {
 			t.Fatal("expected a cost estimate with tiered pricing")
@@ -82,6 +207,30 @@ func TestApplyRewriteSavings(t *testing.T) {
 			t.Fatalf("cost saved = %v, want %v (batch rate)", got, want)
 		}
 	})
+}
+
+func TestRecalculatePricingUsesObservedBlendedRateForRewriteSavings(t *testing.T) {
+	update := recalculateEntryCosts(recalculationEntry{
+		ID:                 "cached-savings",
+		Model:              "gpt-5",
+		Provider:           "openai",
+		Endpoint:           "/v1/chat/completions",
+		InputTokens:        100_000,
+		RewriteTokensSaved: 10_000,
+		RawData:            map[string]any{"prompt_cached_tokens": 80_000},
+	}, staticSavingsPricingResolver{pricing: &core.ModelPricing{
+		InputPerMtok:       new(3.0),
+		CachedInputPerMtok: new(0.30),
+	}})
+
+	if update.RewriteCostSaved == nil {
+		t.Fatal("expected recalculated rewrite savings")
+	}
+	// Recalculated input cost is $0.084 over 100k full input parts, so
+	// 10k removed tokens inherit $0.0084 of the observed blended cost.
+	if got, want := *update.RewriteCostSaved, 0.0084; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("recalculated rewrite cost = %v, want %v", got, want)
+	}
 }
 
 func TestSQLiteSummaryAggregatesRewriteSavings(t *testing.T) {
