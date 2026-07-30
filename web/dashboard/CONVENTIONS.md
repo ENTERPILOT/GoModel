@@ -103,7 +103,8 @@ cells inside — never hand-roll that shell again.
 ### Utils
 
 `format.js` (numbers, costs, tokens, UTC dates and date params, comma lists,
-provider/model display) ·
+provider/model display) · `dateKeys.js` (UTC "YYYY-MM-DD" day-key math shared
+by the timezone store, the reporting window and the contribution calendar) ·
 `chartTheme.js` (theme colors + the shared Chart.js style fragments) ·
 `clipboard.svelte.js` · `debounce.js` · `storage.js` (localStorage can be
 absent or blocked — never touch it directly) · `api/paths.js` (`gomodelPath`).

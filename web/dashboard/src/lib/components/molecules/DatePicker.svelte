@@ -20,6 +20,7 @@
   function toggle() {
     open = !open;
     if (open) {
+      dateRange.syncToToday();
       calendarMonth = timezone.startOfMonthDate(
         dateRange.customEndDate || timezone.todayDate(),
       );
@@ -48,6 +49,16 @@
     };
   });
 
+  // A day rollover slides a today-following window without any click, so the
+  // host page has to refetch just as it would after a manual pick.
+  let seenSyncTick = dateRange.syncTick;
+  $effect(() => {
+    const tick = dateRange.syncTick;
+    if (tick === seenSyncTick) return;
+    seenSyncTick = tick;
+    onchange?.();
+  });
+
   function selectPreset(days) {
     dateRange.selectPreset(days);
     selectingDate = "start";
@@ -67,27 +78,15 @@
   // second click sets the end, swapping the pair if it lands before the start.
   function selectCalendarDay(day) {
     const clicked = new Date(day.date);
-    dateRange.selectedPreset = null;
 
     if (selectingDate === "start") {
-      dateRange.customStartDate = clicked;
-      if (dateRange.customEndDate && dateRange.customEndDate < clicked) {
-        dateRange.customEndDate = clicked;
-      }
-      if (!dateRange.customEndDate) {
-        dateRange.customEndDate = timezone.todayDate();
-      }
+      dateRange.selectStart(clicked);
       selectingDate = "end";
       onchange?.();
       return;
     }
 
-    if (clicked < dateRange.customStartDate) {
-      dateRange.customEndDate = dateRange.customStartDate;
-      dateRange.customStartDate = clicked;
-    } else {
-      dateRange.customEndDate = clicked;
-    }
+    dateRange.selectEnd(clicked);
     selectingDate = "start";
     onchange?.();
     close();
@@ -95,7 +94,11 @@
 </script>
 
 <div class="date-picker" bind:this={rootEl}>
-  <button class="date-picker-trigger" onclick={toggle}>
+  <button
+    class="date-picker-trigger"
+    title={dateRange.dateRangeSpanLabel()}
+    onclick={toggle}
+  >
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M5 1v2M11 1v2M2 6h12M3 3h10a1 1 0 011 1v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4a1 1 0 011-1z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <span>{dateRange.dateRangeLabel()}</span>
     <svg class="date-picker-chevron" class:open width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 4.5l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
