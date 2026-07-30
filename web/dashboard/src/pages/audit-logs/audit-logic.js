@@ -3,83 +3,21 @@
 // Keep this file free of Svelte-runtime imports so node:test can import it
 // directly.
 
-import { formatNumber } from "../../lib/utils/format.js";
+import { formatJSON, formatNumber } from "../../lib/utils/format.js";
+import {
+  findNestedErrorMessage,
+  normalizeErrorText,
+  tryParseJSON,
+} from "./error-text.js";
 
-function tryParseJSON(value) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeAuditErrorText(value, depth) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  if (depth > 6) return text;
-
-  const parsed = tryParseJSON(text);
-  if (parsed == null) return text;
-  return findNestedAuditErrorMessage(parsed, depth + 1) || text;
-}
+// Re-exported: the panes are built here, so consumers get their formatter from
+// the same module.
+export { formatJSON };
 
 function auditErrorMessageFromField(value) {
   if (value == null) return "";
-  if (typeof value === "string") return normalizeAuditErrorText(value, 0);
-  return findNestedAuditErrorMessage(value, 0);
-}
-
-function findNestedAuditErrorMessage(value, depth) {
-  if (value == null || depth > 6) return "";
-
-  if (typeof value === "string") {
-    const parsed = tryParseJSON(value.trim());
-    return parsed == null ? "" : findNestedAuditErrorMessage(parsed, depth + 1);
-  }
-
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      const message = findNestedAuditErrorMessage(value[i], depth + 1);
-      if (message) return message;
-    }
-    return "";
-  }
-
-  if (typeof value !== "object") return "";
-
-  if (value.error !== undefined) {
-    if (typeof value.error === "string") {
-      return normalizeAuditErrorText(value.error, depth + 1);
-    }
-    if (
-      value.error &&
-      typeof value.error.message === "string" &&
-      value.error.message.trim()
-    ) {
-      return normalizeAuditErrorText(value.error.message, depth + 1);
-    }
-    const nestedError = findNestedAuditErrorMessage(value.error, depth + 1);
-    if (nestedError) return nestedError;
-  }
-
-  if (
-    typeof value.message === "string" &&
-    value.message.trim() &&
-    (value.error !== undefined ||
-      value.code !== undefined ||
-      value.status !== undefined ||
-      value.type !== undefined)
-  ) {
-    return normalizeAuditErrorText(value.message, depth + 1);
-  }
-
-  const keys = Object.keys(value);
-  for (let i = 0; i < keys.length; i++) {
-    if (keys[i] === "error") continue;
-    const message = findNestedAuditErrorMessage(value[keys[i]], depth + 1);
-    if (message) return message;
-  }
-  return "";
+  if (typeof value === "string") return normalizeErrorText(value, 0);
+  return findNestedErrorMessage(value, 0);
 }
 
 function auditEntryStatusCodeValue(entry, data) {
@@ -135,7 +73,7 @@ export function auditEntryErrorMessage(entry) {
   const fieldMessage = auditErrorMessageFromField(data.error_message);
   if (fieldMessage) return fieldMessage;
   if (!shouldInspectAuditResponseBody(entry, data)) return "";
-  return findNestedAuditErrorMessage(data.response_body, 0);
+  return findNestedErrorMessage(data.response_body, 0);
 }
 
 // --- Retention note ---------------------------------------------------------
@@ -618,10 +556,6 @@ export function auditAttemptTrack(entry) {
   return [];
 }
 
-export function auditHasAttemptTrack(entry) {
-  return auditAttemptTrack(entry).length > 0;
-}
-
 export function auditAttemptTrackCount(entry) {
   return auditAttempts(entry).length + "×";
 }
@@ -887,31 +821,6 @@ export function auditPromptCacheHighlight(entry, extractSegments) {
 
 // --- Panes ------------------------------------------------------------------
 
-export function formatJSON(v) {
-  if (v == null || v === undefined || v === "") return "Not captured";
-
-  if (typeof v === "string") {
-    const trimmed = v.trim();
-    if (
-      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-      (trimmed.startsWith("[") && trimmed.endsWith("]"))
-    ) {
-      try {
-        return JSON.stringify(JSON.parse(trimmed), null, 2);
-      } catch {
-        return v;
-      }
-    }
-    return v;
-  }
-
-  try {
-    return JSON.stringify(v, null, 2);
-  } catch {
-    return String(v);
-  }
-}
-
 export function auditRequestPane(entry, extractSegments) {
   const data = entry && entry.data ? entry.data : null;
   const empty = !data || (!data.request_headers && !data.request_body);
@@ -1016,10 +925,13 @@ function auditDefaultPaneTab(entry) {
 
 // auditEffectiveTab resolves the active tab id, falling back to the default
 // when nothing is selected yet or the selection no longer exists (e.g. a live
-// entry gained attempts after the first render).
-export function auditEffectiveTab(active, entry) {
-  if (active && auditPanes(entry).some((p) => p.id === active)) {
-    return active;
+// entry gained attempts after the first render). Callers that already hold the
+// entry's panes pass them in; rebuilding the whole set just to check an id
+// re-walks every attempt and re-parses the error body.
+export function auditEffectiveTab(active, entry, panes) {
+  if (active) {
+    const current = Array.isArray(panes) ? panes : auditPanes(entry);
+    if (current.some((p) => p.id === active)) return active;
   }
   return auditDefaultPaneTab(entry);
 }

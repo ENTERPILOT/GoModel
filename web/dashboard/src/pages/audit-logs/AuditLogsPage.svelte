@@ -5,8 +5,7 @@
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import { untrack } from "svelte";
   import { flip } from "svelte/animate";
-  import { slide } from "svelte/transition";
-  import { motionDuration } from "$lib/utils/motion.js";
+  import { liveSlide, motionDuration } from "$lib/utils/motion.js";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
@@ -121,11 +120,13 @@
       <div class="audit-log-list">
         <!-- Live rows slide in and neighbours shift down via FLIP; fetched
              pages (not _live) render instantly, and neither plays on the
-             initial mount (transitions are local). -->
+             initial mount (transitions are local). liveSlide skips building
+             slide keyframes — and the getComputedStyle they cost — for the
+             fetched rows that would animate for 0ms anyway. -->
         {#each auditList.auditLog.entries as entry (entry.id)}
           <div
             animate:flip={{ duration: motionDuration(150) }}
-            in:slide={{ duration: motionDuration(entry._live ? 150 : 0) }}
+            in:liveSlide={{ live: entry._live }}
           >
             {#if auditList.auditGroupSessions}
               <AuditThreadGroup {entry} />
