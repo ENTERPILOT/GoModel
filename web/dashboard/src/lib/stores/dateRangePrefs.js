@@ -1,0 +1,147 @@
+// Persistence shape and trigger label for the shared reporting window.
+// Rune-free and relative-imported so node:test can exercise it directly.
+//
+// Two kinds of window survive a reload:
+//   - preset            "last N days", always relative to today
+//   - custom + follow   a hand-picked window that ended on today, so it keeps
+//                       tracking today and slides forward on a day change
+//   - custom            a hand-picked window that ended in the past: frozen
+
+import {
+  addDaysToDateKey,
+  daysBetweenDateKeys,
+  isDateKey,
+} from "../utils/dateKeys.js";
+
+export const DATE_RANGE_STORAGE_KEY = "gomodel_date_range";
+
+/** The window a dashboard with no saved preference opens on. */
+export const DEFAULT_PRESET_DAYS = "30";
+
+const STORAGE_VERSION = 1;
+
+/** A preset is a whole number of days; anything else never round-trips. */
+function isPresetDays(value) {
+  return /^[1-9]\d*$/.test(String(value ?? ""));
+}
+
+const MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** The persisted payload for a window, or null when there is nothing to save. */
+export function serializeDateRange({
+  selectedPreset,
+  startKey,
+  endKey,
+  followsToday,
+}) {
+  // Only persist what parseDateRange would accept back.
+  if (selectedPreset && isPresetDays(selectedPreset)) {
+    return { v: STORAGE_VERSION, mode: "preset", days: String(selectedPreset) };
+  }
+  if (selectedPreset) return null;
+  if (isDateKey(startKey) && isDateKey(endKey)) {
+    return {
+      v: STORAGE_VERSION,
+      mode: "custom",
+      start: startKey,
+      end: endKey,
+      follow: followsToday === true,
+    };
+  }
+  return null;
+}
+
+/** Parse a persisted payload (JSON string or object); null when unusable. */
+export function parseDateRange(raw) {
+  let value = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+
+  if (value.mode === "preset") {
+    return isPresetDays(value.days)
+      ? { mode: "preset", days: String(value.days) }
+      : null;
+  }
+  if (
+    value.mode === "custom" &&
+    isDateKey(value.start) &&
+    isDateKey(value.end) &&
+    value.start <= value.end
+  ) {
+    return {
+      mode: "custom",
+      start: value.start,
+      end: value.end,
+      follow: value.follow === true,
+    };
+  }
+  return null;
+}
+
+/** Slide a window so it ends on `todayKey`, keeping its span. */
+export function windowEndingToday(startKey, endKey, todayKey) {
+  const span = daysBetweenDateKeys(startKey, endKey);
+  if (span < 1 || !isDateKey(todayKey)) return { start: startKey, end: endKey };
+  return { start: addDaysToDateKey(todayKey, -(span - 1)), end: todayKey };
+}
+
+function formatDateKeyShort(key, todayKey) {
+  if (key === todayKey) return "Today";
+  const [year, month, day] = key.split("-");
+  return MONTH_NAMES[Number(month) - 1] + " " + Number(day) + ", " + year;
+}
+
+/**
+ * Tooltip for the picker trigger: how long the window is. A window that
+ * tracks today is "the last N days"; a fixed one is just N days long.
+ */
+export function rangeSpanLabel({
+  selectedPreset,
+  startKey,
+  endKey,
+  followsToday,
+  todayKey,
+}) {
+  if (selectedPreset) return "Last " + selectedPreset + " days";
+  if (!isDateKey(startKey) || !isDateKey(endKey)) return "";
+
+  const days = daysBetweenDateKeys(startKey, endKey);
+  if (followsToday || endKey === todayKey) {
+    return days === 1 ? "Today" : "Last " + days + " days";
+  }
+  return days === 1 ? "1 day" : days + " days";
+}
+
+/**
+ * Label for the picker trigger. A one-day window shows a single date, and
+ * today is named rather than dated.
+ */
+export function rangeLabel({ selectedPreset, startKey, endKey, todayKey }) {
+  if (selectedPreset) return "Last " + selectedPreset + " days";
+  const short = (key) => formatDateKeyShort(key, todayKey);
+  if (isDateKey(startKey) && isDateKey(endKey)) {
+    if (startKey === endKey) return short(startKey);
+    return short(startKey) + " – " + short(endKey);
+  }
+  if (isDateKey(startKey)) return short(startKey) + " – ...";
+  return "Last " + DEFAULT_PRESET_DAYS + " days";
+}

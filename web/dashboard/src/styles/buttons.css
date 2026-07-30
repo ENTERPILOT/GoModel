@@ -1,0 +1,81 @@
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0 0;
+}
+
+/* Buttons — the app-wide base and its variants. Pair `.btn` with at most one
+   of `-primary` / `-danger` / `-danger-outline`, and add `-with-icon` when the
+   button holds an <Icon> next to its label. */
+.btn {
+  padding: 6px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 70%, #000 10%);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 10px 22px rgba(59, 130, 246, 0.18);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 90%, #fff 10%);
+  border-color: color-mix(in srgb, var(--accent) 78%, #000 12%);
+}
+
+.btn-danger-outline {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: transparent;
+  font-weight: 600;
+}
+
+.btn-danger-outline:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg));
+  border-color: color-mix(in srgb, var(--danger) 75%, var(--border));
+}
+
+.btn-danger {
+  color: #fff;
+  border-color: color-mix(in srgb, var(--danger) 76%, #000 12%);
+  background: var(--danger);
+  font-weight: 600;
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--danger) 20%, transparent);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 90%, #fff 10%);
+  border-color: color-mix(in srgb, var(--danger) 82%, #000 14%);
+}
+
+.btn-with-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-with-icon .table-icon-svg {
+  width: 16px;
+  height: 16px;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

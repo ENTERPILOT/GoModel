@@ -1,8 +1,9 @@
 // Guardrails page state: definitions list + schema-driven editor form.
 // Handles the /admin/guardrails endpoints, 503 "feature unavailable"
-// responses, and the notice/error flow.
+// responses, and the notice/error flow. The request guard ladder
+// (stale → unavailable → error) lives in $lib/api/adminCrud.js.
 
-import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.js";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import {
   buildGuardrailPayload,
@@ -138,23 +139,25 @@ class GuardrailsStore {
   async fetchTypes() {
     this.typesLoading = true;
     try {
-      const result = await getJSON("/admin/guardrails/types", {
+      const outcome = await loadAdminList("/admin/guardrails/types", {
         label: "guardrail types",
       });
-      if (result.status === 503) {
+      if (outcome.status === "stale") return;
+      if (outcome.status === "unavailable") {
         this.available = false;
         this.types = [];
         return;
       }
-      if (result.stale) {
+      // Only a real gateway response proves the feature is back — a thrown
+      // request (offline, DNS) must not undo an earlier 503 unavailable.
+      if (outcome.result) {
+        this.available = true;
+      }
+      this.types = outcome.items;
+      if (outcome.status === "error") {
+        this.error = outcome.error;
         return;
       }
-      this.available = true;
-      if (!result.ok) {
-        this.types = [];
-        return;
-      }
-      this.types = Array.isArray(result.data) ? result.data : [];
       const resolvedType = resolvedGuardrailType(this.types, this.form.type);
       this.form = {
         ...this.form,
@@ -165,10 +168,6 @@ class GuardrailsStore {
           resolvedType,
         ),
       };
-    } catch (e) {
-      console.error("Failed to fetch guardrail types:", e);
-      this.types = [];
-      this.error = "Unable to load guardrail types.";
     } finally {
       this.typesLoading = false;
     }
@@ -178,27 +177,21 @@ class GuardrailsStore {
     this.loading = true;
     this.error = "";
     try {
-      const result = await getJSON("/admin/guardrails", {
+      const outcome = await loadAdminList("/admin/guardrails", {
         label: "guardrails",
       });
-      if (result.status === 503) {
+      if (outcome.status === "stale") return;
+      if (outcome.status === "unavailable") {
         this.available = false;
         this.guardrails = [];
         return;
       }
-      if (result.stale) {
-        return;
+      // Same offline guard as fetchTypes: only trust an answered request.
+      if (outcome.result) {
+        this.available = true;
       }
-      this.available = true;
-      if (!result.ok) {
-        this.guardrails = [];
-        return;
-      }
-      this.guardrails = Array.isArray(result.data) ? result.data : [];
-    } catch (e) {
-      console.error("Failed to fetch guardrails:", e);
-      this.guardrails = [];
-      this.error = "Unable to load guardrails.";
+      this.guardrails = outcome.items;
+      this.error = outcome.error;
     } finally {
       this.loading = false;
     }
@@ -226,36 +219,25 @@ class GuardrailsStore {
     const payload = buildGuardrailPayload(this.form);
 
     try {
-      const result = await sendJSON("/admin/guardrails", "PUT", payload, {
+      const outcome = await sendAdminMutation("/admin/guardrails", "PUT", payload, {
         label: "save guardrail",
+        errorFallback: "Failed to save guardrail.",
+        unavailableMessage: "Guardrails feature is unavailable.",
       });
-      if (result.status === 503) {
+      if (outcome.status === "stale") return;
+      if (outcome.status === "unavailable") {
         this.available = false;
-        this.error = "Guardrails feature is unavailable.";
+        this.error = outcome.error;
         return;
       }
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        if (result.status === 401) {
-          this.error = "Authentication required.";
-          return;
-        }
-        this.error = errorPayloadMessage(
-          result.data,
-          "Failed to save guardrail.",
-        );
-        console.error("Failed to save guardrail:", result.status, this.error);
+      if (outcome.status === "error") {
+        this.error = outcome.error;
         return;
       }
 
       flash.success('Guardrail "' + name + '" saved.');
       this.closeForm();
       void this.fetchGuardrails();
-    } catch (e) {
-      console.error("Failed to save guardrail:", e);
-      this.error = "Failed to save guardrail.";
     } finally {
       this.formSubmitting = false;
     }
@@ -279,31 +261,24 @@ class GuardrailsStore {
     this.deletingName = name;
 
     try {
-      const result = await sendJSON(
+      const outcome = await sendAdminMutation(
         "/admin/guardrails",
         "DELETE",
         { name },
-        { label: "delete guardrail" },
+        {
+          label: "delete guardrail",
+          errorFallback: "Failed to delete guardrail.",
+          unavailableMessage: "Guardrails feature is unavailable.",
+        },
       );
-      if (result.status === 503) {
+      if (outcome.status === "stale") return;
+      if (outcome.status === "unavailable") {
         this.available = false;
-        flash.error("Guardrails feature is unavailable.");
+        flash.error(outcome.error);
         return;
       }
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        if (result.status === 401) {
-          flash.error("Authentication required.");
-          return;
-        }
-        const message = errorPayloadMessage(
-          result.data,
-          "Failed to delete guardrail.",
-        );
-        console.error("Failed to delete guardrail:", result.status, message);
-        flash.error(message);
+      if (outcome.status === "error") {
+        flash.error(outcome.error);
         return;
       }
 
@@ -312,9 +287,6 @@ class GuardrailsStore {
         this.closeForm();
       }
       void this.fetchGuardrails();
-    } catch (e) {
-      console.error("Failed to delete guardrail:", e);
-      flash.error("Failed to delete guardrail.");
     } finally {
       this.deletingName = "";
     }

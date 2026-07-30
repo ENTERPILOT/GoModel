@@ -49,32 +49,61 @@
   }
 </script>
 
-<div class="cards">
+{#snippet tokenCard(label, inputTokens, outputTokens, totalTokens)}
   <div class="card card-wide">
-    <div class="card-label">Tokens</div>
+    <div class="card-label">{label}</div>
     <div class="card-value cache-token-value">
       <span
         class="cache-token-part"
-        title={tokenCountTitle("Input tokens", summary.total_input_tokens)}
+        title={tokenCountTitle("Input tokens", inputTokens)}
       >
-        <span>{formatTokensShort(summary.total_input_tokens)}</span><span
+        <span>{formatTokensShort(inputTokens)}</span><span
           class="cache-token-marker">i</span>
       </span>
       <span class="cache-token-operator">+</span>
       <span
         class="cache-token-part"
-        title={tokenCountTitle("Output tokens", summary.total_output_tokens)}
+        title={tokenCountTitle("Output tokens", outputTokens)}
       >
-        <span>{formatTokensShort(summary.total_output_tokens)}</span><span
+        <span>{formatTokensShort(outputTokens)}</span><span
           class="cache-token-marker">o</span>
       </span>
       <span class="cache-token-operator">=</span>
       <span
         class="cache-token-part"
-        title={tokenCountTitle("Total tokens", summaryTotalTokens(summary))}
-      >{formatTokensShort(summaryTotalTokens(summary))}</span>
+        title={tokenCountTitle("Total tokens", totalTokens)}
+      >{formatTokensShort(totalTokens)}</span>
     </div>
   </div>
+{/snippet}
+
+{#snippet statusCard(flagClass, statusClass, label, ratio, text, link)}
+  <div class="card provider-status-flag {flagClass} {statusClass}">
+    <div class="card-label">{label}</div>
+    <div class="card-value provider-status-value">
+      {ratio}
+    </div>
+    {#if link}
+      <button
+        type="button"
+        class="provider-status-card-link"
+        aria-label={link.title}
+        title={link.title}
+        onclick={link.onclick}
+      >{text}</button>
+    {:else}
+      <span class="provider-status-card-note">{text}</span>
+    {/if}
+  </div>
+{/snippet}
+
+<div class="cards">
+  {@render tokenCard(
+    "Tokens",
+    summary.total_input_tokens,
+    summary.total_output_tokens,
+    summaryTotalTokens(summary),
+  )}
   <div class="card">
     <div class="card-label">Total Requests</div>
     <div
@@ -93,40 +122,12 @@
     <div class="card-value">{formatCost(summary.total_cost)}</div>
   </div>
   {#if cacheEnabled}
-    <div class="card card-wide">
-      <div class="card-label">Local Cache</div>
-      <div class="card-value cache-token-value">
-        <span
-          class="cache-token-part"
-          title={tokenCountTitle(
-            "Input tokens",
-            cacheOverview.summary.total_input_tokens,
-          )}
-        >
-          <span>{formatTokensShort(cacheOverview.summary.total_input_tokens)}</span
-          ><span class="cache-token-marker">i</span>
-        </span>
-        <span class="cache-token-operator">+</span>
-        <span
-          class="cache-token-part"
-          title={tokenCountTitle(
-            "Output tokens",
-            cacheOverview.summary.total_output_tokens,
-          )}
-        >
-          <span>{formatTokensShort(cacheOverview.summary.total_output_tokens)}</span
-          ><span class="cache-token-marker">o</span>
-        </span>
-        <span class="cache-token-operator">=</span>
-        <span
-          class="cache-token-part"
-          title={tokenCountTitle(
-            "Total tokens",
-            cacheOverviewTotalTokens(cacheOverview),
-          )}
-        >{formatTokensShort(cacheOverviewTotalTokens(cacheOverview))}</span>
-      </div>
-    </div>
+    {@render tokenCard(
+      "Local Cache",
+      cacheOverview.summary.total_input_tokens,
+      cacheOverview.summary.total_output_tokens,
+      cacheOverviewTotalTokens(cacheOverview),
+    )}
   {/if}
   <div
     class="card prompt-cache-card"
@@ -150,43 +151,26 @@
     </div>
   </div>
   {#if providerSummary.total > 0}
-    <div
-      class="card provider-status-flag provider-status-overview-card {providerStatusSummaryClass(providerSummary)}"
-    >
-      <div class="card-label">Provider Status</div>
-      <div class="card-value provider-status-value">
-        {providerStatusRatioText(providerSummary)}
-      </div>
-      {#if providerStatusHasIssues(providerSummary)}
-        <button
-          type="button"
-          class="provider-status-card-link"
-          aria-label="View providers overview"
-          title="View providers overview"
-          onclick={scrollToProviderStatusSection}
-        >{providerStatusSummaryText(providerSummary)}</button>
-      {:else}
-        <span class="provider-status-card-note"
-        >{providerStatusSummaryText(providerSummary)}</span>
-      {/if}
-    </div>
+    {@render statusCard(
+      "provider-status-overview-card",
+      providerStatusSummaryClass(providerSummary),
+      "Provider Status",
+      providerStatusRatioText(providerSummary),
+      providerStatusSummaryText(providerSummary),
+      providerStatusHasIssues(providerSummary)
+        ? { title: "View providers overview", onclick: scrollToProviderStatusSection }
+        : null,
+    )}
   {/if}
   {#if mcpOverviewVisible(mcpServersState.available, mcpServersState.servers)}
-    <div
-      class="card provider-status-flag mcp-servers-flag {mcpOverviewSummaryClass(mcpServersState.servers)}"
-    >
-      <div class="card-label">MCP Servers</div>
-      <div class="card-value provider-status-value">
-        {mcpOverviewRatioText(mcpServersState.servers)}
-      </div>
-      <button
-        type="button"
-        class="provider-status-card-link"
-        aria-label="View MCP servers"
-        title="View MCP servers"
-        onclick={() => router.navigate("mcp-servers")}
-      >{mcpOverviewSummaryText(mcpServersState.servers)}</button>
-    </div>
+    {@render statusCard(
+      "mcp-servers-flag",
+      mcpOverviewSummaryClass(mcpServersState.servers),
+      "MCP Servers",
+      mcpOverviewRatioText(mcpServersState.servers),
+      mcpOverviewSummaryText(mcpServersState.servers),
+      { title: "View MCP servers", onclick: () => router.navigate("mcp-servers") },
+    )}
   {/if}
 </div>
 

@@ -1,0 +1,303 @@
+/* Usage by Model Chart Section */
+.model-chart-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.model-chart-section h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.model-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.bar-chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 180px;
+}
+
+.form-select,
+.usage-log-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 8px 34px 8px 12px;
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentcolor 50%),
+    linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) 50%,
+    calc(100% - 12px) 50%;
+  background-repeat: no-repeat;
+  background-size: 5px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.form-select:disabled,
+.usage-log-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-select:focus,
+.usage-log-select:focus {
+  border-color: var(--accent);
+}
+
+.form-select {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Request labels — one deterministic accent per label, shared with the
+   by-label chart. labelChipStyle() sets --label-color inline per chip. */
+.usage-label-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 280px;
+}
+
+.usage-label-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 9px;
+  border: 1px solid color-mix(in srgb, var(--label-color, var(--accent)) 45%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--label-color, var(--accent)) 14%, var(--bg));
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  font-style: normal;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.usage-label-chip:hover {
+  background: color-mix(in srgb, var(--label-color, var(--accent)) 26%, var(--bg));
+}
+
+.usage-label-chip.active {
+  background: color-mix(in srgb, var(--label-color, var(--accent)) 32%, var(--bg));
+  border-color: var(--label-color, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--label-color, var(--accent)) 55%, transparent);
+}
+
+@keyframes audit-live-summary-stripe-blink {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.28;
+  }
+}
+
+.audit-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  background: var(--bg-surface);
+}
+
+.audit-status-badge.status-success {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+}
+
+.audit-status-badge.status-warning {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+}
+
+.audit-status-badge.status-error {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+}
+
+.audit-status-badge.status-neutral {
+  color: var(--text-muted);
+}
+
+.audit-status-badge.status-unknown {
+  color: var(--text-muted);
+  border-color: color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.audit-pane {
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: var(--bg);
+  min-width: 0;
+  padding: 12px;
+}
+
+.audit-pane h5 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+
+.audit-prompt-cache-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--prompt-cache-color) 45%, var(--border));
+  border-radius: 999px;
+  background: var(--prompt-cache-color-bg);
+  color: var(--prompt-cache-color);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.audit-prompt-cache-highlight {
+  color: var(--prompt-cache-color);
+  font-weight: 700;
+}
+
+.audit-audio {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  white-space: normal;
+}
+
+.audit-audio-player {
+  width: 100%;
+  max-width: 420px;
+  height: 36px;
+}
+
+.audit-audio-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.audit-audio-empty {
+  align-items: flex-start;
+  padding: 4px 0;
+}
+
+.audit-audio-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.audit-audio-note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.audit-audio-metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.audit-audio-meta-row {
+  display: flex;
+  gap: 8px;
+}
+
+.audit-audio-meta-key {
+  color: var(--text-muted);
+  min-width: 120px;
+}
+
+.conversation-body-highlight {
+  display: inline;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 70%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: 2px;
+  margin: 0 0 0 -2px;
+  padding: 0 0 0 2px;
+  cursor: pointer;
+  line-height: inherit;
+}
+
+.conversation-body-highlight:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.conversation-body-highlight.conversation-system {
+  border-left-color: color-mix(in srgb, var(--warning) 70%, var(--border));
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.conversation-body-highlight.conversation-user {
+  border-left-color: color-mix(in srgb, var(--accent) 75%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.conversation-body-highlight.conversation-assistant {
+  border-left-color: color-mix(in srgb, var(--success) 65%, var(--border));
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.conversation-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 100vw);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  z-index: 60;
+  transform: translateX(100%);
+  transition: transform 0.2s ease-out;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.2);
+}
+
+.conversation-drawer.open {
+  transform: translateX(0);
+}
+
+body.conversation-drawer-open {
+  overflow: hidden;
+}
+
+#interactions-drawer-content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}

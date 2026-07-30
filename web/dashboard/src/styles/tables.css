@@ -1,0 +1,275 @@
+/* Table */
+.table-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+.table-toolbar-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.table-toolbar-actions {
+  margin-left: auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
+input:is([type="text"], [type="date"], [type="number"]) {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+input:is([type="text"], [type="date"], [type="number"]):focus {
+  border-color: var(--accent);
+}
+
+/* Shared disabled look for every text-like form control, so a read-only
+   field (e.g. an immutable name, or a value owned by config.yaml/env) reads
+   as disabled consistently everywhere instead of looking identical to an
+   editable one. */
+input:is([type="text"], [type="date"], [type="number"]):disabled,
+textarea:disabled,
+.form-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.table-wrapper {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.data-table th {
+  text-align: left;
+  padding: 12px 16px;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table th.model-actions-header {
+  text-align: right;
+  min-width: 156px;
+  width: 1%;
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table tr:hover td {
+  background: var(--bg-surface-hover);
+}
+
+.mono {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.font-size-md {
+  font-size: 13px;
+}
+
+/* Numeric column. The `th` needs the extra specificity to beat
+   `.data-table th`'s left alignment; the bare class covers the body cells. */
+.col-price,
+.data-table th.col-price {
+  text-align: right;
+}
+
+td.col-price {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.provider-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 48px 0;
+  font-size: 14px;
+}
+
+.empty-state-icon {
+  display: block;
+  width: auto;
+  height: auto;
+  max-height: 160px;
+  margin: 0 auto;
+  color: var(--text-muted);
+}
+
+.empty-state-icon text {
+  font-family: inherit;
+  font-weight: 600;
+  fill: var(--text-muted);
+}
+
+/* Empty-state illustration (with baked-in label) centered over the blank usage chart, filling its height. */
+.chart-empty-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.chart-empty-overlay .empty-state-icon {
+  width: auto;
+  height: auto;
+  max-height: 195px;
+  max-width: 90%;
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: loading-spin 0.8s linear infinite;
+}
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.table-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.table-action-btn:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+}
+
+.table-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.table-action-btn-danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+}
+
+.table-action-btn-active {
+  color: var(--accent-strong, var(--accent));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+
+.table-action-btn-active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface-hover));
+}
+
+.table-action-btn-failover-active {
+  position: relative;
+  color: var(--info);
+  background: color-mix(in srgb, var(--cache-meter-prompt) 35%, var(--bg));
+  border-color: color-mix(in srgb, var(--info) 45%, var(--border));
+}
+
+.table-action-btn-failover-active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--cache-meter-prompt) 45%, var(--bg-surface-hover));
+}
+
+.table-icon-btn {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  gap: 0;
+  /* Rounded-square, matching .table-action-btn's own radius, so every
+     icon-only action button (row actions, remove-row buttons in MCP
+     servers/Providers/Virtual Models/Failover forms, ...) reads as the same
+     shape as Budgets' label-expanding action buttons instead of a circle. */
+  border-radius: 6px;
+}
+
+.table-icon-btn.table-action-btn-active {
+  position: relative;
+}
+
+.table-icon-btn.table-action-btn-active::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-surface);
+}
+
+.table-icon-btn.table-action-btn-failover-active::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--info);
+  box-shadow: 0 0 0 2px var(--bg-surface);
+}
+
+.table-icon-svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
