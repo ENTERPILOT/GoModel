@@ -20,6 +20,7 @@
   function toggle() {
     open = !open;
     if (open) {
+      dateRange.syncToToday();
       calendarMonth = timezone.startOfMonthDate(
         dateRange.customEndDate || timezone.todayDate(),
       );
@@ -67,27 +68,15 @@
   // second click sets the end, swapping the pair if it lands before the start.
   function selectCalendarDay(day) {
     const clicked = new Date(day.date);
-    dateRange.selectedPreset = null;
 
     if (selectingDate === "start") {
-      dateRange.customStartDate = clicked;
-      if (dateRange.customEndDate && dateRange.customEndDate < clicked) {
-        dateRange.customEndDate = clicked;
-      }
-      if (!dateRange.customEndDate) {
-        dateRange.customEndDate = timezone.todayDate();
-      }
+      dateRange.selectStart(clicked);
       selectingDate = "end";
       onchange?.();
       return;
     }
 
-    if (clicked < dateRange.customStartDate) {
-      dateRange.customEndDate = dateRange.customStartDate;
-      dateRange.customStartDate = clicked;
-    } else {
-      dateRange.customEndDate = clicked;
-    }
+    dateRange.selectEnd(clicked);
     selectingDate = "start";
     onchange?.();
     close();

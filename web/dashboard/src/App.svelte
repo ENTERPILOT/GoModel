@@ -8,6 +8,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { themeStore, sidebar, modals } from "$lib/stores/ui.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { dateRange } from "$lib/stores/dateRange.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
 
@@ -40,6 +41,7 @@
   };
 
   timezone.init();
+  dateRange.init(); // after timezone.init(): "today" is timezone dependent
   auth.init();
   themeStore.init();
   sidebar.init();
