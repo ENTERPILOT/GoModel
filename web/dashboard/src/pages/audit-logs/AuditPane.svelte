@@ -151,20 +151,12 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .audit-pane-split .audit-pane-block-headers, .audit-pane-split .audit-pane-block-body {
-    margin-top: 0;
-  }
-
   .audit-pane-split .audit-pane-block-error, .audit-pane-split .audit-pane-empty, .audit-pane-split .audit-size-warning {
     grid-column: 1 / -1;
   }
 
   .audit-pane-block {
     min-width: 0;
-  }
-
-  .audit-pane-block + .audit-pane-block {
-    margin-top: 10px;
   }
 
   .audit-pane-block > :global(h5) {
