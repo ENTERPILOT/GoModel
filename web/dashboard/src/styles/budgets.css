@@ -1,0 +1,360 @@
+
+.budget-list {
+  display: grid;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.budget-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.budget-row-main {
+  min-width: 0;
+}
+
+.budget-row-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Shared shape of a scoped subject: a user path or a request label. The scope
+   modifier below only changes the hue. */
+.budget-scope-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  color: var(--text);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.budget-user-path {
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
+}
+
+/* --label-color is the same per-label hue the usage log and API keys use, so
+   one label reads the same everywhere in the dashboard. */
+.budget-label {
+  border: 1px solid color-mix(in srgb, var(--label-color, var(--accent)) 45%, var(--border));
+  background: color-mix(in srgb, var(--label-color, var(--accent)) 14%, var(--bg));
+}
+
+.budget-scope-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  stroke-width: 2.2;
+  opacity: 0.85;
+}
+
+.budget-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.budget-source {
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.budget-row-period {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.budget-row-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.budget-bars {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.budget-bar-line {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.budget-bar-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.budget-bar-percent {
+  font-weight: 700;
+}
+
+.budget-bar-track {
+  position: relative;
+  height: 16px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 75%, var(--bg));
+}
+
+.budget-bar-fill {
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.budget-bar-fill-usage {
+  background: color-mix(in srgb, var(--success) 82%, var(--accent));
+}
+
+.budget-bar-fill-danger {
+  background: var(--danger);
+}
+
+.budget-bar-text-row {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  color: var(--text);
+}
+.budget-bar-text {
+  position: absolute;
+  top: 50%;
+  max-width: min(44%, 190px);
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.budget-bar-text-center {
+  left: 50%;
+  max-width: min(46%, 240px);
+  transform: translate(-50%, -50%);
+}
+
+.budget-bar-text-end {
+  right: 8px;
+  max-width: min(34%, 180px);
+  text-align: right;
+  transform: translateY(-50%);
+}
+
+.budget-period-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.budget-period-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  stroke-width: 2.2;
+}
+
+.budget-period-label-monthly {
+  border-color: color-mix(in srgb, #30302c 62%, var(--border));
+  background: color-mix(in srgb, #30302c 12%, var(--bg));
+  color: color-mix(in srgb, #30302c 34%, var(--text) 66%);
+}
+
+.budget-period-label-weekly {
+  border-color: color-mix(in srgb, #68765c 62%, var(--border));
+  background: color-mix(in srgb, #68765c 12%, var(--bg));
+  color: color-mix(in srgb, #68765c 34%, var(--text) 66%);
+}
+
+.budget-period-label-daily {
+  border-color: color-mix(in srgb, #b5652d 62%, var(--border));
+  background: color-mix(in srgb, #b5652d 12%, var(--bg));
+  color: color-mix(in srgb, #b5652d 34%, var(--text) 66%);
+}
+
+.budget-period-label-hourly {
+  border-color: color-mix(in srgb, #783f22 62%, var(--border));
+  background: color-mix(in srgb, #783f22 12%, var(--bg));
+  color: color-mix(in srgb, #783f22 34%, var(--text) 66%);
+}
+
+.budget-period-label-custom {
+  border-style: dashed;
+  border-color: color-mix(in srgb, #bfa584 68%, var(--border));
+  background: color-mix(in srgb, #bfa584 16%, var(--bg));
+  color: color-mix(in srgb, #8b6f4f 34%, var(--text) 66%);
+}
+
+[data-theme="light"] .budget-period-label-monthly {
+  color: #30302c;
+}
+
+[data-theme="light"] .budget-period-label-weekly {
+  color: #68765c;
+}
+
+[data-theme="light"] .budget-period-label-daily {
+  color: #b5652d;
+}
+
+[data-theme="light"] .budget-period-label-hourly {
+  color: #783f22;
+}
+
+[data-theme="light"] .budget-period-label-custom {
+  color: #8b6f4f;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .budget-period-label-monthly {
+      color: #30302c;
+    }
+
+  :root:not([data-theme="dark"]) .budget-period-label-weekly {
+      color: #68765c;
+    }
+
+  :root:not([data-theme="dark"]) .budget-period-label-daily {
+      color: #b5652d;
+    }
+
+  :root:not([data-theme="dark"]) .budget-period-label-hourly {
+      color: #783f22;
+    }
+
+  :root:not([data-theme="dark"]) .budget-period-label-custom {
+      color: #8b6f4f;
+    }
+}
+
+.budget-row-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.budget-action-btn {
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  gap: 0;
+  padding: 0;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    width 0.18s ease,
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+
+.budget-action-btn:hover,
+.budget-action-btn:focus-visible {
+  width: 82px;
+  gap: 6px;
+  padding: 0 9px;
+}
+
+.budget-action-label {
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    max-width 0.18s ease,
+    opacity 0.12s ease;
+}
+
+.budget-action-btn:hover .budget-action-label,
+.budget-action-btn:focus-visible .budget-action-label {
+  max-width: 58px;
+  opacity: 1;
+}
+
+.budget-action-btn-warning {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+}
+
+.budget-action-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.budget-editor {
+  background: color-mix(in srgb, var(--bg-surface) 86%, var(--bg) 14%);
+}
+
+.budget-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.budget-reset-dialog {
+  max-width: 460px;
+}
+
+.form-action-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
+.settings-refresh-alert {
+  margin-top: 16px;
+  margin-bottom: 0;
+}

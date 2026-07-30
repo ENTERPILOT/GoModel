@@ -7,7 +7,8 @@
 //   PUT    /admin/provider-credentials          — upsert one row
 //   DELETE /admin/provider-credentials/{name}   — delete one row
 
-import { errorPayloadMessage, getJSON, sendJSON, isAbortError } from "$lib/api/client.js";
+import { errorPayloadMessage } from "$lib/api/client.js";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
@@ -73,19 +74,17 @@ class ProvidersConfigState {
     return providerCredentialFormFields(schema, schema && schema.default_base_url);
   }
 
+  // Schema load failures stay silent: the editor falls back to showing every
+  // field, and the list request already reports availability problems.
   async fetchTypes() {
-    try {
-      const result = await getJSON("/admin/provider-credentials/types", {
-        label: "provider credential types",
-      });
-      if (result.stale) return;
-      if (result.status === 503 || result.status === 404) return;
-      if (!result.ok) return;
-      this.types = Array.isArray(result.data) ? result.data : [];
-      this.typesLoaded = true;
-    } catch (e) {
-      console.error("Failed to fetch provider credential types:", e);
+    const outcome = await loadAdminList("/admin/provider-credentials/types", {
+      label: "provider credential types",
+    });
+    if (outcome.status !== "ok") {
+      return;
     }
+    this.types = outcome.items;
+    this.typesLoaded = true;
   }
 
   async fetchPage() {
@@ -95,36 +94,35 @@ class ProvidersConfigState {
     this.loading = true;
     this.error = "";
     try {
-      const result = await getJSON("/admin/provider-credentials", {
+      const outcome = await loadAdminList("/admin/provider-credentials", {
         label: "provider credentials",
-        signal: controller.signal,
+        errorFallback: "Failed to load provider credentials.",
+        unavailableStatuses: [503, 404],
+        options: { signal: controller.signal },
       });
-      if (result.stale || controller.signal.aborted) return;
-      if (result.status === 503 || result.status === 404) {
+      if (outcome.status === "stale" || controller.signal.aborted) {
+        return;
+      }
+      if (outcome.status === "unavailable") {
         this.available = false;
         this.rows = [];
         return;
       }
-      this.available = true;
-      if (!result.ok) {
-        this.rows = [];
-        if (result.status !== 401) {
-          this.error = errorPayloadMessage(
-            result.data,
-            "Failed to load provider credentials.",
-          );
+      if (outcome.status === "error") {
+        // A gateway response proves the endpoint exists; a network failure
+        // (result === null) leaves the availability flag as-is.
+        if (outcome.result) {
+          this.available = true;
         }
+        this.rows = [];
+        this.error = outcome.error;
         return;
       }
-      this.rows = Array.isArray(result.data) ? result.data : [];
+      this.available = true;
+      this.rows = outcome.items;
       if (!this.typesLoaded) {
         await this.fetchTypes();
       }
-    } catch (e) {
-      if (isAbortError(e)) return;
-      console.error("Failed to fetch provider credentials:", e);
-      this.rows = [];
-      this.error = "Unable to load provider credentials.";
     } finally {
       if (this.#controller === controller) {
         this.#controller = null;
@@ -277,21 +275,27 @@ class ProvidersConfigState {
     this.fieldErrors = {};
     this.formSubmitting = true;
     try {
-      const result = await sendJSON("/admin/provider-credentials", "PUT", payload, {
+      const outcome = await sendAdminMutation("/admin/provider-credentials", "PUT", payload, {
         label: "save provider credential",
+        errorFallback: "Failed to save provider credential.",
+        unavailableMessage: "Provider credential management is unavailable.",
       });
-      if (result.stale) return;
-      if (result.status === 503) {
-        this.available = false;
-        this.error = "Provider credential management is unavailable.";
+      if (outcome.status === "stale") {
         return;
       }
-      if (!result.ok) {
-        if (result.status === 401) {
-          this.error = "Authentication required.";
-          return;
+      if (outcome.status === "unavailable") {
+        this.available = false;
+        this.error = outcome.error;
+        return;
+      }
+      if (outcome.status === "error") {
+        // Non-401 gateway rejections carry `error.param`, so route them to
+        // the offending field; everything else lands in the form error slot.
+        if (outcome.result && outcome.result.status !== 401) {
+          this.#reportSaveError(outcome.result.data);
+        } else {
+          this.error = outcome.error;
         }
-        this.#reportSaveError(result.data);
         return;
       }
 
@@ -299,9 +303,6 @@ class ProvidersConfigState {
       this.closeForm();
       this.#refreshInventory();
       void this.fetchPage();
-    } catch (e) {
-      console.error("Failed to save provider credential:", e);
-      this.error = "Failed to save provider credential.";
     } finally {
       this.formSubmitting = false;
     }
@@ -311,26 +312,26 @@ class ProvidersConfigState {
     this.deleteSubmitting = true;
     this.deletingName = name;
     try {
-      const result = await sendJSON(
+      const outcome = await sendAdminMutation(
         "/admin/provider-credentials/" + encodeURIComponent(name),
         "DELETE",
         undefined,
-        { label: "delete provider credential" },
+        {
+          label: "delete provider credential",
+          errorFallback: "Failed to delete provider credential.",
+          unavailableMessage: "Provider credential management is unavailable.",
+        },
       );
-      if (result.stale) return;
-      if (result.status === 503) {
-        this.available = false;
-        confirmDialog.error = "Provider credential management is unavailable.";
+      if (outcome.status === "stale") {
         return;
       }
-      if (!result.ok) {
-        confirmDialog.error =
-          result.status === 401
-            ? "Authentication required."
-            : errorPayloadMessage(
-                result.data,
-                "Failed to delete provider credential.",
-              );
+      if (outcome.status === "unavailable") {
+        this.available = false;
+        confirmDialog.error = outcome.error;
+        return;
+      }
+      if (outcome.status === "error") {
+        confirmDialog.error = outcome.error;
         return;
       }
 
@@ -341,9 +342,6 @@ class ProvidersConfigState {
       }
       this.#refreshInventory();
       void this.fetchPage();
-    } catch (e) {
-      console.error("Failed to delete provider credential:", e);
-      confirmDialog.error = "Failed to delete provider credential.";
     } finally {
       this.deleteSubmitting = false;
       this.deletingName = "";

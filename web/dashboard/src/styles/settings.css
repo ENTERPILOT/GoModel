@@ -1,0 +1,119 @@
+.settings-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+.inline-help-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inline-help-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.inline-help-title-row h2,
+.inline-help-title-row h3 {
+  margin-bottom: 0;
+}
+
+.inline-help-title-row h2:empty,
+.inline-help-title-row h3:empty {
+  display: none;
+}
+
+.inline-help-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.inline-help-toggle::before {
+  content: "";
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: transparent;
+  pointer-events: auto;
+}
+
+.inline-help-toggle:hover {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  color: var(--text);
+}
+
+.inline-help-toggle:active {
+  background: transparent;
+}
+
+.inline-help-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  outline-offset: 2px;
+}
+
+.inline-help-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding-bottom: 1px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.52s cubic-bezier(0.22, 0.72, 0.12, 1);
+}
+
+.inline-help-copy {
+  max-width: 780px;
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+.settings-select {
+  width: 100%;
+}
+
+.settings-refresh-section {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-refresh-section h3 {
+  font-size: 18px;
+}
+
+.settings-refresh-section p {
+  max-width: 720px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}

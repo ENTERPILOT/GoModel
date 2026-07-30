@@ -2,7 +2,7 @@
 // on top of the shared admin API client (401s and stale-auth are handled by
 // the client).
 
-import { errorPayloadMessage, getJSON, sendJSON } from "$lib/api/client.js";
+import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import {
@@ -51,27 +51,29 @@ class AuthKeysStore {
     this.loading = true;
     this.error = "";
     try {
-      const result = await getJSON("/admin/auth-keys", { label: "auth keys" });
-      if (result.status === 503) {
+      const outcome = await loadAdminList("/admin/auth-keys", {
+        label: "auth keys",
+        errorFallback: "Unable to load API keys.",
+      });
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
         this.available = false;
         this.keys = [];
         return;
       }
-      if (result.stale) {
+      if (outcome.status === "error") {
+        // Any load failure keeps the last-known rows next to the inline
+        // error; only an answered request proves availability.
+        if (outcome.result) {
+          this.available = true;
+        }
+        this.error = outcome.error;
         return;
       }
       this.available = true;
-      if (!result.ok) {
-        if (result.status !== 401) {
-          this.error = errorPayloadMessage(result.data, "Unable to load API keys.");
-        }
-        return;
-      }
-      this.keys = Array.isArray(result.data) ? result.data : [];
-    } catch (e) {
-      console.error("Failed to fetch auth keys:", e);
-      this.keys = [];
-      this.error = "Unable to load API keys.";
+      this.keys = outcome.items;
     } finally {
       this.loading = false;
     }
@@ -121,27 +123,27 @@ class AuthKeysStore {
     this.error = "";
     this.formSubmitting = true;
     try {
-      const result = await sendJSON("/admin/auth-keys", "POST", built.payload, {
+      const outcome = await sendAdminMutation("/admin/auth-keys", "POST", built.payload, {
         label: "create API key",
+        errorFallback: "Failed to create API key.",
+        unavailableMessage: "Auth keys feature is unavailable.",
       });
-      if (result.status === 503) {
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
         this.available = false;
-        this.error = "Auth keys feature is unavailable.";
+        this.error = outcome.error;
         return;
       }
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        if (result.status === 401) {
-          this.error = "Authentication required.";
-          return;
+      if (outcome.status === "error") {
+        this.error = outcome.error;
+        if (outcome.result && outcome.result.status !== 401) {
+          console.error("Failed to create API key:", outcome.result.status, this.error);
         }
-        this.error = errorPayloadMessage(result.data, "Failed to create API key.");
-        console.error("Failed to create API key:", result.status, this.error);
         return;
       }
-      const issued = result.data || {};
+      const issued = outcome.result.data || {};
       this.issuedValue = issued.value || "";
       // Reopen the editor if issuance finished after a manual close so the
       // one-time secret is always shown.
@@ -149,9 +151,6 @@ class AuthKeysStore {
       this.copyState.reset();
       this.form = defaultAuthKeyForm();
       void this.fetchKeys();
-    } catch (e) {
-      console.error("Failed to issue auth key:", e);
-      this.error = "Failed to create API key.";
     } finally {
       this.formSubmitting = false;
     }
@@ -188,36 +187,35 @@ class AuthKeysStore {
     const payload = { labels: parseAuthKeyLabels(editor.value) };
 
     try {
-      const result = await sendJSON(
+      const outcome = await sendAdminMutation(
         "/admin/auth-keys/" + encodeURIComponent(editor.id) + "/labels",
         "PUT",
         payload,
-        { label: "update API key labels" },
+        {
+          label: "update API key labels",
+          errorFallback: "Failed to update labels.",
+          unavailableMessage: "Auth keys feature is unavailable.",
+        },
       );
-      if (result.status === 503) {
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
         this.available = false;
-        editor.error = "Auth keys feature is unavailable.";
+        editor.error = outcome.error;
         return;
       }
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        if (result.status === 401) {
-          editor.error = "Authentication required.";
-          return;
+      if (outcome.status === "error") {
+        editor.error = outcome.error;
+        if (outcome.result && outcome.result.status !== 401) {
+          console.error("Failed to update auth key labels:", outcome.result.status, editor.error);
         }
-        editor.error = errorPayloadMessage(result.data, "Failed to update labels.");
-        console.error("Failed to update auth key labels:", result.status, editor.error);
         return;
       }
       flash.success('Labels updated for key "' + editor.name + '".');
       editor.submitting = false;
       this.closeLabelsEditor();
       void this.fetchKeys();
-    } catch (e) {
-      console.error("Failed to update auth key labels:", e);
-      editor.error = "Failed to update labels.";
     } finally {
       editor.submitting = false;
     }
@@ -231,37 +229,39 @@ class AuthKeysStore {
 
     this.dashboardAccessID = key.id;
     try {
-      const result = await sendJSON(
+      const outcome = await sendAdminMutation(
         "/admin/auth-keys/" + encodeURIComponent(key.id) + "/dashboard-access",
         "PUT",
         { dashboard_access: grant },
-        { label: "update API key dashboard access" },
+        {
+          label: "update API key dashboard access",
+          errorFallback: "Failed to update dashboard access.",
+          unavailableMessage: "Auth keys feature is unavailable.",
+        },
       );
-      if (result.status === 503) {
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
         this.available = false;
-        flash.error("Auth keys feature is unavailable.");
+        flash.error(outcome.error);
         return;
       }
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        if (result.status === 401) {
-          flash.error("Authentication required.");
-          return;
+      if (outcome.status === "error") {
+        if (outcome.result && outcome.result.status !== 401) {
+          console.error(
+            "Failed to update auth key dashboard access:",
+            outcome.result.status,
+            outcome.error,
+          );
         }
-        const message = errorPayloadMessage(result.data, "Failed to update dashboard access.");
-        console.error("Failed to update auth key dashboard access:", result.status, message);
-        flash.error(message);
+        flash.error(outcome.error);
         return;
       }
       flash.success(
         'Dashboard access ' + (grant ? "granted to" : "revoked for") + ' key "' + key.name + '".',
       );
       void this.fetchKeys();
-    } catch (e) {
-      console.error("Failed to update auth key dashboard access:", e);
-      flash.error("Failed to update dashboard access.");
     } finally {
       this.dashboardAccessID = "";
     }
@@ -277,35 +277,33 @@ class AuthKeysStore {
 
     this.deactivatingID = key.id;
     try {
-      const result = await sendJSON(
+      const outcome = await sendAdminMutation(
         "/admin/auth-keys/" + encodeURIComponent(key.id) + "/deactivate",
         "POST",
         undefined,
-        { label: "deactivate API key" },
+        {
+          label: "deactivate API key",
+          errorFallback: "Failed to deactivate key.",
+          unavailableMessage: "Auth keys feature is unavailable.",
+        },
       );
-      if (result.status === 503) {
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
         this.available = false;
-        flash.error("Auth keys feature is unavailable.");
+        flash.error(outcome.error);
         return;
       }
-      if (result.stale) {
-        return;
-      }
-      if (!result.ok) {
-        if (result.status === 401) {
-          flash.error("Authentication required.");
-          return;
+      if (outcome.status === "error") {
+        if (outcome.result && outcome.result.status !== 401) {
+          console.error("Failed to deactivate auth key:", outcome.result.status, outcome.error);
         }
-        const message = errorPayloadMessage(result.data, "Failed to deactivate key.");
-        console.error("Failed to deactivate auth key:", result.status, message);
-        flash.error(message);
+        flash.error(outcome.error);
         return;
       }
       flash.success('Key "' + key.name + '" deactivated.');
       void this.fetchKeys();
-    } catch (e) {
-      console.error("Failed to deactivate auth key:", e);
-      flash.error("Failed to deactivate key.");
     } finally {
       this.deactivatingID = "";
     }

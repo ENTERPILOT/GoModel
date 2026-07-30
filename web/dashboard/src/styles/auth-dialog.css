@@ -1,0 +1,75 @@
+.auth-dialog {
+  width: min(440px, 100%);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+  padding: 22px;
+}
+
+.auth-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.auth-dialog h2 {
+  font-size: 22px;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+.auth-dialog-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.auth-dialog-close:hover {
+  color: var(--text);
+  background: var(--bg-surface-hover);
+}
+
+.auth-dialog-close:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+  outline-offset: 2px;
+}
+
+.auth-dialog-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.auth-dialog-error {
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auth-dialog-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.auth-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}

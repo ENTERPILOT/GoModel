@@ -1,13 +1,13 @@
 <script>
-  // Provider credential editor modal (create + edit). Name and Type are
-  // immutable once a provider exists; API keys and service-account secrets
-  // round-trip as "***********" masks that preserve the stored value.
+  // Provider credential editor modal (create + edit), built on the shared
+  // EditorDialog shell. Name and Type are immutable once a provider exists;
+  // API keys and service-account secrets round-trip as "***********" masks
+  // that preserve the stored value.
   //
   // Everything below Name is rendered from the selected type's credential
   // schema, so an operator only ever sees the fields that type actually uses.
-  import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
-  import Modal from "$lib/components/atoms/Modal.svelte";
-  import Icon from "$lib/components/atoms/Icon.svelte";
+  import EnabledToggle from "$lib/components/atoms/EnabledToggle.svelte";
+  import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import ProviderCredentialField from "./ProviderCredentialField.svelte";
   import { providersConfig } from "./providersConfig.svelte.js";
   import {
@@ -54,136 +54,106 @@
   });
 </script>
 
-<Modal open={providersConfig.formOpen} variant="editor" onclose={() => providersConfig.closeForm()}>
-  <div class="model-editor" role="dialog" aria-modal="true" aria-label="Provider credential editor">
-    <form
-      class="form"
-      novalidate
-      onsubmit={(event) => {
-        event.preventDefault();
-        providersConfig.submitForm();
-      }}
+<EditorDialog
+  open={providersConfig.formOpen}
+  title={providersConfig.formMode === "edit" ? "Edit Provider" : "Add Provider"}
+  ariaLabel="Provider credential editor"
+  error={providersConfig.error}
+  submitting={providersConfig.formSubmitting}
+  novalidate
+  onclose={() => providersConfig.closeForm()}
+  onsubmit={() => providersConfig.submitForm()}
+>
+  {#snippet headerHint()}
+    <p class="form-hint">The name is the stable identity used for routing and cannot change once created.</p>
+  {/snippet}
+
+  <div class="form-field">
+    <label class="form-field-label" for="provider-credential-type">
+      Type<span class="form-field-required" aria-hidden="true">*</span>
+    </label>
+    <select
+      id="provider-credential-type"
+      class="form-select"
+      bind:value={providersConfig.form.type}
+      disabled={providersConfig.formMode === "edit"}
+      aria-invalid={typeError ? "true" : undefined}
+      aria-describedby={typeError ? "provider-credential-type-error" : "provider-credential-type-hint"}
+      onchange={onTypeChange}
+      data-modal-autofocus
     >
-      <div class="editor-header">
-        <div>
-          <h3>{providersConfig.formMode === "edit" ? "Edit Provider" : "Add Provider"}</h3>
-          <p class="form-hint">The name is the stable identity used for routing and cannot change once created.</p>
-        </div>
-        <DialogCloseButton
-          label="Close provider editor"
-          onclick={() => providersConfig.closeForm()}
-        />
-      </div>
-
-      {#if providersConfig.error}
-        <p class="form-error" role="alert" aria-live="assertive">{providersConfig.error}</p>
-      {/if}
-
-      <div class="form-field">
-        <label class="form-field-label" for="provider-credential-type">
-          Type<span class="form-field-required" aria-hidden="true">*</span>
-        </label>
-        <select
-          id="provider-credential-type"
-          class="form-select"
-          bind:value={providersConfig.form.type}
-          disabled={providersConfig.formMode === "edit"}
-          aria-invalid={typeError ? "true" : undefined}
-          aria-describedby={typeError ? "provider-credential-type-error" : "provider-credential-type-hint"}
-          onchange={onTypeChange}
-          data-modal-autofocus
-        >
-          <option value="" disabled>Select a provider type&hellip;</option>
-          {#each typeOptions as type (type)}
-            <option value={type}>{type}</option>
-          {/each}
-        </select>
-        {#if typeError}
-          <small class="form-field-error" id="provider-credential-type-error" role="alert">{typeError}</small>
-        {:else}
-          <small class="form-hint" id="provider-credential-type-hint">Determines which fields the gateway uses to build requests.</small>
-        {/if}
-      </div>
-
-      <div class="form-field">
-        <label class="form-field-label" for="provider-credential-name">
-          Name<span class="form-field-required" aria-hidden="true">*</span>
-        </label>
-        <input
-          id="provider-credential-name"
-          type="text"
-          class="mono"
-          placeholder="my-openai"
-          bind:value={providersConfig.form.name}
-          disabled={providersConfig.formMode === "edit"}
-          aria-invalid={nameError ? "true" : undefined}
-          aria-describedby={nameError ? "provider-credential-name-error" : "provider-credential-name-hint"}
-          oninput={() => providersConfig.clearFieldError("name")}
-        />
-        {#if nameError}
-          <small class="form-field-error" id="provider-credential-name-error" role="alert">{nameError}</small>
-        {:else if providersConfig.formMode === "create"}
-          <small class="form-hint" id="provider-credential-name-hint">Suggested from the selected type; used to route requests to this provider instance and editable before saving.</small>
-        {:else}
-          <small class="form-hint" id="provider-credential-name-hint">Immutable once created.</small>
-        {/if}
-      </div>
-
-      {#if !providersConfig.form.type}
-        <p class="form-hint">Pick a type to configure its credentials — each provider type asks for different settings.</p>
-      {/if}
-
-      {#each fields.primary as field (field.name)}
-        <ProviderCredentialField {field} />
+      <option value="" disabled>Select a provider type&hellip;</option>
+      {#each typeOptions as type (type)}
+        <option value={type}>{type}</option>
       {/each}
-
-      <div class="vm-status-row">
-        <div class="vm-status-toggle">
-          <button
-            type="button"
-            class="alias-toggle"
-            class:enabled={providersConfig.form.enabled}
-            aria-label={(providersConfig.form.enabled ? "Disable" : "Enable") + " provider"}
-            onclick={() => (providersConfig.form.enabled = !providersConfig.form.enabled)}
-          >
-            <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
-            <span>{providersConfig.form.enabled ? "Enabled" : "Disabled"}</span>
-          </button>
-        </div>
-      </div>
-
-      {#if fields.advanced.length > 0}
-        <details
-          class="mcp-server-advanced"
-          open={providersConfig.advancedOpen}
-          ontoggle={(event) => (providersConfig.advancedOpen = event.currentTarget.open)}
-        >
-          <summary>
-            <span class="mcp-server-advanced-summary-copy">
-              <span class="mcp-server-advanced-title">Advanced settings</span>
-              <span class="form-hint">{fields.advanced.map((field) => field.label).join(", ")}</span>
-            </span>
-          </summary>
-
-          <div class="mcp-server-advanced-fields">
-            {#each fields.advanced as field (field.name)}
-              <ProviderCredentialField {field} />
-            {/each}
-          </div>
-        </details>
-      {/if}
-
-      <div class="form-actions">
-        <button type="button" class="btn" onclick={() => providersConfig.closeForm()}>Cancel</button>
-        <button
-          type="submit"
-          class="btn btn-primary btn-with-icon"
-          disabled={providersConfig.formSubmitting}
-        >
-          <Icon name="save" class="form-action-icon" />
-          <span>{providersConfig.formSubmitting ? "Saving..." : "Save"}</span>
-        </button>
-      </div>
-    </form>
+    </select>
+    {#if typeError}
+      <small class="form-field-error" id="provider-credential-type-error" role="alert">{typeError}</small>
+    {:else}
+      <small class="form-hint" id="provider-credential-type-hint">Determines which fields the gateway uses to build requests.</small>
+    {/if}
   </div>
-</Modal>
+
+  <div class="form-field">
+    <label class="form-field-label" for="provider-credential-name">
+      Name<span class="form-field-required" aria-hidden="true">*</span>
+    </label>
+    <input
+      id="provider-credential-name"
+      type="text"
+      class="mono"
+      placeholder="my-openai"
+      bind:value={providersConfig.form.name}
+      disabled={providersConfig.formMode === "edit"}
+      aria-invalid={nameError ? "true" : undefined}
+      aria-describedby={nameError ? "provider-credential-name-error" : "provider-credential-name-hint"}
+      oninput={() => providersConfig.clearFieldError("name")}
+    />
+    {#if nameError}
+      <small class="form-field-error" id="provider-credential-name-error" role="alert">{nameError}</small>
+    {:else if providersConfig.formMode === "create"}
+      <small class="form-hint" id="provider-credential-name-hint">Suggested from the selected type; used to route requests to this provider instance and editable before saving.</small>
+    {:else}
+      <small class="form-hint" id="provider-credential-name-hint">Immutable once created.</small>
+    {/if}
+  </div>
+
+  {#if !providersConfig.form.type}
+    <p class="form-hint">Pick a type to configure its credentials — each provider type asks for different settings.</p>
+  {/if}
+
+  {#each fields.primary as field (field.name)}
+    <ProviderCredentialField {field} />
+  {/each}
+
+  <div class="vm-status-row">
+    <div class="vm-status-toggle">
+      <EnabledToggle
+        enabled={providersConfig.form.enabled}
+        label="provider"
+        onclick={() => (providersConfig.form.enabled = !providersConfig.form.enabled)}
+      />
+    </div>
+  </div>
+
+  {#if fields.advanced.length > 0}
+    <details
+      class="mcp-server-advanced"
+      open={providersConfig.advancedOpen}
+      ontoggle={(event) => (providersConfig.advancedOpen = event.currentTarget.open)}
+    >
+      <summary>
+        <span class="mcp-server-advanced-summary-copy">
+          <span class="mcp-server-advanced-title">Advanced settings</span>
+          <span class="form-hint">{fields.advanced.map((field) => field.label).join(", ")}</span>
+        </span>
+      </summary>
+
+      <div class="mcp-server-advanced-fields">
+        {#each fields.advanced as field (field.name)}
+          <ProviderCredentialField {field} />
+        {/each}
+      </div>
+    </details>
+  {/if}
+</EditorDialog>
