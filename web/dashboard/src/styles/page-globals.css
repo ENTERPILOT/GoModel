@@ -1,0 +1,298 @@
+/* Workflow pipeline connector + node bases. They stay global because
+   WorkflowChart's state variants are composed from dynamic class strings the
+   compiler cannot see (see workflowChartLogic.js). */
+.workflow-conn {
+  flex: 1 1 0;
+  min-width: 13px;
+  position: relative;
+  width: auto;
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 44%, var(--border));
+}
+
+.workflow-conn::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 7px;
+  height: 9px;
+  background: color-mix(in srgb, var(--accent) 44%, var(--border));
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+.workflow-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  min-width: 72px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.auth-key-description {
+  color: var(--text-muted);
+  font-size: 13px;
+  max-width: 220px;
+}
+
+.auth-key-status-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.auth-key-status-active {
+  background: color-mix(in srgb, var(--success) 12%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border));
+  color: var(--success);
+}
+
+.auth-key-status-inactive {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border));
+  color: var(--danger);
+}
+
+/* MCP server editor: keep optional descriptive and access-control settings in
+   a native disclosure while connection-critical fields remain immediately visible. */
+.mcp-server-advanced {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-surface) 72%, var(--bg) 28%);
+}
+
+.mcp-server-advanced > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.mcp-server-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.mcp-server-advanced > summary::after {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  content: "";
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.mcp-server-advanced[open] > summary::after {
+  transform: rotate(225deg);
+}
+
+.mcp-server-advanced-summary-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mcp-server-advanced-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mcp-server-advanced-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.copy-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.copy-feedback-btn-copied {
+  background: color-mix(in srgb, var(--success) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+  color: var(--success);
+}
+
+/* Rate limit inspector: the row background doubles as a usage meter. The
+   gradient sits in background-image so the surface color underneath stays. */
+.rate-limit-pressure-row {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--success) 16%, transparent) var(--rate-limit-pressure, 0%),
+    transparent var(--rate-limit-pressure, 0%)
+  );
+}
+
+.rate-limit-pressure-row.rate-limit-pressure-high {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--warning) 20%, transparent) var(--rate-limit-pressure, 0%),
+    transparent var(--rate-limit-pressure, 0%)
+  );
+}
+
+.rate-limit-pressure-row.rate-limit-pressure-full {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--danger) 22%, transparent) var(--rate-limit-pressure, 0%),
+    transparent var(--rate-limit-pressure, 0%)
+  );
+}
+
+/* Models page gauge button: half painted when only provider or global rules
+   throttle the subject (direct rules use table-action-btn-active). */
+.table-icon-btn.rate-limit-gauge-inherited {
+  color: var(--accent-strong, var(--accent));
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--accent) 22%, var(--bg)) 50%,
+    var(--bg) 50%
+  );
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+/* Rules whose targets render in child-component DOM (class props passed into
+   Icon/LoadingState/...) or via dynamic class strings the compiler cannot see:
+   parent-scoped styles cannot match these, so they stay global. */
+
+.auth-dialog-input-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
+    pointer-events: none;
+    transform: translateY(-50%);
+  }
+
+.auth-dialog-input-shell:focus-within .auth-dialog-input-icon {
+    color: var(--accent);
+  }
+
+.auth-dialog-submit-icon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+  }
+
+.nav-icon {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+  }
+
+.api-key-open-icon {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+  }
+
+.theme-icon {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+  }
+
+.theme-toggle-mobile .theme-icon {
+    width: 16px;
+    height: 16px;
+    flex-basis: 16px;
+  }
+
+@media (max-width: 768px) {
+  .sidebar-footer .api-key-open-icon {
+          width: 16px;
+          height: 16px;
+          flex-basis: 16px;
+        }
+}
+
+.failover-drafts-loading {
+    min-height: 96px;
+  }
+
+.models-loading-state {
+    position: sticky;
+    top: 16px;
+    z-index: 7;
+    width: fit-content;
+    min-height: 0;
+    margin: 0 auto 16px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-surface);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 70%, transparent);
+  }
+
+.alias-create-icon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+  }
+
+.pricing-override-remove-row {
+    margin-bottom: 1px;
+  }
+
+@media (max-width: 768px) {
+  .pricing-override-remove-row {
+          margin-bottom: 0;
+        }
+}
+
+.pricing-recalculate-dialog {
+    max-width: 480px;
+  }
+
+.settings-refresh-btn.is-refreshing .settings-refresh-icon {
+    animation: loading-spin 0.8s linear infinite;
+    transform-origin: center;
+  }
+
+.cost-source-icon {
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  color: var(--success);
+  cursor: help;
+  vertical-align: -2px;
+  stroke-width: 2;
+}
+
+.cache-savings-icon {
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  color: var(--accent);
+  cursor: help;
+  vertical-align: -2px;
+  stroke-width: 2;
+}

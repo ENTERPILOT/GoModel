@@ -1,0 +1,181 @@
+/* GoModel Dashboard Styles */
+/* The light palette below is deliberately written twice: once for an explicit
+   [data-theme="light"] and once for the system preference, because
+   themeStore.apply() *removes* data-theme in "system" mode, so neither block
+   can cover the other. Do not collapse them with light-dark(): chartTheme.js
+   reads these variables back through getComputedStyle, and an unregistered
+   custom property computes to its token stream — Chart.js would receive the
+   literal "light-dark(...)" text instead of a color. */
+/* Dark mode (default) — matches gomodel.enterpilot.io */
+:root {
+  --bg: #111110;
+  --bg-surface: #1e1d1c;
+  --bg-surface-hover: #2a2420;
+  --border: #2a2826;
+  --text: #e8e0d6;
+  --text-muted: #9a918a;
+  --accent: #b8956e;
+  --accent-hover: #d4b896;
+  --success: #34d399;
+  --info: #3b82f6;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --prompt-cache-color: color-mix(in srgb, var(--info) 72%, #ffffff);
+  --prompt-cache-color-bg: color-mix(in srgb, var(--token-prompt) 24%, var(--bg-surface));
+  /* Cache meter segments share the live token-throughput palette (defined
+     below) so the meter and the chart read consistently: Regular is the paid
+     brown (input); local and prompt caches are the translucent blues, cheaper
+     = more transparent. */
+  --cache-meter-uncached: var(--token-input);
+  --cache-meter-local: var(--token-local);
+  --cache-meter-prompt: var(--token-prompt);
+  /* Live token throughput series, coloured by cost. Input and output are the
+     paid tokens: solid, light browns (output a shade lighter so the pair reads
+     together). Cached tokens are cheap, so they read as translucent blue —
+     prompt-cache reads (almost free) are semi-transparent; local cache hits
+     (no provider cost) are the most transparent. */
+  --token-input: #c0824a;
+  --token-output: #ddb27a;
+  --token-prompt: color-mix(in srgb, var(--info) 60%, transparent);
+  --token-local: color-mix(in srgb, var(--info) 20%, transparent);
+  --sidebar-width: 240px;
+  --radius: 8px;
+  --chart-grid: #2a2826;
+  --chart-text: #9a918a;
+  /* High-contrast color for chart day-boundary markers (divider line + date
+     label) so they stand out from the muted axis text: bright on dark,
+     dark on light. */
+  --chart-day-marker: var(--text);
+  --chart-tooltip-bg: #1e1d1c;
+  --chart-tooltip-border: #2a2826;
+  --chart-tooltip-text: #e8e0d6;
+  /* Activity-calendar ramp — graduated blue derived from the prompt-cache blue
+     (--info) so the chart reads like the cache visuals. Dark theme climbs from a
+     dark navy through --info and into a brighter tint, giving 10 distinguishable
+     steps (keep in sync with calendarLevel() in contribution-calendar.js). */
+  --cal-level-0: #161b22;
+  --cal-level-1: color-mix(in srgb, var(--info) 15%, var(--bg-surface));
+  --cal-level-2: color-mix(in srgb, var(--info) 25%, var(--bg-surface));
+  --cal-level-3: color-mix(in srgb, var(--info) 36%, var(--bg-surface));
+  --cal-level-4: color-mix(in srgb, var(--info) 48%, var(--bg-surface));
+  --cal-level-5: color-mix(in srgb, var(--info) 60%, var(--bg-surface));
+  --cal-level-6: color-mix(in srgb, var(--info) 73%, var(--bg-surface));
+  --cal-level-7: color-mix(in srgb, var(--info) 87%, var(--bg-surface));
+  --cal-level-8: var(--info);
+  --cal-level-9: color-mix(in srgb, var(--info) 80%, #ffffff);
+  --cal-level-10: color-mix(in srgb, var(--info) 62%, #ffffff);
+  --alias-row-valid-bg: color-mix(
+    in srgb,
+    var(--bg-surface-hover) 86%,
+    #fff 14%
+  );
+  --alias-row-valid-bg-hover: color-mix(
+    in srgb,
+    var(--bg-surface-hover) 72%,
+    #fff 28%
+  );
+  color-scheme: dark;
+}
+
+/* Light mode — matches gomodel.enterpilot.io */
+[data-theme="light"] {
+  --bg: #f5f0ea;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #ece5dc;
+  --border: #e8e0d6;
+  --text: #2d2519;
+  --text-muted: #7a7068;
+  --accent: #755c3d;
+  --accent-hover: #9a7d5a;
+  --success: #34d399;
+  --info: #2563eb;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --prompt-cache-color: color-mix(in srgb, var(--info) 84%, #0f172a);
+  --prompt-cache-color-bg: color-mix(in srgb, var(--token-prompt) 18%, var(--bg-surface));
+  --chart-grid: #e8e0d6;
+  --chart-text: #7a7068;
+  --chart-day-marker: var(--text);
+  --chart-tooltip-bg: #ffffff;
+  --chart-tooltip-border: #e8e0d6;
+  --chart-tooltip-text: #2d2519;
+  /* Light theme: graduated blue climbing from a pale tint through --info into a
+     deep navy, keeping 10 distinguishable steps (see :root for the dark ramp). */
+  --cal-level-0: #ebedf0;
+  --cal-level-1: color-mix(in srgb, var(--info) 12%, #ffffff);
+  --cal-level-2: color-mix(in srgb, var(--info) 24%, #ffffff);
+  --cal-level-3: color-mix(in srgb, var(--info) 37%, #ffffff);
+  --cal-level-4: color-mix(in srgb, var(--info) 50%, #ffffff);
+  --cal-level-5: color-mix(in srgb, var(--info) 64%, #ffffff);
+  --cal-level-6: color-mix(in srgb, var(--info) 80%, #ffffff);
+  --cal-level-7: var(--info);
+  --cal-level-8: color-mix(in srgb, var(--info) 85%, #000000);
+  --cal-level-9: color-mix(in srgb, var(--info) 72%, #000000);
+  --cal-level-10: color-mix(in srgb, var(--info) 60%, #000000);
+  --alias-row-valid-bg: color-mix(
+    in srgb,
+    var(--bg-surface) 96%,
+    var(--accent) 4%
+  );
+  --alias-row-valid-bg-hover: color-mix(
+    in srgb,
+    var(--bg-surface) 90%,
+    var(--accent) 10%
+  );
+  color-scheme: light;
+}
+
+/* System preference: light */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+      --bg: #f5f0ea;
+      --bg-surface: #ffffff;
+      --bg-surface-hover: #ece5dc;
+      --border: #e8e0d6;
+      --text: #2d2519;
+      --text-muted: #7a7068;
+      --accent: #755c3d;
+      --accent-hover: #9a7d5a;
+      --success: #34d399;
+      --info: #2563eb;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --prompt-cache-color: color-mix(in srgb, var(--info) 84%, #0f172a);
+      --prompt-cache-color-bg: color-mix(in srgb, var(--token-prompt) 18%, var(--bg-surface));
+      --chart-grid: #e8e0d6;
+      --chart-text: #7a7068;
+      --chart-day-marker: var(--text);
+      --chart-tooltip-bg: #ffffff;
+      --chart-tooltip-border: #e8e0d6;
+      --chart-tooltip-text: #2d2519;
+      /* Light theme (system preference): mirror the [data-theme="light"] blue ramp. */
+      --cal-level-0: #ebedf0;
+      --cal-level-1: color-mix(in srgb, var(--info) 12%, #ffffff);
+      --cal-level-2: color-mix(in srgb, var(--info) 24%, #ffffff);
+      --cal-level-3: color-mix(in srgb, var(--info) 37%, #ffffff);
+      --cal-level-4: color-mix(in srgb, var(--info) 50%, #ffffff);
+      --cal-level-5: color-mix(in srgb, var(--info) 64%, #ffffff);
+      --cal-level-6: color-mix(in srgb, var(--info) 80%, #ffffff);
+      --cal-level-7: var(--info);
+      --cal-level-8: color-mix(in srgb, var(--info) 85%, #000000);
+      --cal-level-9: color-mix(in srgb, var(--info) 72%, #000000);
+      --cal-level-10: color-mix(in srgb, var(--info) 60%, #000000);
+      --alias-row-valid-bg: color-mix(
+        in srgb,
+        var(--bg-surface) 96%,
+        var(--accent) 4%
+      );
+      --alias-row-valid-bg-hover: color-mix(
+        in srgb,
+        var(--bg-surface) 90%,
+        var(--accent) 10%
+      );
+      color-scheme: light;
+    }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}

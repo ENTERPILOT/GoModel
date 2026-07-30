@@ -10,12 +10,16 @@ follow these rules so the pages compose into one coherent app.
    the Go backend implements it — `internal/admin/*.go` is the source of
    truth. Do not invent endpoints or payload fields.
 2. **CSS lives with its owner.** Component-specific styles are scoped
-   `<style>` blocks in the owning component; `src/styles/dashboard.css`
-   holds only the shared design system (tokens, reset, typography, buttons,
-   forms, tables, alerts, layout, keyframes) plus rules that target
-   child-component DOM — a class passed as a prop into `Icon` or
-   `LoadingState` renders in the child's markup, where the parent's scope
-   hash cannot match. Reuse existing shared class names for standard
+   `<style>` blocks in the owning component; the shared design system
+   (tokens, reset, typography, buttons, forms, tables, alerts, layout,
+   keyframes) plus rules that target child-component DOM — a class passed
+   as a prop into `Icon` or `LoadingState` renders in the child's markup,
+   where the parent's scope hash cannot match — lives in `src/styles/`.
+   `dashboard.css` is only the entry point: it `@import`s the modules in
+   cascade order, so append new rules to the module that owns them and
+   never reorder the imports. No CSS preprocessor, on purpose: scoped
+   styles, custom properties, and native nesting cover the need with zero
+   extra dependencies. Reuse existing shared class names for standard
    elements.
 3. **Mind the scope hash when moving CSS.** Scoping adds specificity, and it
    cuts both ways:
@@ -64,6 +68,11 @@ const saved = await sendJSON("/admin/foo", "POST", payload, { label: "save foo" 
   pure page logic and its `node:test` suite import them from there directly.
 - `apiFetch(path, options)` is the raw escape hatch (SSE, blobs); it adds auth
   + timezone headers and the base path. Never call `fetch` on `/admin/...`.
+- **CRUD stores use `$lib/api/adminCrud.js`**: `loadAdminList` /
+  `sendAdminMutation` reduce a request to an outcome object with the guard
+  ladder applied in the one correct order (stale first, then
+  unavailable-503, then errors; 401 loads stay silent). Apply the outcome
+  to your `$state` fields instead of re-implementing the branches.
 
 ### Stores (`$lib/stores/*.svelte.js`) — all singletons
 
@@ -77,15 +86,19 @@ confirmations).
 
 - **atoms** — `Icon` (kebab-case lucide names), `Spinner`, `Modal`,
   `EmptyState`, `NoDataIllustration`, `CopyButton`, `TableActionButton`,
-  `DialogCloseButton`, `SegmentedControl`.
+  `DialogCloseButton`, `SegmentedControl`, `EnabledToggle`, `GoModelLogo`.
 - **molecules** — `LoadingState`, `Pagination`, `DatePicker`, `FilterInput`,
-  `InlineHelpSection`, `ChartCanvas`, `DemoModeBanner`.
-- **organisms** — `AuthBanner`, `AuthDialog`, `Sidebar`, `ThemeToggle`,
-  `FlashMessages`, `TypedConfirmationDialog`.
+  `InlineHelpSection`, `ChartCanvas`, `DemoModeBanner`, `FormField`.
+- **organisms** — `AuthBanner`, `AuthDialog`, `Sidebar` (nav items in
+  `navigation.js`), `ThemeToggle`, `FlashMessages`,
+  `TypedConfirmationDialog`, `EditorDialog`.
 
 `Modal` handles Escape/backdrop/scroll-lock and autofocuses
 `[data-modal-autofocus]`. `ChartCanvas` runs its `build()` inside an effect,
 so reactive reads are tracked and theme changes rebuild automatically.
+**Every create/edit modal composes `EditorDialog`** (shell + header + error
+banner + actions + the Escape-under-auth-dialog guard) with `FormField`
+cells inside — never hand-roll that shell again.
 
 ### Utils
 
