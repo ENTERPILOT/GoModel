@@ -120,6 +120,12 @@ export function rewriteCostSaved(summary) {
   return s.rewrite_cost_saved === undefined ? null : s.rewrite_cost_saved;
 }
 
+// Keep the estimator disclosure in one helper so every future surface uses
+// the same wording as the Pro compressor's net-characters / 4 calculation.
+export function rewriteTokenEstimateMethodText() {
+  return "Estimated at 4 net characters removed per token";
+}
+
 // Card value: priced savings in costs mode, removed prompt tokens otherwise.
 // Tokens use the short form the overview cards and chart axes use — the exact
 // count stays in the tooltip.
@@ -128,10 +134,12 @@ export function proSavedValueText(summary, mode) {
   return formatTokensShort(rewriteTokensSaved(summary));
 }
 
-// Share of the pre-rewrite total that the rewriters removed:
-// saved / (recorded + saved) — what the period would have cost or weighed
-// without them. Null when the baseline is unknown (costs mode with no
-// pricing), so the card shows the value alone instead of a bogus 0%.
+// Share of the pre-rewrite baseline that the rewriters removed. Tokens mode
+// compares prompt savings with recorded input only; output is unaffected by
+// prompt compression and must not dilute the percentage. Costs mode keeps
+// comparing saved input cost with the period's total recorded spend.
+// Null when the baseline is unknown (costs mode with no pricing), so the card
+// shows the value alone instead of a bogus 0%.
 export function proSavedPercent(summary, mode) {
   const costs = mode === "costs";
   const saved = costs ? Number(rewriteCostSaved(summary)) : rewriteTokensSaved(summary);
@@ -139,7 +147,7 @@ export function proSavedPercent(summary, mode) {
   // Read the baseline before coercing: a null total_cost means "not priced",
   // and coercing it to 0 would put the whole baseline in the savings and
   // claim "100% less" for a period whose spend is simply unknown.
-  const raw = summary && (costs ? summary.total_cost : summary.total_tokens);
+  const raw = summary && (costs ? summary.total_cost : summary.total_input_tokens);
   if (raw === null || raw === undefined) return null;
   const recorded = Number(raw);
   if (!Number.isFinite(recorded) || recorded < 0) return null;
@@ -157,11 +165,14 @@ export function proSavedTitle(summary, mode) {
   const tokens = rewriteTokensSaved(summary);
   if (tokens <= 0) return "";
   const lines = [
-    formatNumber(tokens) + " prompt tokens removed by request rewriters before reaching providers",
+    formatNumber(tokens) + " estimated prompt token-transmissions removed across provider requests",
+    rewriteTokenEstimateMethodText(),
+    "Repeated savings are counted on every request because conversation history is sent again",
   ];
   const cost = rewriteCostSaved(summary);
   if (cost !== null && cost !== undefined) {
-    lines.push(formatCost(cost) + " saved at the requests' input pricing");
+    lines.push(formatCost(cost) + " estimated gross input cost avoided");
+    lines.push("Prompt-cache changes caused by rewriting are not included");
   }
   const pct = proSavedPercentText(summary, mode);
   if (pct) {
