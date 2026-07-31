@@ -8,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  auditLivePauseMessage,
   liveLogsMethods,
   liveLogsStreamPath,
 } from "../src/pages/audit-logs/live-logs-logic.js";
@@ -259,6 +260,39 @@ test("live audit inserts stay blocked for a custom range detached from today", (
 
   assert.equal(app.auditLog.entries.length, 0);
   assert.equal(app.auditLog.total, 0);
+});
+
+test("audit live pause reason names the blocking condition", () => {
+  const cases = [
+    { name: "flowing", overrides: {}, want: null },
+    {
+      name: "pagination wins",
+      overrides: { auditLog: { entries: [], total: 0, limit: 25, offset: 25 } },
+      want: "pagination",
+    },
+    { name: "filters", overrides: { auditStatusCode: "500" }, want: "filters" },
+    {
+      name: "detached date range",
+      overrides: { customStartDate: new Date(), followsToday: false },
+      want: "date_range",
+    },
+    {
+      name: "today-anchored range flows",
+      overrides: { customStartDate: new Date(), customEndDate: new Date(), followsToday: true },
+      want: null,
+    },
+  ];
+  for (const tc of cases) {
+    const app = createLiveLogsApp(tc.overrides);
+    assert.equal(app.auditLivePauseReason(), tc.want, tc.name);
+  }
+});
+
+test("audit live pause messages tell the operator how to resume", () => {
+  assert.match(auditLivePauseMessage("date_range"), /Set it to today/);
+  assert.match(auditLivePauseMessage("filters"), /filters/);
+  assert.match(auditLivePauseMessage("pagination"), /first page/);
+  assert.equal(auditLivePauseMessage(null), "");
 });
 
 test("live audit inserts are blocked while filters or pagination are active", () => {

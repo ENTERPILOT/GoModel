@@ -58,6 +58,17 @@ func (h *Handler) LiveLogs(c *echo.Context) error {
 		}
 	}
 
+	// An immediate heartbeat flushes the headers and gives the client its
+	// cursor right away; without it nothing reaches the wire until the first
+	// ticker heartbeat, so a freshly opened stream looked pending for up to
+	// the whole heartbeat interval.
+	if err := writeLiveEvent(res, live.Event{
+		Seq:  h.liveBroker.LatestSeq(),
+		Type: live.EventHeartbeat,
+	}); err != nil {
+		return err
+	}
+
 	ticker := time.NewTicker(h.liveBroker.Heartbeat())
 	defer ticker.Stop()
 

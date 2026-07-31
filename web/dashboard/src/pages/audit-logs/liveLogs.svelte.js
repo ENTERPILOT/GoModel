@@ -58,6 +58,10 @@ class LiveLogsStore {
   usageFilterUserPath = $state("");
   usageLogHideCached = $state(false);
 
+  // True while the stream body is being consumed; drives the audit page's
+  // live-status indicator.
+  liveLogsStreaming = $state(false);
+
   // Stream bookkeeping (not read by templates).
   liveLogsLastSeq = 0;
   liveLogsReconnectAttempts = 0;
@@ -114,6 +118,7 @@ class LiveLogsStore {
   }
 
   stopLiveLogs() {
+    this.liveLogsStreaming = false;
     if (this.liveLogsReconnectTimer) {
       clearTimeout(this.liveLogsReconnectTimer);
       this.liveLogsReconnectTimer = null;
@@ -165,6 +170,7 @@ class LiveLogsStore {
         return;
       }
       this.liveLogsReconnectAttempts = 0;
+      this.liveLogsStreaming = true;
       await this.consumeLiveLogsBody(res.body.getReader());
       this.scheduleLiveLogsReconnect();
     } catch (e) {
@@ -181,6 +187,7 @@ class LiveLogsStore {
   }
 
   scheduleLiveLogsReconnect() {
+    this.liveLogsStreaming = false;
     if (!this.liveLogsEnabled()) return;
     if (this.liveLogsReconnectTimer) return;
     const attempt = Math.min(this.liveLogsReconnectAttempts + 1, 6);

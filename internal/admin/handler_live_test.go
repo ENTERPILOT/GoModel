@@ -151,6 +151,25 @@ func TestLiveLogsForwardsEventsAndHeartbeats(t *testing.T) {
 	}
 }
 
+func TestLiveLogsWritesImmediateHeartbeat(t *testing.T) {
+	// Default heartbeat interval (15s) — anything on the wire before the
+	// canceled context returns must have been written eagerly on subscribe.
+	broker := live.NewBroker(live.Config{Enabled: true})
+	broker.PublishAuditEvent(live.EventAuditStarted, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: time.Now(),
+	})
+
+	body := runLiveLogsWithCanceledContext(t, broker, "/admin/live/logs?types=audit,usage")
+	if !strings.Contains(body, "event: heartbeat") {
+		t.Fatalf("body = %q, want an immediate heartbeat on subscribe", body)
+	}
+	if !strings.Contains(body, "id: 1") {
+		t.Fatalf("body = %q, want the heartbeat to carry the latest sequence", body)
+	}
+}
+
 func runLiveLogsWithCanceledContext(t *testing.T, broker *live.Broker, target string) string {
 	t.Helper()
 	h := NewHandler(nil, nil, WithLiveBroker(broker))

@@ -66,14 +66,6 @@
       <option value="true">Streaming</option>
       <option value="false">Non-streaming</option>
     </select>
-    <label class="audit-group-checkbox">
-      <input
-        type="checkbox"
-        checked={auditList.auditGroupSessions}
-        onchange={() => auditList.toggleAuditGroupSessions()}
-      />
-      <span>Group by session</span>
-    </label>
     <button
       type="button"
       class="btn audit-clear-btn"
@@ -113,24 +105,6 @@
     grid-column: span 2;
   }
 
-  /* View preference, not a filter: Clear leaves it alone. */
-  .audit-group-checkbox {
-    grid-column: 7 / 11;
-    justify-self: end;
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    color: var(--text-muted);
-    font-size: 13px;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .audit-group-checkbox input {
-    accent-color: var(--accent);
-    cursor: pointer;
-  }
-
   .audit-filter-row-controls :global(.btn) {
     grid-column: 11 / -1;
     justify-self: end;
@@ -164,12 +138,8 @@
         grid-template-columns: 1fr;
       }
 
-    .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-group-checkbox, .audit-filter-row :global(.btn) {
+    .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.btn) {
         grid-column: auto;
-      }
-
-    .audit-group-checkbox {
-        justify-self: start;
       }
   }
 </style>
