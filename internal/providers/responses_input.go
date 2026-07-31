@@ -38,24 +38,59 @@ func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
 func convertResponsesInputItems(items []any) ([]core.Message, error) {
 	messages := make([]core.Message, 0, len(items))
 	var pendingAssistant *core.Message
+	var pendingReasoning string
 
-	flushPendingAssistant := func() {
+	flushPendingAssistant := func() error {
 		if pendingAssistant == nil {
-			return
+			return nil
+		}
+		// Chat reasoning extensions associate reasoning_content with the
+		// assistant tool-call message. DeepSeek requires it on the following
+		// tool-result request, while reasoning from ordinary assistant turns is
+		// intentionally omitted because it is not part of their next-turn
+		// context.
+		if pendingReasoning != "" && len(pendingAssistant.ToolCalls) > 0 {
+			raw, err := json.Marshal(pendingReasoning)
+			if err != nil {
+				return err
+			}
+			extra, err := core.MergeUnknownJSONFields(pendingAssistant.ExtraFields, map[string]json.RawMessage{
+				"reasoning_content": raw,
+			})
+			if err != nil {
+				return err
+			}
+			pendingAssistant.ExtraFields = extra
+			pendingReasoning = ""
 		}
 		messages = append(messages, *pendingAssistant)
 		pendingAssistant = nil
+		return nil
 	}
 
 	for i, item := range items {
+		if reasoning, ok := responsesInputReasoningText(item); ok {
+			if err := flushPendingAssistant(); err != nil {
+				return nil, err
+			}
+			pendingReasoning = ""
+			if reasoning != "" {
+				pendingReasoning = reasoning
+			}
+			continue
+		}
+
 		msg, itemType, err := convertResponsesInputItem(item, i)
 		if err != nil {
 			return nil, err
 		}
 
 		if msg.Role == "assistant" {
-			if itemType == "message" {
-				flushPendingAssistant()
+			if itemType == "message" && pendingAssistant != nil {
+				if err := flushPendingAssistant(); err != nil {
+					return nil, err
+				}
+				pendingReasoning = ""
 			}
 			if pendingAssistant == nil {
 				assistant := cloneResponsesMessage(msg)
@@ -63,19 +98,100 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 			} else if canMergeAssistantMessages(*pendingAssistant, msg) {
 				mergeAssistantMessage(pendingAssistant, msg)
 			} else {
-				flushPendingAssistant()
+				if err := flushPendingAssistant(); err != nil {
+					return nil, err
+				}
 				assistant := cloneResponsesMessage(msg)
 				pendingAssistant = &assistant
 			}
 			continue
 		}
 
-		flushPendingAssistant()
+		if err := flushPendingAssistant(); err != nil {
+			return nil, err
+		}
+		pendingReasoning = ""
 		messages = append(messages, msg)
 	}
 
-	flushPendingAssistant()
+	if err := flushPendingAssistant(); err != nil {
+		return nil, err
+	}
 	return messages, nil
+}
+
+// responsesInputReasoningText recognizes a Responses reasoning item and
+// extracts raw reasoning content. Summary text is accepted as a compatibility
+// fallback for older gateways that mislabeled reasoning_content as a summary.
+// Encrypted-only reasoning stays opaque and is deliberately omitted.
+func responsesInputReasoningText(item any) (string, bool) {
+	var raw json.RawMessage
+	switch typed := item.(type) {
+	case core.ResponsesInputElement:
+		if typed.Type != "reasoning" {
+			return "", false
+		}
+		raw = typed.Raw
+		if len(raw) == 0 {
+			encoded, err := json.Marshal(typed)
+			if err != nil {
+				return "", true
+			}
+			raw = encoded
+		}
+	case map[string]any:
+		itemType, _ := typed["type"].(string)
+		if itemType != "reasoning" {
+			return "", false
+		}
+		encoded, err := json.Marshal(typed)
+		if err != nil {
+			return "", true
+		}
+		raw = encoded
+	default:
+		return "", false
+	}
+
+	var payload struct {
+		Content []responsesReasoningPart `json:"content"`
+		Summary []responsesReasoningPart `json:"summary"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return "", true
+	}
+	if text := reasoningTextParts(payload.Content, "reasoning_text"); text != "" {
+		return text, true
+	}
+	return reasoningTextParts(payload.Summary, "summary_text"), true
+}
+
+type responsesReasoningPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func reasoningTextParts(parts []responsesReasoningPart, partType string) string {
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type == partType && part.Text != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	return strings.Join(texts, "\n\n")
+}
+
+// normalizeChatTranslationRole maps "developer" onto "system". "developer" is
+// OpenAI's newer alias for "system", understood only by OpenAI's own
+// reasoning models; chat-translated providers (DeepSeek, Anthropic, Gemini,
+// ...) speak the classic chat-completions roles, so it must be normalized
+// the same way the other chat-only providers already do (see
+// cohere/gemini/bedrock chat translation).
+func normalizeChatTranslationRole(role string) string {
+	if role == "developer" {
+		return "system"
+	}
+	return role
 }
 
 func convertResponsesInputItem(item any, index int) (core.Message, string, error) {
@@ -136,6 +252,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 		if role == "" {
 			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
 		}
+		role = normalizeChatTranslationRole(role)
 		content, ok := ConvertResponsesContentToChatContent(item.Content)
 		if !ok {
 			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported content", index), nil)
@@ -145,6 +262,9 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 			Content:     content,
 			ExtraFields: core.CloneUnknownJSONFields(item.ExtraFields),
 		}, "message", nil
+	case "reasoning":
+		// Recognized by responsesInputReasoningText before item conversion.
+		return core.Message{}, "reasoning", nil
 	default:
 		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported input item type %q for chat-translated providers", index, item.Type), nil)
 	}
@@ -195,6 +315,9 @@ func convertResponsesInputMap(item map[string]any, index int) (core.Message, str
 			ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "call_id", "status", "output")),
 		}, "function_call_output", nil
 	case "", "message":
+	case "reasoning":
+		// Recognized by responsesInputReasoningText before item conversion.
+		return core.Message{}, "reasoning", nil
 	default:
 		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported input item type %q for chat-translated providers", index, itemType), nil)
 	}
@@ -204,6 +327,7 @@ func convertResponsesInputMap(item map[string]any, index int) (core.Message, str
 	if role == "" {
 		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
 	}
+	role = normalizeChatTranslationRole(role)
 
 	content, ok := ConvertResponsesContentToChatContent(item["content"])
 	if !ok {
@@ -236,13 +360,19 @@ func cloneResponsesMessage(msg core.Message) core.Message {
 }
 
 func canMergeAssistantMessages(current, next core.Message) bool {
+	// A Responses message followed by function_call items represents one Chat
+	// assistant message. Metadata on the message remains on the merged message;
+	// function-call metadata is already carried by each ToolCall.
+	if isAssistantToolCallOnlyMessage(next) && next.ExtraFields.IsEmpty() {
+		return true
+	}
 	if !current.ExtraFields.IsEmpty() || !next.ExtraFields.IsEmpty() {
 		return false
 	}
 	if !core.HasStructuredContent(current.Content) && !core.HasStructuredContent(next.Content) {
 		return true
 	}
-	return isAssistantToolCallOnlyMessage(next)
+	return false
 }
 
 func mergeAssistantMessage(dst *core.Message, src core.Message) {

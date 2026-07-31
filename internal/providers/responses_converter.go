@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
@@ -60,11 +61,23 @@ type openAIStreamChunk struct {
 	Usage   json.RawMessage `json:"usage"`
 	Choices []struct {
 		Delta struct {
-			Content   string                `json:"content"`
-			ToolCalls []openAIChunkToolCall `json:"tool_calls"`
+			Content          string                `json:"content"`
+			ReasoningContent string                `json:"reasoning_content"`
+			ToolCalls        []openAIChunkToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+}
+
+// responsesStreamUsage is the conservative Responses API representation of a
+// Chat Completions usage object. Keeping this local avoids the generic unknown-
+// field preservation path on every streamed response.
+type responsesStreamUsage struct {
+	InputTokens         int                           `json:"input_tokens"`
+	OutputTokens        int                           `json:"output_tokens"`
+	TotalTokens         int                           `json:"total_tokens"`
+	InputTokensDetails  *core.PromptTokensDetails     `json:"input_tokens_details,omitempty"`
+	OutputTokensDetails *core.CompletionTokensDetails `json:"output_tokens_details,omitempty"`
 }
 
 type openAIChunkToolCall struct {
@@ -80,6 +93,9 @@ func (sc *OpenAIResponsesStreamConverter) ensureToolCallState(index int) *Respon
 	state := sc.toolCalls[index]
 	if state == nil {
 		outputIndex := index
+		if sc.output.ReasoningReserved() {
+			outputIndex++
+		}
 		if sc.output.AssistantReserved() {
 			outputIndex++
 		}
@@ -87,6 +103,44 @@ func (sc *OpenAIResponsesStreamConverter) ensureToolCallState(index int) *Respon
 		sc.toolCalls[index] = state
 	}
 	return state
+}
+
+// reasoningOutputIndex is always 0: reasoning content precedes any visible
+// text or tool call in a reasoning model's stream, so the reasoning item (if
+// any) always claims the first output slot.
+const reasoningOutputIndex = 0
+
+func (sc *OpenAIResponsesStreamConverter) reserveReasoningOutput() {
+	if sc.output.ReasoningReserved() {
+		return
+	}
+	sc.output.ReserveReasoning()
+	for _, state := range sc.toolCalls {
+		if state != nil && !state.Started {
+			state.OutputIndex++
+		}
+	}
+}
+
+func (sc *OpenAIResponsesStreamConverter) outputAlreadyStarted() bool {
+	if sc.output.AssistantStarted() {
+		return true
+	}
+	for _, state := range sc.toolCalls {
+		if state != nil && state.Started {
+			return true
+		}
+	}
+	return false
+}
+
+// assistantOutputIndex returns the output index for the assistant message
+// item: 1 if a reasoning item precedes it, 0 otherwise.
+func (sc *OpenAIResponsesStreamConverter) assistantOutputIndex() int {
+	if sc.output.ReasoningReserved() {
+		return 1
+	}
+	return 0
 }
 
 func (sc *OpenAIResponsesStreamConverter) reserveAssistantOutput() {
@@ -137,8 +191,9 @@ func (sc *OpenAIResponsesStreamConverter) completePendingToolCalls() string {
 func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []openAIChunkToolCall) string {
 	var out bytes.Buffer
 
+	out.WriteString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
 	if sc.output.AssistantStarted() && !sc.output.AssistantDone() {
-		out.WriteString(sc.output.CompleteAssistantOutput(0))
+		out.WriteString(sc.output.CompleteAssistantOutput(sc.assistantOutputIndex()))
 	}
 
 	for _, toolCall := range toolCalls {
@@ -209,6 +264,9 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	}
 	choice := &chunk.Choices[0]
 
+	if choice.Delta.ReasoningContent != "" {
+		sc.appendReasoningDelta(choice.Delta.ReasoningContent)
+	}
 	if choice.Delta.Content != "" {
 		sc.appendTextDelta(choice.Delta.Content)
 	}
@@ -250,6 +308,9 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 		return
 	}
 	if delta, ok := choice["delta"].(map[string]any); ok {
+		if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+			sc.appendReasoningDelta(reasoning)
+		}
 		if content, ok := delta["content"].(string); ok && content != "" {
 			sc.appendTextDelta(content)
 		}
@@ -297,10 +358,25 @@ func normalizeToolCallIndex(value any) (int, bool) {
 	}
 }
 
+// appendReasoningDelta records raw provider reasoning and starts the reasoning
+// item before emitting its reasoning_text delta.
+func (sc *OpenAIResponsesStreamConverter) appendReasoningDelta(content string) {
+	// Output indexes cannot be rewritten after an item has been emitted. Some
+	// OpenAI-compatible providers send a stray late reasoning delta; dropping
+	// that extension is safer than producing two items at index 0 or reopening
+	// an item after response.output_item.done.
+	if sc.output.ReasoningDone() || (!sc.output.ReasoningReserved() && sc.outputAlreadyStarted()) {
+		return
+	}
+	sc.reserveReasoningOutput()
+	sc.buffer.AppendString(sc.output.AppendReasoningDelta(reasoningOutputIndex, content))
+}
+
 // appendTextDelta records assistant text and emits its output_text.delta event.
 func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
+	sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
 	sc.reserveAssistantOutput()
-	sc.buffer.AppendString(sc.output.StartAssistantOutput(0))
+	sc.buffer.AppendString(sc.output.StartAssistantOutput(sc.assistantOutputIndex()))
 	sc.output.AppendAssistantText(content)
 	jsonData, err := json.Marshal(struct {
 		Type  string `json:"type"`
@@ -322,7 +398,8 @@ func (sc *OpenAIResponsesStreamConverter) appendCompletedEvents() {
 		return
 	}
 	sc.sentDone = true
-	sc.buffer.AppendString(sc.output.CompleteAssistantOutput(0))
+	sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
+	sc.buffer.AppendString(sc.output.CompleteAssistantOutput(sc.assistantOutputIndex()))
 	sc.buffer.AppendString(sc.completePendingToolCalls())
 	responseData := map[string]any{
 		"id":         sc.responseID,
@@ -332,9 +409,14 @@ func (sc *OpenAIResponsesStreamConverter) appendCompletedEvents() {
 		"provider":   sc.provider,
 		"created_at": sc.createdAt,
 	}
-	// Include usage data if captured from OpenAI stream
+	// Include usage data if captured from OpenAI stream, renamed from Chat
+	// Completions field names (prompt_tokens/completion_tokens) to the
+	// Responses API's (input_tokens/output_tokens) — clients like Codex
+	// require the latter and fail to parse response.completed without them.
 	if sc.cachedUsage != nil {
-		responseData["usage"] = sc.cachedUsage
+		if usage, ok := chatUsageToResponsesUsage(sc.cachedUsage); ok {
+			responseData["usage"] = usage
+		}
 	}
 	doneEvent := map[string]any{
 		"type":     "response.completed",
@@ -401,6 +483,34 @@ func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage
 	sc.buffer.AppendString("event: response.failed\ndata: ")
 	sc.buffer.AppendBytes(jsonData)
 	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+}
+
+// chatUsageToResponsesUsage renames a valid Chat Completions usage object into
+// the conservative Responses API shape. Malformed usage is omitted rather than
+// making clients reject an otherwise successful response.completed event.
+func chatUsageToResponsesUsage(raw json.RawMessage) (responsesStreamUsage, bool) {
+	if !bytes.Contains(raw, []byte(`"prompt_tokens"`)) ||
+		!bytes.Contains(raw, []byte(`"completion_tokens"`)) ||
+		!bytes.Contains(raw, []byte(`"total_tokens"`)) {
+		return responsesStreamUsage{}, false
+	}
+	var chatUsage struct {
+		PromptTokens            int                           `json:"prompt_tokens"`
+		CompletionTokens        int                           `json:"completion_tokens"`
+		TotalTokens             int                           `json:"total_tokens"`
+		PromptTokensDetails     *core.PromptTokensDetails     `json:"prompt_tokens_details"`
+		CompletionTokensDetails *core.CompletionTokensDetails `json:"completion_tokens_details"`
+	}
+	if err := json.Unmarshal(raw, &chatUsage); err != nil {
+		return responsesStreamUsage{}, false
+	}
+	return responsesStreamUsage{
+		InputTokens:         chatUsage.PromptTokens,
+		OutputTokens:        chatUsage.CompletionTokens,
+		TotalTokens:         chatUsage.TotalTokens,
+		InputTokensDetails:  chatUsage.PromptTokensDetails,
+		OutputTokensDetails: chatUsage.CompletionTokensDetails,
+	}, true
 }
 
 func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {

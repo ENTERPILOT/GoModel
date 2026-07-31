@@ -731,7 +731,7 @@ func TestConvertResponsesRequestToChat_RejectsUnknownInputItemTypes(t *testing.T
 	var req core.ResponsesRequest
 	if err := json.Unmarshal([]byte(`{
 		"model":"test-model",
-		"input":[{"type":"reasoning","id":"rs_123","summary":[]}]
+		"input":[{"type":"computer_call","id":"cc_123"}]
 	}`), &req); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
@@ -740,8 +740,97 @@ func TestConvertResponsesRequestToChat_RejectsUnknownInputItemTypes(t *testing.T
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), `unsupported input item type "reasoning"`) {
-		t.Fatalf("error = %v, want unsupported reasoning item", err)
+	if !strings.Contains(err.Error(), `unsupported input item type "computer_call"`) {
+		t.Fatalf("error = %v, want unsupported computer_call item", err)
+	}
+}
+
+// Reasoning from an ordinary assistant turn is accepted but omitted because
+// chat providers do not need it on the following user turn.
+func TestConvertResponsesRequestToChat_DropsReasoningWithoutToolCall(t *testing.T) {
+	var req core.ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"test-model",
+		"input":[
+			{"type":"message","role":"user","content":"hello"},
+			{"type":"reasoning","id":"rs_123","summary":[{"type":"summary_text","text":"thinking..."}]},
+			{"type":"message","role":"assistant","content":"hi there"}
+		]
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	chatReq, err := ConvertResponsesRequestToChat(&req)
+	if err != nil {
+		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+	}
+	if len(chatReq.Messages) != 2 {
+		t.Fatalf("Messages = %#v, want exactly the user and assistant messages (reasoning dropped)", chatReq.Messages)
+	}
+	if chatReq.Messages[0].Role != "user" || chatReq.Messages[1].Role != "assistant" {
+		t.Fatalf("Messages = %#v, want [user, assistant]", chatReq.Messages)
+	}
+	if got := chatReq.Messages[1].ExtraFields.Lookup("reasoning_content"); got != nil {
+		t.Fatalf("reasoning_content = %s, want omitted without a tool call", got)
+	}
+}
+
+// DeepSeek requires reasoning_content to be replayed on the assistant message
+// that made a tool call. Codex echoes Responses output items back as input, so
+// the reasoning item and function-call item must be reassembled here.
+func TestConvertResponsesRequestToChat_ReplaysReasoningWithToolCall(t *testing.T) {
+	var req core.ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"deepseek-v4-pro",
+		"input":[
+			{"type":"message","role":"user","content":"weather?"},
+			{"type":"reasoning","id":"rs_123","summary":[],"content":[{"type":"reasoning_text","text":"Need to check the weather."}]},
+			{"type":"message","id":"msg_123","role":"assistant","content":"I'll check."},
+			{"type":"function_call","call_id":"call_123","name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"},
+			{"type":"function_call_output","call_id":"call_123","output":"sunny"}
+		]
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	chatReq, err := ConvertResponsesRequestToChat(&req)
+	if err != nil {
+		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+	}
+	if len(chatReq.Messages) != 3 {
+		t.Fatalf("Messages = %#v, want user, assistant tool call, and tool result", chatReq.Messages)
+	}
+	assistant := chatReq.Messages[1]
+	if assistant.Role != "assistant" || core.ExtractTextContent(assistant.Content) != "I'll check." || len(assistant.ToolCalls) != 1 {
+		t.Fatalf("assistant message = %#v, want merged text and tool call", assistant)
+	}
+	var reasoning string
+	if err := json.Unmarshal(assistant.ExtraFields.Lookup("reasoning_content"), &reasoning); err != nil {
+		t.Fatalf("reasoning_content decode error = %v", err)
+	}
+	if reasoning != "Need to check the weather." {
+		t.Fatalf("reasoning_content = %q", reasoning)
+	}
+	if chatReq.Messages[2].Role != "tool" || chatReq.Messages[2].ToolCallID != "call_123" {
+		t.Fatalf("tool message = %#v", chatReq.Messages[2])
+	}
+}
+
+func TestConvertResponsesRequestToChat_NormalizesDeveloperRole(t *testing.T) {
+	tests := map[string]any{
+		"typed": []core.ResponsesInputElement{{Type: "message", Role: "developer", Content: "Be concise."}},
+		"map":   []any{map[string]any{"type": "message", "role": "developer", "content": "Be concise."}},
+	}
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			chatReq, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{Model: "test-model", Input: input})
+			if err != nil {
+				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+			}
+			if len(chatReq.Messages) != 1 || chatReq.Messages[0].Role != "system" {
+				t.Fatalf("Messages = %#v, want one system message", chatReq.Messages)
+			}
+		})
 	}
 }
 
@@ -1048,6 +1137,35 @@ func TestConvertChatResponseToResponses(t *testing.T) {
 	}
 	if result.Usage.RawUsage["provider"] != "test" {
 		t.Fatalf("RawUsage = %+v, want provider=test", result.Usage.RawUsage)
+	}
+}
+
+func TestConvertChatResponseToResponses_PreservesRawReasoning(t *testing.T) {
+	resp := &core.ChatResponse{
+		ID:      "chatcmpl-reasoning",
+		Model:   "deepseek-v4-pro",
+		Created: 1,
+		Choices: []core.Choice{{
+			Message: core.ResponseMessage{
+				Role:    "assistant",
+				Content: "done",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"reasoning_content": json.RawMessage(`"raw trace"`),
+				}),
+			},
+		}},
+	}
+
+	result := ConvertChatResponseToResponses(resp)
+	if len(result.Output) != 2 || result.Output[0].Type != "reasoning" || result.Output[1].Type != "message" {
+		t.Fatalf("Output = %#v, want reasoning then message", result.Output)
+	}
+	reasoning := result.Output[0]
+	if len(reasoning.Content) != 1 || reasoning.Content[0].Type != "reasoning_text" || reasoning.Content[0].Text != "raw trace" {
+		t.Fatalf("reasoning content = %#v", reasoning.Content)
+	}
+	if reasoning.ExtraFields.Lookup("summary") == nil {
+		t.Fatal("reasoning summary array missing")
 	}
 }
 

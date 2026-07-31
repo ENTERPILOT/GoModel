@@ -29,6 +29,12 @@ type ResponsesOutputEventState struct {
 	assistantDone      bool
 	assistantMessageID string
 	assistantText      strings.Builder
+
+	reasoningReserved bool
+	reasoningStarted  bool
+	reasoningDone     bool
+	reasoningItemID   string
+	reasoningText     strings.Builder
 }
 
 // NewResponsesOutputEventState creates a new Responses output-item state manager.
@@ -126,6 +132,97 @@ func (s *ResponsesOutputEventState) CompleteAssistantOutput(outputIndex int) str
 		"item":         s.AssistantMessageItem("completed", true),
 		"output_index": outputIndex,
 	})
+}
+
+// ReserveReasoning marks that a reasoning output item occupies index 0,
+// ahead of the assistant message and any tool calls.
+func (s *ResponsesOutputEventState) ReserveReasoning() {
+	s.reasoningReserved = true
+}
+
+// ReasoningReserved reports whether a reasoning output item has been reserved.
+func (s *ResponsesOutputEventState) ReasoningReserved() bool {
+	return s.reasoningReserved
+}
+
+// ReasoningDone reports whether the reasoning output item has been completed.
+func (s *ResponsesOutputEventState) ReasoningDone() bool {
+	return s.reasoningDone
+}
+
+// ReasoningItem renders a raw reasoning output item. Provider
+// reasoning_content is chain-of-thought text, not an OpenAI-generated summary,
+// so it belongs in content while summary remains empty.
+func (s *ResponsesOutputEventState) ReasoningItem(status string, includeContent bool) map[string]any {
+	item := map[string]any{
+		"id":      s.reasoningItemID,
+		"type":    "reasoning",
+		"status":  status,
+		"summary": []map[string]any{},
+	}
+	if includeContent {
+		item["content"] = []map[string]any{
+			{"type": "reasoning_text", "text": s.reasoningText.String()},
+		}
+	}
+	return item
+}
+
+// StartReasoningOutput emits the reasoning output_item.added event once before
+// any reasoning_text delta references the item.
+func (s *ResponsesOutputEventState) StartReasoningOutput(outputIndex int) string {
+	if s.reasoningStarted {
+		return ""
+	}
+	s.reasoningStarted = true
+	if s.reasoningItemID == "" {
+		s.reasoningItemID = "rs_" + uuid.New().String()
+	}
+	return s.WriteEvent("response.output_item.added", map[string]any{
+		"type":         "response.output_item.added",
+		"item":         s.ReasoningItem("in_progress", false),
+		"output_index": outputIndex,
+	})
+}
+
+// AppendReasoningDelta starts the reasoning item if needed and emits a raw
+// reasoning-text delta.
+func (s *ResponsesOutputEventState) AppendReasoningDelta(outputIndex int, delta string) string {
+	var b strings.Builder
+	b.WriteString(s.StartReasoningOutput(outputIndex))
+	s.reasoningText.WriteString(delta)
+	b.WriteString(s.WriteEvent("response.reasoning_text.delta", map[string]any{
+		"type":          "response.reasoning_text.delta",
+		"item_id":       s.reasoningItemID,
+		"output_index":  outputIndex,
+		"content_index": 0,
+		"delta":         delta,
+	}))
+	return b.String()
+}
+
+// CompleteReasoningOutput emits the raw reasoning completion and
+// output_item.done events once.
+func (s *ResponsesOutputEventState) CompleteReasoningOutput(outputIndex int) string {
+	if !s.reasoningReserved || s.reasoningDone {
+		return ""
+	}
+	s.reasoningDone = true
+	var b strings.Builder
+	b.WriteString(s.StartReasoningOutput(outputIndex))
+	b.WriteString(s.WriteEvent("response.reasoning_text.done", map[string]any{
+		"type":          "response.reasoning_text.done",
+		"item_id":       s.reasoningItemID,
+		"output_index":  outputIndex,
+		"content_index": 0,
+		"text":          s.reasoningText.String(),
+	}))
+	b.WriteString(s.WriteEvent("response.output_item.done", map[string]any{
+		"type":         "response.output_item.done",
+		"item":         s.ReasoningItem("completed", true),
+		"output_index": outputIndex,
+	}))
+	return b.String()
 }
 
 // ToolCallArguments returns the serialized argument payload for a function_call item.
