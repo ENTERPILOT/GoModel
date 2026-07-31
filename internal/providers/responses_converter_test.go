@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -228,9 +229,10 @@ data: [DONE]
 
 func TestOpenAIResponsesStreamConverter_ReasoningToolOutputOrder(t *testing.T) {
 	tests := []struct {
-		name        string
-		mockStream  string
-		wantIndexes map[string]float64
+		name         string
+		mockStream   string
+		wantIndexes  map[string]float64
+		wantSequence []string
 	}{
 		{
 			name: "reasoning then tool call",
@@ -242,7 +244,8 @@ data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
 
 data: [DONE]
 `,
-			wantIndexes: map[string]float64{"reasoning": 0, "function_call": 1},
+			wantIndexes:  map[string]float64{"reasoning": 0, "function_call": 1},
+			wantSequence: []string{"reasoning", "function_call"},
 		},
 		{
 			name: "assistant after started tool call",
@@ -254,7 +257,8 @@ data: {"choices":[{"delta":{"content":"Tool selected."},"finish_reason":"stop"}]
 
 data: [DONE]
 `,
-			wantIndexes: map[string]float64{"reasoning": 0, "function_call": 1, "message": 2},
+			wantIndexes:  map[string]float64{"reasoning": 0, "function_call": 1, "message": 2},
+			wantSequence: []string{"reasoning", "function_call", "message"},
 		},
 	}
 
@@ -267,6 +271,7 @@ data: [DONE]
 			}
 
 			addedIndexes := make(map[string]float64)
+			var addedSequence []string
 			reasoningDone := false
 			reasoningDoneBeforeTool := false
 			for _, event := range parseTestSSEEvents(t, string(raw)) {
@@ -279,6 +284,7 @@ data: [DONE]
 					}
 				case "response.output_item.added":
 					addedIndexes[itemType], _ = event.Payload["output_index"].(float64)
+					addedSequence = append(addedSequence, itemType)
 					if itemType == "function_call" {
 						reasoningDoneBeforeTool = reasoningDone
 					}
@@ -292,6 +298,9 @@ data: [DONE]
 				if addedIndexes[itemType] != wantIndex {
 					t.Fatalf("%s output_index = %v, want %v", itemType, addedIndexes[itemType], wantIndex)
 				}
+			}
+			if !slices.Equal(addedSequence, tt.wantSequence) {
+				t.Fatalf("output item sequence = %#v, want %#v", addedSequence, tt.wantSequence)
 			}
 			if !reasoningDoneBeforeTool {
 				t.Fatal("expected the reasoning item to close before the function_call item opened")
