@@ -15,6 +15,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/tidwall/gjson"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -47,6 +48,7 @@ type simpleCacheMiddleware struct {
 	workers sync.WaitGroup
 	mu      sync.RWMutex
 	closed  bool
+	misses  singleflight.Group
 }
 
 func newSimpleCacheMiddleware(store cache.Store, ttl time.Duration, hitRecorder func(exchange, []byte, string)) *simpleCacheMiddleware {
@@ -101,14 +103,42 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 	plan := core.GetWorkflow(ex.Context())
 	key := hashRequest(path, body, plan)
 
-	data, ok, err := ex.Capture("response cache: failed to capture cacheable response body", next)
+	type missResult struct {
+		owner *struct{ marker byte }
+		data  []byte
+	}
+	owner := &struct{ marker byte }{}
+	value, err, _ := m.misses.Do(key, func() (any, error) {
+		data, ok, err := ex.Capture("response cache: failed to capture cacheable response body", next)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return missResult{owner: owner}, nil
+		}
+		m.enqueueWrite(cacheWriteJob{key: key, data: data})
+		return missResult{owner: owner, data: data}, nil
+	})
 	if err != nil {
 		return err
 	}
-	if !ok {
+	result, _ := value.(missResult)
+	if result.owner == owner {
 		return nil
 	}
-	m.enqueueWrite(cacheWriteJob{key: key, data: data})
+	// The leader produced a non-cacheable result (failure status, failover, or
+	// malformed body). Waiting followers must execute independently rather than
+	// replaying something the normal cache would refuse to store.
+	if len(result.data) == 0 {
+		return next()
+	}
+	if err := ex.ReplayHit(body, result.data, CacheTypeExact); err != nil {
+		return next()
+	}
+	ex.MarkHit(CacheTypeExact)
+	if m.hitRecorder != nil {
+		m.hitRecorder(ex, result.data, CacheTypeExact)
+	}
 	return nil
 }
 

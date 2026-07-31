@@ -165,6 +165,63 @@ func TestHandleRequest_DifferentBodyDifferentKey(t *testing.T) {
 	}
 }
 
+func TestHandleRequest_CoalescesConcurrentIdenticalMisses(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	workflow := resolvedWorkflow("openai", "gpt-4")
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"same"}]}`)
+
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	next := func(c *echo.Context) error {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return c.JSON(http.StatusOK, map[string]string{"result": "shared"})
+	}
+
+	const requests = 12
+	recorders := make([]*httptest.ResponseRecorder, requests)
+	var wg sync.WaitGroup
+	for i := range requests {
+		wg.Go(func() {
+			recorders[i] = driveHandleRequest(t, mw, workflow, body, nil, next)
+		})
+	}
+	<-started
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("provider calls = %d, want one coalesced miss", got)
+	}
+	hits := 0
+	for i, rec := range recorders {
+		if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte("shared")) {
+			t.Fatalf("response %d = status %d body %q", i, rec.Code, rec.Body.String())
+		}
+		if rec.Header().Get("X-Cache") == "HIT (exact)" {
+			hits++
+		}
+	}
+	if hits != requests-1 {
+		t.Fatalf("coalesced hit responses = %d, want %d", hits, requests-1)
+	}
+}
+
+func TestHashRequest_CanonicalizesJSONFormattingAndKeyOrder(t *testing.T) {
+	plan := resolvedWorkflow("openai", "gpt-4")
+	compact := []byte(`{"input":[1,2],"model":"gpt-4"}`)
+	formatted := []byte("{\n  \"model\": \"gpt-4\",\n  \"input\": [1, 2]\n}")
+	if first, second := hashRequest("/v1/embeddings", compact, plan), hashRequest("/v1/embeddings", formatted, plan); first != second {
+		t.Fatalf("canonical-equivalent JSON produced different keys: %s != %s", first, second)
+	}
+}
+
 func TestHashRequest_ResolvedModelChangesKey(t *testing.T) {
 	body := []byte(`{"model":"anthropic/claude-opus-4-6","messages":[{"role":"user","content":"hi"}]}`)
 

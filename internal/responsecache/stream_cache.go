@@ -2,6 +2,7 @@ package responsecache
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"strings"
 
@@ -53,8 +54,29 @@ func cacheKeyRequestBody(path string, body []byte) []byte {
 		}
 		return normalized
 	default:
+		return canonicalJSONForCache(body)
+	}
+}
+
+// canonicalJSONForCache makes semantically identical JSON bodies share an
+// exact-cache key despite insignificant whitespace or object-key ordering. It
+// preserves number spellings through json.Number and falls back byte-for-byte
+// for malformed or multi-value input.
+func canonicalJSONForCache(body []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
 		return body
 	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return body
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return body
+	}
+	return canonical
 }
 
 func isEventStreamContentType(contentType string) bool {

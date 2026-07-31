@@ -10,9 +10,11 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/goccy/go-json"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/httpclient"
@@ -74,6 +76,14 @@ type Provider struct {
 	useNativeAPI bool
 	modelsURL    string
 	configErr    error
+	cacheMu      sync.Mutex
+	cacheObjects map[string]geminiCacheObject
+	cacheFlight  singleflight.Group
+}
+
+type geminiCacheObject struct {
+	name      string
+	expiresAt time.Time
 }
 
 // New creates a new Gemini provider.
@@ -462,6 +472,7 @@ func (p *Provider) nativeChatCompletion(ctx context.Context, req *core.ChatReque
 	if err != nil {
 		return nil, err
 	}
+	p.prepareCachedContent(ctx, req, body)
 	var geminiResp geminiGenerateContentResponse
 	err = p.nativeClient.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
@@ -509,6 +520,7 @@ func (p *Provider) nativeStreamChatCompletion(ctx context.Context, req *core.Cha
 	if err != nil {
 		return nil, err
 	}
+	p.prepareCachedContent(ctx, req, body)
 	stream, err := p.nativeClient.DoStream(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: nativeStreamEndpoint(req.Model),
@@ -519,6 +531,97 @@ func (p *Provider) nativeStreamChatCompletion(ctx context.Context, req *core.Cha
 	}
 	includeUsage := streamReq.StreamOptions != nil && streamReq.StreamOptions.IncludeUsage
 	return newGeminiNativeStream(stream, req.Model, includeUsage, p.responseProviderName()), nil
+}
+
+type geminiCreateCachedContentRequest struct {
+	Model             string          `json:"model"`
+	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
+	Contents          []geminiContent `json:"contents"`
+	Tools             []geminiTool    `json:"tools,omitempty"`
+	TTL               string          `json:"ttl"`
+}
+
+type geminiCreateCachedContentResponse struct {
+	Name       string    `json:"name"`
+	ExpireTime time.Time `json:"expireTime"`
+}
+
+// prepareCachedContent materializes the stable prefix selected by the
+// post-routing planner. Cache creation is best-effort: an unsupported model or
+// endpoint must never turn a request that would otherwise work into a failure.
+func (p *Provider) prepareCachedContent(ctx context.Context, req *core.ChatRequest, body *geminiGenerateContentRequest) {
+	if body == nil || body.CachedContent != "" || len(body.Contents) < 2 {
+		return
+	}
+	if req.PromptCachePlan == nil || strings.TrimSpace(req.PromptCachePlan.Key) == "" {
+		return
+	}
+	key := req.PromptCachePlan.Key
+	if cached := p.cachedContentObject(key); cached != "" {
+		useGeminiCachedPrefix(body, cached)
+		return
+	}
+
+	value, err, _ := p.cacheFlight.Do(key, func() (any, error) {
+		if cached := p.cachedContentObject(key); cached != "" {
+			return cached, nil
+		}
+		createReq := geminiCreateCachedContentRequest{
+			Model:             "models/" + normalizeGeminiModelID(req.Model),
+			SystemInstruction: body.SystemInstruction,
+			Contents:          append([]geminiContent(nil), body.Contents[:len(body.Contents)-1]...),
+			Tools:             append([]geminiTool(nil), body.Tools...),
+			TTL:               "300s",
+		}
+		var created geminiCreateCachedContentResponse
+		if err := p.nativeClient.Do(ctx, llmclient.Request{
+			Method:   http.MethodPost,
+			Endpoint: "/cachedContents",
+			Body:     &createReq,
+		}, &created); err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(created.Name) == "" {
+			return "", fmt.Errorf("cached-content creation for Gemini returned an empty name")
+		}
+		expiresAt := created.ExpireTime
+		if expiresAt.IsZero() {
+			expiresAt = time.Now().Add(5 * time.Minute)
+		}
+		p.cacheMu.Lock()
+		if p.cacheObjects == nil {
+			p.cacheObjects = make(map[string]geminiCacheObject)
+		}
+		p.cacheObjects[key] = geminiCacheObject{name: created.Name, expiresAt: expiresAt}
+		p.cacheMu.Unlock()
+		return created.Name, nil
+	})
+	if err == nil {
+		if cached, ok := value.(string); ok && cached != "" {
+			useGeminiCachedPrefix(body, cached)
+		}
+	}
+}
+
+func (p *Provider) cachedContentObject(key string) string {
+	p.cacheMu.Lock()
+	defer p.cacheMu.Unlock()
+	entry, ok := p.cacheObjects[key]
+	if !ok {
+		return ""
+	}
+	if time.Now().Add(15 * time.Second).After(entry.expiresAt) {
+		delete(p.cacheObjects, key)
+		return ""
+	}
+	return entry.name
+}
+
+func useGeminiCachedPrefix(body *geminiGenerateContentRequest, name string) {
+	body.CachedContent = name
+	body.Contents = append([]geminiContent(nil), body.Contents[len(body.Contents)-1])
+	body.SystemInstruction = nil
+	body.Tools = nil
 }
 
 // geminiModel represents a model in Gemini's native API response

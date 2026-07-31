@@ -153,6 +153,9 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 				continue
 			}
 			system = append(system, &brtypes.SystemContentBlockMemberText{Value: text})
+			if isGatewayCachePoint(msg.ExtraFields) {
+				system = append(system, &brtypes.SystemContentBlockMemberCachePoint{Value: brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}})
+			}
 		case "tool":
 			block, err := convertToolResultMessage(msg)
 			if err != nil {
@@ -164,12 +167,18 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 			if text == "" {
 				continue
 			}
-			appendOrMerge(brtypes.ConversationRoleUser,
-				[]brtypes.ContentBlock{&brtypes.ContentBlockMemberText{Value: text}})
+			blocks := []brtypes.ContentBlock{&brtypes.ContentBlockMemberText{Value: text}}
+			if isGatewayCachePoint(msg.ExtraFields) {
+				blocks = append(blocks, &brtypes.ContentBlockMemberCachePoint{Value: brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}})
+			}
+			appendOrMerge(brtypes.ConversationRoleUser, blocks)
 		case "assistant":
 			blocks, err := convertAssistantMessage(msg)
 			if err != nil {
 				return nil, nil, err
+			}
+			if isGatewayCachePoint(msg.ExtraFields) {
+				blocks = append(blocks, &brtypes.ContentBlockMemberCachePoint{Value: brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}})
 			}
 			appendOrMerge(brtypes.ConversationRoleAssistant, blocks)
 		default:
@@ -179,6 +188,10 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 	flushToolResults(pendingToolResults)
 
 	return system, out, nil
+}
+
+func isGatewayCachePoint(fields core.UnknownJSONFields) bool {
+	return strings.TrimSpace(string(fields.Lookup("_gomodel_cache_point"))) == "true"
 }
 
 func convertAssistantMessage(msg core.Message) ([]brtypes.ContentBlock, error) {

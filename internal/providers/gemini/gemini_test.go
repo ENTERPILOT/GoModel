@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -31,6 +32,44 @@ func TestNew(t *testing.T) {
 	}
 	if provider.client == nil {
 		t.Error("client should not be nil")
+	}
+}
+
+func TestPrepareCachedContentCreatesAndReusesObject(t *testing.T) {
+	var creates atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/cachedContents" {
+			t.Fatalf("path = %q, want /cachedContents", r.URL.Path)
+		}
+		creates.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"name":"cachedContents/session-prefix","expireTime":"2099-01-01T00:00:00Z"}`)
+	}))
+	defer server.Close()
+
+	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p.SetBaseURL(server.URL)
+	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "prefix-key"}}
+	newBody := func() *geminiGenerateContentRequest {
+		return &geminiGenerateContentRequest{
+			SystemInstruction: &geminiContent{Parts: []geminiPart{{Text: "system"}}},
+			Contents: []geminiContent{
+				{Role: "user", Parts: []geminiPart{{Text: "stable"}}},
+				{Role: "user", Parts: []geminiPart{{Text: "dynamic"}}},
+			},
+		}
+	}
+	first := newBody()
+	p.prepareCachedContent(context.Background(), req, first)
+	second := newBody()
+	p.prepareCachedContent(context.Background(), req, second)
+	if creates.Load() != 1 {
+		t.Fatalf("cache creates = %d, want 1", creates.Load())
+	}
+	for i, body := range []*geminiGenerateContentRequest{first, second} {
+		if body.CachedContent != "cachedContents/session-prefix" || len(body.Contents) != 1 || body.SystemInstruction != nil {
+			t.Fatalf("body %d did not use cached prefix: %+v", i, body)
+		}
 	}
 }
 

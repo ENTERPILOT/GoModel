@@ -21,7 +21,8 @@ var ErrRegistryNotInitialized = fmt.Errorf("model registry has no models: ensure
 // It uses a dynamic model-to-provider mapping that is populated at startup
 // by fetching available models from each provider's /models endpoint.
 type Router struct {
-	lookup core.ModelLookup
+	lookup       core.ModelLookup
+	cachePlanner *cachePlanner
 }
 
 type providerTypeRegistry interface {
@@ -76,7 +77,8 @@ func NewRouter(lookup core.ModelLookup) (*Router, error) {
 		return nil, fmt.Errorf("lookup cannot be nil")
 	}
 	return &Router{
-		lookup: lookup,
+		lookup:       lookup,
+		cachePlanner: newCachePlanner(),
 	}, nil
 }
 
@@ -478,6 +480,17 @@ func routeStampedModelResponse[Req any, Resp any](
 	return stampProvider(resp, providerType), nil
 }
 
+func routeModelStream[Req any](
+	r *Router,
+	ctx context.Context,
+	model, providerHint string,
+	buildForward func(core.ModelSelector) Req,
+	call func(context.Context, core.Provider, Req) (io.ReadCloser, error),
+) (io.ReadCloser, error) {
+	stream, _, err := routeResolvedModelCall(r, ctx, model, providerHint, buildForward, call)
+	return stream, err
+}
+
 func routeNativeBatchCall[T any](r *Router, ctx context.Context, providerType string, call func(context.Context, core.NativeBatchProvider) (T, error)) (T, error) {
 	bp, err := r.resolveNativeBatchProvider(providerType)
 	if err != nil {
@@ -567,6 +580,25 @@ func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSele
 	return &forwardReq
 }
 
+func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
+	forward := r.forwardChatRequest(ctx, req, selector)
+	if r.cachePlanner == nil || len(forward.Messages) < 2 {
+		return forward
+	}
+	return r.cachePlanner.planChat(forward, r.lookup.GetProviderType(selector.QualifiedModel()), selector)
+}
+
+func (r *Router) plannedResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
+	forward := forwardResponsesRequest(req, selector)
+	if r.cachePlanner == nil {
+		return forward
+	}
+	if items, ok := forward.Input.([]core.ResponsesInputElement); !ok || len(items) < 2 {
+		return forward
+	}
+	return r.cachePlanner.planResponses(forward, r.lookup.GetProviderType(selector.QualifiedModel()), selector)
+}
+
 func forwardEmbeddingRequest(req *core.EmbeddingRequest, selector core.ModelSelector) *core.EmbeddingRequest {
 	forwardReq := *req
 	forwardReq.Model = selector.Model
@@ -627,7 +659,7 @@ func (r *Router) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*co
 		req.Model,
 		req.Provider,
 		func(selector core.ModelSelector) *core.ChatRequest {
-			return r.forwardChatRequest(ctx, req, selector)
+			return r.plannedChatRequest(ctx, req, selector)
 		},
 		callChatCompletion,
 	)
@@ -636,19 +668,18 @@ func (r *Router) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*co
 // StreamChatCompletion routes the streaming request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	stream, _, err := routeResolvedModelCall(
+	return routeModelStream(
 		r,
 		ctx,
 		req.Model,
 		req.Provider,
 		func(selector core.ModelSelector) *core.ChatRequest {
-			return r.forwardChatRequest(ctx, req, selector)
+			return r.plannedChatRequest(ctx, req, selector)
 		},
 		func(ctx context.Context, provider core.Provider, forwardReq *core.ChatRequest) (io.ReadCloser, error) {
 			return provider.StreamChatCompletion(ctx, forwardReq)
 		},
 	)
-	return stream, err
 }
 
 // ListModels returns all models from the lookup.
@@ -678,7 +709,7 @@ func (r *Router) Responses(ctx context.Context, req *core.ResponsesRequest) (*co
 		req.Model,
 		req.Provider,
 		func(selector core.ModelSelector) *core.ResponsesRequest {
-			return forwardResponsesRequest(req, selector)
+			return r.plannedResponsesRequest(req, selector)
 		},
 		callResponses,
 	)
@@ -687,19 +718,18 @@ func (r *Router) Responses(ctx context.Context, req *core.ResponsesRequest) (*co
 // StreamResponses routes the streaming Responses API request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	stream, _, err := routeResolvedModelCall(
+	return routeModelStream(
 		r,
 		ctx,
 		req.Model,
 		req.Provider,
 		func(selector core.ModelSelector) *core.ResponsesRequest {
-			return forwardResponsesRequest(req, selector)
+			return r.plannedResponsesRequest(req, selector)
 		},
 		func(ctx context.Context, provider core.Provider, forwardReq *core.ResponsesRequest) (io.ReadCloser, error) {
 			return provider.StreamResponses(ctx, forwardReq)
 		},
 	)
-	return stream, err
 }
 
 // Embeddings routes the embeddings request to the appropriate provider.
