@@ -52,6 +52,36 @@ func TestNewEmbedder_APIEmbedder(t *testing.T) {
 	}
 }
 
+func TestNewEmbedder_HonorsSessionStickyKeysOptOut(t *testing.T) {
+	disabled := false
+	rawProviders := map[string]config.RawProviderConfig{
+		"openai": {
+			Type:              "openai",
+			APIKeys:           []string{"key-1", "key-2"},
+			BaseURL:           "https://api.openai.com",
+			SessionStickyKeys: &disabled,
+		},
+	}
+	emb, err := NewEmbedder(config.EmbedderConfig{Provider: "openai"}, rawProviders)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer emb.Close()
+
+	ring := emb.(*apiEmbedder).keys
+	got := []string{
+		ring.NextForSession("same-session"),
+		ring.NextForSession("same-session"),
+		ring.NextForSession("same-session"),
+	}
+	want := []string{"key-1", "key-2", "key-1"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("key sequence = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestNewEmbedder_GeminiUsesProviderBaseURL(t *testing.T) {
 	const geminiOpenAICompat = "https://generativelanguage.googleapis.com/v1beta/openai"
 	rawProviders := map[string]config.RawProviderConfig{

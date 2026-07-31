@@ -163,6 +163,7 @@ test("an unavailable schema falls back to sending every field", () => {
   const body = buildProviderCredentialPayload(form, null);
   assert.equal(body.vertex_project, "my-project");
   assert.equal(body.api_version, "");
+  assert.equal("session_sticky_keys" in body, false);
 });
 
 test("payload preserves untouched masked API key positions on edit", () => {

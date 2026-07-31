@@ -3,6 +3,7 @@ package providers
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"sync/atomic"
 
@@ -111,10 +112,11 @@ func (k *Keyring) NextForSession(sessionID string) string {
 }
 
 func rendezvousKeyScore(sessionID, key string) [sha256.Size]byte {
-	hash := sha256.New()
+	// The credential is the HMAC key, not password material being stored or
+	// verified. HMAC also makes that security boundary explicit to static
+	// analysis while retaining a deterministic, uniformly distributed score.
+	hash := hmac.New(sha256.New, []byte(key))
 	_, _ = hash.Write([]byte(sessionID))
-	_, _ = hash.Write([]byte{0})
-	_, _ = hash.Write([]byte(key))
 	var score [sha256.Size]byte
 	copy(score[:], hash.Sum(nil))
 	return score

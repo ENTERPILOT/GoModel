@@ -56,9 +56,9 @@ func TestChatCompletion_AddsDefaultAttributionHeaders(t *testing.T) {
 }
 
 func TestChatCompletion_ForwardsGoModelSessionID(t *testing.T) {
-	var gotSessionID string
+	gotSessionID := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotSessionID = r.Header.Get("X-Session-Id")
+		gotSessionID <- r.Header.Get("X-Session-Id")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"id":"chatcmpl-123","object":"chat.completion","created":1677652288,
@@ -78,8 +78,8 @@ func TestChatCompletion_ForwardsGoModelSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChatCompletion() error = %v", err)
 	}
-	if gotSessionID != "conversation-42" {
-		t.Fatalf("X-Session-Id = %q, want conversation-42", gotSessionID)
+	if got := <-gotSessionID; got != "conversation-42" {
+		t.Fatalf("X-Session-Id = %q, want conversation-42", got)
 	}
 }
 

@@ -548,11 +548,14 @@ func stampProvider[T any](resp T, providerType string) T {
 
 // Provider is gateway routing metadata on OpenAI-compatible request structs and
 // must be removed before dispatching to an upstream provider implementation.
-func forwardChatRequest(req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
+func (r *Router) forwardChatRequest(req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
 	forwardReq := *req
 	forwardReq.Model = selector.Model
 	forwardReq.Provider = ""
-	return &forwardReq
+	if !hasAnthropicCacheControl(&forwardReq) {
+		return &forwardReq
+	}
+	return adaptAnthropicCacheControl(&forwardReq, r.GetProviderType(selector.QualifiedModel()))
 }
 
 func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
@@ -622,7 +625,7 @@ func (r *Router) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*co
 		req.Model,
 		req.Provider,
 		func(selector core.ModelSelector) *core.ChatRequest {
-			return forwardChatRequest(req, selector)
+			return r.forwardChatRequest(req, selector)
 		},
 		callChatCompletion,
 	)
@@ -637,7 +640,7 @@ func (r *Router) StreamChatCompletion(ctx context.Context, req *core.ChatRequest
 		req.Model,
 		req.Provider,
 		func(selector core.ModelSelector) *core.ChatRequest {
-			return forwardChatRequest(req, selector)
+			return r.forwardChatRequest(req, selector)
 		},
 		func(ctx context.Context, provider core.Provider, forwardReq *core.ChatRequest) (io.ReadCloser, error) {
 			return provider.StreamChatCompletion(ctx, forwardReq)

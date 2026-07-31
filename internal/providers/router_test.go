@@ -560,6 +560,89 @@ func TestRouterChatCompletion_ProviderSelector(t *testing.T) {
 	}
 }
 
+func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing.T) {
+	cacheExtra := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+		"x_keep":        json.RawMessage(`true`),
+	})
+	request := &core.ChatRequest{
+		Model:       "gpt-4o",
+		ExtraFields: cacheExtra,
+		Tools: []map[string]any{{
+			"type":          "function",
+			"function":      map[string]any{"name": "lookup"},
+			"cache_control": map[string]any{"type": "ephemeral"},
+		}},
+		Messages: []core.Message{{
+			Role:        "assistant",
+			ExtraFields: cacheExtra,
+			Content: []core.ContentPart{{
+				Type:        "text",
+				Text:        "stable prefix",
+				ExtraFields: cacheExtra,
+			}},
+			ToolCalls: []core.ToolCall{{
+				ID:          "tool-1",
+				Type:        "function",
+				ExtraFields: cacheExtra,
+				Function: core.FunctionCall{
+					Name:        "lookup",
+					Arguments:   `{}`,
+					ExtraFields: cacheExtra,
+				},
+			}},
+		}},
+	}
+
+	strict := &mockProvider{name: "strict", chatResponse: &core.ChatResponse{ID: "ok"}}
+	lookup := newMockLookup()
+	lookup.addModel("gpt-4o", strict, "openai")
+	router, _ := NewRouter(lookup)
+	if _, err := router.ChatCompletion(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+
+	forwarded := strict.lastChatReq
+	if forwarded == nil {
+		t.Fatal("strict provider did not receive a request")
+	}
+	assertNoCacheControl := func(label string, fields core.UnknownJSONFields) {
+		t.Helper()
+		if got := fields.Lookup("cache_control"); got != nil {
+			t.Errorf("%s cache_control = %s, want removed", label, got)
+		}
+		if got := string(fields.Lookup("x_keep")); got != "true" {
+			t.Errorf("%s x_keep = %s, want preserved", label, got)
+		}
+	}
+	assertNoCacheControl("request", forwarded.ExtraFields)
+	if _, exists := forwarded.Tools[0]["cache_control"]; exists {
+		t.Error("tool cache_control was forwarded to strict provider")
+	}
+	assertNoCacheControl("message", forwarded.Messages[0].ExtraFields)
+	part := forwarded.Messages[0].Content.([]core.ContentPart)[0]
+	assertNoCacheControl("content part", part.ExtraFields)
+	call := forwarded.Messages[0].ToolCalls[0]
+	assertNoCacheControl("tool call", call.ExtraFields)
+	assertNoCacheControl("function call", call.Function.ExtraFields)
+
+	// Routing adaptation must never rewrite the canonical caller request.
+	if request.ExtraFields.Lookup("cache_control") == nil || request.Tools[0]["cache_control"] == nil {
+		t.Fatal("routing mutated the caller's request")
+	}
+}
+
+func TestAdaptAnthropicCacheControl_PreservesSupportedProviders(t *testing.T) {
+	req := &core.ChatRequest{ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+	})}
+	for _, providerType := range []string{"anthropic", "openrouter"} {
+		if got := adaptAnthropicCacheControl(req, providerType); got != req {
+			t.Errorf("provider %q cloned or changed supported cache metadata", providerType)
+		}
+	}
+}
+
 func TestRouterChatCompletion_PrefixedModelSelector(t *testing.T) {
 	westResp := &core.ChatResponse{ID: "west", Model: "gpt-4o"}
 	west := &mockProvider{name: "openai-west", chatResponse: westResp}

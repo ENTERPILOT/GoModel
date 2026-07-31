@@ -359,16 +359,27 @@ func systemContent(raw json.RawMessage) (core.MessageContent, error) {
 }
 
 func anthropicCacheControlExtra(raw json.RawMessage) (core.UnknownJSONFields, error) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
+	validated, err := validatedCacheControlJSON(raw)
+	if err != nil {
+		return core.UnknownJSONFields{}, err
+	}
+	if len(validated) == 0 {
 		return core.UnknownJSONFields{}, nil
 	}
-	if trimmed[0] != '{' || !json.Valid(trimmed) {
-		return core.UnknownJSONFields{}, fmt.Errorf("cache_control must be an object")
-	}
 	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-		"cache_control": core.CloneRawJSON(trimmed),
+		"cache_control": validated,
 	}), nil
+}
+
+func validatedCacheControlJSON(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
+		return nil, nil
+	}
+	if trimmed[0] != '{' || !json.Valid(trimmed) {
+		return nil, fmt.Errorf("cache_control must be an object")
+	}
+	return core.CloneRawJSON(trimmed), nil
 }
 
 // toolResultText extracts the text payload of a tool_result block content,
@@ -457,10 +468,11 @@ func convertTools(tools []Tool) ([]map[string]any, error) {
 			function["parameters"] = schema
 		}
 		converted := map[string]any{"type": "function", "function": function}
-		if raw := bytes.TrimSpace(tool.CacheControl); len(raw) > 0 && !core.IsJSONNull(raw) {
-			if raw[0] != '{' || !json.Valid(raw) {
-				return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d].cache_control must be an object", i), nil)
-			}
+		raw, err := validatedCacheControlJSON(tool.CacheControl)
+		if err != nil {
+			return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d].%s", i, err), err)
+		}
+		if len(raw) > 0 {
 			var cacheControl any
 			if err := json.Unmarshal(raw, &cacheControl); err != nil {
 				return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d].cache_control: %v", i, err), err)

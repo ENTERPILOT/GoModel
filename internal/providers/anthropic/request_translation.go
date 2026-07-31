@@ -569,19 +569,7 @@ func buildAnthropicSystemContent(content any) (any, error) {
 }
 
 func anthropicCacheControlFromExtra(extraFields core.UnknownJSONFields) (json.RawMessage, error) {
-	raw := extraFields.Lookup("cache_control")
-	if len(raw) == 0 {
-		return nil, nil
-	}
-
-	trimmed := bytes.TrimSpace(raw)
-	if core.IsJSONNull(trimmed) {
-		return nil, nil
-	}
-	if trimmed[0] != '{' {
-		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", nil)
-	}
-	return core.CloneRawJSON(trimmed), nil
+	return validatedAnthropicCacheControlJSON(extraFields.Lookup("cache_control"))
 }
 
 func anthropicCacheControlFromValue(value any) (json.RawMessage, error) {
@@ -592,11 +580,15 @@ func anthropicCacheControlFromValue(value any) (json.RawMessage, error) {
 	if err != nil {
 		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", err)
 	}
+	return validatedAnthropicCacheControlJSON(raw)
+}
+
+func validatedAnthropicCacheControlJSON(raw json.RawMessage) (json.RawMessage, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
 		return nil, nil
 	}
-	if trimmed[0] != '{' {
+	if trimmed[0] != '{' || !json.Valid(trimmed) {
 		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", nil)
 	}
 	return core.CloneRawJSON(trimmed), nil

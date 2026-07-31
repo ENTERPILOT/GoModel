@@ -252,6 +252,33 @@ func (fields UnknownJSONFields) IsEmpty() bool {
 	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("{}"))
 }
 
+// Without returns the fields without the named members. Other members,
+// including duplicate unknown keys, retain their original JSON representation.
+func (fields UnknownJSONFields) Without(keys ...string) UnknownJSONFields {
+	if fields.IsEmpty() || len(keys) == 0 {
+		return fields
+	}
+	skip := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		skip[key] = struct{}{}
+	}
+
+	var buf bytes.Buffer
+	buf.Grow(len(fields.raw))
+	buf.WriteByte('{')
+	wrote := false
+	if err := appendUnknownJSONMembers(&buf, fields.raw, skip, &wrote); err != nil {
+		// UnknownJSONFields can only be constructed from validated JSON. Retain the
+		// original value if an impossible malformed internal value reaches here.
+		return fields
+	}
+	buf.WriteByte('}')
+	if !wrote {
+		return UnknownJSONFields{}
+	}
+	return UnknownJSONFields{raw: buf.Bytes()}
+}
+
 // extractUnknownJSONFields captures the object's keys that are not in
 // knownFields, preserving their raw bytes for passthrough (Postel's Law).
 //

@@ -87,6 +87,27 @@ func TestUnknownJSONFieldsFromMap_EmptyRawValueEncodesAsNull(t *testing.T) {
 	}
 }
 
+func TestUnknownJSONFieldsWithoutRemovesOnlyNamedMembers(t *testing.T) {
+	fields, err := extractUnknownJSONFields(
+		[]byte(`{"known":true,"cache_control":{"type":"ephemeral"},"x":1,"x":2}`),
+		"known",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	filtered := fields.Without("cache_control")
+	if got := filtered.Lookup("cache_control"); got != nil {
+		t.Fatalf("cache_control = %s, want removed", got)
+	}
+	if got := string(filtered.raw); got != `{"x":1,"x":2}` {
+		t.Fatalf("filtered raw = %s, want duplicate unrelated fields preserved", got)
+	}
+	if got := fields.Lookup("cache_control"); got == nil {
+		t.Fatal("original fields were mutated")
+	}
+}
+
 func TestMergeUnknownJSONFields_AddsAndOverrides(t *testing.T) {
 	base := UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 		"keep":     json.RawMessage(`1`),
