@@ -20,6 +20,7 @@ var credentialSQLSchema = []string{
 		name TEXT PRIMARY KEY,
 		type TEXT NOT NULL,
 		api_keys TEXT NOT NULL DEFAULT '[]',
+		session_sticky_keys ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		base_url TEXT NOT NULL DEFAULT '',
 		api_version TEXT NOT NULL DEFAULT '',
 		backend TEXT NOT NULL DEFAULT '',
@@ -41,7 +42,7 @@ var credentialSQLSchema = []string{
 
 const selectCredentialColumns = `name, type, api_keys, base_url, api_version, backend, auth_type, api_mode, ` +
 	`vertex_project, vertex_location, service_account_file, service_account_json, ` +
-	`service_account_json_base64, gcp_scope, models, enabled, created_at, updated_at`
+	`service_account_json_base64, gcp_scope, models, session_sticky_keys, enabled, created_at, updated_at`
 
 // NewSQLCredentialStore creates the provider_credentials table and indexes if
 // needed.
@@ -51,6 +52,11 @@ func NewSQLCredentialStore(ctx context.Context, db sqlx.DB) (*SQLCredentialStore
 	}
 	if err := db.Schema(ctx, credentialSQLSchema...); err != nil {
 		return nil, fmt.Errorf("failed to create provider_credentials table: %w", err)
+	}
+	if err := sqlx.AddColumns(ctx, db,
+		`ALTER TABLE provider_credentials ADD COLUMN session_sticky_keys `+sqlx.TypeBool+` NOT NULL DEFAULT TRUE`,
+	); err != nil {
+		return nil, fmt.Errorf("migrate provider_credentials: %w", err)
 	}
 	return &SQLCredentialStore{db: db}, nil
 }
@@ -99,9 +105,9 @@ func (s *SQLCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCre
 		INSERT INTO provider_credentials (
 			name, type, api_keys, base_url, api_version, backend, auth_type, api_mode,
 			vertex_project, vertex_location, service_account_file, service_account_json,
-			service_account_json_base64, gcp_scope, models, enabled, created_at, updated_at
+			service_account_json_base64, gcp_scope, models, session_sticky_keys, enabled, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			type = excluded.type,
 			api_keys = excluded.api_keys,
@@ -117,6 +123,7 @@ func (s *SQLCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCre
 			service_account_json_base64 = excluded.service_account_json_base64,
 			gcp_scope = excluded.gcp_scope,
 			models = excluded.models,
+			session_sticky_keys = excluded.session_sticky_keys,
 			enabled = excluded.enabled,
 			updated_at = excluded.updated_at
 	`,
@@ -135,6 +142,7 @@ func (s *SQLCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCre
 		cred.ServiceAccountJSONBase64,
 		cred.GCPScope,
 		modelsJSON,
+		sessionStickyKeysEnabled(cred.SessionStickyKeys),
 		cred.Enabled,
 		cred.CreatedAt.Unix(),
 		cred.UpdatedAt.Unix(),
@@ -164,6 +172,7 @@ func (s *SQLCredentialStore) Close() error {
 func scanSQLCredential(scanner sqlx.Row) (ManagedProviderCredential, error) {
 	var cred ManagedProviderCredential
 	var apiKeys, models []byte
+	var sessionStickyKeys bool
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&cred.Name,
@@ -181,12 +190,14 @@ func scanSQLCredential(scanner sqlx.Row) (ManagedProviderCredential, error) {
 		&cred.ServiceAccountJSONBase64,
 		&cred.GCPScope,
 		&models,
+		&sessionStickyKeys,
 		&cred.Enabled,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
 		return ManagedProviderCredential{}, err
 	}
+	cred.SessionStickyKeys = &sessionStickyKeys
 	var err error
 	if cred.APIKeys, err = decodeCredentialList(apiKeys); err != nil {
 		return ManagedProviderCredential{}, err

@@ -131,7 +131,7 @@ func (e *apiEmbedder) Embed(ctx context.Context, text string) ([]float32, error)
 		return nil, fmt.Errorf("embedding: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if apiKey := e.keys.Next(); apiKey != "" {
+	if apiKey := e.keys.NextForContext(req.Context()); apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	resp, err := e.httpClient.Do(req)

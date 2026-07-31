@@ -17,7 +17,7 @@ import (
 // A request carrying a CallID attaches to an existing WebRTC call as a sideband
 // channel on the GA v1 surface (<resource>/openai/v1/realtime?call_id=...),
 // which needs no api-version parameter.
-func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
+func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
 	}
@@ -35,25 +35,25 @@ func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) 
 		return nil, err
 	}
 
-	return &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders()}, nil
+	return &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders(ctx)}, nil
 }
 
 // RealtimeCallTarget implements core.RealtimeCallProvider for Azure OpenAI's GA
 // WebRTC SDP exchange: POST https://<resource>.openai.azure.com/openai/v1/realtime/calls.
 // The GA v1 surface mirrors OpenAI's and takes no api-version parameter; the
 // model query parameter selects the Azure deployment.
-func (p *Provider) RealtimeCallTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
-	return p.realtimeHTTPTarget(req, "calls")
+func (p *Provider) RealtimeCallTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
+	return p.realtimeHTTPTarget(ctx, req, "calls")
 }
 
 // RealtimeClientSecretTarget implements core.RealtimeCallProvider for minting
 // ephemeral realtime client secrets on Azure's GA v1 surface:
 // POST https://<resource>.openai.azure.com/openai/v1/realtime/client_secrets.
-func (p *Provider) RealtimeClientSecretTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
-	return p.realtimeHTTPTarget(req, "client_secrets")
+func (p *Provider) RealtimeClientSecretTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
+	return p.realtimeHTTPTarget(ctx, req, "client_secrets")
 }
 
-func (p *Provider) realtimeHTTPTarget(req *core.RealtimeRequest, endpoint string) (*core.RealtimeHTTPTarget, error) {
+func (p *Provider) realtimeHTTPTarget(ctx context.Context, req *core.RealtimeRequest, endpoint string) (*core.RealtimeHTTPTarget, error) {
 	if req == nil || strings.TrimSpace(req.Model) == "" {
 		return nil, core.NewInvalidRequestError("model is required for realtime calls", nil)
 	}
@@ -62,7 +62,7 @@ func (p *Provider) realtimeHTTPTarget(req *core.RealtimeRequest, endpoint string
 		return nil, err
 	}
 	u.Path += "/openai/v1/realtime/" + endpoint
-	return &core.RealtimeHTTPTarget{URL: u.String(), Headers: p.realtimeAuthHeaders()}, nil
+	return &core.RealtimeHTTPTarget{URL: u.String(), Headers: p.realtimeAuthHeaders(ctx)}, nil
 }
 
 // realtimeAttachURL builds the GA sideband attach websocket URL:
@@ -120,9 +120,9 @@ func (p *Provider) realtimeRoot(insecureScheme, secureScheme string) (*url.URL, 
 	return u, nil
 }
 
-func (p *Provider) realtimeAuthHeaders() http.Header {
+func (p *Provider) realtimeAuthHeaders(ctx context.Context) http.Header {
 	headers := http.Header{}
-	if apiKey := p.keys.Next(); apiKey != "" {
+	if apiKey := p.keys.NextForContext(ctx); apiKey != "" {
 		headers.Set("api-key", apiKey)
 	}
 	return headers

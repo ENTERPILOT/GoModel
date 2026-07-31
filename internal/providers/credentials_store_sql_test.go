@@ -23,15 +23,17 @@ func runSQLCredentialStoreTest(t *testing.T, body func(t *testing.T, store *SQLC
 func TestSQLCredentialStoreRoundTrip(t *testing.T) {
 	runSQLCredentialStoreTest(t, func(t *testing.T, store *SQLCredentialStore) {
 		ctx := context.Background()
+		sessionStickyKeys := false
 
 		cred := ManagedProviderCredential{
-			Name:       "my-openai",
-			Type:       "openai",
-			APIKeys:    []string{"sk-one", "sk-two"},
-			BaseURL:    "https://api.openai.com/v1",
-			APIVersion: "2024-01-01",
-			Models:     []string{"gpt-4o", "gpt-4o-mini"},
-			Enabled:    true,
+			Name:              "my-openai",
+			Type:              "openai",
+			APIKeys:           []string{"sk-one", "sk-two"},
+			SessionStickyKeys: &sessionStickyKeys,
+			BaseURL:           "https://api.openai.com/v1",
+			APIVersion:        "2024-01-01",
+			Models:            []string{"gpt-4o", "gpt-4o-mini"},
+			Enabled:           true,
 		}
 		if err := store.Upsert(ctx, cred); err != nil {
 			t.Fatalf("Upsert() error = %v", err)
@@ -49,6 +51,9 @@ func TestSQLCredentialStoreRoundTrip(t *testing.T) {
 		}
 		if len(got.Models) != 2 || got.Models[0] != "gpt-4o" {
 			t.Fatalf("Get().Models = %v, want [gpt-4o gpt-4o-mini]", got.Models)
+		}
+		if got.SessionStickyKeys == nil || *got.SessionStickyKeys {
+			t.Fatalf("Get().SessionStickyKeys = %v, want false", got.SessionStickyKeys)
 		}
 		if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
 			t.Fatalf("Get() timestamps = (%v, %v), want both stamped", got.CreatedAt, got.UpdatedAt)

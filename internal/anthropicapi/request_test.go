@@ -389,6 +389,68 @@ func TestToChatRequestExtraFields(t *testing.T) {
 	}
 }
 
+func TestToChatRequestPreservesAnthropicCacheControls(t *testing.T) {
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"claude-test","max_tokens":64,
+		"cache_control":{"type":"ephemeral"},
+		"system":[{"type":"text","text":"stable system","cache_control":{"type":"ephemeral"}}],
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"stable prefix","cache_control":{"type":"ephemeral"}}]},
+			{"role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"lookup","input":{"q":"x"},"cache_control":{"type":"ephemeral"}}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"result","cache_control":{"type":"ephemeral"}}]}
+		],
+		"tools":[{"name":"lookup","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	want := `{"type":"ephemeral"}`
+	if got := string(chat.ExtraFields.Lookup("cache_control")); got != want {
+		t.Errorf("request cache_control = %s, want %s", got, want)
+	}
+	if len(chat.Messages) != 4 {
+		t.Fatalf("messages = %d, want system, user, assistant, tool", len(chat.Messages))
+	}
+	for _, index := range []int{0, 1} {
+		parts, ok := chat.Messages[index].Content.([]core.ContentPart)
+		if !ok || len(parts) != 1 {
+			t.Fatalf("messages[%d].Content = %T %#v, want one structured part", index, chat.Messages[index].Content, chat.Messages[index].Content)
+		}
+		if got := string(parts[0].ExtraFields.Lookup("cache_control")); got != want {
+			t.Errorf("messages[%d] cache_control = %s, want %s", index, got, want)
+		}
+	}
+	if got := string(chat.Messages[2].ToolCalls[0].ExtraFields.Lookup("cache_control")); got != want {
+		t.Errorf("tool_use cache_control = %s, want %s", got, want)
+	}
+	if got := string(chat.Messages[3].ExtraFields.Lookup("cache_control")); got != want {
+		t.Errorf("tool_result cache_control = %s, want %s", got, want)
+	}
+	if got, ok := chat.Tools[0]["cache_control"].(map[string]any); !ok || got["type"] != "ephemeral" {
+		t.Errorf("tool cache_control = %#v, want ephemeral object", chat.Tools[0]["cache_control"])
+	}
+}
+
+func TestToChatRequestRejectsInvalidCacheControl(t *testing.T) {
+	_, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":"invalid"}]}]
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "cache_control must be an object") {
+		t.Fatalf("error = %v, want cache_control object error", err)
+	}
+}
+
+func TestToChatRequestRejectsInvalidTopLevelCacheControl(t *testing.T) {
+	_, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,"cache_control":"invalid",
+		"messages":[{"role":"user","content":"hi"}]
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "cache_control must be an object") {
+		t.Fatalf("error = %v, want cache_control object error", err)
+	}
+}
+
 func TestToChatRequestRejectsUnsupportedContentBlock(t *testing.T) {
 	_, err := ToChatRequest(mustDecode(t, `{
 		"model":"m","max_tokens":10,

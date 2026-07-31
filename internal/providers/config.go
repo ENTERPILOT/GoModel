@@ -20,10 +20,11 @@ type ProviderConfig struct {
 	// or "" for keyless providers. Prefer APIKeys for anything that
 	// authenticates a request, so rotation is honoured.
 	APIKey string
-	// APIKeys is the provider's full, ordered, de-duplicated key set. Requests
-	// rotate across it round robin when it holds more than one key. It is nil
-	// for keyless providers and holds exactly one entry in the common case.
+	// APIKeys is the provider's full, ordered, de-duplicated key set. Identified
+	// sessions stay on one key when SessionStickyKeys is true; sessionless
+	// traffic rotates round robin.
 	APIKeys                  []string
+	SessionStickyKeys        bool
 	BaseURL                  string
 	APIVersion               string
 	Backend                  string
@@ -816,6 +817,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		Type:                     normalizeProviderType(raw),
 		APIKey:                   raw.APIKey,
 		APIKeys:                  raw.APIKeys,
+		SessionStickyKeys:        sessionStickyKeysEnabled(raw.SessionStickyKeys),
 		BaseURL:                  raw.BaseURL,
 		APIVersion:               raw.APIVersion,
 		Backend:                  raw.Backend,
@@ -867,6 +869,10 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 	}
 
 	return resolved
+}
+
+func sessionStickyKeysEnabled(value *bool) bool {
+	return value == nil || *value
 }
 
 func normalizeProviderType(raw config.RawProviderConfig) string {

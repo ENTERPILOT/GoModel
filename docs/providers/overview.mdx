@@ -123,8 +123,8 @@ support, not every individual model capability exposed by an upstream provider.
 - **vLLM** — set `VLLM_API_KEY` only if the upstream server was started with
   `--api-key`.
 - **Multiple API keys for one provider** — set `OPENAI_API_KEY_2`,
-  `OPENAI_API_KEY_3`, and so on to spread requests across keys round robin and
-  lift per-key rate limits. This costs you provider prompt caching; see
+  `OPENAI_API_KEY_3`, and so on to spread sessions across keys while keeping
+  each conversation on one key for prompt-cache affinity. See
   [API key rotation](/providers/key-rotation).
 - **Multiple instances of one provider type** — without `config.yaml`, use
   suffixed env vars such as `OPENAI_EAST_API_KEY` and `OPENAI_EAST_BASE_URL`;

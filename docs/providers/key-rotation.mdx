@@ -1,29 +1,23 @@
 ---
 title: "API Key Rotation"
-description: "Give one provider several API keys and spread requests across them round robin to lift per-key rate limits."
+description: "Give one provider several API keys, spread sessions across them, and preserve prompt-cache affinity."
 icon: "key-round"
 keywords: ["API key rotation", "multiple API keys", "round robin", "rate limits"]
 ---
 
 A provider normally holds one API key, and every request to it uses that key.
-Configure more than one and GoModel spreads requests across them round robin, so
-each key carries a fraction of the traffic. This raises the per-key rate limits
-you hit before the provider starts returning `429`.
+Configure more than one and GoModel spreads identified sessions across them. Each
+conversation stays on one key by default, so it can keep hitting the provider's
+prompt cache while each key still carries a fraction of the overall traffic.
 
 Rotation is off until a second key is configured. One key behaves exactly as it
 always has.
 
-<Warning>
-  **Rotation defeats provider prompt caching.** Providers scope their prompt
-  cache to the API key that created it, so consecutive requests sent under
-  different keys never hit a warm cache. Expect higher cost and slower
-  time-to-first-token on workloads with long, repeated prefixes — system
-  prompts, few-shot examples, long documents, or coding agents replaying a
-  conversation.
-
-  Rotate when you are rate limited. Do not rotate to save money on cached
-  prompts; it does the opposite.
-</Warning>
+<Note>
+  Requests without a detected session still rotate round robin. See
+  [Session Keeping](/features/session-keeping) for supported session headers,
+  body fields, and automatic conversation detection.
+</Note>
 
 ## Configure
 
@@ -36,8 +30,8 @@ OPENAI_API_KEY_2=sk-second
 OPENAI_API_KEY_3=sk-third
 ```
 
-Three keys, so requests to `openai` cycle `sk-first` → `sk-second` →
-`sk-third` → `sk-first` → …
+Three keys, so different sessions distribute deterministically across the three
+keys; every request in one session selects the same key.
 
 Or in `config.yaml`:
 
@@ -52,6 +46,17 @@ providers:
 ```
 
 `api_key` and `api_keys` may be combined; `api_key` is used first.
+
+To restore strict per-request round robin, opt out for that provider:
+
+```yaml
+providers:
+  openai:
+    session_sticky_keys: false
+```
+
+The same setting is the **Session-sticky API keys** checkbox in the dashboard's
+provider editor. It is checked by default.
 
 Any provider that authenticates with an API key can rotate — `ANTHROPIC_API_KEY_2`,
 `GEMINI_API_KEY_2`, `GROQ_API_KEY_2`, and so on. Providers that authenticate
@@ -73,9 +78,8 @@ these variables.
   provider left with no keys at all is not registered.
 
 <Note>
-  Keys rotate per outbound HTTP request, including retries. A request that a
-  provider rejects with `429` is retried under the next key rather than the one
-  that was just throttled.
+  With session stickiness enabled, retries use the session's pinned key. With
+  stickiness disabled, every outbound attempt participates in round robin.
 </Note>
 
 ## Rotation on suffixed providers
@@ -99,10 +103,10 @@ provider suffix, not a key number.
 
 ## What rotation covers
 
-Every call GoModel makes to the provider draws the next key: chat completions,
-responses, embeddings, audio, images, batches, and provider-native
-[passthrough routes](/features/passthrough-api). Realtime websocket sessions pick a
-key when the session opens and keep it for the life of that session.
+Every call GoModel makes to the provider uses the same selection policy: chat
+completions, responses, embeddings, audio, images, batches, provider-native
+[passthrough routes](/features/passthrough-api), and realtime sessions. Identified
+sessions are sticky; sessionless traffic is round robin.
 
 Rotation is per gateway process. Counters live in memory and reset on restart,
 so `N` replicas each rotate independently — which is fine, since the goal is to
@@ -116,14 +120,13 @@ Both let you use several keys of one provider type. They solve different problem
 | --- | --- | --- |
 | Config | `OPENAI_API_KEY_2` | `OPENAI_EAST_API_KEY` |
 | Model IDs | unchanged (`gpt-4o`) | provider-qualified (`openai-east/gpt-4o`) |
-| Routing | automatic, round robin | caller picks, or a [virtual model](/features/virtual-models) balances |
-| Prompt caching | lost | preserved per provider |
+| Routing | automatic, sticky by session | caller picks, or a [virtual model](/features/virtual-models) balances |
+| Prompt caching | preserved for identified sessions | preserved per provider |
 | Use it for | lifting rate limits on one account | separate accounts, regions, or base URLs |
 
-If you want several keys *and* prompt caching, register them as suffixed
-providers and put a `round_robin` [virtual model](/features/virtual-models) in
-front. Each provider keeps its own key, so each keeps its own warm cache, at the
-cost of qualified model IDs and more configuration.
+Separate providers are still useful when keys point at different accounts,
+regions, base URLs, or model catalogs. They are no longer required merely to
+preserve prompt caching across several keys.
 
 ## Verify
 

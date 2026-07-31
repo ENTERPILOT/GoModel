@@ -127,10 +127,15 @@ func convertOpenAIToolsToAnthropic(tools []map[string]any) ([]anthropicTool, err
 			inputSchema = schema
 		}
 
+		cacheControl, err := anthropicCacheControlFromValue(tool["cache_control"])
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, anthropicTool{
-			Name:        name,
-			Description: description,
-			InputSchema: inputSchema.(map[string]any),
+			Name:         name,
+			Description:  description,
+			InputSchema:  inputSchema.(map[string]any),
+			CacheControl: cacheControl,
 		})
 	}
 	if len(out) == 0 {
@@ -232,11 +237,16 @@ func buildAnthropicMessageContent(msg core.Message) (any, error) {
 		if toolUseID == "" {
 			return nil, core.NewInvalidRequestError("tool message is missing tool_call_id", nil)
 		}
+		cacheControl, err := anthropicCacheControlFromExtra(msg.ExtraFields)
+		if err != nil {
+			return nil, err
+		}
 		return []anthropicContentBlock{
 			{
-				Type:      "tool_result",
-				ToolUseID: toolUseID,
-				Content:   core.ExtractTextContent(msg.Content),
+				Type:         "tool_result",
+				ToolUseID:    toolUseID,
+				Content:      core.ExtractTextContent(msg.Content),
+				CacheControl: cacheControl,
 			},
 		}, nil
 	}
@@ -274,11 +284,16 @@ func buildAnthropicMessageContent(msg core.Message) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		cacheControl, err := anthropicCacheControlFromExtra(toolCall.ExtraFields)
+		if err != nil {
+			return nil, err
+		}
 		blocks = append(blocks, anthropicContentBlock{
-			Type:  "tool_use",
-			ID:    toolCallID,
-			Name:  toolName,
-			Input: input,
+			Type:         "tool_use",
+			ID:           toolCallID,
+			Name:         toolName,
+			Input:        input,
+			CacheControl: cacheControl,
 		})
 	}
 	return blocks, nil
@@ -301,6 +316,11 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		Stream:        req.Stream,
 		StopSequences: stopSequencesFromExtra(req.ExtraFields),
 	}
+	cacheControl, err := anthropicCacheControlFromExtra(req.ExtraFields)
+	if err != nil {
+		return nil, err
+	}
+	anthropicReq.CacheControl = cacheControl
 
 	if req.MaxTokens != nil {
 		anthropicReq.MaxTokens = *req.MaxTokens
@@ -556,6 +576,24 @@ func anthropicCacheControlFromExtra(extraFields core.UnknownJSONFields) (json.Ra
 
 	trimmed := bytes.TrimSpace(raw)
 	if core.IsJSONNull(trimmed) {
+		return nil, nil
+	}
+	if trimmed[0] != '{' {
+		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", nil)
+	}
+	return core.CloneRawJSON(trimmed), nil
+}
+
+func anthropicCacheControlFromValue(value any) (json.RawMessage, error) {
+	if value == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", err)
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
 		return nil, nil
 	}
 	if trimmed[0] != '{' {

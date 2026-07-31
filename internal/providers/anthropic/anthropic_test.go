@@ -4482,6 +4482,47 @@ func TestConvertToAnthropicRequest_PreservesCacheControlOnSystemBlocks(t *testin
 	}
 }
 
+func TestConvertToAnthropicRequest_PreservesCacheControlOnRequestToolsAndToolHistory(t *testing.T) {
+	cacheExtra := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+	})
+	req := &core.ChatRequest{
+		Model:       "claude-sonnet-4-5-20250929",
+		ExtraFields: cacheExtra,
+		Tools: []map[string]any{{
+			"type":          "function",
+			"function":      map[string]any{"name": "lookup", "parameters": map[string]any{"type": "object"}},
+			"cache_control": map[string]any{"type": "ephemeral"},
+		}},
+		Messages: []core.Message{
+			{Role: "assistant", ToolCalls: []core.ToolCall{{
+				ID: "tool-1", Type: "function", Function: core.FunctionCall{Name: "lookup", Arguments: `{}`}, ExtraFields: cacheExtra,
+			}}},
+			{Role: "tool", ToolCallID: "tool-1", Content: "result", ExtraFields: cacheExtra},
+		},
+	}
+
+	result, err := convertToAnthropicRequest(req)
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	want := `{"type":"ephemeral"}`
+	if got := string(result.CacheControl); got != want {
+		t.Errorf("request CacheControl = %s, want %s", got, want)
+	}
+	if got := string(result.Tools[0].CacheControl); got != want {
+		t.Errorf("tool CacheControl = %s, want %s", got, want)
+	}
+	assistantBlocks := result.Messages[0].Content.([]anthropicContentBlock)
+	if got := string(assistantBlocks[0].CacheControl); got != want {
+		t.Errorf("tool_use CacheControl = %s, want %s", got, want)
+	}
+	toolBlocks := result.Messages[1].Content.([]anthropicContentBlock)
+	if got := string(toolBlocks[0].CacheControl); got != want {
+		t.Errorf("tool_result CacheControl = %s, want %s", got, want)
+	}
+}
+
 func TestConvertToAnthropicRequest_PreservesAllSystemMessages(t *testing.T) {
 	req := &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",

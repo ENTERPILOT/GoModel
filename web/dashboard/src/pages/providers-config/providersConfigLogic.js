@@ -14,6 +14,7 @@ export { splitCommaList };
 
 // Field names, mirroring internal/providers/credential_schema.go.
 export const FIELD_API_KEYS = "api_keys";
+export const FIELD_SESSION_STICKY_KEYS = "session_sticky_keys";
 export const FIELD_BASE_URL = "base_url";
 export const FIELD_SERVICE_ACCOUNT_JSON = "service_account_json";
 export const FIELD_MODELS = "models";
@@ -27,7 +28,12 @@ export const PROVIDER_CREDENTIAL_FIELDS = {
   [FIELD_API_KEYS]: {
     label: "API Keys",
     control: "keys",
-    hint: "Multiple keys rotate round-robin. Saved values are shown as ***********; leave the asterisks unchanged to keep the stored key.",
+    hint: "Identified sessions stay on one key by default, improving provider prompt-cache hits. Saved values are shown as ***********; leave the asterisks unchanged to keep the stored key.",
+  },
+  [FIELD_SESSION_STICKY_KEYS]: {
+    label: "Session-sticky API keys",
+    control: "checkbox",
+    hint: "Keep each identified conversation on one API key to preserve provider prompt-cache affinity. Turn off to rotate keys round-robin on every request.",
   },
   [FIELD_BASE_URL]: {
     label: "Base URL",
@@ -119,6 +125,7 @@ export function defaultProviderCredentialForm() {
     name: "",
     type: "",
     api_keys: [],
+    session_sticky_keys: true,
     base_url: "",
     api_version: "",
     backend: "",
@@ -324,6 +331,7 @@ export function providerCredentialRowToForm(row) {
     name: String((row && row.name) || "").trim(),
     type: String((row && row.type) || "").trim(),
     api_keys: providerCredentialKeysToRows(row && row.api_keys),
+    session_sticky_keys: !row || row.session_sticky_keys !== false,
     base_url: String((row && row.base_url) || ""),
     api_version: String((row && row.api_version) || ""),
     backend: String((row && row.backend) || ""),
@@ -449,6 +457,12 @@ export function buildProviderCredentialPayload(form, schema) {
     if (rendered.has(name)) {
       continue;
     }
+    // This is a provider capability toggle rather than free-form stored data.
+    // Do not send it to keyless schemas (or older gateways whose schema does
+    // not advertise it), where its default true value would be spurious.
+    if (name === FIELD_SESSION_STICKY_KEYS) {
+      continue;
+    }
     const value = providerCredentialPayloadValue(form, name);
     if (Array.isArray(value) ? value.length > 0 : String(value).trim() !== "") {
       payload[name] = value;
@@ -464,6 +478,8 @@ function providerCredentialPayloadValue(form, name) {
       return providerCredentialKeyRowsToArray(form && form.api_keys);
     case FIELD_MODELS:
       return splitCommaList(form && form.models);
+    case FIELD_SESSION_STICKY_KEYS:
+      return Boolean(form && form.session_sticky_keys);
     // Raw JSON must survive verbatim: trimming would still parse, but the
     // stored value should be exactly what the operator pasted.
     case FIELD_SERVICE_ACCOUNT_JSON:

@@ -7,6 +7,7 @@ import "sort"
 // used verbatim as an error `param` and as a dashboard form field id.
 const (
 	CredentialFieldAPIKeys                  = "api_keys"
+	CredentialFieldSessionStickyKeys        = "session_sticky_keys"
 	CredentialFieldBaseURL                  = "base_url"
 	CredentialFieldAPIVersion               = "api_version"
 	CredentialFieldBackend                  = "backend"
@@ -95,8 +96,14 @@ func credentialSchema(providerType string, spec DiscoveryConfig) CredentialSchem
 		fields = defaultCredentialFields(spec)
 	}
 	schema := CredentialSchema{Type: providerType, DefaultBaseURL: spec.DefaultBaseURL}
-	schema.Fields = make([]CredentialField, 0, len(fields)+1)
+	schema.Fields = make([]CredentialField, 0, len(fields)+2)
 	schema.Fields = append(schema.Fields, fields...)
+	for _, field := range fields {
+		if field.Name == CredentialFieldAPIKeys {
+			schema.Fields = append(schema.Fields, CredentialField{Name: CredentialFieldSessionStickyKeys, Advanced: true})
+			break
+		}
+	}
 	schema.Fields = append(schema.Fields, CredentialField{Name: CredentialFieldModels, Advanced: true})
 	return schema
 }

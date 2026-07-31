@@ -42,25 +42,25 @@ func TestCredentialSchemas_DerivesTheFormFromDiscoveryFlags(t *testing.T) {
 		{
 			name:     "an API key against one endpoint",
 			spec:     DiscoveryConfig{DefaultBaseURL: "https://api.example.com/v1"},
-			fields:   []string{"api_keys", "base_url", "models"},
+			fields:   []string{"api_keys", "base_url", "session_sticky_keys", "models"},
 			required: []string{"api_keys"},
 			// Nothing else to configure once the key is filled in.
-			advanced: []string{"base_url", "models"},
+			advanced: []string{"base_url", "session_sticky_keys", "models"},
 		},
 		{
 			name:     "keyless",
 			spec:     DiscoveryConfig{DefaultBaseURL: "http://localhost:11434", AllowAPIKeyless: true},
-			fields:   []string{"api_keys", "base_url", "models"},
+			fields:   []string{"api_keys", "base_url", "session_sticky_keys", "models"},
 			required: nil,
 			// With no key to fill in, the endpoint is the configuration.
-			advanced: []string{"models"},
+			advanced: []string{"session_sticky_keys", "models"},
 		},
 		{
 			name:     "an endpoint the operator must name",
 			spec:     DiscoveryConfig{RequireBaseURL: true, SupportsAPIVersion: true},
-			fields:   []string{"api_keys", "base_url", "api_version", "models"},
+			fields:   []string{"api_keys", "base_url", "api_version", "session_sticky_keys", "models"},
 			required: []string{"api_keys", "base_url"},
-			advanced: []string{"models"},
+			advanced: []string{"session_sticky_keys", "models"},
 		},
 	}
 

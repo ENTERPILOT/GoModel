@@ -29,6 +29,9 @@ type ManagedProviderCredential struct {
 	// (Ollama, vLLM) and Vertex/Bedrock (which authenticate a different way)
 	// may leave this empty.
 	APIKeys []string
+	// SessionStickyKeys is nil for legacy/default rows and therefore means
+	// enabled. A non-nil false value is the explicit dashboard/YAML opt-out.
+	SessionStickyKeys *bool
 
 	BaseURL                  string
 	APIVersion               string
@@ -61,6 +64,7 @@ func (m ManagedProviderCredential) toRawProviderConfig() config.RawProviderConfi
 	raw := config.RawProviderConfig{
 		Type:                     m.Type,
 		APIKeys:                  m.APIKeys,
+		SessionStickyKeys:        m.SessionStickyKeys,
 		BaseURL:                  m.BaseURL,
 		APIVersion:               m.APIVersion,
 		Backend:                  m.Backend,

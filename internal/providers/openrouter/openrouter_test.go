@@ -55,6 +55,34 @@ func TestChatCompletion_AddsDefaultAttributionHeaders(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_ForwardsGoModelSessionID(t *testing.T) {
+	var gotSessionID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSessionID = r.Header.Get("X-Session-Id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-123","object":"chat.completion","created":1677652288,
+			"model":"openai/gpt-4o-mini",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+	ctx := core.WithSessionID(context.Background(), "conversation-42")
+	_, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "openai/gpt-4o-mini",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotSessionID != "conversation-42" {
+		t.Fatalf("X-Session-Id = %q, want conversation-42", gotSessionID)
+	}
+}
+
 func TestChatCompletion_UsesEnvOverridesForAttributionHeaders(t *testing.T) {
 	t.Setenv("OPENROUTER_SITE_URL", "https://example.com")
 	t.Setenv("OPENROUTER_APP_NAME", "Example App")

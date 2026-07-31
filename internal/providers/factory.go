@@ -132,12 +132,12 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 	}
 
 	// One Keyring per provider instance: every client this provider builds
-	// shares the rotation, so keys are used evenly across all its endpoints.
+	// shares session affinity and the sessionless round-robin sequence.
 	opts := ProviderOptions{
 		Hooks:      hooks,
 		Models:     cfg.Models,
 		Resilience: cfg.Resilience,
-		Keys:       NewKeyring(cfg.APIKeys...),
+		Keys:       NewKeyringWithSessionStickiness(cfg.SessionStickyKeys, cfg.APIKeys...),
 	}
 
 	return builder(cfg, opts), nil

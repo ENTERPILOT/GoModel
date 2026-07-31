@@ -65,7 +65,7 @@ func (p *Provider) SetBaseURL(baseURL string) {
 }
 
 func (p *Provider) setHeaders(req *http.Request) {
-	req.Header.Set("Authorization", "Bearer "+p.keys.Next())
+	req.Header.Set("Authorization", "Bearer "+p.keys.NextForContext(req.Context()))
 	req.Header.Set("X-Client-Name", "GoModel")
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {
 		req.Header.Set("X-Request-Id", requestID)

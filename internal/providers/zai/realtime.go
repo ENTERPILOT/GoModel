@@ -19,7 +19,7 @@ const realtimePath = "/api/paas/v4/realtime"
 // from the configured base URL while the path is pinned to realtimePath so chat
 // base variants like the Coding Plan endpoint still resolve correctly. Bearer
 // auth is injected here and must never be logged.
-func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
+func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
 	model := ""
 	if req != nil {
 		model = strings.TrimSpace(req.Model)
@@ -34,7 +34,7 @@ func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) 
 	}
 
 	headers := http.Header{}
-	if apiKey := p.keys.Next(); apiKey != "" {
+	if apiKey := p.keys.NextForContext(ctx); apiKey != "" {
 		headers.Set("Authorization", "Bearer "+apiKey)
 	}
 

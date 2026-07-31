@@ -117,7 +117,7 @@ func setHeaders(req *http.Request, apiKey string) {
 
 // setNativeHeaders applies the same header policy on the native /api client.
 func (p *Provider) setNativeHeaders(req *http.Request) {
-	setHeaders(req, p.keys.Next())
+	setHeaders(req, p.keys.NextForContext(req.Context()))
 }
 
 // ChatCompletion sends a chat completion request to Ollama

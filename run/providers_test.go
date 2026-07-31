@@ -29,7 +29,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 		{
 			// The plain shape every API-key provider derives.
 			providerType: "openai",
-			fields:       []string{"api_keys", "base_url", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
 			required:     []string{"api_keys"},
 			absent:       []string{"api_version", "vertex_project"},
 		},
@@ -37,13 +37,13 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			// A deployment URL is the provider, so it is required, and Azure
 			// is the one type that takes an API version.
 			providerType: "azure",
-			fields:       []string{"api_keys", "base_url", "api_version", "models"},
+			fields:       []string{"api_keys", "base_url", "api_version", "session_sticky_keys", "models"},
 			required:     []string{"api_keys", "base_url"},
 		},
 		{
 			// Keyless: the endpoint is the whole configuration.
 			providerType: "ollama",
-			fields:       []string{"api_keys", "base_url", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
 			required:     nil,
 		},
 		{
@@ -55,7 +55,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 		{
 			// Bearer token or AWS_BEARER_TOKEN_BEDROCK, plus a request shape.
 			providerType: "bedrock-mantle",
-			fields:       []string{"api_keys", "base_url", "api_mode", "models"},
+			fields:       []string{"api_keys", "base_url", "api_mode", "session_sticky_keys", "models"},
 			required:     nil,
 			options:      map[string][]string{"api_mode": {"auto", "openai", "standard"}},
 		},
@@ -66,7 +66,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			fields: []string{
 				"api_keys", "backend", "base_url", "api_mode", "auth_type",
 				"vertex_project", "vertex_location", "service_account_json",
-				"service_account_file", "service_account_json_base64", "gcp_scope", "models",
+				"service_account_file", "service_account_json_base64", "gcp_scope", "session_sticky_keys", "models",
 			},
 			required: nil,
 			options: map[string][]string{
@@ -133,7 +133,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 
 // credentialPayloadFields mirrors the upsert request's credential keys.
 var credentialPayloadFields = []string{
-	"api_keys", "base_url", "api_version", "backend", "auth_type", "api_mode",
+	"api_keys", "session_sticky_keys", "base_url", "api_version", "backend", "auth_type", "api_mode",
 	"vertex_project", "vertex_location", "service_account_file", "service_account_json",
 	"service_account_json_base64", "gcp_scope", "models",
 }

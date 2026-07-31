@@ -30,6 +30,7 @@ const OPENAI_SCHEMA = {
   fields: [
     { name: "api_keys", required: true, advanced: false },
     { name: "base_url", required: false, advanced: true },
+    { name: "session_sticky_keys", required: false, advanced: true },
     { name: "models", required: false, advanced: true },
   ],
 };
@@ -40,6 +41,7 @@ const AZURE_SCHEMA = {
     { name: "api_keys", required: true, advanced: false },
     { name: "base_url", required: true, advanced: false },
     { name: "api_version", required: false, advanced: false },
+    { name: "session_sticky_keys", required: false, advanced: true },
     { name: "models", required: false, advanced: true },
   ],
 };
@@ -78,6 +80,7 @@ test("buildProviderCredentialPayload sends a normalized PUT payload on create", 
   // stored keys at positions holding an untouched "***********" mask.
   assert.deepEqual(body.api_keys, [" sk-live-123 "]);
   assert.equal(body.base_url, "https://api.openai.com/v1");
+  assert.equal(body.session_sticky_keys, true);
   assert.deepEqual(body.models, ["gpt-4o", "gpt-4o-mini"]);
   assert.equal(body.enabled, true);
 });
@@ -96,6 +99,7 @@ test("the payload carries the fields the provider type accepts", () => {
     "enabled",
     "models",
     "name",
+    "session_sticky_keys",
     "type",
   ]);
 });
@@ -193,16 +197,36 @@ test("service_account_json is sent verbatim while other fields are trimmed", () 
   const body = buildProviderCredentialPayload(form, VERTEX_SCHEMA);
   assert.equal(body.service_account_json, '  {"type": "service_account"}\n');
   assert.equal(body.vertex_project, "my-project");
+  assert.equal("session_sticky_keys" in body, false);
 });
 
 test("providerCredentialFormFields splits a schema into primary and advanced", () => {
   const { primary, advanced } = providerCredentialFormFields(OPENAI_SCHEMA);
 
   assert.deepEqual(primary.map((field) => field.name), ["api_keys"]);
-  assert.deepEqual(advanced.map((field) => field.name), ["base_url", "models"]);
+  assert.deepEqual(advanced.map((field) => field.name), [
+    "base_url",
+    "session_sticky_keys",
+    "models",
+  ]);
   assert.equal(primary[0].required, true);
   assert.equal(primary[0].label, "API Keys");
   assert.equal(primary[0].control, "keys");
+  assert.equal(advanced[1].control, "checkbox");
+});
+
+test("session stickiness defaults on and can be disabled", () => {
+  assert.equal(defaultProviderCredentialForm().session_sticky_keys, true);
+  assert.equal(providerCredentialRowToForm({ session_sticky_keys: false }).session_sticky_keys, false);
+
+  const form = {
+    ...defaultProviderCredentialForm(),
+    name: "my-openai",
+    type: "openai",
+    api_keys: [{ value: "sk-live" }],
+    session_sticky_keys: false,
+  };
+  assert.equal(buildProviderCredentialPayload(form, OPENAI_SCHEMA).session_sticky_keys, false);
 });
 
 test("a field with options renders as a select", () => {

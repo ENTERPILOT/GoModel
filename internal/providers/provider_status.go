@@ -30,12 +30,13 @@ type SanitizedResilienceConfig struct {
 
 // SanitizedProviderConfig is the admin-safe provider configuration view.
 type SanitizedProviderConfig struct {
-	Name       string                    `json:"name"`
-	Type       string                    `json:"type"`
-	BaseURL    string                    `json:"base_url,omitempty"`
-	APIVersion string                    `json:"api_version,omitempty"`
-	Models     []string                  `json:"models,omitempty"`
-	Resilience SanitizedResilienceConfig `json:"resilience"`
+	Name              string                    `json:"name"`
+	Type              string                    `json:"type"`
+	BaseURL           string                    `json:"base_url,omitempty"`
+	APIVersion        string                    `json:"api_version,omitempty"`
+	Models            []string                  `json:"models,omitempty"`
+	SessionStickyKeys bool                      `json:"session_sticky_keys"`
+	Resilience        SanitizedResilienceConfig `json:"resilience"`
 }
 
 // ProviderRuntimeSnapshot describes runtime diagnostics for a configured provider.
@@ -97,11 +98,12 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 		}
 
 		result = append(result, SanitizedProviderConfig{
-			Name:       strings.TrimSpace(name),
-			Type:       strings.TrimSpace(cfg.Type),
-			BaseURL:    strings.TrimSpace(cfg.BaseURL),
-			APIVersion: strings.TrimSpace(cfg.APIVersion),
-			Models:     models,
+			Name:              strings.TrimSpace(name),
+			Type:              strings.TrimSpace(cfg.Type),
+			BaseURL:           strings.TrimSpace(cfg.BaseURL),
+			APIVersion:        strings.TrimSpace(cfg.APIVersion),
+			Models:            models,
+			SessionStickyKeys: cfg.SessionStickyKeys,
 			Resilience: SanitizedResilienceConfig{
 				Retry: SanitizedRetryConfig{
 					MaxRetries:     cfg.Resilience.Retry.MaxRetries,

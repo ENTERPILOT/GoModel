@@ -88,6 +88,21 @@ func TestBuildProviderConfig_InheritsGlobal(t *testing.T) {
 	if got.Resilience.Retry != globalRetry {
 		t.Errorf("expected global retry to be inherited\ngot:  %+v\nwant: %+v", got.Resilience.Retry, globalRetry)
 	}
+	if !got.SessionStickyKeys {
+		t.Error("SessionStickyKeys = false, want default true")
+	}
+}
+
+func TestBuildProviderConfig_CanDisableSessionStickyKeys(t *testing.T) {
+	disabled := false
+	got := buildProviderConfig(config.RawProviderConfig{
+		Type:              "openai",
+		APIKey:            "sk-test",
+		SessionStickyKeys: &disabled,
+	}, globalResilience)
+	if got.SessionStickyKeys {
+		t.Error("SessionStickyKeys = true, want explicit false")
+	}
 }
 
 func TestBuildProviderConfig_NilResilience(t *testing.T) {

@@ -298,6 +298,30 @@ func TestUpsertProviderCredential_CreatesAndRegistersImmediately(t *testing.T) {
 	}
 }
 
+func TestUpsertProviderCredential_CanDisableSessionStickyKeys(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"my-openai","type":"openai","api_keys":["sk-real"],"session_sticky_keys":false}`)
+	if err := h.UpsertProviderCredential(c); err != nil {
+		t.Fatalf("UpsertProviderCredential() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	stored := fake.rows["my-openai"]
+	if stored.SessionStickyKeys == nil || *stored.SessionStickyKeys {
+		t.Fatalf("stored.SessionStickyKeys = %v, want false", stored.SessionStickyKeys)
+	}
+	var response providerCredentialViewResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response.SessionStickyKeys {
+		t.Error("response.SessionStickyKeys = true, want false")
+	}
+}
+
 func TestUpsertProviderCredential_RedactedKeyPreservesStoredValuePositionally(t *testing.T) {
 	fake := newProviderCredentialsAdminFake()
 	fake.rows["multi"] = providers.ManagedProviderCredential{
