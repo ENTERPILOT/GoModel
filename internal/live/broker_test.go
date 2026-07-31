@@ -48,6 +48,47 @@ func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
 	}
 }
 
+func TestSubscriptionLatestSnapshotsSequenceAtSubscribe(t *testing.T) {
+	cases := []struct {
+		name          string
+		publishBefore int
+		publishAfter  int
+		want          uint64
+	}{
+		{name: "fresh broker", publishBefore: 0, publishAfter: 0, want: 0},
+		{name: "existing events", publishBefore: 2, publishAfter: 0, want: 2},
+		// Events published after subscribe arrive on the channel; Latest must
+		// stay at the subscribe-time snapshot or a heartbeat built from it
+		// would let a reconnecting client skip the queued events.
+		{name: "later events stay off the snapshot", publishBefore: 1, publishAfter: 2, want: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := NewBroker(Config{Enabled: true})
+			publish := func(n int) {
+				for range n {
+					b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
+						ID:        "audit-1",
+						RequestID: "req-1",
+						Timestamp: time.Now(),
+					})
+				}
+			}
+			publish(tc.publishBefore)
+			sub := b.Subscribe(0)
+			if sub == nil {
+				t.Fatal("Subscribe returned nil")
+			}
+			defer sub.Close()
+			publish(tc.publishAfter)
+
+			if sub.Latest != tc.want {
+				t.Fatalf("sub.Latest = %d, want %d", sub.Latest, tc.want)
+			}
+		})
+	}
+}
+
 func TestBrokerBroadcastsCachedUsageEvents(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)

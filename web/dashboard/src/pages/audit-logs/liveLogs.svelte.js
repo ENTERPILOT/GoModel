@@ -172,6 +172,12 @@ class LiveLogsStore {
       this.liveLogsReconnectAttempts = 0;
       this.liveLogsStreaming = true;
       await this.consumeLiveLogsBody(res.body.getReader());
+      // A reader that ends normally after the stream was deliberately
+      // stopped (page teardown, pagehide, restart) must not resurrect it —
+      // reconnecting here would open a stream nothing owns.
+      if (controller && (controller.signal.aborted || this.liveLogsController !== controller)) {
+        return;
+      }
       this.scheduleLiveLogsReconnect();
     } catch (e) {
       // Firefox rejects deliberately-aborted stream reads with plain

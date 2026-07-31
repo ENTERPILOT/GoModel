@@ -63,6 +63,13 @@ type Subscription struct {
 	Replay []Event
 	Events <-chan Event
 	Reset  bool
+	// Latest is the newest sequence assigned when the subscription was
+	// created, captured atomically with Replay: replay never goes past it,
+	// and anything newer arrives on Events. Streams start their heartbeat
+	// cursor from it — the broker-global counter read later can already
+	// cover events still queued on Events, and advertising those would let
+	// a reconnecting client skip them.
+	Latest uint64
 
 	broker *Broker
 	id     uint64
@@ -192,6 +199,7 @@ func (b *Broker) Subscribe(cursor uint64) *Subscription {
 		Replay: replay,
 		Events: ch,
 		Reset:  reset,
+		Latest: b.nextSeq,
 		broker: b,
 		id:     id,
 	}

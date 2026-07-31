@@ -41,9 +41,16 @@ func (h *Handler) LiveLogs(c *echo.Context) error {
 	res.Header().Set("X-Accel-Buffering", "no")
 	res.WriteHeader(http.StatusOK)
 
+	// lastSeq is the newest sequence this connection has seen (delivered or
+	// deliberately filtered). Heartbeats advertise it as the reconnect
+	// cursor, so it must never run ahead of the events on the wire: the
+	// broker-global counter can, when an event published after subscribe is
+	// still queued on sub.Events.
+	lastSeq := sub.Latest
+
 	if sub.Reset {
 		if err := writeLiveEvent(res, live.Event{
-			Seq:  h.liveBroker.LatestSeq(),
+			Seq:  lastSeq,
 			Type: live.EventReset,
 		}); err != nil {
 			return err
@@ -63,7 +70,7 @@ func (h *Handler) LiveLogs(c *echo.Context) error {
 	// ticker heartbeat, so a freshly opened stream looked pending for up to
 	// the whole heartbeat interval.
 	if err := writeLiveEvent(res, live.Event{
-		Seq:  h.liveBroker.LatestSeq(),
+		Seq:  lastSeq,
 		Type: live.EventHeartbeat,
 	}); err != nil {
 		return err
@@ -81,6 +88,9 @@ func (h *Handler) LiveLogs(c *echo.Context) error {
 			if !ok {
 				return nil
 			}
+			if event.Seq > lastSeq {
+				lastSeq = event.Seq
+			}
 			if !filter.matches(event.Type) {
 				continue
 			}
@@ -89,7 +99,7 @@ func (h *Handler) LiveLogs(c *echo.Context) error {
 			}
 		case <-ticker.C:
 			if err := writeLiveEvent(res, live.Event{
-				Seq:  h.liveBroker.LatestSeq(),
+				Seq:  lastSeq,
 				Type: live.EventHeartbeat,
 			}); err != nil {
 				return err
