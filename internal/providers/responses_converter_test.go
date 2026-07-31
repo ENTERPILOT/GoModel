@@ -331,6 +331,7 @@ data: [DONE]
 
 	indexes := make(map[float64]string)
 	callIndexes := make(map[string]float64)
+	var addedIndexes []float64
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
 		if event.Name != "response.output_item.added" {
 			continue
@@ -344,6 +345,7 @@ data: [DONE]
 		if previous, exists := indexes[index]; exists {
 			t.Fatalf("output_index %v reused by %q and %q", index, previous, itemID)
 		}
+		addedIndexes = append(addedIndexes, index)
 		indexes[index] = itemID
 		if callID, _ := item["call_id"].(string); callID != "" {
 			callIndexes[callID] = index
@@ -352,6 +354,9 @@ data: [DONE]
 
 	if len(indexes) != 4 {
 		t.Fatalf("output items = %#v, want reasoning, two calls, and message", indexes)
+	}
+	if !slices.Equal(addedIndexes, []float64{0, 1, 2, 3}) {
+		t.Fatalf("output indexes = %#v, want [0 1 2 3]", addedIndexes)
 	}
 	if callIndexes["call_second"] != 1 || callIndexes["call_first"] != 3 {
 		t.Fatalf("function-call indexes = %#v, want emission-order indexes 1 and 3", callIndexes)
