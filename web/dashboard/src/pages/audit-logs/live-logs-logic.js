@@ -113,9 +113,15 @@ export function liveLogsMethods() {
         },
 
         auditLiveInsertAllowed() {
+            // A custom date range pauses live inserts — except a range that
+            // ends today (followsToday): an entry arriving now is inside such
+            // a window by definition, and since the range persists across
+            // sessions it must not silently disable live logs forever.
+            const dateRangeAllows =
+                this.followsToday || (!this.customStartDate && !this.customEndDate);
             return this.auditLog && this.auditLog.offset === 0 &&
                 !this.auditSearch && !this.auditMethod && !this.auditStatusCode && !this.auditStream &&
-                !this.customStartDate && !this.customEndDate;
+                dateRangeAllows;
         },
 
         usageLiveInsertAllowed() {

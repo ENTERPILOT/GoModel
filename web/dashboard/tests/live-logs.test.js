@@ -32,6 +32,7 @@ function createLiveLogsApp(overrides = {}) {
     auditThreadChildren: {},
     customStartDate: null,
     customEndDate: null,
+    followsToday: false,
     page: "audit-logs",
     fetchUsageCalls: 0,
     fetchAuditCalls: 0,
@@ -217,6 +218,43 @@ test("live audit inserts are blocked while a custom audit date range is active",
     seq: 2,
     type: "audit.started",
     data: { id: "audit-end", request_id: "req-end" },
+  });
+
+  assert.equal(app.auditLog.entries.length, 0);
+  assert.equal(app.auditLog.total, 0);
+});
+
+test("live audit inserts flow while the custom date range ends today", () => {
+  const app = createLiveLogsApp();
+
+  // A persisted custom window that follows the current day (e.g. Jul 16 ->
+  // today) must not pause live inserts: entries arriving now are inside it.
+  app.customStartDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  app.customEndDate = new Date();
+  app.followsToday = true;
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.started",
+    data: { id: "audit-today", request_id: "req-today" },
+  });
+
+  assert.equal(app.auditLog.entries.length, 1);
+  assert.equal(app.auditLog.entries[0].id, "audit-today");
+  assert.equal(app.auditLog.total, 1);
+});
+
+test("live audit inserts stay blocked for a custom range detached from today", () => {
+  const app = createLiveLogsApp();
+
+  app.customStartDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  app.customEndDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  app.followsToday = false;
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.started",
+    data: { id: "audit-past", request_id: "req-past" },
   });
 
   assert.equal(app.auditLog.entries.length, 0);

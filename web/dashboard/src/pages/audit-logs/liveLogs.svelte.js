@@ -85,6 +85,12 @@ class LiveLogsStore {
     return dateRange.customEndDate;
   }
 
+  // True while the custom window ends on today; such a window keeps live
+  // inserts flowing (see auditLiveInsertAllowed).
+  get followsToday() {
+    return dateRange.followsToday;
+  }
+
   // Only DASHBOARD_LIVE_LOGS_ENABLED gates the stream (default true). Audit
   // logging being off does not stop the stream — live entries are exactly
   // what the dashboard shows when persistence is off.
@@ -162,7 +168,11 @@ class LiveLogsStore {
       await this.consumeLiveLogsBody(res.body.getReader());
       this.scheduleLiveLogsReconnect();
     } catch (e) {
-      if (isAbortError(e)) {
+      // Firefox rejects deliberately-aborted stream reads with plain
+      // TypeErrors ("Error in input stream", "NetworkError when attempting
+      // to fetch resource") instead of an AbortError, so trust our own
+      // controller state over the error's name.
+      if (isAbortError(e) || (controller && controller.signal && controller.signal.aborted)) {
         return;
       }
       console.error("Live logs stream failed:", e);
@@ -211,6 +221,24 @@ class LiveLogsStore {
 Object.assign(LiveLogsStore.prototype, liveLogsMethods());
 
 export const liveLogs = new LiveLogsStore();
+
+// A page refresh or navigation kills the in-flight stream at the network
+// layer; Firefox surfaces that as a TypeError, which used to log one
+// "stream failed" console error per refresh. Abort the stream ourselves
+// before the page goes away — teardown becomes a real abort the reader
+// suppresses — and bring it back after a back/forward-cache restore.
+if (typeof window !== "undefined") {
+  let streamingBeforePagehide = false;
+  window.addEventListener("pagehide", () => {
+    streamingBeforePagehide = Boolean(liveLogs.liveLogsController);
+    liveLogs.stopLiveLogs();
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted && streamingBeforePagehide) {
+      liveLogs.ensureLiveLogs();
+    }
+  });
+}
 
 // Reconnect the stream whenever the API key changes. The restart is untracked so
 // runtime-config reads inside startLiveLogs never become effect dependencies.
