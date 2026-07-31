@@ -10,9 +10,10 @@ the selected model provider. Some providers expose a native Responses-compatible
 surface. Others expose chat completions or provider-native chat APIs, so
 GoModel translates the request.
 
-The compatibility rule is conservative: GoModel translates portable model
-features and rejects provider-hosted features when it cannot preserve their
-meaning.
+The compatibility rule follows Postel's Law: GoModel translates portable model
+features and accepts unfamiliar tool declarations without forwarding them to a
+provider that cannot execute them. Fields that would change the meaning of the
+model output are still rejected when they cannot be translated safely.
 
 ## Routing modes
 
@@ -34,9 +35,7 @@ function tool loops. They cannot safely execute OpenAI-hosted tools.
 | Function tools | Forwarded | Converted to provider function/tool declarations |
 | Function call output items | Forwarded | Converted to chat tool-result messages |
 | `text.format` structured output | Forwarded | Converted to `response_format` when the provider supports it |
-| OpenAI-hosted web search | Provider decides | Rejected |
-| OpenAI-hosted file search | Provider decides | Rejected |
-| OpenAI-hosted computer use | Provider decides | Rejected |
+| Responses-only tools (`web_search`, `file_search`, computer use, and `namespace`) | Provider decides | Accepted and omitted |
 | `previous_response_id` and `conversation` | Forwarded | Rejected |
 | `include` annotations | Forwarded | Accepted and ignored, except `message.output_text.logprobs` |
 | Unknown Responses input item types | Preserved | Rejected |
@@ -73,23 +72,21 @@ runtime state:
 - `computer_use_preview` depends on a provider-managed computer session,
   display environment, and safety model.
 
-GoModel does not translate these into Anthropic or Gemini tool calls. A fake
-translation would make the request appear supported while changing where the
-tool runs, how state is stored, and which security controls apply.
+GoModel does not translate these into Anthropic, Gemini, or other chat-provider
+tool calls. A fake translation would change where the tool runs, how state is
+stored, and which security controls apply. Chat-translated providers therefore
+accept the request but omit every non-function tool before provider dispatch.
+Supported function tools in the same request continue to work normally.
 
-When a chat-translated provider receives a hosted tool request, GoModel returns
-an OpenAI-compatible invalid request error:
+`namespace` tools are omitted as a unit rather than flattened. Flattening would
+change the tool names and break the client's routing contract. A `tool_choice`
+that selects an omitted tool is omitted too. If every tool is omitted,
+`parallel_tool_calls` is also removed from the translated request.
 
-```json
-{
-  "error": {
-    "type": "invalid_request_error",
-    "message": "responses tool type \"web_search_preview\" is only supported by native Responses providers; chat-translated providers only support function tools",
-    "param": null,
-    "code": null
-  }
-}
-```
+This is graceful capability degradation, not hosted-tool emulation. In
+particular, a response from a chat-translated provider does not imply that a web
+search, file search, or computer action occurred. Use a native Responses
+provider when the result depends on one of those tools running.
 
 ## Agent SDKs
 
@@ -101,8 +98,9 @@ GoModel for portable flows:
 - local function tools
 - SDK-managed local history replay
 
-Provider-hosted tools, server-managed conversation state, and websocket
-Responses transport still depend on provider-specific support.
+Provider-hosted tools are ignored by chat-translated providers. Server-managed
+conversation state and websocket Responses transport still depend on
+provider-specific support.
 
 For Python Agents SDK clients, namespaced GoModel model IDs such as
 `anthropic/claude-sonnet-4-20250514` and `gemini/gemini-2.0-flash` need model ID
@@ -145,9 +143,9 @@ python3 docs/examples/openai-agents-sdk/anthropic_agents_probe.py
 
 The Responses probe verifies both supported and unsupported paths: plain
 Responses calls, function tools, structured-output rejection, stateful-field
-rejection, unknown input-item rejection, and hosted-tool rejection. The Agents
-probe verifies basic runs, function tool loops, and streamed function tool
-loops.
+rejection, unknown input-item rejection, and graceful hosted-tool omission. The
+Agents probe verifies basic runs, function tool loops, and streamed function
+tool loops.
 
 ## Roadmap
 
