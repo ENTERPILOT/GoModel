@@ -111,7 +111,21 @@ func buildResponsesContentItemsFromParts(parts []core.ContentPart) []core.Respon
 
 // BuildResponsesOutputItems converts a response message into Responses API output items.
 func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputItem {
-	output := make([]core.ResponsesOutputItem, 0, len(msg.ToolCalls)+1)
+	reasoningContent := responseMessageReasoningContent(msg)
+	output := make([]core.ResponsesOutputItem, 0, len(msg.ToolCalls)+2)
+	if reasoningContent != "" {
+		output = append(output, core.ResponsesOutputItem{
+			ID:     "rs_" + uuid.New().String(),
+			Type:   "reasoning",
+			Status: "completed",
+			Content: []core.ResponsesContentItem{
+				{Type: "reasoning_text", Text: reasoningContent},
+			},
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"summary": json.RawMessage(`[]`),
+			}),
+		})
+	}
 	contentItems := buildResponsesMessageContent(msg.Content)
 	if len(contentItems) > 0 || len(msg.ToolCalls) == 0 {
 		if len(contentItems) == 0 {
@@ -143,6 +157,18 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 		})
 	}
 	return output
+}
+
+func responseMessageReasoningContent(msg core.ResponseMessage) string {
+	raw := msg.ExtraFields.Lookup("reasoning_content")
+	if len(raw) == 0 {
+		return ""
+	}
+	var content string
+	if err := json.Unmarshal(raw, &content); err != nil {
+		return ""
+	}
+	return content
 }
 
 // ConvertChatResponseToResponses converts a ChatResponse to a ResponsesResponse.

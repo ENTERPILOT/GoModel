@@ -152,6 +152,54 @@ func TestResponses_TranslatesToChatCompletions(t *testing.T) {
 	}
 }
 
+func TestResponses_ReplaysReasoningContentForToolCall(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			http.Error(w, "decode error", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-deepseek",
+			"created":1,
+			"model":"deepseek-v4-pro",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
+	var req core.ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"deepseek-v4-pro",
+		"input":[
+			{"type":"reasoning","summary":[],"content":[{"type":"reasoning_text","text":"Need the weather."}]},
+			{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_1","output":"sunny"}
+		]
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	if _, err := provider.Responses(context.Background(), &req); err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
+
+	messages, _ := gotBody["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("messages = %#v, want assistant call and tool result", gotBody["messages"])
+	}
+	assistant, _ := messages[0].(map[string]any)
+	if assistant["role"] != "assistant" || assistant["reasoning_content"] != "Need the weather." {
+		t.Fatalf("assistant = %#v", assistant)
+	}
+	if calls, _ := assistant["tool_calls"].([]any); len(calls) != 1 {
+		t.Fatalf("assistant tool_calls = %#v", assistant["tool_calls"])
+	}
+}
+
 func TestStreamResponses_TranslatesToChatCompletions(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any

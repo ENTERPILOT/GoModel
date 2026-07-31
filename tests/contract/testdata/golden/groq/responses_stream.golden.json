@@ -87,12 +87,8 @@
           "provider": "groq",
           "status": "completed",
           "usage": {
-            "completion_time": 0.027554055,
-            "completion_tokens": 4,
-            "prompt_time": 0.003210785,
-            "prompt_tokens": 38,
-            "queue_time": 0.090321431,
-            "total_time": 0.03076484,
+            "input_tokens": 38,
+            "output_tokens": 4,
             "total_tokens": 42
           }
         },
