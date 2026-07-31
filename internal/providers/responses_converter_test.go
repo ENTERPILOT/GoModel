@@ -226,91 +226,77 @@ data: [DONE]
 	}
 }
 
-// TestOpenAIResponsesStreamConverter_ReasoningThenToolCall covers a
-// reasoning-only turn (the model reasons, then calls a tool without any
-// visible text): the reasoning item must close before the function_call
-// item opens, and the tool call must shift to output_index 1.
-func TestOpenAIResponsesStreamConverter_ReasoningThenToolCall(t *testing.T) {
-	mockStream := `data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"reasoning_content":"Need the weather."},"finish_reason":null}]}
+func TestOpenAIResponsesStreamConverter_ReasoningToolOutputOrder(t *testing.T) {
+	tests := []struct {
+		name        string
+		mockStream  string
+		wantIndexes map[string]float64
+	}{
+		{
+			name: "reasoning then tool call",
+			mockStream: `data: {"choices":[{"delta":{"reasoning_content":"Need the weather."},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"}}]},"finish_reason":null}]}
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"}}]},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"deepseek-v4-pro","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
 
 data: [DONE]
-`
-
-	reader := io.NopCloser(strings.NewReader(mockStream))
-	converter := NewOpenAIResponsesStreamConverter(reader, "deepseek-v4-pro", "deepseek")
-
-	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
-
-	var reasoningDoneIndex, toolAddedIndex float64 = -1, -1
-	reasoningDoneBeforeToolAdded := false
-	sawReasoningDone := false
-
-	for _, event := range parseTestSSEEvents(t, string(raw)) {
-		if event.Done {
-			continue
-		}
-		switch event.Name {
-		case "response.output_item.done":
-			item, _ := event.Payload["item"].(map[string]any)
-			if item["type"] == "reasoning" {
-				reasoningDoneIndex, _ = event.Payload["output_index"].(float64)
-				sawReasoningDone = true
-			}
-		case "response.output_item.added":
-			item, _ := event.Payload["item"].(map[string]any)
-			if item["type"] == "function_call" {
-				toolAddedIndex, _ = event.Payload["output_index"].(float64)
-				reasoningDoneBeforeToolAdded = sawReasoningDone
-			}
-		}
-	}
-
-	if reasoningDoneIndex != 0 {
-		t.Fatalf("reasoning output_item.done index = %v, want 0", reasoningDoneIndex)
-	}
-	if toolAddedIndex != 1 {
-		t.Fatalf("function_call output_index = %v, want 1 (after the reasoning item)", toolAddedIndex)
-	}
-	if !reasoningDoneBeforeToolAdded {
-		t.Fatal("expected the reasoning item to close before the function_call item opened")
-	}
-}
-
-func TestOpenAIResponsesStreamConverter_AssistantAfterStartedToolUsesNextOutputIndex(t *testing.T) {
-	mockStream := `data: {"choices":[{"delta":{"reasoning_content":"Need a tool."},"finish_reason":null}]}
+`,
+			wantIndexes: map[string]float64{"reasoning": 0, "function_call": 1},
+		},
+		{
+			name: "assistant after started tool call",
+			mockStream: `data: {"choices":[{"delta":{"reasoning_content":"Need a tool."},"finish_reason":null}]}
 
 data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]}
 
 data: {"choices":[{"delta":{"content":"Tool selected."},"finish_reason":"stop"}]}
 
 data: [DONE]
-`
-
-	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
-	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+`,
+			wantIndexes: map[string]float64{"reasoning": 0, "function_call": 1, "message": 2},
+		},
 	}
 
-	addedIndexes := make(map[string]float64)
-	for _, event := range parseTestSSEEvents(t, string(raw)) {
-		if event.Name != "response.output_item.added" {
-			continue
-		}
-		item, _ := event.Payload["item"].(map[string]any)
-		itemType, _ := item["type"].(string)
-		addedIndexes[itemType], _ = event.Payload["output_index"].(float64)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(tt.mockStream)), "test-model", "mock")
+			raw, err := io.ReadAll(converter)
+			if err != nil {
+				t.Fatalf("ReadAll() error = %v", err)
+			}
 
-	if addedIndexes["reasoning"] != 0 || addedIndexes["function_call"] != 1 || addedIndexes["message"] != 2 {
-		t.Fatalf("output indexes = %#v, want reasoning=0, function_call=1, message=2", addedIndexes)
+			addedIndexes := make(map[string]float64)
+			reasoningDone := false
+			reasoningDoneBeforeTool := false
+			for _, event := range parseTestSSEEvents(t, string(raw)) {
+				item, _ := event.Payload["item"].(map[string]any)
+				itemType, _ := item["type"].(string)
+				switch event.Name {
+				case "response.output_item.done":
+					if itemType == "reasoning" {
+						reasoningDone = event.Payload["output_index"] == float64(0)
+					}
+				case "response.output_item.added":
+					addedIndexes[itemType], _ = event.Payload["output_index"].(float64)
+					if itemType == "function_call" {
+						reasoningDoneBeforeTool = reasoningDone
+					}
+				}
+			}
+
+			if len(addedIndexes) != len(tt.wantIndexes) {
+				t.Fatalf("output indexes = %#v, want %#v", addedIndexes, tt.wantIndexes)
+			}
+			for itemType, wantIndex := range tt.wantIndexes {
+				if addedIndexes[itemType] != wantIndex {
+					t.Fatalf("%s output_index = %v, want %v", itemType, addedIndexes[itemType], wantIndex)
+				}
+			}
+			if !reasoningDoneBeforeTool {
+				t.Fatal("expected the reasoning item to close before the function_call item opened")
+			}
+		})
 	}
 }
 
@@ -539,84 +525,44 @@ data: [DONE]
 	}
 }
 
-// TestOpenAIResponsesStreamConverter_DropsNonObjectUsage ensures off-spec
-// non-object usage values never leak into the response.completed payload.
-func TestOpenAIResponsesStreamConverter_DropsNonObjectUsage(t *testing.T) {
-	mockStream := `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}],"usage":"n/a"}
+func TestOpenAIResponsesStreamConverter_DropsInvalidUsage(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage string
+	}{
+		{name: "non-object", usage: `"n/a"`},
+		{name: "malformed required field", usage: `{"prompt_tokens":"unknown","completion_tokens":1,"total_tokens":1}`},
+		{name: "required field nested", usage: `{"metadata":{"prompt_tokens":3},"completion_tokens":1,"total_tokens":1}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStream := `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":` + tt.usage + `}
 
 data: [DONE]
 `
+			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "groq")
+			raw, err := io.ReadAll(converter)
+			if err != nil {
+				t.Fatalf("ReadAll() error = %v", err)
+			}
 
-	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "groq")
-	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
+			for _, event := range parseTestSSEEvents(t, string(raw)) {
+				if event.Done || event.Name != "response.completed" {
+					continue
+				}
+				response, _ := event.Payload["response"].(map[string]any)
+				if response == nil {
+					t.Fatal("response.completed missing response object")
+				}
+				if usage, present := response["usage"]; present {
+					t.Fatalf("invalid usage leaked into response.completed: %#v", usage)
+				}
+				return
+			}
+			t.Fatal("expected response.completed event")
+		})
 	}
-
-	for _, event := range parseTestSSEEvents(t, string(raw)) {
-		if event.Done || event.Name != "response.completed" {
-			continue
-		}
-		response, _ := event.Payload["response"].(map[string]any)
-		if response == nil {
-			t.Fatal("response.completed missing response object")
-		}
-		if usage, present := response["usage"]; present {
-			t.Fatalf("response.completed usage = %#v, want omitted for non-object usage", usage)
-		}
-		return
-	}
-	t.Fatal("expected response.completed event")
-}
-
-func TestOpenAIResponsesStreamConverter_DropsMalformedObjectUsage(t *testing.T) {
-	mockStream := `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":"unknown","completion_tokens":1,"total_tokens":1}}
-
-data: [DONE]
-`
-
-	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "groq")
-	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
-
-	for _, event := range parseTestSSEEvents(t, string(raw)) {
-		if event.Done || event.Name != "response.completed" {
-			continue
-		}
-		response, _ := event.Payload["response"].(map[string]any)
-		if _, present := response["usage"]; present {
-			t.Fatalf("malformed usage leaked into response.completed: %#v", response["usage"])
-		}
-		return
-	}
-	t.Fatal("expected response.completed event")
-}
-
-func TestOpenAIResponsesStreamConverter_DropsUsageWithNestedRequiredField(t *testing.T) {
-	mockStream := `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":{"metadata":{"prompt_tokens":3},"completion_tokens":1,"total_tokens":1}}
-
-data: [DONE]
-`
-
-	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "groq")
-	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
-
-	for _, event := range parseTestSSEEvents(t, string(raw)) {
-		if event.Done || event.Name != "response.completed" {
-			continue
-		}
-		response, _ := event.Payload["response"].(map[string]any)
-		if _, present := response["usage"]; present {
-			t.Fatalf("usage with nested prompt_tokens leaked into response.completed: %#v", response["usage"])
-		}
-		return
-	}
-	t.Fatal("expected response.completed event")
 }
 
 func TestOpenAIResponsesStreamConverter_PropagatesStreamError(t *testing.T) {
