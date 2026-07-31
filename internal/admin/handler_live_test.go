@@ -151,6 +151,50 @@ func TestLiveLogsForwardsEventsAndHeartbeats(t *testing.T) {
 	}
 }
 
+func TestLiveLogsWritesImmediateHeartbeat(t *testing.T) {
+	// Default heartbeat interval (15s) — anything on the wire before the
+	// canceled context returns must have been written eagerly on subscribe.
+	cases := []struct {
+		name       string
+		publish    int
+		want       string
+		wantAbsent string
+	}{
+		{
+			name:    "fresh broker heartbeat carries no sequence",
+			publish: 0,
+			want:    "event: heartbeat",
+			// Seq 0 events omit the SSE id line entirely.
+			wantAbsent: "id:",
+		},
+		{
+			name:    "heartbeat carries the subscription-time sequence",
+			publish: 1,
+			want:    "id: 1\nevent: heartbeat\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			broker := live.NewBroker(live.Config{Enabled: true})
+			for range tc.publish {
+				broker.PublishAuditEvent(live.EventAuditStarted, &auditlog.LogEntry{
+					ID:        "audit-1",
+					RequestID: "req-1",
+					Timestamp: time.Now(),
+				})
+			}
+
+			body := runLiveLogsWithCanceledContext(t, broker, "/admin/live/logs?types=audit,usage")
+			if !strings.Contains(body, tc.want) {
+				t.Fatalf("body = %q, want immediate %q", body, tc.want)
+			}
+			if tc.wantAbsent != "" && strings.Contains(body, tc.wantAbsent) {
+				t.Fatalf("body = %q, want no %q", body, tc.wantAbsent)
+			}
+		})
+	}
+}
+
 func runLiveLogsWithCanceledContext(t *testing.T, broker *live.Broker, target string) string {
 	t.Helper()
 	h := NewHandler(nil, nil, WithLiveBroker(broker))

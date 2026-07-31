@@ -23,6 +23,21 @@ function matchesLiveAuditKey(entry, id, requestID) {
         (!!requestID && String(entry && entry.request_id || '').trim() === requestID);
 }
 
+// auditLivePauseMessage maps an auditLivePauseReason to the operator-facing
+// hint shown by the page's live-status indicator.
+export function auditLivePauseMessage(reason) {
+    switch (reason) {
+        case 'date_range':
+            return 'Live paused — the selected date range does not include today. Set it to today to resume.';
+        case 'filters':
+            return 'Live paused while filters are active. Clear them to resume.';
+        case 'pagination':
+            return 'Live paused on later pages. Go to the first page to resume.';
+        default:
+            return '';
+    }
+}
+
 // liveLogsStreamPath builds the stream path with the replay cursor:
 // '/admin/live/logs?types=audit,usage[&cursor=N]'.
 export function liveLogsStreamPath(lastSeq) {
@@ -112,10 +127,26 @@ export function liveLogsMethods() {
             }
         },
 
+        // auditLivePauseReason names why live inserts are paused, so the page
+        // can tell the operator how to resume them: 'pagination', 'filters',
+        // 'date_range', or null while inserts flow.
+        auditLivePauseReason() {
+            if (!this.auditLog || this.auditLog.offset !== 0) return 'pagination';
+            if (this.auditSearch || this.auditMethod || this.auditStatusCode || this.auditStream) {
+                return 'filters';
+            }
+            // A custom date range pauses live inserts — except a range that
+            // ends today (followsToday): an entry arriving now is inside such
+            // a window by definition, and since the range persists across
+            // sessions it must not silently disable live logs forever.
+            if (!this.followsToday && (this.customStartDate || this.customEndDate)) {
+                return 'date_range';
+            }
+            return null;
+        },
+
         auditLiveInsertAllowed() {
-            return this.auditLog && this.auditLog.offset === 0 &&
-                !this.auditSearch && !this.auditMethod && !this.auditStatusCode && !this.auditStream &&
-                !this.customStartDate && !this.customEndDate;
+            return !this.auditLivePauseReason();
         },
 
         usageLiveInsertAllowed() {

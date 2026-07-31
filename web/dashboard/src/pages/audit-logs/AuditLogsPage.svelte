@@ -14,6 +14,7 @@
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import AuditFilters from "./AuditFilters.svelte";
+  import AuditLiveStatus from "./AuditLiveStatus.svelte";
   import AuditEntryRow from "./AuditEntryRow.svelte";
   import AuditThreadGroup from "./AuditThreadGroup.svelte";
   import ConversationDrawer from "./ConversationDrawer.svelte";
@@ -102,15 +103,29 @@
   <div class="audit-log-section">
     <AuditFilters />
 
-    {#if auditList.auditLog.total > 0}
-      <p class="audit-log-summary">
-        Showing {auditList.auditLog.offset + 1}-{Math.min(
-          auditList.auditLog.offset + auditList.auditLog.limit,
-          auditList.auditLog.total,
-        )} of {auditList.auditLog.total}
-        {auditList.auditGroupSessions ? "sessions" : "logs"}
-      </p>
-    {/if}
+    <div class="audit-list-toolbar">
+      <div class="audit-list-toolbar-left">
+        {#if auditList.auditLog.total > 0}
+          <p class="audit-log-summary">
+            Showing {auditList.auditLog.offset + 1}-{Math.min(
+              auditList.auditLog.offset + auditList.auditLog.limit,
+              auditList.auditLog.total,
+            )} of {auditList.auditLog.total}
+            {auditList.auditGroupSessions ? "sessions" : "logs"}
+          </p>
+        {/if}
+        <!-- View preference, not a filter: Clear leaves it alone. -->
+        <label class="audit-group-checkbox">
+          <input
+            type="checkbox"
+            checked={auditList.auditGroupSessions}
+            onchange={() => auditList.toggleAuditGroupSessions()}
+          />
+          <span>Group by session</span>
+        </label>
+      </div>
+      <AuditLiveStatus />
+    </div>
 
     {#if auditList.loading && auditList.auditLog.entries.length === 0}
       <div class="audit-log-loading">
@@ -163,6 +178,39 @@
     justify-content: center;
     padding: 2rem 0;
   }
+
+  /* Row above the list: page summary and view preference on the left, the
+     live-stream status on the right. */
+  .audit-list-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  .audit-list-toolbar-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .audit-group-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .audit-group-checkbox input {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
 /* Audit Log Section */
 .audit-retention-note {
   color: var(--text-muted);
@@ -184,7 +232,6 @@
 .audit-log-summary {
   color: var(--text-muted);
   font-size: 13px;
-  margin-bottom: 12px;
 }
 
 .audit-log-list {
