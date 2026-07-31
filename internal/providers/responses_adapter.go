@@ -33,9 +33,13 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 	tools := normalizeResponsesToolsForChat(req.Tools)
 	toolChoice := normalizeResponsesToolChoiceForChat(req.ToolChoice)
 	parallelToolCalls := req.ParallelToolCalls
-	if len(req.Tools) > 0 && len(tools) == 0 {
-		toolChoice = nil
-		parallelToolCalls = nil
+	if len(req.Tools) > 0 {
+		if len(tools) == 0 {
+			toolChoice = nil
+			parallelToolCalls = nil
+		} else {
+			toolChoice = dropUnavailableResponsesToolChoice(toolChoice, tools)
+		}
 	}
 
 	chatReq := &core.ChatRequest{
@@ -325,6 +329,29 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 	delete(normalized, "name")
 	normalized["function"] = map[string]any{"name": name}
 	return normalized
+}
+
+func dropUnavailableResponsesToolChoice(choice any, tools []map[string]any) any {
+	choiceMap, ok := choice.(map[string]any)
+	if !ok || choiceMap["type"] != "function" {
+		return choice
+	}
+	function, ok := choiceMap["function"].(map[string]any)
+	if !ok {
+		return choice
+	}
+	name, ok := function["name"].(string)
+	if !ok || strings.TrimSpace(name) == "" {
+		return choice
+	}
+
+	for _, tool := range tools {
+		toolFunction, ok := tool["function"].(map[string]any)
+		if ok && toolFunction["name"] == name {
+			return choice
+		}
+	}
+	return nil
 }
 
 func cloneStringAnyMap(src map[string]any) map[string]any {

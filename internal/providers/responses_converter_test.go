@@ -309,6 +309,55 @@ data: [DONE]
 	}
 }
 
+func TestOpenAIResponsesStreamConverter_OutOfOrderToolCallsKeepUniqueIndexes(t *testing.T) {
+	mockStream := `data: {"choices":[{"delta":{"reasoning_content":"Plan."},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_second","type":"function","function":{"name":"second","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"content":"Calling tools."},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_first","type":"function","function":{"name":"first","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	indexes := make(map[float64]string)
+	callIndexes := make(map[string]float64)
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Name != "response.output_item.added" {
+			continue
+		}
+		index, ok := event.Payload["output_index"].(float64)
+		if !ok {
+			t.Fatalf("output_index = %#v, want number", event.Payload["output_index"])
+		}
+		item, _ := event.Payload["item"].(map[string]any)
+		itemID, _ := item["id"].(string)
+		if previous, exists := indexes[index]; exists {
+			t.Fatalf("output_index %v reused by %q and %q", index, previous, itemID)
+		}
+		indexes[index] = itemID
+		if callID, _ := item["call_id"].(string); callID != "" {
+			callIndexes[callID] = index
+		}
+	}
+
+	if len(indexes) != 4 {
+		t.Fatalf("output items = %#v, want reasoning, two calls, and message", indexes)
+	}
+	if callIndexes["call_second"] != 1 || callIndexes["call_first"] != 3 {
+		t.Fatalf("function-call indexes = %#v, want emission-order indexes 1 and 3", callIndexes)
+	}
+}
+
 func TestOpenAIResponsesStreamConverter_WithTextBeforeToolCall(t *testing.T) {
 	mockStream := `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"test-model","choices":[{"index":0,"delta":{"content":"I'll check that for you."},"finish_reason":null}]}
 

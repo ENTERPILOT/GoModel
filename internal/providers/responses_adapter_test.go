@@ -661,6 +661,68 @@ func TestConvertResponsesRequestToChat_IgnoresOnlyUnsupportedToolsAndChoice(t *t
 	}
 }
 
+func TestConvertResponsesRequestToChat_DropsChoiceForOmittedNamespaceChild(t *testing.T) {
+	parallelToolCalls := true
+	tests := []struct {
+		name       string
+		toolChoice map[string]any
+		wantChoice bool
+	}{
+		{
+			name:       "omitted namespace child",
+			toolChoice: map[string]any{"type": "function", "name": "spawn_agent"},
+		},
+		{
+			name:       "retained function",
+			toolChoice: map[string]any{"type": "function", "name": "exec_command"},
+			wantChoice: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ResponsesRequest{
+				Model: "test-model",
+				Input: "Hello",
+				Tools: []map[string]any{
+					{
+						"type": "namespace",
+						"name": "multi_agent_v1",
+						"tools": []any{
+							map[string]any{"type": "function", "name": "spawn_agent"},
+						},
+					},
+					{
+						"type":       "function",
+						"name":       "exec_command",
+						"parameters": map[string]any{"type": "object"},
+					},
+				},
+				ToolChoice:        tt.toolChoice,
+				ParallelToolCalls: &parallelToolCalls,
+			}
+
+			chatReq, err := ConvertResponsesRequestToChat(req)
+			if err != nil {
+				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+			}
+			if len(chatReq.Tools) != 1 {
+				t.Fatalf("Tools = %#v, want only exec_command", chatReq.Tools)
+			}
+			function, ok := chatReq.Tools[0]["function"].(map[string]any)
+			if !ok || function["name"] != "exec_command" {
+				t.Fatalf("Tools[0] = %#v, want exec_command function", chatReq.Tools[0])
+			}
+			if (chatReq.ToolChoice != nil) != tt.wantChoice {
+				t.Fatalf("ToolChoice = %#v, want present %v", chatReq.ToolChoice, tt.wantChoice)
+			}
+			if chatReq.ParallelToolCalls == nil || !*chatReq.ParallelToolCalls {
+				t.Fatalf("ParallelToolCalls = %#v, want true", chatReq.ParallelToolCalls)
+			}
+		})
+	}
+}
+
 func TestConvertResponsesRequestToChat_MapsTextFormatToResponseFormat(t *testing.T) {
 	t.Run("json_schema nests schema fields", func(t *testing.T) {
 		req := &core.ResponsesRequest{
