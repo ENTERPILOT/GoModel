@@ -20,20 +20,21 @@ import (
 // and converts it to Responses API format.
 // Used by providers that have OpenAI-compatible streaming (Groq, Gemini, etc.)
 type OpenAIResponsesStreamConverter struct {
-	reader      io.ReadCloser
-	model       string
-	provider    string
-	responseID  string
-	createdAt   int64
-	output      *ResponsesOutputEventState
-	toolCalls   map[int]*ResponsesOutputToolCallState
-	buffer      streaming.StreamBuffer
-	lineBuffer  streaming.StreamBuffer
-	readBuf     []byte
-	closed      bool
-	sentCreate  bool
-	sentDone    bool
-	cachedUsage json.RawMessage // Stores usage from final chunk for inclusion in response.completed
+	reader               io.ReadCloser
+	model                string
+	provider             string
+	responseID           string
+	createdAt            int64
+	output               *ResponsesOutputEventState
+	toolCalls            map[int]*ResponsesOutputToolCallState
+	assistantOutputIndex int
+	buffer               streaming.StreamBuffer
+	lineBuffer           streaming.StreamBuffer
+	readBuf              []byte
+	closed               bool
+	sentCreate           bool
+	sentDone             bool
+	cachedUsage          json.RawMessage // Stores usage from final chunk for inclusion in response.completed
 }
 
 // NewOpenAIResponsesStreamConverter creates a new converter that transforms
@@ -134,22 +135,27 @@ func (sc *OpenAIResponsesStreamConverter) outputAlreadyStarted() bool {
 	return false
 }
 
-// assistantOutputIndex returns the output index for the assistant message
-// item: 1 if a reasoning item precedes it, 0 otherwise.
-func (sc *OpenAIResponsesStreamConverter) assistantOutputIndex() int {
-	if sc.output.ReasoningReserved() {
-		return 1
-	}
-	return 0
-}
-
 func (sc *OpenAIResponsesStreamConverter) reserveAssistantOutput() {
 	if sc.output.AssistantReserved() {
 		return
 	}
+
+	// Items that have already been emitted cannot move. Place the assistant
+	// after them, then shift only pending tool calls that would otherwise
+	// occupy the same or a later slot.
+	outputIndex := 0
+	if sc.output.ReasoningReserved() {
+		outputIndex++
+	}
+	for _, state := range sc.toolCalls {
+		if state != nil && state.Started && state.OutputIndex >= outputIndex {
+			outputIndex = state.OutputIndex + 1
+		}
+	}
+	sc.assistantOutputIndex = outputIndex
 	sc.output.ReserveAssistant()
 	for _, state := range sc.toolCalls {
-		if state != nil && !state.Started {
+		if state != nil && !state.Started && state.OutputIndex >= outputIndex {
 			state.OutputIndex++
 		}
 	}
@@ -193,7 +199,7 @@ func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []openA
 
 	out.WriteString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
 	if sc.output.AssistantStarted() && !sc.output.AssistantDone() {
-		out.WriteString(sc.output.CompleteAssistantOutput(sc.assistantOutputIndex()))
+		out.WriteString(sc.output.CompleteAssistantOutput(sc.assistantOutputIndex))
 	}
 
 	for _, toolCall := range toolCalls {
@@ -376,7 +382,7 @@ func (sc *OpenAIResponsesStreamConverter) appendReasoningDelta(content string) {
 func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
 	sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
 	sc.reserveAssistantOutput()
-	sc.buffer.AppendString(sc.output.StartAssistantOutput(sc.assistantOutputIndex()))
+	sc.buffer.AppendString(sc.output.StartAssistantOutput(sc.assistantOutputIndex))
 	sc.output.AppendAssistantText(content)
 	jsonData, err := json.Marshal(struct {
 		Type  string `json:"type"`
@@ -399,7 +405,7 @@ func (sc *OpenAIResponsesStreamConverter) appendCompletedEvents() {
 	}
 	sc.sentDone = true
 	sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
-	sc.buffer.AppendString(sc.output.CompleteAssistantOutput(sc.assistantOutputIndex()))
+	sc.buffer.AppendString(sc.output.CompleteAssistantOutput(sc.assistantOutputIndex))
 	sc.buffer.AppendString(sc.completePendingToolCalls())
 	responseData := map[string]any{
 		"id":         sc.responseID,
@@ -489,11 +495,6 @@ func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage
 // the conservative Responses API shape. Malformed usage is omitted rather than
 // making clients reject an otherwise successful response.completed event.
 func chatUsageToResponsesUsage(raw json.RawMessage) (responsesStreamUsage, bool) {
-	if !bytes.Contains(raw, []byte(`"prompt_tokens"`)) ||
-		!bytes.Contains(raw, []byte(`"completion_tokens"`)) ||
-		!bytes.Contains(raw, []byte(`"total_tokens"`)) {
-		return responsesStreamUsage{}, false
-	}
 	var chatUsage struct {
 		PromptTokens            int                           `json:"prompt_tokens"`
 		CompletionTokens        int                           `json:"completion_tokens"`
@@ -501,7 +502,13 @@ func chatUsageToResponsesUsage(raw json.RawMessage) (responsesStreamUsage, bool)
 		PromptTokensDetails     *core.PromptTokensDetails     `json:"prompt_tokens_details"`
 		CompletionTokensDetails *core.CompletionTokensDetails `json:"completion_tokens_details"`
 	}
+	chatUsage.PromptTokens = -1
+	chatUsage.CompletionTokens = -1
+	chatUsage.TotalTokens = -1
 	if err := json.Unmarshal(raw, &chatUsage); err != nil {
+		return responsesStreamUsage{}, false
+	}
+	if chatUsage.PromptTokens < 0 || chatUsage.CompletionTokens < 0 || chatUsage.TotalTokens < 0 {
 		return responsesStreamUsage{}, false
 	}
 	return responsesStreamUsage{

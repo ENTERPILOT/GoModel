@@ -283,6 +283,37 @@ data: [DONE]
 	}
 }
 
+func TestOpenAIResponsesStreamConverter_AssistantAfterStartedToolUsesNextOutputIndex(t *testing.T) {
+	mockStream := `data: {"choices":[{"delta":{"reasoning_content":"Need a tool."},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"content":"Tool selected."},"finish_reason":"stop"}]}
+
+data: [DONE]
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	addedIndexes := make(map[string]float64)
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Name != "response.output_item.added" {
+			continue
+		}
+		item, _ := event.Payload["item"].(map[string]any)
+		itemType, _ := item["type"].(string)
+		addedIndexes[itemType], _ = event.Payload["output_index"].(float64)
+	}
+
+	if addedIndexes["reasoning"] != 0 || addedIndexes["function_call"] != 1 || addedIndexes["message"] != 2 {
+		t.Fatalf("output indexes = %#v, want reasoning=0, function_call=1, message=2", addedIndexes)
+	}
+}
+
 func TestOpenAIResponsesStreamConverter_WithTextBeforeToolCall(t *testing.T) {
 	mockStream := `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"test-model","choices":[{"index":0,"delta":{"content":"I'll check that for you."},"finish_reason":null}]}
 
@@ -557,6 +588,31 @@ data: [DONE]
 		response, _ := event.Payload["response"].(map[string]any)
 		if _, present := response["usage"]; present {
 			t.Fatalf("malformed usage leaked into response.completed: %#v", response["usage"])
+		}
+		return
+	}
+	t.Fatal("expected response.completed event")
+}
+
+func TestOpenAIResponsesStreamConverter_DropsUsageWithNestedRequiredField(t *testing.T) {
+	mockStream := `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":{"metadata":{"prompt_tokens":3},"completion_tokens":1,"total_tokens":1}}
+
+data: [DONE]
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "groq")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done || event.Name != "response.completed" {
+			continue
+		}
+		response, _ := event.Payload["response"].(map[string]any)
+		if _, present := response["usage"]; present {
+			t.Fatalf("usage with nested prompt_tokens leaked into response.completed: %#v", response["usage"])
 		}
 		return
 	}
