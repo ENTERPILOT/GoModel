@@ -197,10 +197,6 @@
     flex-wrap: wrap;
   }
 
-  .audit-log-summary {
-    margin: 0;
-  }
-
   .audit-group-checkbox {
     display: inline-flex;
     align-items: center;
@@ -236,7 +232,6 @@
 .audit-log-summary {
   color: var(--text-muted);
   font-size: 13px;
-  margin-bottom: 12px;
 }
 
 .audit-log-list {

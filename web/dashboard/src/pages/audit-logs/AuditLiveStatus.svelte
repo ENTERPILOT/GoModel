@@ -29,11 +29,40 @@
   .audit-live-status {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 10px;
     font-size: 12px;
     color: var(--text-muted);
-    /* The pulsing ring expands past the dot; keep it from clipping. */
-    padding-left: 4px;
+    /* Clearance for the expanding ring: it grows to ~2.5x the dot, so keep
+       it away from whatever sits to the left of the chip. */
+    margin-left: 16px;
+    padding-left: 6px;
+  }
+
+  /* The shared .live-dot ring alone is easy to miss at 8px; throb the dot
+     itself in the same rhythm so the live state is unmistakable. */
+  .audit-live-status .live-dot.is-streaming {
+    animation: audit-live-dot-throb 1.8s ease-out infinite;
+  }
+
+  @keyframes audit-live-dot-throb {
+    0% {
+      transform: scale(1);
+    }
+    35% {
+      transform: scale(1.35);
+    }
+    70% {
+      transform: scale(1);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .audit-live-status .live-dot.is-streaming {
+      animation: none;
+    }
   }
 
   .audit-live-status-text.is-live {
