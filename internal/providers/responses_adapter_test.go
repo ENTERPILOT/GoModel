@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -522,10 +523,17 @@ func TestConvertResponsesRequestToChat_RejectsOutputLogprobsInclude(t *testing.T
 }
 
 func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T) {
+	functionTools := []map[string]any{
+		{
+			"type":       "function",
+			"name":       "exec_command",
+			"parameters": map[string]any{"type": "object"},
+		},
+	}
 	tests := []struct {
 		name string
 		req  *core.ResponsesRequest
-		want string
+		want any
 	}{
 		{
 			name: "tool_choice none alias",
@@ -542,6 +550,55 @@ func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T)
 			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "required"}},
 			want: "required",
 		},
+		{
+			name: "bare tool_choice none",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "none"},
+			want: "none",
+		},
+		{
+			name: "bare tool_choice auto",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "auto"},
+			want: "auto",
+		},
+		{
+			name: "bare tool_choice required",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "required"},
+			want: "required",
+		},
+		{
+			name: "unsupported bare tool_choice",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "web_search"},
+		},
+		{
+			name: "function choice without function map",
+			req: &core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				Tools:      functionTools,
+				ToolChoice: map[string]any{"type": "function", "function": "invalid"},
+			},
+			want: map[string]any{"type": "function", "function": "invalid"},
+		},
+		{
+			name: "function choice without name",
+			req: &core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				Tools:      functionTools,
+				ToolChoice: map[string]any{"type": "function", "function": map[string]any{}},
+			},
+			want: map[string]any{"type": "function", "function": map[string]any{}},
+		},
+		{
+			name: "function choice with empty name",
+			req: &core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				Tools:      functionTools,
+				ToolChoice: map[string]any{"type": "function", "function": map[string]any{"name": ""}},
+			},
+			want: map[string]any{"type": "function", "function": map[string]any{"name": ""}},
+		},
 	}
 
 	for _, tt := range tests {
@@ -550,8 +607,8 @@ func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T)
 			if err != nil {
 				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
 			}
-			if chatReq.ToolChoice != tt.want {
-				t.Fatalf("ToolChoice = %#v, want %q", chatReq.ToolChoice, tt.want)
+			if !reflect.DeepEqual(chatReq.ToolChoice, tt.want) {
+				t.Fatalf("ToolChoice = %#v, want %#v", chatReq.ToolChoice, tt.want)
 			}
 		})
 	}
@@ -578,57 +635,6 @@ func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing
 			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Text: map[string]any{"format": map[string]any{"type": "grammar"}}},
 			want: "text",
 		},
-		{
-			name: "hosted web search tool",
-			req: &core.ResponsesRequest{
-				Model: "test-model",
-				Input: "Hello",
-				Tools: []map[string]any{
-					{"type": "web_search_preview"},
-				},
-			},
-			want: "web_search_preview",
-		},
-		{
-			name: "hosted file search tool",
-			req: &core.ResponsesRequest{
-				Model: "test-model",
-				Input: "Hello",
-				Tools: []map[string]any{
-					{"type": "file_search", "vector_store_ids": []string{"vs_123"}},
-				},
-			},
-			want: "file_search",
-		},
-		{
-			name: "hosted computer use tool",
-			req: &core.ResponsesRequest{
-				Model: "test-model",
-				Input: "Hello",
-				Tools: []map[string]any{
-					{"type": "computer_use_preview", "display_width": 1024, "display_height": 768},
-				},
-			},
-			want: "computer_use_preview",
-		},
-		{
-			name: "hosted file search tool choice",
-			req: &core.ResponsesRequest{
-				Model:      "test-model",
-				Input:      "Hello",
-				ToolChoice: map[string]any{"type": "file_search"},
-			},
-			want: "file_search",
-		},
-		{
-			name: "hosted web search tool choice",
-			req: &core.ResponsesRequest{
-				Model:      "test-model",
-				Input:      "Hello",
-				ToolChoice: map[string]any{"type": "web_search_preview"},
-			},
-			want: "web_search_preview",
-		},
 	}
 
 	for _, tt := range tests {
@@ -639,6 +645,136 @@ func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want mention %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestConvertResponsesRequestToChat_IgnoresUnsupportedTools(t *testing.T) {
+	req := &core.ResponsesRequest{
+		Model: "test-model",
+		Input: "Hello",
+		Tools: []map[string]any{
+			{
+				"type": "namespace",
+				"name": "multi_agent_v1",
+				"tools": []any{
+					map[string]any{"type": "function", "name": "spawn_agent"},
+				},
+			},
+			{"type": "web_search"},
+			{"type": "file_search", "vector_store_ids": []string{"vs_123"}},
+			{
+				"type":        "function",
+				"name":        "exec_command",
+				"description": "Run a command.",
+				"parameters":  map[string]any{"type": "object"},
+			},
+		},
+		ToolChoice: map[string]any{"type": "auto"},
+	}
+
+	chatReq, err := ConvertResponsesRequestToChat(req)
+	if err != nil {
+		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+	}
+	if len(chatReq.Tools) != 1 {
+		t.Fatalf("Tools = %#v, want only the function tool", chatReq.Tools)
+	}
+	function, ok := chatReq.Tools[0]["function"].(map[string]any)
+	if !ok || function["name"] != "exec_command" {
+		t.Fatalf("Tools[0] = %#v, want exec_command function", chatReq.Tools[0])
+	}
+	if chatReq.ToolChoice != "auto" {
+		t.Fatalf("ToolChoice = %#v, want auto", chatReq.ToolChoice)
+	}
+}
+
+func TestConvertResponsesRequestToChat_IgnoresOnlyUnsupportedToolsAndChoice(t *testing.T) {
+	parallelToolCalls := true
+	req := &core.ResponsesRequest{
+		Model: "test-model",
+		Input: "Hello",
+		Tools: []map[string]any{
+			{"type": "namespace", "name": "multi_agent_v1", "tools": []any{}},
+			{"type": "web_search"},
+		},
+		ToolChoice:        map[string]any{"type": "web_search"},
+		ParallelToolCalls: &parallelToolCalls,
+	}
+
+	chatReq, err := ConvertResponsesRequestToChat(req)
+	if err != nil {
+		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+	}
+	if chatReq.Tools != nil {
+		t.Fatalf("Tools = %#v, want nil", chatReq.Tools)
+	}
+	if chatReq.ToolChoice != nil {
+		t.Fatalf("ToolChoice = %#v, want nil", chatReq.ToolChoice)
+	}
+	if chatReq.ParallelToolCalls != nil {
+		t.Fatalf("ParallelToolCalls = %#v, want nil", chatReq.ParallelToolCalls)
+	}
+}
+
+func TestConvertResponsesRequestToChat_DropsChoiceForOmittedNamespaceChild(t *testing.T) {
+	parallelToolCalls := true
+	tests := []struct {
+		name       string
+		toolChoice map[string]any
+		wantChoice bool
+	}{
+		{
+			name:       "omitted namespace child",
+			toolChoice: map[string]any{"type": "function", "name": "spawn_agent"},
+		},
+		{
+			name:       "retained function",
+			toolChoice: map[string]any{"type": "function", "name": "exec_command"},
+			wantChoice: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ResponsesRequest{
+				Model: "test-model",
+				Input: "Hello",
+				Tools: []map[string]any{
+					{
+						"type": "namespace",
+						"name": "multi_agent_v1",
+						"tools": []any{
+							map[string]any{"type": "function", "name": "spawn_agent"},
+						},
+					},
+					{
+						"type":       "function",
+						"name":       "exec_command",
+						"parameters": map[string]any{"type": "object"},
+					},
+				},
+				ToolChoice:        tt.toolChoice,
+				ParallelToolCalls: &parallelToolCalls,
+			}
+
+			chatReq, err := ConvertResponsesRequestToChat(req)
+			if err != nil {
+				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+			}
+			if len(chatReq.Tools) != 1 {
+				t.Fatalf("Tools = %#v, want only exec_command", chatReq.Tools)
+			}
+			function, ok := chatReq.Tools[0]["function"].(map[string]any)
+			if !ok || function["name"] != "exec_command" {
+				t.Fatalf("Tools[0] = %#v, want exec_command function", chatReq.Tools[0])
+			}
+			if (chatReq.ToolChoice != nil) != tt.wantChoice {
+				t.Fatalf("ToolChoice = %#v, want present %v", chatReq.ToolChoice, tt.wantChoice)
+			}
+			if chatReq.ParallelToolCalls == nil || !*chatReq.ParallelToolCalls {
+				t.Fatalf("ParallelToolCalls = %#v, want true", chatReq.ParallelToolCalls)
 			}
 		})
 	}

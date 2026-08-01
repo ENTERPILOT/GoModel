@@ -30,14 +30,25 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 	if err := validateResponsesRequestForChatTranslation(req); err != nil {
 		return nil, err
 	}
+	tools := normalizeResponsesToolsForChat(req.Tools)
+	toolChoice := normalizeResponsesToolChoiceForChat(req.ToolChoice)
+	parallelToolCalls := req.ParallelToolCalls
+	if len(req.Tools) > 0 {
+		if len(tools) == 0 {
+			toolChoice = nil
+			parallelToolCalls = nil
+		} else {
+			toolChoice = dropUnavailableResponsesToolChoice(toolChoice, tools)
+		}
+	}
 
 	chatReq := &core.ChatRequest{
 		Model:             req.Model,
 		Provider:          req.Provider,
 		Messages:          make([]core.Message, 0),
-		Tools:             normalizeResponsesToolsForChat(req.Tools),
-		ToolChoice:        normalizeResponsesToolChoiceForChat(req.ToolChoice),
-		ParallelToolCalls: req.ParallelToolCalls,
+		Tools:             tools,
+		ToolChoice:        toolChoice,
+		ParallelToolCalls: parallelToolCalls,
 		Temperature:       req.Temperature,
 		TopP:              req.TopP,
 		Stream:            req.Stream,
@@ -104,12 +115,6 @@ func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) erro
 	if strings.TrimSpace(req.SafetyIdentifier) != "" {
 		return unsupportedResponsesChatTranslationField("safety_identifier")
 	}
-	if err := validateResponsesToolsForChatTranslation(req.Tools); err != nil {
-		return err
-	}
-	if err := validateResponsesToolChoiceForChatTranslation(req.ToolChoice); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -122,12 +127,12 @@ const responsesIncludeOutputLogprobs = "message.output_text.logprobs"
 // validateResponsesIncludeForChatTranslation accepts the Responses "include"
 // field for chat-translated providers. include only asks for extra annotations
 // on response items; it never changes what the model does. Chat translation
-// cannot produce those items — hosted-tool items are rejected at the tools
-// check, and encrypted reasoning has no chat equivalent — so the annotations
-// are simply absent, exactly as they are for a native provider that does not
-// support them. Unrecognized values are dropped too: a stricter allowlist would
-// break clients again every time OpenAI adds a value, and no include value can
-// make a response wrong.
+// cannot produce those items — unsupported hosted tools are omitted during
+// translation, and encrypted reasoning has no chat equivalent — so the
+// annotations are simply absent, exactly as they are for a native provider
+// that does not support them. Unrecognized values are dropped too: a stricter
+// allowlist would break clients again every time OpenAI adds a value, and no
+// include value can make a response wrong.
 func validateResponsesIncludeForChatTranslation(include []string) error {
 	for _, value := range include {
 		if strings.TrimSpace(value) == responsesIncludeOutputLogprobs {
@@ -135,31 +140,6 @@ func validateResponsesIncludeForChatTranslation(include []string) error {
 		}
 	}
 	return nil
-}
-
-func validateResponsesToolsForChatTranslation(tools []map[string]any) error {
-	for _, tool := range tools {
-		toolType, _ := tool["type"].(string)
-		if strings.TrimSpace(toolType) != "function" {
-			return unsupportedResponsesChatTranslationTool(toolType)
-		}
-	}
-	return nil
-}
-
-func validateResponsesToolChoiceForChatTranslation(choice any) error {
-	choiceMap, ok := choice.(map[string]any)
-	if !ok {
-		return nil
-	}
-
-	choiceType, _ := choiceMap["type"].(string)
-	switch strings.TrimSpace(choiceType) {
-	case "function", "auto", "required", "none":
-		return nil
-	default:
-		return unsupportedResponsesChatTranslationTool(choiceType)
-	}
 }
 
 // responsesTextToChatExtraFields maps the Responses "text" settings onto the
@@ -248,17 +228,6 @@ func unsupportedResponsesChatTranslationField(field string) error {
 	)
 }
 
-func unsupportedResponsesChatTranslationTool(toolType string) error {
-	toolType = strings.TrimSpace(toolType)
-	if toolType == "" {
-		toolType = "unknown"
-	}
-	return core.NewInvalidRequestError(
-		fmt.Sprintf("responses tool type %q is only supported by native Responses providers; chat-translated providers only support function tools", toolType),
-		nil,
-	)
-}
-
 func cloneStreamOptions(src *core.StreamOptions) *core.StreamOptions {
 	if src == nil {
 		return nil
@@ -274,7 +243,19 @@ func normalizeResponsesToolsForChat(tools []map[string]any) []map[string]any {
 
 	normalized := make([]map[string]any, 0, len(tools))
 	for _, tool := range tools {
+		toolType, _ := tool["type"].(string)
+		if strings.TrimSpace(toolType) != "function" {
+			// Responses-only tools such as web_search and namespace have no
+			// Chat Completions equivalent. Ignore them for chat-backed providers
+			// instead of rejecting an otherwise usable request. In particular,
+			// namespace tools must not be flattened because changing their names
+			// would break the caller's tool routing contract.
+			continue
+		}
 		normalized = append(normalized, normalizeResponsesToolForChat(tool))
+	}
+	if len(normalized) == 0 {
+		return nil
 	}
 	return normalized
 }
@@ -309,9 +290,18 @@ func normalizeResponsesToolForChat(tool map[string]any) map[string]any {
 }
 
 func normalizeResponsesToolChoiceForChat(choice any) any {
+	if choiceString, ok := choice.(string); ok {
+		switch choiceString := strings.TrimSpace(choiceString); choiceString {
+		case "auto", "required", "none":
+			return choiceString
+		default:
+			return nil
+		}
+	}
+
 	choiceMap, ok := choice.(map[string]any)
 	if !ok {
-		return choice
+		return nil
 	}
 
 	choiceType, _ := choiceMap["type"].(string)
@@ -321,7 +311,10 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 	case "function":
 		// Function choices stay object-shaped, with legacy name-form normalized below.
 	default:
-		return choice
+		// A hosted-tool choice cannot be honored by Chat Completions. Dropping
+		// the choice lets the downstream model use any translatable function
+		// tools without forwarding an invalid provider-specific object.
+		return nil
 	}
 	if _, ok := choiceMap["function"].(map[string]any); ok {
 		return cloneStringAnyMap(choiceMap)
@@ -336,6 +329,29 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 	delete(normalized, "name")
 	normalized["function"] = map[string]any{"name": name}
 	return normalized
+}
+
+func dropUnavailableResponsesToolChoice(choice any, tools []map[string]any) any {
+	choiceMap, ok := choice.(map[string]any)
+	if !ok || choiceMap["type"] != "function" {
+		return choice
+	}
+	function, ok := choiceMap["function"].(map[string]any)
+	if !ok {
+		return choice
+	}
+	name, ok := function["name"].(string)
+	if !ok || strings.TrimSpace(name) == "" {
+		return choice
+	}
+
+	for _, tool := range tools {
+		toolFunction, ok := tool["function"].(map[string]any)
+		if ok && toolFunction["name"] == name {
+			return choice
+		}
+	}
+	return nil
 }
 
 func cloneStringAnyMap(src map[string]any) map[string]any {

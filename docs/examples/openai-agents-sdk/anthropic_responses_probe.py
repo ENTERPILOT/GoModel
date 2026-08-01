@@ -153,25 +153,25 @@ async def main() -> int:
             "unsupported input item type",
         ),
         (
-            "hosted web search gap",
+            "hosted web search is accepted and omitted",
             lambda: client.responses.create(
                 model=MODEL,
                 input="Search the web for the latest Go release.",
-                tools=[{"type": "web_search_preview"}],
+                tools=[{"type": "web_search"}],
             ),
-            "web_search_preview",
+            None,
         ),
         (
-            "hosted file search gap",
+            "hosted file search is accepted and omitted",
             lambda: client.responses.create(
                 model=MODEL,
                 input="Search the attached vector store.",
                 tools=[{"type": "file_search", "vector_store_ids": ["vs_probe"]}],
             ),
-            "file_search",
+            None,
         ),
         (
-            "hosted computer use gap",
+            "hosted computer use is accepted and omitted",
             lambda: client.responses.create(
                 model=MODEL,
                 input="Use the computer to inspect the page.",
@@ -184,7 +184,7 @@ async def main() -> int:
                     }
                 ],
             ),
-            "computer_use_preview",
+            None,
         ),
     ]
 
