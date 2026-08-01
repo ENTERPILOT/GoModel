@@ -35,7 +35,7 @@ function tool loops. They cannot safely execute OpenAI-hosted tools.
 | Function tools | Forwarded | Converted to provider function/tool declarations |
 | Function call output items | Forwarded | Converted to chat tool-result messages |
 | `text.format` structured output | Forwarded | Converted to `response_format` when the provider supports it |
-| Responses-only tools (`web_search`, `file_search`, computer use, and `namespace`) | Provider decides | Accepted and omitted |
+| Responses-only tools (`web_search`, `file_search`, `computer_use_preview`, and `namespace`) | Provider decides | Accepted and omitted |
 | `previous_response_id` and `conversation` | Forwarded | Rejected |
 | `include` annotations | Forwarded | Accepted and ignored, except `message.output_text.logprobs` |
 | Unknown Responses input item types | Preserved | Rejected |

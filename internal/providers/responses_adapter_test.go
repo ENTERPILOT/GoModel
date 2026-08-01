@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -522,10 +523,17 @@ func TestConvertResponsesRequestToChat_RejectsOutputLogprobsInclude(t *testing.T
 }
 
 func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T) {
+	functionTools := []map[string]any{
+		{
+			"type":       "function",
+			"name":       "exec_command",
+			"parameters": map[string]any{"type": "object"},
+		},
+	}
 	tests := []struct {
 		name string
 		req  *core.ResponsesRequest
-		want string
+		want any
 	}{
 		{
 			name: "tool_choice none alias",
@@ -542,6 +550,55 @@ func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T)
 			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "required"}},
 			want: "required",
 		},
+		{
+			name: "bare tool_choice none",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "none"},
+			want: "none",
+		},
+		{
+			name: "bare tool_choice auto",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "auto"},
+			want: "auto",
+		},
+		{
+			name: "bare tool_choice required",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "required"},
+			want: "required",
+		},
+		{
+			name: "unsupported bare tool_choice",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "web_search"},
+		},
+		{
+			name: "function choice without function map",
+			req: &core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				Tools:      functionTools,
+				ToolChoice: map[string]any{"type": "function", "function": "invalid"},
+			},
+			want: map[string]any{"type": "function", "function": "invalid"},
+		},
+		{
+			name: "function choice without name",
+			req: &core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				Tools:      functionTools,
+				ToolChoice: map[string]any{"type": "function", "function": map[string]any{}},
+			},
+			want: map[string]any{"type": "function", "function": map[string]any{}},
+		},
+		{
+			name: "function choice with empty name",
+			req: &core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				Tools:      functionTools,
+				ToolChoice: map[string]any{"type": "function", "function": map[string]any{"name": ""}},
+			},
+			want: map[string]any{"type": "function", "function": map[string]any{"name": ""}},
+		},
 	}
 
 	for _, tt := range tests {
@@ -550,8 +607,8 @@ func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T)
 			if err != nil {
 				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
 			}
-			if chatReq.ToolChoice != tt.want {
-				t.Fatalf("ToolChoice = %#v, want %q", chatReq.ToolChoice, tt.want)
+			if !reflect.DeepEqual(chatReq.ToolChoice, tt.want) {
+				t.Fatalf("ToolChoice = %#v, want %#v", chatReq.ToolChoice, tt.want)
 			}
 		})
 	}
