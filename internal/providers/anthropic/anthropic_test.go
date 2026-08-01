@@ -4523,6 +4523,33 @@ func TestConvertToAnthropicRequest_PreservesCacheControlOnRequestToolsAndToolHis
 	}
 }
 
+func TestConvertToAnthropicRequest_PreservesFunctionLevelToolCallCacheControl(t *testing.T) {
+	cacheExtra := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+	})
+	req := &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{{Role: "assistant", ToolCalls: []core.ToolCall{{
+			ID:   "tool-1",
+			Type: "function",
+			Function: core.FunctionCall{
+				Name:        "lookup",
+				Arguments:   `{}`,
+				ExtraFields: cacheExtra,
+			},
+		}}}},
+	}
+
+	result, err := convertToAnthropicRequest(req)
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	blocks := result.Messages[0].Content.([]anthropicContentBlock)
+	if got := string(blocks[0].CacheControl); got != `{"type":"ephemeral"}` {
+		t.Fatalf("tool_use CacheControl = %s, want function-level cache_control", got)
+	}
+}
+
 func TestConvertToAnthropicRequest_PreservesAllSystemMessages(t *testing.T) {
 	req := &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",

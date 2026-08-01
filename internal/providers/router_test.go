@@ -563,23 +563,27 @@ func TestRouterChatCompletion_ProviderSelector(t *testing.T) {
 
 func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing.T) {
 	tests := []struct {
-		providerType string
-		wantCache    bool
+		name            string
+		providerType    string
+		messagesIngress bool
+		wantCache       bool
 	}{
-		{providerType: "openai"},
-		{providerType: "anthropic", wantCache: true},
-		{providerType: "openrouter", wantCache: true},
+		{name: "messages ingress strips for openai", providerType: "openai", messagesIngress: true},
+		{name: "chat ingress preserves for openai", providerType: "openai", wantCache: true},
+		{name: "messages ingress preserves for anthropic", providerType: "anthropic", messagesIngress: true, wantCache: true},
+		{name: "messages ingress preserves for openrouter", providerType: "openrouter", messagesIngress: true, wantCache: true},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.providerType, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			cacheExtra := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 				"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
 				"x_keep":        json.RawMessage(`true`),
 			})
 			request := &core.ChatRequest{
-				Model:       "gpt-4o",
-				ExtraFields: cacheExtra,
+				Model:                    "gpt-4o",
+				ExtraFields:              cacheExtra,
+				AnthropicMessagesRequest: tt.messagesIngress,
 				Tools: []map[string]any{{
 					"type":          "function",
 					"function":      map[string]any{"name": "lookup"},

@@ -552,10 +552,12 @@ func (r *Router) forwardChatRequest(req *core.ChatRequest, selector core.ModelSe
 	forwardReq := *req
 	forwardReq.Model = selector.Model
 	forwardReq.Provider = ""
-	if !hasAnthropicCacheControl(&forwardReq) {
+	if !forwardReq.AnthropicMessagesRequest {
 		return &forwardReq
 	}
-	return adaptAnthropicCacheControl(&forwardReq, r.GetProviderType(selector.QualifiedModel()))
+	// The selector is already concrete, so querying the lookup directly avoids
+	// repeating model resolution on every routed Messages request.
+	return adaptAnthropicCacheControl(&forwardReq, r.lookup.GetProviderType(selector.QualifiedModel()))
 }
 
 func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {

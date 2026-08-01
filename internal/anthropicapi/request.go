@@ -59,13 +59,14 @@ func ToChatRequest(req *MessagesRequest) (*core.ChatRequest, error) {
 
 	maxTokens := req.MaxTokens
 	chat := &core.ChatRequest{
-		Model:       req.Model,
-		Messages:    messages,
-		MaxTokens:   &maxTokens,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
-		Stream:      req.Stream,
-		Reasoning:   thinkingToReasoning(req.Thinking),
+		Model:                    req.Model,
+		Messages:                 messages,
+		MaxTokens:                &maxTokens,
+		Temperature:              req.Temperature,
+		TopP:                     req.TopP,
+		Stream:                   req.Stream,
+		Reasoning:                thinkingToReasoning(req.Thinking),
+		AnthropicMessagesRequest: true,
 	}
 	if req.Metadata != nil && strings.TrimSpace(req.Metadata.UserID) != "" {
 		chat.User = req.Metadata.UserID

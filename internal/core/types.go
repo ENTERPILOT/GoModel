@@ -41,6 +41,10 @@ type ChatRequest struct {
 	User              string            `json:"user,omitempty"`
 	ServiceTier       string            `json:"service_tier,omitempty"`
 	ExtraFields       UnknownJSONFields `json:"-" swaggerignore:"true"`
+	// AnthropicMessagesRequest marks the canonical form of /v1/messages
+	// ingress. It lets post-routing adaptation remove Anthropic-only metadata
+	// without changing opaque fields supplied to /v1/chat/completions.
+	AnthropicMessagesRequest bool `json:"-" swaggerignore:"true"`
 }
 
 func (r *ChatRequest) semanticSelector() (string, string) {

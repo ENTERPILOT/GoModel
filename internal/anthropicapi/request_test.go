@@ -404,6 +404,9 @@ func TestToChatRequestPreservesAnthropicCacheControls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToChatRequest: %v", err)
 	}
+	if !chat.AnthropicMessagesRequest {
+		t.Fatal("AnthropicMessagesRequest = false, want Messages ingress marker")
+	}
 	want := `{"type":"ephemeral"}`
 	if got := string(chat.ExtraFields.Lookup("cache_control")); got != want {
 		t.Errorf("request cache_control = %s, want %s", got, want)

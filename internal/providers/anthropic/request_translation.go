@@ -288,6 +288,12 @@ func buildAnthropicMessageContent(msg core.Message) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		if len(cacheControl) == 0 {
+			cacheControl, err = anthropicCacheControlFromExtra(toolCall.Function.ExtraFields)
+			if err != nil {
+				return nil, err
+			}
+		}
 		blocks = append(blocks, anthropicContentBlock{
 			Type:         "tool_use",
 			ID:           toolCallID,
