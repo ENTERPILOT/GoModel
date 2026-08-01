@@ -49,7 +49,7 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	request := req.Clone(req.Context())
 	request.Header = req.Header.Clone()
 
-	if token := t.keys.Next(); token != "" {
+	if token := t.keys.NextForContext(req.Context()); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 		return t.base.RoundTrip(request)
 	}

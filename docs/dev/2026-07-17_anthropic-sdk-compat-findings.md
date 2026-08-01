@@ -23,7 +23,7 @@ Models exercised (cheap/free tiers): `openai/gpt-4o-mini`, `gemini/gemini-2.5-fl
 | F3 message_start usage=0 | **Fixed (best effort)** — `message_start` now carries the chars/4 heuristic estimate; authoritative usage still lands in `message_delta`, which SDK accumulators prefer. |
 | F4 models list shape | **Fixed** — `GET /v1/models` renders the Anthropic list shape (`type`, `display_name`, `created_at`, `has_more`/`first_id`/`last_id`) when the request carries the `anthropic-version` header Anthropic SDKs always send. |
 | F5 non-canonical 404 | **Fixed** — unknown routes return the canonical error envelope, Anthropic-shaped for Anthropic-dialect callers (`e.RouteNotFound` + `handleRouteNotFound`). Messages batches API itself stays unimplemented, now documented. |
-| F6 cache_control dropped | **Documented** (`docs/advanced/anthropic-messages-api.mdx`) — real propagation needs cache-breakpoint representation in the canonical type; use `/p/anthropic` for prompt caching. |
+| F6 cache_control dropped | **Fixed 2026-07-31** — request, system/content block, custom-tool, tool-use, and tool-result controls survive the canonical hop to Anthropic. |
 | F7 heuristic count_tokens | **Documented** — passthrough gives exact counts. |
 | F8 unsigned thinking blocks | **Documented** — by design; replay against the gateway works. |
 
@@ -101,14 +101,14 @@ works perfectly (10 models, `claude-sonnet-5` first).
 (b) unknown-route 404s under `/v1/` could use the canonical error envelope so SDK
 clients raise a clean typed error.
 
-### F6 — `cache_control` accepted but silently dropped · limitation
+### F6 — `cache_control` accepted but silently dropped · fixed 2026-07-31
 
 `cache_control` markers on system/content blocks are tolerated (no 400 — good), but the
 translation flattens system prompts to plain strings and drops the markers, so **prompt
 caching never activates**, even when the request routes to the Anthropic provider.
 Usage responses show no cache fields. Fine for correctness, costs money for heavy users.
-Worth documenting; propagating breakpoints on the anthropic-provider path would be the
-real fix.
+The canonical representation now retains these controls in metadata and the Anthropic
+provider restores them at every supported wire location.
 
 ### F7 — `count_tokens` is heuristic · documented, keep an eye on it
 

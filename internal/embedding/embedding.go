@@ -59,11 +59,15 @@ func NewEmbedder(cfg config.EmbedderConfig, resolvedProviders map[string]config.
 	// APIKey leads APIKeys and is de-duplicated away when it repeats there, so
 	// this works whether raw came from provider resolution (which normalizes
 	// both fields) or was built by hand with only APIKey set.
+	sessionStickyKeys := raw.SessionStickyKeys == nil || *raw.SessionStickyKeys
 	return &apiEmbedder{
 		endpointURL: endpointURL,
-		keys:        providers.NewKeyring(append([]string{raw.APIKey}, raw.APIKeys...)...),
-		model:       model,
-		httpClient:  &http.Client{Timeout: defaultTimeout},
+		keys: providers.NewKeyringWithSessionStickiness(
+			sessionStickyKeys,
+			append([]string{raw.APIKey}, raw.APIKeys...)...,
+		),
+		model:      model,
+		httpClient: &http.Client{Timeout: defaultTimeout},
 	}, nil
 }
 
@@ -131,7 +135,7 @@ func (e *apiEmbedder) Embed(ctx context.Context, text string) ([]float32, error)
 		return nil, fmt.Errorf("embedding: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if apiKey := e.keys.Next(); apiKey != "" {
+	if apiKey := e.keys.NextForContext(req.Context()); apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	resp, err := e.httpClient.Do(req)

@@ -250,7 +250,7 @@ func (p *Provider) responseProviderName() string {
 // instead, so only the API-key path consumes the rotation.
 func (p *Provider) setHeaders(req *http.Request) {
 	if p.authType == geminiAuthTypeAPIKey {
-		req.Header.Set("Authorization", "Bearer "+p.keys.Next())
+		req.Header.Set("Authorization", "Bearer "+p.keys.NextForContext(req.Context()))
 	}
 
 	// Forward request ID if present in context for request tracing
@@ -262,7 +262,7 @@ func (p *Provider) setHeaders(req *http.Request) {
 // setNativeHeaders sets the required headers for Gemini native API requests.
 func (p *Provider) setNativeHeaders(req *http.Request) {
 	if p.authType == geminiAuthTypeAPIKey {
-		req.Header.Set("x-goog-api-key", p.keys.Next())
+		req.Header.Set("x-goog-api-key", p.keys.NextForContext(req.Context()))
 	}
 
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {

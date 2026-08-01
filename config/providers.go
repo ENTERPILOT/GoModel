@@ -7,9 +7,13 @@ type RawProviderConfig struct {
 	Type   string `yaml:"type"`
 	APIKey string `yaml:"api_key"`
 	// APIKeys lists additional API keys for this provider. When more than one
-	// key is resolved (counting APIKey), requests rotate across them round
-	// robin. Set it via `api_keys:` or the `<PROVIDER>_API_KEY_<n>` env vars.
-	APIKeys                  []string             `yaml:"api_keys"`
+	// key is resolved (counting APIKey), identified sessions stay on one key by
+	// default while sessionless requests rotate round robin. Set it via
+	// `api_keys:` or the `<PROVIDER>_API_KEY_<n>` env vars.
+	APIKeys []string `yaml:"api_keys"`
+	// SessionStickyKeys defaults to true. Set false to restore round-robin key
+	// selection for every request, including requests carrying a session ID.
+	SessionStickyKeys        *bool                `yaml:"session_sticky_keys"`
 	BaseURL                  string               `yaml:"base_url"`
 	APIVersion               string               `yaml:"api_version"`
 	Backend                  string               `yaml:"backend"`

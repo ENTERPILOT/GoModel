@@ -156,7 +156,8 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	ctx, prepared, workflow, err := prepareChatCompletionRequest(s, c.Request().Context(), req, translatedRequestMeta(c))
+	ctx := core.WithRequestDialect(c.Request().Context(), core.RequestDialectAnthropicMessages)
+	ctx, prepared, workflow, err := prepareChatCompletionRequest(s, ctx, req, translatedRequestMeta(c))
 	if err != nil {
 		return handleError(c, err)
 	}

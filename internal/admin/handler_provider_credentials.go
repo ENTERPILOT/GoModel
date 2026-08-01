@@ -41,6 +41,7 @@ type upsertProviderCredentialRequest struct {
 	Name                     string   `json:"name"`
 	Type                     string   `json:"type"`
 	APIKeys                  []string `json:"api_keys,omitempty"`
+	SessionStickyKeys        *bool    `json:"session_sticky_keys,omitempty"`
 	BaseURL                  string   `json:"base_url,omitempty"`
 	APIVersion               string   `json:"api_version,omitempty"`
 	Backend                  string   `json:"backend,omitempty"`
@@ -87,6 +88,7 @@ type providerCredentialViewResponse struct {
 	Name                     string     `json:"name"`
 	Type                     string     `json:"type"`
 	APIKeys                  []string   `json:"api_keys,omitempty"`
+	SessionStickyKeys        bool       `json:"session_sticky_keys"`
 	BaseURL                  string     `json:"base_url,omitempty"`
 	APIVersion               string     `json:"api_version,omitempty"`
 	Backend                  string     `json:"backend,omitempty"`
@@ -313,6 +315,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		Name:                     name,
 		Type:                     strings.TrimSpace(req.Type),
 		APIKeys:                  apiKeys,
+		SessionStickyKeys:        req.SessionStickyKeys,
 		BaseURL:                  strings.TrimSpace(req.BaseURL),
 		APIVersion:               strings.TrimSpace(req.APIVersion),
 		Backend:                  strings.TrimSpace(req.Backend),
@@ -329,6 +332,9 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 	}
 	if current != nil {
 		cred.CreatedAt = current.CreatedAt
+		if req.SessionStickyKeys == nil {
+			cred.SessionStickyKeys = current.SessionStickyKeys
+		}
 	}
 	return cred, nil
 }
@@ -398,6 +404,7 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 		Name:               cred.Name,
 		Type:               cred.Type,
 		APIKeys:            redactList(cred.APIKeys),
+		SessionStickyKeys:  cred.SessionStickyKeys == nil || *cred.SessionStickyKeys,
 		BaseURL:            cred.BaseURL,
 		APIVersion:         cred.APIVersion,
 		Backend:            cred.Backend,
@@ -430,13 +437,14 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 // there is nothing to redact because nothing sensitive was ever loaded.
 func (h *Handler) declaredProviderCredentialView(cfg providers.SanitizedProviderConfig) providerCredentialViewResponse {
 	return providerCredentialViewResponse{
-		Name:       cfg.Name,
-		Type:       cfg.Type,
-		BaseURL:    cfg.BaseURL,
-		APIVersion: cfg.APIVersion,
-		Models:     cfg.Models,
-		Enabled:    true,
-		Managed:    true,
+		Name:              cfg.Name,
+		Type:              cfg.Type,
+		BaseURL:           cfg.BaseURL,
+		APIVersion:        cfg.APIVersion,
+		Models:            cfg.Models,
+		SessionStickyKeys: cfg.SessionStickyKeys,
+		Enabled:           true,
+		Managed:           true,
 	}
 }
 

@@ -87,6 +87,27 @@ func TestUnknownJSONFieldsFromMap_EmptyRawValueEncodesAsNull(t *testing.T) {
 	}
 }
 
+func TestUnknownJSONFieldsWithoutRemovesOnlyNamedMembers(t *testing.T) {
+	fields, err := extractUnknownJSONFields(
+		[]byte(`{"known":true,"cache_control":{"type":"ephemeral"},"x":1,"x":2}`),
+		"known",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	filtered := fields.Without("cache_control")
+	if got := filtered.Lookup("cache_control"); got != nil {
+		t.Fatalf("cache_control = %s, want removed", got)
+	}
+	if got := string(filtered.raw); got != `{"x":1,"x":2}` {
+		t.Fatalf("filtered raw = %s, want duplicate unrelated fields preserved", got)
+	}
+	if got := fields.Lookup("cache_control"); got == nil {
+		t.Fatal("original fields were mutated")
+	}
+}
+
 func TestMergeUnknownJSONFields_AddsAndOverrides(t *testing.T) {
 	base := UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 		"keep":     json.RawMessage(`1`),
@@ -255,6 +276,33 @@ func TestDecoderLeniencyIsBounded(t *testing.T) {
 func TestMergedJSONObjectCap_Overflow(t *testing.T) {
 	if _, err := mergedJSONObjectCap(math.MaxInt, 2); err == nil {
 		t.Fatal("mergedJSONObjectCap() error = nil, want overflow error")
+	}
+}
+
+func TestCloneOptionalJSONObject(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     json.RawMessage
+		want    string
+		wantErr bool
+	}{
+		{name: "empty"},
+		{name: "null", raw: json.RawMessage(` null `)},
+		{name: "object", raw: json.RawMessage(` {"type":"ephemeral"} `), want: `{"type":"ephemeral"}`},
+		{name: "array", raw: json.RawMessage(`[]`), wantErr: true},
+		{name: "invalid object", raw: json.RawMessage(`{"type":`), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := CloneOptionalJSONObject(tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CloneOptionalJSONObject() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("CloneOptionalJSONObject() = %s, want %s", got, tt.want)
+			}
+		})
 	}
 }
 

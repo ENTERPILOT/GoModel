@@ -10,6 +10,9 @@ uses it in two places:
 - **Sticky load balancing** — a load-balanced virtual model routes every
   request of a session to the target that served it first, which keeps provider
   prompt caches warm and model behavior consistent mid-conversation.
+- **Sticky API-key selection** — when one provider has several keys, every
+  request in a detected session uses the same key, preserving provider
+  prompt-cache affinity.
 - **Threaded audit logs** — the dashboard's Audit Logs page groups a session's
   requests into one thread: the latest request as the row, with an expander
   that unfolds the older requests beneath it.
@@ -83,6 +86,13 @@ keeping") and on the admin API (`session_affinity` on
 Pins are in-memory per instance (like rate-limit counters): after a restart or
 on another replica, the next request of a session simply re-pins. Idle
 sessions expire after 6 hours.
+
+API-key affinity is deterministic rather than stored, so the same ordered key
+set selects the same key across replicas and restarts. Disable it per provider
+with `session_sticky_keys: false`,
+`<PROVIDER>[_SUFFIX]_SESSION_STICKY_KEYS=false`, or the dashboard's
+**Session-sticky API keys**
+checkbox. Requests with no detected session remain round robin.
 
 ## Threaded audit logs
 

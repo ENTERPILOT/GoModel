@@ -1,8 +1,12 @@
 package providers
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestNewKeyring(t *testing.T) {
@@ -39,6 +43,55 @@ func TestNewKeyring(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestKeyringPinsIdentifiedSessionsByDefault(t *testing.T) {
+	ring := NewKeyring("k1", "k2", "k3")
+	want := ring.NextForSession("conversation-42")
+	for i := range 10 {
+		if got := ring.NextForSession("conversation-42"); got != want {
+			t.Fatalf("NextForSession() call %d = %q, want pinned key %q", i+2, got, want)
+		}
+	}
+
+	ctx := core.WithSessionID(context.Background(), "conversation-42")
+	if got := ring.NextForContext(ctx); got != want {
+		t.Fatalf("NextForContext() = %q, want %q", got, want)
+	}
+}
+
+func TestKeyringSessionStickinessCanBeDisabled(t *testing.T) {
+	ring := NewKeyringWithSessionStickiness(false, "k1", "k2")
+	got := []string{
+		ring.NextForSession("same-session"),
+		ring.NextForSession("same-session"),
+		ring.NextForSession("same-session"),
+	}
+	want := []string{"k1", "k2", "k1"}
+	if !equalStrings(got, want) {
+		t.Fatalf("disabled sticky keys = %v, want round robin %v", got, want)
+	}
+}
+
+func TestKeyringSessionlessTrafficRemainsRoundRobin(t *testing.T) {
+	ring := NewKeyring("k1", "k2")
+	got := []string{ring.NextForContext(context.Background()), ring.NextForContext(context.Background())}
+	if want := []string{"k1", "k2"}; !equalStrings(got, want) {
+		t.Fatalf("sessionless keys = %v, want %v", got, want)
+	}
+}
+
+func TestKeyringRendezvousHashingOnlyRemapsSessionsOnChangedKey(t *testing.T) {
+	before := NewKeyring("k1", "k2", "k3")
+	after := NewKeyring("k1", "k3")
+	for i := range 1000 {
+		session := fmt.Sprintf("session-%d", i)
+		previous := before.NextForSession(session)
+		current := after.NextForSession(session)
+		if previous != "k2" && current != previous {
+			t.Fatalf("%q moved from %q to %q although its key remains", session, previous, current)
+		}
 	}
 }
 

@@ -87,6 +87,15 @@
         <option value={option}>{option}</option>
       {/each}
     </select>
+  {:else if field.control === "checkbox"}
+    <input
+      {id}
+      type="checkbox"
+      aria-invalid={error ? "true" : undefined}
+      aria-describedby={describedBy}
+      bind:checked={providersConfig.form[field.name]}
+      onchange={onInput}
+    />
   {:else if field.control === "textarea"}
     <textarea
       {id}

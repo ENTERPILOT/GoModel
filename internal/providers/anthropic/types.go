@@ -30,12 +30,14 @@ type anthropicRequest struct {
 	StopSequences []string               `json:"stop_sequences,omitempty"`
 	Thinking      *anthropicThinking     `json:"thinking,omitempty"`
 	OutputConfig  *anthropicOutputConfig `json:"output_config,omitempty"`
+	CacheControl  json.RawMessage        `json:"cache_control,omitempty"`
 }
 
 type anthropicTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"input_schema"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  map[string]any  `json:"input_schema"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 }
 
 type anthropicToolChoice struct {

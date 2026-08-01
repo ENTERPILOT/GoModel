@@ -97,7 +97,7 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 	// what spreads successive calls across them.
 	headerSetter := func(req *http.Request) {
 		if cfg.SetHeaders != nil {
-			cfg.SetHeaders(req, p.keys.Next())
+			cfg.SetHeaders(req, p.keys.NextForContext(req.Context()))
 		}
 	}
 	if cfg.HTTPClient != nil {
@@ -123,7 +123,7 @@ func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client,
 	clientCfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, clientCfg, func(req *http.Request) {
 		if cfg.SetHeaders != nil {
-			cfg.SetHeaders(req, p.keys.Next())
+			cfg.SetHeaders(req, p.keys.NextForContext(req.Context()))
 		}
 	})
 	return p

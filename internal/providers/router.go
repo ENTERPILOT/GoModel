@@ -548,11 +548,16 @@ func stampProvider[T any](resp T, providerType string) T {
 
 // Provider is gateway routing metadata on OpenAI-compatible request structs and
 // must be removed before dispatching to an upstream provider implementation.
-func forwardChatRequest(req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
+func (r *Router) forwardChatRequest(ctx context.Context, req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
 	forwardReq := *req
 	forwardReq.Model = selector.Model
 	forwardReq.Provider = ""
-	return &forwardReq
+	if core.RequestDialectFromContext(ctx) != core.RequestDialectAnthropicMessages {
+		return &forwardReq
+	}
+	// The selector is already concrete, so querying the lookup directly avoids
+	// repeating model resolution on every routed Messages request.
+	return adaptAnthropicCacheControl(&forwardReq, r.lookup.GetProviderType(selector.QualifiedModel()))
 }
 
 func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
@@ -622,7 +627,7 @@ func (r *Router) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*co
 		req.Model,
 		req.Provider,
 		func(selector core.ModelSelector) *core.ChatRequest {
-			return forwardChatRequest(req, selector)
+			return r.forwardChatRequest(ctx, req, selector)
 		},
 		callChatCompletion,
 	)
@@ -637,7 +642,7 @@ func (r *Router) StreamChatCompletion(ctx context.Context, req *core.ChatRequest
 		req.Model,
 		req.Provider,
 		func(selector core.ModelSelector) *core.ChatRequest {
-			return forwardChatRequest(req, selector)
+			return r.forwardChatRequest(ctx, req, selector)
 		},
 		func(ctx context.Context, provider core.Provider, forwardReq *core.ChatRequest) (io.ReadCloser, error) {
 			return provider.StreamChatCompletion(ctx, forwardReq)
@@ -1025,8 +1030,12 @@ func (r *Router) Passthrough(ctx context.Context, providerType string, req *core
 
 // CreateBatch routes native batch creation to a provider type.
 func (r *Router) CreateBatch(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, error) {
+	forwardReq, err := adaptAnthropicBatchCacheControl(ctx, req, providerType)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResponse, error) {
-		return bp.CreateBatch(ctx, req)
+		return bp.CreateBatch(ctx, forwardReq)
 	})
 	return stampProvider(resp, providerType), err
 }
@@ -1038,12 +1047,16 @@ func (r *Router) CreateBatchWithHints(ctx context.Context, providerType string, 
 		resp  *core.BatchResponse
 		hints map[string]string
 	}
+	forwardReq, err := adaptAnthropicBatchCacheControl(ctx, req, providerType)
+	if err != nil {
+		return nil, nil, err
+	}
 	result, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (createBatchWithHintsResult, error) {
 		if hinted, ok := bp.(core.BatchCreateHintAwareProvider); ok {
-			resp, hints, err := hinted.CreateBatchWithHints(ctx, req)
+			resp, hints, err := hinted.CreateBatchWithHints(ctx, forwardReq)
 			return createBatchWithHintsResult{resp: resp, hints: hints}, err
 		}
-		resp, err := bp.CreateBatch(ctx, req)
+		resp, err := bp.CreateBatch(ctx, forwardReq)
 		return createBatchWithHintsResult{resp: resp}, err
 	})
 	return stampProvider(result.resp, providerType), result.hints, err

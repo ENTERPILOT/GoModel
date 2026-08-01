@@ -314,13 +314,14 @@ providers:
   openai:
     type: openai
     api_key: "sk-..."
-    # Several keys for one provider rotate round robin, raising the per-key rate
-    # limit. Equivalent env vars: OPENAI_API_KEY_2, OPENAI_API_KEY_3, ...
-    # Caveat: rotation defeats provider prompt caching, since providers scope the
-    # cache to the key that filled it.
+    # Identified sessions stay on one key by default, preserving provider prompt
+    # cache affinity while still spreading different sessions across keys.
+    # Equivalent env vars: OPENAI_API_KEY_2, OPENAI_API_KEY_3, ...
     # api_keys:
     #   - "${OPENAI_API_KEY_2}"
     #   - "${OPENAI_API_KEY_3}"
+    # Set false for strict per-request round robin (usually worse for prompt caching).
+    # session_sticky_keys: false
     # Per-provider resilience overrides (optional).
     # Only specified fields override the global defaults above.
     # resilience:

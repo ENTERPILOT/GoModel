@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -226,6 +227,7 @@ type mockBatchProvider struct {
 	capturedBatchHints map[string]string
 	capturedBatchID    string
 	clearedBatchHintID string
+	lastBatchReq       *core.BatchRequest
 }
 
 type mockResponseProvider struct {
@@ -262,7 +264,8 @@ func (m *mockResponseProvider) CompactResponse(_ context.Context, req *core.Resp
 	return &core.ResponseCompactResponse{ID: "cmp_1", Object: "response.compaction"}, nil
 }
 
-func (m *mockBatchProvider) CreateBatch(_ context.Context, _ *core.BatchRequest) (*core.BatchResponse, error) {
+func (m *mockBatchProvider) CreateBatch(_ context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
+	m.lastBatchReq = req
 	return &core.BatchResponse{ID: "provider-batch-1", Object: "batch"}, nil
 }
 
@@ -557,6 +560,257 @@ func TestRouterChatCompletion_ProviderSelector(t *testing.T) {
 	}
 	if west.lastChatReq.Provider != "" {
 		t.Fatalf("expected provider field to be stripped upstream, got %q", west.lastChatReq.Provider)
+	}
+}
+
+func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing.T) {
+	tests := []struct {
+		name            string
+		providerType    string
+		messagesIngress bool
+		wantCache       bool
+	}{
+		{name: "messages ingress strips for openai", providerType: "openai", messagesIngress: true},
+		{name: "chat ingress preserves for openai", providerType: "openai", wantCache: true},
+		{name: "messages ingress preserves for anthropic", providerType: "anthropic", messagesIngress: true, wantCache: true},
+		{name: "messages ingress preserves for openrouter", providerType: "openrouter", messagesIngress: true, wantCache: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cacheExtra := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+				"x_keep":        json.RawMessage(`true`),
+			})
+			request := &core.ChatRequest{
+				Model:       "gpt-4o",
+				ExtraFields: cacheExtra,
+				Tools: []map[string]any{{
+					"type":          "function",
+					"function":      map[string]any{"name": "lookup"},
+					"cache_control": map[string]any{"type": "ephemeral"},
+				}},
+				Messages: []core.Message{
+					{
+						Role:        "assistant",
+						ExtraFields: cacheExtra,
+						Content: []core.ContentPart{{
+							Type:        "text",
+							Text:        "stable prefix",
+							ExtraFields: cacheExtra,
+						}},
+						ToolCalls: []core.ToolCall{{
+							ID:          "tool-1",
+							Type:        "function",
+							ExtraFields: cacheExtra,
+							Function: core.FunctionCall{
+								Name:        "lookup",
+								Arguments:   `{}`,
+								ExtraFields: cacheExtra,
+							},
+						}},
+					},
+					{
+						Role:        "tool",
+						ToolCallID:  "tool-1",
+						ExtraFields: cacheExtra,
+						Content: []core.ContentPart{{
+							Type:        "text",
+							Text:        "tool result",
+							ExtraFields: cacheExtra,
+						}},
+					},
+				},
+			}
+			before, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			provider := &mockProvider{name: tt.providerType, chatResponse: &core.ChatResponse{ID: "ok"}}
+			lookup := newMockLookup()
+			lookup.addModel("gpt-4o", provider, tt.providerType)
+			router, _ := NewRouter(lookup)
+			ctx := context.Background()
+			if tt.messagesIngress {
+				ctx = core.WithRequestDialect(ctx, core.RequestDialectAnthropicMessages)
+			}
+			if _, err := router.ChatCompletion(ctx, request); err != nil {
+				t.Fatal(err)
+			}
+
+			forwarded := provider.lastChatReq
+			if forwarded == nil {
+				t.Fatal("provider did not receive a request")
+			}
+			expectedCache := json.RawMessage(`{"type":"ephemeral"}`)
+			assertFields := func(label string, fields core.UnknownJSONFields, wantCache bool) {
+				t.Helper()
+				gotCache := fields.Lookup("cache_control")
+				if wantCache && !bytes.Equal(gotCache, expectedCache) {
+					t.Errorf("%s cache_control = %s, want %s", label, gotCache, expectedCache)
+				}
+				if !wantCache && len(gotCache) != 0 {
+					t.Errorf("%s cache_control = %s, want absent", label, gotCache)
+				}
+				if got := string(fields.Lookup("x_keep")); got != "true" {
+					t.Errorf("%s x_keep = %s, want preserved", label, got)
+				}
+			}
+			assertFields("request", forwarded.ExtraFields, tt.wantCache)
+			toolCache, toolHasCache := forwarded.Tools[0]["cache_control"]
+			if tt.wantCache {
+				encoded, err := json.Marshal(toolCache)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !toolHasCache || !bytes.Equal(encoded, expectedCache) {
+					t.Errorf("tool cache_control = %s, want %s", encoded, expectedCache)
+				}
+			} else if toolHasCache {
+				t.Errorf("tool cache_control = %v, want absent", toolCache)
+			}
+			assertFields("assistant message", forwarded.Messages[0].ExtraFields, tt.wantCache)
+			assertFields("assistant content", forwarded.Messages[0].Content.([]core.ContentPart)[0].ExtraFields, tt.wantCache)
+			call := forwarded.Messages[0].ToolCalls[0]
+			assertFields("tool call", call.ExtraFields, tt.wantCache)
+			assertFields("function call", call.Function.ExtraFields, tt.wantCache)
+			assertFields("tool result", forwarded.Messages[1].ExtraFields, tt.wantCache)
+			assertFields("tool result content", forwarded.Messages[1].Content.([]core.ContentPart)[0].ExtraFields, tt.wantCache)
+
+			assertFields("caller request", request.ExtraFields, true)
+			assertFields("caller assistant message", request.Messages[0].ExtraFields, true)
+			assertFields("caller assistant content", request.Messages[0].Content.([]core.ContentPart)[0].ExtraFields, true)
+			callerCall := request.Messages[0].ToolCalls[0]
+			assertFields("caller tool call", callerCall.ExtraFields, true)
+			assertFields("caller function call", callerCall.Function.ExtraFields, true)
+			assertFields("caller tool result", request.Messages[1].ExtraFields, true)
+			assertFields("caller tool result content", request.Messages[1].Content.([]core.ContentPart)[0].ExtraFields, true)
+
+			after, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, before) {
+				t.Fatalf("routing mutated caller request\nbefore: %s\n after: %s", before, after)
+			}
+		})
+	}
+}
+
+func TestRouterCreateBatch_AdaptsAnthropicCacheControlAfterRouting(t *testing.T) {
+	tests := []struct {
+		name            string
+		providerType    string
+		messagesIngress bool
+		withHints       bool
+		wantCache       bool
+	}{
+		{name: "messages ingress strips for openai", providerType: "openai", messagesIngress: true},
+		{name: "messages ingress strips with hint-aware route", providerType: "openai", messagesIngress: true, withHints: true},
+		{name: "generic batch preserves for openai", providerType: "openai", wantCache: true},
+		{name: "messages ingress preserves for anthropic", providerType: "anthropic", messagesIngress: true, wantCache: true},
+		{name: "messages ingress preserves for openrouter", providerType: "openrouter", messagesIngress: true, wantCache: true},
+	}
+
+	const body = `{
+		"model":"gpt-4o",
+		"cache_control":{"type":"ephemeral"},
+		"x_keep":true,
+		"messages":[{"role":"user","content":[{
+			"type":"text","text":"stable prefix",
+			"cache_control":{"type":"ephemeral"},"x_keep":true
+		}]}],
+		"tools":[{"type":"function","function":{"name":"lookup"},"cache_control":{"type":"ephemeral"}}]
+	}`
+	expectedCache := json.RawMessage(`{"type":"ephemeral"}`)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &mockBatchProvider{mockProvider: mockProvider{name: tt.providerType}}
+			lookup := newMockLookup()
+			lookup.addModel("gpt-4o", provider, tt.providerType)
+			router, _ := NewRouter(lookup)
+
+			request := &core.BatchRequest{
+				Endpoint: "/v1/chat/completions",
+				Requests: []core.BatchRequestItem{{
+					CustomID: "item-1",
+					Method:   http.MethodPost,
+					URL:      "/v1/chat/completions",
+					Body:     json.RawMessage(body),
+				}},
+			}
+			before := append(json.RawMessage(nil), request.Requests[0].Body...)
+			ctx := context.Background()
+			if tt.messagesIngress {
+				ctx = core.WithRequestDialect(ctx, core.RequestDialectAnthropicMessages)
+			}
+			if tt.withHints {
+				if _, _, err := router.CreateBatchWithHints(ctx, tt.providerType, request); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := router.CreateBatch(ctx, tt.providerType, request); err != nil {
+				t.Fatal(err)
+			}
+
+			if provider.lastBatchReq == nil || len(provider.lastBatchReq.Requests) != 1 {
+				t.Fatalf("provider batch request = %#v, want one item", provider.lastBatchReq)
+			}
+			decoded, err := core.DecodeKnownBatchItemRequest(provider.lastBatchReq.Endpoint, provider.lastBatchReq.Requests[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			chat := decoded.Request.(*core.ChatRequest)
+			gotCache := chat.ExtraFields.Lookup("cache_control")
+			if tt.wantCache && !bytes.Equal(gotCache, expectedCache) {
+				t.Errorf("request cache_control = %s, want %s", gotCache, expectedCache)
+			}
+			if !tt.wantCache && len(gotCache) != 0 {
+				t.Errorf("request cache_control = %s, want absent", gotCache)
+			}
+			if got := string(chat.ExtraFields.Lookup("x_keep")); got != "true" {
+				t.Errorf("request x_keep = %s, want true", got)
+			}
+			part := chat.Messages[0].Content.([]core.ContentPart)[0]
+			partCache := part.ExtraFields.Lookup("cache_control")
+			if tt.wantCache && !bytes.Equal(partCache, expectedCache) {
+				t.Errorf("content cache_control = %s, want %s", partCache, expectedCache)
+			}
+			if !tt.wantCache && len(partCache) != 0 {
+				t.Errorf("content cache_control = %s, want absent", partCache)
+			}
+			if got := string(part.ExtraFields.Lookup("x_keep")); got != "true" {
+				t.Errorf("content x_keep = %s, want true", got)
+			}
+			toolCache, toolHasCache := chat.Tools[0]["cache_control"]
+			if tt.wantCache {
+				encoded, err := json.Marshal(toolCache)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !toolHasCache || !bytes.Equal(encoded, expectedCache) {
+					t.Errorf("tool cache_control = %s, want %s", encoded, expectedCache)
+				}
+			} else if toolHasCache {
+				t.Errorf("tool cache_control = %v, want absent", toolCache)
+			}
+
+			if !bytes.Equal(request.Requests[0].Body, before) {
+				t.Fatalf("routing mutated caller batch item\nbefore: %s\n after: %s", before, request.Requests[0].Body)
+			}
+		})
+	}
+}
+
+func TestAdaptAnthropicCacheControl_PreservesSupportedProviders(t *testing.T) {
+	req := &core.ChatRequest{ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+	})}
+	for _, providerType := range []string{"anthropic", "openrouter"} {
+		if got := adaptAnthropicCacheControl(req, providerType); got != req {
+			t.Errorf("provider %q cloned or changed supported cache metadata", providerType)
+		}
 	}
 }
 

@@ -14,7 +14,7 @@ import (
 // schema. Unlike chat, the realtime websocket is NOT under /compatible-mode/v1;
 // it lives at /api-ws/v1/realtime on the same host, so the host (and thus the
 // region selected via BAILIAN_BASE_URL) is taken from the configured base URL.
-func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
+func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
 	if req == nil || strings.TrimSpace(req.Model) == "" {
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
 	}
@@ -25,7 +25,7 @@ func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) 
 	}
 
 	headers := http.Header{}
-	if apiKey := p.keys.Next(); apiKey != "" {
+	if apiKey := p.keys.NextForContext(ctx); apiKey != "" {
 		headers.Set("Authorization", "Bearer "+apiKey)
 	}
 

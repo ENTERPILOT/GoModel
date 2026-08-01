@@ -15,7 +15,7 @@ import (
 // without extra config. Bearer auth is injected here and must never be logged.
 // A request carrying a CallID attaches to an existing WebRTC/SIP call as a
 // sideband channel instead of opening a fresh model session.
-func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
+func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
 	}
@@ -35,24 +35,24 @@ func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) 
 	// Note: the legacy "OpenAI-Beta: realtime=v1" header is intentionally NOT set.
 	// The GA endpoint rejects it ("The Realtime Beta API is no longer supported").
 
-	return &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders()}, nil
+	return &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders(ctx)}, nil
 }
 
 // RealtimeCallTarget implements core.RealtimeCallProvider for OpenAI's WebRTC SDP
 // exchange (POST https://api.openai.com/v1/realtime/calls). The gateway appends
 // the model query parameter or session form field itself, so the target is the
 // bare calls endpoint.
-func (p *Provider) RealtimeCallTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
-	return p.realtimeHTTPTarget(req, "calls")
+func (p *Provider) RealtimeCallTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
+	return p.realtimeHTTPTarget(ctx, req, "calls")
 }
 
 // RealtimeClientSecretTarget implements core.RealtimeCallProvider for minting
 // ephemeral realtime client secrets (POST https://api.openai.com/v1/realtime/client_secrets).
-func (p *Provider) RealtimeClientSecretTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
-	return p.realtimeHTTPTarget(req, "client_secrets")
+func (p *Provider) RealtimeClientSecretTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
+	return p.realtimeHTTPTarget(ctx, req, "client_secrets")
 }
 
-func (p *Provider) realtimeHTTPTarget(req *core.RealtimeRequest, endpoint string) (*core.RealtimeHTTPTarget, error) {
+func (p *Provider) realtimeHTTPTarget(ctx context.Context, req *core.RealtimeRequest, endpoint string) (*core.RealtimeHTTPTarget, error) {
 	if req == nil || strings.TrimSpace(req.Model) == "" {
 		return nil, core.NewInvalidRequestError("model is required for realtime calls", nil)
 	}
@@ -60,14 +60,14 @@ func (p *Provider) realtimeHTTPTarget(req *core.RealtimeRequest, endpoint string
 	if err != nil {
 		return nil, err
 	}
-	return &core.RealtimeHTTPTarget{URL: target, Headers: p.realtimeAuthHeaders()}, nil
+	return &core.RealtimeHTTPTarget{URL: target, Headers: p.realtimeAuthHeaders(ctx)}, nil
 }
 
 // realtimeAuthHeaders picks the next key in the rotation. A realtime session is
 // long-lived, so the key is chosen once per session rather than per event.
-func (p *Provider) realtimeAuthHeaders() http.Header {
+func (p *Provider) realtimeAuthHeaders(ctx context.Context) http.Header {
 	headers := http.Header{}
-	if apiKey := p.keys.Next(); apiKey != "" {
+	if apiKey := p.keys.NextForContext(ctx); apiKey != "" {
 		headers.Set("Authorization", "Bearer "+apiKey)
 	}
 	return headers

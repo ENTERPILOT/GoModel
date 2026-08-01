@@ -81,6 +81,13 @@ func setHeaders(req *http.Request, apiKey string) {
 		RequestIDHeader:   "X-Client-Request-Id",
 		ValidateRequestID: providers.IsValidClientRequestID,
 	})
+	// OpenRouter uses this value to keep a conversation on the same resolved
+	// model and provider endpoint from its first successful request, maximizing
+	// upstream prompt-cache reuse. GoModel's session detector already scopes
+	// user-supplied IDs before placing them in context.
+	if sessionID := strings.TrimSpace(core.SessionIDFromContext(req.Context())); sessionID != "" {
+		req.Header.Set("X-Session-Id", sessionID)
+	}
 }
 
 func envOrDefault(key, fallback string) string {

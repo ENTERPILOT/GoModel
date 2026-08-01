@@ -23,6 +23,7 @@ type MessagesRequest struct {
 	Tools         []Tool          `json:"tools,omitempty"`
 	ToolChoice    *ToolChoice     `json:"tool_choice,omitempty"`
 	Thinking      *Thinking       `json:"thinking,omitempty"`
+	CacheControl  json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
 }
 
 // Metadata carries the optional Anthropic request metadata object.
@@ -54,6 +55,9 @@ type ContentBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty" swaggertype:"object"`
 	IsError   bool            `json:"is_error,omitempty"`
+	// CacheControl preserves Anthropic prompt-cache breakpoints through the
+	// canonical chat representation when the request is routed back to Claude.
+	CacheControl json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
 }
 
 // Source describes an Anthropic image source (base64 inline data or a URL).
@@ -68,10 +72,11 @@ type Source struct {
 // "custom"); a server/built-in tool (web search, code execution, …) carries a
 // versioned Type and is rejected during translation — see convertTools.
 type Tool struct {
-	Type        string          `json:"type,omitempty"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema,omitempty" swaggertype:"object"`
+	Type         string          `json:"type,omitempty"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"input_schema,omitempty" swaggertype:"object"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
 }
 
 // ToolChoice constrains how the model selects tools.

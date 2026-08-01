@@ -48,6 +48,9 @@ func ToChatRequest(req *MessagesRequest) (*core.ChatRequest, error) {
 	if len(req.Messages) == 0 {
 		return nil, core.NewInvalidRequestError("messages must not be empty", nil).WithParam("messages")
 	}
+	if _, err := anthropicCacheControlExtra(req.CacheControl); err != nil {
+		return nil, core.NewInvalidRequestError(err.Error(), err).WithParam("cache_control")
+	}
 
 	messages, err := convertMessages(req)
 	if err != nil {
@@ -95,7 +98,7 @@ func ToChatRequest(req *MessagesRequest) (*core.ChatRequest, error) {
 func convertMessages(req *MessagesRequest) ([]core.Message, error) {
 	out := make([]core.Message, 0, len(req.Messages)+1)
 
-	// Collect system messages from the messages array
+	// Collect system messages from the messages array.
 	var systemMessages []string
 	filteredMessages := make([]Message, 0, len(req.Messages))
 	for _, msg := range req.Messages {
@@ -113,19 +116,29 @@ func convertMessages(req *MessagesRequest) ([]core.Message, error) {
 		}
 	}
 
-	// Build the system prompt by combining existing system field and system messages
-	system, err := systemText(req.System)
+	// Build the system prompt while retaining block-level cache_control metadata.
+	system, err := systemContent(req.System)
 	if err != nil {
 		return nil, core.NewInvalidRequestError(err.Error(), err)
 	}
 	if len(systemMessages) > 0 {
-		if system != "" {
-			system = strings.TrimSpace(system + "\n\n" + strings.Join(systemMessages, "\n\n"))
-		} else {
-			system = strings.TrimSpace(strings.Join(systemMessages, "\n\n"))
+		appended := strings.TrimSpace(strings.Join(systemMessages, "\n\n"))
+		switch content := system.(type) {
+		case string:
+			if content != "" {
+				system = strings.TrimSpace(content + "\n\n" + appended)
+			} else {
+				system = appended
+			}
+		case []core.ContentPart:
+			if appended != "" {
+				system = append(content, core.ContentPart{Type: "text", Text: appended})
+			}
+		case nil:
+			system = appended
 		}
 	}
-	if system != "" {
+	if system != nil && core.ExtractTextContent(system) != "" {
 		out = append(out, core.Message{Role: "system", Content: system})
 	}
 
@@ -162,10 +175,14 @@ func convertBlockMessage(role string, blocks []ContentBlock) ([]core.Message, er
 		toolCalls    []core.ToolCall
 	)
 	for _, block := range blocks {
+		extra, err := anthropicCacheControlExtra(block.CacheControl)
+		if err != nil {
+			return nil, err
+		}
 		switch block.Type {
 		case "text":
 			if block.Text != "" {
-				parts = append(parts, core.ContentPart{Type: "text", Text: block.Text})
+				parts = append(parts, core.ContentPart{Type: "text", Text: block.Text, ExtraFields: extra})
 			}
 		case "image":
 			url, err := imageURLFromSource(block.Source)
@@ -173,17 +190,19 @@ func convertBlockMessage(role string, blocks []ContentBlock) ([]core.Message, er
 				return nil, err
 			}
 			parts = append(parts, core.ContentPart{
-				Type:     "image_url",
-				ImageURL: &core.ImageURLContent{URL: url},
+				Type:        "image_url",
+				ImageURL:    &core.ImageURLContent{URL: url},
+				ExtraFields: extra,
 			})
 		case "tool_use":
 			if strings.TrimSpace(block.Name) == "" {
 				return nil, fmt.Errorf("tool_use block is missing name")
 			}
 			toolCalls = append(toolCalls, core.ToolCall{
-				ID:       block.ID,
-				Type:     "function",
-				Function: core.FunctionCall{Name: block.Name, Arguments: rawToArguments(block.Input)},
+				ID:          block.ID,
+				Type:        "function",
+				Function:    core.FunctionCall{Name: block.Name, Arguments: rawToArguments(block.Input)},
+				ExtraFields: extra,
 			})
 		case "tool_result":
 			id := strings.TrimSpace(block.ToolUseID)
@@ -195,9 +214,10 @@ func convertBlockMessage(role string, blocks []ContentBlock) ([]core.Message, er
 				return nil, err
 			}
 			toolMessages = append(toolMessages, core.Message{
-				Role:       "tool",
-				ToolCallID: id,
-				Content:    content,
+				Role:        "tool",
+				ToolCallID:  id,
+				Content:     content,
+				ExtraFields: extra,
 			})
 		case "thinking", "redacted_thinking":
 			// Extended-thinking history has no canonical chat equivalent; drop
@@ -232,7 +252,7 @@ func collapseParts(parts []core.ContentPart) core.MessageContent {
 	}
 	onlyText := true
 	for _, part := range parts {
-		if part.Type != "text" {
+		if part.Type != "text" || !part.ExtraFields.IsEmpty() {
 			onlyText = false
 			break
 		}
@@ -294,6 +314,69 @@ func systemText(raw json.RawMessage) (string, error) {
 		}
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n")), nil
+}
+
+// systemContent is systemText's metadata-preserving counterpart. It keeps a
+// structured representation only when at least one block carries cache_control;
+// ordinary system prompts retain the historical compact string representation.
+func systemContent(raw json.RawMessage) (core.MessageContent, error) {
+	text, blocks, err := parseContent(raw)
+	if err != nil {
+		return nil, fmt.Errorf("system: %v", err)
+	}
+	if blocks == nil {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return nil, nil
+		}
+		return text, nil
+	}
+	parts := make([]core.ContentPart, 0, len(blocks))
+	hasCacheControl := false
+	for _, block := range blocks {
+		if block.Type != "text" {
+			return nil, fmt.Errorf("system block type %q is not supported; only text is allowed", block.Type)
+		}
+		if block.Text == "" {
+			continue
+		}
+		extra, err := anthropicCacheControlExtra(block.CacheControl)
+		if err != nil {
+			return nil, err
+		}
+		if !extra.IsEmpty() {
+			hasCacheControl = true
+		}
+		parts = append(parts, core.ContentPart{Type: "text", Text: block.Text, ExtraFields: extra})
+	}
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	if !hasCacheControl {
+		return strings.TrimSpace(core.ExtractTextContent(parts)), nil
+	}
+	return parts, nil
+}
+
+func anthropicCacheControlExtra(raw json.RawMessage) (core.UnknownJSONFields, error) {
+	validated, err := validatedCacheControlJSON(raw)
+	if err != nil {
+		return core.UnknownJSONFields{}, err
+	}
+	if len(validated) == 0 {
+		return core.UnknownJSONFields{}, nil
+	}
+	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"cache_control": validated,
+	}), nil
+}
+
+func validatedCacheControlJSON(raw json.RawMessage) (json.RawMessage, error) {
+	validated, err := core.CloneOptionalJSONObject(raw)
+	if err != nil {
+		return nil, fmt.Errorf("cache_control must be an object")
+	}
+	return validated, nil
 }
 
 // toolResultText extracts the text payload of a tool_result block content,
@@ -381,7 +464,19 @@ func convertTools(tools []Tool) ([]map[string]any, error) {
 			}
 			function["parameters"] = schema
 		}
-		out = append(out, map[string]any{"type": "function", "function": function})
+		converted := map[string]any{"type": "function", "function": function}
+		raw, err := validatedCacheControlJSON(tool.CacheControl)
+		if err != nil {
+			return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d].%s", i, err), err)
+		}
+		if len(raw) > 0 {
+			var cacheControl any
+			if err := json.Unmarshal(raw, &cacheControl); err != nil {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d].cache_control: %v", i, err), err)
+			}
+			converted["cache_control"] = cacheControl
+		}
+		out = append(out, converted)
 	}
 	return out, nil
 }
@@ -451,6 +546,9 @@ func buildExtraFields(req *MessagesRequest) core.UnknownJSONFields {
 		if raw, err := json.Marshal(req.StopSequences); err == nil {
 			fields["stop"] = raw
 		}
+	}
+	if raw := bytes.TrimSpace(req.CacheControl); len(raw) > 0 && !core.IsJSONNull(raw) {
+		fields["cache_control"] = core.CloneRawJSON(raw)
 	}
 	return core.UnknownJSONFieldsFromMap(fields)
 }

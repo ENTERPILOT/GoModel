@@ -5365,12 +5365,14 @@ func (m *mockPricingResolver) ResolvePricing(model, provider string) *core.Model
 // capturingProvider is a mockProvider that captures the request passed to StreamResponses/StreamChatCompletion.
 type capturingProvider struct {
 	mockProvider
+	capturedChatCtx      context.Context
 	capturedChatReq      *core.ChatRequest
 	capturedResponsesReq *core.ResponsesRequest
 	capturedEmbeddingReq *core.EmbeddingRequest
 }
 
-func (c *capturingProvider) ChatCompletion(_ context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+func (c *capturingProvider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	c.capturedChatCtx = ctx
 	c.capturedChatReq = req
 	if c.err != nil {
 		return nil, c.err
@@ -5378,7 +5380,8 @@ func (c *capturingProvider) ChatCompletion(_ context.Context, req *core.ChatRequ
 	return c.response, nil
 }
 
-func (c *capturingProvider) StreamChatCompletion(_ context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+func (c *capturingProvider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	c.capturedChatCtx = ctx
 	c.capturedChatReq = req
 	return io.NopCloser(strings.NewReader(c.streamData)), nil
 }

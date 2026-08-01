@@ -29,6 +29,10 @@ const (
 	requestLabelsKey contextKey = "request-labels"
 	// sessionIDKey stores the client session id detected for the request.
 	sessionIDKey contextKey = "session-id"
+	// requestDialectKey stores the external API dialect translated into a
+	// canonical request. Post-routing adapters use it to keep provider-specific
+	// metadata from leaking to incompatible upstream APIs.
+	requestDialectKey contextKey = "request-dialect"
 	// taggingStripHeadersKey stores canonical tagging header names that must not
 	// be forwarded to upstream providers.
 	taggingStripHeadersKey contextKey = "tagging-strip-headers"
@@ -67,9 +71,14 @@ const (
 // internal gateway-owned workflow.
 type RequestOrigin string
 
+// RequestDialect identifies the external request shape translated at ingress.
+type RequestDialect string
+
 const (
 	RequestOriginExternal  RequestOrigin = "external"
 	RequestOriginGuardrail RequestOrigin = "guardrail"
+
+	RequestDialectAnthropicMessages RequestDialect = "anthropic_messages"
 )
 
 // WithRequestID returns a new context with the request ID attached.
@@ -148,6 +157,22 @@ func SessionIDFromContext(ctx context.Context) string {
 		if id, ok := v.(string); ok {
 			return id
 		}
+	}
+	return ""
+}
+
+// WithRequestDialect returns a context carrying the translated ingress dialect.
+func WithRequestDialect(ctx context.Context, dialect RequestDialect) context.Context {
+	if dialect == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, requestDialectKey, dialect)
+}
+
+// RequestDialectFromContext returns the translated ingress dialect, if any.
+func RequestDialectFromContext(ctx context.Context) RequestDialect {
+	if dialect, ok := ctx.Value(requestDialectKey).(RequestDialect); ok {
+		return dialect
 	}
 	return ""
 }

@@ -115,8 +115,8 @@ is recorded under the `/v1/messages` endpoint so it can be filtered in the dashb
 `/v1/messages` translates through GoModel's canonical chat type. Anthropic-specific
 features that have no canonical equivalent are not preserved end to end:
 
-- **`cache_control` breakpoints** are dropped — prompt-caching cost benefits are not
-  carried through the canonical hop.
+- **`cache_control`** is preserved on the request, system/content blocks,
+  custom tools, and tool-use/tool-result history when routed to Anthropic.
 - **Extended-thinking signatures** and `thinking` blocks on input messages are dropped.
 - **Server/built-in tools** (web search, code execution, …) are rejected with a clear
   `400`; only custom tools (`type` absent or `"custom"`) translate.
@@ -137,7 +137,7 @@ features that have no canonical equivalent are not preserved end to end:
   streaming `message_start` event; the authoritative counts arrive in the final
   `message_delta` event, which SDK accumulators prefer.
 
-For byte-exact Anthropic fidelity (including prompt-cache breakpoints), use the
+For byte-exact Anthropic fidelity beyond the supported cache controls, use the
 `/p/anthropic/v1/messages` passthrough route instead.
 
 See [ADR-0007](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0007-anthropic-messages-ingress.md)

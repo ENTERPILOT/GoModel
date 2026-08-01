@@ -156,9 +156,9 @@ func (p *Provider) getBatchResultEndpoints(batchID string) map[string]string {
 }
 
 // setHeaders sets the required headers for Anthropic API requests. It runs once
-// per outbound request, so p.keys.Next advances the rotation per call.
+// per outbound request; identified sessions resolve to a stable key.
 func (p *Provider) setHeaders(req *http.Request) {
-	req.Header.Set("x-api-key", p.keys.Next())
+	req.Header.Set("x-api-key", p.keys.NextForContext(req.Context()))
 	req.Header.Set("anthropic-version", anthropicAPIVersion)
 
 	// Forward request ID if present in context

@@ -62,6 +62,19 @@ func CloneRawJSON(raw json.RawMessage) json.RawMessage {
 	return append(json.RawMessage(nil), raw...)
 }
 
+// CloneOptionalJSONObject validates and clones an optional raw JSON object.
+// Empty and null values are treated as absent.
+func CloneOptionalJSONObject(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if IsJSONNull(trimmed) {
+		return nil, nil
+	}
+	if trimmed[0] != '{' || !json.Valid(trimmed) {
+		return nil, fmt.Errorf("JSON value must be an object")
+	}
+	return CloneRawJSON(trimmed), nil
+}
+
 // CloneUnknownJSONFields returns a detached copy of a raw unknown-field object.
 func CloneUnknownJSONFields(fields UnknownJSONFields) UnknownJSONFields {
 	return UnknownJSONFields{raw: CloneRawJSON(fields.raw)}
@@ -250,6 +263,33 @@ func (fields UnknownJSONFields) Lookup(key string) json.RawMessage {
 func (fields UnknownJSONFields) IsEmpty() bool {
 	trimmed := bytes.TrimSpace(fields.raw)
 	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("{}"))
+}
+
+// Without returns the fields without the named members. Other members,
+// including duplicate unknown keys, retain their original JSON representation.
+func (fields UnknownJSONFields) Without(keys ...string) UnknownJSONFields {
+	if fields.IsEmpty() || len(keys) == 0 {
+		return fields
+	}
+	skip := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		skip[key] = struct{}{}
+	}
+
+	var buf bytes.Buffer
+	buf.Grow(len(fields.raw))
+	buf.WriteByte('{')
+	wrote := false
+	if err := appendUnknownJSONMembers(&buf, fields.raw, skip, &wrote); err != nil {
+		// UnknownJSONFields can only be constructed from validated JSON. Retain the
+		// original value if an impossible malformed internal value reaches here.
+		return fields
+	}
+	buf.WriteByte('}')
+	if !wrote {
+		return UnknownJSONFields{}
+	}
+	return UnknownJSONFields{raw: buf.Bytes()}
 }
 
 // extractUnknownJSONFields captures the object's keys that are not in

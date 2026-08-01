@@ -112,8 +112,6 @@ end to end, including request-validation and upstream errors.
 ### What is explicitly not implemented (v1)
 
 - **`/v1/messages/batches`** (Messages Batches API) — deferred; batches has its own pipeline.
-- **`cache_control` breakpoints** — dropped during the canonical hop; prompt-caching cost
-  benefits are not preserved when translating through `core.ChatRequest`.
 - **Extended-thinking signatures and `thinking` blocks on input messages** — dropped; the
   canonical chat type has no first-class field for them.
 - **Server/built-in tools** (web search, code execution, etc.) — a `tools[]` entry
@@ -144,10 +142,10 @@ end to end, including request-validation and upstream errors.
 ### Negative / Mitigations
 
 - **Lossy round-trip to the Anthropic provider.** A `/v1/messages` request routed *to* the
-  Anthropic provider is translated Anthropic → `core.ChatRequest` → Anthropic; provider-only
-  features (`cache_control`, thinking signatures, server tools) do not survive the canonical
-  hop. Mitigation: clients needing byte-exact Anthropic fidelity (including prompt-cache
-  breakpoints) can still use the `/p/anthropic/v1/messages` passthrough. A future optimization
+  Anthropic provider is translated Anthropic → `core.ChatRequest` → Anthropic. Prompt-cache
+  controls survive on supported request, system/content, custom-tool, and tool-history
+  locations, but thinking signatures and server tools do not. Mitigation: clients needing
+  byte-exact Anthropic fidelity can still use the `/p/anthropic/v1/messages` passthrough. A future optimization
   could add an Anthropic → Anthropic fast path that skips the canonical hop.
 - **count_tokens is an estimate**, typically within ~10–25% of a tokenizer-exact count, and is
   not model-specific. Mitigation: documented clearly; adequate for budgeting/UX sizing, not for
