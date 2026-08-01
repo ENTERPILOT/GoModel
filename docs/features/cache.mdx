@@ -113,6 +113,14 @@ The plan is applied post-routing so provider-only fields cannot leak through a
 fallback to another backend. Cache keys include the concrete provider instance
 and model, and caller-supplied cache controls always win.
 
+Provider prompt-cache planning is enabled by default. To disable GoModel's
+automatic planning while continuing to pass through compatible client cache
+directives, set:
+
+```bash
+PROVIDER_PROMPT_CACHE_PLANNER_ENABLED=false
+```
+
 ## `user_path` behavior
 
 For the exact cache, `user_path` is not added to the cache key by itself.

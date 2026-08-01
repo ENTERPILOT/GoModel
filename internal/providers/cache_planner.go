@@ -3,6 +3,9 @@ package providers
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -10,11 +13,31 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-const cachePointField = "_gomodel_cache_point"
+const (
+	cachePointField                      = "_gomodel_cache_point"
+	providerPromptCachePlannerEnabledEnv = "PROVIDER_PROMPT_CACHE_PLANNER_ENABLED"
+)
 
 type cachePlanner struct{}
 
-func newCachePlanner() *cachePlanner { return &cachePlanner{} }
+func newCachePlanner() *cachePlanner {
+	raw, configured := os.LookupEnv(providerPromptCachePlannerEnabledEnv)
+	if !configured || strings.TrimSpace(raw) == "" {
+		return &cachePlanner{}
+	}
+	enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		slog.Warn("invalid provider prompt-cache planner flag; using default",
+			"env", providerPromptCachePlannerEnabledEnv,
+			"value", raw,
+			"default", true)
+		return &cachePlanner{}
+	}
+	if !enabled {
+		return nil
+	}
+	return &cachePlanner{}
+}
 
 func (p *cachePlanner) planChat(req *core.ChatRequest, providerType string, selector core.ModelSelector) *core.ChatRequest {
 	if req == nil || len(req.Messages) < 2 || hasCacheDirective(req.ExtraFields) {

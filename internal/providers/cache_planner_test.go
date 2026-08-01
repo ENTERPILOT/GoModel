@@ -54,6 +54,26 @@ func TestCachePlannerAppliesProviderSpecificChatPlanWithoutMutatingCaller(t *tes
 	}
 }
 
+func TestNewCachePlanner_EnvironmentKillSwitch(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		value   string
+		enabled bool
+	}{
+		{name: "default on", enabled: true},
+		{name: "explicit on", value: "true", enabled: true},
+		{name: "explicit off", value: "false", enabled: false},
+		{name: "invalid keeps safe default", value: "sometimes", enabled: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(providerPromptCachePlannerEnabledEnv, tt.value)
+			if got := newCachePlanner() != nil; got != tt.enabled {
+				t.Fatalf("newCachePlanner() enabled = %v, want %v", got, tt.enabled)
+			}
+		})
+	}
+}
+
 func TestCachePlannerHonorsMinimumAndClientDirective(t *testing.T) {
 	planner := newCachePlanner()
 	short := &core.ChatRequest{Messages: []core.Message{{Role: "system", Content: "short"}, {Role: "user", Content: "turn"}}}
