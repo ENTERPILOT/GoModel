@@ -15,7 +15,6 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/tidwall/gjson"
-	"golang.org/x/sync/singleflight"
 
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -48,7 +47,14 @@ type simpleCacheMiddleware struct {
 	workers sync.WaitGroup
 	mu      sync.RWMutex
 	closed  bool
-	misses  singleflight.Group
+	missMu  sync.Mutex
+	misses  map[string]*exactMissCall
+}
+
+type exactMissCall struct {
+	done chan struct{}
+	data []byte
+	err  error
 }
 
 func newSimpleCacheMiddleware(store cache.Store, ttl time.Duration, hitRecorder func(exchange, []byte, string)) *simpleCacheMiddleware {
@@ -103,43 +109,64 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 	plan := core.GetWorkflow(ex.Context())
 	key := hashRequest(path, body, plan)
 
-	type missResult struct {
-		owner *struct{ marker byte }
-		data  []byte
-	}
-	owner := &struct{ marker byte }{}
-	value, err, _ := m.misses.Do(key, func() (any, error) {
+	call, leader := m.joinMiss(key)
+	if leader {
 		data, ok, err := ex.Capture("response cache: failed to capture cacheable response body", next)
-		if err != nil {
-			return nil, err
+		if err == nil && ok {
+			m.enqueueWrite(cacheWriteJob{key: key, data: data})
+		} else {
+			data = nil
 		}
-		if !ok {
-			return missResult{owner: owner}, nil
-		}
-		m.enqueueWrite(cacheWriteJob{key: key, data: data})
-		return missResult{owner: owner, data: data}, nil
-	})
-	if err != nil {
+		m.finishMiss(key, call, data, err)
 		return err
 	}
-	result, _ := value.(missResult)
-	if result.owner == owner {
-		return nil
+
+	select {
+	case <-ex.Context().Done():
+		return ex.Context().Err()
+	case <-call.done:
 	}
 	// The leader produced a non-cacheable result (failure status, failover, or
 	// malformed body). Waiting followers must execute independently rather than
 	// replaying something the normal cache would refuse to store.
-	if len(result.data) == 0 {
+	if call.err != nil {
+		return m.StoreAfter(ex, body, next)
+	}
+	if len(call.data) == 0 {
 		return next()
 	}
-	if err := ex.ReplayHit(body, result.data, CacheTypeExact); err != nil {
+	if err := ex.ReplayHit(body, call.data, CacheTypeExact); err != nil {
 		return next()
 	}
 	ex.MarkHit(CacheTypeExact)
 	if m.hitRecorder != nil {
-		m.hitRecorder(ex, result.data, CacheTypeExact)
+		m.hitRecorder(ex, call.data, CacheTypeExact)
 	}
 	return nil
+}
+
+func (m *simpleCacheMiddleware) joinMiss(key string) (*exactMissCall, bool) {
+	m.missMu.Lock()
+	defer m.missMu.Unlock()
+	if call := m.misses[key]; call != nil {
+		return call, false
+	}
+	if m.misses == nil {
+		m.misses = make(map[string]*exactMissCall)
+	}
+	call := &exactMissCall{done: make(chan struct{})}
+	m.misses[key] = call
+	return call, true
+}
+
+func (m *simpleCacheMiddleware) finishMiss(key string, call *exactMissCall, data []byte, err error) {
+	m.missMu.Lock()
+	call.data, call.err = data, err
+	if m.misses[key] == call {
+		delete(m.misses, key)
+	}
+	close(call.done)
+	m.missMu.Unlock()
 }
 
 // close waits for all in-flight cache writes to complete, then closes the store.

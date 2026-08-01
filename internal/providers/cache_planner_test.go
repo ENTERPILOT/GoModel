@@ -1,6 +1,8 @@
 package providers
 
 import (
+	"bytes"
+	"os"
 	"strings"
 	"testing"
 
@@ -10,6 +12,7 @@ import (
 )
 
 func TestCachePlannerAppliesProviderSpecificChatPlanWithoutMutatingCaller(t *testing.T) {
+	planner := &cachePlanner{enabled: true}
 	prefix := strings.Repeat("stable context ", 1500)
 	tests := []struct {
 		provider string
@@ -19,7 +22,7 @@ func TestCachePlannerAppliesProviderSpecificChatPlanWithoutMutatingCaller(t *tes
 	}{
 		{provider: "openai", model: "gpt-5.6", field: "prompt_cache_key"},
 		{provider: "anthropic", model: "claude-sonnet-4-5", field: "cache_control"},
-		{provider: "bedrock", model: "anthropic.claude-sonnet-4-5", marker: cachePointField},
+		{provider: "bedrock", model: "anthropic.claude-sonnet-4-5", marker: core.GatewayCachePointField},
 		{provider: "gemini", model: "gemini-2.5-pro"},
 	}
 	for _, tt := range tests {
@@ -28,7 +31,7 @@ func TestCachePlannerAppliesProviderSpecificChatPlanWithoutMutatingCaller(t *tes
 				{Role: "system", Content: prefix},
 				{Role: "user", Content: "new turn"},
 			}}
-			planned := newCachePlanner().planChat(req, tt.provider, core.ModelSelector{Provider: tt.provider + "-primary", Model: tt.model})
+			planned := planner.planChat(req, tt.provider, core.ModelSelector{Provider: tt.provider + "-primary", Model: tt.model})
 			if planned == req {
 				t.Fatal("planner returned caller-owned request")
 			}
@@ -58,16 +61,30 @@ func TestNewCachePlanner_EnvironmentKillSwitch(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		value   string
+		set     bool
 		enabled bool
 	}{
 		{name: "default on", enabled: true},
-		{name: "explicit on", value: "true", enabled: true},
-		{name: "explicit off", value: "false", enabled: false},
-		{name: "invalid keeps safe default", value: "sometimes", enabled: true},
+		{name: "empty keeps safe default", value: "", set: true, enabled: true},
+		{name: "explicit on", value: "true", set: true, enabled: true},
+		{name: "explicit off", value: "false", set: true, enabled: false},
+		{name: "invalid keeps safe default", value: "sometimes", set: true, enabled: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(providerPromptCachePlannerEnabledEnv, tt.value)
-			if got := newCachePlanner() != nil; got != tt.enabled {
+			old, existed := os.LookupEnv(providerPromptCachePlannerEnabledEnv)
+			t.Cleanup(func() {
+				if existed {
+					_ = os.Setenv(providerPromptCachePlannerEnabledEnv, old)
+				} else {
+					_ = os.Unsetenv(providerPromptCachePlannerEnabledEnv)
+				}
+			})
+			if tt.set {
+				_ = os.Setenv(providerPromptCachePlannerEnabledEnv, tt.value)
+			} else {
+				_ = os.Unsetenv(providerPromptCachePlannerEnabledEnv)
+			}
+			if got := newCachePlanner().enabled; got != tt.enabled {
 				t.Fatalf("newCachePlanner() enabled = %v, want %v", got, tt.enabled)
 			}
 		})
@@ -75,7 +92,7 @@ func TestNewCachePlanner_EnvironmentKillSwitch(t *testing.T) {
 }
 
 func TestCachePlannerHonorsMinimumAndClientDirective(t *testing.T) {
-	planner := newCachePlanner()
+	planner := &cachePlanner{enabled: true}
 	short := &core.ChatRequest{Messages: []core.Message{{Role: "system", Content: "short"}, {Role: "user", Content: "turn"}}}
 	if got := planner.planChat(short, "openai", core.ModelSelector{Model: "gpt-5.6"}); got != short {
 		t.Fatal("planned prefix below provider minimum")
@@ -87,5 +104,98 @@ func TestCachePlannerHonorsMinimumAndClientDirective(t *testing.T) {
 	}
 	if got := planner.planChat(directed, "openai", core.ModelSelector{Model: "gpt-5.6"}); got != directed {
 		t.Fatal("overrode client cache directive")
+	}
+}
+
+func TestCachePlannerResponsesShapesAndCallerOwnership(t *testing.T) {
+	planner := &cachePlanner{enabled: true}
+	prefix := strings.Repeat("stable response context ", 1200)
+	shapes := []struct {
+		name    string
+		content any
+	}{
+		{name: "string", content: prefix},
+		{name: "typed parts", content: []core.ContentPart{{Type: "input_text", Text: prefix}}},
+		{name: "generic parts", content: []any{map[string]any{"type": "input_text", "text": prefix}}},
+	}
+	for _, shape := range shapes {
+		t.Run(shape.name, func(t *testing.T) {
+			req := &core.ResponsesRequest{Model: "gpt-5.6", Input: []core.ResponsesInputElement{
+				{Role: "user", Content: shape.content},
+				{Role: "user", Content: "dynamic"},
+			}}
+			before, err := json.Marshal(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			planned := planner.planResponses(req, "openai", core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"})
+			if planned == req || len(planned.ExtraFields.Lookup("prompt_cache_key")) == 0 ||
+				len(planned.ExtraFields.Lookup("prompt_cache_options")) == 0 {
+				t.Fatalf("Responses plan missing cache fields: %+v", planned)
+			}
+			plannedJSON, err := json.Marshal(planned)
+			if err != nil || !bytes.Contains(plannedJSON, []byte(`"prompt_cache_breakpoint"`)) {
+				t.Fatalf("Responses plan lacks explicit breakpoint: %s (err=%v)", plannedJSON, err)
+			}
+			after, err := json.Marshal(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatalf("planner mutated caller: before=%s after=%s", before, after)
+			}
+		})
+	}
+	anthropic := &core.ResponsesRequest{Input: []core.ResponsesInputElement{
+		{Role: "user", Content: prefix}, {Role: "user", Content: "dynamic"},
+	}}
+	if got := planner.planResponses(anthropic, "anthropic", core.ModelSelector{Model: "claude-sonnet-4-5"}); got == anthropic || len(got.ExtraFields.Lookup("cache_control")) == 0 {
+		t.Fatal("Anthropic Responses plan lacks cache_control")
+	}
+	short := &core.ResponsesRequest{Input: []core.ResponsesInputElement{
+		{Role: "user", Content: "short"}, {Role: "user", Content: "dynamic"},
+	}}
+	if got := planner.planResponses(short, "openai", core.ModelSelector{Model: "gpt-5.6"}); got != short {
+		t.Fatal("planned a Responses prefix below the provider minimum")
+	}
+}
+
+func TestCachePlannerFindsNestedClientDirective(t *testing.T) {
+	prefix := strings.Repeat("x", 9000)
+	req := &core.ChatRequest{Messages: []core.Message{
+		{Role: "system", Content: []core.ContentPart{{
+			Type: "text", Text: prefix,
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+			}),
+		}}},
+		{Role: "user", Content: "turn"},
+	}}
+	if got := (&cachePlanner{enabled: true}).planChat(req, "openai", core.ModelSelector{Model: "gpt-5.6"}); got != req {
+		t.Fatal("planner overrode a nested client cache directive")
+	}
+}
+
+func TestCachePlannerProviderCapabilityBoundaries(t *testing.T) {
+	req := &core.ChatRequest{Messages: []core.Message{
+		{Role: "system", Content: strings.Repeat("x", 20000)},
+		{Role: "user", Content: "turn"},
+	}}
+	planner := &cachePlanner{enabled: true}
+	for _, provider := range []string{"openrouter", "vertex", "unknown"} {
+		if got := planner.planChat(req, provider, core.ModelSelector{Model: "gemini-2.5-pro"}); got != req {
+			t.Fatalf("provider %q unexpectedly received an automatic plan", provider)
+		}
+	}
+}
+
+func TestCloneChatRequestPreservesInternalCachePlan(t *testing.T) {
+	req := &core.ChatRequest{PromptCachePlan: &core.PromptCachePlan{Key: "stable"}}
+	clone, ok := cloneChatRequest(req)
+	if !ok || clone.PromptCachePlan == nil || clone.PromptCachePlan.Key != "stable" {
+		t.Fatalf("clone lost internal cache metadata: %+v", clone)
+	}
+	if clone.PromptCachePlan == req.PromptCachePlan {
+		t.Fatal("clone aliases internal cache metadata")
 	}
 }

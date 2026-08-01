@@ -3,8 +3,11 @@ package gemini
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -63,6 +66,11 @@ const (
 	// accepts further spellings of each.
 	geminiAPIModeNative           = "native"
 	geminiAPIModeOpenAICompatible = "openai_compatible"
+	geminiCacheTTL                = 5 * time.Minute
+	geminiCacheFreshness          = 15 * time.Second
+	geminiCacheFailureBackoff     = 30 * time.Second
+	geminiCacheCreateTimeout      = 30 * time.Second
+	geminiCacheObjectLimit        = 1024
 )
 
 // Provider implements the core.Provider interface for Google Gemini
@@ -82,8 +90,9 @@ type Provider struct {
 }
 
 type geminiCacheObject struct {
-	name      string
-	expiresAt time.Time
+	name       string
+	expiresAt  time.Time
+	retryAfter time.Time
 }
 
 // New creates a new Gemini provider.
@@ -550,22 +559,37 @@ type geminiCreateCachedContentResponse struct {
 // post-routing planner. Cache creation is best-effort: an unsupported model or
 // endpoint must never turn a request that would otherwise work into a failure.
 func (p *Provider) prepareCachedContent(ctx context.Context, req *core.ChatRequest, body *geminiGenerateContentRequest) {
-	if body == nil || body.CachedContent != "" || len(body.Contents) < 2 {
+	if body == nil || body.CachedContent != "" || p.backend != geminiBackendAIStudio || len(body.Contents) == 0 {
 		return
 	}
 	if req.PromptCachePlan == nil || strings.TrimSpace(req.PromptCachePlan.Key) == "" {
 		return
 	}
-	key := req.PromptCachePlan.Key
-	if cached := p.cachedContentObject(key); cached != "" {
-		useGeminiCachedPrefix(body, cached)
+	// The final content is the live turn. A system instruction, tools, or an
+	// earlier content item must remain before it for a useful cached prefix.
+	if len(body.Contents) == 1 && body.SystemInstruction == nil && len(body.Tools) == 0 {
+		return
+	}
+	key, ok := p.scopedCachedContentKey(ctx, req.PromptCachePlan.Key)
+	if !ok {
+		return
+	}
+	if cached, suppress := p.cachedContentObject(key, time.Now()); suppress {
+		if cached != "" {
+			useGeminiCachedPrefix(body, cached)
+		}
 		return
 	}
 
-	value, err, _ := p.cacheFlight.Do(key, func() (any, error) {
-		if cached := p.cachedContentObject(key); cached != "" {
+	value, _, _ := p.cacheFlight.Do(key, func() (any, error) {
+		now := time.Now()
+		if cached, suppress := p.cachedContentObject(key, now); suppress {
 			return cached, nil
 		}
+		// Cache creation may outlive the request that happened to lead the
+		// singleflight. Keep affinity values while detaching cancellation.
+		createCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), geminiCacheCreateTimeout)
+		defer cancel()
 		createReq := geminiCreateCachedContentRequest{
 			Model:             "models/" + normalizeGeminiModelID(req.Model),
 			SystemInstruction: body.SystemInstruction,
@@ -574,47 +598,82 @@ func (p *Provider) prepareCachedContent(ctx context.Context, req *core.ChatReque
 			TTL:               "300s",
 		}
 		var created geminiCreateCachedContentResponse
-		if err := p.nativeClient.Do(ctx, llmclient.Request{
-			Method:   http.MethodPost,
-			Endpoint: "/cachedContents",
-			Body:     &createReq,
-		}, &created); err != nil {
-			return "", err
-		}
-		if strings.TrimSpace(created.Name) == "" {
-			return "", fmt.Errorf("cached-content creation for Gemini returned an empty name")
+		err := p.nativeClient.Do(createCtx, llmclient.Request{
+			Method: http.MethodPost, Endpoint: "/cachedContents", Body: &createReq,
+		}, &created)
+		if err != nil || strings.TrimSpace(created.Name) == "" {
+			if err == nil {
+				err = fmt.Errorf("cached-content creation returned an empty name")
+			}
+			slog.DebugContext(ctx, "Gemini cached-content creation skipped", "model", req.Model, "error", err)
+			p.storeCachedContentObject(key, geminiCacheObject{retryAfter: now.Add(geminiCacheFailureBackoff)}, now)
+			return "", nil
 		}
 		expiresAt := created.ExpireTime
 		if expiresAt.IsZero() {
-			expiresAt = time.Now().Add(5 * time.Minute)
+			expiresAt = now.Add(geminiCacheTTL)
 		}
-		p.cacheMu.Lock()
-		if p.cacheObjects == nil {
-			p.cacheObjects = make(map[string]geminiCacheObject)
+		if !now.Add(geminiCacheFreshness).Before(expiresAt) {
+			p.storeCachedContentObject(key, geminiCacheObject{retryAfter: now.Add(geminiCacheFailureBackoff)}, now)
+			return "", nil
 		}
-		p.cacheObjects[key] = geminiCacheObject{name: created.Name, expiresAt: expiresAt}
-		p.cacheMu.Unlock()
+		p.storeCachedContentObject(key, geminiCacheObject{name: created.Name, expiresAt: expiresAt}, now)
 		return created.Name, nil
 	})
-	if err == nil {
-		if cached, ok := value.(string); ok && cached != "" {
-			useGeminiCachedPrefix(body, cached)
-		}
+	if cached, ok := value.(string); ok && cached != "" {
+		useGeminiCachedPrefix(body, cached)
 	}
 }
 
-func (p *Provider) cachedContentObject(key string) string {
+func (p *Provider) scopedCachedContentKey(ctx context.Context, planKey string) (string, bool) {
+	credential, stable := p.keys.StableForContext(ctx)
+	if !stable {
+		return "", false
+	}
+	digest := sha256.Sum256([]byte(credential))
+	return planKey + ":" + hex.EncodeToString(digest[:]), true
+}
+
+func (p *Provider) cachedContentObject(key string, now time.Time) (string, bool) {
 	p.cacheMu.Lock()
 	defer p.cacheMu.Unlock()
 	entry, ok := p.cacheObjects[key]
 	if !ok {
-		return ""
+		return "", false
 	}
-	if time.Now().Add(15 * time.Second).After(entry.expiresAt) {
+	if entry.name == "" {
+		if now.Before(entry.retryAfter) {
+			return "", true
+		}
 		delete(p.cacheObjects, key)
-		return ""
+		return "", false
 	}
-	return entry.name
+	if now.Add(geminiCacheFreshness).After(entry.expiresAt) {
+		delete(p.cacheObjects, key)
+		return "", false
+	}
+	return entry.name, true
+}
+
+func (p *Provider) storeCachedContentObject(key string, entry geminiCacheObject, now time.Time) {
+	p.cacheMu.Lock()
+	defer p.cacheMu.Unlock()
+	if p.cacheObjects == nil {
+		p.cacheObjects = make(map[string]geminiCacheObject)
+	}
+	for candidate, cached := range p.cacheObjects {
+		if (cached.name == "" && !now.Before(cached.retryAfter)) ||
+			(cached.name != "" && now.Add(geminiCacheFreshness).After(cached.expiresAt)) {
+			delete(p.cacheObjects, candidate)
+		}
+	}
+	if len(p.cacheObjects) >= geminiCacheObjectLimit {
+		for candidate := range p.cacheObjects {
+			delete(p.cacheObjects, candidate)
+			break
+		}
+	}
+	p.cacheObjects[key] = entry
 }
 
 func useGeminiCachedPrefix(body *geminiGenerateContentRequest, name string) {

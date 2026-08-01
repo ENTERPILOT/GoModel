@@ -85,6 +85,24 @@ func (k *Keyring) NextForContext(ctx context.Context) string {
 	return k.NextForSession(core.SessionIDFromContext(ctx))
 }
 
+// StableForContext returns the credential that every request with this context
+// will use without advancing round-robin state. The boolean is false when the
+// context has no stable credential affinity, so callers must not persist
+// credential-scoped provider resources for later reuse.
+func (k *Keyring) StableForContext(ctx context.Context) (string, bool) {
+	if k == nil || len(k.keys) == 0 {
+		return "", false
+	}
+	if len(k.keys) == 1 {
+		return k.keys[0], true
+	}
+	sessionID := core.SessionIDFromContext(ctx)
+	if !k.sessionSticky || sessionID == "" {
+		return "", false
+	}
+	return k.stickyKey(sessionID), true
+}
+
 // NextForSession deterministically maps one non-empty session to one key using
 // rendezvous hashing. Adding or removing a key therefore remaps only sessions
 // assigned to the changed key, rather than invalidating every warm cache. The
@@ -99,6 +117,10 @@ func (k *Keyring) NextForSession(sessionID string) string {
 	if !k.sessionSticky || sessionID == "" {
 		return k.Next()
 	}
+	return k.stickyKey(sessionID)
+}
+
+func (k *Keyring) stickyKey(sessionID string) string {
 	selected := k.keys[0]
 	best := rendezvousKeyScore(sessionID, selected)
 	for _, key := range k.keys[1:] {

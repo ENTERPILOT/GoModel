@@ -582,7 +582,7 @@ func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSele
 
 func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
 	forward := r.forwardChatRequest(ctx, req, selector)
-	if r.cachePlanner == nil || len(forward.Messages) < 2 {
+	if r.cachePlanner == nil {
 		return forward
 	}
 	return r.cachePlanner.planChat(forward, r.lookup.GetProviderType(selector.QualifiedModel()), selector)
@@ -591,9 +591,6 @@ func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, 
 func (r *Router) plannedResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
 	forward := forwardResponsesRequest(req, selector)
 	if r.cachePlanner == nil {
-		return forward
-	}
-	if items, ok := forward.Input.([]core.ResponsesInputElement); !ok || len(items) < 2 {
 		return forward
 	}
 	return r.cachePlanner.planResponses(forward, r.lookup.GetProviderType(selector.QualifiedModel()), selector)

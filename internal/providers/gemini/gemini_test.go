@@ -1,15 +1,19 @@
 package gemini
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -37,9 +41,12 @@ func TestNew(t *testing.T) {
 
 func TestPrepareCachedContentCreatesAndReusesObject(t *testing.T) {
 	var creates atomic.Int32
+	var wrongPath atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/cachedContents" {
-			t.Fatalf("path = %q, want /cachedContents", r.URL.Path)
+			wrongPath.Store(true)
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
 		}
 		creates.Add(1)
 		w.Header().Set("Content-Type", "application/json")
@@ -57,6 +64,7 @@ func TestPrepareCachedContentCreatesAndReusesObject(t *testing.T) {
 				{Role: "user", Parts: []geminiPart{{Text: "stable"}}},
 				{Role: "user", Parts: []geminiPart{{Text: "dynamic"}}},
 			},
+			Tools: []geminiTool{{FunctionDeclarations: []geminiFunctionDeclaration{{Name: "lookup"}}}},
 		}
 	}
 	first := newBody()
@@ -66,10 +74,186 @@ func TestPrepareCachedContentCreatesAndReusesObject(t *testing.T) {
 	if creates.Load() != 1 {
 		t.Fatalf("cache creates = %d, want 1", creates.Load())
 	}
+	if wrongPath.Load() {
+		t.Fatal("cached-content request used the wrong path")
+	}
 	for i, body := range []*geminiGenerateContentRequest{first, second} {
 		if body.CachedContent != "cachedContents/session-prefix" || len(body.Contents) != 1 || body.SystemInstruction != nil {
 			t.Fatalf("body %d did not use cached prefix: %+v", i, body)
 		}
+	}
+}
+
+func TestPrepareCachedContentSupportsSystemOnlyPrefix(t *testing.T) {
+	var creates atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		creates.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"name":"cachedContents/system-prefix","expireTime":"2099-01-01T00:00:00Z"}`)
+	}))
+	defer server.Close()
+	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p.SetBaseURL(server.URL)
+	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "system"}}
+	body := &geminiGenerateContentRequest{
+		SystemInstruction: &geminiContent{Parts: []geminiPart{{Text: "stable system"}}},
+		Contents:          []geminiContent{{Role: "user", Parts: []geminiPart{{Text: "live turn"}}}},
+	}
+	p.prepareCachedContent(context.Background(), req, body)
+	if creates.Load() != 1 || body.CachedContent != "cachedContents/system-prefix" || len(body.Contents) != 1 || body.SystemInstruction != nil {
+		t.Fatalf("system prefix was not cached: creates=%d body=%+v", creates.Load(), body)
+	}
+}
+
+func TestPrepareCachedContentFailureIsBestEffortAndBackedOff(t *testing.T) {
+	var creates atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		creates.Add(1)
+		http.Error(w, "unsupported", http.StatusBadRequest)
+	}))
+	defer server.Close()
+	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p.SetBaseURL(server.URL)
+	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "failure"}}
+	newBody := func() *geminiGenerateContentRequest {
+		return &geminiGenerateContentRequest{
+			SystemInstruction: &geminiContent{Parts: []geminiPart{{Text: "system"}}},
+			Contents:          []geminiContent{{Role: "user", Parts: []geminiPart{{Text: "live"}}}},
+			Tools:             []geminiTool{{FunctionDeclarations: []geminiFunctionDeclaration{{Name: "lookup"}}}},
+		}
+	}
+	first, second := newBody(), newBody()
+	firstBefore, _ := json.Marshal(first)
+	secondBefore, _ := json.Marshal(second)
+	p.prepareCachedContent(context.Background(), req, first)
+	p.prepareCachedContent(context.Background(), req, second)
+	if creates.Load() != 1 {
+		t.Fatalf("failed creation attempts = %d, want one during backoff", creates.Load())
+	}
+	firstAfter, _ := json.Marshal(first)
+	secondAfter, _ := json.Marshal(second)
+	if !bytes.Equal(firstBefore, firstAfter) || !bytes.Equal(secondBefore, secondAfter) {
+		t.Fatalf("failed best-effort creation modified requests: %s / %s", firstAfter, secondAfter)
+	}
+}
+
+func TestPrepareCachedContentEmptyNameAndExpiringEntry(t *testing.T) {
+	var creates atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		call := creates.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if call == 1 {
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"name":"cachedContents/recreated","expireTime":"2099-01-01T00:00:00Z"}`)
+	}))
+	defer server.Close()
+	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p.SetBaseURL(server.URL)
+	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "expiry"}}
+	newBody := func() *geminiGenerateContentRequest {
+		return &geminiGenerateContentRequest{SystemInstruction: &geminiContent{}, Contents: []geminiContent{{Role: "user"}}}
+	}
+	failed := newBody()
+	before, _ := json.Marshal(failed)
+	p.prepareCachedContent(context.Background(), req, failed)
+	after, _ := json.Marshal(failed)
+	if !bytes.Equal(before, after) {
+		t.Fatalf("empty-name failure modified request: %s", after)
+	}
+	scopedKey, ok := p.scopedCachedContentKey(context.Background(), req.PromptCachePlan.Key)
+	if !ok {
+		t.Fatal("single credential did not produce a stable key")
+	}
+	p.cacheMu.Lock()
+	p.cacheObjects[scopedKey] = geminiCacheObject{name: "cachedContents/expiring", expiresAt: time.Now().Add(5 * time.Second)}
+	p.cacheMu.Unlock()
+	recreated := newBody()
+	p.prepareCachedContent(context.Background(), req, recreated)
+	if creates.Load() != 2 || recreated.CachedContent != "cachedContents/recreated" {
+		t.Fatalf("expiring entry was not recreated: creates=%d body=%+v", creates.Load(), recreated)
+	}
+}
+
+func TestPrepareCachedContentCoalescesConcurrentCreation(t *testing.T) {
+	const callers = 12
+	var creates, begun atomic.Int32
+	allBegun := make(chan struct{})
+	handlerEntered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		creates.Add(1)
+		handlerEntered <- struct{}{}
+		<-allBegun
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"name":"cachedContents/concurrent","expireTime":"2099-01-01T00:00:00Z"}`)
+	}))
+	defer server.Close()
+	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p.SetBaseURL(server.URL)
+	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "concurrent"}}
+	bodies := make([]*geminiGenerateContentRequest, callers)
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Go(func() {
+			bodies[i] = &geminiGenerateContentRequest{SystemInstruction: &geminiContent{}, Contents: []geminiContent{{Role: "user"}}}
+			if begun.Add(1) == callers {
+				close(allBegun)
+			}
+			p.prepareCachedContent(context.Background(), req, bodies[i])
+		})
+	}
+	<-handlerEntered
+	<-allBegun
+	close(release)
+	wg.Wait()
+	if got := creates.Load(); got != 1 {
+		t.Fatalf("concurrent cache creates = %d, want 1", got)
+	}
+	for i, body := range bodies {
+		if body.CachedContent != "cachedContents/concurrent" {
+			t.Fatalf("caller %d did not receive shared cache object: %+v", i, body)
+		}
+	}
+}
+
+func TestPrepareCachedContentRequiresStableCredentialAndAIStudio(t *testing.T) {
+	p := NewWithHTTPClient("key", http.DefaultClient, llmclient.Hooks{})
+	p.keys = providers.NewKeyring("one", "two")
+	req := &core.ChatRequest{PromptCachePlan: &core.PromptCachePlan{Key: "prefix"}}
+	body := &geminiGenerateContentRequest{SystemInstruction: &geminiContent{}, Contents: []geminiContent{{Role: "user"}}}
+	if _, ok := p.scopedCachedContentKey(context.Background(), "prefix"); ok {
+		t.Fatal("sessionless rotating credentials must not own reusable cache objects")
+	}
+	ctx := core.WithSessionID(context.Background(), "session-a")
+	first, ok := p.scopedCachedContentKey(ctx, "prefix")
+	second, ok2 := p.scopedCachedContentKey(ctx, "prefix")
+	if !ok || !ok2 || first == "" || first != second {
+		t.Fatalf("sticky credential key is unstable: %q %q", first, second)
+	}
+	p.backend = geminiBackendVertex
+	p.prepareCachedContent(ctx, req, body)
+	if body.CachedContent != "" {
+		t.Fatal("Vertex must not use the AI Studio cachedContents endpoint")
+	}
+}
+
+func TestGeminiCacheObjectMapIsBoundedAndSweepsExpiredEntries(t *testing.T) {
+	p := &Provider{}
+	now := time.Now()
+	p.cacheObjects = map[string]geminiCacheObject{
+		"expired": {name: "old", expiresAt: now.Add(-time.Minute)},
+	}
+	for i := range geminiCacheObjectLimit + 20 {
+		p.storeCachedContentObject(fmt.Sprintf("key-%d", i), geminiCacheObject{name: "cache", expiresAt: now.Add(time.Hour)}, now)
+	}
+	if _, exists := p.cacheObjects["expired"]; exists {
+		t.Fatal("expired entry was not swept")
+	}
+	if got := len(p.cacheObjects); got > geminiCacheObjectLimit {
+		t.Fatalf("cache object map size = %d, limit = %d", got, geminiCacheObjectLimit)
 	}
 }
 

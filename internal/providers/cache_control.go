@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/goccy/go-json"
 
@@ -74,12 +73,7 @@ func adaptAnthropicBatchCacheControl(ctx context.Context, req *core.BatchRequest
 }
 
 func providerAcceptsAnthropicCacheControl(providerType string) bool {
-	switch strings.ToLower(strings.TrimSpace(providerType)) {
-	case "anthropic", "openrouter":
-		return true
-	default:
-		return false
-	}
+	return promptCacheProfileFor(providerType).acceptsAnthropicCacheControl
 }
 
 func hasAnthropicCacheControl(req *core.ChatRequest) bool {

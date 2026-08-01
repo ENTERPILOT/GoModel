@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -14,16 +15,32 @@ import (
 )
 
 const (
-	cachePointField                      = "_gomodel_cache_point"
 	providerPromptCachePlannerEnabledEnv = "PROVIDER_PROMPT_CACHE_PLANNER_ENABLED"
 )
 
-type cachePlanner struct{}
+type promptCacheMode uint8
+
+const (
+	promptCacheUnsupported promptCacheMode = iota
+	promptCacheOpenAI
+	promptCacheAnthropic
+	promptCacheBedrock
+	promptCacheGemini
+)
+
+type promptCacheProfile struct {
+	mode                         promptCacheMode
+	acceptsAnthropicCacheControl bool
+}
+
+type cachePlanner struct {
+	enabled bool
+}
 
 func newCachePlanner() *cachePlanner {
 	raw, configured := os.LookupEnv(providerPromptCachePlannerEnabledEnv)
 	if !configured || strings.TrimSpace(raw) == "" {
-		return &cachePlanner{}
+		return &cachePlanner{enabled: true}
 	}
 	enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
 	if err != nil {
@@ -31,23 +48,29 @@ func newCachePlanner() *cachePlanner {
 			"env", providerPromptCachePlannerEnabledEnv,
 			"value", raw,
 			"default", true)
-		return &cachePlanner{}
+		return &cachePlanner{enabled: true}
 	}
-	if !enabled {
-		return nil
-	}
-	return &cachePlanner{}
+	return &cachePlanner{enabled: enabled}
 }
 
 func (p *cachePlanner) planChat(req *core.ChatRequest, providerType string, selector core.ModelSelector) *core.ChatRequest {
-	if req == nil || len(req.Messages) < 2 || hasCacheDirective(req.ExtraFields) {
+	profile := promptCacheProfileFor(providerType)
+	if p == nil || !p.enabled || req == nil || len(req.Messages) < 2 || profile.mode == promptCacheUnsupported {
+		return req
+	}
+	minimum := providerCacheMinimum(profile, selector.Model)
+	if tokens, conclusive := estimateSimpleChatPrefixTokens(req); conclusive && tokens < minimum {
+		return req
+	}
+	prefixMessages := req.Messages[:len(req.Messages)-1]
+	if hasChatCacheDirective(req, prefixMessages) {
 		return req
 	}
 	prefixBody, err := json.Marshal(struct {
 		Tools    []map[string]any `json:"tools,omitempty"`
 		Messages []core.Message   `json:"messages"`
-	}{req.Tools, req.Messages[:len(req.Messages)-1]})
-	if err != nil || estimatedTokens(prefixBody) < providerCacheMinimum(providerType, selector.Model) {
+	}{req.Tools, prefixMessages})
+	if err != nil || estimatedTokens(prefixBody) < minimum {
 		return req
 	}
 
@@ -56,8 +79,8 @@ func (p *cachePlanner) planChat(req *core.ChatRequest, providerType string, sele
 		return req
 	}
 	key := cacheAffinityKey(providerType, selector, req.User, prefixBody)
-	switch normalizedProviderType(providerType) {
-	case "openai":
+	switch profile.mode {
+	case promptCacheOpenAI:
 		planned.ExtraFields = mergeCacheExtras(planned.ExtraFields, map[string]json.RawMessage{
 			"prompt_cache_key": jsonString(key),
 		})
@@ -68,24 +91,25 @@ func (p *cachePlanner) planChat(req *core.ChatRequest, providerType string, sele
 				})
 			}
 		}
-	case "anthropic":
+	case promptCacheAnthropic:
 		planned.ExtraFields = mergeCacheExtras(planned.ExtraFields, map[string]json.RawMessage{
 			"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
 		})
-	case "bedrock":
-		markLastChatPrefix(&planned.Messages, cachePointField, json.RawMessage(`true`))
-	case "gemini", "vertex":
+	case promptCacheBedrock:
+		markLastChatPrefix(&planned.Messages, core.GatewayCachePointField, json.RawMessage(`true`))
+	case promptCacheGemini:
 		planned.PromptCachePlan = &core.PromptCachePlan{Key: key}
 	}
 	return planned
 }
 
 func (p *cachePlanner) planResponses(req *core.ResponsesRequest, providerType string, selector core.ModelSelector) *core.ResponsesRequest {
-	if req == nil {
+	profile := promptCacheProfileFor(providerType)
+	if p == nil || !p.enabled || req == nil || profile.mode == promptCacheUnsupported {
 		return req
 	}
 	items, ok := req.Input.([]core.ResponsesInputElement)
-	if !ok || len(items) < 2 || hasCacheDirective(req.ExtraFields) {
+	if !ok || len(items) < 2 || hasResponsesCacheDirective(req, items[:len(items)-1]) {
 		return req
 	}
 	prefixBody, err := json.Marshal(struct {
@@ -93,7 +117,7 @@ func (p *cachePlanner) planResponses(req *core.ResponsesRequest, providerType st
 		Tools        []map[string]any             `json:"tools,omitempty"`
 		Input        []core.ResponsesInputElement `json:"input"`
 	}{req.Instructions, req.Tools, items[:len(items)-1]})
-	if err != nil || estimatedTokens(prefixBody) < providerCacheMinimum(providerType, selector.Model) {
+	if err != nil || estimatedTokens(prefixBody) < providerCacheMinimum(profile, selector.Model) {
 		return req
 	}
 	planned, ok := cloneResponsesRequest(req)
@@ -101,8 +125,8 @@ func (p *cachePlanner) planResponses(req *core.ResponsesRequest, providerType st
 		return req
 	}
 	key := cacheAffinityKey(providerType, selector, req.User, prefixBody)
-	switch normalizedProviderType(providerType) {
-	case "openai":
+	switch profile.mode {
+	case promptCacheOpenAI:
 		planned.ExtraFields = mergeCacheExtras(planned.ExtraFields, map[string]json.RawMessage{
 			"prompt_cache_key": jsonString(key),
 		})
@@ -111,7 +135,7 @@ func (p *cachePlanner) planResponses(req *core.ResponsesRequest, providerType st
 				"prompt_cache_options": json.RawMessage(`{"mode":"explicit"}`),
 			})
 		}
-	case "anthropic":
+	case promptCacheAnthropic:
 		planned.ExtraFields = mergeCacheExtras(planned.ExtraFields, map[string]json.RawMessage{
 			"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
 		})
@@ -127,6 +151,10 @@ func cloneChatRequest(req *core.ChatRequest) (*core.ChatRequest, bool) {
 	var clone core.ChatRequest
 	if err := json.Unmarshal(body, &clone); err != nil {
 		return nil, false
+	}
+	if req.PromptCachePlan != nil {
+		plan := *req.PromptCachePlan
+		clone.PromptCachePlan = &plan
 	}
 	return &clone, true
 }
@@ -144,7 +172,7 @@ func cloneResponsesRequest(req *core.ResponsesRequest) (*core.ResponsesRequest, 
 }
 
 func hasCacheDirective(fields core.UnknownJSONFields) bool {
-	for _, key := range []string{"cache_control", "cached_content", "prompt_cache_key", "prompt_cache_options"} {
+	for _, key := range []string{"cache_control", "cached_content", "prompt_cache_key", "prompt_cache_options", "prompt_cache_breakpoint", core.GatewayCachePointField} {
 		if len(fields.Lookup(key)) > 0 {
 			return true
 		}
@@ -152,9 +180,120 @@ func hasCacheDirective(fields core.UnknownJSONFields) bool {
 	return false
 }
 
+func hasChatCacheDirective(req *core.ChatRequest, prefix []core.Message) bool {
+	if hasCacheDirective(req.ExtraFields) || anyHasCacheDirective(req.Tools) {
+		return true
+	}
+	for _, message := range prefix {
+		if hasCacheDirective(message.ExtraFields) {
+			return true
+		}
+		for _, call := range message.ToolCalls {
+			if hasCacheDirective(call.ExtraFields) || hasCacheDirective(call.Function.ExtraFields) {
+				return true
+			}
+		}
+		if contentHasCacheDirective(message.Content) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasResponsesCacheDirective(req *core.ResponsesRequest, prefix []core.ResponsesInputElement) bool {
+	if hasCacheDirective(req.ExtraFields) || anyHasCacheDirective(req.Tools) {
+		return true
+	}
+	for _, item := range prefix {
+		if hasCacheDirective(item.ExtraFields) || contentHasCacheDirective(item.Content) {
+			return true
+		}
+	}
+	return false
+}
+
+func contentHasCacheDirective(content any) bool {
+	switch typed := content.(type) {
+	case []core.ContentPart:
+		for _, part := range typed {
+			if hasCacheDirective(part.ExtraFields) ||
+				(part.ImageURL != nil && hasCacheDirective(part.ImageURL.ExtraFields)) ||
+				(part.InputAudio != nil && hasCacheDirective(part.InputAudio.ExtraFields)) {
+				return true
+			}
+		}
+		return false
+	default:
+		return anyHasCacheDirective(typed)
+	}
+}
+
+func anyHasCacheDirective(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if isCacheDirectiveKey(key) || anyHasCacheDirective(child) {
+				return true
+			}
+		}
+	case []any:
+		if slices.ContainsFunc(typed, anyHasCacheDirective) {
+			return true
+		}
+	case []map[string]any:
+		for _, child := range typed {
+			if anyHasCacheDirective(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isCacheDirectiveKey(key string) bool {
+	switch key {
+	case "cache_control", "cached_content", "prompt_cache_key", "prompt_cache_options", "prompt_cache_breakpoint", core.GatewayCachePointField:
+		return true
+	default:
+		return false
+	}
+}
+
+func estimateSimpleChatPrefixTokens(req *core.ChatRequest) (int, bool) {
+	if len(req.Tools) > 0 {
+		return 0, false
+	}
+	bytes := 0
+	for _, message := range req.Messages[:len(req.Messages)-1] {
+		bytes += len(message.Role) + len(message.ToolCallID) + 16
+		switch content := message.Content.(type) {
+		case string:
+			bytes += len(content)
+		case []core.ContentPart:
+			for _, part := range content {
+				if part.Type != "text" && part.Type != "input_text" {
+					return 0, false
+				}
+				bytes += len(part.Text) + 16
+			}
+		default:
+			return 0, false
+		}
+		if len(message.ToolCalls) > 0 {
+			return 0, false
+		}
+	}
+	return (bytes + 3) / 4, true
+}
+
 func markLastChatPrefix(messages *[]core.Message, field string, value json.RawMessage) {
 	for i := len(*messages) - 2; i >= 0; i-- {
 		msg := &(*messages)[i]
+		switch msg.Role {
+		case "system", "developer", "user", "assistant":
+		default:
+			continue
+		}
 		if strings.TrimSpace(core.ExtractTextContent(msg.Content)) == "" && len(msg.ToolCalls) == 0 {
 			continue
 		}
@@ -214,7 +353,7 @@ func markOpenAIResponsesBreakpoint(req *core.ResponsesRequest) bool {
 			return true
 		case []core.ContentPart:
 			for j := len(content) - 1; j >= 0; j-- {
-				if content[j].Type == "input_text" || content[j].Type == "input_image" || content[j].Type == "input_file" {
+				if content[j].Type == "text" || content[j].Type == "input_text" || content[j].Type == "input_image" || content[j].Type == "input_file" {
 					content[j].ExtraFields = mergeCacheExtras(content[j].ExtraFields, map[string]json.RawMessage{
 						"prompt_cache_breakpoint": json.RawMessage(`{"mode":"explicit"}`),
 					})
@@ -230,9 +369,21 @@ func markOpenAIResponsesBreakpoint(req *core.ResponsesRequest) bool {
 					continue
 				}
 				blockType, _ := block["type"].(string)
-				if blockType == "input_text" || blockType == "input_image" || blockType == "input_file" {
+				if blockType == "text" || blockType == "input_text" || blockType == "input_image" || blockType == "input_file" {
 					if _, exists := block["prompt_cache_breakpoint"]; !exists {
 						block["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
+					}
+					items[i].Content = content
+					req.Input = items
+					return true
+				}
+			}
+		case []map[string]any:
+			for j := len(content) - 1; j >= 0; j-- {
+				blockType, _ := content[j]["type"].(string)
+				if blockType == "text" || blockType == "input_text" || blockType == "input_image" || blockType == "input_file" {
+					if _, exists := content[j]["prompt_cache_breakpoint"]; !exists {
+						content[j]["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
 					}
 					items[i].Content = content
 					req.Input = items
@@ -274,13 +425,12 @@ func cacheAffinityKey(providerType string, selector core.ModelSelector, user str
 
 func estimatedTokens(body []byte) int { return (len(body) + 3) / 4 }
 
-func providerCacheMinimum(providerType, model string) int {
-	providerType = normalizedProviderType(providerType)
+func providerCacheMinimum(profile promptCacheProfile, model string) int {
 	model = strings.ToLower(model)
-	switch providerType {
-	case "openai":
+	switch profile.mode {
+	case promptCacheOpenAI:
 		return 1024
-	case "anthropic":
+	case promptCacheAnthropic:
 		if strings.Contains(model, "haiku-3") && !strings.Contains(model, "3-5") && !strings.Contains(model, "3.5") {
 			return 4096
 		}
@@ -288,12 +438,35 @@ func providerCacheMinimum(providerType, model string) int {
 			return 2048
 		}
 		return 1024
-	case "gemini", "vertex":
+	case promptCacheGemini:
 		return 4096
-	case "bedrock":
-		return 1024
+	case promptCacheBedrock:
+		if strings.Contains(model, "nova") {
+			return 1536
+		}
+		if strings.Contains(model, "claude") {
+			return 1024
+		}
+		return int(^uint(0) >> 1)
 	default:
 		return int(^uint(0) >> 1)
+	}
+}
+
+func promptCacheProfileFor(providerType string) promptCacheProfile {
+	switch normalizedProviderType(providerType) {
+	case "openai":
+		return promptCacheProfile{mode: promptCacheOpenAI}
+	case "anthropic":
+		return promptCacheProfile{mode: promptCacheAnthropic, acceptsAnthropicCacheControl: true}
+	case "openrouter":
+		return promptCacheProfile{acceptsAnthropicCacheControl: true}
+	case "bedrock":
+		return promptCacheProfile{mode: promptCacheBedrock}
+	case "gemini":
+		return promptCacheProfile{mode: promptCacheGemini}
+	default:
+		return promptCacheProfile{}
 	}
 }
 

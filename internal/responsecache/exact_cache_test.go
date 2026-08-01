@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -24,6 +25,38 @@ type concurrentTrackingStore struct {
 	maxConcurrent atomic.Int32
 	enterCh       chan struct{}
 	releaseCh     chan struct{}
+}
+
+type blockingMissExchange struct {
+	ctx          context.Context
+	started      chan<- struct{}
+	release      <-chan struct{}
+	joined       chan struct{}
+	contextCalls atomic.Int32
+}
+
+func (e *blockingMissExchange) Context() context.Context {
+	if e.joined != nil && e.contextCalls.Add(1) == 2 {
+		close(e.joined)
+	}
+	return e.ctx
+}
+func (e *blockingMissExchange) Path() string                           { return "/v1/chat/completions" }
+func (e *blockingMissExchange) Method() string                         { return http.MethodPost }
+func (e *blockingMissExchange) RequestHeader(string) string            { return "" }
+func (e *blockingMissExchange) MarkHit(string)                         {}
+func (e *blockingMissExchange) ReplayHit([]byte, []byte, string) error { return nil }
+func (e *blockingMissExchange) Capture(_ string, next func() error) ([]byte, bool, error) {
+	if e.started != nil {
+		e.started <- struct{}{}
+	}
+	if e.release != nil {
+		<-e.release
+	}
+	if err := next(); err != nil {
+		return nil, false, err
+	}
+	return []byte(`{"ok":true}`), true, nil
 }
 
 func newConcurrentTrackingStore() *concurrentTrackingStore {
@@ -86,6 +119,20 @@ func driveHandleRequest(
 	next func(c *echo.Context) error,
 ) *httptest.ResponseRecorder {
 	t.Helper()
+	rec, err := driveHandleRequestResult(mw, workflow, body, headers, next)
+	if err != nil {
+		t.Fatalf("HandleRequest: %v", err)
+	}
+	return rec
+}
+
+func driveHandleRequestResult(
+	mw *ResponseCacheMiddleware,
+	workflow *core.Workflow,
+	body []byte,
+	headers map[string]string,
+	next func(c *echo.Context) error,
+) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -97,10 +144,8 @@ func driveHandleRequest(
 	}
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	if err := mw.HandleRequest(c, body, func() error { return next(c) }); err != nil {
-		t.Fatalf("HandleRequest: %v", err)
-	}
-	return rec
+	err := mw.HandleRequest(c, body, func() error { return next(c) })
+	return rec, err
 }
 
 func TestHandleRequest_ExactCacheHit(t *testing.T) {
@@ -165,60 +210,142 @@ func TestHandleRequest_DifferentBodyDifferentKey(t *testing.T) {
 	}
 }
 
-func TestHandleRequest_CoalescesConcurrentIdenticalMisses(t *testing.T) {
-	store := cache.NewMapStore()
-	defer store.Close()
-	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
-	workflow := resolvedWorkflow("openai", "gpt-4")
+func TestStoreAfter_CoalescesConcurrentIdenticalMisses(t *testing.T) {
+	m := newSimpleCacheMiddleware(cache.NewMapStore(), time.Hour, nil)
+	defer m.close()
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"same"}]}`)
-
 	var calls atomic.Int32
-	started := make(chan struct{})
+	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	next := func(c *echo.Context) error {
-		if calls.Add(1) == 1 {
-			close(started)
-		}
-		<-release
-		return c.JSON(http.StatusOK, map[string]string{"result": "shared"})
-	}
-
 	const requests = 12
-	recorders := make([]*httptest.ResponseRecorder, requests)
+	errs := make([]error, requests)
 	var wg sync.WaitGroup
-	for i := range requests {
+	wg.Go(func() {
+		errs[0] = m.StoreAfter(&blockingMissExchange{
+			ctx: context.Background(), started: started, release: release,
+		}, body, func() error {
+			calls.Add(1)
+			return nil
+		})
+	})
+	<-started
+
+	joined := make([]chan struct{}, requests-1)
+	for i := 1; i < requests; i++ {
+		joined[i-1] = make(chan struct{})
 		wg.Go(func() {
-			recorders[i] = driveHandleRequest(t, mw, workflow, body, nil, next)
+			errs[i] = m.StoreAfter(&blockingMissExchange{
+				ctx: context.Background(), joined: joined[i-1],
+			}, body, func() error {
+				calls.Add(1)
+				return nil
+			})
 		})
 	}
-	<-started
-	time.Sleep(20 * time.Millisecond)
+	for _, waiter := range joined {
+		<-waiter
+	}
 	close(release)
 	wg.Wait()
 
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("provider calls = %d, want one coalesced miss", got)
 	}
-	hits := 0
-	for i, rec := range recorders {
-		if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte("shared")) {
-			t.Fatalf("response %d = status %d body %q", i, rec.Code, rec.Body.String())
-		}
-		if rec.Header().Get("X-Cache") == "HIT (exact)" {
-			hits++
+	for i := range requests {
+		if errs[i] != nil {
+			t.Fatalf("request %d: %v", i, errs[i])
 		}
 	}
-	if hits != requests-1 {
-		t.Fatalf("coalesced hit responses = %d, want %d", hits, requests-1)
+}
+
+func TestStoreAfter_CanceledFollowerDoesNotWaitForLeader(t *testing.T) {
+	store := cache.NewMapStore()
+	m := newSimpleCacheMiddleware(store, time.Hour, nil)
+	defer m.close()
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"same"}]}`)
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	leaderDone := make(chan error, 1)
+	go func() {
+		leaderDone <- m.StoreAfter(&blockingMissExchange{
+			ctx: context.Background(), started: started, release: release,
+		}, body, func() error { return nil })
+	}()
+	<-started
+
+	followerCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	follower := &blockingMissExchange{ctx: followerCtx}
+	if err := m.StoreAfter(follower, body, func() error { return nil }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled follower error = %v, want context.Canceled", err)
+	}
+	close(release)
+	if err := <-leaderDone; err != nil {
+		t.Fatalf("leader error: %v", err)
+	}
+}
+
+func TestStoreAfter_LeaderErrorIsNotFannedOut(t *testing.T) {
+	m := newSimpleCacheMiddleware(cache.NewMapStore(), time.Hour, nil)
+	defer m.close()
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"same"}]}`)
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	leaderErr := errors.New("first provider failed")
+	leaderDone := make(chan error, 1)
+	go func() {
+		leaderDone <- m.StoreAfter(&blockingMissExchange{
+			ctx: context.Background(), started: started, release: release,
+		}, body, func() error { return leaderErr })
+	}()
+	<-started
+
+	joined := make(chan struct{})
+	var followerCalls atomic.Int32
+	followerDone := make(chan error, 1)
+	go func() {
+		followerDone <- m.StoreAfter(&blockingMissExchange{
+			ctx: context.Background(), joined: joined,
+		}, body, func() error {
+			followerCalls.Add(1)
+			return nil
+		})
+	}()
+	<-joined
+	close(release)
+	if err := <-leaderDone; !errors.Is(err, leaderErr) {
+		t.Fatalf("leader error = %v, want %v", err, leaderErr)
+	}
+	if err := <-followerDone; err != nil {
+		t.Fatalf("follower inherited leader error: %v", err)
+	}
+	if got := followerCalls.Load(); got != 1 {
+		t.Fatalf("follower provider calls = %d, want independent retry", got)
 	}
 }
 
 func TestHashRequest_CanonicalizesJSONFormattingAndKeyOrder(t *testing.T) {
 	plan := resolvedWorkflow("openai", "gpt-4")
-	compact := []byte(`{"input":[1,2],"model":"gpt-4"}`)
-	formatted := []byte("{\n  \"model\": \"gpt-4\",\n  \"input\": [1, 2]\n}")
-	if first, second := hashRequest("/v1/embeddings", compact, plan), hashRequest("/v1/embeddings", formatted, plan); first != second {
-		t.Fatalf("canonical-equivalent JSON produced different keys: %s != %s", first, second)
+	for _, tt := range []struct {
+		name   string
+		first  string
+		second string
+		equal  bool
+	}{
+		{name: "formatting and key order", first: `{"input":[1,2],"model":"gpt-4"}`, second: "{\n  \"model\": \"gpt-4\",\n  \"input\": [1, 2]\n}", equal: true},
+		{name: "nested key order", first: `{"input":{"b":2,"a":1},"model":"gpt-4"}`, second: `{"model":"gpt-4","input":{"a":1,"b":2}}`, equal: true},
+		{name: "number spelling preserved", first: `{"input":1,"model":"gpt-4"}`, second: `{"input":1.0,"model":"gpt-4"}`, equal: false},
+		{name: "array order matters", first: `{"input":[1,2],"model":"gpt-4"}`, second: `{"input":[2,1],"model":"gpt-4"}`, equal: false},
+		{name: "malformed falls back exactly", first: `{"input":`, second: ` {"input":`, equal: false},
+		{name: "multiple values fall back exactly", first: `{"a":1} {"b":2}`, second: `{"a":1}  {"b":2}`, equal: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			first := hashRequest("/v1/embeddings", []byte(tt.first), plan)
+			second := hashRequest("/v1/embeddings", []byte(tt.second), plan)
+			if got := first == second; got != tt.equal {
+				t.Fatalf("key equality = %v, want %v: %s / %s", got, tt.equal, first, second)
+			}
+		})
 	}
 }
 
