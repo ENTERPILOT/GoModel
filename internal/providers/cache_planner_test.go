@@ -23,6 +23,7 @@ func TestCachePlannerAppliesProviderSpecificChatPlanWithoutMutatingCaller(t *tes
 		{provider: "openai", model: "gpt-5.6", field: "prompt_cache_key"},
 		{provider: "anthropic", model: "claude-sonnet-4-5", field: "cache_control"},
 		{provider: "bedrock", model: "anthropic.claude-sonnet-4-5", marker: core.GatewayCachePointField},
+		{provider: "bedrock-mantle", model: "gpt-5.6", field: "prompt_cache_key"},
 		{provider: "gemini", model: "gemini-2.5-pro"},
 	}
 	for _, tt := range tests {
@@ -44,7 +45,7 @@ func TestCachePlannerAppliesProviderSpecificChatPlanWithoutMutatingCaller(t *tes
 			if tt.provider == "gemini" && (planned.PromptCachePlan == nil || planned.PromptCachePlan.Key == "") {
 				t.Fatal("Gemini plan lacks an internal cached-content key")
 			}
-			if tt.provider == "openai" {
+			if promptCacheProfileFor(tt.provider).mode == promptCacheOpenAI {
 				parts, ok := planned.Messages[0].Content.([]core.ContentPart)
 				if !ok || len(parts) != 1 || len(parts[0].ExtraFields.Lookup("prompt_cache_breakpoint")) == 0 {
 					t.Fatalf("OpenAI stable content lacks a breakpoint: %#v", planned.Messages[0].Content)
@@ -52,6 +53,33 @@ func TestCachePlannerAppliesProviderSpecificChatPlanWithoutMutatingCaller(t *tes
 			}
 			if !req.ExtraFields.IsEmpty() || !req.Messages[0].ExtraFields.IsEmpty() {
 				t.Fatal("planner mutated caller-owned request")
+			}
+		})
+	}
+}
+
+func TestProviderCacheMinimumByModelGeneration(t *testing.T) {
+	for _, tt := range []struct {
+		provider string
+		model    string
+		want     int
+	}{
+		{provider: "anthropic", model: "claude-haiku-4-5-20251001", want: 4096},
+		{provider: "anthropic", model: "claude-haiku-3-5-latest", want: 2048},
+		{provider: "anthropic", model: "claude-3-haiku-20240307", want: 2048},
+		{provider: "anthropic", model: "claude-opus-4-5-20251101", want: 4096},
+		{provider: "anthropic", model: "claude-opus-4.6", want: 4096},
+		{provider: "anthropic", model: "claude-opus-4-7", want: 2048},
+		{provider: "anthropic", model: "claude-sonnet-4-5", want: 1024},
+		{provider: "bedrock", model: "anthropic.claude-haiku-4-5-20251001-v1:0", want: 4096},
+		{provider: "bedrock", model: "anthropic.claude-sonnet-4-5-20250929-v1:0", want: 4096},
+		{provider: "bedrock", model: "anthropic.claude-sonnet-4-6", want: 1024},
+		{provider: "bedrock-mantle", model: "openai.gpt-5.6-sol", want: 1024},
+	} {
+		t.Run(tt.provider+"/"+tt.model, func(t *testing.T) {
+			profile := promptCacheProfileFor(tt.provider)
+			if got := providerCacheMinimum(profile, tt.model); got != tt.want {
+				t.Fatalf("providerCacheMinimum() = %d, want %d", got, tt.want)
 			}
 		})
 	}
@@ -197,5 +225,36 @@ func TestCloneChatRequestPreservesInternalCachePlan(t *testing.T) {
 	}
 	if clone.PromptCachePlan == req.PromptCachePlan {
 		t.Fatal("clone aliases internal cache metadata")
+	}
+}
+
+func TestGeminiPlanKeyIncludesEntireNativePrefixAndBoundary(t *testing.T) {
+	planner := &cachePlanner{enabled: true}
+	makeRequest := func(system, boundary, toolName string) *core.ChatRequest {
+		return &core.ChatRequest{
+			Model: "gemini-2.5-pro",
+			Messages: []core.Message{
+				{Role: "system", Content: strings.Repeat(system, 5000)},
+				{Role: "user", Content: boundary},
+				{Role: "user", Content: "live"},
+			},
+			Tools: []map[string]any{{"type": "function", "function": map[string]any{"name": toolName}}},
+		}
+	}
+	keys := make(map[string]struct{})
+	for _, req := range []*core.ChatRequest{
+		makeRequest("system-a", "boundary-a", "lookup"),
+		makeRequest("system-b", "boundary-a", "lookup"),
+		makeRequest("system-a", "boundary-b", "lookup"),
+		makeRequest("system-a", "boundary-a", "search"),
+	} {
+		planned := planner.planChat(req, "gemini", core.ModelSelector{Provider: "gemini-primary", Model: req.Model})
+		if planned.PromptCachePlan == nil || planned.PromptCachePlan.Key == "" {
+			t.Fatal("Gemini request was not planned")
+		}
+		keys[planned.PromptCachePlan.Key] = struct{}{}
+	}
+	if len(keys) != 4 {
+		t.Fatalf("system, boundary, or tools were omitted from Gemini keys: %v", keys)
 	}
 }

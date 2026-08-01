@@ -35,6 +35,9 @@ type blockingMissExchange struct {
 	contextCalls atomic.Int32
 }
 
+// Context deliberately signals on StoreAfter's second Context call: the first
+// reads the workflow and the second occurs after a follower joins the wait.
+// Update this helper if StoreAfter's pre-wait call count changes.
 func (e *blockingMissExchange) Context() context.Context {
 	if e.joined != nil && e.contextCalls.Add(1) == 2 {
 		close(e.joined)

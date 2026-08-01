@@ -595,12 +595,13 @@ func (p *Provider) prepareCachedContent(ctx context.Context, req *core.ChatReque
 			SystemInstruction: body.SystemInstruction,
 			Contents:          append([]geminiContent(nil), body.Contents[:len(body.Contents)-1]...),
 			Tools:             append([]geminiTool(nil), body.Tools...),
-			TTL:               "300s",
+			TTL:               fmt.Sprintf("%ds", geminiCacheTTL/time.Second),
 		}
 		var created geminiCreateCachedContentResponse
 		err := p.nativeClient.Do(createCtx, llmclient.Request{
 			Method: http.MethodPost, Endpoint: "/cachedContents", Body: &createReq,
 		}, &created)
+		now = time.Now()
 		if err != nil || strings.TrimSpace(created.Name) == "" {
 			if err == nil {
 				err = fmt.Errorf("cached-content creation returned an empty name")

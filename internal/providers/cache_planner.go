@@ -426,12 +426,18 @@ func cacheAffinityKey(providerType string, selector core.ModelSelector, user str
 func estimatedTokens(body []byte) int { return (len(body) + 3) / 4 }
 
 func providerCacheMinimum(profile promptCacheProfile, model string) int {
-	model = strings.ToLower(model)
+	model = strings.NewReplacer(".", "-", "_", "-").Replace(strings.ToLower(model))
 	switch profile.mode {
 	case promptCacheOpenAI:
 		return 1024
 	case promptCacheAnthropic:
-		if strings.Contains(model, "haiku-3") && !strings.Contains(model, "3-5") && !strings.Contains(model, "3.5") {
+		if strings.Contains(model, "fable-5") || strings.Contains(model, "mythos-5") {
+			return 512
+		}
+		if strings.Contains(model, "mythos-preview") || strings.Contains(model, "opus-4-7") {
+			return 2048
+		}
+		if strings.Contains(model, "haiku-4-5") || strings.Contains(model, "opus-4-5") || strings.Contains(model, "opus-4-6") {
 			return 4096
 		}
 		if strings.Contains(model, "haiku") {
@@ -445,6 +451,10 @@ func providerCacheMinimum(profile promptCacheProfile, model string) int {
 			return 1536
 		}
 		if strings.Contains(model, "claude") {
+			if strings.Contains(model, "haiku-4-5") || strings.Contains(model, "sonnet-4-5") ||
+				strings.Contains(model, "opus-4-5") || strings.Contains(model, "opus-4-6") {
+				return 4096
+			}
 			return 1024
 		}
 		return int(^uint(0) >> 1)
@@ -463,6 +473,10 @@ func promptCacheProfileFor(providerType string) promptCacheProfile {
 		return promptCacheProfile{acceptsAnthropicCacheControl: true}
 	case "bedrock":
 		return promptCacheProfile{mode: promptCacheBedrock}
+	case "bedrock-mantle":
+		// Mantle exposes Bedrock models through the OpenAI-compatible cache
+		// fields, not Converse cachePoint blocks.
+		return promptCacheProfile{mode: promptCacheOpenAI}
 	case "gemini":
 		return promptCacheProfile{mode: promptCacheGemini}
 	default:
