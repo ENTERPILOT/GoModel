@@ -470,6 +470,47 @@ func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
 	}
 }
 
+func TestApplyProviderEnvVars_SessionStickyKeys(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-primary")
+	t.Setenv("OPENAI_API_KEY_2", "sk-secondary")
+	t.Setenv("OPENAI_SESSION_STICKY_KEYS", "false")
+	t.Setenv("OPENAI_EU_API_KEY", "sk-eu")
+	t.Setenv("OPENAI_EU_SESSION_STICKY_KEYS", "true")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	if sticky := got["openai"].SessionStickyKeys; sticky == nil || *sticky {
+		t.Fatalf("openai SessionStickyKeys = %v, want false", sticky)
+	}
+	if sticky := got["openai-eu"].SessionStickyKeys; sticky == nil || !*sticky {
+		t.Fatalf("openai-eu SessionStickyKeys = %v, want true", sticky)
+	}
+}
+
+func TestApplyProviderEnvVars_SessionStickyKeysOverridesYAML(t *testing.T) {
+	disabled := false
+	t.Setenv("OPENAI_API_KEY", "sk-env")
+	t.Setenv("OPENAI_SESSION_STICKY_KEYS", "true")
+	raw := map[string]config.RawProviderConfig{
+		"openai": {Type: "openai", APIKey: "sk-yaml", SessionStickyKeys: &disabled},
+	}
+
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	sticky := got["openai"].SessionStickyKeys
+	if sticky == nil || !*sticky {
+		t.Fatalf("SessionStickyKeys = %v, want env override true", sticky)
+	}
+}
+
+func TestApplyProviderEnvVars_IgnoresInvalidSessionStickyKeys(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-env")
+	t.Setenv("OPENAI_SESSION_STICKY_KEYS", "sometimes")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	if sticky := got["openai"].SessionStickyKeys; sticky != nil {
+		t.Fatalf("SessionStickyKeys = %v, want invalid value ignored", *sticky)
+	}
+}
+
 func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {
 	t.Setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 

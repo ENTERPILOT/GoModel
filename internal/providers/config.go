@@ -142,6 +142,7 @@ const (
 	providerEnvFieldServiceAccountJSON
 	providerEnvFieldServiceAccountJSONBase64
 	providerEnvFieldGCPScope
+	providerEnvFieldSessionStickyKeys
 )
 
 type providerEnvSource struct {
@@ -169,6 +170,7 @@ type providerEnvValues struct {
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
 	Models                   []string
+	SessionStickyKeys        *bool
 }
 
 // apiKeys returns the ordered key set this env group declares: the unsuffixed
@@ -234,6 +236,7 @@ func (v providerEnvValues) empty() bool {
 		strings.TrimSpace(v.ServiceAccountJSON) == "" &&
 		strings.TrimSpace(v.ServiceAccountJSONBase64) == "" &&
 		strings.TrimSpace(v.GCPScope) == "" &&
+		v.SessionStickyKeys == nil &&
 		len(v.Models) == 0
 }
 
@@ -300,6 +303,10 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 			values.ServiceAccountJSONBase64 = value
 		case providerEnvFieldGCPScope:
 			values.GCPScope = value
+		case providerEnvFieldSessionStickyKeys:
+			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+				values.SessionStickyKeys = &parsed
+			}
 		}
 		groups[suffix] = values
 	}
@@ -345,6 +352,7 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		name  string
 		field providerEnvField
 	}{
+		{name: "SESSION_STICKY_KEYS", field: providerEnvFieldSessionStickyKeys},
 		{name: "API_VERSION", field: providerEnvFieldAPIVersion},
 		{name: "BASE_URL", field: providerEnvFieldBaseURL},
 		{name: "AUTH_TYPE", field: providerEnvFieldAuthType},
@@ -509,6 +517,7 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		ServiceAccountJSONBase64: v.ServiceAccountJSONBase64,
 		GCPScope:                 v.GCPScope,
 		Models:                   rawProviderModelsFromIDs(v.Models),
+		SessionStickyKeys:        v.SessionStickyKeys,
 	}
 }
 
@@ -562,6 +571,9 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	}
 	if values.GCPScope != "" {
 		existing.GCPScope = values.GCPScope
+	}
+	if values.SessionStickyKeys != nil {
+		existing.SessionStickyKeys = values.SessionStickyKeys
 	}
 	if len(values.Models) > 0 {
 		existing.Models = rawProviderModelsFromIDs(values.Models)

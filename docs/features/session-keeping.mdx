@@ -89,7 +89,9 @@ sessions expire after 6 hours.
 
 API-key affinity is deterministic rather than stored, so the same ordered key
 set selects the same key across replicas and restarts. Disable it per provider
-with `session_sticky_keys: false` or the dashboard's **Session-sticky API keys**
+with `session_sticky_keys: false`,
+`<PROVIDER>[_SUFFIX]_SESSION_STICKY_KEYS=false`, or the dashboard's
+**Session-sticky API keys**
 checkbox. Requests with no detected session remain round robin.
 
 ## Threaded audit logs

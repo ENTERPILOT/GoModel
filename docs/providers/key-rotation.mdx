@@ -55,6 +55,19 @@ providers:
     session_sticky_keys: false
 ```
 
+Environment-only provider instances use the same provider prefix and optional
+suffix as their API keys:
+
+```bash
+OPENAI_API_KEY=sk-primary
+OPENAI_API_KEY_2=sk-secondary
+OPENAI_SESSION_STICKY_KEYS=false
+
+OPENAI_EU_API_KEY=sk-eu-primary
+OPENAI_EU_API_KEY_2=sk-eu-secondary
+OPENAI_EU_SESSION_STICKY_KEYS=false
+```
+
 The same setting is the **Session-sticky API keys** checkbox in the dashboard's
 provider editor. It is checked by default.
 
