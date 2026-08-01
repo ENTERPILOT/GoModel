@@ -448,12 +448,15 @@ export function buildProviderCredentialPayload(form, schema) {
     enabled: Boolean(form && form.enabled),
   };
   const { primary, advanced } = providerCredentialFormFields(schema);
+  const hasAdvertisedFields = Boolean(
+    schema && Array.isArray(schema.fields) && schema.fields.length > 0,
+  );
   const rendered = new Set();
   for (const field of [...primary, ...advanced]) {
     // A missing schema is the compatibility fallback for gateways that predate
     // this capability. Do not send the new toggle unless the gateway explicitly
     // advertised it.
-    if (!schema && field.name === FIELD_SESSION_STICKY_KEYS) {
+    if (!hasAdvertisedFields && field.name === FIELD_SESSION_STICKY_KEYS) {
       continue;
     }
     rendered.add(field.name);

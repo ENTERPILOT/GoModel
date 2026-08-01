@@ -471,43 +471,70 @@ func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
 }
 
 func TestApplyProviderEnvVars_SessionStickyKeys(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "sk-primary")
-	t.Setenv("OPENAI_API_KEY_2", "sk-secondary")
-	t.Setenv("OPENAI_SESSION_STICKY_KEYS", "false")
-	t.Setenv("OPENAI_EU_API_KEY", "sk-eu")
-	t.Setenv("OPENAI_EU_SESSION_STICKY_KEYS", "true")
-
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-	if sticky := got["openai"].SessionStickyKeys; sticky == nil || *sticky {
-		t.Fatalf("openai SessionStickyKeys = %v, want false", sticky)
-	}
-	if sticky := got["openai-eu"].SessionStickyKeys; sticky == nil || !*sticky {
-		t.Fatalf("openai-eu SessionStickyKeys = %v, want true", sticky)
-	}
-}
-
-func TestApplyProviderEnvVars_SessionStickyKeysOverridesYAML(t *testing.T) {
 	disabled := false
-	t.Setenv("OPENAI_API_KEY", "sk-env")
-	t.Setenv("OPENAI_SESSION_STICKY_KEYS", "true")
-	raw := map[string]config.RawProviderConfig{
-		"openai": {Type: "openai", APIKey: "sk-yaml", SessionStickyKeys: &disabled},
+	tests := []struct {
+		name     string
+		env      map[string]string
+		raw      map[string]config.RawProviderConfig
+		provider string
+		want     bool
+		wantNil  bool
+	}{
+		{
+			name:     "unsuffixed false",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-primary", "OPENAI_SESSION_STICKY_KEYS": "false"},
+			provider: "openai",
+		},
+		{
+			name:     "suffixed true",
+			env:      map[string]string{"OPENAI_EU_API_KEY": "sk-eu", "OPENAI_EU_SESSION_STICKY_KEYS": "true"},
+			provider: "openai-eu",
+			want:     true,
+		},
+		{
+			name:     "environment overrides yaml",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-env", "OPENAI_SESSION_STICKY_KEYS": "true"},
+			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-yaml", SessionStickyKeys: &disabled}},
+			provider: "openai",
+			want:     true,
+		},
+		{
+			name:     "unset keeps default unspecified",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-env"},
+			provider: "openai",
+			wantNil:  true,
+		},
+		{
+			name:     "invalid is ignored",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-env", "OPENAI_SESSION_STICKY_KEYS": "sometimes"},
+			provider: "openai",
+			wantNil:  true,
+		},
+		{
+			name:     "invalid preserves yaml",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-env", "OPENAI_SESSION_STICKY_KEYS": "sometimes"},
+			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-yaml", SessionStickyKeys: &disabled}},
+			provider: "openai",
+		},
 	}
 
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
-	sticky := got["openai"].SessionStickyKeys
-	if sticky == nil || !*sticky {
-		t.Fatalf("SessionStickyKeys = %v, want env override true", sticky)
-	}
-}
-
-func TestApplyProviderEnvVars_IgnoresInvalidSessionStickyKeys(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "sk-env")
-	t.Setenv("OPENAI_SESSION_STICKY_KEYS", "sometimes")
-
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-	if sticky := got["openai"].SessionStickyKeys; sticky != nil {
-		t.Fatalf("SessionStickyKeys = %v, want invalid value ignored", *sticky)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			got := applyProviderEnvVars(tt.raw, testDiscoveryConfigs)
+			sticky := got[tt.provider].SessionStickyKeys
+			if tt.wantNil {
+				if sticky != nil {
+					t.Fatalf("SessionStickyKeys = %v, want nil", *sticky)
+				}
+				return
+			}
+			if sticky == nil || *sticky != tt.want {
+				t.Fatalf("SessionStickyKeys = %v, want %v", sticky, tt.want)
+			}
+		})
 	}
 }
 

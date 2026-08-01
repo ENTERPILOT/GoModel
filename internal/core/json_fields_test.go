@@ -279,6 +279,33 @@ func TestMergedJSONObjectCap_Overflow(t *testing.T) {
 	}
 }
 
+func TestCloneOptionalJSONObject(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     json.RawMessage
+		want    string
+		wantErr bool
+	}{
+		{name: "empty"},
+		{name: "null", raw: json.RawMessage(` null `)},
+		{name: "object", raw: json.RawMessage(` {"type":"ephemeral"} `), want: `{"type":"ephemeral"}`},
+		{name: "array", raw: json.RawMessage(`[]`), wantErr: true},
+		{name: "invalid object", raw: json.RawMessage(`{"type":`), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := CloneOptionalJSONObject(tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CloneOptionalJSONObject() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("CloneOptionalJSONObject() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractUnknownJSONFields_DoesNotRetainBodySizedCapacity(t *testing.T) {
 	// A large request with tiny unknown extras: the retained raw bytes are
 	// kept for the decoded request's whole lifetime, so they must not pin a

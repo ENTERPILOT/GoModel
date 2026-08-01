@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -561,74 +562,109 @@ func TestRouterChatCompletion_ProviderSelector(t *testing.T) {
 }
 
 func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing.T) {
-	cacheExtra := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-		"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
-		"x_keep":        json.RawMessage(`true`),
-	})
-	request := &core.ChatRequest{
-		Model:       "gpt-4o",
-		ExtraFields: cacheExtra,
-		Tools: []map[string]any{{
-			"type":          "function",
-			"function":      map[string]any{"name": "lookup"},
-			"cache_control": map[string]any{"type": "ephemeral"},
-		}},
-		Messages: []core.Message{{
-			Role:        "assistant",
-			ExtraFields: cacheExtra,
-			Content: []core.ContentPart{{
-				Type:        "text",
-				Text:        "stable prefix",
+	tests := []struct {
+		providerType string
+		wantCache    bool
+	}{
+		{providerType: "openai"},
+		{providerType: "anthropic", wantCache: true},
+		{providerType: "openrouter", wantCache: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.providerType, func(t *testing.T) {
+			cacheExtra := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+				"x_keep":        json.RawMessage(`true`),
+			})
+			request := &core.ChatRequest{
+				Model:       "gpt-4o",
 				ExtraFields: cacheExtra,
-			}},
-			ToolCalls: []core.ToolCall{{
-				ID:          "tool-1",
-				Type:        "function",
-				ExtraFields: cacheExtra,
-				Function: core.FunctionCall{
-					Name:        "lookup",
-					Arguments:   `{}`,
-					ExtraFields: cacheExtra,
+				Tools: []map[string]any{{
+					"type":          "function",
+					"function":      map[string]any{"name": "lookup"},
+					"cache_control": map[string]any{"type": "ephemeral"},
+				}},
+				Messages: []core.Message{
+					{
+						Role:        "assistant",
+						ExtraFields: cacheExtra,
+						Content: []core.ContentPart{{
+							Type:        "text",
+							Text:        "stable prefix",
+							ExtraFields: cacheExtra,
+						}},
+						ToolCalls: []core.ToolCall{{
+							ID:          "tool-1",
+							Type:        "function",
+							ExtraFields: cacheExtra,
+							Function: core.FunctionCall{
+								Name:        "lookup",
+								Arguments:   `{}`,
+								ExtraFields: cacheExtra,
+							},
+						}},
+					},
+					{
+						Role:        "tool",
+						ToolCallID:  "tool-1",
+						ExtraFields: cacheExtra,
+						Content: []core.ContentPart{{
+							Type:        "text",
+							Text:        "tool result",
+							ExtraFields: cacheExtra,
+						}},
+					},
 				},
-			}},
-		}},
-	}
+			}
+			before, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	strict := &mockProvider{name: "strict", chatResponse: &core.ChatResponse{ID: "ok"}}
-	lookup := newMockLookup()
-	lookup.addModel("gpt-4o", strict, "openai")
-	router, _ := NewRouter(lookup)
-	if _, err := router.ChatCompletion(context.Background(), request); err != nil {
-		t.Fatal(err)
-	}
+			provider := &mockProvider{name: tt.providerType, chatResponse: &core.ChatResponse{ID: "ok"}}
+			lookup := newMockLookup()
+			lookup.addModel("gpt-4o", provider, tt.providerType)
+			router, _ := NewRouter(lookup)
+			if _, err := router.ChatCompletion(context.Background(), request); err != nil {
+				t.Fatal(err)
+			}
 
-	forwarded := strict.lastChatReq
-	if forwarded == nil {
-		t.Fatal("strict provider did not receive a request")
-	}
-	assertNoCacheControl := func(label string, fields core.UnknownJSONFields) {
-		t.Helper()
-		if got := fields.Lookup("cache_control"); got != nil {
-			t.Errorf("%s cache_control = %s, want removed", label, got)
-		}
-		if got := string(fields.Lookup("x_keep")); got != "true" {
-			t.Errorf("%s x_keep = %s, want preserved", label, got)
-		}
-	}
-	assertNoCacheControl("request", forwarded.ExtraFields)
-	if _, exists := forwarded.Tools[0]["cache_control"]; exists {
-		t.Error("tool cache_control was forwarded to strict provider")
-	}
-	assertNoCacheControl("message", forwarded.Messages[0].ExtraFields)
-	part := forwarded.Messages[0].Content.([]core.ContentPart)[0]
-	assertNoCacheControl("content part", part.ExtraFields)
-	call := forwarded.Messages[0].ToolCalls[0]
-	assertNoCacheControl("tool call", call.ExtraFields)
-	assertNoCacheControl("function call", call.Function.ExtraFields)
+			forwarded := provider.lastChatReq
+			if forwarded == nil {
+				t.Fatal("provider did not receive a request")
+			}
+			assertFields := func(label string, fields core.UnknownJSONFields) {
+				t.Helper()
+				hasCache := len(fields.Lookup("cache_control")) > 0
+				if hasCache != tt.wantCache {
+					t.Errorf("%s cache_control present = %v, want %v", label, hasCache, tt.wantCache)
+				}
+				if got := string(fields.Lookup("x_keep")); got != "true" {
+					t.Errorf("%s x_keep = %s, want preserved", label, got)
+				}
+			}
+			assertFields("request", forwarded.ExtraFields)
+			_, toolHasCache := forwarded.Tools[0]["cache_control"]
+			if toolHasCache != tt.wantCache {
+				t.Errorf("tool cache_control present = %v, want %v", toolHasCache, tt.wantCache)
+			}
+			assertFields("assistant message", forwarded.Messages[0].ExtraFields)
+			assertFields("assistant content", forwarded.Messages[0].Content.([]core.ContentPart)[0].ExtraFields)
+			call := forwarded.Messages[0].ToolCalls[0]
+			assertFields("tool call", call.ExtraFields)
+			assertFields("function call", call.Function.ExtraFields)
+			assertFields("tool result", forwarded.Messages[1].ExtraFields)
+			assertFields("tool result content", forwarded.Messages[1].Content.([]core.ContentPart)[0].ExtraFields)
 
-	// Routing adaptation must never rewrite the canonical caller request.
-	if request.ExtraFields.Lookup("cache_control") == nil || request.Tools[0]["cache_control"] == nil {
-		t.Fatal("routing mutated the caller's request")
+			after, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, before) {
+				t.Fatalf("routing mutated caller request\nbefore: %s\n after: %s", before, after)
+			}
+		})
 	}
 }
 

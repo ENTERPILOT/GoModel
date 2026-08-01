@@ -62,6 +62,19 @@ func CloneRawJSON(raw json.RawMessage) json.RawMessage {
 	return append(json.RawMessage(nil), raw...)
 }
 
+// CloneOptionalJSONObject validates and clones an optional raw JSON object.
+// Empty and null values are treated as absent.
+func CloneOptionalJSONObject(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if IsJSONNull(trimmed) {
+		return nil, nil
+	}
+	if trimmed[0] != '{' || !json.Valid(trimmed) {
+		return nil, fmt.Errorf("JSON value must be an object")
+	}
+	return CloneRawJSON(trimmed), nil
+}
+
 // CloneUnknownJSONFields returns a detached copy of a raw unknown-field object.
 func CloneUnknownJSONFields(fields UnknownJSONFields) UnknownJSONFields {
 	return UnknownJSONFields{raw: CloneRawJSON(fields.raw)}

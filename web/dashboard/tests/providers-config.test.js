@@ -166,6 +166,19 @@ test("an unavailable schema falls back to sending every field", () => {
   assert.equal("session_sticky_keys" in body, false);
 });
 
+test("an empty schema does not advertise session-sticky keys", () => {
+  const form = {
+    ...defaultProviderCredentialForm(),
+    name: "my-openai",
+    type: "openai",
+  };
+
+  for (const schema of [{ type: "openai", fields: [] }, { type: "openai" }]) {
+    const body = buildProviderCredentialPayload(form, schema);
+    assert.equal("session_sticky_keys" in body, false);
+  }
+});
+
 test("payload preserves untouched masked API key positions on edit", () => {
   const existing = {
     name: "my-openai",

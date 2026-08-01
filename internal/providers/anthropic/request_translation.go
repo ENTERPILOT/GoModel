@@ -584,14 +584,11 @@ func anthropicCacheControlFromValue(value any) (json.RawMessage, error) {
 }
 
 func validatedAnthropicCacheControlJSON(raw json.RawMessage) (json.RawMessage, error) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
-		return nil, nil
-	}
-	if trimmed[0] != '{' || !json.Valid(trimmed) {
+	validated, err := core.CloneOptionalJSONObject(raw)
+	if err != nil {
 		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", nil)
 	}
-	return core.CloneRawJSON(trimmed), nil
+	return validated, nil
 }
 
 // resolveAnthropicReasoningEffort returns the requested reasoning effort,

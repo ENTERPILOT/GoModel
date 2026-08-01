@@ -1,9 +1,13 @@
 package embedding
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestNewEmbedder_EmptyProvider(t *testing.T) {
@@ -52,33 +56,60 @@ func TestNewEmbedder_APIEmbedder(t *testing.T) {
 	}
 }
 
-func TestNewEmbedder_HonorsSessionStickyKeysOptOut(t *testing.T) {
+func TestAPIEmbedder_SessionStickyKeys(t *testing.T) {
 	disabled := false
-	rawProviders := map[string]config.RawProviderConfig{
-		"openai": {
-			Type:              "openai",
-			APIKeys:           []string{"key-1", "key-2"},
-			BaseURL:           "https://api.openai.com",
-			SessionStickyKeys: &disabled,
-		},
+	tests := []struct {
+		name          string
+		stickySetting *bool
+		wantSticky    bool
+	}{
+		{name: "enabled by default", wantSticky: true},
+		{name: "explicitly disabled", stickySetting: &disabled},
 	}
-	emb, err := NewEmbedder(config.EmbedderConfig{Provider: "openai"}, rawProviders)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer emb.Close()
 
-	ring := emb.(*apiEmbedder).keys
-	got := []string{
-		ring.NextForSession("same-session"),
-		ring.NextForSession("same-session"),
-		ring.NextForSession("same-session"),
-	}
-	want := []string{"key-1", "key-2", "key-1"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("key sequence = %v, want %v", got, want)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seen := make(chan string, 3)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen <- r.Header.Get("Authorization")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":[{"embedding":[0.25]}]}`))
+			}))
+			defer server.Close()
+
+			emb, err := NewEmbedder(config.EmbedderConfig{Provider: "openai"}, map[string]config.RawProviderConfig{
+				"openai": {
+					Type:              "openai",
+					APIKeys:           []string{"key-1", "key-2"},
+					BaseURL:           server.URL,
+					SessionStickyKeys: tt.stickySetting,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer emb.Close()
+
+			ctx := core.WithSessionID(context.Background(), "same-session")
+			for range 3 {
+				if _, err := emb.Embed(ctx, "hello"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := []string{<-seen, <-seen, <-seen}
+			if tt.wantSticky {
+				if got[0] == "" || got[1] != got[0] || got[2] != got[0] {
+					t.Fatalf("authorization sequence = %v, want one sticky key", got)
+				}
+				return
+			}
+			want := []string{"Bearer key-1", "Bearer key-2", "Bearer key-1"}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("authorization sequence = %v, want %v", got, want)
+				}
+			}
+		})
 	}
 }
 
