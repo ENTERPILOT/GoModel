@@ -66,8 +66,8 @@ Hosted tools are executed by the upstream provider, not by the model text
 completion alone. Their payloads often reference provider-owned resources and
 runtime state:
 
-- `web_search_preview` depends on the provider's search implementation and
-  event schema.
+- `web_search` and its legacy `web_search_preview` alias depend on the
+  provider's search implementation and event schema.
 - `file_search` references provider vector stores such as `vector_store_ids`.
 - `computer_use_preview` depends on a provider-managed computer session,
   display environment, and safety model.

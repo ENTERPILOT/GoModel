@@ -157,7 +157,7 @@ async def main() -> int:
             lambda: client.responses.create(
                 model=MODEL,
                 input="Search the web for the latest Go release.",
-                tools=[{"type": "web_search_preview"}],
+                tools=[{"type": "web_search"}],
             ),
             None,
         ),
