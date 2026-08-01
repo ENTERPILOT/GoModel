@@ -68,6 +68,9 @@ func TestMessages_NonStreaming(t *testing.T) {
 	if provider.capturedChatReq == nil {
 		t.Fatal("provider did not receive a chat request")
 	}
+	if got := core.RequestDialectFromContext(provider.capturedChatCtx); got != core.RequestDialectAnthropicMessages {
+		t.Fatalf("request dialect = %q, want %q", got, core.RequestDialectAnthropicMessages)
+	}
 	msgs := provider.capturedChatReq.Messages
 	if len(msgs) != 2 || msgs[0].Role != "system" || msgs[1].Role != "user" {
 		t.Fatalf("translated messages = %+v", msgs)

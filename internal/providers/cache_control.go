@@ -1,8 +1,12 @@
 package providers
 
 import (
+	"context"
+	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -36,6 +40,37 @@ func adaptAnthropicCacheControl(req *core.ChatRequest, providerType string) *cor
 		adapted.Messages[i] = withoutAnthropicMessageCacheControl(message)
 	}
 	return &adapted
+}
+
+// adaptAnthropicBatchCacheControl applies the same post-routing policy to
+// canonical chat items produced by the Anthropic Message Batches ingress.
+// Ordinary OpenAI-compatible batches remain opaque and caller-owned.
+func adaptAnthropicBatchCacheControl(ctx context.Context, req *core.BatchRequest, providerType string) (*core.BatchRequest, error) {
+	if req == nil || core.RequestDialectFromContext(ctx) != core.RequestDialectAnthropicMessages ||
+		providerAcceptsAnthropicCacheControl(providerType) {
+		return req, nil
+	}
+
+	adapted := *req
+	adapted.Requests = append([]core.BatchRequestItem(nil), req.Requests...)
+	for i, item := range req.Requests {
+		decoded, err := core.DecodeKnownBatchItemRequest(req.Endpoint, item)
+		if err != nil {
+			return nil, core.NewInvalidRequestError(fmt.Sprintf("requests[%d]: %v", i, err), err)
+		}
+		chat, ok := decoded.Request.(*core.ChatRequest)
+		if !ok {
+			return nil, core.NewInvalidRequestError(
+				fmt.Sprintf("requests[%d]: Anthropic Message Batch item is not a chat completion", i), nil,
+			)
+		}
+		body, err := json.Marshal(adaptAnthropicCacheControl(chat, providerType))
+		if err != nil {
+			return nil, core.NewInvalidRequestError(fmt.Sprintf("requests[%d]: failed to encode adapted chat request", i), err)
+		}
+		adapted.Requests[i].Body = body
+	}
+	return &adapted, nil
 }
 
 func providerAcceptsAnthropicCacheControl(providerType string) bool {

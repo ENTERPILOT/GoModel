@@ -30,6 +30,7 @@ func (s *nativeBatchService) CreateMessageBatch(c *echo.Context) error {
 	}
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
+	ctx = core.WithRequestDialect(ctx, core.RequestDialectAnthropicMessages)
 	result, err := s.batch().Create(ctx, req, batchRequestMeta(c, requestID))
 	if err != nil {
 		return handleError(c, err)

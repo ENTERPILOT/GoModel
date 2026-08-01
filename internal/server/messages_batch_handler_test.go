@@ -79,6 +79,9 @@ func TestMessagesBatches_CreateGetList(t *testing.T) {
 	if mock.capturedBatchReq == nil || len(mock.capturedBatchReq.Requests) != 2 {
 		t.Fatalf("capturedBatchReq = %+v", mock.capturedBatchReq)
 	}
+	if got := core.RequestDialectFromContext(mock.capturedBatchCtx); got != core.RequestDialectAnthropicMessages {
+		t.Fatalf("request dialect = %q, want %q", got, core.RequestDialectAnthropicMessages)
+	}
 	item := mock.capturedBatchReq.Requests[0]
 	if item.CustomID != "first" || item.URL != "/v1/chat/completions" {
 		t.Fatalf("item = %+v", item)
