@@ -552,7 +552,9 @@ func (r *Router) forwardChatRequest(req *core.ChatRequest, selector core.ModelSe
 	forwardReq := *req
 	forwardReq.Model = selector.Model
 	forwardReq.Provider = ""
-	if !forwardReq.AnthropicMessagesRequest {
+	messagesIngress := forwardReq.AnthropicMessagesRequest
+	forwardReq.AnthropicMessagesRequest = false
+	if !messagesIngress {
 		return &forwardReq
 	}
 	// The selector is already concrete, so querying the lookup directly avoids

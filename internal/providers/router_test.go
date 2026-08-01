@@ -638,28 +638,43 @@ func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing
 			if forwarded == nil {
 				t.Fatal("provider did not receive a request")
 			}
-			assertFields := func(label string, fields core.UnknownJSONFields) {
+			if forwarded.AnthropicMessagesRequest {
+				t.Error("provider received internal Anthropic Messages ingress marker")
+			}
+			assertFields := func(label string, fields core.UnknownJSONFields, wantCache bool) {
 				t.Helper()
 				hasCache := len(fields.Lookup("cache_control")) > 0
-				if hasCache != tt.wantCache {
-					t.Errorf("%s cache_control present = %v, want %v", label, hasCache, tt.wantCache)
+				if hasCache != wantCache {
+					t.Errorf("%s cache_control present = %v, want %v", label, hasCache, wantCache)
 				}
 				if got := string(fields.Lookup("x_keep")); got != "true" {
 					t.Errorf("%s x_keep = %s, want preserved", label, got)
 				}
 			}
-			assertFields("request", forwarded.ExtraFields)
+			assertFields("request", forwarded.ExtraFields, tt.wantCache)
 			_, toolHasCache := forwarded.Tools[0]["cache_control"]
 			if toolHasCache != tt.wantCache {
 				t.Errorf("tool cache_control present = %v, want %v", toolHasCache, tt.wantCache)
 			}
-			assertFields("assistant message", forwarded.Messages[0].ExtraFields)
-			assertFields("assistant content", forwarded.Messages[0].Content.([]core.ContentPart)[0].ExtraFields)
+			assertFields("assistant message", forwarded.Messages[0].ExtraFields, tt.wantCache)
+			assertFields("assistant content", forwarded.Messages[0].Content.([]core.ContentPart)[0].ExtraFields, tt.wantCache)
 			call := forwarded.Messages[0].ToolCalls[0]
-			assertFields("tool call", call.ExtraFields)
-			assertFields("function call", call.Function.ExtraFields)
-			assertFields("tool result", forwarded.Messages[1].ExtraFields)
-			assertFields("tool result content", forwarded.Messages[1].Content.([]core.ContentPart)[0].ExtraFields)
+			assertFields("tool call", call.ExtraFields, tt.wantCache)
+			assertFields("function call", call.Function.ExtraFields, tt.wantCache)
+			assertFields("tool result", forwarded.Messages[1].ExtraFields, tt.wantCache)
+			assertFields("tool result content", forwarded.Messages[1].Content.([]core.ContentPart)[0].ExtraFields, tt.wantCache)
+
+			assertFields("caller request", request.ExtraFields, true)
+			assertFields("caller assistant message", request.Messages[0].ExtraFields, true)
+			assertFields("caller assistant content", request.Messages[0].Content.([]core.ContentPart)[0].ExtraFields, true)
+			callerCall := request.Messages[0].ToolCalls[0]
+			assertFields("caller tool call", callerCall.ExtraFields, true)
+			assertFields("caller function call", callerCall.Function.ExtraFields, true)
+			assertFields("caller tool result", request.Messages[1].ExtraFields, true)
+			assertFields("caller tool result content", request.Messages[1].Content.([]core.ContentPart)[0].ExtraFields, true)
+			if request.AnthropicMessagesRequest != tt.messagesIngress {
+				t.Errorf("caller ingress marker = %v, want %v", request.AnthropicMessagesRequest, tt.messagesIngress)
+			}
 
 			after, err := json.Marshal(request)
 			if err != nil {
