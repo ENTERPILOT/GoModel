@@ -255,6 +255,7 @@
   z-index: 110;
   pointer-events: none;
   --loading-state-min-height: 0;
+
   padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
