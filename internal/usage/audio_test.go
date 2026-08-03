@@ -100,6 +100,13 @@ func TestExtractFromTranscriptionResponse_TokenUsage(t *testing.T) {
 	}
 }
 
+func TestExtractFromTranslationResponse_UsesTranslationEndpoint(t *testing.T) {
+	entry := ExtractFromTranslationResponse([]byte(`{"text":"hello"}`), "req", "whisper-1", "openai")
+	if entry.Endpoint != endpointAudioTranslations {
+		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointAudioTranslations)
+	}
+}
+
 func TestExtractFromTranscriptionResponse_TotalTokensDerived(t *testing.T) {
 	body := []byte(`{"usage":{"input_tokens":10,"output_tokens":20}}`)
 

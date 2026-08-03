@@ -692,6 +692,29 @@ func (h *Handler) AudioTranscriptions(c *echo.Context) error {
 	return h.audio().CreateTranscription(c)
 }
 
+// AudioTranslations handles POST /v1/audio/translations.
+//
+// @Summary      Translate audio into English
+// @Tags         audio
+// @Accept       mpfd
+// @Produce      json
+// @Produce      plain
+// @Security     BearerAuth
+// @Param        file             formData  file    true   "Audio file to translate"
+// @Param        model            formData  string  true   "Model ID"
+// @Param        prompt           formData  string  false  "Optional English text to guide the model"
+// @Param        response_format  formData  string  false  "json, text, srt, verbose_json, or vtt"
+// @Param        temperature      formData  number  false  "Sampling temperature (0-1)"
+// @Success      200              {object}  map[string]interface{}  "English translation in the requested response_format"
+// @Failure      400              {object}  core.OpenAIErrorEnvelope
+// @Failure      401              {object}  core.OpenAIErrorEnvelope
+// @Failure      404              {object}  core.OpenAIErrorEnvelope
+// @Failure      502              {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/audio/translations [post]
+func (h *Handler) AudioTranslations(c *echo.Context) error {
+	return h.audio().CreateTranslation(c)
+}
+
 // Responses handles POST /v1/responses
 //
 // @Summary      Create a model response (Responses API)

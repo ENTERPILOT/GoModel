@@ -23,10 +23,12 @@ type audioMockProvider struct {
 	*mockProvider
 	speechResp            *core.AudioResponse
 	transcriptionResp     *core.AudioResponse
+	translationResp       *core.AudioResponse
 	audioErr              error
 	resolved              *core.ModelSelector
 	capturedSpeech        *core.AudioSpeechRequest
 	capturedTranscription *core.AudioTranscriptionRequest
+	capturedTranslation   *core.AudioTranscriptionRequest
 }
 
 // ResolveModel lets the fake stand in for the Router so the service can authorize
@@ -54,6 +56,14 @@ func (m *audioMockProvider) CreateTranscription(_ context.Context, req *core.Aud
 		return nil, m.audioErr
 	}
 	return m.transcriptionResp, nil
+}
+
+func (m *audioMockProvider) CreateTranslation(_ context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	m.capturedTranslation = req
+	if m.audioErr != nil {
+		return nil, m.audioErr
+	}
+	return m.translationResp, nil
 }
 
 func TestAudioSpeech_HappyPath(t *testing.T) {
@@ -227,6 +237,49 @@ func TestAudioTranscription_HappyPath(t *testing.T) {
 	}
 	if string(captured.File) != "audio-bytes" {
 		t.Errorf("captured file = %q, want audio-bytes", string(captured.File))
+	}
+}
+
+func TestAudioTranslation_HappyPath(t *testing.T) {
+	mock := &audioMockProvider{
+		mockProvider:    &mockProvider{supportedModels: []string{"whisper-1"}},
+		translationResp: &core.AudioResponse{ContentType: "application/json", Data: []byte(`{"text":"hello"}`)},
+	}
+	srv := New(mock, nil)
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("model", "whisper-1")
+	_ = w.WriteField("language", "de")
+	_ = w.WriteField("prompt", "Use product names")
+	_ = w.WriteField("response_format", "json")
+	_ = w.WriteField("temperature", "0.2")
+	_ = w.WriteField("timestamp_granularities[]", "word")
+	part, err := w.CreateFormFile("file", "speech.wav")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	_, _ = part.Write([]byte("audio-bytes"))
+	if err := w.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/translations", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"text":"hello"}` {
+		t.Fatalf("status/body = %d %q, want 200 translation response", rec.Code, rec.Body.String())
+	}
+	captured := mock.capturedTranslation
+	if captured == nil || captured.Model != "whisper-1" || captured.Filename != "speech.wav" {
+		t.Fatalf("captured translation request mismatch: %+v", captured)
+	}
+	if captured.Language != "" || len(captured.TimestampGranularities) != 0 {
+		t.Errorf("translation accepted transcription-only fields: %+v", captured)
+	}
+	if captured.Prompt != "Use product names" || captured.ResponseFormat != "json" || captured.Temperature != "0.2" {
+		t.Errorf("translation fields were not preserved: %+v", captured)
 	}
 }
 

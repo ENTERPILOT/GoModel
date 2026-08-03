@@ -126,6 +126,20 @@ type mockProvider struct {
 	passthroughResp   *core.PassthroughResponse
 }
 
+type mockAudioTranslationProvider struct {
+	*mockProvider
+	translationResponse *core.AudioResponse
+	lastTranslationReq  *core.AudioTranscriptionRequest
+}
+
+func (m *mockAudioTranslationProvider) CreateTranslation(_ context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	m.lastTranslationReq = req
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.translationResponse, nil
+}
+
 func readAndCloseBody(t *testing.T, body io.ReadCloser) string {
 	t.Helper()
 	if body == nil {
@@ -365,6 +379,44 @@ func TestNewRouter(t *testing.T) {
 			t.Error("expected non-nil router")
 		}
 	})
+}
+
+func TestRouterCreateTranslation(t *testing.T) {
+	translator := &mockAudioTranslationProvider{
+		mockProvider:        &mockProvider{name: "openai"},
+		translationResponse: &core.AudioResponse{ContentType: "application/json", Data: []byte(`{"text":"hello"}`)},
+	}
+	lookup := newMockLookup()
+	lookup.addModel("openai/whisper-1", translator, "openai")
+	router, _ := NewRouter(lookup)
+
+	resp, err := router.CreateTranslation(context.Background(), &core.AudioTranscriptionRequest{
+		Model: "whisper-1", Provider: "openai", File: []byte("audio"), Prompt: "names",
+	})
+	if err != nil {
+		t.Fatalf("CreateTranslation() error = %v", err)
+	}
+	if string(resp.Data) != `{"text":"hello"}` {
+		t.Errorf("response = %s", resp.Data)
+	}
+	if translator.lastTranslationReq == nil {
+		t.Fatal("translation provider was not called")
+	}
+	if translator.lastTranslationReq.Model != "whisper-1" || translator.lastTranslationReq.Provider != "" {
+		t.Errorf("forwarded selector = %q/%q, want provider metadata stripped", translator.lastTranslationReq.Provider, translator.lastTranslationReq.Model)
+	}
+}
+
+func TestRouterCreateTranslation_RejectsUnsupportedProvider(t *testing.T) {
+	provider := &mockProvider{name: "cohere"}
+	lookup := newMockLookup()
+	lookup.addModel("transcribe-only", provider, "cohere")
+	router, _ := NewRouter(lookup)
+
+	_, err := router.CreateTranslation(context.Background(), &core.AudioTranscriptionRequest{Model: "transcribe-only", File: []byte("audio")})
+	if err == nil || !strings.Contains(err.Error(), "does not support audio translations") {
+		t.Fatalf("CreateTranslation() error = %v, want unsupported translation error", err)
+	}
 }
 
 func TestRouterEmptyLookup(t *testing.T) {

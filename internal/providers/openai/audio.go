@@ -59,8 +59,25 @@ func speechResponseContentType(raw *llmclient.Response, format string) string {
 // The request is multipart/form-data; the response (JSON or text per response_format)
 // is proxied verbatim.
 func (p *CompatibleProvider) CreateTranscription(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	return p.createAudioTranscription(ctx, req, "/audio/transcriptions", true, "audio transcription request is required")
+}
+
+// CreateTranslation implements OpenAI speech translation (POST /audio/translations).
+// Translation accepts the transcription upload fields except language and timestamp
+// granularities, and always returns English text.
+func (p *CompatibleProvider) CreateTranslation(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	return p.createAudioTranscription(ctx, req, "/audio/translations", false, "audio translation request is required")
+}
+
+func (p *CompatibleProvider) createAudioTranscription(
+	ctx context.Context,
+	req *core.AudioTranscriptionRequest,
+	endpoint string,
+	includeTranscriptionFields bool,
+	nilRequestMessage string,
+) (*core.AudioResponse, error) {
 	if req == nil {
-		return nil, core.NewInvalidRequestError("audio transcription request is required", nil)
+		return nil, core.NewInvalidRequestError(nilRequestMessage, nil)
 	}
 	content := req.FileReader
 	if content == nil && len(req.File) > 0 {
@@ -70,10 +87,10 @@ func (p *CompatibleProvider) CreateTranscription(ctx context.Context, req *core.
 		return nil, core.NewInvalidRequestError("file is required", nil)
 	}
 
-	body, contentType := transcriptionMultipart(req, content)
+	body, contentType := audioTranscriptionMultipart(req, content, includeTranscriptionFields)
 	raw, err := p.client.DoRaw(ctx, p.prepareRequest(llmclient.Request{
 		Method:        http.MethodPost,
-		Endpoint:      "/audio/transcriptions",
+		Endpoint:      endpoint,
 		RawBodyReader: body,
 		Headers:       http.Header{"Content-Type": {contentType}},
 	}))
@@ -86,11 +103,10 @@ func (p *CompatibleProvider) CreateTranscription(ctx context.Context, req *core.
 	}, nil
 }
 
-// transcriptionMultipart streams a multipart/form-data body for a transcription
-// request and returns the reader plus its Content-Type. It mirrors the file-upload
-// adapter: the body is produced on a goroutine through an io.Pipe so large audio
-// files are never buffered whole.
-func transcriptionMultipart(req *core.AudioTranscriptionRequest, content io.Reader) (io.Reader, string) {
+// audioTranscriptionMultipart streams a multipart/form-data body for a
+// transcription or translation request. Translation omits fields that OpenAI's
+// translations endpoint does not accept.
+func audioTranscriptionMultipart(req *core.AudioTranscriptionRequest, content io.Reader, includeTranscriptionFields bool) (io.Reader, string) {
 	filename := strings.TrimSpace(req.Filename)
 	if filename == "" {
 		filename = "audio"
@@ -101,13 +117,15 @@ func transcriptionMultipart(req *core.AudioTranscriptionRequest, content io.Read
 	go func() {
 		defer func() { _ = pw.Close() }()
 
-		fields := [...][2]string{
-			{"model", req.Model},
-			{"language", req.Language},
-			{"prompt", req.Prompt},
-			{"response_format", req.ResponseFormat},
-			{"temperature", req.Temperature},
+		fields := [][2]string{{"model", req.Model}}
+		if includeTranscriptionFields {
+			fields = append(fields, [2]string{"language", req.Language})
 		}
+		fields = append(fields,
+			[2]string{"prompt", req.Prompt},
+			[2]string{"response_format", req.ResponseFormat},
+			[2]string{"temperature", req.Temperature},
+		)
 		for _, field := range fields {
 			if strings.TrimSpace(field[1]) == "" {
 				continue
@@ -117,13 +135,15 @@ func transcriptionMultipart(req *core.AudioTranscriptionRequest, content io.Read
 				return
 			}
 		}
-		for _, granularity := range req.TimestampGranularities {
-			if strings.TrimSpace(granularity) == "" {
-				continue
-			}
-			if err := writer.WriteField("timestamp_granularities[]", granularity); err != nil {
-				_ = pw.CloseWithError(core.NewInvalidRequestError("failed to write timestamp_granularities field", err))
-				return
+		if includeTranscriptionFields {
+			for _, granularity := range req.TimestampGranularities {
+				if strings.TrimSpace(granularity) == "" {
+					continue
+				}
+				if err := writer.WriteField("timestamp_granularities[]", granularity); err != nil {
+					_ = pw.CloseWithError(core.NewInvalidRequestError("failed to write timestamp_granularities field", err))
+					return
+				}
 			}
 		}
 

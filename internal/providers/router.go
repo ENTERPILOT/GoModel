@@ -750,6 +750,25 @@ func (r *Router) CreateTranscription(ctx context.Context, req *core.AudioTranscr
 	)
 }
 
+// CreateTranslation routes a speech translation request to a provider that
+// explicitly supports the OpenAI-compatible translations endpoint.
+func (r *Router) CreateTranslation(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	resp, _, err := routeResolvedModelCall(
+		r, ctx, req.Model, req.Provider,
+		func(selector core.ModelSelector) *core.AudioTranscriptionRequest {
+			return forwardAudioTranscriptionRequest(req, selector)
+		},
+		func(ctx context.Context, provider core.Provider, forwardReq *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+			translator, ok := provider.(core.AudioTranslationProvider)
+			if !ok {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support audio translations", req.Model), nil)
+			}
+			return translator.CreateTranslation(ctx, forwardReq)
+		},
+	)
+	return resp, err
+}
+
 // routeAudioCall resolves the model, requires the target provider to implement
 // core.AudioProvider, and invokes call. It mirrors routeNative*Call but for the
 // optional audio capability.
