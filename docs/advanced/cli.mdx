@@ -100,7 +100,10 @@ restarting it — the same operation as `nginx -s reload`:
 gomodel --reload
 ```
 
-It reads the pid file, signals that process, and exits. The gateway then:
+It loads the same configuration the gateway does to find the pid file, signals
+that process, and exits. Loading it first means a `config.yaml` the binary
+cannot parse fails the command — non-zero exit, no signal sent — before the
+running gateway is ever asked to look at it. On success the gateway:
 
 1. Re-reads the `.env` file. New and edited values are applied; values removed
    from the file are unset. Variables exported into the process environment
@@ -119,10 +122,10 @@ already works.
 
 The listening socket is held for the lifetime of the process and handed to each
 configuration in turn, so requests arriving mid-reload wait to be accepted
-rather than being refused. In-flight requests are drained first (see
-`GracefulDrainTimeout`), and streamed responses that outlive the drain window
-are cut, so reload during heavy streaming traffic is not free — but no
-connection is dropped at the socket.
+rather than being refused. In-flight requests get the same 10-second drain
+window as a shutdown, and streamed responses that outlive it are cut, so a
+reload during heavy streaming traffic is not free — but no connection is
+dropped at the socket.
 
 Sending the signal directly does the same thing, which is what a process manager
 or a container without a shell can use:

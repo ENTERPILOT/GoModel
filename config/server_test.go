@@ -8,10 +8,10 @@ import (
 	"github.com/enterpilot/gomodel/internal/platformdir"
 )
 
-// The pid file has to land next to the database, or `gomodel --reload` looks
-// for it somewhere the gateway never wrote it: a Docker image with /app/data
-// keeps both project-local, a binary install keeps both in the per-user data
-// directory.
+// The pid file follows the database instead of scattering GoModel's state
+// across the filesystem: a Docker image with /app/data keeps both
+// project-local, and a binary install started from an arbitrary working
+// directory keeps both in the per-user data directory.
 func TestDefaultPIDFilePath(t *testing.T) {
 	platformDataDir, err := platformdir.DataDir()
 	if err != nil {

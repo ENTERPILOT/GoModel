@@ -152,12 +152,12 @@ func TestGracefulDrainFitsInsideTheShutdownBudget(t *testing.T) {
 	}
 }
 
-// servingApp mirrors the ordering that matters in the real App: Start blocks
-// until Shutdown stops the server, and Shutdown keeps working afterwards —
-// flushing buffered usage and audit records, closing the database — before it
-// returns.
+// servingApp mirrors the ordering that matters in the real App:
+// StartWithListener blocks until Shutdown stops the server, and Shutdown keeps
+// working afterwards — flushing buffered usage and audit records, closing the
+// database — before it returns.
 type servingApp struct {
-	serverStopped chan struct{} // closed by Shutdown, releases Start
+	serverStopped chan struct{} // closed by Shutdown, releases StartWithListener
 	flushing      chan struct{} // closed by the test, releases Shutdown
 	shutdownDone  atomic.Bool
 }

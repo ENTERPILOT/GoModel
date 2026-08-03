@@ -168,11 +168,15 @@ func TestServeUntilShutdownKeepsServingWhenReloadFails(t *testing.T) {
 	}
 }
 
-// Reloading must not cost the port: the socket outlives every generation, so a
-// client connecting mid-swap waits in the accept queue instead of being
-// refused.
+// Reloading must not cost the port. This walks the window a reload opens: the
+// generation that was serving has closed its listener and the next one has not
+// started, and a client connecting right then must still be connected — waiting
+// in the kernel's accept queue — rather than refused.
 func TestBoundSocketSurvivesGenerations(t *testing.T) {
 	socket := testSocket(t)
+	if socket.file == nil {
+		t.Skip("this platform cannot duplicate the listening socket; generations rebind instead")
+	}
 
 	first, err := socket.next()
 	if err != nil {
@@ -183,31 +187,32 @@ func TestBoundSocketSurvivesGenerations(t *testing.T) {
 		t.Fatalf("close first listener: %v", err)
 	}
 
+	// Nothing is accepting at this point.
+	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
+	if err != nil {
+		t.Fatalf("connect while no generation is accepting: %v", err)
+	}
+	defer conn.Close()
+
 	second, err := socket.next()
 	if err != nil {
 		t.Fatalf("socket.next() after a generation ended = %v", err)
 	}
 	defer second.Close()
 	if got := second.Addr().String(); got != address {
-		t.Errorf("second generation address = %q, want %q", got, address)
+		t.Fatalf("second generation address = %q, want %q", got, address)
+	}
+	if deadliner, ok := second.(interface{ SetDeadline(time.Time) error }); ok {
+		if err := deadliner.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatalf("set accept deadline: %v", err)
+		}
 	}
 
-	accepted := make(chan error, 1)
-	go func() {
-		conn, err := second.Accept()
-		if err == nil {
-			_ = conn.Close()
-		}
-		accepted <- err
-	}()
-	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
+	waiting, err := second.Accept()
 	if err != nil {
-		t.Fatalf("dial the reloaded gateway: %v", err)
+		t.Fatalf("accept the connection that waited through the swap: %v", err)
 	}
-	defer conn.Close()
-	if err := <-accepted; err != nil {
-		t.Fatalf("accept on the reloaded gateway: %v", err)
-	}
+	_ = waiting.Close()
 }
 
 func testSocket(t *testing.T) *boundSocket {
@@ -255,7 +260,7 @@ func (g *fakeGeneration) Shutdown(context.Context) error {
 	return nil
 }
 
-// A second instance started in the same directory owns the pid file; the first
+// A second instance configured with the same pid file path owns it; the first
 // one must not remove it on its way out, or --reload loses the survivor.
 func TestPIDFileRemovalLeavesAnotherInstanceAlone(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gomodel.pid")

@@ -40,7 +40,9 @@ func newDotenv() *dotenv {
 
 // apply merges the current contents of envFile into the process environment.
 // A missing file is normal — configuration may come entirely from the real
-// environment — and clears whatever the file previously contributed.
+// environment — and clears whatever the file previously contributed. A file
+// that cannot be read or parsed is not: it leaves the environment as it stands,
+// so a half-typed edit does not strip the running configuration.
 func (d *dotenv) apply() {
 	values, err := godotenv.Read(envFile)
 	if err != nil {

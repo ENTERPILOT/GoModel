@@ -183,9 +183,10 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	// build produces one generation of the gateway from the configuration as it
-	// stands right now. It is called again for every reload, which is what makes
-	// a reload equivalent to a restart in effect: every configuration value is
-	// re-read, not a hand-picked subset.
+	// stands right now. It is called again for every reload, which is what lets
+	// a reload re-read every configuration value rather than a hand-picked
+	// subset — everything except what is fixed for the life of the process (see
+	// warnAboutStartupOnlySettings).
 	build := func() (*app.App, *config.Config, error) {
 		result, err := config.Load()
 		if err != nil {

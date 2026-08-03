@@ -16,11 +16,12 @@ import (
 // while one generation is draining and the next is starting therefore wait in
 // the kernel's accept queue instead of being refused.
 //
-// Not every platform lets a listening socket be duplicated. Where it cannot be,
-// the listener is served directly and a later generation rebinds the address,
-// which does leave a gap where connections are refused. Reload is delivered by
-// a POSIX signal, so on a platform without one — Windows — that fallback is
-// what serves, and there is never a second generation to rebind for.
+// Duplicating the descriptor is what keeps the socket alive, and not every
+// platform and listener type supports it. Where it fails, the listener is
+// served directly and a later generation rebinds the address instead, which
+// does leave a gap where connections are refused. Windows never reaches that
+// gap for a different reason: Go delivers no SIGHUP there, so nothing asks for
+// a second generation in the first place.
 type boundSocket struct {
 	address  string
 	file     *os.File
