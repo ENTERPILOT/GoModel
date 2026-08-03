@@ -124,8 +124,14 @@ The listening socket is held for the lifetime of the process and handed to each
 configuration in turn, so requests arriving mid-reload wait to be accepted
 rather than being refused. In-flight requests get the same 10-second drain
 window as a shutdown, and streamed responses that outlive it are cut, so a
-reload during heavy streaming traffic is not free — but no connection is
-dropped at the socket.
+reload during heavy streaming traffic is not free — but no connection is dropped
+at the socket.
+
+That last guarantee depends on the operating system letting the gateway
+duplicate a listening socket, which covers every platform that can be sent a
+reload signal in the first place. Where duplication is unavailable, the next
+configuration rebinds the address instead, and connections are refused for the
+length of the swap.
 
 Sending the signal directly does the same thing, which is what a process manager
 or a container without a shell can use:
@@ -147,10 +153,11 @@ OS-conventional per-user data directory otherwise — the same resolution the
 SQLite database uses.
 
 Give each instance its own path when several gateways share a host, since
-`--reload` signals whichever process the file names. Setting it empty writes no
-pid file and disables `--reload`; `kill -HUP` still works. If the path is not
-writable the gateway logs a warning and serves normally, only without `--reload`
-support.
+`--reload` signals whichever process the file names. To write no pid file at
+all, set `server.pid_file: ""` in `config.yaml` — that disables `--reload`,
+though `kill -HUP` still works. An empty `PID_FILE` env var reads as unset and
+keeps the default, the same as every other setting. If the path is not writable
+the gateway logs a warning and serves normally, only without `--reload` support.
 
 Both the gateway and `gomodel --reload` resolve the path from the same
 configuration, so run the command from the same working directory (or with the

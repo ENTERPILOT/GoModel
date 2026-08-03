@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -280,5 +282,130 @@ func TestPIDFileRemovalLeavesAnotherInstanceAlone(t *testing.T) {
 	}
 	if pid != 424242 {
 		t.Errorf("pid = %d, want 424242", pid)
+	}
+}
+
+// A reload reads the environment file before it can know whether the
+// configuration built from it works. When it does not, the generation that
+// keeps serving must keep the environment it was built with — the operator was
+// told the new configuration was rejected.
+func TestDotenvApplyUndoRestoresTheEnvironment(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("GOMODEL_TEST_EXPORTED", "from-environment")
+	writeEnvFile(t, "GOMODEL_TEST_KEPT=before\nGOMODEL_TEST_DROPPED=present\n")
+	t.Cleanup(func() {
+		os.Unsetenv("GOMODEL_TEST_KEPT")
+		os.Unsetenv("GOMODEL_TEST_DROPPED")
+		os.Unsetenv("GOMODEL_TEST_ADDED")
+	})
+
+	env := newDotenv()
+	env.apply()
+
+	// The edit a failed reload would have read.
+	writeEnvFile(t, "GOMODEL_TEST_KEPT=after\nGOMODEL_TEST_ADDED=new\nGOMODEL_TEST_EXPORTED=from-file\n")
+	undo := env.apply()
+	if got := os.Getenv("GOMODEL_TEST_KEPT"); got != "after" {
+		t.Fatalf("edited variable before undo = %q, want %q", got, "after")
+	}
+
+	undo()
+
+	if got := os.Getenv("GOMODEL_TEST_KEPT"); got != "before" {
+		t.Errorf("edited variable after undo = %q, want %q", got, "before")
+	}
+	if got := os.Getenv("GOMODEL_TEST_DROPPED"); got != "present" {
+		t.Errorf("removed variable after undo = %q, want %q", got, "present")
+	}
+	if _, present := os.LookupEnv("GOMODEL_TEST_ADDED"); present {
+		t.Error("variable added by the rejected file is still set")
+	}
+	if got := os.Getenv("GOMODEL_TEST_EXPORTED"); got != "from-environment" {
+		t.Errorf("exported variable = %q, want it untouched throughout", got)
+	}
+
+	// The bookkeeping has to be restored too, or the next reload treats the
+	// rolled-back variables as none of its business.
+	writeEnvFile(t, "GOMODEL_TEST_KEPT=third\n")
+	env.apply()
+	if got := os.Getenv("GOMODEL_TEST_KEPT"); got != "third" {
+		t.Errorf("variable after a later reload = %q, want %q", got, "third")
+	}
+	if _, present := os.LookupEnv("GOMODEL_TEST_DROPPED"); present {
+		t.Error("variable dropped from the env file survived the later reload")
+	}
+}
+
+func TestSendReloadSignal(t *testing.T) {
+	tests := []struct {
+		name      string
+		pidFile   func(t *testing.T, dir string) string
+		wantError bool
+	}{
+		{
+			name: "signals the process named by the pid file",
+			pidFile: func(t *testing.T, dir string) string {
+				path := filepath.Join(dir, "gomodel.pid")
+				remove, err := writePIDFile(path)
+				if err != nil {
+					t.Fatalf("writePIDFile() error = %v", err)
+				}
+				t.Cleanup(remove)
+				return path
+			},
+		},
+		{
+			name: "reports a missing pid file",
+			pidFile: func(t *testing.T, dir string) string {
+				return filepath.Join(dir, "absent.pid")
+			},
+			wantError: true,
+		},
+		{
+			name: "reports a pid file that names no process",
+			pidFile: func(t *testing.T, dir string) string {
+				path := filepath.Join(dir, "garbage.pid")
+				if err := os.WriteFile(path, []byte("not-a-pid"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir) // no config.yaml here, so only PID_FILE decides the path
+			t.Setenv("PID_FILE", tt.pidFile(t, dir))
+
+			// Registered before signalling, exactly as the gateway does it, so a
+			// delivered SIGHUP is caught here instead of killing the test binary.
+			delivered := make(chan os.Signal, 1)
+			signal.Notify(delivered, reloadSignal)
+			defer signal.Stop(delivered)
+
+			var out strings.Builder
+			err := sendReloadSignal(&out)
+			if tt.wantError {
+				if err == nil {
+					t.Fatal("sendReloadSignal() error = nil, want an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("sendReloadSignal() error = %v", err)
+			}
+
+			select {
+			case <-delivered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the reload signal was never delivered")
+			}
+			if !strings.Contains(out.String(), "reload requested") {
+				t.Errorf("output = %q, want it to confirm the reload", out.String())
+			}
+		})
 	}
 }

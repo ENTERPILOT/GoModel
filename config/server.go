@@ -3,9 +3,7 @@ package config
 import (
 	"fmt"
 	"net/textproto"
-	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -49,8 +47,11 @@ type ServerConfig struct {
 	RealtimeEnabled bool `yaml:"realtime_enabled" env:"REALTIME_ENABLED"`
 	// PIDFile records the process id of the running gateway so `gomodel --reload`
 	// can find it. Default: DefaultPIDFilePath(). Set it per instance when
-	// several gateways share a host; set it empty to write no pid file, which
-	// also disables `--reload`.
+	// several gateways share a host, or to "" in config.yaml to write no pid
+	// file at all, which also disables `--reload` (an empty PID_FILE reads as
+	// unset, like every other env var here, and keeps the default). Changing it
+	// needs a restart — it names the process that is already running — so a
+	// reload only warns about it.
 	PIDFile string `yaml:"pid_file" env:"PID_FILE"`
 }
 
@@ -61,16 +62,9 @@ const LegacyPIDFilePath = "data/gomodel.pid"
 // DefaultPIDFilePath returns the pid file path used when none is configured:
 // LegacyPIDFilePath when a ./data directory already exists (Docker images and
 // existing deployments), otherwise the OS-conventional per-user data directory
-// — the same resolution storage.DefaultSQLitePath uses for the database.
+// — the same resolution the database uses, so both land together.
 func DefaultPIDFilePath() string {
-	if info, err := os.Stat("data"); err == nil && info.IsDir() {
-		return LegacyPIDFilePath
-	}
-	dir, err := platformdir.DataDir()
-	if err != nil {
-		return LegacyPIDFilePath
-	}
-	return filepath.Join(dir, "gomodel.pid")
+	return platformdir.DataFile("gomodel.pid")
 }
 
 var headerNameRegex = regexp.MustCompile(`^[!#$%&'*+\-.^_` + "`" + `|~0-9A-Za-z]+$`)

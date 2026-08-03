@@ -127,7 +127,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	env := newDotenv()
-	env.apply()
+	env.apply() // startup has nothing to roll back to
 
 	if cliOpts.Health {
 		if err := runHealthProbe(cliOpts.HealthTimeout); err != nil {
@@ -220,6 +220,14 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	defer func() { _ = socket.Close() }()
 
+	// Claim the reload signal before the pid file exists. The pid file is what
+	// tells an operator or a process manager that this instance can be signalled,
+	// and until Notify runs, SIGHUP still carries its default disposition: it
+	// would kill the gateway instead of reloading it.
+	reload := make(chan os.Signal, 1)
+	signal.Notify(reload, reloadSignal)
+	defer signal.Stop(reload)
+
 	removePIDFile, err := writePIDFile(appCfg.Server.PIDFile)
 	if err != nil {
 		slog.Warn("could not write the pid file; --reload will not find this instance", "error", err)
@@ -229,19 +237,28 @@ func Run(ctx context.Context, opts Options) error {
 	signalCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	reload := make(chan os.Signal, 1)
-	signal.Notify(reload, reloadSignal)
-	defer signal.Stop(reload)
-
+	// rebuild prepares the next generation. Reading the environment file and
+	// installing the new logging configuration have to happen first — config.Load
+	// reads the process environment, and the new log level applies to the build
+	// itself — but both are process-wide, so a build that fails would otherwise
+	// leave the generation that keeps serving running under a configuration the
+	// operator was told had been rejected. Everything is put back instead.
 	rebuild := func() (lifecycleApp, error) {
-		// The environment file is re-read first so config.Load sees the new
-		// values; variables exported into the process keep winning over it.
-		env.apply()
+		// Variables exported into the process keep winning over the file.
+		undoEnv := env.apply()
+		previousLogger := slog.Default()
+		rollback := func() {
+			slog.SetDefault(previousLogger)
+			undoEnv()
+		}
+
 		if err := configureLogging(opts.Stderr); err != nil {
+			rollback()
 			return nil, err
 		}
 		next, nextCfg, err := build()
 		if err != nil {
+			rollback()
 			return nil, err
 		}
 		warnAboutStartupOnlySettings(appCfg.Server, nextCfg.Server)
@@ -369,6 +386,8 @@ func serveGeneration(ctx context.Context, application lifecycleApp, listener net
 	return startErr
 }
 
+// shutdownApplicationWithTimeout tears an application down on the one budget
+// every teardown gets, whether or not it ever served.
 func shutdownApplicationWithTimeout(application lifecycleApp) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()

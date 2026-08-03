@@ -152,10 +152,27 @@ func TestNewGatewayStartConfigForListener_KeepsTheServerConfiguration(t *testing
 	if err := cfg.BeforeServeFunc(server); err != nil {
 		t.Fatalf("BeforeServeFunc() error = %v", err)
 	}
-	if server.ReadHeaderTimeout != inboundServerReadHeaderTimeout {
-		t.Errorf("ReadHeaderTimeout = %v, want %v", server.ReadHeaderTimeout, inboundServerReadHeaderTimeout)
+	for _, timeout := range []struct {
+		name string
+		got  time.Duration
+		want time.Duration
+	}{
+		{"ReadTimeout", server.ReadTimeout, inboundServerReadTimeout},
+		{"ReadHeaderTimeout", server.ReadHeaderTimeout, inboundServerReadHeaderTimeout},
+		{"WriteTimeout", server.WriteTimeout, inboundServerWriteTimeout},
+	} {
+		if timeout.got != timeout.want {
+			t.Errorf("%s = %v, want %v", timeout.name, timeout.got, timeout.want)
+		}
 	}
-	if server.WriteTimeout != inboundServerWriteTimeout {
-		t.Errorf("WriteTimeout = %v, want %v", server.WriteTimeout, inboundServerWriteTimeout)
+}
+
+// A nil listener is a caller mistake, not something to hand to Echo: it would
+// bind a fresh address from the empty start config and serve there instead.
+func TestStartWithListenerRejectsANilListener(t *testing.T) {
+	srv := New(nil, &Config{})
+
+	if err := srv.StartWithListener(context.Background(), nil); err == nil {
+		t.Fatal("StartWithListener(nil) error = nil, want an error")
 	}
 }

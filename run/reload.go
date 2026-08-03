@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -43,15 +44,34 @@ func newDotenv() *dotenv {
 // environment — and clears whatever the file previously contributed. A file
 // that cannot be read or parsed is not: it leaves the environment as it stands,
 // so a half-typed edit does not strip the running configuration.
-func (d *dotenv) apply() {
+//
+// The returned function undoes exactly the changes this call made. A reload
+// reads the file before it knows whether the configuration built from it is
+// usable, so rejecting that configuration has to put the environment back the
+// way the still-running gateway expects it.
+func (d *dotenv) apply() (undo func()) {
 	values, err := godotenv.Read(envFile)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			slog.Warn("failed to read env file; keeping the current environment", "file", envFile, "error", err)
-			return
+			return func() {}
 		}
 		values = map[string]string{}
 	}
+
+	// A nil entry records a variable that was not set before this call.
+	previous := make(map[string]*string)
+	record := func(key string) {
+		if _, seen := previous[key]; seen {
+			return
+		}
+		if value, exported := os.LookupEnv(key); exported {
+			previous[key] = &value
+			return
+		}
+		previous[key] = nil
+	}
+	appliedBefore := maps.Clone(d.applied)
 
 	for key, value := range values {
 		if _, owned := d.applied[key]; !owned {
@@ -59,6 +79,7 @@ func (d *dotenv) apply() {
 				continue
 			}
 		}
+		record(key)
 		if err := os.Setenv(key, value); err != nil {
 			slog.Warn("failed to apply env file variable", "file", envFile, "variable", key, "error", err)
 			continue
@@ -70,11 +91,23 @@ func (d *dotenv) apply() {
 		if _, present := values[key]; present {
 			continue
 		}
+		record(key)
 		if err := os.Unsetenv(key); err != nil {
 			slog.Warn("failed to unset removed env file variable", "file", envFile, "variable", key, "error", err)
 			continue
 		}
 		delete(d.applied, key)
+	}
+
+	return func() {
+		for key, value := range previous {
+			if value == nil {
+				_ = os.Unsetenv(key)
+				continue
+			}
+			_ = os.Setenv(key, *value)
+		}
+		d.applied = appliedBefore
 	}
 }
 
@@ -106,6 +139,9 @@ func writePIDFile(path string) (func(), error) {
 	}, nil
 }
 
+// readPIDFile returns the process id recorded at path. A missing file and a
+// file that holds anything else both report why, since both are what an
+// operator sees when --reload cannot find the gateway.
 func readPIDFile(path string) (int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

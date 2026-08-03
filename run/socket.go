@@ -28,6 +28,7 @@ type boundSocket struct {
 	listener net.Listener
 }
 
+// listenOn binds address and keeps hold of it for the process's lifetime.
 func listenOn(address string) (*boundSocket, error) {
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -66,6 +67,8 @@ func (s *boundSocket) next() (net.Listener, error) {
 	return net.Listen("tcp", s.address)
 }
 
+// Close releases the socket for good, which is the process exiting rather than
+// a generation ending.
 func (s *boundSocket) Close() error {
 	if s.listener != nil {
 		defer func() { s.listener = nil }()

@@ -52,15 +52,51 @@ func TestDefaultPIDFilePath(t *testing.T) {
 	}
 }
 
-func TestPIDFileEnvOverride(t *testing.T) {
-	t.Chdir(t.TempDir())
-	t.Setenv("PID_FILE", "/var/run/gomodel/custom.pid")
-
-	result, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+func TestPIDFilePathResolution(t *testing.T) {
+	tests := []struct {
+		name       string
+		env        string
+		configYAML string
+		want       string
+	}{
+		{
+			name: "env var wins",
+			env:  "/var/run/gomodel/custom.pid",
+			want: "/var/run/gomodel/custom.pid",
+		},
+		{
+			// Empty env vars are "unset" everywhere in this config, so PID_FILE=
+			// keeps the default rather than disabling the pid file. Asserted so
+			// the documented way to disable it stays the config file.
+			name: "empty env var keeps the default",
+			env:  "",
+			want: DefaultPIDFilePath(),
+		},
+		{
+			name:       "empty config value writes no pid file",
+			configYAML: "server:\n  pid_file: \"\"\n",
+			want:       "",
+		},
 	}
-	if got := result.Config.Server.PIDFile; got != "/var/run/gomodel/custom.pid" {
-		t.Errorf("Server.PIDFile = %q, want the PID_FILE value", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			t.Setenv("PID_FILE", tt.env)
+			if tt.configYAML != "" {
+				if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			result, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if got := result.Config.Server.PIDFile; got != tt.want {
+				t.Errorf("Server.PIDFile = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
