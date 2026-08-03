@@ -16,9 +16,11 @@ import (
 // while one generation is draining and the next is starting therefore wait in
 // the kernel's accept queue instead of being refused.
 //
-// Windows cannot duplicate a listening socket. There the plain listener is
-// served directly and a later generation rebinds the address — reload is a
-// POSIX-signal feature, so that path only matters if a rebind is ever needed.
+// Not every platform lets a listening socket be duplicated. Where it cannot be,
+// the listener is served directly and a later generation rebinds the address,
+// which does leave a gap where connections are refused. Reload is delivered by
+// a POSIX signal, so on a platform without one — Windows — that fallback is
+// what serves, and there is never a second generation to rebind for.
 type boundSocket struct {
 	address  string
 	file     *os.File

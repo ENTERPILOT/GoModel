@@ -304,7 +304,7 @@ func serveUntilShutdown(ctx context.Context, reload <-chan os.Signal, socket *bo
 
 // watchForReload turns reload signals into the next application generation. It
 // builds the replacement first and ends the running generation only once that
-// succeeded, so a failed build is a logged non-event rather than an outage. The
+// succeeded, so a failed build costs a log line rather than an outage. The
 // returned channel yields the replacement, or nil when the generation ended for
 // any other reason.
 func watchForReload(ctx context.Context, endGeneration context.CancelFunc, reload <-chan os.Signal, rebuild func() (lifecycleApp, error)) <-chan lifecycleApp {
@@ -334,18 +334,20 @@ func watchForReload(ctx context.Context, endGeneration context.CancelFunc, reloa
 // serveGeneration starts one application generation and returns only once its
 // server has stopped *and* the teardown that stopped it has finished.
 //
-// The teardown has to run on its own goroutine because Start blocks until the
-// server stops and Shutdown is what stops it. Waiting for that goroutine here
-// is the load-bearing part: the process exits the moment Run returns, so
-// anything Shutdown had not reached yet — the buffered usage and audit
-// records, the database handle — would be dropped on every Ctrl+C.
+// The teardown has to run on its own goroutine because StartWithListener
+// blocks until the server stops and Shutdown is what stops it. Waiting for that
+// goroutine here is the load-bearing part: the process exits the moment Run
+// returns, so anything Shutdown had not reached yet — the buffered usage and
+// audit records, the database handle — would be dropped on every Ctrl+C.
 //
-// This is the only caller of shutdownApplication, so teardown runs exactly
-// once per generation and on a single shutdownTimeout budget, whichever way the
-// server ended: a signal, a reload, a stop of its own accord, or a Start that
-// never got off the ground all converge here. Routing the failed-start path
-// through the same place is what removes the second teardown that used to run
-// alongside it, and with it any reliance on Shutdown being idempotent.
+// Every generation that serves is torn down here, exactly once and on a single
+// shutdownTimeout budget, whichever way the server ended: a signal, a reload, a
+// stop of its own accord, or a start that never got off the ground all converge
+// here. Routing the failed-start path through the same place is what removes
+// the second teardown that used to run alongside it, and with it any reliance
+// on Shutdown being idempotent. An application built but never served — one
+// that could not be given a listener, or a replacement overtaken by shutdown —
+// is torn down by its owner in serveUntilShutdown, on the same budget.
 func serveGeneration(ctx context.Context, application lifecycleApp, listener net.Listener) error {
 	serverReturned := make(chan struct{})
 	shutdownDone := make(chan error, 1)

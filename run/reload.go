@@ -77,7 +77,8 @@ func (d *dotenv) apply() {
 }
 
 // writePIDFile records the running process id so `gomodel --reload` can find
-// the gateway to signal. The returned function removes the file again.
+// the gateway to signal. The returned function removes the file again, unless
+// another instance has claimed it in the meantime.
 func writePIDFile(path string) (func(), error) {
 	remove := func() {}
 	path = strings.TrimSpace(path)
@@ -93,9 +94,9 @@ func writePIDFile(path string) (func(), error) {
 		return remove, fmt.Errorf("write pid file %s: %w", path, err)
 	}
 	return func() {
-		// Leave the file alone if it is no longer ours: another instance
-		// started in the same directory has taken the name over, and removing
-		// it would leave that one unreachable from --reload.
+		// Leave the file alone if it is no longer ours: another instance has
+		// taken this path over, and removing it would leave that one
+		// unreachable from --reload.
 		if pid, err := readPIDFile(path); err == nil && pid != os.Getpid() {
 			return
 		}
