@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -117,11 +118,7 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "failed to parse speech response", err)
 	}
 	if response.BaseResponse.StatusCode != 0 {
-		message := "minimax speech request failed"
-		if statusMessage := strings.TrimSpace(response.BaseResponse.StatusMsg); statusMessage != "" {
-			message += ": " + statusMessage
-		}
-		return nil, core.NewProviderError("minimax", http.StatusBadGateway, message, nil)
+		return nil, speechStatusError(response.BaseResponse.StatusCode, response.BaseResponse.StatusMsg)
 	}
 	if response.Data == nil || strings.TrimSpace(response.Data.Audio) == "" {
 		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "speech response contains no audio", nil)
@@ -138,6 +135,29 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 		ContentType: core.SpeechResponseContentType(format),
 		Data:        audio,
 	}, nil
+}
+
+// speechStatusError maps a MiniMax base_resp status code to a gateway error.
+// MiniMax reports failures as HTTP 200 with a non-zero base_resp.status_code,
+// so caller mistakes (invalid parameters, auth, balance, rate limits) must be
+// surfaced with their real meaning rather than a blanket 502.
+func speechStatusError(statusCode int, statusMessage string) error {
+	message := fmt.Sprintf("minimax speech request failed (status %d)", statusCode)
+	if statusMessage = strings.TrimSpace(statusMessage); statusMessage != "" {
+		message += ": " + statusMessage
+	}
+	switch statusCode {
+	case 1002, 1039: // rate limit / token-per-minute limit triggered
+		return core.NewRateLimitError("minimax", message)
+	case 1004: // authentication failed
+		return core.NewAuthenticationError("minimax", message)
+	case 1008: // insufficient balance
+		return core.NewProviderError("minimax", http.StatusPaymentRequired, message, nil)
+	case 1026, 2013: // sensitive input content / invalid request parameters
+		return core.NewInvalidRequestError(message, nil)
+	default:
+		return core.NewProviderError("minimax", http.StatusBadGateway, message, nil)
+	}
 }
 
 func speechFormat(responseFormat string) (string, error) {
