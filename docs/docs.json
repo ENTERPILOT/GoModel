@@ -166,6 +166,7 @@
                     "providers/xai",
                     "providers/bailian",
                     "providers/xiaomi",
+                    "providers/minimax",
                     "providers/opencode-go",
                     "providers/vllm",
                     "providers/multiple-ollama",
