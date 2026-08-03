@@ -150,11 +150,13 @@ func TestCreateSpeech_MapsNativeStatusCodes(t *testing.T) {
 	}{
 		{name: "rate limit", nativeStatus: 1002, statusMsg: "rate limit triggered", wantHTTPStatus: http.StatusTooManyRequests, wantType: core.ErrorTypeRateLimit},
 		{name: "tpm limit", nativeStatus: 1039, statusMsg: "token limit", wantHTTPStatus: http.StatusTooManyRequests, wantType: core.ErrorTypeRateLimit},
+		{name: "rate growth limit", nativeStatus: 2045, statusMsg: "rate growth limit", wantHTTPStatus: http.StatusTooManyRequests, wantType: core.ErrorTypeRateLimit},
 		{name: "usage limit", nativeStatus: 2056, statusMsg: "usage limit exceeded", wantHTTPStatus: http.StatusTooManyRequests, wantType: core.ErrorTypeRateLimit},
 		{name: "auth failed", nativeStatus: 1004, statusMsg: "not authorized", wantHTTPStatus: http.StatusUnauthorized, wantType: core.ErrorTypeAuthentication},
 		{name: "invalid api key", nativeStatus: 2049, statusMsg: "invalid API Key", wantHTTPStatus: http.StatusUnauthorized, wantType: core.ErrorTypeAuthentication},
 		{name: "insufficient balance", nativeStatus: 1008, statusMsg: "insufficient balance", wantHTTPStatus: http.StatusPaymentRequired, wantType: core.ErrorTypeProvider},
 		{name: "sensitive input", nativeStatus: 1026, statusMsg: "sensitive content", wantHTTPStatus: http.StatusBadRequest, wantType: core.ErrorTypeInvalidRequest},
+		{name: "invisible characters", nativeStatus: 1042, statusMsg: "invisible character ratio limit", wantHTTPStatus: http.StatusBadRequest, wantType: core.ErrorTypeInvalidRequest},
 		{name: "invalid params", nativeStatus: 2013, statusMsg: "invalid params", wantHTTPStatus: http.StatusBadRequest, wantType: core.ErrorTypeInvalidRequest},
 		{name: "invalid voice", nativeStatus: 20132, statusMsg: "invalid samples or voice_id", wantHTTPStatus: http.StatusBadRequest, wantType: core.ErrorTypeInvalidRequest},
 		{name: "unknown code", nativeStatus: 1000, statusMsg: "unknown error", wantHTTPStatus: http.StatusBadGateway, wantType: core.ErrorTypeProvider},
