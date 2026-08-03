@@ -147,14 +147,16 @@ func speechStatusError(statusCode int, statusMessage string) error {
 		message += ": " + statusMessage
 	}
 	switch statusCode {
-	case 1002, 1039: // rate limit / token-per-minute limit triggered
+	case 1002, 1039, 2045, 2056: // rate limit / token limit / rate growth limit / usage limit
 		return core.NewRateLimitError("minimax", message)
-	case 1004: // authentication failed
+	case 1004, 2049: // not authorized / invalid API key
 		return core.NewAuthenticationError("minimax", message)
 	case 1008: // insufficient balance
 		return core.NewProviderError("minimax", http.StatusPaymentRequired, message, nil)
-	case 1026, 2013: // sensitive input content / invalid request parameters
-		return core.NewInvalidRequestError(message, nil)
+	case 1026, 1042, 2013, 20132: // sensitive input / invisible characters / invalid params / invalid voice_id
+		gatewayErr := core.NewInvalidRequestError(message, nil)
+		gatewayErr.Provider = "minimax"
+		return gatewayErr
 	default:
 		return core.NewProviderError("minimax", http.StatusBadGateway, message, nil)
 	}
