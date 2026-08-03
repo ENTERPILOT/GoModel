@@ -272,6 +272,18 @@ func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFiel
 		return nil, core.NewInvalidRequestError("model is required", nil)
 	}
 
+	form, err := c.MultipartForm()
+	if err != nil {
+		return nil, core.NewInvalidRequestError("invalid multipart form", err)
+	}
+	if !includeTranscriptionFields && form != nil {
+		for _, field := range []string{"language", "timestamp_granularities", "timestamp_granularities[]"} {
+			if _, present := form.Value[field]; present {
+				return nil, core.NewInvalidRequestError(field+" is not supported for audio translations", nil)
+			}
+		}
+	}
+
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		return nil, core.NewInvalidRequestError("file is required", err)
@@ -284,18 +296,6 @@ func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFiel
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return nil, core.NewInvalidRequestError("failed to read uploaded file", err)
-	}
-
-	form, err := c.MultipartForm()
-	if err != nil {
-		return nil, core.NewInvalidRequestError("invalid multipart form", err)
-	}
-	if !includeTranscriptionFields && form != nil {
-		for _, field := range []string{"language", "timestamp_granularities", "timestamp_granularities[]"} {
-			if _, present := form.Value[field]; present {
-				return nil, core.NewInvalidRequestError(field+" is not supported for audio translations", nil)
-			}
-		}
 	}
 
 	var granularities []string
