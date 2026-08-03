@@ -9,6 +9,10 @@ import (
 )
 
 func TestMongoDBStoreRoundTrip(t *testing.T) {
+	if _, err := NewMongoDBStore(context.Background(), nil); err == nil {
+		t.Fatal("expected error for nil database")
+	}
+
 	mongotest.Run(t, func(t *testing.T, database *mongo.Database) {
 		ctx := context.Background()
 		store, err := NewMongoDBStore(ctx, database)

@@ -41,6 +41,7 @@ func (s *Service) startSync() {
 func (s *Service) sync(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var errs []error
 	for _, key := range s.order {
 		setting := s.settings[key]
 		descriptor := setting.Descriptor()
@@ -49,7 +50,8 @@ func (s *Service) sync(ctx context.Context) error {
 		}
 		value, found, err := s.store.Get(ctx, key)
 		if err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("get synchronized runtime setting %q: %w", key, err))
+			continue
 		}
 		if !found || value == descriptor.Value {
 			delete(s.rejected, key)
@@ -64,8 +66,8 @@ func (s *Service) sync(ctx context.Context) error {
 		}
 		delete(s.rejected, key)
 		if err := setting.Apply(value); err != nil {
-			return fmt.Errorf("apply synchronized runtime setting %q: %w", key, err)
+			errs = append(errs, fmt.Errorf("apply synchronized runtime setting %q: %w", key, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }

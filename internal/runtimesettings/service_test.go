@@ -2,8 +2,10 @@ package runtimesettings
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -12,17 +14,23 @@ import (
 )
 
 type testSetting struct {
-	mu      sync.Mutex
-	value   string
-	locked  bool
-	applies int
+	mu       sync.Mutex
+	key      string
+	value    string
+	locked   bool
+	applies  int
+	applyErr error
 }
 
 func (s *testSetting) Descriptor() ext.SettingDescriptor {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	key := s.key
+	if key == "" {
+		key = "pro.compression.level"
+	}
 	return ext.SettingDescriptor{
-		Key:    "pro.compression.level",
+		Key:    key,
 		Label:  "Prompt compression level",
 		Value:  s.value,
 		Locked: s.locked,
@@ -37,6 +45,9 @@ func (s *testSetting) Descriptor() ext.SettingDescriptor {
 func (s *testSetting) Apply(value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.applyErr != nil {
+		return s.applyErr
+	}
 	switch value {
 	case "none", "medium", "high":
 		s.value = value
@@ -54,14 +65,18 @@ func (s *testSetting) applyCount() int {
 }
 
 type stubStore struct {
-	mu     sync.Mutex
-	values map[string]string
-	setErr error
+	mu      sync.Mutex
+	values  map[string]string
+	getErrs map[string]error
+	setErr  error
 }
 
 func (s *stubStore) Get(_ context.Context, key string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.getErrs[key]; err != nil {
+		return "", false, err
+	}
 	value, found := s.values[key]
 	return value, found, nil
 }
@@ -201,6 +216,38 @@ func TestServiceSynchronizesChangedValuesAcrossInstances(t *testing.T) {
 	}
 	if after := second.applyCount(); after != applies {
 		t.Fatalf("unchanged sync called Apply: before=%d after=%d", applies, after)
+	}
+}
+
+func TestServiceSyncContinuesAfterSettingFailures(t *testing.T) {
+	getErr := errors.New("read failed")
+	applyErr := errors.New("apply failed")
+	readFailure := &testSetting{key: "a.read", value: "high"}
+	applyFailure := &testSetting{key: "b.apply", value: "high", applyErr: applyErr}
+	success := &testSetting{key: "c.success", value: "high"}
+	service := &Service{
+		store: &stubStore{
+			values:  map[string]string{"b.apply": "medium", "c.success": "medium"},
+			getErrs: map[string]error{"a.read": getErr},
+		},
+		settings: map[string]ext.RuntimeSetting{
+			"a.read":    readFailure,
+			"b.apply":   applyFailure,
+			"c.success": success,
+		},
+		order:    []string{"a.read", "b.apply", "c.success"},
+		rejected: make(map[string]string),
+	}
+
+	err := service.sync(context.Background())
+	if !errors.Is(err, getErr) || !errors.Is(err, applyErr) {
+		t.Fatalf("sync error = %v, want both read and apply errors", err)
+	}
+	if got := err.Error(); !strings.Contains(got, `"a.read"`) || !strings.Contains(got, `"b.apply"`) {
+		t.Fatalf("sync error = %q, want failing setting keys", got)
+	}
+	if got := success.Descriptor().Value; got != "medium" {
+		t.Fatalf("later setting value = %q, want medium", got)
 	}
 }
 
