@@ -2234,8 +2234,18 @@ func TestConvertFromAnthropicResponse_WithCacheFields(t *testing.T) {
 }
 
 func TestConvertFromAnthropicResponse_WithThinkingTokens(t *testing.T) {
-	var resp anthropicResponse
-	err := json.Unmarshal([]byte(`{
+	tests := []struct {
+		name           string
+		thinkingTokens int
+		wantPresent    bool
+	}{
+		{name: "zero omitted", thinkingTokens: 0, wantPresent: false},
+		{name: "positive preserved", thinkingTokens: 27, wantPresent: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{
 		"id": "msg_thinking",
 		"type": "message",
 		"role": "assistant",
@@ -2245,20 +2255,47 @@ func TestConvertFromAnthropicResponse_WithThinkingTokens(t *testing.T) {
 		"usage": {
 			"input_tokens": 31,
 			"output_tokens": 311,
-			"output_tokens_details": {"thinking_tokens": 27}
+			"output_tokens_details": {"thinking_tokens": ` + strconv.Itoa(tt.thinkingTokens) + `}
 		}
-	}`), &resp)
-	if err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
+	}`
+			var resp anthropicResponse
+			if err := json.Unmarshal([]byte(body), &resp); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+
+			result := convertFromAnthropicResponse(&resp)
+			got, present := result.Usage.RawUsage["completion_reasoning_tokens"]
+
+			if present != tt.wantPresent {
+				t.Fatalf("completion_reasoning_tokens presence = %v, want %v", present, tt.wantPresent)
+			}
+			if tt.wantPresent && got != tt.thinkingTokens {
+				t.Errorf("RawUsage[completion_reasoning_tokens] = %v, want %d", got, tt.thinkingTokens)
+			}
+		})
+	}
+}
+
+func TestMergeAnthropicUsage_WithThinkingTokens(t *testing.T) {
+	dst := anthropicUsage{}
+	src := anthropicUsage{
+		OutputTokensDetails: anthropicOutputTokensDetails{ThinkingTokens: 27},
 	}
 
-	result := convertFromAnthropicResponse(&resp)
-
-	if result.Usage.RawUsage == nil {
-		t.Fatal("expected RawUsage to be set")
+	if !mergeAnthropicUsage(&dst, &src) {
+		t.Fatal("mergeAnthropicUsage() = false, want true")
 	}
-	if result.Usage.RawUsage["completion_reasoning_tokens"] != 27 {
-		t.Errorf("RawUsage[completion_reasoning_tokens] = %v, want 27", result.Usage.RawUsage["completion_reasoning_tokens"])
+	if dst.OutputTokensDetails.ThinkingTokens != 27 {
+		t.Fatalf("ThinkingTokens = %d, want 27", dst.OutputTokensDetails.ThinkingTokens)
+	}
+
+	chatDetails, ok := anthropicChatUsagePayload(&dst)["completion_tokens_details"].(map[string]any)
+	if !ok || chatDetails["reasoning_tokens"] != 27 {
+		t.Fatalf("chat completion token details = %#v, want reasoning_tokens=27", chatDetails)
+	}
+	responseDetails, ok := anthropicResponsesUsagePayload(&dst)["output_tokens_details"].(map[string]any)
+	if !ok || responseDetails["reasoning_tokens"] != 27 {
+		t.Fatalf("response output token details = %#v, want reasoning_tokens=27", responseDetails)
 	}
 }
 

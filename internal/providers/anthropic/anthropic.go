@@ -358,6 +358,20 @@ func buildAnthropicRawUsage(u anthropicUsage) map[string]any {
 	return raw
 }
 
+func addAnthropicUsagePayloadDetails(payload map[string]any, usage *anthropicUsage, outputDetailsKey string) {
+	if usage.CacheReadInputTokens > 0 {
+		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
+	}
+	if usage.CacheCreationInputTokens > 0 {
+		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
+	}
+	if usage.OutputTokensDetails.ThinkingTokens > 0 {
+		payload[outputDetailsKey] = map[string]any{
+			"reasoning_tokens": usage.OutputTokensDetails.ThinkingTokens,
+		}
+	}
+}
+
 func malformedAnthropicStreamError(err error) error {
 	return core.NewProviderError("anthropic", http.StatusBadGateway, "failed to decode anthropic stream event: "+err.Error(), err)
 }
@@ -408,6 +422,10 @@ func mergeAnthropicUsage(dst *anthropicUsage, src *anthropicUsage) bool {
 	}
 	if src.CacheReadInputTokens != 0 {
 		dst.CacheReadInputTokens = src.CacheReadInputTokens
+		merged = true
+	}
+	if src.OutputTokensDetails.ThinkingTokens != 0 {
+		dst.OutputTokensDetails.ThinkingTokens = src.OutputTokensDetails.ThinkingTokens
 		merged = true
 	}
 
