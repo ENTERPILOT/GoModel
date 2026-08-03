@@ -84,6 +84,11 @@ func TestShutdownOrderHasNoUnregisteredEntries(t *testing.T) {
 
 	registered := make(map[string]closerOwner, len(application.registered))
 	for _, subsystem := range application.registered {
+		// Keying by name collapses duplicates, which would let two registrations
+		// share one shutdown-order entry and pass the coverage check below.
+		if _, duplicate := registered[subsystem.name]; duplicate {
+			t.Errorf("subsystem %q is registered more than once, so the coverage check below cannot see the duplicate", subsystem.name)
+		}
 		registered[subsystem.name] = subsystem.owner
 	}
 
@@ -101,6 +106,24 @@ func TestShutdownOrderHasNoUnregisteredEntries(t *testing.T) {
 		}
 		if owner != ownedByShutdown {
 			t.Errorf("subsystem %q is closed by shutdownOrder but registered as owner %d", subsystem.name, owner)
+		}
+	}
+}
+
+// The registry promises each subsystem registers exactly once. Nothing but this
+// test enforces it: a second registration under an existing name is invisible to
+// the name-keyed coverage checks, while unwind walks the append-only slice and
+// would close that resource twice on startup failure.
+func TestEverySubsystemRegistersExactlyOnce(t *testing.T) {
+	application := newFullyWiredApp(t)
+
+	counts := make(map[string]int, len(application.registered))
+	for _, subsystem := range application.registered {
+		counts[subsystem.name]++
+	}
+	for name, count := range counts {
+		if count > 1 {
+			t.Errorf("subsystem %q is registered %d times; unwind would close it %d times on startup failure", name, count, count)
 		}
 	}
 }
