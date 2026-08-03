@@ -3,6 +3,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -122,5 +123,30 @@ func TestCreateTranslation_UsesTranslationMultipartShape(t *testing.T) {
 	}
 	if string(resp.Data) != "Hello from GoModel." {
 		t.Errorf("Data = %q, want translated text", resp.Data)
+	}
+}
+
+func TestCreateTranslation_RejectsInvalidRequests(t *testing.T) {
+	tests := []struct {
+		name        string
+		req         *core.AudioTranscriptionRequest
+		wantMessage string
+	}{
+		{name: "nil request", wantMessage: "audio translation request is required"},
+		{name: "missing file", req: &core.AudioTranscriptionRequest{Model: "whisper-1"}, wantMessage: "file is required"},
+	}
+
+	provider := &CompatibleProvider{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := provider.CreateTranslation(context.Background(), tt.req)
+			var gatewayErr *core.GatewayError
+			if !errors.As(err, &gatewayErr) {
+				t.Fatalf("CreateTranslation() error = %v, want GatewayError", err)
+			}
+			if gatewayErr.Message != tt.wantMessage {
+				t.Fatalf("CreateTranslation() message = %q, want %q", gatewayErr.Message, tt.wantMessage)
+			}
+		})
 	}
 }

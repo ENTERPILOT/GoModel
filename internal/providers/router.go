@@ -753,6 +753,9 @@ func (r *Router) CreateTranscription(ctx context.Context, req *core.AudioTranscr
 // CreateTranslation routes a speech translation request to a provider that
 // explicitly supports the OpenAI-compatible translations endpoint.
 func (r *Router) CreateTranslation(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("audio translation request is required", nil)
+	}
 	resp, _, err := routeResolvedModelCall(
 		r, ctx, req.Model, req.Provider,
 		func(selector core.ModelSelector) *core.AudioTranscriptionRequest {

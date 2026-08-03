@@ -1007,6 +1007,7 @@ func TestIsModelInteractionPath(t *testing.T) {
 		{"batches prefix overmatch", "/v1/batcheship", false},
 		{"audio speech", "/v1/audio/speech", true},
 		{"audio transcriptions", "/v1/audio/transcriptions", true},
+		{"audio translations", "/v1/audio/translations", true},
 		{"models", "/v1/models", false},
 		{"models with subpath", "/v1/models/gpt-4", false},
 		{"health", "/health", false},

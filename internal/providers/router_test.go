@@ -407,15 +407,61 @@ func TestRouterCreateTranslation(t *testing.T) {
 	}
 }
 
-func TestRouterCreateTranslation_RejectsUnsupportedProvider(t *testing.T) {
-	provider := &mockProvider{name: "cohere"}
-	lookup := newMockLookup()
-	lookup.addModel("transcribe-only", provider, "cohere")
-	router, _ := NewRouter(lookup)
+func TestRouterCreateTranslation_Errors(t *testing.T) {
+	providerErr := errors.New("translation provider failed")
+	tests := []struct {
+		name         string
+		model        string
+		provider     core.Provider
+		providerType string
+		req          *core.AudioTranscriptionRequest
+		wantError    string
+		wantIs       error
+	}{
+		{
+			name:         "unsupported provider",
+			model:        "transcribe-only",
+			provider:     &mockProvider{name: "cohere"},
+			providerType: "cohere",
+			req:          &core.AudioTranscriptionRequest{Model: "transcribe-only", File: []byte("audio")},
+			wantError:    "does not support audio translations",
+		},
+		{
+			name:         "provider failure",
+			model:        "openai/whisper-1",
+			provider:     &mockAudioTranslationProvider{mockProvider: &mockProvider{name: "openai", err: providerErr}},
+			providerType: "openai",
+			req:          &core.AudioTranscriptionRequest{Model: "whisper-1", Provider: "openai", File: []byte("audio")},
+			wantIs:       providerErr,
+		},
+		{
+			name:      "nil request",
+			wantError: "audio translation request is required",
+		},
+	}
 
-	_, err := router.CreateTranslation(context.Background(), &core.AudioTranscriptionRequest{Model: "transcribe-only", File: []byte("audio")})
-	if err == nil || !strings.Contains(err.Error(), "does not support audio translations") {
-		t.Fatalf("CreateTranslation() error = %v, want unsupported translation error", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lookup := newMockLookup()
+			if tt.provider != nil {
+				lookup.addModel(tt.model, tt.provider, tt.providerType)
+			}
+			router, err := NewRouter(lookup)
+			if err != nil {
+				t.Fatalf("NewRouter() error = %v", err)
+			}
+
+			_, err = router.CreateTranslation(context.Background(), tt.req)
+			if tt.wantIs != nil {
+				if !errors.Is(err, tt.wantIs) {
+					t.Fatalf("CreateTranslation() error = %v, want %v", err, tt.wantIs)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("CreateTranslation() error = %v, want message containing %q", err, tt.wantError)
+			}
+		})
 	}
 }
 

@@ -286,13 +286,25 @@ func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFiel
 		return nil, core.NewInvalidRequestError("failed to read uploaded file", err)
 	}
 
+	form, err := c.MultipartForm()
+	if err != nil {
+		return nil, core.NewInvalidRequestError("invalid multipart form", err)
+	}
+	if !includeTranscriptionFields && form != nil {
+		for _, field := range []string{"language", "timestamp_granularities", "timestamp_granularities[]"} {
+			if _, present := form.Value[field]; present {
+				return nil, core.NewInvalidRequestError(field+" is not supported for audio translations", nil)
+			}
+		}
+	}
+
 	var granularities []string
 	var language string
 	if includeTranscriptionFields {
 		language = strings.TrimSpace(c.FormValue("language"))
 		// Accept both the canonical bracketed key and the unbracketed variant some
 		// clients send; the adapter always forwards the bracketed form upstream.
-		if form, err := c.MultipartForm(); err == nil && form != nil {
+		if form != nil {
 			granularities = form.Value["timestamp_granularities[]"]
 			if len(granularities) == 0 {
 				granularities = form.Value["timestamp_granularities"]
