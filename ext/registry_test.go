@@ -12,6 +12,17 @@ import (
 
 type namedRewriter struct{ name string }
 
+type testRuntimeSetting struct{ value string }
+
+func (s *testRuntimeSetting) Descriptor() SettingDescriptor {
+	return SettingDescriptor{Key: "test.setting", Value: s.value}
+}
+
+func (s *testRuntimeSetting) Apply(value string) error {
+	s.value = value
+	return nil
+}
+
 func (r *namedRewriter) Name() string { return r.name }
 
 func (r *namedRewriter) Rewrite(_ context.Context, _ Input) (*Result, error) {
@@ -56,6 +67,17 @@ func TestRegistryCollectsMiddlewareAndRoutes(t *testing.T) {
 
 	assert.Len(t, reg.Middleware(), 1)
 	assert.Len(t, reg.Routes(), 1)
+}
+
+func TestRegistryCollectsRuntimeSettings(t *testing.T) {
+	reg := &Registry{}
+	reg.RegisterSetting(&testRuntimeSetting{value: "high"})
+
+	snapshot := reg.Settings()
+	require.Len(t, snapshot, 1)
+	reg.RegisterSetting(&testRuntimeSetting{value: "low"})
+	assert.Len(t, snapshot, 1, "earlier snapshot must not grow")
+	assert.Len(t, reg.Settings(), 2)
 }
 
 func TestRegistryConcurrentRegistration(t *testing.T) {

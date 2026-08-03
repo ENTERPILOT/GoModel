@@ -17,6 +17,8 @@ type RouteRegistrar interface {
 // Callers typically pass an *echo.Group rooted at /admin.
 func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/runtime/config", h.DashboardConfig)
+	g.GET("/runtime/settings", h.RuntimeSettings)
+	g.PUT("/runtime/settings/:key", h.UpdateRuntimeSetting)
 	g.GET("/cache/overview", h.CacheOverview)
 	g.GET("/live/logs", h.LiveLogs)
 
