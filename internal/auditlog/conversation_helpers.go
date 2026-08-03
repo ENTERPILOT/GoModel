@@ -10,6 +10,82 @@ import (
 )
 
 type entryLookup func(ctx context.Context, id string) (*LogEntry, error)
+type sessionPageLookup func(ctx context.Context, params LogQueryParams) (*LogListResult, error)
+
+// buildSessionConversation returns the newest portion of an audit session,
+// while always retaining the selected anchor. Session requests are the
+// authoritative interaction thread for chat/completions and messages, whose
+// payloads do not carry Responses API linkage IDs.
+func buildSessionConversation(ctx context.Context, anchor *LogEntry, limit int, getPage sessionPageLookup) (*ConversationResult, error) {
+	limit = clampConversationLimit(limit)
+	if anchor == nil {
+		return &ConversationResult{Entries: []LogEntry{}}, nil
+	}
+
+	entries := make([]LogEntry, 0, limit)
+	total := 0
+	for offset := 0; offset < limit; {
+		pageSize := min(limit-offset, 100)
+		page, err := getPage(ctx, LogQueryParams{
+			SessionID:    anchor.SessionID,
+			Limit:        pageSize,
+			Offset:       offset,
+			OmitAttempts: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if page == nil {
+			break
+		}
+		total = page.Total
+		entries = append(entries, page.Entries...)
+		if len(page.Entries) == 0 || len(entries) >= total {
+			break
+		}
+		offset += len(page.Entries)
+	}
+
+	anchorFound := false
+	for i := range entries {
+		if entries[i].ID == anchor.ID {
+			anchorFound = true
+			break
+		}
+	}
+	if !anchorFound {
+		if len(entries) >= limit {
+			entries = entries[:limit-1]
+		}
+		entries = append(entries, *anchor)
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Timestamp.Before(entries[j].Timestamp)
+	})
+
+	return &ConversationResult{
+		AnchorID:  anchor.ID,
+		Entries:   entries,
+		Truncated: total > len(entries),
+	}, nil
+}
+
+func buildConversation(ctx context.Context, logID string, limit int, getByID entryLookup, getPage sessionPageLookup, findByResponseID, findByPreviousResponseID entryLookup) (*ConversationResult, error) {
+	anchor, err := getByID(ctx, logID)
+	if err != nil {
+		return nil, err
+	}
+	if anchor == nil {
+		return &ConversationResult{AnchorID: logID, Entries: []LogEntry{}}, nil
+	}
+	if strings.TrimSpace(anchor.SessionID) != "" {
+		return buildSessionConversation(ctx, anchor, limit, getPage)
+	}
+	return buildConversationThread(ctx, logID, limit,
+		func(context.Context, string) (*LogEntry, error) { return anchor, nil },
+		findByResponseID, findByPreviousResponseID)
+}
 
 // buildConversationThread walks the response-ID chain outward from the anchor
 // entry: backward via previous_response_id, then forward via the entries that

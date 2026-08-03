@@ -26,6 +26,7 @@ type LogQueryParams struct {
 	Stream         *bool
 	Limit          int
 	Offset         int
+	OmitAttempts   bool
 }
 
 // LogListResult holds a paginated list of audit log entries.
@@ -56,14 +57,13 @@ type SessionListResult struct {
 	Offset   int              `json:"offset"`
 }
 
-// ConversationResult holds a linear conversation thread centered around an anchor log.
+// ConversationResult holds a conversation thread with a selected anchor log.
 type ConversationResult struct {
 	AnchorID string     `json:"anchor_id"`
 	Entries  []LogEntry `json:"entries"`
 
-	// Truncated reports that the thread walk stopped early because the
-	// caller's deadline expired; the entries collected up to that point are
-	// returned rather than failing the whole request.
+	// Truncated reports that more session or linkage entries exist than were
+	// returned.
 	Truncated bool `json:"truncated,omitempty"`
 }
 
@@ -82,8 +82,8 @@ type Reader interface {
 	// Returns (nil, nil) when no entry exists for the given ID.
 	GetLogByID(ctx context.Context, id string) (*LogEntry, error)
 
-	// GetConversation returns a linear conversation thread around a seed log entry.
-	// It follows Responses API linkage fields when available:
+	// GetConversation returns the anchor's session when it has one. Entries
+	// without a detected session fall back to Responses API linkage fields:
 	// request_body.previous_response_id and response_body.id.
 	GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error)
 

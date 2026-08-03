@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -18,6 +19,30 @@ import (
 type partialErrorReadCloser struct {
 	data []byte
 	read bool
+}
+
+type sessionLiveEvent struct {
+	eventType string
+	sessionID string
+}
+
+type sessionLivePublisher struct {
+	events []sessionLiveEvent
+}
+
+type sessionParentLookup struct {
+	entry *auditlog.LogEntry
+	err   error
+	calls int
+}
+
+func (l *sessionParentLookup) GetLogByID(_ context.Context, _ string) (*auditlog.LogEntry, error) {
+	l.calls++
+	return l.entry, l.err
+}
+
+func (p *sessionLivePublisher) PublishLiveEvent(eventType string, entry *auditlog.LogEntry) {
+	p.events = append(p.events, sessionLiveEvent{eventType: eventType, sessionID: entry.SessionID})
 }
 
 func (r *partialErrorReadCloser) Read(p []byte) (int, error) {
@@ -88,6 +113,125 @@ func TestSessionCaptureStampsContext(t *testing.T) {
 	}
 	if got != "11111111-2222-3333-4444-555555555555" {
 		t.Fatalf("session id = %q, want header value", got)
+	}
+}
+
+func TestSessionCapturePublishesSessionBeforeDownstreamHandler(t *testing.T) {
+	detector := session.NewDetector(session.BuiltinRules(), true)
+	c := sessionTestContext(t, "/v1/chat/completions", map[string]string{
+		"X-Session-Id": "session-live",
+	})
+	entry := &auditlog.LogEntry{ID: "audit-live"}
+	publisher := &sessionLivePublisher{}
+	c.Set(string(auditlog.LogEntryKey), entry)
+	c.Set(string(auditlog.LogEntryLivePublisherKey), publisher)
+
+	handler := SessionCapture(detector)(func(c *echo.Context) error {
+		if len(publisher.events) != 1 {
+			t.Fatalf("live events before handler = %d, want 1", len(publisher.events))
+		}
+		if got := publisher.events[0]; got.eventType != auditlog.LiveEventAuditUpdated || got.sessionID != "session-live" {
+			t.Fatalf("live event = %#v, want audit.updated with detected session", got)
+		}
+		if entry.SessionID != "session-live" {
+			t.Fatalf("entry session = %q, want detected session", entry.SessionID)
+		}
+		return nil
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+}
+
+func TestSessionCaptureInheritsTrustedInteractionParent(t *testing.T) {
+	detector := session.NewDetector(session.BuiltinRules(), true)
+	c := sessionTestContext(t, "/v1/responses", map[string]string{
+		interactionParentHeader: "parent-log",
+		"X-Session-Id":          "raw-session-that-must-not-win",
+	})
+	setInteractionContinuationAllowed(c, true)
+	lookup := &sessionParentLookup{entry: &auditlog.LogEntry{
+		ID: "parent-log", SessionID: "auto-resolved-session", UserPath: "/",
+	}}
+
+	handler := SessionCapture(detector, lookup)(func(c *echo.Context) error {
+		if got := core.SessionIDFromContext(c.Request().Context()); got != "auto-resolved-session" {
+			t.Fatalf("session id = %q, want inherited parent session", got)
+		}
+		return nil
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if lookup.calls != 1 {
+		t.Fatalf("parent lookups = %d, want 1", lookup.calls)
+	}
+}
+
+func TestSessionCaptureAllowsParentWhenAuthenticationIsDisabled(t *testing.T) {
+	detector := session.NewDetector(session.BuiltinRules(), true)
+	c := sessionTestContext(t, "/v1/responses", map[string]string{
+		interactionParentHeader: "parent-log",
+	})
+	lookup := &sessionParentLookup{entry: &auditlog.LogEntry{
+		ID: "parent-log", SessionID: "parent-session", UserPath: "/",
+	}}
+
+	handler := sessionCapture(detector, lookup, true)(func(c *echo.Context) error {
+		if got := core.SessionIDFromContext(c.Request().Context()); got != "parent-session" {
+			t.Fatalf("session id = %q, want inherited parent session", got)
+		}
+		return nil
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+}
+
+func TestSessionCaptureRejectsUntrustedOrCrossPathParent(t *testing.T) {
+	detector := session.NewDetector(session.BuiltinRules(), true)
+	for _, tc := range []struct {
+		name            string
+		trusted         bool
+		parentPath      string
+		requestUserPath string
+		wantCalls       int
+	}{
+		{name: "untrusted", wantCalls: 0},
+		{name: "different user path", trusted: true, parentPath: "/team", wantCalls: 1},
+		{name: "legacy root parent from user path", trusted: true, requestUserPath: "/team", wantCalls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := sessionTestContext(t, "/v1/chat/completions", map[string]string{
+				interactionParentHeader: "parent-log",
+				"X-Session-Id":          "detected-session",
+			})
+			if tc.requestUserPath != "" {
+				req := c.Request()
+				c.SetRequest(req.WithContext(core.WithEffectiveUserPath(req.Context(), tc.requestUserPath)))
+			}
+			setInteractionContinuationAllowed(c, tc.trusted)
+			lookup := &sessionParentLookup{entry: &auditlog.LogEntry{
+				ID: "parent-log", SessionID: "parent-session", UserPath: tc.parentPath,
+			}}
+
+			handler := SessionCapture(detector, lookup)(func(c *echo.Context) error {
+				got := core.SessionIDFromContext(c.Request().Context())
+				if tc.requestUserPath != "" && (got == "" || got == "parent-session") {
+					t.Fatalf("session id = %q, want scoped detector fallback", got)
+				}
+				if tc.requestUserPath == "" && got != "detected-session" {
+					t.Fatalf("session id = %q, want detector fallback", got)
+				}
+				return nil
+			})
+			if err := handler(c); err != nil {
+				t.Fatalf("handler error = %v", err)
+			}
+			if lookup.calls != tc.wantCalls {
+				t.Fatalf("parent lookups = %d, want %d", lookup.calls, tc.wantCalls)
+			}
+		})
 	}
 }
 

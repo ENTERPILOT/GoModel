@@ -60,6 +60,18 @@ func TestSQLStore_SessionIDRoundtripAndFilter(t *testing.T) {
 				t.Fatalf("filter leaked entry %q with session %q", entry.ID, entry.SessionID)
 			}
 		}
+
+		conversation, err := reader.GetConversation(ctx, "s-1", 10)
+		if err != nil {
+			t.Fatalf("GetConversation failed: %v", err)
+		}
+		if conversation.AnchorID != "s-1" || len(conversation.Entries) != 2 {
+			t.Fatalf("conversation = %+v, want the two-entry sess-a thread", conversation)
+		}
+		if conversation.Entries[0].ID != "s-1" || conversation.Entries[1].ID != "s-2" {
+			t.Fatalf("conversation ids = %q, %q; want s-1, s-2",
+				conversation.Entries[0].ID, conversation.Entries[1].ID)
+		}
 	})
 }
 

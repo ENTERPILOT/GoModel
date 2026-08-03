@@ -651,7 +651,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	livePublishersEnabled := false
 	usageEnabledForDashboard := usageResult.Logger.Config().Enabled
 	if adminCfg.EndpointsEnabled {
-		adminHandler, dashHandler, adminErr := initAdmin(
+		adminHandler, dashHandler, auditReader, adminErr := initAdmin(
 			usageReader,
 			usageReadStorage,
 			sharedStorage,
@@ -681,6 +681,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		} else {
 			serverCfg.AdminEndpointsEnabled = true
 			serverCfg.AdminHandler = adminHandler
+			serverCfg.AuditReader = auditReader
 			livePublishersEnabled = true
 			slog.Info("admin API enabled",
 				"api", config.JoinBasePath(appCfg.Server.BasePath, "/admin"),
@@ -1073,7 +1074,7 @@ func initAdmin(
 	usagePricingRecalculationEnabled bool,
 	basePath string,
 	uiEnabled bool,
-) (*admin.Handler, *dashboard.Handler, error) {
+) (*admin.Handler, *dashboard.Handler, auditlog.Reader, error) {
 	// Pricing recalculation writes through the same storage the reader uses.
 	var pricingRecalculator usage.PricingRecalculator
 	if usageReadStorage != nil && usagePricingRecalculationEnabled {
@@ -1093,7 +1094,7 @@ func initAdmin(
 		var err error
 		auditReader, err = auditlog.NewReader(auditStorage)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create audit reader: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create audit reader: %w", err)
 		}
 	}
 
@@ -1138,11 +1139,11 @@ func initAdmin(
 		var err error
 		dashHandler, err = dashboard.NewWithDemoMode(basePath, runtimeConfig.DemoMode == "on")
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize dashboard: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to initialize dashboard: %w", err)
 		}
 	}
 
-	return adminHandler, dashHandler, nil
+	return adminHandler, dashHandler, auditReader, nil
 }
 
 func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Definition, error) {

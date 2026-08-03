@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -137,6 +138,70 @@ func TestBuildConversationThreadWalksBothDirections(t *testing.T) {
 		if result.Entries[i].ID != want {
 			t.Errorf("entry %d = %s, want %s", i, result.Entries[i].ID, want)
 		}
+	}
+}
+
+func TestBuildSessionConversationFollowsLatestAndKeepsAnchor(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	anchor := &LogEntry{ID: "log-1", SessionID: "session-1", Timestamp: base}
+	newestFirst := []LogEntry{
+		{ID: "log-4", SessionID: "session-1", Timestamp: base.Add(3 * time.Minute)},
+		{ID: "log-3", SessionID: "session-1", Timestamp: base.Add(2 * time.Minute)},
+		{ID: "log-2", SessionID: "session-1", Timestamp: base.Add(time.Minute)},
+		*anchor,
+	}
+
+	result, err := buildSessionConversation(context.Background(), anchor, 3,
+		func(_ context.Context, params LogQueryParams) (*LogListResult, error) {
+			if params.SessionID != "session-1" {
+				t.Fatalf("session id = %q, want session-1", params.SessionID)
+			}
+			if !params.OmitAttempts {
+				t.Fatal("session conversation must omit attempt hydration")
+			}
+			end := min(params.Offset+params.Limit, len(newestFirst))
+			return &LogListResult{
+				Entries: newestFirst[params.Offset:end],
+				Total:   len(newestFirst),
+			}, nil
+		})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Truncated {
+		t.Fatal("limited session must be marked truncated")
+	}
+	if result.AnchorID != "log-1" {
+		t.Fatalf("anchor id = %q, want log-1", result.AnchorID)
+	}
+	got := []string{result.Entries[0].ID, result.Entries[1].ID, result.Entries[2].ID}
+	want := []string{"log-1", "log-3", "log-4"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("entry ids = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestBuildSessionConversationPagesPastAuditListCap(t *testing.T) {
+	t.Parallel()
+	anchor := &LogEntry{ID: "log-119", SessionID: "session-1", Timestamp: time.Now()}
+	calls := 0
+	result, err := buildSessionConversation(context.Background(), anchor, 120,
+		func(_ context.Context, params LogQueryParams) (*LogListResult, error) {
+			calls++
+			entries := make([]LogEntry, params.Limit)
+			for i := range entries {
+				entries[i] = LogEntry{ID: fmt.Sprintf("log-%d", params.Offset+i)}
+			}
+			return &LogListResult{Entries: entries, Total: 120}, nil
+		})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 2 || len(result.Entries) != 120 {
+		t.Fatalf("calls/entries = %d/%d, want 2/120", calls, len(result.Entries))
 	}
 }
 

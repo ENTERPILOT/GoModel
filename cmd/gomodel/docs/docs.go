@@ -18,14 +18,14 @@ const docTemplate = `{
     "paths": {
         "/admin/audit/conversation": {
             "get": {
-                "description": "Thread entries carry the request/response bodies the\ntranscript is built from; attempts, request revisions, and\nheader maps are omitted.",
+                "description": "Thread entries carry the request/response bodies the\ntranscript is built from; attempts, request revisions, and\nresponse headers are omitted; redacted request headers are\nretained so the dashboard can continue the same session.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Get conversation thread around an audit log entry",
+                "summary": "Get the interaction session containing an audit log entry",
                 "parameters": [
                     {
                         "type": "string",

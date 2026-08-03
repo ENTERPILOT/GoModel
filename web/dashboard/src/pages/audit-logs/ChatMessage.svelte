@@ -14,7 +14,7 @@
       m.role === "function_call" || m.role === "function_result"
         ? "chat-function-note"
         : "chat-message";
-    return [base, m.roleClass, m.isAnchor ? "is-anchor" : ""]
+    return [base, m.roleClass, m.isAnchor ? "is-anchor" : "", m.isAfterAnchor ? "is-after-anchor" : ""]
       .filter(Boolean)
       .join(" ");
   }
@@ -27,7 +27,11 @@
   }
 </script>
 
-<article class={articleClass(msg)}>
+<article
+  class={articleClass(msg)}
+  data-conversation-anchor={msg.isAnchor ? "true" : undefined}
+  data-entry-id={msg.entryID}
+>
   {#if msg.role === "function_call" || msg.role === "function_result"}
     <details class="chat-function-note-details">
       <summary class="chat-function-note-inner">
@@ -68,6 +72,11 @@
   .chat-message.is-anchor {
     border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+
+  .chat-message.is-after-anchor,
+  .chat-function-note.is-after-anchor {
+    opacity: 0.46;
   }
 
   .chat-message.role-user {

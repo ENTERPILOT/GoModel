@@ -143,8 +143,10 @@ func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogLis
 	}
 	rows.Close()
 
-	if err := r.loadAttempts(ctx, entries); err != nil {
-		return nil, err
+	if !params.OmitAttempts {
+		if err := r.loadAttempts(ctx, entries); err != nil {
+			return nil, err
+		}
 	}
 	return &LogListResult{Entries: entries, Total: total, Limit: limit, Offset: offset}, nil
 }
@@ -228,9 +230,9 @@ func (r *SQLReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error
 		selectLogColumns+" WHERE "+r.dialect.idColumn+" = ? LIMIT 1", id)
 }
 
-// GetConversation returns a linear conversation thread around a seed log entry.
 func (r *SQLReader) GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error) {
-	return buildConversationThread(ctx, logID, limit, r.GetLogByID, r.findByResponseID, r.findByPreviousResponseID)
+	return buildConversation(ctx, logID, limit, r.GetLogByID, r.GetLogs,
+		r.findByResponseID, r.findByPreviousResponseID)
 }
 
 func (r *SQLReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {

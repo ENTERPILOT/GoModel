@@ -124,23 +124,21 @@ func looksLikeResponsesOutput(v any) bool {
 }
 
 // slimConversationEntry strips the fields the Interactions drawer never
-// reads from a conversation-thread entry. The drawer builds its transcript
-// from id, timestamp, request_body, response_body, and error_message;
-// attempts, request revisions (each carrying a full rewritten body), and
-// header maps only inflate the response — for agent traffic they roughly
-// double it.
+// reads from a conversation-thread entry. Request headers are retained because
+// the drawer uses the safe, redacted subset to continue the same session from
+// the original endpoint. Response headers, attempts, and request revisions
+// only inflate the response.
 func slimConversationEntry(entry *auditlog.LogEntry) {
 	d := entry.Data
 	if d == nil {
 		return
 	}
-	if d.Attempts == nil && d.RequestRevisions == nil && d.RequestHeaders == nil && d.ResponseHeaders == nil {
+	if d.Attempts == nil && d.RequestRevisions == nil && d.ResponseHeaders == nil {
 		return
 	}
 	slim := *d
 	slim.Attempts = nil
 	slim.RequestRevisions = nil
-	slim.RequestHeaders = nil
 	slim.ResponseHeaders = nil
 	entry.Data = &slim
 }

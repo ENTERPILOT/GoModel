@@ -123,6 +123,9 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 	if len(matchFilters) > 0 {
 		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
+	if params.OmitAttempts {
+		pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{{Key: "data.attempts", Value: 0}}}})
+	}
 
 	pipeline = append(pipeline, bson.D{{Key: "$facet", Value: bson.D{
 		{Key: "data", Value: bson.A{
@@ -293,9 +296,9 @@ func (r *MongoDBReader) GetLogByID(ctx context.Context, id string) (*LogEntry, e
 	return row.toLogEntry(), nil
 }
 
-// GetConversation returns a linear conversation thread around a seed log entry.
 func (r *MongoDBReader) GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error) {
-	return buildConversationThread(ctx, logID, limit, r.GetLogByID, r.findByResponseID, r.findByPreviousResponseID)
+	return buildConversation(ctx, logID, limit, r.GetLogByID, r.GetLogs,
+		r.findByResponseID, r.findByPreviousResponseID)
 }
 
 func mongoDateRangeFilter(params QueryParams) bson.D {

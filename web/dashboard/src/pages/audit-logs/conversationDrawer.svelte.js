@@ -1,20 +1,19 @@
-// Interactions drawer state singleton (openConversation, closeConversation,
-// conversationOpen, conversationLoading, conversationError,
-// conversationAnchorID, conversationEntries, conversationMessages,
-// conversationLiveEntryId, conversationRequestToken, conversationReturnFocusEl,
-// bodyPointerStart, …). Pure message shaping lives in ./conversation-helpers.js.
-//
-// The drawer imports the liveLogs singleton for the live-state helpers and
-// registers itself as the live-conversation sink (refreshLiveConversation),
-// so an open live conversation re-renders as stream chunks arrive.
+// Interactions drawer state. Pure transcript and branch shaping lives in
+// conversation-helpers.js.
 
-import { getJSON } from "$lib/api/client.js";
+import { apiFetch, getJSON } from "$lib/api/client.js";
 import { liveLogs } from "./liveLogs.svelte.js";
 import {
-  buildConversationMessages,
+  buildConversationView,
+  buildFollowUpHeaders,
+  buildFollowUpRequest,
   canShowConversation,
+  conversationEntryIsLatest,
+  conversationFollowUpEntry,
+  followUpEndpointKind,
   formatJSON,
-  functionExpandedContent,
+  interactionParentID,
+  latestRenderableConversationEntry,
   renderBodyWithConversationHighlights,
 } from "./conversation-helpers.js";
 
@@ -25,16 +24,22 @@ class ConversationDrawerStore {
   conversationAnchorID = $state("");
   conversationEntries = $state([]);
   conversationMessages = $state([]);
-  conversationLiveEntryId = $state("");
+  conversationBranchEntryIDs = $state([]);
+  conversationSessionID = $state("");
+  conversationTruncated = $state(false);
+  conversationFollowLatest = $state(false);
+  conversationOpenedFromID = $state("");
+  followUpText = $state("");
+  followUpSending = $state(false);
+  followUpError = $state("");
 
-  // Non-rendered bookkeeping.
   conversationRequestToken = 0;
   conversationReturnFocusEl = null;
   bodyPointerStart = null;
 
-  // Element refs bound by ConversationDrawer.svelte.
-  conversationDialogEl = null;
-  conversationCloseBtnEl = null;
+  conversationDialogEl = $state(null);
+  conversationCloseBtnEl = $state(null);
+  conversationThreadEl = $state(null);
 
   canShowConversation(entry) {
     return canShowConversation(entry);
@@ -74,10 +79,6 @@ class ConversationDrawerStore {
     this.openConversation(entry, el);
   }
 
-  // handleErrorConversationClick opens the interactions preview from an
-  // error message block. The error text has no conversation segments to
-  // highlight, so the whole message acts as the trigger (skipping drags
-  // and text selections, like the body handler).
   handleErrorConversationClick(event, entry) {
     const wasDrag = this._isBodyDrag(event);
     this.bodyPointerStart = null;
@@ -115,8 +116,15 @@ class ConversationDrawerStore {
     this.conversationOpen = true;
     this.conversationError = "";
     this.conversationAnchorID = entry.id;
+    this.conversationOpenedFromID = entry.id;
+    this.conversationSessionID = String(entry.session_id || "").trim();
     this.conversationEntries = [];
     this.conversationMessages = [];
+    this.conversationBranchEntryIDs = [];
+    this.conversationTruncated = false;
+    this.conversationFollowLatest = false;
+    this.followUpText = "";
+    this.followUpError = "";
     document.body.classList.add("conversation-drawer-open");
     requestAnimationFrame(() => this._focusConversationDrawer());
 
@@ -124,26 +132,49 @@ class ConversationDrawerStore {
     // live preview data and keep re-rendering as stream events arrive
     // (see refreshLiveConversation).
     if (this._conversationEntryLivePending(entry)) {
-      this.conversationLiveEntryId = String(entry.id).trim();
+      this.conversationFollowLatest = true;
       this.conversationLoading = false;
       this.applyLiveConversationEntry(entry);
+      this._scheduleLatestScroll();
       return;
     }
-    this.conversationLiveEntryId = "";
     this.conversationLoading = true;
-    await this.fetchConversation(entry.id, requestToken);
+    await this.fetchConversation(entry.id, requestToken, true, true);
   }
 
-  // Guarded like every cross-module call: without the live-logs module no
-  // entry is ever marked _live, so false is the degraded answer.
   _conversationEntryLivePending(entry) {
     return typeof liveLogs.auditEntryLiveDetailPending === "function" &&
       liveLogs.auditEntryLiveDetailPending(entry);
   }
 
   applyLiveConversationEntry(entry) {
-    this.conversationEntries = [entry];
-    this.conversationMessages = this.buildConversationMessages([entry], entry.id);
+    const entries = [...(this.conversationEntries || [])];
+    const id = String(entry.id || "").trim();
+    const requestID = String(entry.request_id || "").trim();
+    const index = entries.findIndex((candidate) =>
+      (id && String(candidate.id || "").trim() === id) ||
+      (requestID && String(candidate.request_id || "").trim() === requestID));
+    if (index >= 0) entries.splice(index, 1, { ...entries[index], ...entry });
+    else entries.push(entry);
+    this.conversationEntries = entries;
+    if (!this.conversationSessionID && entry.session_id) {
+      this.conversationSessionID = String(entry.session_id).trim();
+    }
+    this._applyConversationView(entries);
+    if (this.conversationFollowLatest) this._scheduleLatestScroll();
+  }
+
+  _applyConversationView(entries) {
+    let view = buildConversationView(entries, this.conversationAnchorID);
+    if (this.conversationFollowLatest) {
+      const latest = latestRenderableConversationEntry(entries, view.entryIDs);
+      if (latest && latest.id && String(latest.id) !== this.conversationAnchorID) {
+        this.conversationAnchorID = String(latest.id);
+        view = buildConversationView(entries, this.conversationAnchorID);
+      }
+    }
+    this.conversationBranchEntryIDs = view.entryIDs;
+    this.conversationMessages = view.messages;
   }
 
   // refreshLiveConversation re-renders an open live conversation when its
@@ -151,13 +182,24 @@ class ConversationDrawerStore {
   // full thread (prior turns, final bodies) is hydrated from the store
   // instead.
   refreshLiveConversation(entry) {
-    if (!this.conversationOpen || !this.conversationLiveEntryId || !entry) return;
-    if (String(entry.id || "").trim() !== this.conversationLiveEntryId) return;
+    if (!this.conversationOpen || !entry) return;
+    const entryID = String(entry.id || "").trim();
+    const entrySessionID = String(entry.session_id || "").trim();
+    const parentID = interactionParentID(entry);
+    const knownEntry = (this.conversationEntries || []).some((candidate) =>
+      String(candidate.id || "").trim() === entryID ||
+      (entry.request_id && candidate.request_id === entry.request_id));
+    const sameSession = !!this.conversationSessionID && entrySessionID === this.conversationSessionID;
+    const linkedParent = !!parentID && (parentID === this.conversationAnchorID ||
+      (this.conversationEntries || []).some((candidate) => candidate.id === parentID));
+    if (!knownEntry && !sameSession && !linkedParent) return;
+
     const state = String(entry._live_state || "").trim();
     if (state === "audit.flushed" || state === "audit.detail") {
-      this.conversationLiveEntryId = "";
+      this.applyLiveConversationEntry(entry);
+      if (this.conversationMessages.length === 0) this.conversationLoading = true;
       const requestToken = ++this.conversationRequestToken;
-      this.fetchConversation(entry.id, requestToken);
+      this.fetchConversation(this.conversationAnchorID || entryID, requestToken, false);
       return;
     }
     this.applyLiveConversationEntry(entry);
@@ -166,11 +208,11 @@ class ConversationDrawerStore {
   // conversationLiveWaiting reports whether the open live conversation is
   // still waiting on the in-flight request (drives the drawer's spinner).
   conversationLiveWaiting() {
-    if (!this.conversationOpen || !this.conversationLiveEntryId) return false;
-    const entry = (this.conversationEntries || [])[0];
-    if (!entry) return true;
-    return typeof liveLogs.liveAuditStateSettled !== "function" ||
-      !liveLogs.liveAuditStateSettled(entry._live_state);
+    if (!this.conversationOpen) return false;
+    const branchIDs = new Set(this.conversationBranchEntryIDs || []);
+    return (this.conversationEntries || []).some((entry) => branchIDs.has(String(entry && entry.id || "")) && entry._live &&
+      (typeof liveLogs.liveAuditStateSettled !== "function" ||
+        !liveLogs.liveAuditStateSettled(entry._live_state)));
   }
 
   conversationLiveStatusText() {
@@ -182,7 +224,11 @@ class ConversationDrawerStore {
   closeConversation() {
     this.conversationOpen = false;
     this.conversationRequestToken++;
-    this.conversationLiveEntryId = "";
+    this.conversationSessionID = "";
+    this.conversationBranchEntryIDs = [];
+    this.conversationFollowLatest = false;
+    this.conversationOpenedFromID = "";
+    this.followUpSending = false;
     document.body.classList.remove("conversation-drawer-open");
     const returnFocusEl = this.conversationReturnFocusEl;
     this.conversationReturnFocusEl = null;
@@ -204,7 +250,7 @@ class ConversationDrawerStore {
     }
   }
 
-  async fetchConversation(logID, requestToken) {
+  async fetchConversation(logID, requestToken, scrollToAnchor = true, detectFollowLatest = false) {
     try {
       const qs = "log_id=" + encodeURIComponent(logID) + "&limit=120";
       const result = await getJSON("/admin/audit/conversation?" + qs, {
@@ -218,19 +264,30 @@ class ConversationDrawerStore {
         this.conversationError = "Unable to load interactions.";
         this.conversationEntries = [];
         this.conversationMessages = [];
+        this.conversationBranchEntryIDs = [];
         return;
       }
 
       const payload = result.data || {};
-      this.conversationAnchorID = payload.anchor_id || logID;
+      const responseAnchorID = payload.anchor_id || logID;
       this.conversationEntries = Array.isArray(payload.entries) ? payload.entries : [];
-      this.conversationMessages = this.buildConversationMessages(this.conversationEntries, this.conversationAnchorID);
+      if (detectFollowLatest) {
+        this.conversationFollowLatest = conversationEntryIsLatest(this.conversationEntries, responseAnchorID);
+      }
+      this.conversationAnchorID = responseAnchorID;
+      const anchor = this.conversationEntries.find((entry) => entry.id === this.conversationAnchorID);
+      if (anchor && anchor.session_id) this.conversationSessionID = String(anchor.session_id).trim();
+      this.conversationTruncated = !!payload.truncated;
+      this._applyConversationView(this.conversationEntries);
+      if (this.conversationFollowLatest) this._scheduleLatestScroll();
+      else if (scrollToAnchor) this._scheduleAnchorScroll();
     } catch (e) {
       if (requestToken !== this.conversationRequestToken) return;
       console.error("Failed to fetch audit conversation:", e);
       this.conversationError = "Failed to load interactions.";
       this.conversationEntries = [];
       this.conversationMessages = [];
+      this.conversationBranchEntryIDs = [];
     } finally {
       if (requestToken === this.conversationRequestToken) {
         this.conversationLoading = false;
@@ -238,13 +295,91 @@ class ConversationDrawerStore {
     }
   }
 
-  buildConversationMessages(entries, anchorID) {
-    return buildConversationMessages(entries, anchorID);
+  selectedConversationEntry() {
+    return conversationFollowUpEntry(this.conversationEntries, this.conversationAnchorID);
   }
 
-  functionExpandedContent(msg) {
-    return functionExpandedContent(msg);
+  followUpKind() {
+    const selected = this.selectedConversationEntry();
+    if (!selected || !selected.data || !selected.data.request_body) return "";
+    return followUpEndpointKind(selected.path);
   }
+
+  canSendFollowUp() {
+    return !!this.followUpKind() && !!String(this.followUpText || "").trim() &&
+      !this.followUpSending && !this.conversationLiveWaiting();
+  }
+
+  async sendFollowUp() {
+    if (!this.canSendFollowUp()) return;
+    const entry = this.selectedConversationEntry();
+    const body = buildFollowUpRequest(entry, this.followUpText);
+    if (!entry || !body) return;
+
+    this.followUpSending = true;
+    this.followUpError = "";
+    try {
+      const response = await apiFetch(entry.path, {
+        method: "POST",
+        headers: buildFollowUpHeaders(entry, this.conversationAnchorID),
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        let message = "Unable to send message.";
+        try {
+          const payload = await response.json();
+          message = payload && payload.error && payload.error.message || message;
+        } catch { /* keep the generic message */ }
+        this.followUpError = message;
+        return;
+      }
+      this.followUpText = "";
+      await drainResponse(response);
+      if (this.conversationOpen && this.conversationAnchorID) {
+        const requestToken = ++this.conversationRequestToken;
+        await this.fetchConversation(this.conversationAnchorID, requestToken, false);
+      }
+    } catch (error) {
+      console.error("Failed to send interaction follow-up:", error);
+      this.followUpError = "Failed to send message.";
+    } finally {
+      this.followUpSending = false;
+    }
+  }
+
+  _scheduleAnchorScroll() {
+    requestAnimationFrame(() => {
+      const thread = this.conversationThreadEl;
+      if (!thread) return;
+      const anchors = thread.querySelectorAll('[data-conversation-anchor="true"]');
+      const target = anchors[anchors.length - 1];
+      if (target && typeof target.scrollIntoView === "function") {
+        target.scrollIntoView({ block: "center" });
+      }
+    });
+  }
+
+  _scheduleLatestScroll() {
+    requestAnimationFrame(() => {
+      const thread = this.conversationThreadEl;
+      if (!thread) return;
+      const target = thread.lastElementChild;
+      if (target && typeof target.scrollIntoView === "function") {
+        target.scrollIntoView({ block: "end" });
+      }
+    });
+  }
+}
+
+async function drainResponse(response) {
+  const reader = response && response.body && typeof response.body.getReader === "function"
+    ? response.body.getReader()
+    : null;
+  if (!reader) {
+    await response.text();
+    return;
+  }
+  while (!(await reader.read()).done) { /* drain without retaining the body */ }
 }
 
 export const conversationDrawer = new ConversationDrawerStore();

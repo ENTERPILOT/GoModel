@@ -72,6 +72,7 @@ type Config struct {
 	BodySizeLimit                   string                                 // Max request body size (e.g., "10M", "1024K")
 	PprofEnabled                    bool                                   // Whether to expose debug profiling routes at /debug/pprof/*
 	AuditLogger                     auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
+	AuditReader                     auditlog.Reader                        // Optional: audit lookup used for dashboard interaction continuations
 	UsageLogger                     usage.LoggerInterface                  // Optional: Usage logger for token tracking
 	BudgetChecker                   BudgetChecker                          // Optional: per-user-path budget checker
 	RateLimiter                     RateLimiter                            // Optional: per-user-path rate limiter
@@ -358,7 +359,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// handler returns, so persisted entries carry it even though they are
 	// created earlier in the chain.
 	if cfg != nil && cfg.SessionDetector != nil {
-		e.Use(SessionCapture(cfg.SessionDetector))
+		noAuthentication := cfg.MasterKey == "" && (cfg.Authenticator == nil || !cfg.Authenticator.Enabled())
+		e.Use(sessionCapture(cfg.SessionDetector, cfg.AuditReader, noAuthentication))
 	}
 
 	// Request rewriters run post-auth (rewriters only see authenticated
