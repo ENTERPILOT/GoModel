@@ -238,19 +238,44 @@
     min-height: 96px;
   }
 
+/* Models loading pill: an out-of-flow overlay like the flash region —
+   fixed to the viewport, centered in the content area (left/right + auto
+   margins), below flash toasts (z 120) and above the table, and click-
+   transparent so it never blocks the table beneath it. The pill renders
+   LoadingState's scoped .loading-state, which wins the min-height tie by
+   specificity, so the compact height is set through the component's
+   --loading-state-min-height hook. */
 .models-loading-state {
-    position: sticky;
-    top: 16px;
-    z-index: 7;
-    width: fit-content;
-    min-height: 0;
-    margin: 0 auto 16px;
-    padding: 10px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--bg-surface);
-    box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 70%, transparent);
+  position: fixed;
+  top: 16px;
+  left: var(--sidebar-width);
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  z-index: 110;
+  pointer-events: none;
+  --loading-state-min-height: 0;
+
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+/* Mobile sidebar is 60px; mirror .flash-region's mobile offset. */
+@media (max-width: 768px) {
+  .models-loading-state {
+    left: 60px;
   }
+}
+
+/* Desktop collapsed sidebar is 60px. Plain CSS — no Svelte
+   :global(...) wrapper — because .content is a sibling of the sidebar
+   under .app, so the descendant selector reaches the pill. */
+.sidebar.sidebar-collapsed ~ .content .models-loading-state {
+  left: 60px;
+}
 
 .alias-create-icon {
     width: 16px;

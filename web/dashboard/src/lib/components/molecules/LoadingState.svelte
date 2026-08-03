@@ -1,5 +1,7 @@
 <script>
   // Loading placeholder row (.loading-state markup with the CSS spinner).
+  // Global modifier classes can override the default min-height by setting
+  // --loading-state-min-height on the same element.
   let { label = "Loading...", class: className = "" } = $props();
 </script>
 
@@ -14,7 +16,7 @@
     align-items: center;
     justify-content: center;
     gap: 10px;
-    min-height: 64px;
+    min-height: var(--loading-state-min-height, 64px);
     color: var(--text-muted);
     font-size: 14px;
   }
