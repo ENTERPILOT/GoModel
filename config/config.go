@@ -61,6 +61,7 @@ func buildDefaultConfig() *Config {
 			UserPathHeader:          "X-GoModel-User-Path",
 			SwaggerEnabled:          false,
 			PprofEnabled:            false,
+			PIDFile:                 DefaultPIDFilePath(),
 			EnablePassthroughRoutes: true,
 			AllowPassthroughV1Alias: true,
 			RealtimeEnabled:         true,

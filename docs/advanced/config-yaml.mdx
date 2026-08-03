@@ -110,6 +110,11 @@ For deployments mounted below a domain root, set `server.base_path` or
 To change the inbound user path header, set `server.user_path_header` or
 `USER_PATH_HEADER`. The default remains `X-GoModel-User-Path`.
 
+Edits to this file are applied to a running gateway with `gomodel --reload`,
+which re-reads the file and the environment and rebuilds the gateway in place —
+see [CLI Operations](/advanced/cli#configuration-reload). Nothing changes if the
+new file fails to load.
+
 ## Docker
 
 GoModel reads `config/config.yaml` first, then `config.yaml`.

@@ -21,6 +21,7 @@ type cliOptions struct {
 	HealthTimeout time.Duration
 	Ready         bool
 	ReadyTimeout  time.Duration
+	Reload        bool
 }
 
 func parseCLI(productName string, args []string, output io.Writer) (cliOptions, error) {
@@ -32,6 +33,7 @@ func parseCLI(productName string, args []string, output io.Writer) (cliOptions, 
 	flags.DurationVar(&opts.HealthTimeout, "health-timeout", defaultHealthTimeout, "Timeout for --health")
 	flags.BoolVar(&opts.Ready, "ready", false, "Check the local GoModel readiness endpoint and exit")
 	flags.DurationVar(&opts.ReadyTimeout, "ready-timeout", defaultReadyTimeout, "Timeout for --ready")
+	flags.BoolVar(&opts.Reload, "reload", false, "Tell the running GoModel to reload its configuration and exit")
 	if err := flags.Parse(args); err != nil {
 		return opts, err
 	}

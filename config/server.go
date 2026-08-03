@@ -3,10 +3,14 @@ package config
 import (
 	"fmt"
 	"net/textproto"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/enterpilot/gomodel/internal/platformdir"
 )
 
 // Body size limit constants
@@ -43,6 +47,30 @@ type ServerConfig struct {
 	// at /v1/realtime and the /p/{provider}/v1/realtime passthrough upgrade.
 	// Default: true. Only providers implementing realtime accept sessions.
 	RealtimeEnabled bool `yaml:"realtime_enabled" env:"REALTIME_ENABLED"`
+	// PIDFile records the process id of the running gateway so `gomodel --reload`
+	// can find it. Default: DefaultPIDFilePath(). Set it per instance when
+	// several gateways share a host; set it empty to write no pid file, which
+	// also disables `--reload`.
+	PIDFile string `yaml:"pid_file" env:"PID_FILE"`
+}
+
+// LegacyPIDFilePath is the pid file location used next to a project-local
+// ./data directory, matching where the SQLite database lands in the same setup.
+const LegacyPIDFilePath = "data/gomodel.pid"
+
+// DefaultPIDFilePath returns the pid file path used when none is configured:
+// LegacyPIDFilePath when a ./data directory already exists (Docker images and
+// existing deployments), otherwise the OS-conventional per-user data directory
+// — the same resolution storage.DefaultSQLitePath uses for the database.
+func DefaultPIDFilePath() string {
+	if info, err := os.Stat("data"); err == nil && info.IsDir() {
+		return LegacyPIDFilePath
+	}
+	dir, err := platformdir.DataDir()
+	if err != nil {
+		return LegacyPIDFilePath
+	}
+	return filepath.Join(dir, "gomodel.pid")
 }
 
 var headerNameRegex = regexp.MustCompile(`^[!#$%&'*+\-.^_` + "`" + `|~0-9A-Za-z]+$`)
