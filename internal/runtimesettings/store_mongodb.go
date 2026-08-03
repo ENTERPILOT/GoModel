@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+// MongoDBStore persists runtime settings in MongoDB.
 type MongoDBStore struct{ settings *mongo.Collection }
 
 type mongoDocument struct {
@@ -19,6 +20,7 @@ type mongoDocument struct {
 	UpdatedAt int64  `bson:"updated_at"`
 }
 
+// NewMongoDBStore uses the shared runtime_settings collection.
 func NewMongoDBStore(_ context.Context, database *mongo.Database) (*MongoDBStore, error) {
 	if database == nil {
 		return nil, fmt.Errorf("database is required")
@@ -26,6 +28,7 @@ func NewMongoDBStore(_ context.Context, database *mongo.Database) (*MongoDBStore
 	return &MongoDBStore{settings: database.Collection("runtime_settings")}, nil
 }
 
+// Get returns a persisted value when present.
 func (s *MongoDBStore) Get(ctx context.Context, key string) (string, bool, error) {
 	var doc mongoDocument
 	err := s.settings.FindOne(ctx, bson.D{{Key: "_id", Value: key}}).Decode(&doc)
@@ -38,6 +41,7 @@ func (s *MongoDBStore) Get(ctx context.Context, key string) (string, bool, error
 	return doc.Value, true, nil
 }
 
+// Set upserts a persisted value.
 func (s *MongoDBStore) Set(ctx context.Context, key, value string) error {
 	doc := mongoDocument{Key: key, Value: value, UpdatedAt: time.Now().Unix()}
 	_, err := s.settings.ReplaceOne(ctx, bson.D{{Key: "_id", Value: key}}, doc, options.Replace().SetUpsert(true))
@@ -46,5 +50,3 @@ func (s *MongoDBStore) Set(ctx context.Context, key, value string) error {
 	}
 	return nil
 }
-
-func (s *MongoDBStore) Close() error { return nil }

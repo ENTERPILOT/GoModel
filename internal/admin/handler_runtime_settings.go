@@ -20,6 +20,7 @@ type updateRuntimeSettingRequest struct {
 	Value string `json:"value"`
 }
 
+// RuntimeSettings lists extension-defined settings for the Dashboard.
 func (h *Handler) RuntimeSettings(c *echo.Context) error {
 	settings := []ext.SettingDescriptor{}
 	if h.runtimeSettings != nil {
@@ -28,6 +29,7 @@ func (h *Handler) RuntimeSettings(c *echo.Context) error {
 	return c.JSON(http.StatusOK, runtimeSettingsResponse{Settings: settings})
 }
 
+// UpdateRuntimeSetting validates and persists one extension-defined setting.
 func (h *Handler) UpdateRuntimeSetting(c *echo.Context) error {
 	if h.runtimeSettings == nil {
 		return handleError(c, featureUnavailableError("runtime settings are unavailable"))

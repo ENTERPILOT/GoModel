@@ -91,7 +91,9 @@ type SettingOption struct {
 
 // SettingDescriptor describes one deployment-wide extension setting.
 // Locked settings are controlled by an environment variable and remain
-// visible, but cannot be changed through the admin API.
+// visible, but cannot be changed through the admin API. Options must list
+// every accepted value for an unlocked setting, including Value; registration
+// fails when that contract is not met.
 type SettingDescriptor struct {
 	Key         string          `json:"key"`
 	Label       string          `json:"label"`
@@ -104,8 +106,8 @@ type SettingDescriptor struct {
 
 // RuntimeSetting is a mutable, deployment-wide extension setting. Core owns
 // persistence and the admin API; the extension owns validation and applying
-// the value to its live runtime state. Implementations must be safe for
-// concurrent use.
+// the value to its live runtime state. Apply receives only a value advertised
+// in Descriptor.Options. Implementations must be safe for concurrent use.
 type RuntimeSetting interface {
 	Descriptor() SettingDescriptor
 	Apply(value string) error

@@ -9,6 +9,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
+// SQLStore persists runtime settings in SQLite or PostgreSQL.
 type SQLStore struct{ db sqlx.DB }
 
 const sqlSchema = `
@@ -19,6 +20,7 @@ const sqlSchema = `
 	)
 `
 
+// NewSQLStore initializes the shared runtime-settings table.
 func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
@@ -29,6 +31,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	return &SQLStore{db: db}, nil
 }
 
+// Get returns a persisted value when present.
 func (s *SQLStore) Get(ctx context.Context, key string) (string, bool, error) {
 	var value string
 	err := s.db.QueryRow(ctx, `SELECT value FROM runtime_settings WHERE key = ?`, key).Scan(&value)
@@ -41,6 +44,7 @@ func (s *SQLStore) Get(ctx context.Context, key string) (string, bool, error) {
 	return value, true, nil
 }
 
+// Set upserts a persisted value.
 func (s *SQLStore) Set(ctx context.Context, key, value string) error {
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO runtime_settings (key, value, updated_at) VALUES (?, ?, ?)
@@ -51,5 +55,3 @@ func (s *SQLStore) Set(ctx context.Context, key, value string) error {
 	}
 	return nil
 }
-
-func (s *SQLStore) Close() error { return nil }

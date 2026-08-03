@@ -100,7 +100,7 @@
             id={`runtime-setting-${setting.key}`}
             class="form-select settings-select"
             value={setting.value}
-            disabled={setting.locked || savingKey === setting.key}
+            disabled={setting.locked || savingKey !== ""}
             onchange={(event) =>
               save(setting, event.currentTarget.value, event.currentTarget)}
           >

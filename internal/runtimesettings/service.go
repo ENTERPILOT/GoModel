@@ -21,13 +21,18 @@ var (
 	ErrInvalid  = errors.New("invalid runtime setting value")
 )
 
+// Service validates, persists, applies, and reconciles registered settings.
 type Service struct {
 	mu       sync.Mutex
 	store    Store
 	settings map[string]ext.RuntimeSetting
 	order    []string
+	rejected map[string]string
+	cancel   context.CancelFunc
+	done     chan struct{}
 }
 
+// New restores registered settings and starts cross-instance reconciliation.
 func New(ctx context.Context, backend storage.Storage, registered []ext.RuntimeSetting) (*Service, error) {
 	if len(registered) == 0 {
 		return nil, nil
@@ -39,7 +44,12 @@ func New(ctx context.Context, backend storage.Storage, registered []ext.RuntimeS
 	if err != nil {
 		return nil, fmt.Errorf("create runtime settings store: %w", err)
 	}
-	service := &Service{store: store, settings: make(map[string]ext.RuntimeSetting, len(registered))}
+	service := &Service{
+		store:    store,
+		settings: make(map[string]ext.RuntimeSetting, len(registered)),
+		rejected: make(map[string]string),
+	}
+	editable := false
 	for _, setting := range registered {
 		if setting == nil {
 			continue
@@ -57,20 +67,36 @@ func New(ctx context.Context, backend storage.Storage, registered []ext.RuntimeS
 		if descriptor.Locked {
 			continue
 		}
+		editable = true
+		if len(descriptor.Options) == 0 {
+			return nil, fmt.Errorf("runtime setting %q has no allowed options", key)
+		}
+		if !valueAllowed(descriptor, descriptor.Value) {
+			return nil, fmt.Errorf("runtime setting %q current value %q is not an allowed option", key, descriptor.Value)
+		}
 		value, found, getErr := store.Get(ctx, key)
 		if getErr != nil {
 			return nil, getErr
 		}
-		if found {
+		if found && value != descriptor.Value {
+			if !valueAllowed(descriptor, value) {
+				slog.Warn("ignoring invalid persisted runtime setting", "key", key, "value", value)
+				service.rejected[key] = value
+				continue
+			}
 			if applyErr := setting.Apply(value); applyErr != nil {
 				slog.Warn("ignoring invalid persisted runtime setting", "key", key, "value", value, "error", applyErr)
 			}
 		}
 	}
 	slices.Sort(service.order)
+	if editable {
+		service.startSync()
+	}
 	return service, nil
 }
 
+// List returns the current setting descriptors in stable key order.
 func (s *Service) List() []ext.SettingDescriptor {
 	if s == nil {
 		return nil
@@ -84,7 +110,11 @@ func (s *Service) List() []ext.SettingDescriptor {
 	return result
 }
 
+// Update applies and persists one setting, rolling back if persistence fails.
 func (s *Service) Update(ctx context.Context, key, value string) (ext.SettingDescriptor, error) {
+	if s == nil {
+		return ext.SettingDescriptor{}, ErrNotFound
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	setting, ok := s.settings[key]
@@ -95,7 +125,7 @@ func (s *Service) Update(ctx context.Context, key, value string) (ext.SettingDes
 	if previous.Locked {
 		return ext.SettingDescriptor{}, ErrLocked
 	}
-	if !slices.ContainsFunc(previous.Options, func(option ext.SettingOption) bool { return option.Value == value }) {
+	if !valueAllowed(previous, value) {
 		return ext.SettingDescriptor{}, fmt.Errorf("%w: %q is not allowed for %s", ErrInvalid, value, key)
 	}
 	if err := setting.Apply(value); err != nil {
@@ -110,9 +140,18 @@ func (s *Service) Update(ctx context.Context, key, value string) (ext.SettingDes
 	return setting.Descriptor(), nil
 }
 
+// Close stops background reconciliation.
 func (s *Service) Close() error {
-	if s == nil || s.store == nil {
+	if s == nil || s.cancel == nil {
 		return nil
 	}
-	return s.store.Close()
+	s.cancel()
+	<-s.done
+	return nil
+}
+
+func valueAllowed(descriptor ext.SettingDescriptor, value string) bool {
+	return slices.ContainsFunc(descriptor.Options, func(option ext.SettingOption) bool {
+		return option.Value == value
+	})
 }
