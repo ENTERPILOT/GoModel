@@ -340,7 +340,7 @@ func extractToolCalls(blocks []anthropicContent) []core.ToolCall {
 	return out
 }
 
-// buildAnthropicRawUsage extracts cache fields from anthropicUsage into a RawData map.
+// buildAnthropicRawUsage extracts token details from anthropicUsage into a RawData map.
 func buildAnthropicRawUsage(u anthropicUsage) map[string]any {
 	raw := make(map[string]any)
 	if u.CacheCreationInputTokens > 0 {
@@ -348,6 +348,9 @@ func buildAnthropicRawUsage(u anthropicUsage) map[string]any {
 	}
 	if u.CacheReadInputTokens > 0 {
 		raw["cache_read_input_tokens"] = u.CacheReadInputTokens
+	}
+	if u.OutputTokensDetails.ThinkingTokens > 0 {
+		raw["completion_reasoning_tokens"] = u.OutputTokensDetails.ThinkingTokens
 	}
 	if len(raw) == 0 {
 		return nil

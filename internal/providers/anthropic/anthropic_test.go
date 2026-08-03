@@ -2233,6 +2233,35 @@ func TestConvertFromAnthropicResponse_WithCacheFields(t *testing.T) {
 	}
 }
 
+func TestConvertFromAnthropicResponse_WithThinkingTokens(t *testing.T) {
+	var resp anthropicResponse
+	err := json.Unmarshal([]byte(`{
+		"id": "msg_thinking",
+		"type": "message",
+		"role": "assistant",
+		"model": "claude-sonnet-4-5-20250929",
+		"content": [{"type": "text", "text": "Done"}],
+		"stop_reason": "end_turn",
+		"usage": {
+			"input_tokens": 31,
+			"output_tokens": 311,
+			"output_tokens_details": {"thinking_tokens": 27}
+		}
+	}`), &resp)
+	if err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	result := convertFromAnthropicResponse(&resp)
+
+	if result.Usage.RawUsage == nil {
+		t.Fatal("expected RawUsage to be set")
+	}
+	if result.Usage.RawUsage["completion_reasoning_tokens"] != 27 {
+		t.Errorf("RawUsage[completion_reasoning_tokens] = %v, want 27", result.Usage.RawUsage["completion_reasoning_tokens"])
+	}
+}
+
 func TestConvertFromAnthropicResponse_NoCacheFields(t *testing.T) {
 	resp := &anthropicResponse{
 		ID:    "msg_nocache",
