@@ -76,9 +76,7 @@
           <div class="contribution-calendar-week">
             {#each week as day, di (wi + "-" + di)}
               <div
-                class="contribution-calendar-cell {day.empty
-                  ? 'empty'
-                  : 'level-' + day.level}"
+                class={["contribution-calendar-cell", day.empty ? "empty" : `level-${day.level}`]}
                 role="presentation"
                 onmouseenter={(event) => showTooltip(event, day)}
                 onmouseleave={hideTooltip}

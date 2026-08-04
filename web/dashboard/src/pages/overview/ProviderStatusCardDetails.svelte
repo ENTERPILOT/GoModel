@@ -3,10 +3,11 @@
   // request health (breaker state + per-model traffic), and config rows.
   // Props: `provider` (status row), `expanded` (bool, drives the collapse).
   //
-  // Split out of ProviderStatusCard.svelte. Every class styled below appears
-  // statically in this file's markup — the breaker-state palette classes are
-  // applied via class: directives (not a computed class string) so the
-  // compiler can see them and the scope hash keeps matching.
+  // Split out of ProviderStatusCard.svelte so the breaker-state palette
+  // styles live next to the markup they scope to. `breakerClass` is dynamic,
+  // which keeps the compiler from pruning the is-healthy/is-degraded/
+  // is-unhealthy selectors below; the scope hash is applied at runtime
+  // alongside the class array, so the scoped selectors keep matching.
   import {
     providerRequestHealth,
     providerBreakerState,
@@ -65,10 +66,7 @@
             <span class="provider-status-config-label">Breaker State</span>
             <span>
               <span
-                class="provider-status-health-state"
-                class:is-healthy={breakerClass === "is-healthy"}
-                class:is-degraded={breakerClass === "is-degraded"}
-                class:is-unhealthy={breakerClass === "is-unhealthy"}
+                class={["provider-status-health-state", breakerClass]}
               >{providerBreakerStateLabel(provider)}</span>
             </span>
           </div>

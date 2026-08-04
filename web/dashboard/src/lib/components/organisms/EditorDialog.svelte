@@ -64,7 +64,7 @@
 
 <Modal {open} variant="editor" onclose={onModalClose}>
   <div
-    class={"model-editor" + (dialogClass ? " " + dialogClass : "")}
+    class={["model-editor", dialogClass]}
     role="dialog"
     aria-modal="true"
     aria-label={ariaLabel || title}

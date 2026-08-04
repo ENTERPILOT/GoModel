@@ -4,7 +4,7 @@
 </script>
 
 <span
-  class="spinner {className}"
+  class={["spinner", className]}
   style="--spinner-size: {size}px"
   role="status"
   aria-label={label}
