@@ -9,6 +9,7 @@
   import { rateLimits } from "./rateLimits.svelte.js";
   import RateLimitEditor from "./RateLimitEditor.svelte";
   import RateLimitList from "./RateLimitList.svelte";
+  import { Plus } from "lucide";
 
   const PAGE = "rate-limits";
 
@@ -42,7 +43,7 @@
           disabled={rateLimits.rateLimitFormSubmitting}
           onclick={() => rateLimits.openRateLimitForm()}
         >
-          <Icon name="plus" class="form-action-icon" />
+          <Icon icon={Plus} class="form-action-icon" />
           <span>Create Rate Limit</span>
         </button>
       {/if}

@@ -5,6 +5,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import AuditPane from "./AuditPane.svelte";
   import { auditEffectiveTab, auditTabKeydownTarget, statusCodeClass } from "./audit-logic.js";
+  import { ArrowLeft, ArrowRight } from "lucide";
 
   let { entry, panes = [] } = $props();
 
@@ -47,9 +48,9 @@
           aria-hidden="true"
         >
           {#if p.pane.direction === "request"}
-            <Icon name="arrow-right" />
+            <Icon icon={ArrowRight} />
           {:else if p.pane.direction === "response"}
-            <Icon name="arrow-left" />
+            <Icon icon={ArrowLeft} />
           {/if}
         </span>
         <span class="audit-pane-tab-label">{p.pane.title}</span>

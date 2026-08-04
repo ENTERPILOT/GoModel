@@ -13,6 +13,7 @@
   import McpServerEditor from "./McpServerEditor.svelte";
   import McpServerList from "./McpServerList.svelte";
   import { mcpServers } from "./mcpServers.svelte.js";
+  import { Plus } from "lucide";
 
   const PAGE = "mcp-servers";
   const HELP_TEXT =
@@ -40,7 +41,7 @@
           disabled={mcpServers.formSubmitting}
           onclick={() => mcpServers.openCreate()}
         >
-          <Icon name="plus" class="form-action-icon" />
+          <Icon icon={Plus} class="form-action-icon" />
           <span>Add MCP Server</span>
         </button>
       {/if}

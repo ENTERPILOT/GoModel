@@ -5,6 +5,7 @@
   import { workflowsStore as wf } from "./workflows.svelte.js";
   import WorkflowEditor from "./WorkflowEditor.svelte";
   import WorkflowList from "./WorkflowList.svelte";
+  import { Plus } from "lucide";
 
   // Fetch on mount (the page renders only while its route is active) and
   // whenever the API key / timezone refresh tick changes.
@@ -27,7 +28,7 @@
           class="btn btn-primary btn-with-icon workflow-create-btn"
           onclick={() => wf.openCreate()}
         >
-          <Icon name="plus" class="form-action-icon" aria-hidden="true" />
+          <Icon icon={Plus} class="form-action-icon" aria-hidden="true" />
           <span>New&nbsp;Workflow</span>
         </button>
       {/if}

@@ -10,6 +10,7 @@
   import { providersConfig } from "./providersConfig.svelte.js";
   import ProviderCredentialList from "./ProviderCredentialList.svelte";
   import ProviderCredentialEditor from "./ProviderCredentialEditor.svelte";
+  import { Plus } from "lucide";
 
   const PAGE = "providers-config";
 
@@ -41,7 +42,7 @@
           disabled={providersConfig.formSubmitting}
           onclick={() => providersConfig.openCreate()}
         >
-          <Icon name="plus" class="form-action-icon" />
+          <Icon icon={Plus} class="form-action-icon" />
           <span>Add Provider</span>
         </button>
       {/if}

@@ -2,6 +2,8 @@
 // with confirmDialog.open({...}); the onConfirm callback runs on submit and
 // is responsible for closing the dialog when its action succeeds.
 
+import { TriangleAlert } from "lucide";
+
 function emptyState() {
   return {
     open: false,
@@ -12,7 +14,7 @@ function emptyState() {
     requiredText: "",
     value: "",
     confirmLabel: "Confirm",
-    icon: "triangle-alert",
+    icon: TriangleAlert,
     dialogClass: "",
     loading: false,
     onConfirm: null,

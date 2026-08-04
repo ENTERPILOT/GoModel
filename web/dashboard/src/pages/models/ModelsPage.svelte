@@ -21,6 +21,7 @@
   import RateLimitEditor from "$pages/rate-limits/RateLimitEditor.svelte";
   import RateLimitInspector from "$pages/rate-limits/RateLimitInspector.svelte";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
+  import { Plus } from "lucide";
 
   const PAGE = "models";
 
@@ -110,7 +111,7 @@
             title="Alias"
             onclick={() => virtualModels.openVirtualModelCreate()}
           >
-            <Icon name="plus" class="alias-create-icon" />
+            <Icon icon={Plus} class="alias-create-icon" />
             <span>New&nbsp;virtual&nbsp;model</span>
           </button>
         {/if}

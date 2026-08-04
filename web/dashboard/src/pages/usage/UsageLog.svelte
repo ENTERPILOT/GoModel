@@ -29,6 +29,7 @@
     usageLogHasLabels,
     usesResponseCostPricing,
   } from "./usage-helpers.js";
+  import { CircleDollarSign, DatabaseZap } from "lucide";
 
   const costsMode = $derived(usagePage.usageMode === "costs");
   const hasLabels = $derived(
@@ -154,13 +155,13 @@
                 >
                 {#if costsMode && usesResponseCostPricing(entry)}
                   <Icon
-                    name="circle-dollar-sign"
+                    icon={CircleDollarSign}
                     class="cost-source-icon"
                     title={costSourceTooltip(entry)}
                   />
                 {/if}
                 {#if costsMode && usageEntryCached(entry)}
-                  <Icon name="database-zap" class="cache-savings-icon" />
+                  <Icon icon={DatabaseZap} class="cache-savings-icon" />
                 {/if}
                 {#if costsMode && entry.costs_calculation_caveat}
                   <span class="caveat-icon" title={entry.costs_calculation_caveat}>&#9888;</span>
@@ -171,13 +172,13 @@
                   <span>{formatCost(entry.total_cost)}</span>
                   {#if usesResponseCostPricing(entry)}
                     <Icon
-                      name="circle-dollar-sign"
+                      icon={CircleDollarSign}
                       class="cost-source-icon"
                       title={costSourceTooltip(entry)}
                     />
                   {/if}
                   {#if usageEntryCached(entry)}
-                    <Icon name="database-zap" class="cache-savings-icon" />
+                    <Icon icon={DatabaseZap} class="cache-savings-icon" />
                   {/if}
                   {#if entry.costs_calculation_caveat}
                     <span class="caveat-icon" title={entry.costs_calculation_caveat}>&#9888;</span>

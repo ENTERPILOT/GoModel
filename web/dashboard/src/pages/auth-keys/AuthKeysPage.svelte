@@ -10,6 +10,7 @@
   import AuthKeyEditor from "./AuthKeyEditor.svelte";
   import AuthKeyLabelsEditor from "./AuthKeyLabelsEditor.svelte";
   import AuthKeyList from "./AuthKeyList.svelte";
+  import { Plus } from "lucide";
 
   const PAGE = "auth-keys";
 
@@ -33,7 +34,7 @@
             if (!store.formSubmitting) store.openForm();
           }}
         >
-          <Icon name="plus" class="table-icon-svg" />
+          <Icon icon={Plus} class="table-icon-svg" />
           <span>Create API Key</span>
         </button>
       {/if}

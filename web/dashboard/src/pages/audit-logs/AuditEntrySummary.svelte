@@ -12,6 +12,7 @@
     formatDurationNs,
     statusCodeClass,
   } from "./audit-logic.js";
+  import { ChevronDown, ChevronRight } from "lucide";
 
   // `thread` marks a session-thread head row (grouped mode):
   // { count, expanded, ontoggle }. `expanded`/`onactivate` wire the
@@ -61,7 +62,7 @@
         onclick={toggleThread}
       >
         <Icon
-          name={thread.expanded ? "chevron-down" : "chevron-right"}
+          icon={thread.expanded ? ChevronDown : ChevronRight}
           class="audit-thread-expander-svg"
         />
         <span class="audit-thread-count mono">{thread.count}</span>
@@ -90,7 +91,7 @@
         aria-label="Open interactions"
         onclick={openConversation}
       >
-        <Icon name="chevron-right" class="audit-conversation-trigger-svg" />
+        <Icon icon={ChevronRight} class="audit-conversation-trigger-svg" />
       </button>
     {/if}
   </div>
