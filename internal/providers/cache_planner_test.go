@@ -217,6 +217,19 @@ func TestCachePlannerProviderCapabilityBoundaries(t *testing.T) {
 	}
 }
 
+func TestCachePlannerSkipsUnsupportedResponsesModesBeforeCloning(t *testing.T) {
+	req := &core.ResponsesRequest{Input: []core.ResponsesInputElement{
+		{Role: "user", Content: strings.Repeat("x", 20000)},
+		{Role: "user", Content: "turn"},
+	}}
+	planner := &cachePlanner{enabled: true}
+	for _, provider := range []string{"bedrock", "gemini", "openrouter", "unknown"} {
+		if got := planner.planResponses(req, provider, core.ModelSelector{Model: "model"}); got != req {
+			t.Fatalf("provider %q unexpectedly received a Responses plan", provider)
+		}
+	}
+}
+
 func TestCloneChatRequestPreservesInternalCachePlan(t *testing.T) {
 	req := &core.ChatRequest{PromptCachePlan: &core.PromptCachePlan{Key: "stable"}}
 	clone, ok := cloneChatRequest(req)

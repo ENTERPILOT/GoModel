@@ -220,7 +220,13 @@ func TestPrepareCachedContentCoalescesConcurrentCreation(t *testing.T) {
 }
 
 func TestPrepareCachedContentRequiresStableCredentialAndAIStudio(t *testing.T) {
-	p := NewWithHTTPClient("key", http.DefaultClient, llmclient.Hooks{})
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests.Add(1)
+	}))
+	defer server.Close()
+	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p.SetBaseURL(server.URL)
 	p.keys = providers.NewKeyring("one", "two")
 	req := &core.ChatRequest{PromptCachePlan: &core.PromptCachePlan{Key: "prefix"}}
 	body := &geminiGenerateContentRequest{SystemInstruction: &geminiContent{}, Contents: []geminiContent{{Role: "user"}}}
@@ -237,6 +243,9 @@ func TestPrepareCachedContentRequiresStableCredentialAndAIStudio(t *testing.T) {
 	p.prepareCachedContent(ctx, req, body)
 	if body.CachedContent != "" {
 		t.Fatal("Vertex must not use the AI Studio cachedContents endpoint")
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("Vertex cache preparation made %d cachedContents requests, want none", got)
 	}
 }
 

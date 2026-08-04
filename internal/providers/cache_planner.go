@@ -105,7 +105,12 @@ func (p *cachePlanner) planChat(req *core.ChatRequest, providerType string, sele
 
 func (p *cachePlanner) planResponses(req *core.ResponsesRequest, providerType string, selector core.ModelSelector) *core.ResponsesRequest {
 	profile := promptCacheProfileFor(providerType)
-	if p == nil || !p.enabled || req == nil || profile.mode == promptCacheUnsupported {
+	if p == nil || !p.enabled || req == nil {
+		return req
+	}
+	// Only OpenAI and Anthropic Responses requests have cache directives that
+	// this planner can emit. Reject other modes before scanning or cloning.
+	if profile.mode != promptCacheOpenAI && profile.mode != promptCacheAnthropic {
 		return req
 	}
 	items, ok := req.Input.([]core.ResponsesInputElement)
@@ -171,8 +176,17 @@ func cloneResponsesRequest(req *core.ResponsesRequest) (*core.ResponsesRequest, 
 	return &clone, true
 }
 
+var cacheDirectiveKeys = []string{
+	"cache_control",
+	"cached_content",
+	"prompt_cache_key",
+	"prompt_cache_options",
+	"prompt_cache_breakpoint",
+	core.GatewayCachePointField,
+}
+
 func hasCacheDirective(fields core.UnknownJSONFields) bool {
-	for _, key := range []string{"cache_control", "cached_content", "prompt_cache_key", "prompt_cache_options", "prompt_cache_breakpoint", core.GatewayCachePointField} {
+	for _, key := range cacheDirectiveKeys {
 		if len(fields.Lookup(key)) > 0 {
 			return true
 		}
@@ -251,12 +265,7 @@ func anyHasCacheDirective(value any) bool {
 }
 
 func isCacheDirectiveKey(key string) bool {
-	switch key {
-	case "cache_control", "cached_content", "prompt_cache_key", "prompt_cache_options", "prompt_cache_breakpoint", core.GatewayCachePointField:
-		return true
-	default:
-		return false
-	}
+	return slices.Contains(cacheDirectiveKeys, key)
 }
 
 func estimateSimpleChatPrefixTokens(req *core.ChatRequest) (int, bool) {
@@ -451,6 +460,9 @@ func providerCacheMinimum(profile promptCacheProfile, model string) int {
 			return 1536
 		}
 		if strings.Contains(model, "claude") {
+			// AWS documents a Bedrock-specific 4096-token checkpoint minimum
+			// for these models, including Sonnet 4.5; the direct Anthropic API
+			// minimum can differ for the same model family.
 			if strings.Contains(model, "haiku-4-5") || strings.Contains(model, "sonnet-4-5") ||
 				strings.Contains(model, "opus-4-5") || strings.Contains(model, "opus-4-6") {
 				return 4096

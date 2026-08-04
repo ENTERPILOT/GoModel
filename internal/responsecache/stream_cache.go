@@ -2,6 +2,7 @@ package responsecache
 
 import (
 	"bytes"
+	stdjson "encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -22,6 +23,12 @@ var (
 )
 
 func cacheKeyRequestBody(path string, body []byte) []byte {
+	// Typed decoding and generic unmarshaling both collapse duplicate object
+	// names. Keep such requests byte-exact so they cannot collide with the
+	// single-member form a provider may interpret differently.
+	if hasDuplicateJSONMemberNames(body) {
+		return body
+	}
 	switch path {
 	case "/v1/chat/completions":
 		req, err := core.DecodeChatRequest(body, nil)
@@ -56,6 +63,56 @@ func cacheKeyRequestBody(path string, body []byte) []byte {
 	default:
 		return canonicalJSONForCache(body)
 	}
+}
+
+func hasDuplicateJSONMemberNames(body []byte) bool {
+	decoder := stdjson.NewDecoder(bytes.NewReader(body))
+	var scanValue func() (bool, error)
+	scanValue = func() (bool, error) {
+		token, err := decoder.Token()
+		if err != nil {
+			return false, err
+		}
+		delim, ok := token.(stdjson.Delim)
+		if !ok {
+			return false, nil
+		}
+		switch delim {
+		case '{':
+			seen := make(map[string]struct{})
+			for decoder.More() {
+				keyToken, err := decoder.Token()
+				if err != nil {
+					return false, err
+				}
+				key, ok := keyToken.(string)
+				if !ok {
+					return false, io.ErrUnexpectedEOF
+				}
+				if _, duplicate := seen[key]; duplicate {
+					return true, nil
+				}
+				seen[key] = struct{}{}
+				if duplicate, err := scanValue(); err != nil || duplicate {
+					return duplicate, err
+				}
+			}
+			_, err = decoder.Token()
+			return false, err
+		case '[':
+			for decoder.More() {
+				if duplicate, err := scanValue(); err != nil || duplicate {
+					return duplicate, err
+				}
+			}
+			_, err = decoder.Token()
+			return false, err
+		default:
+			return false, nil
+		}
+	}
+	duplicate, err := scanValue()
+	return err == nil && duplicate
 }
 
 // canonicalJSONForCache makes semantically identical JSON bodies share an

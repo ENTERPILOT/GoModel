@@ -32,6 +32,7 @@ type blockingMissExchange struct {
 	started      chan<- struct{}
 	release      <-chan struct{}
 	joined       chan struct{}
+	nonCacheable bool
 	contextCalls atomic.Int32
 }
 
@@ -58,6 +59,9 @@ func (e *blockingMissExchange) Capture(_ string, next func() error) ([]byte, boo
 	}
 	if err := next(); err != nil {
 		return nil, false, err
+	}
+	if e.nonCacheable {
+		return nil, false, nil
 	}
 	return []byte(`{"ok":true}`), true, nil
 }
@@ -303,27 +307,103 @@ func TestStoreAfter_LeaderErrorIsNotFannedOut(t *testing.T) {
 	}()
 	<-started
 
-	joined := make(chan struct{})
+	const followers = 8
+	joined := make([]chan struct{}, followers)
+	errs := make([]error, followers)
 	var followerCalls atomic.Int32
-	followerDone := make(chan error, 1)
-	go func() {
-		followerDone <- m.StoreAfter(&blockingMissExchange{
-			ctx: context.Background(), joined: joined,
-		}, body, func() error {
-			followerCalls.Add(1)
-			return nil
+	var wg sync.WaitGroup
+	for i := range followers {
+		joined[i] = make(chan struct{})
+		wg.Go(func() {
+			errs[i] = m.StoreAfter(&blockingMissExchange{
+				ctx: context.Background(), joined: joined[i],
+			}, body, func() error {
+				followerCalls.Add(1)
+				return nil
+			})
 		})
-	}()
-	<-joined
+	}
+	for _, waiter := range joined {
+		<-waiter
+	}
 	close(release)
 	if err := <-leaderDone; !errors.Is(err, leaderErr) {
 		t.Fatalf("leader error = %v, want %v", err, leaderErr)
 	}
-	if err := <-followerDone; err != nil {
-		t.Fatalf("follower inherited leader error: %v", err)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("follower %d inherited leader error: %v", i, err)
+		}
 	}
-	if got := followerCalls.Load(); got != 1 {
-		t.Fatalf("follower provider calls = %d, want independent retry", got)
+	if got := followerCalls.Load(); got != followers {
+		t.Fatalf("follower provider calls = %d, want %d independent retries", got, followers)
+	}
+}
+
+func TestStoreAfter_CacheableFollowerStoresAfterNonCacheableLeader(t *testing.T) {
+	store := cache.NewMapStore()
+	m := newSimpleCacheMiddleware(store, time.Hour, nil)
+	defer m.close()
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"same"}]}`)
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	leaderDone := make(chan error, 1)
+	go func() {
+		leaderDone <- m.StoreAfter(&blockingMissExchange{
+			ctx: context.Background(), started: started, release: release, nonCacheable: true,
+		}, body, func() error { return nil })
+	}()
+	<-started
+
+	joined := make(chan struct{})
+	followerDone := make(chan error, 1)
+	go func() {
+		followerDone <- m.StoreAfter(&blockingMissExchange{
+			ctx: context.Background(), joined: joined,
+		}, body, func() error { return nil })
+	}()
+	<-joined
+	close(release)
+	if err := <-leaderDone; err != nil {
+		t.Fatalf("leader error: %v", err)
+	}
+	if err := <-followerDone; err != nil {
+		t.Fatalf("follower error: %v", err)
+	}
+	m.wg.Wait()
+	key := hashRequest("/v1/chat/completions", body, nil)
+	if cached, err := store.Get(context.Background(), key); err != nil || len(cached) == 0 {
+		t.Fatalf("cached follower response = %q, err=%v", cached, err)
+	}
+}
+
+func TestStoreAfter_LeaderPanicReleasesMiss(t *testing.T) {
+	m := newSimpleCacheMiddleware(cache.NewMapStore(), time.Hour, nil)
+	defer m.close()
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"same"}]}`)
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		_ = m.StoreAfter(&blockingMissExchange{ctx: context.Background()}, body, func() error {
+			panic("provider panic")
+		})
+	}()
+	if recovered == nil {
+		t.Fatal("leader panic did not propagate")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var calls atomic.Int32
+	if err := m.StoreAfter(&blockingMissExchange{ctx: ctx}, body, func() error {
+		calls.Add(1)
+		return nil
+	}); err != nil {
+		t.Fatalf("request after leader panic: %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("provider calls after leader panic = %d, want 1", got)
 	}
 }
 
@@ -341,12 +421,34 @@ func TestHashRequest_CanonicalizesJSONFormattingAndKeyOrder(t *testing.T) {
 		{name: "array order matters", first: `{"input":[1,2],"model":"gpt-4"}`, second: `{"input":[2,1],"model":"gpt-4"}`, equal: false},
 		{name: "malformed falls back exactly", first: `{"input":`, second: ` {"input":`, equal: false},
 		{name: "multiple values fall back exactly", first: `{"a":1} {"b":2}`, second: `{"a":1}  {"b":2}`, equal: false},
+		{name: "duplicate names fall back exactly", first: `{"model":"a","model":"b"}`, second: `{"model":"b"}`, equal: false},
+		{name: "nested duplicate names fall back exactly", first: `{"input":{"a":1,"a":2}}`, second: `{"input":{"a":2}}`, equal: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			first := hashRequest("/v1/embeddings", []byte(tt.first), plan)
 			second := hashRequest("/v1/embeddings", []byte(tt.second), plan)
 			if got := first == second; got != tt.equal {
 				t.Fatalf("key equality = %v, want %v: %s / %s", got, tt.equal, first, second)
+			}
+		})
+	}
+}
+
+func TestHashRequest_DuplicateNamesDoNotCollideAfterTypedDecoding(t *testing.T) {
+	plan := resolvedWorkflow("openai", "gpt-4")
+	for _, tt := range []struct {
+		path      string
+		duplicate string
+		collapsed string
+	}{
+		{path: "/v1/chat/completions", duplicate: `{"model":"a","model":"b","messages":[]}`, collapsed: `{"model":"b","messages":[]}`},
+		{path: "/v1/responses", duplicate: `{"model":"a","model":"b","input":[]}`, collapsed: `{"model":"b","input":[]}`},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			first := hashRequest(tt.path, []byte(tt.duplicate), plan)
+			second := hashRequest(tt.path, []byte(tt.collapsed), plan)
+			if first == second {
+				t.Fatal("duplicate-member request collided with its collapsed form")
 			}
 		})
 	}

@@ -111,13 +111,10 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 
 	call, leader := m.joinMiss(key)
 	if leader {
-		data, ok, err := ex.Capture("response cache: failed to capture cacheable response body", next)
-		if err == nil && ok {
-			m.enqueueWrite(cacheWriteJob{key: key, data: data})
-		} else {
-			data = nil
-		}
-		m.finishMiss(key, call, data, err)
+		var data []byte
+		var err error
+		defer func() { m.finishMiss(key, call, data, err) }()
+		data, err = m.captureAndStore(ex, key, next)
 		return err
 	}
 
@@ -129,11 +126,9 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 	// The leader produced a non-cacheable result (failure status, failover, or
 	// malformed body). Waiting followers must execute independently rather than
 	// replaying something the normal cache would refuse to store.
-	if call.err != nil {
-		return m.StoreAfter(ex, body, next)
-	}
-	if len(call.data) == 0 {
-		return next()
+	if call.err != nil || len(call.data) == 0 {
+		_, err := m.captureAndStore(ex, key, next)
+		return err
 	}
 	if err := ex.ReplayHit(body, call.data, CacheTypeExact); err != nil {
 		return next()
@@ -143,6 +138,18 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 		m.hitRecorder(ex, call.data, CacheTypeExact)
 	}
 	return nil
+}
+
+// captureAndStore executes one cache miss without joining the coalescing
+// group. Followers use it after a leader produces no replayable response so
+// they proceed independently while retaining the normal cache-write behavior.
+func (m *simpleCacheMiddleware) captureAndStore(ex exchange, key string, next func() error) ([]byte, error) {
+	data, ok, err := ex.Capture("response cache: failed to capture cacheable response body", next)
+	if err != nil || !ok {
+		return nil, err
+	}
+	m.enqueueWrite(cacheWriteJob{key: key, data: data})
+	return data, nil
 }
 
 func (m *simpleCacheMiddleware) joinMiss(key string) (*exactMissCall, bool) {
