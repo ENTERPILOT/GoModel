@@ -11,7 +11,7 @@
      `variant` carries the structural class, `state` the computed status
      class from workflowChartLogic.js. -->
 {#snippet node({ icon, label, variant = "workflow-node-feature", state, sub, badge })}
-  <div class="workflow-node {variant} {state || ''}">
+  <div class={["workflow-node", variant, state]}>
     {#if icon}
       <div
         class="workflow-node-icon"
@@ -46,7 +46,7 @@
     })}
 
     {#if chart.showCache}
-      <div class="workflow-conn {chart.cacheConnClass || ''}"></div>
+      <div class={["workflow-conn", chart.cacheConnClass]}></div>
       {@render node({
         icon: "database",
         label: "Cache",
@@ -74,7 +74,7 @@
       })}
     {/if}
 
-    <div class="workflow-conn {chart.aiConnClass || ''}"></div>
+    <div class={["workflow-conn", chart.aiConnClass]}></div>
     {@render node({
       label: chart.aiLabel,
       variant: "workflow-node-ai",
@@ -83,7 +83,7 @@
     })}
 
     {#if chart.showFailover}
-      <div class="workflow-conn {chart.failoverConnClass || ''}"></div>
+      <div class={["workflow-conn", chart.failoverConnClass]}></div>
       {@render node({
         icon: "maximize-2",
         label: "Failover",
@@ -93,7 +93,7 @@
       })}
     {/if}
 
-    <div class="workflow-conn {chart.responseConnClass || ''}"></div>
+    <div class={["workflow-conn", chart.responseConnClass]}></div>
     {@render node({
       icon: "circle-check-big",
       label: "Response",

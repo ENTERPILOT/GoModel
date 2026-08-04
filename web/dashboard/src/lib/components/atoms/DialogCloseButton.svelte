@@ -16,7 +16,7 @@
 
 <button
   type="button"
-  class="dialog-close-btn {className}"
+  class={["dialog-close-btn", className]}
   aria-label={label}
   {disabled}
   {onclick}

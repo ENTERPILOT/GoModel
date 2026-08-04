@@ -65,10 +65,7 @@
             <span class="provider-status-config-label">Breaker State</span>
             <span>
               <span
-                class="provider-status-health-state"
-                class:is-healthy={breakerClass === "is-healthy"}
-                class:is-degraded={breakerClass === "is-degraded"}
-                class:is-unhealthy={breakerClass === "is-unhealthy"}
+                class={["provider-status-health-state", breakerClass]}
               >{providerBreakerStateLabel(provider)}</span>
             </span>
           </div>

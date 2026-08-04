@@ -22,7 +22,7 @@
 
 <button
   type="button"
-  class="copy-feedback-btn {className}"
+  class={["copy-feedback-btn", className]}
   class:copy-feedback-btn-copied={state.copied}
   onclick={(event) => {
     event.preventDefault();

@@ -67,9 +67,10 @@
           </td>
           <td>
             <span
-              class="auth-key-status-badge {server.enabled
-                ? 'auth-key-status-active'
-                : 'auth-key-status-inactive'}"
+              class={[
+                "auth-key-status-badge",
+                server.enabled ? "auth-key-status-active" : "auth-key-status-inactive",
+              ]}
               >{server.enabled ? "Enabled" : "Disabled"}</span
             >
           </td>

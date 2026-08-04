@@ -208,7 +208,7 @@ test("buildDisplayModels flags model rows with a policy override as carrying a v
 
 test("displayRowClass renders real models carrying a virtual model as alias-like", () => {
   const overrideRow = { is_alias: false, has_virtual_model: true, access: { effective_enabled: true } };
-  assert.equal(displayRowClass(overrideRow), "alias-row is-valid");
+  assert.deepEqual(displayRowClass(overrideRow), ["alias-row", "is-valid"]);
 
   const redirectRow = {
     is_alias: false,
@@ -216,14 +216,14 @@ test("displayRowClass renders real models carrying a virtual model as alias-like
     masking_alias: { name: "openai/gpt-4o" },
     access: { effective_enabled: true },
   };
-  assert.equal(displayRowClass(redirectRow), "alias-row is-valid masked-model-row");
+  assert.deepEqual(displayRowClass(redirectRow), ["alias-row", "is-valid", "masked-model-row"]);
   assert.equal(rowRedirectCanRemove(redirectRow), true);
 
   const plainRow = { is_alias: false, has_virtual_model: false, access: { effective_enabled: true } };
-  assert.equal(displayRowClass(plainRow), "");
+  assert.deepEqual(displayRowClass(plainRow), []);
 
   const aliasRow = { is_alias: true, alias: { enabled: true, valid: true } };
-  assert.equal(displayRowClass(aliasRow), "alias-row is-valid");
+  assert.deepEqual(displayRowClass(aliasRow), ["alias-row", "is-valid"]);
   assert.equal(
     aliasRowCanRemove({ is_alias: true, source_model_exists: true, alias: { name: "openai/gpt-4o" } }),
     true,

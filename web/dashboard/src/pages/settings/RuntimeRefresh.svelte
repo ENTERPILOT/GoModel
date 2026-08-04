@@ -80,7 +80,7 @@
   {#if runtimeRefreshSteps(report).length > 0}
     <ul class="runtime-refresh-steps" role="status" aria-live="polite">
       {#each runtimeRefreshSteps(report) as step (step.name)}
-        <li class={"runtime-refresh-step is-" + step.status}>
+        <li class="runtime-refresh-step is-{step.status}">
           {runtimeRefreshStepLabel(step)}
         </li>
       {/each}

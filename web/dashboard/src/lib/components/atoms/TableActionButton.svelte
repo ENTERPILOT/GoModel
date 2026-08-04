@@ -17,7 +17,7 @@
 
 <button
   type="button"
-  class="table-action-btn {className}"
+  class={["table-action-btn", className]}
   aria-label={label}
   title={label}
   {disabled}

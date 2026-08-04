@@ -13,7 +13,7 @@
   } = $props();
 </script>
 
-<div class="filter-input-wrap {className}">
+<div class={["filter-input-wrap", className]}>
   <Icon name="search" class="filter-input-icon" />
   <input
     type="text"

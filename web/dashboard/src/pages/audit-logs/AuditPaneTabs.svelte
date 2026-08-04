@@ -43,7 +43,7 @@
         onclick={() => (activeTab = p.id)}
       >
         <span
-          class="audit-pane-icon audit-pane-icon-{p.pane.direction || ''}"
+          class={["audit-pane-icon", p.pane.direction && `audit-pane-icon-${p.pane.direction}`]}
           aria-hidden="true"
         >
           {#if p.pane.direction === "request"}
@@ -57,7 +57,7 @@
           <span class="audit-pane-seq mono">#{p.pane.seq}</span>
         {/if}
         {#if p.pane.kind}
-          <span class="provider-badge audit-pane-kind audit-pane-kind-{p.pane.kind || ''}"
+          <span class="provider-badge audit-pane-kind audit-pane-kind-{p.pane.kind}"
             >{p.pane.kind}</span
           >
         {/if}
