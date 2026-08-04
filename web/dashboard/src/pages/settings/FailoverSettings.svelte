@@ -5,6 +5,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { failover } from "$pages/models/failover.svelte.js";
   import FailoverDrafts from "$pages/models/FailoverDrafts.svelte";
+  import { Trash2, WandSparkles } from "lucide";
 
   const busy = $derived(
     failover.failoverSaving ||
@@ -26,7 +27,7 @@
       disabled={busy}
       onclick={() => failover.generateFailoverRules()}
     >
-      <Icon name="wand-sparkles" class="form-action-icon" />
+      <Icon icon={WandSparkles} class="form-action-icon" />
       <span>
         {failover.failoverGenerating
           ? "Generating..."
@@ -39,7 +40,7 @@
       disabled={busy}
       onclick={() => failover.openFailoverResetDialog()}
     >
-      <Icon name="trash-2" class="form-action-icon" />
+      <Icon icon={Trash2} class="form-action-icon" />
       <span>Remove all the failover models</span>
     </button>
   </div>

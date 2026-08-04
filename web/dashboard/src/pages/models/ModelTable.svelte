@@ -16,6 +16,7 @@
   import ModelGlobalActions from "./ModelGlobalActions.svelte";
   import ModelRow from "./ModelRow.svelte";
   import { categoryColumns, categoryColspan } from "./categoryColumns.js";
+  import { CircleDollarSign, Gauge, Pencil } from "lucide";
 
   const category = $derived(modelsStore.activeCategory || "all");
   const columns = $derived(categoryColumns(category));
@@ -66,7 +67,7 @@
                     class="table-icon-btn {pricingOverrides.modelPricingButtonClass(pricingOverrides.hasProviderPricingOverride(group))}"
                     onclick={() => pricingOverrides.openProviderPricingOverrideEdit(group)}
                   >
-                    <Icon name="circle-dollar-sign" class="table-icon-svg" />
+                    <Icon icon={CircleDollarSign} class="table-icon-svg" />
                   </TableActionButton>
                 {/if}
                 {#if rateLimits.rateLimitsEnabled() && group.provider_name}
@@ -75,7 +76,7 @@
                     class="table-icon-btn {rateLimits.rateLimitGaugeClassForProvider(group)}"
                     onclick={() => rateLimits.openRateLimitInspectorForProvider(group)}
                   >
-                    <Icon name="gauge" class="table-icon-svg" />
+                    <Icon icon={Gauge} class="table-icon-svg" />
                   </TableActionButton>
                 {/if}
                 {#if virtualModels.virtualModelsAvailable && group.access.selector}
@@ -84,7 +85,7 @@
                     class="table-icon-btn {modelOverrideEditButtonClass(hasAccessOverride(group.access))}"
                     onclick={() => virtualModels.openProviderOverrideEdit(group)}
                   >
-                    <Icon name="pencil" class="table-icon-svg" />
+                    <Icon icon={Pencil} class="table-icon-svg" />
                   </TableActionButton>
                 {/if}
               </div>

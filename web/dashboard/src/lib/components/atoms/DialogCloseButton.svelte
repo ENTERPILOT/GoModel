@@ -3,6 +3,7 @@
   // `iconClass` defaults to the 14px table icon size used by the editors;
   // the auth-style dialogs pass "" to keep their larger X.
   import Icon from "./Icon.svelte";
+  import { X } from "lucide";
 
   let {
     label = "Close",
@@ -22,7 +23,7 @@
   {onclick}
   bind:this={el}
 >
-  <Icon name="x" class={iconClass} />
+  <Icon icon={X} class={iconClass} />
 </button>
 
 <style>

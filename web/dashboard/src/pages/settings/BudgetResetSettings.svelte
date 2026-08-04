@@ -4,6 +4,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { budgetsStore } from "$pages/budgets/budgets.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+  import { RotateCcw } from "lucide";
 </script>
 
 {#if runtimeConfig.budgetsVisible()}
@@ -22,7 +23,7 @@
         disabled={budgetsStore.resetAllLoading}
         onclick={() => budgetsStore.openResetDialog()}
       >
-        <Icon name="rotate-ccw" class="form-action-icon" />
+        <Icon icon={RotateCcw} class="form-action-icon" />
         <span>Reset Budgets</span>
       </button>
     </div>

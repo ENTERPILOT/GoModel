@@ -5,6 +5,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModels as vm } from "./virtualModels.svelte.js";
+  import { Trash2 } from "lucide";
 
   let {
     model = $bindable(""),
@@ -47,7 +48,7 @@
       onclick={onremove}
       disabled={vm.vmFormManaged}
     >
-      <Icon name="trash-2" class="table-icon-svg" />
+      <Icon icon={Trash2} class="table-icon-svg" />
     </TableActionButton>
   {/if}
 </div>

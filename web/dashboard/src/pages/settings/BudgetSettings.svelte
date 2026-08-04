@@ -14,6 +14,7 @@
     normalizeBudgetSettings,
     budgetWeekdays,
   } from "./budget-settings-logic.js";
+  import { Save } from "lucide";
 
   let settings = $state(defaultBudgetSettings());
   let loading = $state(false);
@@ -248,7 +249,7 @@
         aria-describedby="budget-settings-help-copy"
         onclick={save}
       >
-        <Icon name="save" class="form-action-icon" />
+        <Icon icon={Save} class="form-action-icon" />
         <span>Save Budget Settings</span>
       </button>
       {#if loading}

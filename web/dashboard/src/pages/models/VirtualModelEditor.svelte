@@ -11,6 +11,7 @@
   import { virtualModels } from "./virtualModels.svelte.js";
   import { qualifiedModelName } from "./virtualModelsLogic.js";
   import VmTargetRow from "./VmTargetRow.svelte";
+  import { Plus } from "lucide";
 
   const vm = virtualModels;
 
@@ -66,7 +67,6 @@
     </p>
   {/if}
 
-
   <FormField id="virtual-model-source" label="Source">
     <input
       id="virtual-model-source"
@@ -110,7 +110,7 @@
         disabled={vm.vmFormManaged}
         onclick={() => vm.addVmTarget()}
       >
-        <Icon name="plus" class="form-action-icon" />
+        <Icon icon={Plus} class="form-action-icon" />
         <span>Add target (load balancing)</span>
       </button>
     </div>
