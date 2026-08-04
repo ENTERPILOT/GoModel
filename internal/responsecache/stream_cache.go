@@ -67,6 +67,7 @@ func cacheKeyRequestBody(path string, body []byte) []byte {
 
 func hasDuplicateJSONMemberNames(body []byte) bool {
 	decoder := stdjson.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
 	var scanValue func() (bool, error)
 	scanValue = func() (bool, error) {
 		token, err := decoder.Token()

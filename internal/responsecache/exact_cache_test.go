@@ -423,6 +423,7 @@ func TestHashRequest_CanonicalizesJSONFormattingAndKeyOrder(t *testing.T) {
 		{name: "multiple values fall back exactly", first: `{"a":1} {"b":2}`, second: `{"a":1}  {"b":2}`, equal: false},
 		{name: "duplicate names fall back exactly", first: `{"model":"a","model":"b"}`, second: `{"model":"b"}`, equal: false},
 		{name: "nested duplicate names fall back exactly", first: `{"input":{"a":1,"a":2}}`, second: `{"input":{"a":2}}`, equal: false},
+		{name: "oversized number before duplicate names", first: `{"n":1e1000000,"model":"a","model":"b"}`, second: `{"n":1e1000000,"model":"b"}`, equal: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			first := hashRequest("/v1/embeddings", []byte(tt.first), plan)
