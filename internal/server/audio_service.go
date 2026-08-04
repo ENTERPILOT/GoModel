@@ -267,15 +267,15 @@ func (s *audioService) logUsage(ctx context.Context, route audioRoute, extract f
 }
 
 func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFields bool) (*core.AudioTranscriptionRequest, error) {
+	form, err := c.MultipartForm()
+	if err != nil {
+		return nil, core.NewInvalidRequestError("invalid multipart form", err)
+	}
 	model := strings.TrimSpace(c.FormValue("model"))
 	if model == "" {
 		return nil, core.NewInvalidRequestError("model is required", nil)
 	}
 
-	form, err := c.MultipartForm()
-	if err != nil {
-		return nil, core.NewInvalidRequestError("invalid multipart form", err)
-	}
 	if !includeTranscriptionFields && form != nil {
 		for _, field := range []string{"language", "timestamp_granularities", "timestamp_granularities[]"} {
 			if _, present := form.Value[field]; present {

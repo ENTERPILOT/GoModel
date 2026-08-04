@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -238,6 +239,54 @@ func TestAudioTranscription_HappyPath(t *testing.T) {
 	}
 	if string(captured.File) != "audio-bytes" {
 		t.Errorf("captured file = %q, want audio-bytes", string(captured.File))
+	}
+}
+
+func TestAudioTranscription_UsesConfiguredMultipartMemoryLimit(t *testing.T) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("model", "gpt-4o-transcribe")
+	part, err := w.CreateFormFile("file", "speech.mp3")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	audio := bytes.Repeat([]byte("a"), 1024)
+	if _, err := part.Write(audio); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	e := echo.NewWithConfig(echo.Config{FormParseMaxMemory: 1})
+	c := e.NewContext(req, rec)
+
+	parsed, err := audioTranscriptionRequestFromForm(c, true)
+	if err != nil {
+		t.Fatalf("audioTranscriptionRequestFromForm returned error: %v", err)
+	}
+	if !bytes.Equal(parsed.File, audio) {
+		t.Fatalf("parsed file length = %d, want %d", len(parsed.File), len(audio))
+	}
+	if req.MultipartForm == nil {
+		t.Fatal("multipart form was not parsed")
+	}
+	t.Cleanup(func() { _ = req.MultipartForm.RemoveAll() })
+	files := req.MultipartForm.File["file"]
+	if len(files) != 1 {
+		t.Fatalf("parsed uploads = %d, want 1", len(files))
+	}
+
+	upload, err := files[0].Open()
+	if err != nil {
+		t.Fatalf("open parsed upload: %v", err)
+	}
+	defer func() { _ = upload.Close() }()
+	if _, ok := upload.(*os.File); !ok {
+		t.Fatalf("uploaded file type = %T, want disk-backed *os.File", upload)
 	}
 }
 
