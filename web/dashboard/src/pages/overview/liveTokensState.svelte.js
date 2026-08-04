@@ -165,6 +165,13 @@ class LiveTokensState {
       await consumeEventStream(res.body.getReader(), (event) =>
         this.#handleEvent(event),
       );
+      // A reader that ends normally after this stream was replaced (navigate
+      // away and back) must not resurrect it — reconnecting here would open a
+      // second stream alongside the live one. Same guard as the audit-log
+      // stream in liveLogs.svelte.js.
+      if (controller.signal.aborted || this.#sseController !== controller) {
+        return;
+      }
       this.#scheduleReconnect();
     } catch (e) {
       if (isAbortError(e)) return;
