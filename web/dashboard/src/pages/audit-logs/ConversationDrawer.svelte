@@ -67,16 +67,20 @@
     {#if drawer.conversationLoading}
       <p class="empty-state">Loading interactions...</p>
     {/if}
-    {#if !drawer.conversationLoading && !drawer.conversationError && drawer.conversationMessages.length === 0 && !drawer.conversationLiveWaiting()}
+    {#if !drawer.conversationLoading && !drawer.followUpSending && !drawer.conversationError && drawer.conversationMessages.length === 0 && !drawer.conversationLiveWaiting()}
       <p class="empty-state">No interaction data available for this entry.</p>
     {/if}
 
     {#if drawer.conversationMessages.length > 0}
-      <div class="conversation-thread">
+      <div class="conversation-thread" bind:this={drawer.conversationThreadEl}>
         {#each drawer.conversationMessages as msg (msg.uid)}
           <ChatMessage {msg} />
         {/each}
       </div>
+    {/if}
+
+    {#if drawer.conversationTruncated}
+      <p class="conversation-truncated">Showing the newest part of this session and the selected log.</p>
     {/if}
 
     {#if drawer.conversationLiveWaiting()}
@@ -89,7 +93,38 @@
 
   {#if drawer.conversationAnchorID}
     <div class="conversation-drawer-footer">
-      <p class="conversation-meta">{"Opened from log: " + drawer.conversationAnchorID}</p>
+      {#if drawer.followUpKind()}
+        <form
+          class="conversation-composer"
+          onsubmit={(event) => {
+            event.preventDefault();
+            drawer.sendFollowUp();
+          }}
+        >
+          <label for="conversation-follow-up">Send a message</label>
+          <textarea
+            id="conversation-follow-up"
+            rows="3"
+            placeholder="Continue this interaction…"
+            bind:value={drawer.followUpText}
+            disabled={drawer.followUpSending || drawer.conversationLiveWaiting()}
+          ></textarea>
+          {#if drawer.followUpError}
+            <p class="conversation-send-error" role="alert">{drawer.followUpError}</p>
+          {/if}
+          <div class="conversation-composer-actions">
+            <span class="conversation-endpoint mono">{drawer.selectedConversationEntry()?.path || ""}</span>
+            <button class="btn btn-primary" type="submit" disabled={!drawer.canSendFollowUp()}>
+              {drawer.followUpSending ? "Sending…" : "Send"}
+            </button>
+          </div>
+        </form>
+      {/if}
+      <p class="conversation-meta">
+        {drawer.conversationFollowLatest
+          ? "Following latest interaction"
+          : "Opened from log: " + drawer.conversationOpenedFromID}
+      </p>
     </div>
   {/if}
 </div>
@@ -127,6 +162,69 @@
     border-top: 1px solid var(--border);
     padding: 10px 16px;
     background: var(--bg-surface);
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .conversation-composer {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .conversation-composer label {
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .conversation-composer textarea {
+    width: 100%;
+    min-height: 70px;
+    resize: vertical;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 9px 10px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    line-height: 1.45;
+  }
+
+  .conversation-composer textarea:focus {
+    outline: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
+    outline-offset: 1px;
+  }
+
+  .conversation-composer textarea:disabled {
+    opacity: 0.65;
+  }
+
+  .conversation-composer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .conversation-endpoint {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .conversation-send-error {
+    color: var(--danger);
+    font-size: 12px;
+  }
+
+  .conversation-truncated {
+    padding: 0 16px 14px;
+    color: var(--text-muted);
+    font-size: 12px;
   }
 
   .conversation-thread {

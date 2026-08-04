@@ -14,6 +14,7 @@
     budgetSubjectFieldLabel,
     budgetSubjectPlaceholder,
   } from "./budgets-helpers.js";
+  import { Save } from "lucide";
 
   function onSubjectInput(event) {
     store.setFormSubject(event.target.value);
@@ -153,7 +154,7 @@
           class="btn btn-danger btn-with-icon"
           disabled={store.formSubmitting}
         >
-          <Icon name="save" class="form-action-icon" />
+          <Icon icon={Save} class="form-action-icon" />
           <span>{store.formSubmitting ? "Saving..." : "Override Budget"}</span>
         </button>
       </div>

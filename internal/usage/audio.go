@@ -13,6 +13,7 @@ import (
 const (
 	endpointAudioSpeech         = "/v1/audio/speech"
 	endpointAudioTranscriptions = "/v1/audio/transcriptions"
+	endpointAudioTranslations   = "/v1/audio/translations"
 
 	// rawKeyInputCharacters and rawKeyAudioSeconds are the RawData keys that carry
 	// the non-token billable units audio providers do not report as tokens: input
@@ -89,13 +90,23 @@ type transcriptionUsage struct {
 // interaction stays observable even when the provider reports no usage (whisper,
 // or non-JSON response formats such as text/srt/vtt).
 func ExtractFromTranscriptionResponse(body []byte, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	return extractFromAudioTextResponse(body, requestID, model, provider, endpointAudioTranscriptions, pricing...)
+}
+
+// ExtractFromTranslationResponse builds a usage entry for an audio translation
+// request while preserving the translations endpoint in usage records.
+func ExtractFromTranslationResponse(body []byte, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	return extractFromAudioTextResponse(body, requestID, model, provider, endpointAudioTranslations, pricing...)
+}
+
+func extractFromAudioTextResponse(body []byte, requestID, model, provider, endpoint string, pricing ...*core.ModelPricing) *UsageEntry {
 	entry := &UsageEntry{
 		ID:        uuid.New().String(),
 		RequestID: requestID,
 		Timestamp: time.Now().UTC(),
 		Model:     model,
 		Provider:  provider,
-		Endpoint:  endpointAudioTranscriptions,
+		Endpoint:  endpoint,
 	}
 
 	var parsed struct {
@@ -114,7 +125,7 @@ func ExtractFromTranscriptionResponse(body []byte, requestID, model, provider st
 		}
 	}
 
-	applyUsageCosts(entry, provider, endpointAudioTranscriptions, pricing...)
+	applyUsageCosts(entry, provider, endpoint, pricing...)
 
 	return entry
 }

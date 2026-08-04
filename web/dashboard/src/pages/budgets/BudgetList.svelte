@@ -27,6 +27,7 @@
     budgetUsagePercentLabel,
     budgetUsageRatio,
   } from "./budgets-helpers.js";
+  import { Pencil, RotateCcw, Tag, Trash2 } from "lucide";
 
   let { budgets = [] } = $props();
 
@@ -56,13 +57,13 @@
             title={budgetScopeLabel(item) + ": " + budgetSubject(item)}
           >
             {#if budgetScope(item) === "label"}
-              <Icon name="tag" class="budget-scope-icon" />
+              <Icon icon={Tag} class="budget-scope-icon" />
             {/if}
             {budgetSubject(item)}
           </code>
           <div class="budget-row-period">
             <span class="budget-period-label {budgetPeriodClass(item)}">
-              <Icon name={budgetPeriodIcon(item)} class="budget-period-icon" />
+              <Icon icon={budgetPeriodIcon(item)} class="budget-period-icon" />
               <span>{budgetPeriodLabel(item)}</span>
             </span>
           </div>
@@ -78,7 +79,7 @@
                 class="budget-action-btn"
                 onclick={() => store.openForm(item)}
               >
-                <Icon name="pencil" class="budget-action-icon" />
+                <Icon icon={Pencil} class="budget-action-icon" />
                 <span class="budget-action-label">Edit</span>
               </TableActionButton>
               <TableActionButton
@@ -87,7 +88,7 @@
                 onclick={() => store.resetBudget(item)}
                 disabled={store.resettingKey === budgetKey(item)}
               >
-                <Icon name="rotate-ccw" class="budget-action-icon" />
+                <Icon icon={RotateCcw} class="budget-action-icon" />
                 <span class="budget-action-label">
                   {store.resettingKey === budgetKey(item) ? "Resetting" : "Reset"}
                 </span>
@@ -98,7 +99,7 @@
                 onclick={() => store.deleteBudget(item)}
                 disabled={store.deletingKey === budgetKey(item)}
               >
-                <Icon name="trash-2" class="budget-action-icon" />
+                <Icon icon={Trash2} class="budget-action-icon" />
                 <span class="budget-action-label">
                   {store.deletingKey === budgetKey(item) ? "Deleting" : "Delete"}
                 </span>

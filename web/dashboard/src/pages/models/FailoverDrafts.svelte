@@ -7,6 +7,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { failover } from "./failover.svelte.js";
+  import { Check, Save } from "lucide";
 </script>
 
 <Modal
@@ -54,7 +55,7 @@
           disabled={failover.failoverDraftSaving}
           onclick={() => failover.toggleAllFailoverDrafts()}
         >
-          <Icon name="check" class="form-action-icon" />
+          <Icon icon={Check} class="form-action-icon" />
           <span>
             {failover.allFailoverDraftsSelected() ? "Deselect all" : "Select all"}
           </span>
@@ -117,7 +118,7 @@
           failover.selectedFailoverDraftCount() === 0}
         onclick={() => failover.saveSelectedFailoverDrafts()}
       >
-        <Icon name="save" class="form-action-icon" />
+        <Icon icon={Save} class="form-action-icon" />
         <span>{failover.failoverDraftSaving ? "Saving..." : "Save selected"}</span>
       </button>
     </div>

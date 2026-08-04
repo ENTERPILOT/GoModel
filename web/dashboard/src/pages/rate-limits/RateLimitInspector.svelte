@@ -12,6 +12,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
   import { rateLimits } from "./rateLimits.svelte.js";
+  import { Activity, Pencil, Plus, Timer } from "lucide";
 
   function onclose() {
     // Never close the inspector underneath the auth dialog.
@@ -58,7 +59,7 @@
                   section.subject,
                 )}
             >
-              <Icon name="plus" class="table-icon-svg" />
+              <Icon icon={Plus} class="table-icon-svg" />
               <span class="budget-action-label">Add</span>
             </TableActionButton>
           </div>
@@ -84,9 +85,9 @@
                       <div class="budget-row-period">
                         <span class="budget-period-label">
                           <Icon
-                            name={rateLimits.rateLimitIsConcurrent(item)
-                              ? "activity"
-                              : "timer"}
+                            icon={rateLimits.rateLimitIsConcurrent(item)
+                              ? Activity
+                              : Timer}
                             class="budget-period-icon"
                           />
                           <span>{rateLimits.rateLimitPeriodLabel(item)}</span>
@@ -118,7 +119,7 @@
                                   item,
                                 )}
                             >
-                              <Icon name="pencil" class="budget-action-icon" />
+                              <Icon icon={Pencil} class="budget-action-icon" />
                               <span class="budget-action-label">Edit</span>
                             </TableActionButton>
                           {/if}

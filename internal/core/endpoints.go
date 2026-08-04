@@ -27,6 +27,7 @@ const (
 	OperationFiles               Operation = "files"
 	OperationAudioSpeech         Operation = "audio_speech"
 	OperationAudioTranscriptions Operation = "audio_transcriptions"
+	OperationAudioTranslations   Operation = "audio_translations"
 	OperationRealtime            Operation = "realtime"
 	OperationProviderPassthrough Operation = "provider_passthrough"
 	OperationMCP                 Operation = "mcp"
@@ -142,6 +143,12 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationAudioTranscriptions,
 		}
+	case path == "/v1/audio/translations":
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			Dialect:          "openai_compat",
+			Operation:        OperationAudioTranslations,
+		}
 	case path == "/v1/realtime" || path == "/v1/realtime/calls" || path == "/v1/realtime/client_secrets":
 		// The realtime endpoints relay the provider's schema verbatim: /v1/realtime
 		// upgrades to a websocket, /v1/realtime/calls exchanges WebRTC SDP, and
@@ -212,7 +219,7 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 		return BodyModeNone
 	case OperationAudioSpeech:
 		return BodyModeJSON
-	case OperationAudioTranscriptions:
+	case OperationAudioTranscriptions, OperationAudioTranslations:
 		return BodyModeMultipart
 	case OperationRealtime:
 		if method == http.MethodPost && path == "/v1/realtime/client_secrets" {

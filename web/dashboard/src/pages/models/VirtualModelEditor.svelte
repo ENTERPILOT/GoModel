@@ -11,6 +11,7 @@
   import { virtualModels } from "./virtualModels.svelte.js";
   import { qualifiedModelName } from "./virtualModelsLogic.js";
   import VmTargetRow from "./VmTargetRow.svelte";
+  import { Plus, Save } from "lucide";
 
   const vm = virtualModels;
 
@@ -30,7 +31,7 @@
   submitting={vm.vmSubmitting}
   submitDisabled={vm.vmDeleting || vm.vmFormManaged}
   submitLabel={vm.vmFormMode === "edit" ? "Save" : "Create"}
-  submitIcon={vm.vmFormMode !== "edit" ? "plus" : "save"}
+  submitIcon={vm.vmFormMode !== "edit" ? Plus : Save}
   onclose={() => vm.closeVirtualModelForm()}
   onsubmit={() => vm.submitVirtualModelForm()}
 >
@@ -65,7 +66,6 @@
       <code>VIRTUAL_MODELS</code>) and is read-only here. Edit your configuration to change it.
     </p>
   {/if}
-
 
   <FormField id="virtual-model-source" label="Source">
     <input
@@ -110,7 +110,7 @@
         disabled={vm.vmFormManaged}
         onclick={() => vm.addVmTarget()}
       >
-        <Icon name="plus" class="form-action-icon" />
+        <Icon icon={Plus} class="form-action-icon" />
         <span>Add target (load balancing)</span>
       </button>
     </div>

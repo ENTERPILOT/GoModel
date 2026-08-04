@@ -340,7 +340,7 @@ func extractToolCalls(blocks []anthropicContent) []core.ToolCall {
 	return out
 }
 
-// buildAnthropicRawUsage extracts cache fields from anthropicUsage into a RawData map.
+// buildAnthropicRawUsage extracts token details from anthropicUsage into a RawData map.
 func buildAnthropicRawUsage(u anthropicUsage) map[string]any {
 	raw := make(map[string]any)
 	if u.CacheCreationInputTokens > 0 {
@@ -349,10 +349,27 @@ func buildAnthropicRawUsage(u anthropicUsage) map[string]any {
 	if u.CacheReadInputTokens > 0 {
 		raw["cache_read_input_tokens"] = u.CacheReadInputTokens
 	}
+	if u.OutputTokensDetails.ThinkingTokens > 0 {
+		raw["completion_reasoning_tokens"] = u.OutputTokensDetails.ThinkingTokens
+	}
 	if len(raw) == 0 {
 		return nil
 	}
 	return raw
+}
+
+func addAnthropicUsagePayloadDetails(payload map[string]any, usage *anthropicUsage, outputDetailsKey string) {
+	if usage.CacheReadInputTokens > 0 {
+		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
+	}
+	if usage.CacheCreationInputTokens > 0 {
+		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
+	}
+	if usage.OutputTokensDetails.ThinkingTokens > 0 {
+		payload[outputDetailsKey] = map[string]any{
+			"reasoning_tokens": usage.OutputTokensDetails.ThinkingTokens,
+		}
+	}
 }
 
 func malformedAnthropicStreamError(err error) error {
@@ -405,6 +422,10 @@ func mergeAnthropicUsage(dst *anthropicUsage, src *anthropicUsage) bool {
 	}
 	if src.CacheReadInputTokens != 0 {
 		dst.CacheReadInputTokens = src.CacheReadInputTokens
+		merged = true
+	}
+	if src.OutputTokensDetails.ThinkingTokens != 0 {
+		dst.OutputTokensDetails.ThinkingTokens = src.OutputTokensDetails.ThinkingTokens
 		merged = true
 	}
 

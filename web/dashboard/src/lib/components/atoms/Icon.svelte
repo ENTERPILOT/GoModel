@@ -1,35 +1,11 @@
 <script>
-  // Lucide icon by kebab-case name. Renders the SVG inline so CSS classes
-  // style it directly.
-  import { icons } from "lucide";
-
-  let { name = "", class: className = "", ...rest } = $props();
-
-  function pascalCase(kebab) {
-    return String(kebab || "")
-      .split("-")
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join("");
-  }
-
-  function attrsToString(attrs) {
-    return Object.entries(attrs)
-      .map(([key, value]) => `${key}="${String(value)}"`)
-      .join(" ");
-  }
-
-  function renderNode([tag, attrs, children]) {
-    const inner = Array.isArray(children)
-      ? children.map(renderNode).join("")
-      : "";
-    return `<${tag} ${attrsToString(attrs || {})}>${inner}</${tag}>`;
-  }
-
-  const svg = $derived.by(() => {
-    const icon = icons[pascalCase(name)];
-    if (!icon) return "";
-    return icon.map(renderNode).join("");
-  });
+  // Renders a lucide icon inline as SVG so CSS classes style it directly.
+  // `icon` is the icon itself, imported from "lucide" by the caller
+  // (`import { Pencil } from "lucide"` → `<Icon icon={Pencil} />`), not a
+  // name string: an unknown icon is then a build error rather than a
+  // silently blank SVG. Lucide icons are plain [tag, attrs, children?]
+  // arrays, so they are safe to pass around and store as data.
+  let { icon = [], class: className = "", ...rest } = $props();
 </script>
 
 <svg
@@ -47,6 +23,14 @@
   focusable="false"
   {...rest}
 >
-  <!-- eslint-disable-next-line svelte/no-at-html-tags -- trusted static icon data -->
-  {@html svg}
+  {#snippet iconNodes(nodes)}
+    {#each nodes as [tag, attrs, children], i (i)}
+      <!-- xmlns tells the compiler to create these in the SVG namespace;
+           snippet bodies don't inherit it from the surrounding <svg>. -->
+      <svelte:element this={tag} xmlns="http://www.w3.org/2000/svg" {...attrs}>
+        {#if Array.isArray(children)}{@render iconNodes(children)}{/if}
+      </svelte:element>
+    {/each}
+  {/snippet}
+  {@render iconNodes(icon)}
 </svg>

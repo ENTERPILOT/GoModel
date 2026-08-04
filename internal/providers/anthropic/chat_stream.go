@@ -85,12 +85,7 @@ func anthropicChatUsagePayload(usage *anthropicUsage) map[string]any {
 		"completion_tokens": usage.OutputTokens,
 		"total_tokens":      usage.InputTokens + usage.OutputTokens,
 	}
-	if usage.CacheReadInputTokens > 0 {
-		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
-	}
-	if usage.CacheCreationInputTokens > 0 {
-		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
-	}
+	addAnthropicUsagePayloadDetails(payload, usage, "completion_tokens_details")
 	return payload
 }
 

@@ -58,3 +58,24 @@ func TestMongoDBReader_GetSessions(t *testing.T) {
 		assertGetSessionsFilters(t, reader)
 	})
 }
+
+func TestMongoDBReader_GetConversationScopesSessionToUserPath(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+		defer store.Close()
+
+		if err := store.WriteBatch(ctx, conversationPathIsolationFixture(time.Now().UTC())); err != nil {
+			t.Fatalf("WriteBatch failed: %v", err)
+		}
+
+		reader, err := NewMongoDBReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
+		assertConversationUserPathIsolation(t, reader)
+	})
+}

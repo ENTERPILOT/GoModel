@@ -36,6 +36,14 @@ type AudioProvider interface {
 	CreateTranscription(ctx context.Context, req *AudioTranscriptionRequest) (*AudioResponse, error)
 }
 
+// AudioTranslationProvider is implemented by audio providers that support
+// translating spoken audio into English through POST /v1/audio/translations.
+// It is separate from AudioProvider because transcription support does not imply
+// translation support for every upstream provider.
+type AudioTranslationProvider interface {
+	CreateTranslation(ctx context.Context, req *AudioTranscriptionRequest) (*AudioResponse, error)
+}
+
 // NativeBatchProvider is implemented by providers that support native discounted batching.
 // This is intentionally separate from Provider so unsupported providers can still implement
 // regular synchronous APIs without batch capabilities.

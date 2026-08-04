@@ -3,6 +3,7 @@
   // to "id: ..." until hovered/focused, and click-to-copy.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { createCopyState } from "$lib/utils/clipboard.svelte.js";
+  import { Copy } from "lucide";
 
   let { workflowID = "" } = $props();
 
@@ -44,7 +45,7 @@
   <span class="workflow-pipeline-meta-placeholder">...</span>
   <span class="workflow-pipeline-meta-value">{workflowID}</span>
   <span class="workflow-pipeline-meta-icon" aria-hidden="true">
-    <Icon name="copy" />
+    <Icon icon={Copy} />
   </span>
 </button>
 

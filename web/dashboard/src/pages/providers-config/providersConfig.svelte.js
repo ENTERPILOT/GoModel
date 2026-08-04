@@ -22,6 +22,7 @@ import {
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
 } from "./providersConfigLogic.js";
+import { Trash2 } from "lucide";
 
 class ProvidersConfigState {
   rows = $state([]);
@@ -372,7 +373,7 @@ class ProvidersConfigState {
         '" to permanently delete this provider credential. Requests routed to it will fail until it is reconfigured.',
       requiredText: target,
       confirmLabel: "Delete Provider",
-      icon: "trash-2",
+      icon: Trash2,
       dialogClass: "budget-reset-dialog",
       onConfirm: () => this.performDelete(target),
     });

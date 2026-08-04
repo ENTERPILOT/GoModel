@@ -3,6 +3,7 @@
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
+  import { Check, LockKeyhole } from "lucide";
 </script>
 
 <Modal
@@ -37,7 +38,7 @@
       }}
     >
       <div class="auth-dialog-input-shell">
-        <Icon name="lock-keyhole" class="auth-dialog-input-icon" />
+        <Icon icon={LockKeyhole} class="auth-dialog-input-icon" />
         <input
           id="authDialogApiKey"
           class="auth-dialog-input"
@@ -62,7 +63,7 @@
           type="submit"
           class="btn btn-primary btn-with-icon auth-dialog-submit-btn"
         >
-          <Icon name="check" class="auth-dialog-submit-icon" />
+          <Icon icon={Check} class="auth-dialog-submit-icon" />
           <span>{auth.needsAuth ? "Unlock dashboard" : "Save API key"}</span>
         </button>
       </div>

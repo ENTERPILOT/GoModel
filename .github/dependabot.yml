@@ -7,6 +7,10 @@ updates:
       interval: "weekly"
     labels:
       - "dependencies"
+    ignore:
+      # echo-swagger must stay on v1.5.0: it is the only release built against
+      # echo/v5; v1.5.1+ depend on echo/v4 and pull it into the module graph.
+      - dependency-name: "github.com/swaggo/echo-swagger"
     groups:
       gomod:
         patterns:

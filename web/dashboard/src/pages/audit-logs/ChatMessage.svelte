@@ -1,23 +1,15 @@
 <script>
   // One interaction message in the Interactions drawer: either a collapsible
   // function call/result note or a regular chat bubble. The <article> class
-  // is a computed string (base + roleClass + is-anchor), which keeps the
-  // compiler from pruning the role/anchor selectors below — those rules must
-  // live here, next to the element they scope to (CONVENTIONS rule 3).
+  // is partly dynamic (roleClass), which keeps the compiler from pruning the
+  // role selectors below — those rules must live here, next to the element
+  // they scope to (CONVENTIONS rule 3).
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { functionExpandedContent } from "./conversation-helpers.js";
 
   let { msg } = $props();
 
-  function articleClass(m) {
-    const base =
-      m.role === "function_call" || m.role === "function_result"
-        ? "chat-function-note"
-        : "chat-message";
-    return [base, m.roleClass, m.isAnchor ? "is-anchor" : ""]
-      .filter(Boolean)
-      .join(" ");
-  }
+  const isFunctionNote = $derived(msg.role === "function_call" || msg.role === "function_result");
 
   function functionDetailText(m) {
     if (m.role === "function_call") {
@@ -27,8 +19,16 @@
   }
 </script>
 
-<article class={articleClass(msg)}>
-  {#if msg.role === "function_call" || msg.role === "function_result"}
+<article
+  class={[
+    isFunctionNote ? "chat-function-note" : "chat-message",
+    msg.roleClass,
+    { "is-anchor": msg.isAnchor, "is-after-anchor": msg.isAfterAnchor },
+  ]}
+  data-conversation-anchor={msg.isAnchor ? "true" : undefined}
+  data-entry-id={msg.entryID}
+>
+  {#if isFunctionNote}
     <details class="chat-function-note-details">
       <summary class="chat-function-note-inner">
         <span class="chat-function-label">{msg.roleLabel}</span>
@@ -68,6 +68,11 @@
   .chat-message.is-anchor {
     border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+
+  .chat-message.is-after-anchor,
+  .chat-function-note.is-after-anchor {
+    opacity: 0.46;
   }
 
   .chat-message.role-user {

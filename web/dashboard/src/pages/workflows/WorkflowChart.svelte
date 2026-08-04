@@ -3,21 +3,31 @@
   // Renders a chart contract object built by workflowChartLogic.js.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import WorkflowIdBadge from "./WorkflowIdBadge.svelte";
+  import {
+    ChartColumnIncreasing,
+    CircleCheckBig,
+    Database,
+    FileText,
+    Maximize2,
+    Shield,
+    User,
+    Wallet,
+  } from "lucide";
 
   let { chart = {} } = $props();
 </script>
 
-<!-- One pipeline node. `icon` is a lucide name (omitted for the AI node);
+<!-- One pipeline node. `icon` is a lucide icon (omitted for the AI node);
      `variant` carries the structural class, `state` the computed status
      class from workflowChartLogic.js. -->
 {#snippet node({ icon, label, variant = "workflow-node-feature", state, sub, badge })}
-  <div class="workflow-node {variant} {state || ''}">
+  <div class={["workflow-node", variant, state]}>
     {#if icon}
       <div
         class="workflow-node-icon"
         class:workflow-node-icon-endpoint={variant === "workflow-node-endpoint"}
       >
-        <Icon name={icon} />
+        <Icon {icon} />
       </div>
     {/if}
     <span class="workflow-node-label">{label}</span>
@@ -35,20 +45,20 @@
     <WorkflowIdBadge workflowID={chart.workflowID} />
   {/if}
   <div class="workflow-pipeline-row">
-    {@render node({ icon: "user", label: "Client", variant: "workflow-node-endpoint" })}
+    {@render node({ icon: User, label: "Client", variant: "workflow-node-endpoint" })}
 
     <div class="workflow-conn"></div>
     {@render node({
-      icon: "database",
+      icon: Database,
       label: "Auth",
       state: chart.authNodeClass,
       sub: chart.authNodeSublabel,
     })}
 
     {#if chart.showCache}
-      <div class="workflow-conn {chart.cacheConnClass || ''}"></div>
+      <div class={["workflow-conn", chart.cacheConnClass]}></div>
       {@render node({
-        icon: "database",
+        icon: Database,
         label: "Cache",
         state: chart.cacheNodeClass,
         badge: chart.cacheStatusLabel,
@@ -58,7 +68,7 @@
     {#if chart.showBudget}
       <div class="workflow-conn"></div>
       {@render node({
-        icon: "wallet",
+        icon: Wallet,
         label: "Budget",
         state: chart.budgetNodeClass,
         badge: chart.budgetStatusLabel,
@@ -68,13 +78,13 @@
     {#if chart.showGuardrails}
       <div class="workflow-conn"></div>
       {@render node({
-        icon: "shield",
+        icon: Shield,
         label: "Guardrails",
         sub: chart.guardrailLabel,
       })}
     {/if}
 
-    <div class="workflow-conn {chart.aiConnClass || ''}"></div>
+    <div class={["workflow-conn", chart.aiConnClass]}></div>
     {@render node({
       label: chart.aiLabel,
       variant: "workflow-node-ai",
@@ -83,9 +93,9 @@
     })}
 
     {#if chart.showFailover}
-      <div class="workflow-conn {chart.failoverConnClass || ''}"></div>
+      <div class={["workflow-conn", chart.failoverConnClass]}></div>
       {@render node({
-        icon: "maximize-2",
+        icon: Maximize2,
         label: "Failover",
         state: chart.failoverNodeClass,
         badge: chart.failoverStatusLabel,
@@ -93,9 +103,9 @@
       })}
     {/if}
 
-    <div class="workflow-conn {chart.responseConnClass || ''}"></div>
+    <div class={["workflow-conn", chart.responseConnClass]}></div>
     {@render node({
-      icon: "circle-check-big",
+      icon: CircleCheckBig,
       label: "Response",
       variant: "workflow-node-endpoint",
       state: chart.responseNodeClass,
@@ -108,7 +118,7 @@
       <div class="workflow-async-row">
         {#if chart.showUsage}
           {@render node({
-            icon: "chart-column-increasing",
+            icon: ChartColumnIncreasing,
             label: "Usage",
             variant: "workflow-node-feature workflow-node-async",
             state: chart.usageNodeClass,
@@ -119,7 +129,7 @@
         {/if}
         {#if chart.showAudit}
           {@render node({
-            icon: "file-text",
+            icon: FileText,
             label: "Audit Log",
             variant: "workflow-node-feature workflow-node-async",
             state: chart.auditNodeClass,

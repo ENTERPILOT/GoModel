@@ -32,6 +32,7 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 			// If no auth mechanism is configured, allow all requests.
 			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) {
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
+				setInteractionContinuationAllowed(c, true)
 				return next(c)
 			}
 
@@ -58,6 +59,7 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 			}
 			if masterKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(masterKey)) == 1 {
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodMasterKey)
+				setInteractionContinuationAllowed(c, true)
 				return next(c)
 			}
 
@@ -125,6 +127,7 @@ func requestAuthToken(r *http.Request) (token, errMessage string) {
 // the master key (or with auth skipped) never carry it, so they are not
 // subject to the admin gate.
 type managedDashboardAccessKey struct{}
+type interactionContinuationAllowedKey struct{}
 
 // managedDashboardAccess reports whether the request was authenticated with a
 // managed key and, if so, whether that key grants admin API and dashboard
@@ -134,11 +137,25 @@ func managedDashboardAccess(ctx context.Context) (allowed, isManagedKey bool) {
 	return allowed, isManagedKey
 }
 
+func setInteractionContinuationAllowed(c *echo.Context, allowed bool) {
+	if c == nil {
+		return
+	}
+	req := c.Request()
+	c.SetRequest(req.WithContext(context.WithValue(req.Context(), interactionContinuationAllowedKey{}, allowed)))
+}
+
+func interactionContinuationAllowed(ctx context.Context) bool {
+	allowed, _ := ctx.Value(interactionContinuationAllowedKey{}).(bool)
+	return allowed
+}
+
 // applyAuthKeyResult enriches the request context and audit entry with the
 // authenticated managed key's identity, labels, and bound user path.
 func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResult, userPathHeaderName string) {
 	ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
 	ctx = context.WithValue(ctx, managedDashboardAccessKey{}, authResult.DashboardAccess)
+	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, authResult.DashboardAccess)
 	if len(authResult.Labels) > 0 {
 		// Key labels join any labels the tagging middleware already
 		// extracted from request headers; duplicates collapse.

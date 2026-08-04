@@ -224,8 +224,11 @@ func TestAuditConversationSlimsEntries(t *testing.T) {
 	if d.ErrorMessage != "boom" {
 		t.Error("error_message feeds the drawer's error rendering; it must survive")
 	}
-	if d.Attempts != nil || d.RequestRevisions != nil || d.RequestHeaders != nil || d.ResponseHeaders != nil {
-		t.Errorf("attempts/revisions/headers must be stripped from conversation entries, got %+v", d)
+	if d.Attempts != nil || d.RequestRevisions != nil || d.ResponseHeaders != nil {
+		t.Errorf("attempts/revisions/response headers must be stripped from conversation entries, got %+v", d)
+	}
+	if d.RequestHeaders["content-type"] != "application/json" {
+		t.Errorf("redacted request headers are required for follow-ups, got %+v", d.RequestHeaders)
 	}
 }
 

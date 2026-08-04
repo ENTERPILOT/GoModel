@@ -43,7 +43,7 @@
   <span class="audit-entry-metadata-label">Metadata:</span>
   <div class="audit-entry-context">
     {#each badges as badge (badge.key)}
-      <span class="provider-badge {badge.class || ''}" class:mono={badge.mono}
+      <span class={["provider-badge", badge.class, { mono: badge.mono }]}
         >{badge.text}</span
       >
     {/each}

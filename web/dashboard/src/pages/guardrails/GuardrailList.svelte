@@ -7,6 +7,7 @@
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
+  import { Pencil, Plus, X } from "lucide";
 </script>
 
 <section class="settings-panel settings-guardrails-list">
@@ -25,7 +26,7 @@
       disabled={store.typesLoading || store.formSubmitting || !store.available}
       onclick={() => store.openCreate()}
     >
-      <Icon name="plus" class="form-action-icon" />
+      <Icon icon={Plus} class="form-action-icon" />
       <span>Create&nbsp;Guardrail</span>
     </button>
   </div>
@@ -88,7 +89,7 @@
                     class="table-icon-btn"
                     onclick={() => store.openEdit(guardrail)}
                   >
-                    <Icon name="pencil" class="table-icon-svg" />
+                    <Icon icon={Pencil} class="table-icon-svg" />
                   </TableActionButton>
                   <TableActionButton
                     label={(store.deletingName === guardrail.name ? "Deleting guardrail " : "Delete guardrail ") + guardrail.name}
@@ -96,7 +97,7 @@
                     onclick={() => store.deleteGuardrail(guardrail)}
                     disabled={store.deletingName === guardrail.name}
                   >
-                    <Icon name="x" class="table-icon-svg" />
+                    <Icon icon={X} class="table-icon-svg" />
                   </TableActionButton>
                 </div>
               </td>
