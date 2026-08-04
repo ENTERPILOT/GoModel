@@ -238,7 +238,7 @@ export function buildFollowUpRequest(entry, text) {
             : '';
         if (responseID && requestBody.conversation == null) {
             requestBody.previous_response_id = responseID;
-        } else if (!responseID || requestBody.conversation != null) {
+        } else {
             delete requestBody.previous_response_id;
         }
         return requestBody;
@@ -265,7 +265,8 @@ export function buildFollowUpRequest(entry, text) {
 }
 
 const blockedFollowUpHeaders = new Set([
-    'authorization', 'proxy-authorization', 'cookie', 'content-length', 'host',
+    'authorization', 'proxy-authorization', 'cookie', 'content-type', 'content-length', 'host',
+    'accept',
     'connection', 'accept-encoding', 'content-encoding', 'transfer-encoding',
     'user-agent', 'date', 'expect', 'upgrade', 'via', 'te', 'trailer',
     'keep-alive', 'origin', 'referer', 'forwarded', 'x-real-ip', 'traceparent',
@@ -314,11 +315,7 @@ export function latestConversationEntry(entries) {
     if (!Array.isArray(entries) || entries.length === 0) return null;
     return entries.reduce((latest, entry) => {
         if (!latest) return entry;
-        const latestTime = new Date(latest.timestamp).getTime();
-        const entryTime = new Date(entry && entry.timestamp).getTime();
-        if (!Number.isFinite(latestTime)) return entry;
-        if (!Number.isFinite(entryTime)) return latest;
-        return entryTime >= latestTime ? entry : latest;
+        return compareConversationEntries(entry, latest) >= 0 ? entry : latest;
     }, null);
 }
 
@@ -639,10 +636,18 @@ function roleMeta(role) {
     return { role: 'user', label: 'User', className: 'role-user' };
 }
 
-function conversationMessage(role, text, timestamp, entryID, isAnchor, isAfterAnchor, idx, toolCalls, functionName) {
+function conversationMessage(role, text, {
+    timestamp,
+    entryID,
+    isAnchor,
+    isAfterAnchor,
+    index,
+    toolCalls,
+    functionName,
+}) {
     const normalized = roleMeta(role);
     return {
-        uid: entryID + '-' + idx,
+        uid: entryID + '-' + index,
         entryID,
         timestamp,
         text,
@@ -746,7 +751,11 @@ function compareConversationEntries(a, b) {
     const aTime = new Date(a && a.timestamp).getTime();
     const bTime = new Date(b && b.timestamp).getTime();
     if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return aTime - bTime;
-    return String(a && a.timestamp || '').localeCompare(String(b && b.timestamp || ''));
+    const timestampOrder = String(a && a.timestamp || '').localeCompare(String(b && b.timestamp || ''));
+    if (timestampOrder !== 0) return timestampOrder;
+    const aID = String(a && a.id || '');
+    const bID = String(b && b.id || '');
+    return aID < bID ? -1 : aID > bID ? 1 : 0;
 }
 
 export function buildConversationView(entries, anchorID) {
@@ -784,9 +793,18 @@ export function buildConversationView(entries, anchorID) {
         const requestBody = entry.data && entry.data.request_body ? entry.data.request_body : null;
         const responseBody = entry.data && entry.data.response_body ? entry.data.response_body : null;
         const requestStart = messages.length;
+        const message = (role, text, { toolCalls, functionName } = {}) => conversationMessage(role, text, {
+            timestamp: ts,
+            entryID: entry.id,
+            isAnchor,
+            isAfterAnchor,
+            index: ++idx,
+            toolCalls,
+            functionName,
+        });
 
         if (requestBody && typeof requestBody.instructions === 'string' && requestBody.instructions.trim()) {
-            messages.push(conversationMessage('system', requestBody.instructions, ts, entry.id, isAnchor, isAfterAnchor, ++idx));
+            messages.push(message('system', requestBody.instructions));
         }
 
         if (requestBody && Array.isArray(requestBody.messages)) {
@@ -796,19 +814,19 @@ export function buildConversationView(entries, anchorID) {
                 if (role === 'tool') {
                     const text = extractText(m.content);
                     const fnName = m.name || callIdMap[m.tool_call_id] || '';
-                    if (text) messages.push(conversationMessage('function_result', text, ts, entry.id, isAnchor, isAfterAnchor, ++idx, [], fnName));
+                    if (text) messages.push(message('function_result', text, { functionName: fnName }));
                     return;
                 }
                 if (role === 'assistant') {
                     const text = extractText(m.content);
                     const toolCalls = extractToolCallsList(m.tool_calls);
                     if (text || toolCalls.length > 0) {
-                        messages.push(conversationMessage(role, text, ts, entry.id, isAnchor, isAfterAnchor, ++idx, toolCalls));
+                        messages.push(message(role, text, { toolCalls }));
                     }
                     return;
                 }
                 const text = extractText(m.content);
-                if (text) messages.push(conversationMessage(role, text, ts, entry.id, isAnchor, isAfterAnchor, ++idx));
+                if (text) messages.push(message(role, text));
             });
         }
 
@@ -818,18 +836,18 @@ export function buildConversationView(entries, anchorID) {
                     if (!item || typeof item !== 'object') return;
                     if (item.type === 'function_call_output') {
                         const text = typeof item.output === 'string' ? item.output : extractText(item.output);
-                        if (text) messages.push(conversationMessage('function_result', text, ts, entry.id, isAnchor, isAfterAnchor, ++idx, [], callIdMap[item.call_id] || ''));
+                        if (text) messages.push(message('function_result', text, { functionName: callIdMap[item.call_id] || '' }));
                     } else if (item.type === 'function_call') {
-                        messages.push(conversationMessage('function_call', '', ts, entry.id, isAnchor, isAfterAnchor, ++idx, [{ name: item.name || '', arguments: item.arguments || '' }]));
+                        messages.push(message('function_call', '', { toolCalls: [{ name: item.name || '', arguments: item.arguments || '' }] }));
                     } else if (item.role) {
                         const role = String(item.role).toLowerCase();
                         const text = extractText(item.content);
-                        if (text) messages.push(conversationMessage(role, text, ts, entry.id, isAnchor, isAfterAnchor, ++idx));
+                        if (text) messages.push(message(role, text));
                     }
                 });
             } else {
                 extractResponsesInputMessages(requestBody.input).forEach((m) => {
-                    if (m.text) messages.push(conversationMessage(m.role, m.text, ts, entry.id, isAnchor, isAfterAnchor, ++idx));
+                    if (m.text) messages.push(message(m.role, m.text));
                 });
             }
         }
@@ -912,7 +930,7 @@ export function buildConversationView(entries, anchorID) {
                 const text = extractText(first.message.content);
                 const toolCalls = extractToolCallsList(first.message.tool_calls);
                 if (text || toolCalls.length > 0) {
-                    const responseMessage = conversationMessage(role, text, ts, entry.id, isAnchor, isAfterAnchor, ++idx, toolCalls);
+                    const responseMessage = message(role, text, { toolCalls });
                     messages.push(responseMessage);
                     historySignatures.push(signature(responseMessage));
                 }
@@ -923,7 +941,9 @@ export function buildConversationView(entries, anchorID) {
             responseBody.output.forEach((item) => {
                 if (!item) return;
                 if (item.type === 'function_call') {
-                    const responseMessage = conversationMessage('function_call', '', ts, entry.id, isAnchor, isAfterAnchor, ++idx, [{ name: item.name || '', arguments: item.arguments || '' }]);
+                    const responseMessage = message('function_call', '', {
+                        toolCalls: [{ name: item.name || '', arguments: item.arguments || '' }],
+                    });
                     messages.push(responseMessage);
                     historySignatures.push(signature(responseMessage));
                     return;
@@ -931,7 +951,7 @@ export function buildConversationView(entries, anchorID) {
                 const role = (item.role || 'assistant').toLowerCase();
                 const text = extractResponsesOutputText(item);
                 if (text) {
-                    const responseMessage = conversationMessage(role, text, ts, entry.id, isAnchor, isAfterAnchor, ++idx);
+                    const responseMessage = message(role, text);
                     messages.push(responseMessage);
                     historySignatures.push(signature(responseMessage));
                 }
@@ -945,7 +965,7 @@ export function buildConversationView(entries, anchorID) {
             const role = String(responseBody.role || 'assistant').toLowerCase();
             const text = extractText(responseBody.content);
             if (text) {
-                const responseMessage = conversationMessage(role, text, ts, entry.id, isAnchor, isAfterAnchor, ++idx);
+                const responseMessage = message(role, text);
                 messages.push(responseMessage);
                 historySignatures.push(signature(responseMessage));
             }
@@ -953,7 +973,7 @@ export function buildConversationView(entries, anchorID) {
 
         const errMsg = extractConversationErrorMessage(entry);
         if (errMsg) {
-            messages.push(conversationMessage('error', errMsg, ts, entry.id, isAnchor, isAfterAnchor, ++idx));
+            messages.push(message('error', errMsg));
         }
 
         const responseID = String(responseBody && responseBody.id || '').trim();

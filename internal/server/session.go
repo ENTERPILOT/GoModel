@@ -19,18 +19,10 @@ type interactionParentLookup interface {
 	GetLogByID(ctx context.Context, id string) (*auditlog.LogEntry, error)
 }
 
-// SessionCapture resolves session identity after authentication and before
+// sessionCapture resolves session identity after authentication and before
 // routing. Dashboard continuations inherit their persisted parent's resolved
 // session; ordinary requests use the configured detector.
-func SessionCapture(detector *session.Detector, parentLookups ...interactionParentLookup) echo.MiddlewareFunc {
-	var parentLookup interactionParentLookup
-	if len(parentLookups) > 0 {
-		parentLookup = parentLookups[0]
-	}
-	return sessionCapture(detector, parentLookup, false)
-}
-
-func sessionCapture(detector *session.Detector, parentLookup interactionParentLookup, allowWithoutAuth bool) echo.MiddlewareFunc {
+func sessionCapture(detector *session.Detector, parentLookup interactionParentLookup, authMiddlewareAbsent bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			if detector == nil {
@@ -53,7 +45,7 @@ func sessionCapture(detector *session.Detector, parentLookup interactionParentLo
 			detectAndStamp := func(snapshot *core.RequestSnapshot) bool {
 				return stamp(detector.Detect(snapshot, core.UserPathFromContext(c.Request().Context())))
 			}
-			if stamp(interactionParentSession(c, parentLookup, allowWithoutAuth)) {
+			if stamp(interactionParentSession(c, parentLookup, authMiddlewareAbsent)) {
 				return next(c)
 			}
 
@@ -87,7 +79,7 @@ func interactionParentSession(c *echo.Context, lookup interactionParentLookup, a
 		return ""
 	}
 	parentID := strings.TrimSpace(c.Request().Header.Get(interactionParentHeader))
-	if parentID == "" || len(parentID) > 200 || strings.ContainsAny(parentID, ",\x00\r\n") {
+	if parentID == "" || len(parentID) > 200 || strings.ContainsAny(parentID, ",\x00") {
 		return ""
 	}
 	parent, err := lookup.GetLogByID(c.Request().Context(), parentID)

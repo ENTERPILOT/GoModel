@@ -25,8 +25,8 @@ const maxAuditLogLimit = 100
 // reports the same limit an enabled reader would.
 const defaultAuditLogLimit = 25
 
-// conversationBuildTimeout bounds the store lookups behind
-// /admin/audit/conversation.
+// conversationBuildTimeout bounds the store lookups behind the conversation
+// endpoint. The linkage fallback returns the partial thread if it expires.
 const conversationBuildTimeout = 10 * time.Second
 
 // AuditLog handles GET /admin/audit/log

@@ -3,6 +3,7 @@ package auditlog
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -141,7 +142,7 @@ func TestBuildConversationThreadWalksBothDirections(t *testing.T) {
 	}
 }
 
-func TestBuildSessionConversationFollowsLatestAndKeepsAnchor(t *testing.T) {
+func TestBuildSessionConversationKeepsAnchorAndClosestEntries(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
 	anchor := &LogEntry{ID: "log-1", SessionID: "session-1", UserPath: "/team/a", Timestamp: base}
@@ -182,11 +183,65 @@ func TestBuildSessionConversationFollowsLatestAndKeepsAnchor(t *testing.T) {
 		t.Fatalf("anchor id = %q, want log-1", result.AnchorID)
 	}
 	got := []string{result.Entries[0].ID, result.Entries[1].ID, result.Entries[2].ID}
-	want := []string{"log-1", "log-3", "log-4"}
+	want := []string{"log-1", "log-2", "log-3"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("entry ids = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestBuildSessionConversationDeduplicatesOverlappingPages(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	anchor := &LogEntry{ID: "log-a", SessionID: "session-1", Timestamp: base}
+
+	result, err := buildSessionConversation(context.Background(), anchor, 4,
+		func(_ context.Context, params LogQueryParams) (*LogListResult, error) {
+			switch params.Offset {
+			case 0:
+				return &LogListResult{Entries: []LogEntry{
+					{ID: "log-c", Timestamp: base.Add(2 * time.Second)},
+					*anchor,
+				}, Total: 4}, nil
+			case 2:
+				return &LogListResult{Entries: []LogEntry{
+					*anchor,
+					{ID: "log-b", Timestamp: base.Add(time.Second)},
+				}, Total: 4}, nil
+			default:
+				t.Fatalf("unexpected offset %d", params.Offset)
+				return nil, nil
+			}
+		})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Truncated {
+		t.Fatal("overlapping pages must report the incomplete result")
+	}
+	got := []string{result.Entries[0].ID, result.Entries[1].ID, result.Entries[2].ID}
+	if want := []string{"log-a", "log-b", "log-c"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("entry ids = %v, want %v", got, want)
+	}
+}
+
+func TestBuildSessionConversationOrdersEqualTimestampsByID(t *testing.T) {
+	t.Parallel()
+	timestamp := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	anchor := &LogEntry{ID: "log-a", SessionID: "session-1", Timestamp: timestamp}
+	result, err := buildSessionConversation(context.Background(), anchor, 2,
+		func(_ context.Context, _ LogQueryParams) (*LogListResult, error) {
+			return &LogListResult{Entries: []LogEntry{
+				{ID: "log-b", Timestamp: timestamp},
+				*anchor,
+			}, Total: 2}, nil
+		})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Entries[0].ID != "log-a" || result.Entries[1].ID != "log-b" {
+		t.Fatalf("equal-timestamp entries = %+v, want log-a then log-b", result.Entries)
 	}
 }
 

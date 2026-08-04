@@ -348,7 +348,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// Authentication (skips public paths)
-	if cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil) {
+	// Register by authenticator presence; its Enabled state can change at runtime.
+	authMiddlewareRegistered := cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil)
+	if authMiddlewareRegistered {
 		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths, userPathHeaderName))
 	}
 
@@ -359,8 +361,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// handler returns, so persisted entries carry it even though they are
 	// created earlier in the chain.
 	if cfg != nil && cfg.SessionDetector != nil {
-		noAuthentication := cfg.MasterKey == "" && (cfg.Authenticator == nil || !cfg.Authenticator.Enabled())
-		e.Use(sessionCapture(cfg.SessionDetector, cfg.AuditReader, noAuthentication))
+		e.Use(sessionCapture(cfg.SessionDetector, cfg.AuditReader, !authMiddlewareRegistered))
 	}
 
 	// Request rewriters run post-auth (rewriters only see authenticated

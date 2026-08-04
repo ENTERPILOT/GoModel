@@ -12,8 +12,9 @@ import (
 type entryLookup func(ctx context.Context, id string) (*LogEntry, error)
 type sessionPageLookup func(ctx context.Context, params LogQueryParams) (*LogListResult, error)
 
-// buildSessionConversation returns the newest portion of an audit session,
-// while always retaining the selected anchor. Session requests are the
+// buildSessionConversation returns a bounded portion of an audit session. It
+// retains the selected anchor and favors the closest fetched entries when the
+// limit excludes it. Session requests are the
 // authoritative interaction thread for chat/completions and messages, whose
 // payloads do not carry Responses API linkage IDs.
 func buildSessionConversation(ctx context.Context, anchor *LogEntry, limit int, getPage sessionPageLookup) (*ConversationResult, error) {
@@ -27,6 +28,7 @@ func buildSessionConversation(ctx context.Context, anchor *LogEntry, limit int, 
 	}
 
 	entries := make([]LogEntry, 0, limit)
+	seen := make(map[string]struct{}, limit)
 	total := 0
 	for offset := 0; offset < limit; {
 		pageSize := min(limit-offset, 100)
@@ -45,11 +47,19 @@ func buildSessionConversation(ctx context.Context, anchor *LogEntry, limit int, 
 			break
 		}
 		total = page.Total
-		entries = append(entries, page.Entries...)
-		if len(page.Entries) == 0 || len(entries) >= total {
-			break
+		for _, entry := range page.Entries {
+			if entry.ID != "" {
+				if _, exists := seen[entry.ID]; exists {
+					continue
+				}
+				seen[entry.ID] = struct{}{}
+			}
+			entries = append(entries, entry)
 		}
 		offset += len(page.Entries)
+		if len(page.Entries) == 0 || offset >= total {
+			break
+		}
 	}
 
 	anchorFound := false
@@ -60,20 +70,36 @@ func buildSessionConversation(ctx context.Context, anchor *LogEntry, limit int, 
 		}
 	}
 	if !anchorFound {
-		if len(entries) >= limit {
-			entries = entries[:limit-1]
-		}
 		entries = append(entries, *anchor)
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Timestamp.Before(entries[j].Timestamp)
+		if !entries[i].Timestamp.Equal(entries[j].Timestamp) {
+			return entries[i].Timestamp.Before(entries[j].Timestamp)
+		}
+		return entries[i].ID < entries[j].ID
 	})
+	truncated := total > len(entries)
+	if len(entries) > limit {
+		anchorIndex := 0
+		for i := range entries {
+			if entries[i].ID == anchor.ID {
+				anchorIndex = i
+				break
+			}
+		}
+		if anchorIndex < len(entries)/2 {
+			entries = entries[:limit]
+		} else {
+			entries = entries[len(entries)-limit:]
+		}
+		truncated = true
+	}
 
 	return &ConversationResult{
 		AnchorID:  anchor.ID,
 		Entries:   entries,
-		Truncated: total > len(entries),
+		Truncated: truncated,
 	}, nil
 }
 
@@ -172,7 +198,10 @@ func buildConversationThread(ctx context.Context, logID string, limit int, getBy
 	}
 
 	sort.Slice(thread, func(i, j int) bool {
-		return thread[i].Timestamp.Before(thread[j].Timestamp)
+		if !thread[i].Timestamp.Equal(thread[j].Timestamp) {
+			return thread[i].Timestamp.Before(thread[j].Timestamp)
+		}
+		return thread[i].ID < thread[j].ID
 	})
 
 	entries := make([]LogEntry, 0, len(thread))

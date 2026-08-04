@@ -396,6 +396,31 @@ test("latest-selection detection enables follow-latest only for the newest recor
   assert.equal(conversationEntryIsLatest(entries, "older"), false);
 });
 
+test("equal timestamps are ordered deterministically by audit id", () => {
+  const timestamp = "2026-07-06T12:00:00Z";
+  const first = {
+    id: "log-a",
+    timestamp,
+    data: {
+      request_body: { input: "First" },
+      response_body: { id: "resp-a" },
+    },
+  };
+  const second = {
+    id: "log-b",
+    timestamp,
+    data: {
+      request_body: { input: "Second", previous_response_id: "resp-a" },
+      response_body: { id: "resp-b" },
+    },
+  };
+
+  const view = buildConversationView([second, first], first.id);
+  assert.deepEqual(view.entryIDs, ["log-a", "log-b"]);
+  assert.deepEqual(view.messages.map((message) => message.text), ["First", "Second"]);
+  assert.equal(latestConversationEntry([second, first]), second);
+});
+
 test("follow-latest waits for request data before moving to a classified live entry", () => {
   const anchor = {
     id: "selected",
@@ -477,6 +502,13 @@ test("responses follow-ups preserve options and chain from the latest response",
     path: "/v1/responses",
     data: { request_body: { input: "Hi", previous_response_id: "resp_old" } },
   }, "Next").previous_response_id, undefined);
+  assert.equal(buildFollowUpRequest({
+    path: "/v1/responses",
+    data: {
+      request_body: { input: "Hi", conversation: "conv_123", previous_response_id: "resp_old" },
+      response_body: { id: "resp_123" },
+    },
+  }, "Next").previous_response_id, undefined);
 });
 
 test("follow-up headers preserve application context without replaying credentials", () => {
@@ -489,6 +521,8 @@ test("follow-up headers preserve application context without replaying credentia
       "X-Session-Id": "session-9",
       "X-Custom": "keep",
       "X-Request-Id": "old-request",
+      "content-type": "application/json; charset=utf-8",
+      Accept: "application/json",
       "Content-Encoding": "gzip",
       "Idempotency-Key": "old-operation",
     } },
@@ -496,6 +530,8 @@ test("follow-up headers preserve application context without replaying credentia
   const headers = buildFollowUpHeaders(entry, "log-1");
   assert.equal(headers.Authorization, undefined);
   assert.equal(headers["X-Request-Id"], undefined);
+  assert.equal(headers["content-type"], undefined);
+  assert.equal(headers.Accept, undefined);
   assert.equal(headers["Content-Encoding"], undefined);
   assert.equal(headers["Idempotency-Key"], undefined);
   assert.equal(headers["X-Custom"], "keep");
