@@ -107,7 +107,14 @@ provider/model display) · `dateKeys.js` (UTC "YYYY-MM-DD" day-key math shared
 by the timezone store, the reporting window and the contribution calendar) ·
 `chartTheme.js` (theme colors + the shared Chart.js style fragments) ·
 `clipboard.svelte.js` · `debounce.js` · `storage.js` (localStorage can be
-absent or blocked — never touch it directly) · `api/paths.js` (`gomodelPath`).
+absent or blocked — never touch it directly) · `api/paths.js` (`gomodelPath`) ·
+`attachments.js` (`{@attach ...}` behaviours: `dismissOnOutside`,
+`autofocusWithin`).
+
+For DOM behaviour tied to one element, prefer an attachment over `bind:this` +
+`$effect`: the element arrives as the argument, the returned teardown runs with
+the element, and a falsy expression (`{@attach open ? x(…) : undefined}`)
+switches it off.
 
 ## Page skeleton
 
