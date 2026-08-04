@@ -369,6 +369,25 @@ func TestSQLStore_WriteBatch_PersistsProviderAttempts(t *testing.T) {
 		if got.Data.Attempts[1].ResponseBody != nil || got.Data.Attempts[1].ResponseHeaders != nil {
 			t.Fatalf("successful attempt should not carry a captured error body/headers: %#v", got.Data.Attempts[1])
 		}
+
+		conversation, err := reader.GetConversation(ctx, entry.ID, 40)
+		if err != nil {
+			t.Fatalf("GetConversation failed: %v", err)
+		}
+		if len(conversation.Entries) != 1 || conversation.Entries[0].Data == nil {
+			t.Fatalf("conversation = %#v, want one populated entry", conversation)
+		}
+		if len(conversation.Entries[0].Data.Attempts) != 0 {
+			t.Fatalf("conversation hydrated provider attempts: %#v", conversation.Entries[0].Data.Attempts)
+		}
+
+		parent, err := reader.GetInteractionParent(ctx, entry.ID)
+		if err != nil {
+			t.Fatalf("GetInteractionParent failed: %v", err)
+		}
+		if parent == nil || parent.UserPath != "/" || parent.SessionID != "" {
+			t.Fatalf("interaction parent = %#v, want root path with empty session", parent)
+		}
 	})
 }
 

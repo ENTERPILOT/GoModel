@@ -868,6 +868,25 @@ test("grouped mode folds a new live entry into its on-screen thread", () => {
   assert.equal(children.total, 3);
 });
 
+test("parent headers do not assign sessions before the server resolves them", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [
+    { id: "head-a", session_id: "s-a", session_count: 2 },
+  ];
+
+  app.mergeLiveAuditEntry({
+    id: "live-3",
+    request_id: "req-3",
+    path: "/v1/chat/completions",
+    data: { request_headers: { "X-GoModel-Interaction-Parent": "head-a" } },
+  }, "audit.started");
+
+  assert.equal(app.auditLog.entries.length, 2);
+  assert.equal(app.auditLog.entries[0].id, "live-3");
+  assert.equal(app.auditLog.entries[0].session_id, undefined);
+  assert.equal(app.auditLog.entries[1].id, "head-a");
+});
+
 test("grouped fold retains the displaced head of an unexpanded thread", () => {
   const app = createLiveLogsApp({ auditGroupSessions: true });
   app.auditLog.entries = [
@@ -1056,7 +1075,7 @@ test("audit.removed reloads an unexpanded grouped thread when its head disappear
   assert.equal(app.fetchAuditCalls, 1);
 });
 
-test("a sessionless live row re-folds into its thread once a later event adds the session id", () => {
+test("a sessionless live row re-folds on the pre-response session update", () => {
   const app = createLiveLogsApp({ auditGroupSessions: true });
   app.auditLog.entries = [{ id: "head-a", session_id: "s-a", session_count: 2 }];
   app.auditLog.total = 1;
@@ -1070,10 +1089,11 @@ test("a sessionless live row re-folds into its thread once a later event adds th
   assert.equal(app.auditLog.entries.length, 2);
   assert.equal(app.auditLog.total, 2);
 
-  // The terminal event delivers the session id: the row folds into its thread.
+  // SessionCapture delivers audit.updated before the provider handler runs:
+  // the row folds without waiting for a response or terminal event.
   app.mergeLiveAuditEntry(
-    { id: "live-1", request_id: "req-1", session_id: "s-a", status_code: 200 },
-    "audit.flushed",
+    { id: "live-1", request_id: "req-1", session_id: "s-a" },
+    "audit.updated",
   );
 
   assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["live-1"]);
