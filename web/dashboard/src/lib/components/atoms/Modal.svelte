@@ -4,8 +4,9 @@
   // lock (via the modals store), and autofocus of [data-modal-autofocus].
   // Children render inside the shell; give the top-level child the dialog
   // role/class (e.g. <section class="model-editor" role="dialog">).
-  import { tick, untrack } from "svelte";
+  import { untrack } from "svelte";
   import { modals } from "$lib/stores/ui.svelte.js";
+  import { autofocusWithin } from "$lib/utils/attachments.js";
 
   let {
     open = false,
@@ -23,19 +24,11 @@
     variant === "auth" ? "auth-dialog-shell" : "editor-modal-shell",
   );
 
-  let shellEl = $state(null);
-
   $effect(() => {
     if (!open) return;
     // untrack: opened() reads AND writes modals.stack; tracking that read
     // would make the effect invalidate itself and loop (effect_update_depth).
     const token = untrack(() => modals.opened());
-    tick().then(() => {
-      const target = shellEl && shellEl.querySelector("[data-modal-autofocus]");
-      if (target && typeof target.focus === "function") {
-        target.focus();
-      }
-    });
     const onKeydown = (event) => {
       // Only the topmost dialog reacts to Escape (stacked dialogs, e.g. the
       // auth dialog over an editor, must not both close).
@@ -50,8 +43,10 @@
     };
   });
 
+  // Only a click on the shell itself is a backdrop click; clicks inside the
+  // dialog bubble up to the same handler with a deeper target.
   function onShellClick(event) {
-    if (closeOnBackdrop && event.target === shellEl) {
+    if (closeOnBackdrop && event.target === event.currentTarget) {
       onclose?.();
     }
   }
@@ -60,7 +55,7 @@
 {#if open}
   <div class={backdropClass} aria-hidden="true"></div>
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class={shellClass} bind:this={shellEl} onclick={onShellClick}>
+  <div class={shellClass} onclick={onShellClick} {@attach autofocusWithin()}>
     {@render children?.()}
   </div>
 {/if}

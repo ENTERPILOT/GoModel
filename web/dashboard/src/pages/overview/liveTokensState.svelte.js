@@ -5,15 +5,16 @@
 // so history is present on load and survives refreshes/restarts. The live
 // usage SSE stream (GET /admin/live/logs?types=usage) is used only as a
 // signal to refetch (debounced) when new usage is persisted; a steady timer
-// refetches to keep the window scrolling. stop() closes the SSE stream,
+// refetches to keep the window scrolling. Framing and reconnect backoff come
+// from the shared $lib/api/eventStream.js. stop() closes the SSE stream,
 // clears every timer, and frees the bucket buffer when navigating away.
 
 import { getJSON, apiFetch, isAbortError } from "$lib/api/client.js";
+import { consumeEventStream, nextReconnect } from "$lib/api/eventStream.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { GRANULARITIES } from "./liveTokensLogic.js";
 
 const USAGE_FLUSH_DEBOUNCE_MS = 900;
-const MAX_RECONNECT_ATTEMPTS = 6;
 
 class LiveTokensState {
   granularity = $state("minutes");
@@ -161,7 +162,9 @@ class LiveTokensState {
         return;
       }
       this.#reconnectAttempts = 0;
-      await this.#consumeBody(res.body.getReader());
+      await consumeEventStream(res.body.getReader(), (event) =>
+        this.#handleEvent(event),
+      );
       this.#scheduleReconnect();
     } catch (e) {
       if (isAbortError(e)) return;
@@ -170,42 +173,7 @@ class LiveTokensState {
     }
   }
 
-  async #consumeBody(reader) {
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      let delimiter;
-      while ((delimiter = buffer.match(/\r?\n\r?\n/))) {
-        const splitAt = delimiter.index;
-        const frame = buffer.slice(0, splitAt);
-        buffer = buffer.slice(splitAt + delimiter[0].length);
-        this.#handleFrame(frame);
-      }
-    }
-    buffer += decoder.decode();
-    if (buffer.trim()) {
-      this.#handleFrame(buffer);
-    }
-  }
-
-  #handleFrame(frame) {
-    const lines = String(frame || "").split(/\r?\n/);
-    const data = [];
-    for (const line of lines) {
-      if (line.indexOf("data:") === 0) {
-        data.push(line.slice(5).trimStart());
-      }
-    }
-    if (data.length === 0) return;
-    let event;
-    try {
-      event = JSON.parse(data.join("\n"));
-    } catch {
-      return;
-    }
+  #handleEvent(event) {
     if (!event || typeof event !== "object") return;
     const type = String(event.type || "").trim();
     if (type.indexOf("usage.") === 0) {
@@ -216,9 +184,8 @@ class LiveTokensState {
   #scheduleReconnect() {
     if (!this.active) return;
     if (this.#reconnectTimer) return;
-    const attempt = Math.min(this.#reconnectAttempts + 1, MAX_RECONNECT_ATTEMPTS);
+    const { attempt, delay } = nextReconnect(this.#reconnectAttempts);
     this.#reconnectAttempts = attempt;
-    const delay = Math.min(30000, 500 * Math.pow(2, attempt - 1));
     this.#reconnectTimer = setTimeout(() => {
       this.#reconnectTimer = null;
       this.#startUsageSignalStream();
