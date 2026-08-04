@@ -318,6 +318,29 @@ export function conversationEntryByRequestID(entries, requestID) {
     return entries.find((entry) => String(entry && entry.request_id || '').trim() === wanted) || null;
 }
 
+export function matchLiveConversationEntry(entries, anchorID, sessionID, followUpRequestID, entry) {
+    const currentEntries = Array.isArray(entries) ? entries : [];
+    const entryID = String(entry && entry.id || '').trim();
+    const entryRequestID = String(entry && entry.request_id || '').trim();
+    const entrySessionID = String(entry && entry.session_id || '').trim();
+    const correlationID = String(followUpRequestID || '').trim();
+    const parentID = interactionParentID(entry);
+    const knownEntry = currentEntries.some((candidate) =>
+        (entryID && String(candidate && candidate.id || '').trim() === entryID) ||
+        (entryRequestID && String(candidate && candidate.request_id || '').trim() === entryRequestID));
+    const submittedChild = !!correlationID && entryRequestID === correlationID;
+    const sameSession = !!sessionID && entrySessionID === String(sessionID).trim();
+    const linkedParent = !!parentID && (parentID === String(anchorID || '').trim() ||
+        currentEntries.some((candidate) => String(candidate && candidate.id || '').trim() === parentID));
+    const accepted = knownEntry || submittedChild || (!correlationID && (sameSession || linkedParent));
+
+    return {
+        accepted,
+        submittedChild,
+        followUpRequestID: accepted && submittedChild && entryID ? '' : correlationID,
+    };
+}
+
 export function interactionParentID(entry) {
     const headers = entry && entry.data && entry.data.request_headers;
     if (!headers || typeof headers !== 'object') return '';

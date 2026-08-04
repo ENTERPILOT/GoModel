@@ -84,35 +84,99 @@ func TestSQLReader_GetConversationUsesKeysetPagination(t *testing.T) {
 		}
 		defer store.Close()
 
-		base := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
-		entries := make([]*LogEntry, 120)
-		for i := range entries {
-			entries[i] = &LogEntry{
-				ID:        fmt.Sprintf("paged-%03d", i),
-				Timestamp: base.Add(time.Duration(i) * time.Second),
-				SessionID: "paged-session",
-			}
-		}
 		ctx := context.Background()
-		if err := store.WriteBatch(ctx, entries); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
 		reader, err := NewSQLReader(db)
 		if err != nil {
 			t.Fatalf("NewSQLReader failed: %v", err)
 		}
 
-		conversation, err := reader.GetConversation(ctx, entries[0].ID, 120)
+		base := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+		cases := []struct {
+			name      string
+			count     int
+			timestamp func(int) time.Time
+			truncated bool
+		}{
+			{
+				name:      "distinct timestamps",
+				count:     120,
+				timestamp: func(i int) time.Time { return base.Add(time.Duration(i) * time.Second) },
+			},
+			{
+				name:      "equal timestamps across page boundary",
+				count:     121,
+				timestamp: func(int) time.Time { return base.Add(time.Hour) },
+				truncated: true,
+			},
+		}
+		for caseIndex, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				prefix := fmt.Sprintf("paged-%d-", caseIndex)
+				sessionID := fmt.Sprintf("paged-session-%d", caseIndex)
+				entries := make([]*LogEntry, tc.count)
+				for i := range entries {
+					entries[i] = &LogEntry{
+						ID:        fmt.Sprintf("%s%03d", prefix, i),
+						Timestamp: tc.timestamp(i),
+						SessionID: sessionID,
+					}
+				}
+				if err := store.WriteBatch(ctx, entries); err != nil {
+					t.Fatalf("WriteBatch failed: %v", err)
+				}
+
+				conversation, err := reader.GetConversation(ctx, entries[0].ID, 120)
+				if err != nil {
+					t.Fatalf("GetConversation failed: %v", err)
+				}
+				if len(conversation.Entries) != 120 || conversation.Truncated != tc.truncated {
+					t.Fatalf("conversation entries/truncated = %d/%v, want 120/%v",
+						len(conversation.Entries), conversation.Truncated, tc.truncated)
+				}
+				seen := make(map[string]struct{}, len(conversation.Entries))
+				for i, entry := range conversation.Entries {
+					wantID := fmt.Sprintf("%s%03d", prefix, i)
+					if entry.ID != wantID {
+						t.Fatalf("entry %d = %q, want %q", i, entry.ID, wantID)
+					}
+					if _, exists := seen[entry.ID]; exists {
+						t.Fatalf("duplicate entry %q", entry.ID)
+					}
+					seen[entry.ID] = struct{}{}
+				}
+			})
+		}
+	})
+}
+
+func TestSQLReader_GetInteractionParentAllowsLegacyNulls(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := newSQLStoreForTest(t, db, 0)
 		if err != nil {
-			t.Fatalf("GetConversation failed: %v", err)
+			t.Fatalf("failed to create store: %v", err)
 		}
-		if len(conversation.Entries) != len(entries) || conversation.Truncated {
-			t.Fatalf("conversation entries/truncated = %d/%v, want 120/false", len(conversation.Entries), conversation.Truncated)
+		defer store.Close()
+
+		ctx := context.Background()
+		entry := &LogEntry{ID: "legacy-parent", Timestamp: time.Now().UTC(), UserPath: "/"}
+		if err := store.WriteBatch(ctx, []*LogEntry{entry}); err != nil {
+			t.Fatalf("WriteBatch failed: %v", err)
 		}
-		for i, entry := range conversation.Entries {
-			if entry.ID != entries[i].ID {
-				t.Fatalf("entry %d = %q, want %q", i, entry.ID, entries[i].ID)
-			}
+		if _, err := db.Exec(ctx,
+			"UPDATE audit_logs SET user_path = NULL, session_id = NULL WHERE id = ?", entry.ID); err != nil {
+			t.Fatalf("clear legacy parent fields: %v", err)
+		}
+
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("NewSQLReader failed: %v", err)
+		}
+		parent, err := reader.GetInteractionParent(ctx, entry.ID)
+		if err != nil {
+			t.Fatalf("GetInteractionParent failed: %v", err)
+		}
+		if parent == nil || parent.UserPath != "" || parent.SessionID != "" {
+			t.Fatalf("interaction parent = %#v, want empty legacy fields", parent)
 		}
 	})
 }

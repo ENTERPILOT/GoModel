@@ -243,7 +243,8 @@ func (r *SQLReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error
 func (r *SQLReader) GetInteractionParent(ctx context.Context, id string) (*InteractionParent, error) {
 	var parent InteractionParent
 	err := r.db.QueryRow(ctx,
-		"SELECT user_path, session_id FROM audit_logs WHERE "+r.dialect.idColumn+" = ? LIMIT 1", id,
+		"SELECT COALESCE(user_path, ''), COALESCE(session_id, '') FROM audit_logs WHERE "+
+			r.dialect.idColumn+" = ? LIMIT 1", id,
 	).Scan(&parent.UserPath, &parent.SessionID)
 	if errors.Is(err, sqlx.ErrNoRows) {
 		return nil, nil

@@ -17,6 +17,7 @@ import {
   interactionParentID,
   latestConversationEntry,
   latestRenderableConversationEntry,
+  matchLiveConversationEntry,
 } from "../src/pages/audit-logs/conversation-helpers.js";
 import { liveLogsMethods } from "../src/pages/audit-logs/live-logs-logic.js";
 
@@ -630,6 +631,41 @@ test("follow-up correlation selects only the submitted child request", () => {
 
   const headers = buildFollowUpHeaders(entries[1], "parent", " request-new ");
   assert.equal(headers["X-Request-ID"], "request-new");
+});
+
+test("follow-up correlation clears for the persisted child and accepts its descendant", () => {
+  const parent = { id: "parent", session_id: "session-1" };
+  const unrelated = {
+    id: "sibling",
+    request_id: "request-other",
+    session_id: "session-1",
+  };
+  const rejected = matchLiveConversationEntry(
+    [parent], parent.id, parent.session_id, "request-submitted", unrelated);
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.followUpRequestID, "request-submitted");
+
+  const submitted = {
+    id: "submitted",
+    request_id: "request-submitted",
+    session_id: "session-1",
+  };
+  const childMatch = matchLiveConversationEntry(
+    [parent], parent.id, parent.session_id, "request-submitted", submitted);
+  assert.equal(childMatch.accepted, true);
+  assert.equal(childMatch.submittedChild, true);
+  assert.equal(childMatch.followUpRequestID, "");
+
+  const descendant = {
+    id: "descendant",
+    request_id: "request-descendant",
+    data: { request_headers: { "X-GoModel-Interaction-Parent": submitted.id } },
+  };
+  const descendantMatch = matchLiveConversationEntry(
+    [parent, submitted], submitted.id, parent.session_id,
+    childMatch.followUpRequestID, descendant);
+  assert.equal(descendantMatch.accepted, true);
+  assert.equal(descendantMatch.submittedChild, false);
 });
 
 test("follow-up headers do not change session scoping", () => {

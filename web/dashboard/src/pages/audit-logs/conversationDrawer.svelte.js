@@ -14,8 +14,8 @@ import {
   conversationFollowUpEntry,
   followUpEndpointKind,
   formatJSON,
-  interactionParentID,
   latestRenderableConversationEntry,
+  matchLiveConversationEntry,
   renderBodyWithConversationHighlights,
 } from "./conversation-helpers.js";
 
@@ -193,20 +193,12 @@ class ConversationDrawerStore {
   refreshLiveConversation(entry) {
     if (!this.conversationOpen || !entry) return;
     const entryID = String(entry.id || "").trim();
-    const entryRequestID = String(entry.request_id || "").trim();
-    const entrySessionID = String(entry.session_id || "").trim();
-    const parentID = interactionParentID(entry);
-    const knownEntry = (this.conversationEntries || []).some((candidate) =>
-      String(candidate.id || "").trim() === entryID ||
-      (entry.request_id && candidate.request_id === entry.request_id));
-    const submittedChild = !!this.followUpRequestID && entryRequestID === this.followUpRequestID;
-    const sameSession = !!this.conversationSessionID && entrySessionID === this.conversationSessionID;
-    const linkedParent = !!parentID && (parentID === this.conversationAnchorID ||
-      (this.conversationEntries || []).some((candidate) => candidate.id === parentID));
-    if (!knownEntry && this.followUpRequestID && !submittedChild) return;
-    if (!knownEntry && !submittedChild && !sameSession && !linkedParent) return;
+    const match = matchLiveConversationEntry(this.conversationEntries, this.conversationAnchorID,
+      this.conversationSessionID, this.followUpRequestID, entry);
+    if (!match.accepted) return;
+    this.followUpRequestID = match.followUpRequestID;
 
-    if (entryID && submittedChild) {
+    if (entryID && match.submittedChild) {
       this.conversationAnchorID = entryID;
       this.conversationFollowLatest = true;
     }
@@ -356,7 +348,7 @@ class ConversationDrawerStore {
         signal: controller.signal,
       });
       const responseRequestID = String(response.headers.get("X-Request-ID") || "").trim();
-      if (responseRequestID) this.followUpRequestID = responseRequestID;
+      if (responseRequestID && this.followUpRequestID) this.followUpRequestID = responseRequestID;
       if (!response.ok) {
         let message = "Unable to send message.";
         try {
@@ -408,6 +400,7 @@ class ConversationDrawerStore {
           this.conversationEntries = entries;
           this.conversationAnchorID = String(child.id);
           this.conversationFollowLatest = false;
+          if (this.followUpRequestID === requestID) this.followUpRequestID = "";
           this.conversationTruncated = !!payload.truncated;
           if (child.session_id) this.conversationSessionID = String(child.session_id).trim();
           this._applyConversationView(entries);

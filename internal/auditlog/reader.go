@@ -26,8 +26,11 @@ type LogQueryParams struct {
 	Stream         *bool
 	Limit          int
 	Offset         int
-	OmitAttempts   bool
-	ExactUserPath  bool
+	// OmitAttempts excludes provider attempts from returned entries. The default is false.
+	OmitAttempts bool
+	// ExactUserPath matches only UserPath instead of its subtree. The default is false.
+	// An exact root path also matches legacy empty and null stored paths.
+	ExactUserPath bool
 	// Internal keyset cursor used while assembling multi-page conversations.
 	beforeTimestamp time.Time
 	beforeID        string
@@ -95,6 +98,8 @@ type Reader interface {
 
 	// GetInteractionParent returns the fields needed to authorize and inherit a
 	// dashboard continuation without loading captured bodies or attempts.
+	// SQL and MongoDB readers return (nil, nil) when no entry exists; session
+	// capture treats that result as no parent.
 	GetInteractionParent(ctx context.Context, id string) (*InteractionParent, error)
 
 	// GetConversation returns the anchor's session when it has one. Entries
