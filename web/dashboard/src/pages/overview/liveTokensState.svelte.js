@@ -153,30 +153,39 @@ class LiveTokensState {
   }
 
   async #readStream(controller) {
+    // Every exit from this reader can schedule a reconnect, and any of them
+    // can be reached by a reader whose stream was already replaced (navigate
+    // away and back): the fetch may have resolved before the abort landed, or
+    // the read may end normally. Reconnecting from one of those would open a
+    // second stream alongside the live one, so all three paths go through this
+    // guard. Mirrors the audit-log stream in liveLogs.svelte.js.
+    const reconnectIfCurrent = () => {
+      if (controller.signal.aborted || this.#sseController !== controller) {
+        return;
+      }
+      this.#scheduleReconnect();
+    };
+
     try {
       const res = await apiFetch("/admin/live/logs?types=usage", {
         signal: controller.signal,
       });
       if (!res.ok || !res.body || typeof res.body.getReader !== "function") {
-        this.#scheduleReconnect();
+        reconnectIfCurrent();
         return;
       }
       this.#reconnectAttempts = 0;
       await consumeEventStream(res.body.getReader(), (event) =>
         this.#handleEvent(event),
       );
-      // A reader that ends normally after this stream was replaced (navigate
-      // away and back) must not resurrect it — reconnecting here would open a
-      // second stream alongside the live one. Same guard as the audit-log
-      // stream in liveLogs.svelte.js.
-      if (controller.signal.aborted || this.#sseController !== controller) {
-        return;
-      }
-      this.#scheduleReconnect();
+      reconnectIfCurrent();
     } catch (e) {
-      if (isAbortError(e)) return;
+      // Firefox rejects a deliberately-aborted read with a plain TypeError
+      // rather than an AbortError, so trust our own controller state over the
+      // error's name (the same reason liveLogs.svelte.js checks both).
+      if (isAbortError(e) || controller.signal.aborted) return;
       console.error("Live usage stream failed:", e);
-      this.#scheduleReconnect();
+      reconnectIfCurrent();
     }
   }
 
