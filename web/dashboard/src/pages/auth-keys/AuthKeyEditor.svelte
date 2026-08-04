@@ -7,6 +7,7 @@
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import { authKeysStore as store } from "./authKeys.svelte.js";
+  import { Check, Plus } from "lucide";
 </script>
 
 <EditorDialog
@@ -17,7 +18,7 @@
   submitting={store.formSubmitting}
   submitLabel={store.issuedValue ? "Done, I’ve stored it" : "Create API Key"}
   submittingLabel="Creating..."
-  submitIcon={store.issuedValue ? "check" : "plus"}
+  submitIcon={store.issuedValue ? Check : Plus}
   cancel={false}
   dialogClass="auth-key-editor"
   onclose={() => store.closeForm()}

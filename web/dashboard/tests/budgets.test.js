@@ -36,6 +36,7 @@ import {
   normalizeBudgetUserPath,
   syncBudgetScope,
 } from "../src/pages/budgets/budgets-helpers.js";
+import { Calendar, CalendarDays, Clock, Settings2, Sun } from "lucide";
 
 test("buildBudgetFormPayload normalizes user path and standard periods", () => {
   const { payload, error } = buildBudgetFormPayload({
@@ -302,10 +303,10 @@ test("budgetSourceTitle explains manual and config sources", () => {
 
 test("budget period label, classes, icon, and duration distinguish standard and custom periods", () => {
   const matrix = [
-    [3600, "Hourly", "hourly", "clock", "1 hour"],
-    [86400, "Daily", "daily", "sun", "1 day"],
-    [604800, "Weekly", "weekly", "calendar-days", "1 week"],
-    [2592000, "Monthly", "monthly", "calendar", "1 month"],
+    [3600, "Hourly", "hourly", Clock, "1 hour"],
+    [86400, "Daily", "daily", Sun, "1 day"],
+    [604800, "Weekly", "weekly", CalendarDays, "1 week"],
+    [2592000, "Monthly", "monthly", Calendar, "1 month"],
   ];
   for (const [seconds, label, suffix, icon, duration] of matrix) {
     const item = { period_seconds: seconds };
@@ -330,7 +331,7 @@ test("budget period label, classes, icon, and duration distinguish standard and 
     budgetPeriodTrackClass({ period_seconds: 7200 }),
     "budget-bar-track-period-custom",
   );
-  assert.equal(budgetPeriodIcon({ period_seconds: 7200 }), "settings-2");
+  assert.equal(budgetPeriodIcon({ period_seconds: 7200 }), Settings2);
   assert.equal(budgetPeriodDurationLabel({ period_seconds: 7200 }), "7200 seconds");
   assert.equal(budgetPeriodDurationLabel({ period_seconds: 1 }), "1 second");
   assert.equal(budgetPeriodFromSeconds(7200), "custom");

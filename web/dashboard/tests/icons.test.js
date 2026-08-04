@@ -55,3 +55,39 @@ test("every lucide icon imported in the dashboard exists and is drawable", () =>
     );
   }
 });
+
+// Icons travel as values now, so a leftover name string reaching an icon prop
+// renders a blank SVG. That is how EmptyState's "inbox" default, the three
+// EditorDialog submitIcon callers, and budgetPeriodIcon() all slipped through
+// review, so the invariant is asserted rather than trusted.
+test("no icon binding is assigned a name string", () => {
+  // `icon`/`submitIcon` as an attribute, object property, or default — with a
+  // string literal anywhere in the value. Comparisons against strings are
+  // fine, so only the branches that produce the value are inspected.
+  const binding = /\b(icon|submitIcon)\s*(?:=|:)\s*(\{[^}]*\}|"[^"]*")/g;
+  const offenders = [];
+
+  for (const file of sourceFiles(SRC)) {
+    const source = readFileSync(file, "utf8");
+    for (const [match, prop, value] of source.matchAll(binding)) {
+      const produced = value.startsWith("{")
+        ? value.slice(1, -1).split(/\?|:/).slice(1).join(" ") // ternary branches only
+        : value;
+      if (!/"[a-z][a-z0-9-]*"/.test(produced)) continue;
+      offenders.push(`${file.slice(SRC.length + 1)}: ${match.replace(/\s+/g, " ")}`);
+    }
+  }
+
+  assert.deepEqual(offenders, [], `icon bindings must be lucide icons, not names:\n${offenders.join("\n")}`);
+});
+
+test("helpers that return icons return lucide icons, not names", async () => {
+  const { budgetPeriodIcon } = await import("../src/pages/budgets/budgets-helpers.js");
+  for (const seconds of [3600, 86400, 604800, 2592000, 7200]) {
+    const icon = budgetPeriodIcon({ period_seconds: seconds });
+    assert.ok(
+      Array.isArray(icon) && icon.length > 0,
+      `budgetPeriodIcon(${seconds}) returned ${JSON.stringify(icon)}, not a lucide icon`,
+    );
+  }
+});

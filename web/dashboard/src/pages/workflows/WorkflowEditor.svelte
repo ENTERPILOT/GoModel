@@ -9,6 +9,7 @@
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { workflowsStore as wf } from "./workflows.svelte.js";
   import WorkflowCard from "./WorkflowCard.svelte";
+  import { Plus, Save } from "lucide";
 </script>
 
 <EditorDialog
@@ -18,7 +19,7 @@
   submitting={wf.submitting}
   submitLabel={wf.submitLabel()}
   submittingLabel={wf.submittingLabel()}
-  submitIcon={wf.submitMode() === "create" ? "plus" : "save"}
+  submitIcon={wf.submitMode() === "create" ? Plus : Save}
   dialogClass="workflow-editor"
   onclose={() => wf.closeForm()}
   onsubmit={() => wf.submitForm()}

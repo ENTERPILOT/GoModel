@@ -3,6 +3,7 @@
 // Vite and plain node).
 
 import { formatCost } from "../../lib/utils/format.js";
+import { Calendar, CalendarDays, Clock, Settings2, Sun } from "lucide";
 
 export function defaultBudgetForm() {
   return {
@@ -419,15 +420,15 @@ export function budgetPeriodIcon(item) {
   const seconds = Number((item && item.period_seconds) || 0);
   switch (seconds) {
     case 3600:
-      return "clock";
+      return Clock;
     case 86400:
-      return "sun";
+      return Sun;
     case 604800:
-      return "calendar-days";
+      return CalendarDays;
     case 2592000:
-      return "calendar";
+      return Calendar;
     default:
-      return "settings-2";
+      return Settings2;
   }
 }
 

@@ -11,7 +11,7 @@
   import { virtualModels } from "./virtualModels.svelte.js";
   import { qualifiedModelName } from "./virtualModelsLogic.js";
   import VmTargetRow from "./VmTargetRow.svelte";
-  import { Plus } from "lucide";
+  import { Plus, Save } from "lucide";
 
   const vm = virtualModels;
 
@@ -31,7 +31,7 @@
   submitting={vm.vmSubmitting}
   submitDisabled={vm.vmDeleting || vm.vmFormManaged}
   submitLabel={vm.vmFormMode === "edit" ? "Save" : "Create"}
-  submitIcon={vm.vmFormMode !== "edit" ? "plus" : "save"}
+  submitIcon={vm.vmFormMode !== "edit" ? Plus : Save}
   onclose={() => vm.closeVirtualModelForm()}
   onsubmit={() => vm.submitVirtualModelForm()}
 >
