@@ -7,8 +7,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -31,16 +29,9 @@ const LegacySQLitePath = "data/gomodel.db"
 
 // DefaultSQLitePath returns the database path used when none is configured:
 // LegacySQLitePath when a ./data directory already exists, otherwise the
-// OS-conventional per-user data directory (see platformdir.DataDir).
+// OS-conventional per-user data directory (see platformdir.DataFile).
 func DefaultSQLitePath() string {
-	if info, err := os.Stat("data"); err == nil && info.IsDir() {
-		return LegacySQLitePath
-	}
-	dir, err := platformdir.DataDir()
-	if err != nil {
-		return LegacySQLitePath
-	}
-	return filepath.Join(dir, "gomodel.db")
+	return platformdir.DataFile("gomodel.db")
 }
 
 // Config holds storage configuration

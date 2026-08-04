@@ -541,14 +541,16 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 	return newGatewayStartConfig(addr).Start(ctx, s.echo)
 }
 
-// StartWithListener starts the HTTP server using a pre-bound listener.
-// This is useful in tests that need an already-reserved loopback port.
+// StartWithListener starts the HTTP server using a pre-bound listener. The
+// gateway serves this way in production — the listening socket outlives each
+// configuration a reload installs — and tests use it to reserve a loopback
+// port up front, so it configures the server exactly like Start does: same
+// inbound timeouts, same drain window.
 func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) error {
-	sc := echo.StartConfig{
-		HideBanner: true,
-		Listener:   listener,
+	if listener == nil {
+		return errors.New("listener is required")
 	}
-	return sc.Start(ctx, s.echo)
+	return newGatewayStartConfigForListener(listener).Start(ctx, s.echo)
 }
 
 // Shutdown releases server resources. The HTTP server itself is stopped by
@@ -607,6 +609,14 @@ func newGatewayStartConfig(addr string) echo.StartConfig {
 			)
 		},
 	}
+}
+
+// newGatewayStartConfig with a pre-bound listener. Echo ignores Address once
+// Listener is set; it is filled in anyway so the two describe the same server.
+func newGatewayStartConfigForListener(listener net.Listener) echo.StartConfig {
+	sc := newGatewayStartConfig(listener.Addr().String())
+	sc.Listener = listener
+	return sc
 }
 
 func configureGatewayHTTPServer(server *http.Server) error {

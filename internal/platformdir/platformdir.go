@@ -45,6 +45,32 @@ func DataDir() (string, error) {
 	}
 }
 
+// LocalDataDir is the project-local data directory. Deployments that already
+// have one — the Docker image, anyone running from a checkout — keep their
+// state there, so upgrades never move a database or a pid file out from under
+// an operator.
+const LocalDataDir = "data"
+
+// DataFile returns where a durable data file called name belongs: inside
+// LocalDataDir when that directory exists next to the process, otherwise inside
+// DataDir. Callers share this rule so a deployment's files stay together
+// instead of some landing project-local and others in the per-user directory.
+//
+// The local form is spelled with a forward slash on every platform, which
+// Windows accepts, so it stays comparable to the legacy path constants built
+// the same way.
+func DataFile(name string) string {
+	local := LocalDataDir + "/" + name
+	if info, err := os.Stat(LocalDataDir); err == nil && info.IsDir() {
+		return local
+	}
+	dir, err := DataDir()
+	if err != nil {
+		return local
+	}
+	return filepath.Join(dir, name)
+}
+
 // CacheDir returns the directory for re-creatable caches such as the model
 // catalog:
 //
