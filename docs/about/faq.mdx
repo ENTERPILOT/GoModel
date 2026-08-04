@@ -74,8 +74,9 @@ Otherwise the binary uses your OS's conventional per-user directories:
 | macOS | `~/Library/Application Support/gomodel/` | `~/Library/Caches/gomodel/` |
 | Windows | `%LocalAppData%\gomodel\` | `%LocalAppData%\gomodel\cache\` |
 
-The resolved database path is printed at startup (`storage configured`), and
-`SQLITE_PATH` / `GOMODEL_CACHE_DIR` override it. Available from
+The resolved database path is printed at startup (`storage configured`).
+`SQLITE_PATH` overrides the database path, and `GOMODEL_CACHE_DIR` overrides the
+model cache directory. Available from
 v0.1.54; older binaries always use `./data` relative to the working
 directory.
 

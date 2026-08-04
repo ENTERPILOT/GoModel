@@ -15,7 +15,7 @@ change it. A condensed [checklist](#production-checklist) is at the end.
 ## Small enough to run anywhere
 
 GoModel is a single static Go binary with no runtime dependencies. It is built
-`CGO_ENABLED=0` and ships on `distroless/static`, so the container has no shell,
+with `CGO_ENABLED=0` and ships on `distroless/static`, so the container has no shell,
 no package manager, and no libc to patch.
 
 | | GoModel |
@@ -283,7 +283,7 @@ included in the repository under `helm/`; check its probe paths and its
 On `SIGTERM` the gateway drains in-flight HTTP work for 10 seconds, then
 finishes teardown within 30 seconds, flushing buffered usage and audit entries
 on the way out. Neither timeout is configurable. In-flight streamed responses
-are cut at the 10 second mark, so a long completion in progress during a rolling
+are cut at the 10-second mark, so a long completion in progress during a rolling
 deploy will be truncated. Set `terminationGracePeriodSeconds` above 30 (45 is a
 reasonable choice) so the teardown is not racing SIGKILL.
 
