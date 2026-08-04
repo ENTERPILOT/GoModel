@@ -18,13 +18,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
-
-	"github.com/joho/godotenv"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
@@ -101,11 +100,16 @@ func ExitCode(err error) int {
 	return 1
 }
 
-// Run executes the full gateway lifecycle: CLI parsing, --version and
-// --health/--ready probe modes, dotenv loading, logging setup, config
-// loading, provider registration, application construction (including
-// registered extensions), signal handling, and start with graceful shutdown.
-// Cancelling ctx triggers the same graceful shutdown as SIGINT/SIGTERM.
+// Run executes the full gateway lifecycle: CLI parsing, --version,
+// --health/--ready probe and --reload signalling modes, dotenv loading,
+// logging setup, config loading, provider registration, application
+// construction (including registered extensions), signal handling, and start
+// with graceful shutdown.
+//
+// Cancelling ctx triggers the same graceful shutdown as SIGINT/SIGTERM. A
+// reload signal (SIGHUP, what `gomodel --reload` sends) instead re-reads the
+// environment file and the configuration and replaces the running application
+// with one built from them, without giving up the listening socket.
 func Run(ctx context.Context, opts Options) error {
 	opts = opts.withDefaults()
 
@@ -122,7 +126,8 @@ func Run(ctx context.Context, opts Options) error {
 		return nil
 	}
 
-	_ = godotenv.Load()
+	env := newDotenv()
+	env.apply() // startup has nothing to roll back to
 
 	if cliOpts.Health {
 		if err := runHealthProbe(cliOpts.HealthTimeout); err != nil {
@@ -135,6 +140,14 @@ func Run(ctx context.Context, opts Options) error {
 	if cliOpts.Ready {
 		if err := runReadyProbe(cliOpts.ReadyTimeout); err != nil {
 			fmt.Fprintf(opts.Stderr, "readiness check failed: %v\n", err)
+			return err
+		}
+		return nil
+	}
+
+	if cliOpts.Reload {
+		if err := sendReloadSignal(opts.Stdout); err != nil {
+			fmt.Fprintf(opts.Stderr, "reload failed: %v\n", err)
 			return err
 		}
 		return nil
@@ -169,29 +182,91 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	result, err := config.Load()
-	if err != nil {
-		slog.Error("failed to load config", "error", err)
-		return err
-	}
-	opts.ConfigureSwaggerDocs(result.Config.Server.BasePath)
+	// build produces one generation of the gateway from the configuration as it
+	// stands right now. It is called again for every reload, which is what lets
+	// a reload re-read every configuration value rather than a hand-picked
+	// subset — everything except what is fixed for the life of the process (see
+	// warnAboutStartupOnlySettings).
+	build := func() (*app.App, *config.Config, error) {
+		result, err := config.Load()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to load config: %w", err)
+		}
+		opts.ConfigureSwaggerDocs(result.Config.Server.BasePath)
 
-	application, err := app.New(ctx, app.Config{
-		AppConfig:  result,
-		Factory:    defaultProviderFactory(result.Config),
-		Extensions: opts.Extensions,
-		DemoMode:   demoMode,
-	})
+		application, err := app.New(ctx, app.Config{
+			AppConfig:  result,
+			Factory:    defaultProviderFactory(result.Config),
+			Extensions: opts.Extensions,
+			DemoMode:   demoMode,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to initialize application: %w", err)
+		}
+		return application, result.Config, nil
+	}
+
+	application, appCfg, err := build()
 	if err != nil {
-		slog.Error("failed to initialize application", "error", err)
+		slog.Error("startup failed", "error", err)
 		return err
 	}
+
+	socket, err := listenOn(":" + appCfg.Server.Port)
+	if err != nil {
+		slog.Error("failed to bind the server address", "error", err)
+		_ = shutdownApplicationWithTimeout(application)
+		return err
+	}
+	defer func() { _ = socket.Close() }()
+
+	// Claim the reload signal before the pid file exists. The pid file is what
+	// tells an operator or a process manager that this instance can be signalled,
+	// and until Notify runs, SIGHUP still carries its default disposition: it
+	// would kill the gateway instead of reloading it.
+	reload := make(chan os.Signal, 1)
+	signal.Notify(reload, reloadSignal)
+	defer signal.Stop(reload)
+
+	removePIDFile, err := writePIDFile(appCfg.Server.PIDFile)
+	if err != nil {
+		slog.Warn("could not write the pid file; --reload will not find this instance", "error", err)
+	}
+	defer removePIDFile()
 
 	signalCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	addr := ":" + result.Config.Server.Port
-	if err := serveUntilShutdown(signalCtx, application, addr); err != nil {
+	// rebuild prepares the next generation. Reading the environment file and
+	// installing the new logging configuration have to happen first — config.Load
+	// reads the process environment, and the new log level applies to the build
+	// itself — but both are process-wide, so a build that fails would otherwise
+	// leave the generation that keeps serving running under a configuration the
+	// operator was told had been rejected. Everything is put back instead.
+	rebuild := func() (lifecycleApp, error) {
+		// Variables exported into the process keep winning over the file.
+		undoEnv := env.apply()
+		previousLogger := slog.Default()
+		rollback := func() {
+			slog.SetDefault(previousLogger)
+			undoEnv()
+		}
+
+		if err := configureLogging(opts.Stderr); err != nil {
+			rollback()
+			return nil, err
+		}
+		next, nextCfg, err := build()
+		if err != nil {
+			rollback()
+			return nil, err
+		}
+		warnAboutStartupOnlySettings(appCfg.Server, nextCfg.Server)
+		appCfg = nextCfg
+		return next, nil
+	}
+
+	if err := serveUntilShutdown(signalCtx, reload, socket, application, rebuild); err != nil {
 		slog.Error("application failed", "error", err)
 		return err
 	}
@@ -204,26 +279,94 @@ func versionLine(productName string) string {
 }
 
 type lifecycleApp interface {
-	Start(ctx context.Context, addr string) error
+	StartWithListener(ctx context.Context, listener net.Listener) error
 	Shutdown(ctx context.Context) error
 }
 
-// serveUntilShutdown starts the application and returns only once the server
-// has stopped *and* the teardown that stopped it has finished.
+// serveUntilShutdown serves the gateway until it is asked to stop, replacing
+// the running application with a freshly configured one every time a reload
+// signal arrives.
 //
-// The teardown has to run on its own goroutine because Start blocks until the
-// server stops and Shutdown is what stops it. Waiting for that goroutine here
-// is the load-bearing part: the process exits the moment Run returns, so
-// anything Shutdown had not reached yet — the buffered usage and audit
-// records, the database handle — would be dropped on every Ctrl+C.
+// A reload builds its replacement before stopping the generation it replaces,
+// so a configuration that fails to load or to initialize leaves the gateway
+// serving on the one that already works — nginx's rule, and the reason the
+// operator can reload without holding their breath.
+func serveUntilShutdown(ctx context.Context, reload <-chan os.Signal, socket *boundSocket, application lifecycleApp, rebuild func() (lifecycleApp, error)) error {
+	for {
+		listener, err := socket.next()
+		if err != nil {
+			_ = shutdownApplicationWithTimeout(application)
+			return err
+		}
+
+		generationCtx, endGeneration := context.WithCancel(ctx)
+		replacement := watchForReload(generationCtx, endGeneration, reload, rebuild)
+
+		startErr := serveGeneration(generationCtx, application, listener)
+		endGeneration()
+
+		next := <-replacement
+		switch {
+		case next == nil:
+			return startErr
+		case startErr != nil || ctx.Err() != nil:
+			// The gateway is on its way out anyway, so the replacement built
+			// alongside the shutdown never gets to serve.
+			_ = shutdownApplicationWithTimeout(next)
+			return startErr
+		}
+		application = next
+		slog.Info("configuration reloaded")
+	}
+}
+
+// watchForReload turns reload signals into the next application generation. It
+// builds the replacement first and ends the running generation only once that
+// succeeded, so a failed build costs a log line rather than an outage. The
+// returned channel yields the replacement, or nil when the generation ended for
+// any other reason.
+func watchForReload(ctx context.Context, endGeneration context.CancelFunc, reload <-chan os.Signal, rebuild func() (lifecycleApp, error)) <-chan lifecycleApp {
+	replacement := make(chan lifecycleApp, 1)
+	go func() {
+		defer close(replacement)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-reload:
+				slog.Info("reloading configuration")
+				next, err := rebuild()
+				if err != nil {
+					slog.Error("reload failed; keeping the running configuration", "error", err)
+					continue
+				}
+				replacement <- next
+				endGeneration()
+				return
+			}
+		}
+	}()
+	return replacement
+}
+
+// serveGeneration starts one application generation and returns only once its
+// server has stopped *and* the teardown that stopped it has finished.
 //
-// This is the only caller of shutdownApplication, so teardown runs exactly
-// once per exit and on a single shutdownTimeout budget, whichever way the
-// server ended: a signal, a stop of its own accord, or a Start that never got
-// off the ground all converge here. Routing the failed-start path through the
-// same place is what removes the second teardown that used to run alongside
-// it, and with it any reliance on Shutdown being idempotent.
-func serveUntilShutdown(ctx context.Context, application lifecycleApp, addr string) error {
+// The teardown has to run on its own goroutine because StartWithListener
+// blocks until the server stops and Shutdown is what stops it. Waiting for that
+// goroutine here is the load-bearing part: the process exits the moment Run
+// returns, so anything Shutdown had not reached yet — the buffered usage and
+// audit records, the database handle — would be dropped on every Ctrl+C.
+//
+// Every generation that serves is torn down here, exactly once and on a single
+// shutdownTimeout budget, whichever way the server ended: a signal, a reload, a
+// stop of its own accord, or a start that never got off the ground all converge
+// here. Routing the failed-start path through the same place is what removes
+// the second teardown that used to run alongside it, and with it any reliance
+// on Shutdown being idempotent. An application built but never served — one
+// that could not be given a listener, or a replacement overtaken by shutdown —
+// is torn down by its owner in serveUntilShutdown, on the same budget.
+func serveGeneration(ctx context.Context, application lifecycleApp, listener net.Listener) error {
 	serverReturned := make(chan struct{})
 	shutdownDone := make(chan error, 1)
 	go func() {
@@ -231,18 +374,38 @@ func serveUntilShutdown(ctx context.Context, application lifecycleApp, addr stri
 		case <-ctx.Done():
 		case <-serverReturned:
 		}
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		shutdownDone <- shutdownApplication(application, shutdownCtx)
+		shutdownDone <- shutdownApplicationWithTimeout(application)
 	}()
 
-	startErr := application.Start(context.Background(), addr)
+	startErr := application.StartWithListener(context.Background(), listener)
 	close(serverReturned)
 
 	if err := <-shutdownDone; err != nil {
 		slog.Error("application shutdown error", "error", err)
 	}
 	return startErr
+}
+
+// shutdownApplicationWithTimeout tears an application down on the one budget
+// every teardown gets, whether or not it ever served.
+func shutdownApplicationWithTimeout(application lifecycleApp) error {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	return shutdownApplication(application, shutdownCtx)
+}
+
+// warnAboutStartupOnlySettings reports the settings a reload cannot apply: the
+// listening socket is kept bound across generations precisely so no connection
+// is refused, and the pid file names the process that is already running.
+func warnAboutStartupOnlySettings(current, next config.ServerConfig) {
+	if next.Port != current.Port {
+		slog.Warn("server port change needs a restart; keeping the bound address",
+			"bound_port", current.Port, "configured_port", next.Port)
+	}
+	if next.PIDFile != current.PIDFile {
+		slog.Warn("pid file change needs a restart; keeping the current pid file",
+			"current_pid_file", current.PIDFile, "configured_pid_file", next.PIDFile)
+	}
 }
 
 func shutdownApplication(application lifecycleApp, ctx context.Context) error {

@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"errors"
+	"net"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -24,7 +25,7 @@ type stubLifecycleApp struct {
 	shutdownBlock <-chan struct{}
 }
 
-func (s *stubLifecycleApp) Start(_ context.Context, _ string) error {
+func (s *stubLifecycleApp) StartWithListener(_ context.Context, _ net.Listener) error {
 	s.mu.Lock()
 	s.startCalls++
 	s.mu.Unlock()
@@ -63,11 +64,11 @@ func (s *stubLifecycleApp) capturedShutdownContext() context.Context {
 // A server that never came up still holds a database handle and whatever the
 // loggers buffered while it was being built, so it gets torn down — once, on
 // one shutdownTimeout budget, from the same place every other exit uses.
-func TestServeUntilShutdown_TearsDownOnceAfterAFailedStart(t *testing.T) {
+func TestServeGeneration_TearsDownOnceAfterAFailedStart(t *testing.T) {
 	startErr := errors.New("listen tcp :8080: bind: address already in use")
 	app := &stubLifecycleApp{startErr: startErr}
 
-	err := serveUntilShutdown(context.Background(), app, ":8080")
+	err := serveGeneration(context.Background(), app, nil)
 	if !errors.Is(err, startErr) {
 		t.Fatalf("error = %v, want start error %v", err, startErr)
 	}
@@ -92,11 +93,11 @@ func TestServeUntilShutdown_TearsDownOnceAfterAFailedStart(t *testing.T) {
 
 // The start error is what the operator needs to see and what sets the exit
 // code, so a teardown that also fails is logged rather than wrapped around it.
-func TestServeUntilShutdown_ShutdownFailureDoesNotMaskTheStartError(t *testing.T) {
+func TestServeGeneration_ShutdownFailureDoesNotMaskTheStartError(t *testing.T) {
 	startErr := errors.New("listen failed")
 	app := &stubLifecycleApp{startErr: startErr, shutdownErr: errors.New("close failed")}
 
-	err := serveUntilShutdown(context.Background(), app, ":8080")
+	err := serveGeneration(context.Background(), app, nil)
 	if !errors.Is(err, startErr) {
 		t.Fatalf("error = %v, want start error %v", err, startErr)
 	}
@@ -106,8 +107,8 @@ func TestServeUntilShutdown_ShutdownFailureDoesNotMaskTheStartError(t *testing.T
 }
 
 // A teardown that wedges must not wedge the process with it: the wait is
-// bounded by shutdownTimeout and serveUntilShutdown returns regardless.
-func TestServeUntilShutdown_StopsWaitingWhenShutdownTimesOut(t *testing.T) {
+// bounded by shutdownTimeout and serveGeneration returns regardless.
+func TestServeGeneration_StopsWaitingWhenShutdownTimesOut(t *testing.T) {
 	previousTimeout := shutdownTimeout
 	shutdownTimeout = 10 * time.Millisecond
 	defer func() {
@@ -122,7 +123,7 @@ func TestServeUntilShutdown_StopsWaitingWhenShutdownTimesOut(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- serveUntilShutdown(context.Background(), app, ":8080")
+		done <- serveGeneration(context.Background(), app, nil)
 	}()
 
 	select {
@@ -131,7 +132,7 @@ func TestServeUntilShutdown_StopsWaitingWhenShutdownTimesOut(t *testing.T) {
 			t.Fatalf("error = %v, want start error %v", err, startErr)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("serveUntilShutdown blocked on a shutdown that never returned")
+		t.Fatal("serveGeneration blocked on a shutdown that never returned")
 	}
 	if calls := app.shutdownCallCount(); calls != 1 {
 		t.Fatalf("shutdownCalls = %d, want 1", calls)
@@ -151,12 +152,12 @@ func TestGracefulDrainFitsInsideTheShutdownBudget(t *testing.T) {
 	}
 }
 
-// servingApp mirrors the ordering that matters in the real App: Start blocks
-// until Shutdown stops the server, and Shutdown keeps working afterwards —
-// flushing buffered usage and audit records, closing the database — before it
-// returns.
+// servingApp mirrors the ordering that matters in the real App:
+// StartWithListener blocks until Shutdown stops the server, and Shutdown keeps
+// working afterwards — flushing buffered usage and audit records, closing the
+// database — before it returns.
 type servingApp struct {
-	serverStopped chan struct{} // closed by Shutdown, releases Start
+	serverStopped chan struct{} // closed by Shutdown, releases StartWithListener
 	flushing      chan struct{} // closed by the test, releases Shutdown
 	shutdownDone  atomic.Bool
 }
@@ -168,7 +169,7 @@ func newServingApp() *servingApp {
 	}
 }
 
-func (a *servingApp) Start(context.Context, string) error {
+func (a *servingApp) StartWithListener(context.Context, net.Listener) error {
 	<-a.serverStopped
 	return nil
 }
@@ -184,14 +185,14 @@ func (a *servingApp) Shutdown(context.Context) error {
 // flushing loses whatever it had not written yet. That is what happened on
 // every Ctrl+C: the server stopped, Start returned, the process left, and
 // "application shutdown complete" was never reached.
-func TestServeUntilShutdown_WaitsForTeardownToFinish(t *testing.T) {
+func TestServeGeneration_WaitsForTeardownToFinish(t *testing.T) {
 	app := newServingApp()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	returned := make(chan error, 1)
 	go func() {
-		returned <- serveUntilShutdown(ctx, app, ":0")
+		returned <- serveGeneration(ctx, app, nil)
 	}()
 
 	cancel() // the SIGINT equivalent
@@ -199,7 +200,7 @@ func TestServeUntilShutdown_WaitsForTeardownToFinish(t *testing.T) {
 	// Start has returned by now; Shutdown is still flushing.
 	select {
 	case err := <-returned:
-		t.Fatalf("serveUntilShutdown returned mid-teardown (error = %v)", err)
+		t.Fatalf("serveGeneration returned mid-teardown (error = %v)", err)
 	case <-time.After(100 * time.Millisecond):
 	}
 
@@ -207,10 +208,10 @@ func TestServeUntilShutdown_WaitsForTeardownToFinish(t *testing.T) {
 	select {
 	case err := <-returned:
 		if err != nil {
-			t.Fatalf("serveUntilShutdown() error = %v, want nil", err)
+			t.Fatalf("serveGeneration() error = %v, want nil", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("serveUntilShutdown did not return after teardown finished")
+		t.Fatal("serveGeneration did not return after teardown finished")
 	}
 	if !app.shutdownDone.Load() {
 		t.Fatal("teardown did not run to completion")
@@ -219,23 +220,23 @@ func TestServeUntilShutdown_WaitsForTeardownToFinish(t *testing.T) {
 
 // A server that stops without a signal still owns a database handle and
 // buffered records, so it gets the same teardown.
-func TestServeUntilShutdown_TearsDownWhenServerStopsOnItsOwn(t *testing.T) {
+func TestServeGeneration_TearsDownWhenServerStopsOnItsOwn(t *testing.T) {
 	app := &stubLifecycleApp{}
 
-	if err := serveUntilShutdown(context.Background(), app, ":0"); err != nil {
-		t.Fatalf("serveUntilShutdown() error = %v, want nil", err)
+	if err := serveGeneration(context.Background(), app, nil); err != nil {
+		t.Fatalf("serveGeneration() error = %v, want nil", err)
 	}
 	if calls := app.shutdownCallCount(); calls != 1 {
 		t.Fatalf("shutdownCalls = %d, want 1", calls)
 	}
 }
 
-func TestServeUntilShutdown_ReturnsStartFailure(t *testing.T) {
+func TestServeGeneration_ReturnsStartFailure(t *testing.T) {
 	startErr := errors.New("listen tcp :8080: bind: address already in use")
 	app := &stubLifecycleApp{startErr: startErr}
 
-	if err := serveUntilShutdown(context.Background(), app, ":8080"); !errors.Is(err, startErr) {
-		t.Fatalf("serveUntilShutdown() error = %v, want start error %v", err, startErr)
+	if err := serveGeneration(context.Background(), app, nil); !errors.Is(err, startErr) {
+		t.Fatalf("serveGeneration() error = %v, want start error %v", err, startErr)
 	}
 }
 

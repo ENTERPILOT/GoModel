@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -119,4 +120,59 @@ type deadlineTrackingWriter struct {
 func (w *deadlineTrackingWriter) SetWriteDeadline(deadline time.Time) error {
 	w.deadlines = append(w.deadlines, deadline)
 	return nil
+}
+
+// The gateway serves on a pre-bound listener in production, because the
+// listening socket has to outlive the configuration a reload replaces. That
+// path went through a bare start config once, which silently dropped the
+// inbound timeouts and the drain window from every request the gateway served.
+func TestNewGatewayStartConfigForListener_KeepsTheServerConfiguration(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	cfg := newGatewayStartConfigForListener(listener)
+
+	if cfg.Listener != listener {
+		t.Error("Listener = nil, want the pre-bound listener")
+	}
+	if cfg.GracefulTimeout != GracefulDrainTimeout {
+		t.Errorf("GracefulTimeout = %v, want %v", cfg.GracefulTimeout, GracefulDrainTimeout)
+	}
+	if cfg.OnShutdownError == nil {
+		t.Error("OnShutdownError = nil, want the drain cutoff reported by the gateway")
+	}
+	if cfg.BeforeServeFunc == nil {
+		t.Fatal("BeforeServeFunc = nil, want the inbound server timeouts")
+	}
+
+	server := &http.Server{}
+	if err := cfg.BeforeServeFunc(server); err != nil {
+		t.Fatalf("BeforeServeFunc() error = %v", err)
+	}
+	for _, timeout := range []struct {
+		name string
+		got  time.Duration
+		want time.Duration
+	}{
+		{"ReadTimeout", server.ReadTimeout, inboundServerReadTimeout},
+		{"ReadHeaderTimeout", server.ReadHeaderTimeout, inboundServerReadHeaderTimeout},
+		{"WriteTimeout", server.WriteTimeout, inboundServerWriteTimeout},
+	} {
+		if timeout.got != timeout.want {
+			t.Errorf("%s = %v, want %v", timeout.name, timeout.got, timeout.want)
+		}
+	}
+}
+
+// A nil listener is a caller mistake, not something to hand to Echo: it would
+// bind a fresh address from the empty start config and serve there instead.
+func TestStartWithListenerRejectsANilListener(t *testing.T) {
+	srv := New(nil, &Config{})
+
+	if err := srv.StartWithListener(context.Background(), nil); err == nil {
+		t.Fatal("StartWithListener(nil) error = nil, want an error")
+	}
 }

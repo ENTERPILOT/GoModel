@@ -1,8 +1,8 @@
 ---
 title: "CLI Operations"
-description: "Command-line flags for inspecting the GoModel binary and probing a running gateway's health."
+description: "Command-line flags for inspecting the GoModel binary, probing a running gateway's health, and reloading its configuration."
 icon: "terminal"
-keywords: ["CLI", "command-line flags", "health check", "version probe"]
+keywords: ["CLI", "command-line flags", "health check", "version probe", "config reload", "SIGHUP"]
 ---
 
 ## Overview
@@ -18,6 +18,7 @@ the examples below use the long form.
 | `--health-timeout` | Maximum time to wait for the `--health` probe            | `2s`    |
 | `--ready`          | Probe the local `/health/ready` (readiness) endpoint and exit | — |
 | `--ready-timeout`  | Maximum time to wait for the `--ready` probe            | `4s`    |
+| `--reload`         | Tell the running gateway to reload its configuration and exit | —   |
 
 ## Version
 
@@ -89,6 +90,96 @@ gomodel --ready
 ```json
 { "status": "ready", "components": { "storage": "ok", "cache": "ok" } }
 ```
+
+## Configuration reload
+
+`--reload` applies configuration changes to a running gateway without
+restarting it — the same operation as `nginx -s reload`:
+
+```bash
+gomodel --reload
+```
+
+It loads the same configuration the gateway does to find the pid file, signals
+that process, and exits. Loading it first means a `config.yaml` the binary
+cannot parse fails the command — non-zero exit, no signal sent — before the
+running gateway is ever asked to look at it. On success the gateway:
+
+1. Re-reads the `.env` file. New and edited values are applied; values removed
+   from the file are unset. Variables exported into the process environment
+   keep winning over the file, exactly as they do at startup — a container's
+   environment is not overridden by a file inside it.
+2. Re-reads `config/config.yaml` (or `config.yaml`) and every environment
+   variable, then rebuilds itself from the result. Providers, virtual models,
+   budgets, rate limits, guardrails, MCP servers, caching, logging, admin
+   settings — all of it reloads, because the reload re-runs the same startup
+   path rather than a hand-picked subset.
+
+The replacement is built **before** the running configuration is stopped, so a
+configuration that fails to load or initialize changes nothing: the gateway logs
+`reload failed; keeping the running configuration` and keeps serving on what
+already works.
+
+The listening socket is held for the lifetime of the process and handed to each
+configuration in turn, so requests arriving mid-reload wait to be accepted
+rather than being refused. In-flight requests get the same 10-second drain
+window as a shutdown, and streamed responses that outlive it are cut, so a
+reload during heavy streaming traffic is not free — but no connection is dropped
+at the socket.
+
+That last guarantee depends on the operating system letting the gateway
+duplicate a listening socket, which covers every platform that can be sent a
+reload signal in the first place. Where duplication is unavailable, the next
+configuration rebinds the address instead, and connections are refused for the
+length of the swap.
+
+Sending the signal directly does the same thing, which is what a process manager
+or a container without a shell can use:
+
+```bash
+kill -HUP "$(cat data/gomodel.pid)"
+```
+
+<Note>
+  Reload is a POSIX signal feature and is not available on Windows.
+</Note>
+
+### The pid file
+
+The gateway writes its process id to `PID_FILE` / `server.pid_file` at startup
+and removes it on shutdown. The default is `data/gomodel.pid` when a `./data`
+directory exists (Docker images and existing deployments) and the
+OS-conventional per-user data directory otherwise — the same resolution the
+SQLite database uses.
+
+Give each instance its own path when several gateways share a host, since
+`--reload` signals whichever process the file names. To write no pid file at
+all, set `server.pid_file: ""` in `config.yaml` — that disables `--reload`,
+though `kill -HUP` still works. An empty `PID_FILE` env var reads as unset and
+keeps the default, the same as every other setting. If the path is not writable
+the gateway logs a warning and serves normally, only without `--reload` support.
+
+Both the gateway and `gomodel --reload` resolve the path from the same
+configuration, so run the command from the same working directory (or with the
+same `PID_FILE`) as the gateway:
+
+```bash
+docker exec my-gateway /gomodel --reload
+```
+
+### What a reload does not change
+
+- **`PORT`** — the socket stays bound so no connection is refused; a port change
+  needs a restart. The gateway logs a warning naming both ports.
+- **`PID_FILE`** — it names the process that is already running.
+- **`GOMODEL_DEMO_MODE`** — the demo warnings are wired up once at startup.
+- **In-memory state** — rate limit counters, virtual-model session affinity, and
+  live log buffers start fresh, exactly as they would after a restart. Budgets
+  and usage are stored in the database and are unaffected.
+
+For refreshing provider model catalogs and admin-managed data *without* re-reading
+configuration, the dashboard's runtime refresh (`POST /admin/runtime/refresh`) is
+the lighter option.
 
 Liveness (`--health`) is the right signal for a Docker `HEALTHCHECK` (restart on
 crash). Readiness (`/health/ready`) is the right signal for a Kubernetes
