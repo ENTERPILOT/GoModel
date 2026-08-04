@@ -145,6 +145,7 @@
                 "tab": "Guides",
                 "icon": "compass",
                 "pages": [
+                    "guides/production",
                     "guides/openai-agents-sdk",
                     "guides/openclaw",
                     "guides/claude-code",

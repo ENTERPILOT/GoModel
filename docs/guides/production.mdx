@@ -1,0 +1,380 @@
+---
+title: "Production Deployment"
+description: "A production-grade deployment checklist for GoModel: storage backends, credential handling, air-gapped installs, multi-replica behavior, retention, and hardening."
+icon: "server-cog"
+keywords: ["production", "deployment", "self-hosted", "air-gapped", "offline", "Kubernetes", "hardening", "security"]
+---
+
+This page collects the best practices for running GoModel in production. The
+[Quick Start](/getting-started/quickstart) gets you serving traffic in a minute;
+this page covers what to decide before that install carries real load.
+
+Each section states the default, when the default is fine, and when you should
+change it. A condensed [checklist](#production-checklist) is at the end.
+
+## Small enough to run anywhere
+
+GoModel is a single static Go binary with no runtime dependencies. It is built
+with `CGO_ENABLED=0` and ships on `distroless/static`, so the container has no shell,
+no package manager, and no libc to patch.
+
+| | GoModel |
+| --- | --- |
+| Container image (compressed) | `16 MB` |
+| Peak RAM under load | `37 MB` |
+| Cold start | `0.56 s` |
+
+Those numbers are from the [benchmarks](/about/benchmarks) page, measured
+against other gateways on identical hardware.
+
+The practical consequence is that GoModel fits comfortably where size and cold
+starts are penalized: Cloud Run, Fargate, Container Apps, Fly.io, container
+Lambdas, or a small VM next to your app. It does not need a dedicated node pool.
+
+<Warning>
+  Scale-to-zero and autoscaling environments change two things. Local disk is
+  ephemeral, so SQLite is not a valid backend there (see
+  [storage](#choose-a-storage-backend)), and several in-memory controls are
+  multiplied by the number of live instances (see
+  [multiple replicas](#running-more-than-one-replica)).
+</Warning>
+
+## Choose a storage backend
+
+GoModel persists audit logs, usage records, budgets, virtual models, managed API
+keys, and other admin state through `STORAGE_TYPE`.
+
+| Backend | `STORAGE_TYPE` | Use it when |
+| --- | --- | --- |
+| SQLite (default) | `sqlite` | A single instance with a durable local disk or a mounted volume. |
+| PostgreSQL | `postgresql` | More than one replica, or you already operate Postgres. The usual production choice. |
+| MongoDB | `mongodb` | You already operate MongoDB and prefer it over Postgres. |
+
+SQLite is the default so GoModel works with zero configuration, and it is a real
+production option for a single instance with a persistent volume. It removes a
+network hop and a component to operate.
+
+It stops being viable in two cases: more than one replica, and any runtime whose
+filesystem does not survive a restart. Two SQLite replicas do not share a
+database, they each get their own, so usage, budgets, and managed API keys
+diverge silently. A key created on one pod does not exist on the other.
+
+SQLite also runs with a single open connection by design, to keep one writer and
+avoid lock contention. Every audit flush, usage flush, and budget check
+serializes through it, which is a throughput ceiling under sustained load.
+
+For Postgres, `POSTGRES_MAX_CONNS` defaults to `10`. Raise it first if you run
+high concurrency with budgets or rate limits enabled.
+
+<Warning>
+  **The Docker image does not declare a volume.** The default database path
+  resolves to `/app/data/gomodel.db` inside the image, which is an image-layer
+  directory. Without an explicit volume mount, every audit log, usage record,
+  budget, managed API key, and stored credential is lost when the container is
+  replaced. Always mount a volume at `/app/data`, or move to Postgres/MongoDB.
+</Warning>
+
+The default SQLite path is `./data/gomodel.db` when a `./data` directory already
+exists next to the binary, and the OS per-user data directory otherwise. That
+makes the default path dependent on the working directory, so set `SQLITE_PATH`
+explicitly in production. The resolved path is printed at startup as
+`storage configured`. See
+[Where does GoModel store its data?](/about/faq#where-does-gomodel-store-its-data).
+
+### Redis
+
+Redis is optional. It backs the shared model catalog snapshot and the exact
+[response cache](/features/cache). Without it, GoModel uses an in-process cache
+plus a local file cache, which is correct but not shared between replicas. Add
+Redis when several replicas should share discovery results and cache hits.
+
+<Note>
+  If a Redis model cache is configured and Redis is unreachable **at startup**,
+  the gateway fails to start. Losing Redis later is only a degraded condition.
+  Take that into account when ordering service startup.
+</Note>
+
+Redis does not coordinate rate limits or budgets. It is a cache, not a
+distributed lock.
+
+## Provider credentials
+
+GoModel takes provider credentials from environment variables, from
+`config.yaml`, or from the dashboard's Providers page. All three work. They do
+not carry the same risk.
+
+**For production, configure providers through environment variables and supply
+the values from your secret manager.** Inject them with AWS Secrets Manager,
+Google Secret Manager, Azure Key Vault, HashiCorp Vault, or a Kubernetes Secret
+populated by the External Secrets Operator or the Secrets Store CSI driver.
+
+There are two reasons, and the second is the one people miss.
+
+**Secrets stay out of the database.** Provider credentials saved from the
+dashboard are persisted to the `provider_credentials` store as plaintext. There
+is no encryption at rest, and the `***` masking is applied on the read path
+only: it stops a key being displayed back over the admin API, but the stored
+value is readable to anyone with the database file, a backup, a snapshot, or a
+read replica. The same is true of MCP server headers. Credentials declared via
+environment variables or `config.yaml` are never written to the store at all.
+
+**Config-declared providers cannot be edited at runtime.** A provider declared
+in env or `config.yaml` is read-only in the dashboard. A provider stored in the
+database can be edited by anyone holding a dashboard-capable key, including its
+`base_url`. Repointing `base_url` at an attacker-controlled host silently
+redirects every prompt and the injected upstream key to it. Declaring providers
+as code means that change can only arrive through your deploy pipeline.
+
+<Warning>
+  An environment variable is only as good as its source. A key baked into a
+  `Dockerfile`, a committed `.env`, or a compose file is worse than the
+  dashboard, not better. The point is that the value is delivered at runtime by
+  a secret manager that owns its rotation, access control, and audit trail.
+
+  Environment variables are also visible through `/proc/<pid>/environ`,
+  `docker inspect`, and crash dumps, so restrict who can exec into the container
+  or describe the pod.
+</Warning>
+
+GoModel does not support a `<VAR>_FILE` convention for reading secrets from
+mounted files, with the single exception of the Vertex AI
+`SERVICE_ACCOUNT_FILE`. If your secret tooling mounts files, materialize them
+into environment variables in your entrypoint.
+
+The dashboard path stays the right choice for development, evaluations, and
+adding a provider without a redeploy. If you use it in production, treat the
+database as credential material: encrypt the volume, restrict access, and
+classify backups accordingly.
+
+### Other credential handling
+
+- **Managed API keys** are stored as a SHA-256 hash of a high-entropy random
+  secret, never recoverably. The plaintext is shown once at creation. This is
+  deliberately different from provider credentials.
+- **Client credential headers are redacted before they are persisted.** With
+  `LOGGING_LOG_HEADERS=true`, `Authorization`, `x-api-key`, `Cookie`, and the
+  other credential headers are replaced with `[REDACTED]` on the write path, so
+  the audit store never receives them.
+- **Set `GOMODEL_MASTER_KEY`.** If it is empty and no managed keys exist, every
+  request is allowed through unauthenticated, and `/admin/*` is added to the
+  auth skip list as a lockout-recovery path. An internet-reachable gateway in
+  that state hands anyone the full admin API.
+
+### TLS
+
+GoModel does not terminate TLS. It serves plain HTTP and expects a reverse proxy
+or load balancer in front of it. Run one for any deployment that is not
+loopback-only: without it, client API keys, managed gateway keys, and the master
+key all cross the network in cleartext.
+
+There is also no CORS middleware, so browser clients on another origin cannot
+call the gateway directly. Add the headers at your proxy if you need that.
+
+## Air-gapped and offline deployments
+
+**GoModel runs fully air-gapped.** There is no telemetry, no phone-home, no
+update check, and no license check. The admin dashboard is embedded in the
+binary and its fonts are vendored, so the UI loads no CDN assets. Paired with
+local model servers such as [Ollama](/providers/multiple-ollama) or
+[vLLM](/providers/vllm), the gateway needs no route to the public internet.
+
+There is exactly one outbound call that is not to a configured provider: the
+model metadata registry at `MODEL_LIST_URL`, which supplies pricing, context
+windows, and capabilities. It is fetched in a background goroutine at startup
+and again on each cache refresh.
+
+That fetch is best-effort. When it fails the gateway boots normally, `/health`
+and `/health/ready` return `200`, provider discovery still works because model
+lists come from each provider's own `/models` endpoint, and requests route
+normally. What you lose is metadata enrichment.
+
+<Warning>
+  Without metadata enrichment, models have **no pricing**. Cost tracking then
+  reports no cost, and since [budgets](/features/budgets) read spend from usage
+  cost records, budgets have nothing to charge against and will not enforce
+  spend limits.
+
+  Fix it either by mirroring the model list internally and pointing
+  `MODEL_LIST_URL` at your mirror, or by declaring pricing per model under
+  `providers.<name>.models[].metadata.pricing` in `config.yaml`.
+</Warning>
+
+<Note>
+  Setting `MODEL_LIST_URL=""` does **not** disable the fetch. Empty environment
+  values are skipped when overrides are applied, so the compiled-in default URL
+  survives. To disable it, set `cache.model.model_list.url: ""` in
+  `config.yaml`. To redirect it, point `MODEL_LIST_URL` at an internal mirror.
+</Note>
+
+If a Bedrock provider is configured, the AWS SDK may also probe the link-local
+instance metadata endpoint (`169.254.169.254`) for credentials. An air-gapped
+install would not configure Bedrock, but it is worth knowing.
+
+## Running more than one replica
+
+Request handling is stateless, so replicas need no affinity for ordinary
+traffic. Several features, however, keep state in process memory and do not
+coordinate across instances.
+
+| State | Scope | Consequence at N replicas |
+| --- | --- | --- |
+| [Budgets](/features/budgets) enforcement | Durable (database) | Correct across replicas. Spend is read from the shared usage table. |
+| [Usage and cost records](/features/cost-tracking) | Durable (database) | Aggregated correctly. |
+| Audit logs | Durable (database) | Complete across replicas. |
+| [Rate limits](/features/rate-limits) | In-memory, per instance | Effective limit is about `N x` the configured limit. Counters reset on restart. |
+| Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
+| [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
+| Live log buffer | In-memory, per instance | A connected dashboard sees only that replica's live traffic, roughly `1/N` of it. History still comes from the database. |
+| MCP downstream sessions | In-memory, per instance | An `Mcp-Session-Id` from one replica returns 404 on another. [MCP](/features/mcp-gateway) clients need sticky sessions. |
+| Provider request health | In-memory, per instance | Dashboard provider status reflects the replica that answered. |
+
+The one that surprises people is rate limits: they are an in-process control, so
+three replicas with a 100 rpm rule admit up to 300 rpm in aggregate. Size rules
+per replica, and use [budgets](/features/budgets) as the durable cross-instance
+control since they read from the shared database.
+
+### Config changes do not propagate instantly
+
+Admin-managed configuration is durable in the database but served from an
+in-memory snapshot on each replica. A change saved in the dashboard updates the
+replica that handled the request immediately. Other replicas pick it up on their
+own refresh cadence, and two of them have none.
+
+| Changed in the dashboard | Reaches other replicas after |
+| --- | --- |
+| Budget definitions | **Restart only** |
+| Rate limit rules | **Restart only** |
+| Virtual models | Up to `CACHE_REFRESH_INTERVAL` (1 hour by default) |
+| Managed API keys | Up to 60 seconds |
+| Guardrails, workflows, failover, pricing overrides | About 60 seconds |
+
+<Warning>
+  Two of these matter operationally. **Revoking a managed API key can take up to
+  a minute to take effect on other replicas.** And **a budget or rate limit rule
+  created in the dashboard does not reach other replicas until they restart**,
+  so with three replicas a new budget initially governs a third of your traffic.
+
+  If you run several replicas, declare budgets and rate limits as code in
+  `config.yaml` or environment variables so they are loaded identically at boot,
+  and restart after dashboard changes.
+</Warning>
+
+### Health probes and shutdown
+
+GoModel exposes liveness and readiness separately, and the binary can probe
+itself, which works in a distroless image with no shell or `curl`.
+
+| Purpose | HTTP | CLI | Checks |
+| --- | --- | --- | --- |
+| Liveness | `GET /health` | `gomodel --health` | Nothing. Confirms the listener answers. |
+| Readiness | `GET /health/ready` | `gomodel --ready` | Storage (503 if down), Redis (degraded, still 200). |
+
+Point Kubernetes readiness at `/health/ready`, not `/health`. A Helm chart is
+included in the repository under `helm/`; check its probe paths and its
+`replicaCount` against the storage backend you chose before using it as-is.
+
+<Note>
+  Readiness does not wait for the model catalog, which loads asynchronously. A
+  fresh pod can report ready while `GET /v1/models` is still empty and the first
+  requests fail. Allow for that in rollout settings, or warm pods before
+  shifting traffic.
+</Note>
+
+On `SIGTERM` the gateway drains in-flight HTTP work for 10 seconds, then
+finishes teardown within 30 seconds, flushing buffered usage and audit entries
+on the way out. Neither timeout is configurable. In-flight streamed responses
+are cut at the 10-second mark, so a long completion in progress during a rolling
+deploy will be truncated. Set `terminationGracePeriodSeconds` above 30 (45 is a
+reasonable choice) so the teardown is not racing SIGKILL.
+
+## Data retention and disk growth
+
+Audit logging and usage tracking write a row per request, and both sweep hourly.
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| `LOGGING_RETENTION_DAYS` | `30` | Audit entries older than this are removed. |
+| `USAGE_RETENTION_DAYS` | `90` | Usage records older than this are removed. |
+| `LOGGING_LOG_BODIES` | `true` | Captures full request and response bodies, up to 1 MB each. |
+
+<Warning>
+  `LOGGING_LOG_BODIES` is on by default and stores complete prompt and response
+  bodies with no content redaction. It is excellent for debugging and it is by
+  far the largest contributor to database growth: up to about 2 MB per request,
+  retained for 30 days. It also means anything sensitive a user types into a
+  prompt is persisted for the full retention window.
+
+  In regulated environments, or anywhere prompts carry personal data, set
+  `LOGGING_LOG_BODIES=false` and keep the metadata-only audit trail.
+</Warning>
+
+Two further points at volume:
+
+- **Usage and audit writes are buffered and dropped, not blocked, when the
+  buffer fills.** A burst or a slow database can silently lose usage entries,
+  which means lost cost data and under-charged budgets. The only signal is a
+  `usage log buffer full` warning in the logs, so alert on it.
+- **Budget checks query the usage table on every request.** Keep
+  `USAGE_RETENTION_DAYS` tight when budgets are enabled, and prefer Postgres
+  over SQLite, whose single connection makes this the dominant cost.
+
+Retention deletes rows but does not shrink a SQLite file. Vacuum it separately
+if the file size matters.
+
+## Observability
+
+- **Metrics are off by default.** Set `METRICS_ENABLED=true` to expose
+  Prometheus metrics at `METRICS_ENDPOINT` (`/metrics`). The endpoint is
+  unauthenticated, so keep it inside your perimeter. See the
+  [Prometheus guide](/guides/prometheus-metrics).
+- **Logs are JSON automatically when stdout is not a TTY**, so containers get
+  structured logs with no configuration. Set `LOG_FORMAT` explicitly to override.
+  `LOG_LEVEL` defaults to `info`; an invalid value fails startup.
+- **`gomodel_circuit_breaker_state`** is the gauge to alert on for provider
+  health. It updates per request, so an idle provider keeps its last observed
+  value.
+- **Request duration for streaming responses measures time to stream
+  establishment**, not total stream duration. Read stream latency panels with
+  that in mind.
+- **There are no token or cost metrics in Prometheus.** Spend and token
+  accounting live in the usage database, the dashboard, and
+  [`GET /v1/usage`](/advanced/usage-api). Alert on spend from budgets, not from
+  Prometheus.
+
+## Hardening notes
+
+- **Put the admin surface behind your perimeter.** The dashboard and `/admin/*`
+  are served on the same port as the model API and cannot be moved to a separate
+  listener. Restrict them at the proxy or network level, or disable them with
+  `ADMIN_ENDPOINTS_ENABLED=false`. The dashboard shell and its static assets skip
+  auth by design; only the data they load is gated.
+- **Restrict the database file.** The SQLite data directory is created `0755`
+  and the database file with default permissions, so on a shared host it can be
+  world-readable. Run GoModel as a dedicated user and tighten permissions,
+  especially if any credentials are stored through the dashboard.
+- **Keep `BODY_SIZE_LIMIT` sane.** It defaults to `10M` and is what stops an
+  oversized body becoming a memory-exhaustion vector. An unparseable value falls
+  back to the default with only a warning, so check the spelling.
+- **Leave `pprof` disabled.** It is off by default and unauthenticated when on.
+- **Scope managed API keys.** Give each consumer its own key with its own
+  [user path](/features/user-path), which is also what makes per-consumer rate
+  limits and budgets possible. Grant `dashboard_access` only where needed.
+
+## Production checklist
+
+- Set `GOMODEL_MASTER_KEY` to a strong value.
+- Terminate TLS in a proxy in front of the gateway.
+- Restrict `/admin/*`, the dashboard, and `/metrics` at the network perimeter.
+- Use Postgres or MongoDB for more than one replica or any ephemeral filesystem;
+  with SQLite, mount a volume and set `SQLITE_PATH`.
+- Declare providers in environment variables or `config.yaml`, with values from
+  a secret manager.
+- Declare budgets and rate limits as code when running several replicas, and
+  size rate limit rules per replica.
+- Decide on `LOGGING_LOG_BODIES` and set retention windows deliberately.
+- Point readiness at `/health/ready` and set
+  `terminationGracePeriodSeconds` above 30.
+- Enable metrics and alert on `gomodel_circuit_breaker_state` and on
+  `usage log buffer full`.
+- For air-gapped installs, mirror `MODEL_LIST_URL` or declare model pricing in
+  config so cost tracking and budgets keep working.
