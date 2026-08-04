@@ -1,0 +1,85 @@
+---
+title: "MiniMax"
+description: "Configure MiniMax in GoModel: chat models, temperature handling, and native text-to-speech through the standard audio endpoint."
+icon: "waveform"
+keywords: ["MiniMax", "text-to-speech", "TTS", "t2a_v2", "provider setup"]
+---
+
+MiniMax speaks an OpenAI-compatible chat API, so chat models work out of the
+box. Text-to-speech, however, uses MiniMax's own `t2a_v2` API — GoModel
+translates the standard `/v1/audio/speech` endpoint into that dialect for you.
+
+## Configure
+
+```bash
+MINIMAX_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  minimax:
+    type: minimax
+    base_url: "https://api.minimax.io/v1"
+    api_key: "${MINIMAX_API_KEY}"
+```
+
+`MINIMAX_BASE_URL` overrides the endpoint (default
+`https://api.minimax.io/v1`); accounts on the China platform should set it to
+`https://api.minimaxi.com/v1`.
+
+## Temperature
+
+MiniMax requires `temperature` in `(0.0, 1.0]` and rejects zero. GoModel clamps
+a zero or negative temperature to `1.0` so OpenAI-style requests that pin
+`temperature: 0` keep working.
+
+## Text-to-speech
+
+`POST /v1/audio/speech` is translated to MiniMax's synchronous
+[`t2a_v2`](https://platform.minimax.io/docs/api-reference/speech-t2a-v2)
+API and the hex-encoded audio is decoded back to binary:
+
+```bash
+curl https://your-gateway/v1/audio/speech \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "speech-2.6-hd",
+    "input": "Hello from GoModel.",
+    "voice": "English_expressive_narrator",
+    "response_format": "mp3"
+  }' \
+  --output speech.mp3
+```
+
+- `voice` takes a **MiniMax voice ID** (for example
+  `English_expressive_narrator`), not an OpenAI voice name like `alloy`.
+- `response_format` supports `mp3` (default), `wav`, `flac`, and `pcm`.
+- `speed` supports `0.5`–`2.0` (default `1.0`).
+
+Speech models are usually not returned by MiniMax's `/models` listing, so add
+them to the configured model list to make them routable:
+
+```bash
+MINIMAX_MODELS=speech-2.6-hd,speech-2.6-turbo
+```
+
+MiniMax reports failures as HTTP 200 with a native status code; GoModel maps
+the common ones to real errors (invalid parameters and blocked content → 400,
+authentication → 401, insufficient balance → 402, rate limits → 429) instead of
+relaying them as opaque gateway errors.
+
+## Not supported by MiniMax
+
+All of these return `invalid_request_error` rather than silently dropping the
+option:
+
+- Speech `instructions` (pick a voice ID that matches the style you want).
+- Speech `response_format` values other than `mp3`/`wav`/`flac`/`pcm` and
+  `speed` outside `0.5`–`2.0`.
+- Speech-to-text — MiniMax has no transcription API, so
+  `/v1/audio/transcriptions` is rejected.
+- Realtime voice-to-voice — MiniMax's conversational realtime schema is not
+  OpenAI-compatible, so it is not exposed at `/v1/realtime`.

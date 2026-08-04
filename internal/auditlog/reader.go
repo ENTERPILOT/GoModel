@@ -26,6 +26,14 @@ type LogQueryParams struct {
 	Stream         *bool
 	Limit          int
 	Offset         int
+	// OmitAttempts excludes provider attempts from returned entries. The default is false.
+	OmitAttempts bool
+	// ExactUserPath matches only UserPath instead of its subtree. The default is false.
+	// An exact root path also matches legacy empty and null stored paths.
+	ExactUserPath bool
+	// Internal keyset cursor used while assembling multi-page conversations.
+	beforeTimestamp time.Time
+	beforeID        string
 }
 
 // LogListResult holds a paginated list of audit log entries.
@@ -56,15 +64,21 @@ type SessionListResult struct {
 	Offset   int              `json:"offset"`
 }
 
-// ConversationResult holds a linear conversation thread centered around an anchor log.
+// ConversationResult holds a conversation thread with a selected anchor log.
 type ConversationResult struct {
 	AnchorID string     `json:"anchor_id"`
 	Entries  []LogEntry `json:"entries"`
 
-	// Truncated reports that the thread walk stopped early because the
-	// caller's deadline expired; the entries collected up to that point are
-	// returned rather than failing the whole request.
+	// Truncated reports that more session or linkage entries exist than were
+	// returned.
 	Truncated bool `json:"truncated,omitempty"`
+}
+
+// InteractionParent contains only the persisted identity needed to attach a
+// dashboard continuation to its parent session.
+type InteractionParent struct {
+	UserPath  string
+	SessionID string
 }
 
 // Reader provides read access to audit log data for the admin API.
@@ -82,8 +96,14 @@ type Reader interface {
 	// Returns (nil, nil) when no entry exists for the given ID.
 	GetLogByID(ctx context.Context, id string) (*LogEntry, error)
 
-	// GetConversation returns a linear conversation thread around a seed log entry.
-	// It follows Responses API linkage fields when available:
+	// GetInteractionParent returns the fields needed to authorize and inherit a
+	// dashboard continuation without loading captured bodies or attempts.
+	// SQL and MongoDB readers return (nil, nil) when no entry exists; session
+	// capture treats that result as no parent.
+	GetInteractionParent(ctx context.Context, id string) (*InteractionParent, error)
+
+	// GetConversation returns the anchor's session when it has one. Entries
+	// without a detected session fall back to Responses API linkage fields:
 	// request_body.previous_response_id and response_body.id.
 	GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error)
 

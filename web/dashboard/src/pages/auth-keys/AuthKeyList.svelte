@@ -6,6 +6,7 @@
   import { formatDateUTC, formatTimestampUTC } from "$lib/utils/format.js";
   import { authKeyDeactivated, authKeyExpired, labelChipStyle } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
+  import { Info, Pencil, Power, ShieldCheck, ShieldOff } from "lucide";
 </script>
 
 <div class="table-wrapper">
@@ -23,7 +24,7 @@
             title="Keys without dashboard access are denied the dashboard and every /admin API endpoint. Model endpoints and GET /v1/usage stay available to all keys."
           >
             Dashboard Access
-            <Icon name="info" width="13" height="13" />
+            <Icon icon={Info} width="13" height="13" />
           </span>
         </th>
         <th>Expires</th>
@@ -81,14 +82,14 @@
                   onclick={() => store.toggleDashboardAccess(key)}
                   disabled={Boolean(store.dashboardAccessID)}
                 >
-                  <Icon name={key.dashboard_access ? "shield-off" : "shield-check"} class="table-icon-svg" />
+                  <Icon icon={key.dashboard_access ? ShieldOff : ShieldCheck} class="table-icon-svg" />
                 </TableActionButton>
                 <TableActionButton
                   label={"Edit labels for API key " + key.name}
                   class="table-icon-btn"
                   onclick={() => store.openLabelsEditor(key)}
                 >
-                  <Icon name="pencil" class="table-icon-svg" />
+                  <Icon icon={Pencil} class="table-icon-svg" />
                 </TableActionButton>
                 <TableActionButton
                   label={(store.deactivatingID === key.id ? "Deactivating API key " : "Deactivate API key ") + key.name}
@@ -96,7 +97,7 @@
                   onclick={() => store.deactivateKey(key)}
                   disabled={store.deactivatingID === key.id}
                 >
-                  <Icon name="power" class="table-icon-svg" />
+                  <Icon icon={Power} class="table-icon-svg" />
                 </TableActionButton>
               {:else if authKeyDeactivated(key)}
                 <span

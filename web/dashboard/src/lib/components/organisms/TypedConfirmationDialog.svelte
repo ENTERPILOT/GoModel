@@ -60,7 +60,7 @@
           class="btn btn-danger btn-with-icon"
           disabled={dialog.loading || !confirmDialog.ready()}
         >
-          <Icon name={dialog.icon} class="form-action-icon" />
+          <Icon icon={dialog.icon} class="form-action-icon" />
           <span>{dialog.confirmLabel}</span>
         </button>
       </div>

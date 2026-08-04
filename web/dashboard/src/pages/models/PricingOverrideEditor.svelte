@@ -6,6 +6,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { formatPriceFine } from "$lib/utils/format.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
+  import { Plus, X } from "lucide";
 
   const po = pricingOverrides;
 </script>
@@ -89,7 +90,7 @@
           class="table-action-btn-danger table-icon-btn pricing-override-remove-row"
           onclick={() => po.removeModelPricingOverrideRow(row)}
         >
-          <Icon name="x" class="table-icon-svg" />
+          <Icon icon={X} class="table-icon-svg" />
         </TableActionButton>
       </div>
     {/each}
@@ -101,7 +102,7 @@
       class="btn btn-with-icon"
       onclick={() => po.addModelPricingOverrideRow()}
     >
-      <Icon name="plus" class="form-action-icon" />
+      <Icon icon={Plus} class="form-action-icon" />
       <span>Add Price</span>
     </button>
   </div>

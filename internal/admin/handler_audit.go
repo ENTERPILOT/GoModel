@@ -25,10 +25,8 @@ const maxAuditLogLimit = 100
 // reports the same limit an enabled reader would.
 const defaultAuditLogLimit = 25
 
-// conversationBuildTimeout bounds the response-chain walk behind
-// /admin/audit/conversation. Indexed lookups finish in milliseconds; the
-// deadline exists so a degraded store (mis-planned query, lock contention,
-// pool starvation) yields a partial thread instead of an endless request.
+// conversationBuildTimeout bounds the store lookups behind the conversation
+// endpoint. The linkage fallback returns the partial thread if it expires.
 const conversationBuildTimeout = 10 * time.Second
 
 // AuditLog handles GET /admin/audit/log
@@ -419,10 +417,11 @@ func (h *Handler) AuditLogDetail(c *echo.Context) error {
 
 // AuditConversation handles GET /admin/audit/conversation
 //
-// @Summary      Get conversation thread around an audit log entry
+// @Summary      Get the interaction session containing an audit log entry
 // @Description  Thread entries carry the request/response bodies the
 // @Description  transcript is built from; attempts, request revisions, and
-// @Description  header maps are omitted.
+// @Description  response headers are omitted; redacted request headers are
+// @Description  retained so the dashboard can continue the same session.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -460,11 +459,6 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 		})
 	}
 
-	// The chain walk runs up to ~2×limit sequential store lookups; without a
-	// deadline one slow lookup holds the request open until a fronting proxy
-	// kills it. Under the deadline the builder returns the partial thread it
-	// collected (Truncated=true); only a timeout before the anchor loads
-	// surfaces as an error.
 	ctx, cancel := context.WithTimeout(c.Request().Context(), conversationBuildTimeout)
 	defer cancel()
 	result, err := h.auditReader.GetConversation(ctx, logID, limit)

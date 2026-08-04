@@ -7,6 +7,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { gomodelPath } from "$lib/api/paths.js";
   import { NAV_ITEMS } from "./navigation.js";
+  import { LockKeyhole } from "lucide";
 
   // Visibility gates read the runtimeConfig store, so this re-filters when
   // the flags load.
@@ -35,7 +36,7 @@
           router.navigate(item.page);
         }}
       >
-        <Icon name={item.icon} class="nav-icon" />
+        <Icon icon={item.icon} class="nav-icon" />
         <span>{item.label}</span>
       </a>
     {/each}
@@ -50,7 +51,7 @@
           onclick={() => auth.openDialog()}
           aria-label={auth.needsAuth ? "Enter API key" : "Change API key"}
         >
-          <Icon name="lock-keyhole" class="api-key-open-icon" />
+          <Icon icon={LockKeyhole} class="api-key-open-icon" />
           <span>{auth.needsAuth ? "Enter API key" : "Change API key"}</span>
         </button>
       </div>

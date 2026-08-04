@@ -2,7 +2,9 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"io"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -11,13 +13,16 @@ import (
 	"github.com/enterpilot/gomodel/internal/session"
 )
 
-// SessionCapture detects the client session id for model interaction requests
-// and attaches it to the request context. It runs after RequestSnapshotCapture
-// (detection reads the captured headers and body) and after authentication so
-// client-provided and auto-detected ids are scoped by the effective user path,
-// including a managed key's bound path. Audit entries pick the id up in the
-// post-handler re-read.
-func SessionCapture(detector *session.Detector) echo.MiddlewareFunc {
+const interactionParentHeader = "X-GoModel-Interaction-Parent"
+
+type interactionParentLookup interface {
+	GetInteractionParent(ctx context.Context, id string) (*auditlog.InteractionParent, error)
+}
+
+// sessionCapture resolves session identity after authentication and before
+// routing. Dashboard continuations inherit their persisted parent's resolved
+// session; ordinary requests use the configured detector.
+func sessionCapture(detector *session.Detector, parentLookup interactionParentLookup, authMiddlewareAbsent bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			if detector == nil {
@@ -27,14 +32,21 @@ func SessionCapture(detector *session.Detector) echo.MiddlewareFunc {
 			if snapshot == nil || !core.IsModelInteractionPath(snapshot.Path) {
 				return next(c)
 			}
-			detectAndStamp := func(snapshot *core.RequestSnapshot) bool {
-				req := c.Request()
-				id := detector.Detect(snapshot, core.UserPathFromContext(req.Context()))
+			stamp := func(id string) bool {
+				id = strings.TrimSpace(id)
 				if id == "" {
 					return false
 				}
+				req := c.Request()
 				c.SetRequest(req.WithContext(core.WithSessionID(req.Context(), id)))
+				auditlog.EnrichEntryWithSessionID(c, id)
 				return true
+			}
+			detectAndStamp := func(snapshot *core.RequestSnapshot) bool {
+				return stamp(detector.Detect(snapshot, core.UserPathFromContext(c.Request().Context())))
+			}
+			if stamp(interactionParentSession(c, parentLookup, authMiddlewareAbsent)) {
+				return next(c)
 			}
 
 			// A captured body lets the detector resolve every rule in one pass.
@@ -59,6 +71,33 @@ func SessionCapture(detector *session.Detector) echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+func interactionParentSession(c *echo.Context, lookup interactionParentLookup, allowWithoutAuth bool) string {
+	if c == nil || lookup == nil ||
+		(!allowWithoutAuth && !interactionContinuationAllowed(c.Request().Context())) {
+		return ""
+	}
+	parentID := strings.TrimSpace(c.Request().Header.Get(interactionParentHeader))
+	if parentID == "" || len(parentID) > 200 || strings.ContainsAny(parentID, ",\x00") {
+		return ""
+	}
+	parent, err := lookup.GetInteractionParent(c.Request().Context(), parentID)
+	if err != nil || parent == nil {
+		return ""
+	}
+	parentPath := strings.TrimSpace(parent.UserPath)
+	if parentPath == "" {
+		parentPath = "/"
+	}
+	requestPath := strings.TrimSpace(core.UserPathFromContext(c.Request().Context()))
+	if requestPath == "" {
+		requestPath = "/"
+	}
+	if parentPath != requestPath {
+		return ""
+	}
+	return strings.TrimSpace(parent.SessionID)
 }
 
 // sessionDetectionSnapshot returns a snapshot whose complete body is available

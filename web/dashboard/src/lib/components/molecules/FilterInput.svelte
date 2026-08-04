@@ -2,6 +2,7 @@
   // Standard toolbar search field: magnifier icon inside a text input.
   // `label` fills aria-label; `class` adds modifiers to the wrapper.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import { Search } from "lucide";
 
   let {
     value = $bindable(""),
@@ -13,8 +14,8 @@
   } = $props();
 </script>
 
-<div class="filter-input-wrap {className}">
-  <Icon name="search" class="filter-input-icon" />
+<div class={["filter-input-wrap", className]}>
+  <Icon icon={Search} class="filter-input-icon" />
   <input
     type="text"
     class="filter-input"

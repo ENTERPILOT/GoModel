@@ -1,8 +1,4 @@
-// Pure conversation/message shaping helpers, ported verbatim from
-// internal/admin/dashboard/static/js/modules/conversation-helpers.js, plus
-// the pure message-building logic extracted from conversation-drawer.js
-// (buildConversationMessages, functionExpandedContent).
-// Plain ESM — no runes — shared by the Svelte stores and tests.
+// Pure interaction shaping shared by the Svelte stores and Node tests.
 
 import { formatJSON } from "../../lib/utils/format.js";
 import { findNestedErrorMessage, tryParseJSON } from "./error-text.js";
@@ -183,15 +179,201 @@ function isConversationExcludedPath(path) {
 
 function isConversationalPath(path) {
     if (!path) return false;
-    const p = String(path).toLowerCase();
-    return p === '/v1/chat/completions' ||
-        p === '/v1/chat/completions/' ||
-        p.startsWith('/v1/chat/completions?') ||
-        p.startsWith('/v1/chat/completions/') ||
-        p === '/v1/responses' ||
-        p === '/v1/responses/' ||
-        p.startsWith('/v1/responses?') ||
-        p.startsWith('/v1/responses/');
+    return !!followUpEndpointKind(path);
+}
+
+function normalizedInteractionPath(path) {
+    const raw = String(path || '').trim();
+    const withoutQuery = raw.split('?')[0].replace(/\/+$/, '').toLowerCase();
+    return withoutQuery.startsWith('/v1/') ? withoutQuery.slice(3) : withoutQuery;
+}
+
+// followUpEndpointKind intentionally gates the composer more narrowly than
+// canShowConversation: passthrough endpoints may have conversation-shaped
+// bodies, but GoModel cannot safely infer how to continue them.
+export function followUpEndpointKind(path) {
+    switch (normalizedInteractionPath(path)) {
+    case '/chat/completions':
+        return 'chat';
+    case '/responses':
+        return 'responses';
+    case '/messages':
+        return 'messages';
+    default:
+        return '';
+    }
+}
+
+function cloneJSON(value) {
+    if (!value || typeof value !== 'object') return null;
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch {
+        return null;
+    }
+}
+
+function appendIfMissing(messages, message) {
+    if (!message || typeof message !== 'object') return;
+    const previous = messages[messages.length - 1];
+    try {
+        if (previous && JSON.stringify(previous) === JSON.stringify(message)) return;
+    } catch { /* append when comparison is unavailable */ }
+    messages.push(message);
+}
+
+// buildFollowUpRequest reuses the latest request's model/options and extends
+// it according to the endpoint's native conversation contract.
+export function canBuildFollowUpRequest(entry) {
+    const kind = followUpEndpointKind(entry && entry.path);
+    const requestBody = entry && entry.data && entry.data.request_body;
+    if (!kind || !requestBody || typeof requestBody !== 'object') return false;
+    if (kind !== 'responses') return true;
+    const responseID = entry.data && entry.data.response_body &&
+        typeof entry.data.response_body.id === 'string'
+        ? entry.data.response_body.id.trim()
+        : '';
+    return responseID !== '' || conversationReference(requestBody) !== '';
+}
+
+export function buildFollowUpRequest(entry, text) {
+    const message = String(text || '').trim();
+    const kind = followUpEndpointKind(entry && entry.path);
+    const requestBody = cloneJSON(entry && entry.data && entry.data.request_body);
+    if (!message || !kind || !requestBody) return null;
+
+    const responseBody = entry && entry.data ? entry.data.response_body : null;
+    if (kind === 'responses') {
+        const responseID = responseBody && typeof responseBody.id === 'string'
+            ? responseBody.id.trim()
+            : '';
+        const conversationID = conversationReference(requestBody);
+        if (!responseID && !conversationID) return null;
+        requestBody.input = message;
+        if (responseID && !conversationID) {
+            requestBody.previous_response_id = responseID;
+        } else {
+            delete requestBody.previous_response_id;
+        }
+        return requestBody;
+    }
+
+    const messages = Array.isArray(requestBody.messages) ? requestBody.messages : [];
+    if (kind === 'chat') {
+        const choice = responseBody && Array.isArray(responseBody.choices)
+            ? responseBody.choices[0]
+            : null;
+        if (choice && choice.message) appendIfMissing(messages, cloneJSON(choice.message));
+        messages.push({ role: 'user', content: message });
+    } else {
+        if (responseBody && responseBody.content !== undefined) {
+            appendIfMissing(messages, {
+                role: String(responseBody.role || 'assistant'),
+                content: cloneJSON(responseBody.content) || responseBody.content,
+            });
+        }
+        messages.push({ role: 'user', content: message });
+    }
+    requestBody.messages = messages;
+    return requestBody;
+}
+
+const blockedFollowUpHeaders = new Set([
+    'authorization', 'proxy-authorization', 'cookie', 'content-type', 'content-length', 'host',
+    'accept',
+    'connection', 'accept-encoding', 'content-encoding', 'transfer-encoding',
+    'user-agent', 'date', 'expect', 'upgrade', 'via', 'te', 'trailer',
+    'keep-alive', 'origin', 'referer', 'forwarded', 'x-real-ip', 'traceparent',
+    'tracestate', 'x-request-id', 'idempotency-key', 'x-idempotency-key',
+    'x-gomodel-timezone', 'x-gomodel-interaction-parent'
+]);
+
+// Persisted headers are already credential-redacted server-side. This second
+// gate prevents redaction placeholders, browser-owned transport headers, and
+// old request/trace IDs from being replayed while preserving captured session,
+// user-path, label, and other application headers.
+export function buildFollowUpHeaders(entry, anchorID, requestID = '') {
+    const original = entry && entry.data && entry.data.request_headers;
+    const headers = {};
+    if (original && typeof original === 'object') {
+        Object.keys(original).forEach((name) => {
+            const lower = String(name).toLowerCase();
+            const value = String(original[name] == null ? '' : original[name]);
+            if (!name || !value || value === '[REDACTED]') return;
+            if (blockedFollowUpHeaders.has(lower) || lower.startsWith('sec-') ||
+                lower.startsWith('cf-') || lower.startsWith('x-forwarded-')) return;
+            headers[name] = value;
+        });
+    }
+    // The server inherits the resolved session from this parent. Replaying a
+    // derived auto-/scoped session as a raw client header would scope it again.
+    headers['X-GoModel-Interaction-Parent'] = String(anchorID || entry && entry.id || '').trim();
+    if (String(requestID || '').trim()) headers['X-Request-ID'] = String(requestID).trim();
+    return headers;
+}
+
+export function conversationEntryByRequestID(entries, requestID) {
+    const wanted = String(requestID || '').trim();
+    if (!wanted || !Array.isArray(entries)) return null;
+    return entries.find((entry) => String(entry && entry.request_id || '').trim() === wanted) || null;
+}
+
+export function matchLiveConversationEntry(entries, anchorID, sessionID, followUpRequestID, entry) {
+    const currentEntries = Array.isArray(entries) ? entries : [];
+    const entryID = String(entry && entry.id || '').trim();
+    const entryRequestID = String(entry && entry.request_id || '').trim();
+    const entrySessionID = String(entry && entry.session_id || '').trim();
+    const correlationID = String(followUpRequestID || '').trim();
+    const parentID = interactionParentID(entry);
+    const knownEntry = currentEntries.some((candidate) =>
+        (entryID && String(candidate && candidate.id || '').trim() === entryID) ||
+        (entryRequestID && String(candidate && candidate.request_id || '').trim() === entryRequestID));
+    const submittedChild = !!correlationID && entryRequestID === correlationID;
+    const sameSession = !!sessionID && entrySessionID === String(sessionID).trim();
+    const linkedParent = !!parentID && (parentID === String(anchorID || '').trim() ||
+        currentEntries.some((candidate) => String(candidate && candidate.id || '').trim() === parentID));
+    const accepted = knownEntry || submittedChild || (!correlationID && (sameSession || linkedParent));
+
+    return {
+        accepted,
+        submittedChild,
+        followUpRequestID: accepted && submittedChild && entryID ? '' : correlationID,
+    };
+}
+
+export function interactionParentID(entry) {
+    const headers = entry && entry.data && entry.data.request_headers;
+    if (!headers || typeof headers !== 'object') return '';
+    const key = Object.keys(headers).find((name) => name.toLowerCase() === 'x-gomodel-interaction-parent');
+    return key ? String(headers[key] || '').trim() : '';
+}
+
+// Follow-ups branch from the record the operator opened, even when newer
+// records exist in the same session.
+export function conversationFollowUpEntry(entries, anchorID) {
+    if (!Array.isArray(entries) || !anchorID) return null;
+    return entries.find((entry) => String(entry && entry.id || '') === String(anchorID)) || null;
+}
+
+export function latestConversationEntry(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) return null;
+    return entries.reduce((latest, entry) => {
+        if (!latest) return entry;
+        return compareConversationEntries(entry, latest) >= 0 ? entry : latest;
+    }, null);
+}
+
+export function latestRenderableConversationEntry(entries, entryIDs) {
+    const accepted = new Set(Array.isArray(entryIDs) ? entryIDs.map(String) : []);
+    return latestConversationEntry((Array.isArray(entries) ? entries : []).filter((entry) => {
+        const id = String(entry && entry.id || '');
+        return accepted.has(id) && entry && entry.data && entry.data.request_body != null;
+    }));
+}
+
+export function conversationEntryIsLatest(entries, entryID) {
+    const latest = latestConversationEntry(entries);
+    return !!latest && String(latest.id || '') === String(entryID || '');
 }
 
 function hasConversationPayload(entry) {
@@ -478,11 +660,6 @@ export function renderBodyWithConversationHighlights(entry, value, deps) {
     return rendered.join('\n');
 }
 
-// ---------------------------------------------------------------------------
-// Message building (extracted from conversation-drawer.js so the drawer store
-// stays thin and the logic is testable without runes).
-// ---------------------------------------------------------------------------
-
 function roleMeta(role) {
     const normalized = String(role || '').toLowerCase();
     if (normalized === 'system' || normalized === 'developer') {
@@ -503,10 +680,18 @@ function roleMeta(role) {
     return { role: 'user', label: 'User', className: 'role-user' };
 }
 
-function conversationMessage(role, text, timestamp, entryID, isAnchor, idx, toolCalls, functionName) {
+function conversationMessage(role, text, {
+    timestamp,
+    entryID,
+    isAnchor,
+    isAfterAnchor,
+    index,
+    toolCalls,
+    functionName,
+}) {
     const normalized = roleMeta(role);
     return {
-        uid: entryID + '-' + idx,
+        uid: entryID + '-' + index,
         entryID,
         timestamp,
         text,
@@ -514,6 +699,7 @@ function conversationMessage(role, text, timestamp, entryID, isAnchor, idx, tool
         roleLabel: normalized.label,
         roleClass: normalized.className,
         isAnchor,
+        isAfterAnchor,
         toolCalls: Array.isArray(toolCalls) && toolCalls.length > 0 ? toolCalls : null,
         functionName: functionName || ''
     };
@@ -574,10 +760,52 @@ function collectCallIds(map, requestBody, responseBody) {
     }
 }
 
-export function buildConversationMessages(entries, anchorID) {
-    if (!Array.isArray(entries) || entries.length === 0) return [];
+function stableJSON(value) {
+    if (Array.isArray(value)) return '[' + value.map(stableJSON).join(',') + ']';
+    if (value && typeof value === 'object') {
+        return '{' + Object.keys(value).sort().map((key) =>
+            JSON.stringify(key) + ':' + stableJSON(value[key])).join(',') + '}';
+    }
+    return JSON.stringify(value);
+}
 
-    const sorted = [...entries].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+function fullSnapshotLineage(requestBody) {
+    if (!requestBody || typeof requestBody !== 'object') return null;
+    const values = [];
+    if (requestBody.system !== undefined) values.push({ system: requestBody.system });
+    if (requestBody.instructions !== undefined) values.push({ instructions: requestBody.instructions });
+    if (Array.isArray(requestBody.messages)) values.push(...requestBody.messages);
+    else if (Array.isArray(requestBody.input) &&
+        requestBody.previous_response_id == null && requestBody.conversation == null) {
+        values.push(...requestBody.input);
+    } else {
+        return null;
+    }
+    return values.map(stableJSON);
+}
+
+function conversationReference(requestBody) {
+    const value = requestBody && requestBody.conversation;
+    if (typeof value === 'string') return value.trim();
+    if (value && typeof value.id === 'string') return value.id.trim();
+    return '';
+}
+
+function compareConversationEntries(a, b) {
+    const aTime = new Date(a && a.timestamp).getTime();
+    const bTime = new Date(b && b.timestamp).getTime();
+    if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return aTime - bTime;
+    const timestampOrder = String(a && a.timestamp || '').localeCompare(String(b && b.timestamp || ''));
+    if (timestampOrder !== 0) return timestampOrder;
+    const aID = String(a && a.id || '');
+    const bID = String(b && b.id || '');
+    return aID < bID ? -1 : aID > bID ? 1 : 0;
+}
+
+export function buildConversationView(entries, anchorID) {
+    if (!Array.isArray(entries) || entries.length === 0) return { messages: [], entryIDs: [] };
+
+    const sorted = [...entries].sort(compareConversationEntries);
 
     const callIdMap = {};
     sorted.forEach((entry) => {
@@ -587,16 +815,45 @@ export function buildConversationMessages(entries, anchorID) {
     });
 
     const messages = [];
+    const branchEntryIDSet = new Set();
+    const acceptedResponseIDs = new Set();
+    const acceptedConversationIDs = new Set();
+    let historySignatures = [];
+    let anchorLineage = null;
     let idx = 0;
+    const anchorIndex = sorted.findIndex((entry) => entry.id === anchorID);
 
-    sorted.forEach((entry) => {
+    const signature = (message) => JSON.stringify({
+        role: message.role,
+        text: message.text,
+        toolCalls: message.toolCalls,
+        functionName: message.functionName,
+    });
+
+    sorted.forEach((entry, entryIndex) => {
         const isAnchor = entry.id === anchorID;
+        const isAfterAnchor = anchorIndex >= 0 && entryIndex > anchorIndex;
         const ts = entry.timestamp;
         const requestBody = entry.data && entry.data.request_body ? entry.data.request_body : null;
         const responseBody = entry.data && entry.data.response_body ? entry.data.response_body : null;
+        const requestStart = messages.length;
+        const message = (role, text, { toolCalls, functionName } = {}) => conversationMessage(role, text, {
+            timestamp: ts,
+            entryID: entry.id,
+            isAnchor,
+            isAfterAnchor,
+            index: ++idx,
+            toolCalls,
+            functionName,
+        });
 
-        if (requestBody && typeof requestBody.instructions === 'string' && requestBody.instructions.trim()) {
-            messages.push(conversationMessage('system', requestBody.instructions, ts, entry.id, isAnchor, ++idx));
+        if (requestBody && requestBody.system !== undefined) {
+            const text = extractText(requestBody.system);
+            if (text) messages.push(message('system', text));
+        }
+        if (requestBody && requestBody.instructions !== undefined) {
+            const text = extractText(requestBody.instructions);
+            if (text) messages.push(message('system', text));
         }
 
         if (requestBody && Array.isArray(requestBody.messages)) {
@@ -606,19 +863,19 @@ export function buildConversationMessages(entries, anchorID) {
                 if (role === 'tool') {
                     const text = extractText(m.content);
                     const fnName = m.name || callIdMap[m.tool_call_id] || '';
-                    if (text) messages.push(conversationMessage('function_result', text, ts, entry.id, isAnchor, ++idx, [], fnName));
+                    if (text) messages.push(message('function_result', text, { functionName: fnName }));
                     return;
                 }
                 if (role === 'assistant') {
                     const text = extractText(m.content);
                     const toolCalls = extractToolCallsList(m.tool_calls);
                     if (text || toolCalls.length > 0) {
-                        messages.push(conversationMessage(role, text, ts, entry.id, isAnchor, ++idx, toolCalls));
+                        messages.push(message(role, text, { toolCalls }));
                     }
                     return;
                 }
                 const text = extractText(m.content);
-                if (text) messages.push(conversationMessage(role, text, ts, entry.id, isAnchor, ++idx));
+                if (text) messages.push(message(role, text));
             });
         }
 
@@ -628,20 +885,91 @@ export function buildConversationMessages(entries, anchorID) {
                     if (!item || typeof item !== 'object') return;
                     if (item.type === 'function_call_output') {
                         const text = typeof item.output === 'string' ? item.output : extractText(item.output);
-                        if (text) messages.push(conversationMessage('function_result', text, ts, entry.id, isAnchor, ++idx, [], callIdMap[item.call_id] || ''));
+                        if (text) messages.push(message('function_result', text, { functionName: callIdMap[item.call_id] || '' }));
                     } else if (item.type === 'function_call') {
-                        messages.push(conversationMessage('function_call', '', ts, entry.id, isAnchor, ++idx, [{ name: item.name || '', arguments: item.arguments || '' }]));
+                        messages.push(message('function_call', '', { toolCalls: [{ name: item.name || '', arguments: item.arguments || '' }] }));
                     } else if (item.role) {
                         const role = String(item.role).toLowerCase();
                         const text = extractText(item.content);
-                        if (text) messages.push(conversationMessage(role, text, ts, entry.id, isAnchor, ++idx));
+                        if (text) messages.push(message(role, text));
                     }
                 });
             } else {
                 extractResponsesInputMessages(requestBody.input).forEach((m) => {
-                    if (m.text) messages.push(conversationMessage(m.role, m.text, ts, entry.id, isAnchor, ++idx));
+                    if (m.text) messages.push(message(m.role, m.text));
                 });
             }
+        }
+
+        // Chat-completions and Messages requests are complete conversation
+        // snapshots. Treat the newest snapshot as authoritative and preserve
+        // provenance only for its unchanged prefix. This guarantees that a
+        // changed or normalized historical message cannot make us append the
+        // whole history a second time.
+        //
+        // Responses requests using previous_response_id/conversation may carry
+        // only a delta, so those continue to extend the rendered transcript.
+        const requestMessages = messages.splice(requestStart);
+        const requestSignatures = requestMessages.map(signature);
+        const lineage = fullSnapshotLineage(requestBody);
+        const isFullSnapshot = lineage !== null;
+        const parentID = interactionParentID(entry);
+        const linkedParent = !!parentID && branchEntryIDSet.has(parentID);
+        const previousResponseID = String(requestBody && requestBody.previous_response_id || '').trim();
+        const conversationID = conversationReference(requestBody);
+        const linkedDelta = linkedParent ||
+            (!!previousResponseID && acceptedResponseIDs.has(previousResponseID)) ||
+            (!!conversationID && acceptedConversationIDs.has(conversationID));
+
+        if (isAfterAnchor) {
+            const retainsAnchor = isFullSnapshot && anchorLineage && anchorLineage.length > 0 &&
+                anchorLineage.every((value, i) => lineage[i] === value);
+            if ((isFullSnapshot && !retainsAnchor && !linkedParent) ||
+                (!isFullSnapshot && !linkedDelta)) return;
+        }
+        if (isAnchor && isFullSnapshot) {
+            anchorLineage = [...lineage];
+        }
+
+        const entryID = String(entry.id || '').trim();
+        if (isAnchor) {
+            branchEntryIDSet.clear();
+            acceptedResponseIDs.clear();
+            acceptedConversationIDs.clear();
+        }
+        if (entryID) {
+            if (isAnchor || isAfterAnchor) branchEntryIDSet.add(entryID);
+        }
+        if (conversationID) acceptedConversationIDs.add(conversationID);
+        let commonPrefix = 0;
+        while (commonPrefix < requestSignatures.length &&
+            commonPrefix < historySignatures.length &&
+            requestSignatures[commonPrefix] === historySignatures[commonPrefix]) {
+            commonPrefix++;
+        }
+        if (isFullSnapshot) {
+            for (let i = 0; i < commonPrefix; i++) {
+                requestMessages[i] = {
+                    ...requestMessages[i],
+                    uid: messages[i].uid,
+                    entryID: messages[i].entryID,
+                    timestamp: messages[i].timestamp,
+                    isAnchor: messages[i].isAnchor,
+                    isAfterAnchor: messages[i].isAfterAnchor,
+                };
+            }
+            messages.splice(0, messages.length, ...requestMessages);
+            historySignatures = requestSignatures;
+        } else {
+            let overlap = Math.min(historySignatures.length, requestSignatures.length);
+            while (overlap > 0) {
+                const historySuffix = historySignatures.slice(-overlap);
+                const requestPrefix = requestSignatures.slice(0, overlap);
+                if (historySuffix.every((value, i) => value === requestPrefix[i])) break;
+                overlap--;
+            }
+            messages.push(...requestMessages.slice(overlap));
+            historySignatures.push(...requestSignatures.slice(overlap));
         }
 
         if (responseBody && Array.isArray(responseBody.choices)) {
@@ -651,7 +979,9 @@ export function buildConversationMessages(entries, anchorID) {
                 const text = extractText(first.message.content);
                 const toolCalls = extractToolCallsList(first.message.tool_calls);
                 if (text || toolCalls.length > 0) {
-                    messages.push(conversationMessage(role, text, ts, entry.id, isAnchor, ++idx, toolCalls));
+                    const responseMessage = message(role, text, { toolCalls });
+                    messages.push(responseMessage);
+                    historySignatures.push(signature(responseMessage));
                 }
             }
         }
@@ -660,26 +990,52 @@ export function buildConversationMessages(entries, anchorID) {
             responseBody.output.forEach((item) => {
                 if (!item) return;
                 if (item.type === 'function_call') {
-                    messages.push(conversationMessage('function_call', '', ts, entry.id, isAnchor, ++idx, [{ name: item.name || '', arguments: item.arguments || '' }]));
+                    const responseMessage = message('function_call', '', {
+                        toolCalls: [{ name: item.name || '', arguments: item.arguments || '' }],
+                    });
+                    messages.push(responseMessage);
+                    historySignatures.push(signature(responseMessage));
                     return;
                 }
                 const role = (item.role || 'assistant').toLowerCase();
                 const text = extractResponsesOutputText(item);
-                if (text) messages.push(conversationMessage(role, text, ts, entry.id, isAnchor, ++idx));
+                if (text) {
+                    const responseMessage = message(role, text);
+                    messages.push(responseMessage);
+                    historySignatures.push(signature(responseMessage));
+                }
             });
+        }
+
+        // Anthropic-compatible /messages responses carry assistant content at
+        // the top level instead of under choices/output.
+        if (responseBody && responseBody.content !== undefined &&
+            !Array.isArray(responseBody.choices) && !Array.isArray(responseBody.output)) {
+            const role = String(responseBody.role || 'assistant').toLowerCase();
+            const text = extractText(responseBody.content);
+            if (text) {
+                const responseMessage = message(role, text);
+                messages.push(responseMessage);
+                historySignatures.push(signature(responseMessage));
+            }
         }
 
         const errMsg = extractConversationErrorMessage(entry);
         if (errMsg) {
-            messages.push(conversationMessage('error', errMsg, ts, entry.id, isAnchor, ++idx));
+            messages.push(message('error', errMsg));
         }
+
+        const responseID = String(responseBody && responseBody.id || '').trim();
+        if (responseID) acceptedResponseIDs.add(responseID);
     });
 
-    return messages;
+    return { messages, entryIDs: [...branchEntryIDSet] };
 }
 
-// functionExpandedContent renders the expandable body of a function-call /
-// function-result note (pretty-printing JSON arguments when possible).
+export function buildConversationMessages(entries, anchorID) {
+    return buildConversationView(entries, anchorID).messages;
+}
+
 export function functionExpandedContent(msg) {
     if (msg.role === 'function_call') {
         return (msg.toolCalls || []).map(function (tc) {

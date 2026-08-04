@@ -14,6 +14,7 @@
     runtimeRefreshSteps,
     runtimeRefreshStepLabel,
   } from "./runtime-refresh-logic.js";
+  import { RefreshCw } from "lucide";
 
   let loading = $state(false);
   let report = $state(null);
@@ -71,7 +72,7 @@
       aria-describedby="runtime-refresh-help-copy"
       onclick={refreshRuntime}
     >
-      <Icon name="refresh-cw" class="settings-refresh-icon" />
+      <Icon icon={RefreshCw} class="settings-refresh-icon" />
       <span>Refresh</span>
     </button>
   </div>
@@ -80,7 +81,7 @@
   {#if runtimeRefreshSteps(report).length > 0}
     <ul class="runtime-refresh-steps" role="status" aria-live="polite">
       {#each runtimeRefreshSteps(report) as step (step.name)}
-        <li class={"runtime-refresh-step is-" + step.status}>
+        <li class="runtime-refresh-step is-{step.status}">
           {runtimeRefreshStepLabel(step)}
         </li>
       {/each}

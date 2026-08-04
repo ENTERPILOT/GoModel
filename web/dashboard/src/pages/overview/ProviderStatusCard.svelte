@@ -19,6 +19,7 @@
     providerLastCheckedTitle,
     providerStatusPillTitle,
   } from "./providersLogic.js";
+  import { ChevronDown } from "lucide";
 
   let { provider } = $props();
 
@@ -84,7 +85,7 @@
     title={expanded ? "Collapse details" : "Expand details"}
     onclick={() => providerStatusState.toggleCard(provider)}
   >
-    <Icon name="chevron-down" class="provider-status-card-toggle-icon" />
+    <Icon icon={ChevronDown} class="provider-status-card-toggle-icon" />
   </button>
 </article>
 

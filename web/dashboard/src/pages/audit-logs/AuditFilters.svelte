@@ -5,6 +5,7 @@
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import { auditList } from "./auditList.svelte.js";
+  import { X } from "lucide";
 
   const onSearchInput = debounced(() => auditList.fetchAuditLog(true));
   $effect(() => onSearchInput.cancel);
@@ -71,7 +72,7 @@
       class="btn audit-clear-btn"
       onclick={() => auditList.clearAuditFilters()}
     >
-      <Icon name="x" class="table-icon-svg" />
+      <Icon icon={X} class="table-icon-svg" />
       <span>Clear</span>
     </button>
   </div>

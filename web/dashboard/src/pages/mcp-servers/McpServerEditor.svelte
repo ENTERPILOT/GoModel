@@ -9,6 +9,7 @@
   import FormField from "$lib/components/molecules/FormField.svelte";
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import { mcpServers } from "./mcpServers.svelte.js";
+  import { Plus, Trash2 } from "lucide";
 </script>
 
 <EditorDialog
@@ -95,7 +96,7 @@
             class="table-action-btn-danger table-icon-btn vm-target-remove"
             onclick={() => mcpServers.removeHeader(index)}
           >
-            <Icon name="trash-2" class="table-icon-svg" />
+            <Icon icon={Trash2} class="table-icon-svg" />
           </TableActionButton>
         </div>
       {/each}
@@ -106,7 +107,7 @@
         class="btn btn-with-icon"
         onclick={() => mcpServers.addHeader()}
       >
-        <Icon name="plus" class="form-action-icon" />
+        <Icon icon={Plus} class="form-action-icon" />
         <span>Add header</span>
       </button>
     </div>

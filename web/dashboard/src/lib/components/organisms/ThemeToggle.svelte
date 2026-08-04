@@ -5,13 +5,14 @@
   // sidebar); below 768px it is used regardless.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { themeStore } from "$lib/stores/ui.svelte.js";
+  import { Monitor, Moon, Sun } from "lucide";
 
   let { compact = false } = $props();
 
   const themes = [
-    { value: "light", icon: "sun", label: "Light theme" },
-    { value: "system", icon: "monitor", label: "System theme" },
-    { value: "dark", icon: "moon", label: "Dark theme" },
+    { value: "light", icon: Sun, label: "Light theme" },
+    { value: "system", icon: Monitor, label: "System theme" },
+    { value: "dark", icon: Moon, label: "Dark theme" },
   ];
   const activeTheme = $derived(
     themes.find((t) => t.value === themeStore.theme) || themes[1],
@@ -31,7 +32,7 @@
       title={theme.label}
       aria-label={theme.label}
     >
-      <Icon name={theme.icon} class="theme-icon" />
+      <Icon icon={theme.icon} class="theme-icon" />
     </button>
   {/each}
 </div>
@@ -42,7 +43,7 @@
   title={cycleLabel}
   aria-label={cycleLabel}
 >
-  <Icon name={activeTheme.icon} class="theme-icon" />
+  <Icon icon={activeTheme.icon} class="theme-icon" />
 </button>
 
 <style>

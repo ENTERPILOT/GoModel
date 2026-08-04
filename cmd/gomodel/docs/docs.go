@@ -18,14 +18,14 @@ const docTemplate = `{
     "paths": {
         "/admin/audit/conversation": {
             "get": {
-                "description": "Thread entries carry the request/response bodies the\ntranscript is built from; attempts, request revisions, and\nheader maps are omitted.",
+                "description": "Thread entries carry the request/response bodies the\ntranscript is built from; attempts, request revisions, and\nresponse headers are omitted; redacted request headers are\nretained so the dashboard can continue the same session.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Get conversation thread around an audit log entry",
+                "summary": "Get the interaction session containing an audit log entry",
                 "parameters": [
                     {
                         "type": "string",
@@ -4136,6 +4136,93 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/audio/translations": {
+            "post": {
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json",
+                    "text/plain"
+                ],
+                "tags": [
+                    "audio"
+                ],
+                "summary": "Translate audio into English",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Audio file to translate",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "model",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional English text to guide the model",
+                        "name": "prompt",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "json, text, srt, verbose_json, or vtt",
+                        "name": "response_format",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Sampling temperature (0-1)",
+                        "name": "temperature",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "English translation in the requested response_format",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true

@@ -63,13 +63,17 @@
   <div class="dp-days">
     {#each days as day (day.key)}
       <button
-        class="dp-day"
-        class:other-month={!day.current}
-        class:today={isToday(day)}
-        class:range-start={boundary(day, "start")}
-        class:range-end={boundary(day, "end")}
-        class:in-range={inRange(day)}
-        class:disabled={isFuture(day)}
+        class={[
+          "dp-day",
+          {
+            "other-month": !day.current,
+            today: isToday(day),
+            "range-start": boundary(day, "start"),
+            "range-end": boundary(day, "end"),
+            "in-range": inRange(day),
+            disabled: isFuture(day),
+          },
+        ]}
         disabled={isFuture(day) || !day.current}
         onclick={() => onselect?.(day)}
       >

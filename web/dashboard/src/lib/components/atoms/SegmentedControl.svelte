@@ -11,7 +11,7 @@
   } = $props();
 </script>
 
-<div class="segmented-control {className}" role="group" aria-label={ariaLabel}>
+<div class={["segmented-control", className]} role="group" aria-label={ariaLabel}>
   {#each options as option (option.value)}
     <button
       type="button"

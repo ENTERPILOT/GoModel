@@ -6,6 +6,7 @@
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { providersConfig } from "./providersConfig.svelte.js";
+  import { Plus, Trash2 } from "lucide";
 
   let { field } = $props();
 
@@ -57,7 +58,7 @@
             class="table-action-btn-danger table-icon-btn vm-target-remove"
             onclick={() => providersConfig.removeApiKeyRow(index)}
           >
-            <Icon name="trash-2" class="table-icon-svg" />
+            <Icon icon={Trash2} class="table-icon-svg" />
           </TableActionButton>
         </div>
       {/each}
@@ -69,7 +70,7 @@
         class="btn btn-with-icon"
         onclick={() => providersConfig.addApiKeyRow()}
       >
-        <Icon name="plus" class="form-action-icon" />
+        <Icon icon={Plus} class="form-action-icon" />
         <span>Add key</span>
       </button>
     </div>

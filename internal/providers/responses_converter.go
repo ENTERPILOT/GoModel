@@ -28,6 +28,7 @@ type OpenAIResponsesStreamConverter struct {
 	output               *ResponsesOutputEventState
 	toolCalls            map[int]*ResponsesOutputToolCallState
 	assistantOutputIndex int
+	nextOutputIndex      int
 	buffer               streaming.StreamBuffer
 	lineBuffer           streaming.StreamBuffer
 	readBuf              []byte
@@ -93,14 +94,7 @@ type openAIChunkToolCall struct {
 func (sc *OpenAIResponsesStreamConverter) ensureToolCallState(index int) *ResponsesOutputToolCallState {
 	state := sc.toolCalls[index]
 	if state == nil {
-		outputIndex := index
-		if sc.output.ReasoningReserved() {
-			outputIndex++
-		}
-		if sc.output.AssistantReserved() {
-			outputIndex++
-		}
-		state = &ResponsesOutputToolCallState{OutputIndex: outputIndex}
+		state = &ResponsesOutputToolCallState{OutputIndex: -1}
 		sc.toolCalls[index] = state
 	}
 	return state
@@ -116,11 +110,7 @@ func (sc *OpenAIResponsesStreamConverter) reserveReasoningOutput() {
 		return
 	}
 	sc.output.ReserveReasoning()
-	for _, state := range sc.toolCalls {
-		if state != nil && !state.Started {
-			state.OutputIndex++
-		}
-	}
+	sc.nextOutputIndex++
 }
 
 func (sc *OpenAIResponsesStreamConverter) outputAlreadyStarted() bool {
@@ -140,25 +130,20 @@ func (sc *OpenAIResponsesStreamConverter) reserveAssistantOutput() {
 		return
 	}
 
-	// Items that have already been emitted cannot move. Place the assistant
-	// after them, then shift only pending tool calls that would otherwise
-	// occupy the same or a later slot.
-	outputIndex := 0
-	if sc.output.ReasoningReserved() {
-		outputIndex++
-	}
-	for _, state := range sc.toolCalls {
-		if state != nil && state.Started && state.OutputIndex >= outputIndex {
-			outputIndex = state.OutputIndex + 1
-		}
-	}
-	sc.assistantOutputIndex = outputIndex
+	sc.assistantOutputIndex = sc.nextOutputIndex
+	sc.nextOutputIndex++
 	sc.output.ReserveAssistant()
-	for _, state := range sc.toolCalls {
-		if state != nil && !state.Started && state.OutputIndex >= outputIndex {
-			state.OutputIndex++
-		}
+}
+
+func (sc *OpenAIResponsesStreamConverter) startToolCall(state *ResponsesOutputToolCallState) string {
+	if state == nil || state.Started || strings.TrimSpace(state.CallID) == "" || strings.TrimSpace(state.Name) == "" {
+		return ""
 	}
+	if state.OutputIndex < 0 {
+		state.OutputIndex = sc.nextOutputIndex
+		sc.nextOutputIndex++
+	}
+	return sc.output.StartToolCall(state, false)
 }
 
 func (sc *OpenAIResponsesStreamConverter) forceStartToolCall(state *ResponsesOutputToolCallState) string {
@@ -168,7 +153,7 @@ func (sc *OpenAIResponsesStreamConverter) forceStartToolCall(state *ResponsesOut
 	if strings.TrimSpace(state.Name) == "" {
 		state.Name = "unknown"
 	}
-	return sc.output.StartToolCall(state, false)
+	return sc.startToolCall(state)
 }
 
 func (sc *OpenAIResponsesStreamConverter) completePendingToolCalls() string {
@@ -220,7 +205,7 @@ func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []openA
 		if arguments != "" {
 			_, _ = state.Arguments.WriteString(arguments)
 		}
-		out.WriteString(sc.output.StartToolCall(state, false))
+		out.WriteString(sc.startToolCall(state))
 
 		if state.Started {
 			delta := ""

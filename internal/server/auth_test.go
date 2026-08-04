@@ -247,6 +247,57 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *te
 	assert.Equal(t, "ok", rec.Body.String())
 }
 
+func TestAuthMiddleware_InteractionContinuationAccess(t *testing.T) {
+	tests := []struct {
+		name          string
+		masterKey     string
+		authenticator BearerTokenAuthenticator
+		token         string
+		wantAllowed   bool
+	}{
+		{name: "authentication disabled", wantAllowed: true},
+		{name: "master key", masterKey: "master", token: "master", wantAllowed: true},
+		{
+			name: "managed key with dashboard access",
+			authenticator: mockAuthenticator{
+				enabled:        true,
+				tokenToID:      map[string]string{"managed": "key-1"},
+				tokenDashboard: map[string]bool{"managed": true},
+			},
+			token:       "managed",
+			wantAllowed: true,
+		},
+		{
+			name: "managed key without dashboard access",
+			authenticator: mockAuthenticator{
+				enabled:   true,
+				tokenToID: map[string]string{"managed": "key-1"},
+			},
+			token: "managed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := echo.New()
+			handler := AuthMiddlewareWithAuthenticator(tt.masterKey, tt.authenticator, nil)(func(c *echo.Context) error {
+				assert.Equal(t, tt.wantAllowed, interactionContinuationAllowed(c.Request().Context()))
+				return c.NoContent(http.StatusNoContent)
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			if tt.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tt.token)
+			}
+			rec := httptest.NewRecorder()
+			err := handler(e.NewContext(req, rec))
+
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusNoContent, rec.Code)
+		})
+	}
+}
+
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyLabelsMergeWithHeaderLabels(t *testing.T) {
 	e := echo.New()
 	testHandler := func(c *echo.Context) error {

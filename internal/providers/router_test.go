@@ -126,6 +126,20 @@ type mockProvider struct {
 	passthroughResp   *core.PassthroughResponse
 }
 
+type mockAudioTranslationProvider struct {
+	*mockProvider
+	translationResponse *core.AudioResponse
+	lastTranslationReq  *core.AudioTranscriptionRequest
+}
+
+func (m *mockAudioTranslationProvider) CreateTranslation(_ context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	m.lastTranslationReq = req
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.translationResponse, nil
+}
+
 func readAndCloseBody(t *testing.T, body io.ReadCloser) string {
 	t.Helper()
 	if body == nil {
@@ -365,6 +379,90 @@ func TestNewRouter(t *testing.T) {
 			t.Error("expected non-nil router")
 		}
 	})
+}
+
+func TestRouterCreateTranslation(t *testing.T) {
+	translator := &mockAudioTranslationProvider{
+		mockProvider:        &mockProvider{name: "openai"},
+		translationResponse: &core.AudioResponse{ContentType: "application/json", Data: []byte(`{"text":"hello"}`)},
+	}
+	lookup := newMockLookup()
+	lookup.addModel("openai/whisper-1", translator, "openai")
+	router, _ := NewRouter(lookup)
+
+	resp, err := router.CreateTranslation(context.Background(), &core.AudioTranscriptionRequest{
+		Model: "whisper-1", Provider: "openai", File: []byte("audio"), Prompt: "names",
+	})
+	if err != nil {
+		t.Fatalf("CreateTranslation() error = %v", err)
+	}
+	if string(resp.Data) != `{"text":"hello"}` {
+		t.Errorf("response = %s", resp.Data)
+	}
+	if translator.lastTranslationReq == nil {
+		t.Fatal("translation provider was not called")
+	}
+	if translator.lastTranslationReq.Model != "whisper-1" || translator.lastTranslationReq.Provider != "" {
+		t.Errorf("forwarded selector = %q/%q, want provider metadata stripped", translator.lastTranslationReq.Provider, translator.lastTranslationReq.Model)
+	}
+}
+
+func TestRouterCreateTranslation_Errors(t *testing.T) {
+	providerErr := errors.New("translation provider failed")
+	tests := []struct {
+		name         string
+		model        string
+		provider     core.Provider
+		providerType string
+		req          *core.AudioTranscriptionRequest
+		wantError    string
+		wantIs       error
+	}{
+		{
+			name:         "unsupported provider",
+			model:        "transcribe-only",
+			provider:     &mockProvider{name: "cohere"},
+			providerType: "cohere",
+			req:          &core.AudioTranscriptionRequest{Model: "transcribe-only", File: []byte("audio")},
+			wantError:    "does not support audio translations",
+		},
+		{
+			name:         "provider failure",
+			model:        "openai/whisper-1",
+			provider:     &mockAudioTranslationProvider{mockProvider: &mockProvider{name: "openai", err: providerErr}},
+			providerType: "openai",
+			req:          &core.AudioTranscriptionRequest{Model: "whisper-1", Provider: "openai", File: []byte("audio")},
+			wantIs:       providerErr,
+		},
+		{
+			name:      "nil request",
+			wantError: "audio translation request is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lookup := newMockLookup()
+			if tt.provider != nil {
+				lookup.addModel(tt.model, tt.provider, tt.providerType)
+			}
+			router, err := NewRouter(lookup)
+			if err != nil {
+				t.Fatalf("NewRouter() error = %v", err)
+			}
+
+			_, err = router.CreateTranslation(context.Background(), tt.req)
+			if tt.wantIs != nil {
+				if !errors.Is(err, tt.wantIs) {
+					t.Fatalf("CreateTranslation() error = %v, want %v", err, tt.wantIs)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("CreateTranslation() error = %v, want message containing %q", err, tt.wantError)
+			}
+		})
+	}
 }
 
 func TestRouterEmptyLookup(t *testing.T) {

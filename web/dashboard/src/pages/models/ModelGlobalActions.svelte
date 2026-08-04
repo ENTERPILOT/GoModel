@@ -9,6 +9,7 @@
     modelOverrideEditButtonLabel,
   } from "./virtualModelsLogic.js";
   import AccessToggle from "./AccessToggle.svelte";
+  import { CircleDollarSign, Pencil } from "lucide";
 </script>
 
 <div class="alias-actions-cell model-list-actions">
@@ -21,7 +22,7 @@
       class="table-icon-btn {pricingOverrides.modelPricingButtonClass(pricingOverrides.hasGlobalPricingOverride())}"
       onclick={() => pricingOverrides.openGlobalPricingOverrideEdit()}
     >
-      <Icon name="circle-dollar-sign" class="table-icon-svg" />
+      <Icon icon={CircleDollarSign} class="table-icon-svg" />
     </TableActionButton>
   {/if}
   {#if virtualModels.virtualModelsAvailable}
@@ -30,7 +31,7 @@
       class="table-icon-btn {modelOverrideEditButtonClass(virtualModels.hasGlobalModelOverride())}"
       onclick={() => virtualModels.openGlobalModelOverrideEdit()}
     >
-      <Icon name="pencil" class="table-icon-svg" />
+      <Icon icon={Pencil} class="table-icon-svg" />
     </TableActionButton>
   {/if}
 </div>

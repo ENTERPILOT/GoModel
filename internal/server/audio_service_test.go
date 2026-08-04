@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -23,10 +25,12 @@ type audioMockProvider struct {
 	*mockProvider
 	speechResp            *core.AudioResponse
 	transcriptionResp     *core.AudioResponse
+	translationResp       *core.AudioResponse
 	audioErr              error
 	resolved              *core.ModelSelector
 	capturedSpeech        *core.AudioSpeechRequest
 	capturedTranscription *core.AudioTranscriptionRequest
+	capturedTranslation   *core.AudioTranscriptionRequest
 }
 
 // ResolveModel lets the fake stand in for the Router so the service can authorize
@@ -54,6 +58,14 @@ func (m *audioMockProvider) CreateTranscription(_ context.Context, req *core.Aud
 		return nil, m.audioErr
 	}
 	return m.transcriptionResp, nil
+}
+
+func (m *audioMockProvider) CreateTranslation(_ context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	m.capturedTranslation = req
+	if m.audioErr != nil {
+		return nil, m.audioErr
+	}
+	return m.translationResp, nil
 }
 
 func TestAudioSpeech_HappyPath(t *testing.T) {
@@ -227,6 +239,184 @@ func TestAudioTranscription_HappyPath(t *testing.T) {
 	}
 	if string(captured.File) != "audio-bytes" {
 		t.Errorf("captured file = %q, want audio-bytes", string(captured.File))
+	}
+}
+
+func TestAudioTranscription_UsesConfiguredMultipartMemoryLimit(t *testing.T) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("model", "gpt-4o-transcribe")
+	part, err := w.CreateFormFile("file", "speech.mp3")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	audio := bytes.Repeat([]byte("a"), 1024)
+	if _, err := part.Write(audio); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	e := echo.NewWithConfig(echo.Config{FormParseMaxMemory: 1})
+	c := e.NewContext(req, rec)
+
+	parsed, err := audioTranscriptionRequestFromForm(c, true)
+	if err != nil {
+		t.Fatalf("audioTranscriptionRequestFromForm returned error: %v", err)
+	}
+	if !bytes.Equal(parsed.File, audio) {
+		t.Fatalf("parsed file length = %d, want %d", len(parsed.File), len(audio))
+	}
+	if req.MultipartForm == nil {
+		t.Fatal("multipart form was not parsed")
+	}
+	t.Cleanup(func() { _ = req.MultipartForm.RemoveAll() })
+	files := req.MultipartForm.File["file"]
+	if len(files) != 1 {
+		t.Fatalf("parsed uploads = %d, want 1", len(files))
+	}
+
+	upload, err := files[0].Open()
+	if err != nil {
+		t.Fatalf("open parsed upload: %v", err)
+	}
+	defer func() { _ = upload.Close() }()
+	if _, ok := upload.(*os.File); !ok {
+		t.Fatalf("uploaded file type = %T, want disk-backed *os.File", upload)
+	}
+}
+
+func TestAudioTranslation_HappyPath(t *testing.T) {
+	mock := &audioMockProvider{
+		mockProvider:    &mockProvider{supportedModels: []string{"whisper-1"}},
+		translationResp: &core.AudioResponse{ContentType: "application/json", Data: []byte(`{"text":"hello"}`)},
+	}
+	srv := New(mock, nil)
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("model", "whisper-1")
+	_ = w.WriteField("prompt", "Use product names")
+	_ = w.WriteField("response_format", "json")
+	_ = w.WriteField("temperature", "0.2")
+	part, err := w.CreateFormFile("file", "speech.wav")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	_, _ = part.Write([]byte("audio-bytes"))
+	if err := w.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/translations", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"text":"hello"}` {
+		t.Fatalf("status/body = %d %q, want 200 translation response", rec.Code, rec.Body.String())
+	}
+	captured := mock.capturedTranslation
+	if captured == nil || captured.Model != "whisper-1" || captured.Filename != "speech.wav" {
+		t.Fatalf("captured translation request mismatch: %+v", captured)
+	}
+	if captured.Language != "" || len(captured.TimestampGranularities) != 0 {
+		t.Errorf("translation accepted transcription-only fields: %+v", captured)
+	}
+	if captured.Prompt != "Use product names" || captured.ResponseFormat != "json" || captured.Temperature != "0.2" {
+		t.Errorf("translation fields were not preserved: %+v", captured)
+	}
+}
+
+func TestAudioTranslation_ErrorResponses(t *testing.T) {
+	tests := []struct {
+		name          string
+		fields        map[string][]string
+		providerError *core.GatewayError
+		wantStatus    int
+		wantType      core.ErrorType
+		wantMessage   string
+		wantProvider  bool
+	}{
+		{
+			name:        "rejects language",
+			fields:      map[string][]string{"language": {"de"}},
+			wantStatus:  http.StatusBadRequest,
+			wantType:    core.ErrorTypeInvalidRequest,
+			wantMessage: "language is not supported for audio translations",
+		},
+		{
+			name:        "rejects unbracketed timestamp granularities",
+			fields:      map[string][]string{"timestamp_granularities": {"word"}},
+			wantStatus:  http.StatusBadRequest,
+			wantType:    core.ErrorTypeInvalidRequest,
+			wantMessage: "timestamp_granularities is not supported for audio translations",
+		},
+		{
+			name:        "rejects bracketed timestamp granularities",
+			fields:      map[string][]string{"timestamp_granularities[]": {"word"}},
+			wantStatus:  http.StatusBadRequest,
+			wantType:    core.ErrorTypeInvalidRequest,
+			wantMessage: "timestamp_granularities[] is not supported for audio translations",
+		},
+		{
+			name:          "propagates provider error",
+			providerError: core.NewProviderError("openai", http.StatusBadGateway, "translation provider failed", nil),
+			wantStatus:    http.StatusBadGateway,
+			wantType:      core.ErrorTypeProvider,
+			wantMessage:   "translation provider failed",
+			wantProvider:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &audioMockProvider{
+				mockProvider:    &mockProvider{supportedModels: []string{"whisper-1"}},
+				translationResp: &core.AudioResponse{ContentType: "application/json", Data: []byte(`{"text":"hello"}`)},
+				audioErr:        tt.providerError,
+			}
+			srv := New(mock, nil)
+
+			var buf bytes.Buffer
+			writer := multipart.NewWriter(&buf)
+			_ = writer.WriteField("model", "whisper-1")
+			for field, values := range tt.fields {
+				for _, value := range values {
+					_ = writer.WriteField(field, value)
+				}
+			}
+			part, err := writer.CreateFormFile("file", "speech.wav")
+			if err != nil {
+				t.Fatalf("CreateFormFile: %v", err)
+			}
+			_, _ = part.Write([]byte("audio-bytes"))
+			if err := writer.Close(); err != nil {
+				t.Fatalf("close multipart writer: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/audio/translations", &buf)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			var envelope core.OpenAIErrorEnvelope
+			if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if envelope.Error.Type != tt.wantType || envelope.Error.Message != tt.wantMessage {
+				t.Fatalf("error = %+v, want type %q and message %q", envelope.Error, tt.wantType, tt.wantMessage)
+			}
+			if (mock.capturedTranslation != nil) != tt.wantProvider {
+				t.Fatalf("provider called = %v, want %v", mock.capturedTranslation != nil, tt.wantProvider)
+			}
+		})
 	}
 }
 

@@ -1,18 +1,11 @@
 ---
 title: "Quick Start"
-description: "GoModel AI gateway quick start: run an OpenAI-compatible LLM gateway in 30 seconds, send your first request, and open the admin panel."
+description: "GoModel AI gateway: run an OpenAI-compatible LLM gateway in 20 seconds, send your first request and see the real-time logs."
 icon: "rocket"
 keywords: ["quick start", "install", "getting started", "AI gateway setup", "Docker"]
 ---
 
-import ProviderCredentialsNote from "/snippets/provider-credentials-note.mdx";
-
-## Run GoModel in 30 Seconds
-
-GoModel is an OpenAI-compatible AI gateway. You can connect one endpoint and
-route traffic across OpenAI, Anthropic, Gemini, DeepSeek, xAI, Groq, OpenRouter, Kilo AI,
-Z.ai, Azure OpenAI, Oracle GenAI, Ollama, and more while keeping auth, audit logs, and
-admin visibility in one place.
+## Run GoModel in 20 Seconds
 
 ### 1. Install and start GoModel
 
@@ -20,39 +13,38 @@ admin visibility in one place.
   <Tab title="macOS / Linux">
     ```bash
     curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
-    GOMODEL_MASTER_KEY="change-me" OPENAI_API_KEY="sk-..." gomodel
+    gomodel
     ```
-
-    <ProviderCredentialsNote />
   </Tab>
   <Tab title="Windows">
     ```powershell
     irm https://gomodel.enterpilot.io/install.ps1 | iex
-    $env:GOMODEL_MASTER_KEY = "change-me"; $env:OPENAI_API_KEY = "sk-..."; gomodel
+    gomodel
     ```
-
-    <ProviderCredentialsNote />
   </Tab>
   <Tab title="Docker">
     ```bash
-    docker run --rm -p 8080:8080 \
-      -e LOG_FORMAT=text \
-      -e GOMODEL_MASTER_KEY="change-me" \
-      -e OPENAI_API_KEY="sk-..." \
-      enterpilot/gomodel
+    docker run --rm -p 8080:8080 enterpilot/gomodel
     ```
-
-    <ProviderCredentialsNote />
   </Tab>
   <Tab title="Live Demo" icon="monitor-play">
     [https://demo.enterpilot.io/admin/dashboard](https://demo.enterpilot.io/admin/dashboard?utm_source=gomodel_docs)
   </Tab>
 </Tabs>
 
-### 2. Send your first request
+### 2. Set up a provider
 
-Use `curl` or the OpenAI SDKs for Python and JavaScript against the same
-OpenAI-compatible endpoint:
+You can do this with an [environment variable](/advanced/configuration#auto-discovery-from-environment-variables),
+a [config.yaml file](/advanced/config-yaml) (infrastructure as code), or from
+the Dashboard's [Providers page](/providers/overview#configuring-providers-without-env-vars) -
+(no restart required in this case).
+
+![Add Provider dialog in the GoModel dashboard](./images/add-provider.png)
+
+### 3. Send your first request
+
+Use `curl`, the OpenAI SDK, or the Anthropic SDK for Python and JavaScript
+against the same gateway:
 
 <CodeGroup>
 
@@ -98,11 +90,51 @@ const completion = await client.chat.completions.create({
 console.log(completion.choices[0].message.content);
 ```
 
+```python Python (Anthropic)
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://localhost:8080",
+    api_key="change-me",
+)
+
+message = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=256,
+    messages=[{"role": "user", "content": "Say hello in one sentence."}],
+)
+
+print(message.content[0].text)
+```
+
+```javascript JavaScript (Anthropic)
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const message = await client.messages.create({
+  model: "claude-sonnet-4-6",
+  max_tokens: 256,
+  messages: [{ role: "user", content: "Say hello in one sentence." }],
+});
+
+console.log(message.content[0].text);
+```
+
 </CodeGroup>
 
-### 3. Open the Admin Panel
+<Tip>
+  The Anthropic SDK examples call `POST /v1/messages`, GoModel's
+  [Anthropic-compatible endpoint](/advanced/anthropic-messages-api). Any
+  configured provider's model can be used there, not only Anthropic's.
+</Tip>
 
-Open this URL in your browser:
+## Admin Panel Preview
+
+Open this URL in your browser to see the management dashboard and real-time audit logs and more:
 
 `http://localhost:8080/admin/dashboard`
 
@@ -111,19 +143,6 @@ Open this URL in your browser:
   endpoints are at `/admin/*` and use the same bearer auth as the main
   API.
 </Tip>
-
-## Verify Models
-
-List currently available models:
-
-```bash
-curl -s http://localhost:8080/v1/models \
-  -H "Authorization: Bearer change-me"
-```
-
-Use one of those model IDs in your requests.
-
-## Admin Panel Preview
 
 ### Usage Analytics
 
@@ -135,6 +154,7 @@ Use one of those model IDs in your requests.
 
 ## Next Steps
 
+- Take it to production: [Production Deployment](/guides/production)
 - Update, pin a version, or uninstall: [FAQ](/about/faq)
 - Understand response caching: [Cache](/features/cache)
 - Add spend limits: [Budgets](/features/budgets)

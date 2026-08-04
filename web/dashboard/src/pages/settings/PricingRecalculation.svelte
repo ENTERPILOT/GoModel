@@ -16,6 +16,7 @@
     pricingRecalculatePayload,
     pricingRecalculateSummary,
   } from "./pricing-logic.js";
+  import { Calculator } from "lucide";
 
   let userPath = $state("");
   let selector = $state("");
@@ -39,7 +40,7 @@
       inputId: "pricing-recalculate-confirmation",
       requiredText: "recalculate",
       confirmLabel: "Recalculate Pricing",
-      icon: "calculator",
+      icon: Calculator,
       dialogClass: "pricing-recalculate-dialog",
       message:
         "Stored usage cost fields matching the selected filters will be overwritten.",
@@ -148,7 +149,7 @@
         aria-describedby="pricing-recalculate-help-copy"
         onclick={openDialog}
       >
-        <Icon name="calculator" class="form-action-icon" />
+        <Icon icon={Calculator} class="form-action-icon" />
         <span>Recalculate Pricing</span>
       </button>
     </div>

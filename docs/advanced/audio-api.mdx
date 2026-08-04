@@ -15,8 +15,11 @@ Requests route **by model** through the same registry used for chat and
 embeddings, so `model` selection, `provider` hints, virtual models, per-key model
 access rules ([user paths](/features/user-path)), and budgets all apply. Audio is
 served by OpenAI and the OpenAI-compatible providers (OpenRouter, Azure OpenAI,
-vLLM, Oracle, MiniMax, Z.ai); a provider that doesn't support audio returns a
-clear error rather than mis-routing.
+vLLM, Oracle, Z.ai), plus providers whose **native audio APIs GoModel translates**
+behind the same endpoints: [Xiaomi MiMo](/providers/xiaomi) (TTS and ASR via chat
+completions), [Cohere](/providers/cohere) (transcription), and
+[MiniMax](/providers/minimax) (TTS via its native `t2a_v2` API). A provider that
+doesn't support audio returns a clear error rather than mis-routing.
 
 ## Supported endpoints
 
@@ -74,9 +77,10 @@ through the full inference orchestrator**. Compared with `/v1/chat/completions`:
 - **No usage/cost metering** — audio is not token-priced, so it is not recorded in
   usage tracking. Requests are still authorized, budget-checked, and written to the
   [audit log](/advanced/admin-endpoints) under their `/v1/audio/*` path.
-- **OpenAI request shape only** — requests are forwarded in OpenAI's audio format to
-  OpenAI-compatible upstreams. Providers with a different native audio contract are
-  not yet adapted behind this endpoint.
+- **OpenAI request shape in, provider dialect out** — clients always send OpenAI's
+  audio format. OpenAI-compatible upstreams receive it unchanged; Xiaomi MiMo,
+  Cohere, and MiniMax requests are translated to each provider's native audio
+  contract. Providers beyond those are not adapted behind this endpoint.
 - **Realtime voice-to-voice** (the WebSocket realtime API) is not supported.
 
 For a provider whose native audio API differs from OpenAI's, use the

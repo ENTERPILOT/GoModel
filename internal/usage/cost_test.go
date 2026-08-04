@@ -93,6 +93,38 @@ func TestCalculateGranularCost_Anthropic_CacheTokens(t *testing.T) {
 	assertCostNear(t, "OutputCost", result.OutputCost, 1.5)
 }
 
+func TestCalculateGranularCost_Anthropic_ThinkingTokens(t *testing.T) {
+	tests := []struct {
+		name          string
+		reasoningRate *float64
+		wantOutput    float64
+	}{
+		{name: "base output rate", wantOutput: 1.5},
+		{name: "distinct reasoning rate", reasoningRate: new(30.0), wantOutput: 1.8},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pricing := &core.ModelPricing{
+				InputPerMtok:           new(3.0),
+				OutputPerMtok:          new(15.0),
+				ReasoningOutputPerMtok: tt.reasoningRate,
+			}
+			rawData := map[string]any{
+				"completion_reasoning_tokens": 20_000,
+			}
+
+			result := CalculateGranularCost(200_000, 100_000, rawData, "anthropic", pricing)
+
+			assertCostNear(t, "InputCost", result.InputCost, 0.6)
+			assertCostNear(t, "OutputCost", result.OutputCost, tt.wantOutput)
+			if result.Caveat != "" {
+				t.Fatalf("expected no caveat for Anthropic thinking tokens, got %q", result.Caveat)
+			}
+		})
+	}
+}
+
 func TestCalculateGranularCost_Gemini_ThoughtTokens(t *testing.T) {
 	pricing := &core.ModelPricing{
 		InputPerMtok:           new(1.25),

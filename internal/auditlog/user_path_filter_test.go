@@ -102,3 +102,12 @@ func TestAuditUserPathSQLPredicate(t *testing.T) {
 		})
 	}
 }
+
+func TestAuditExactUserPathSQLPredicate(t *testing.T) {
+	if got := auditExactUserPathSQLPredicate("/", "user_path = ?"); got != "(user_path = ? OR user_path = '' OR user_path IS NULL)" {
+		t.Fatalf("root exact predicate = %q", got)
+	}
+	if got := auditExactUserPathSQLPredicate("/team", "user_path = ?"); got != "user_path = ?" {
+		t.Fatalf("nested exact predicate = %q", got)
+	}
+}

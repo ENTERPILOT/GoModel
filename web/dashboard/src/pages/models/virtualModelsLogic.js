@@ -653,8 +653,9 @@ export function rowAccessSelector(row) {
   return qualifiedModelName(row);
 }
 
+// Returns a class array for Svelte's clsx-style class attribute.
 export function displayRowClass(row) {
-  if (!row) return "";
+  if (!row) return [];
   const classes = [];
   if (row.is_alias) {
     classes.push("alias-row", aliasStateClass(row.alias));
@@ -669,7 +670,7 @@ export function displayRowClass(row) {
   if (!row.is_alias && row.access && row.access.effective_enabled === false) {
     classes.push("model-access-disabled-row");
   }
-  return classes.join(" ");
+  return classes;
 }
 
 export function aliasRowCanRemove(row) {

@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -73,6 +72,12 @@ type App struct {
 	live                *live.Broker
 	server              *server.Server
 	storage             storage.Storage
+
+	// registered records every successfully initialized subsystem in
+	// construction order, together with the teardown path that owns it. It is
+	// the single source of truth for what must be closed: startup failure
+	// unwinds it in reverse, and shutdownOrder is checked against it.
+	registered []registeredSubsystem
 
 	shutdownMu  sync.Mutex
 	shutdown    bool
@@ -206,21 +211,17 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		Heartbeat:   time.Duration(appCfg.Admin.LiveLogsHeartbeatSeconds) * time.Second,
 	})
 
-	// closers collects the Close functions of successfully initialized
-	// components; fail unwinds them in reverse order before returning an
-	// initialization error. Appending here is the single source of truth
-	// for the cleanup order on startup failure. The live broker is created
-	// above, so it is the first entry.
-	closers := []func() error{func() error {
+	// Every subsystem registers as it initializes (see subsystems.go): fail
+	// unwinds the registry in reverse construction order before returning an
+	// initialization error, and Shutdown releases the same set in its own
+	// hand-maintained runtime order. The live broker is created above, so it
+	// is the first entry.
+	app.register(subsystemLive, ownedByPrologue, func() error {
 		app.live.Close()
 		return nil
-	}}
+	})
 	fail := func(msg string, cause error) (*App, error) {
-		var closeErrs []error
-		for i := len(closers) - 1; i >= 0; i-- {
-			closeErrs = append(closeErrs, closers[i]())
-		}
-		closeErr := errors.Join(closeErrs...)
+		closeErr := app.unwind()
 		switch {
 		case cause != nil && closeErr != nil:
 			return nil, fmt.Errorf("%s: %w (also: close error: %v)", msg, cause, closeErr)
@@ -242,7 +243,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to create storage", err)
 	}
 	app.storage = sharedStorage
-	closers = append(closers, sharedStorage.Close)
+	app.register(subsystemStorage, ownedByShutdown, sharedStorage.Close)
 
 	// Track real-traffic outcomes per provider/model for the dashboard's
 	// provider status; hooks must be composed before any provider is created.
@@ -265,7 +266,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize providers", err)
 	}
 	app.providers = providerResult
-	closers = append(closers, app.providers.Close)
+	app.register(subsystemProviders, ownedByShutdown, app.providers.Close)
 
 	// Initialize audit logging
 	auditResult, err := auditlog.New(ctx, appCfg, sharedStorage)
@@ -273,7 +274,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize audit logging", err)
 	}
 	app.audit = auditResult
-	closers = append(closers, app.audit.Close)
+	app.register(subsystemAudit, ownedByShutdown, app.audit.Close)
 
 	// Initialize usage tracking. Disabled tracking yields a noop logger.
 	usageResult, err := usage.New(ctx, appCfg, sharedStorage)
@@ -282,12 +283,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	if usageResult == nil || usageResult.Logger == nil {
 		if usageResult != nil {
-			closers = append(closers, usageResult.Close)
+			app.register(subsystemUsage, ownedByShutdown, usageResult.Close)
 		}
 		return fail("usage tracking initialization returned nil result", nil)
 	}
 	app.usage = usageResult
-	closers = append(closers, app.usage.Close)
+	app.register(subsystemUsage, ownedByShutdown, app.usage.Close)
 
 	var budgetResult *budget.Result
 	if appCfg.Budgets.Enabled {
@@ -300,7 +301,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		slog.Info("budgets disabled")
 	}
 	app.budgets = budgetResult
-	closers = append(closers, app.budgets.Close)
+	app.register(subsystemBudgets, ownedByShutdown, app.budgets.Close)
 
 	var rateLimitResult *ratelimit.Result
 	if appCfg.RateLimits.Enabled {
@@ -319,7 +320,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		slog.Info("rate limits disabled")
 	}
 	app.rateLimits = rateLimitResult
-	closers = append(closers, app.rateLimits.Close)
+	app.register(subsystemRateLimits, ownedByShutdown, app.rateLimits.Close)
 
 	// Initialize batch lifecycle storage.
 	var batchResult *batch.Result
@@ -328,7 +329,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize batch storage", err)
 	}
 	app.batch = batchResult
-	closers = append(closers, app.batch.Close)
+	app.register(subsystemBatch, ownedByShutdown, app.batch.Close)
 
 	// Initialize file provider mapping storage for OpenAI-compatible Files/Batches workflows.
 	var fileStoreResult *filestore.Result
@@ -337,7 +338,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize file mapping storage", err)
 	}
 	app.fileStore = fileStoreResult
-	closers = append(closers, app.fileStore.Close)
+	app.register(subsystemFileStore, ownedByShutdown, app.fileStore.Close)
 
 	// Initialize Responses/Conversations lifecycle persistence so agentic
 	// response chains and conversation history land in storage instead of
@@ -348,7 +349,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize response snapshot storage", err)
 	}
 	app.responseStore = responseStoreResult
-	closers = append(closers, app.responseStore.Close)
+	app.register(subsystemResponseStore, ownedByServer, app.responseStore.Close)
 
 	var conversationStoreResult *conversationstore.Result
 	conversationStoreResult, err = conversationstore.New(ctx, sharedStorage)
@@ -356,7 +357,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize conversation storage", err)
 	}
 	app.conversations = conversationStoreResult
-	closers = append(closers, app.conversations.Close)
+	app.register(subsystemConversationStore, ownedByServer, app.conversations.Close)
 
 	// Initialize virtual models (unified aliases + access overrides) using
 	// shared storage when already available. Provider names declared in YAML —
@@ -393,7 +394,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize provider credentials store", err)
 	}
 	app.providerCredentials = providerCredentialsResult
-	closers = append(closers, app.providerCredentials.Close)
+	app.register(subsystemProviderCredentials, ownedByShutdown, app.providerCredentials.Close)
 
 	var virtualModelsResult *virtualmodels.Result
 	virtualModelsResult, err = virtualmodels.New(ctx, appCfg, sharedStorage, providerResult.Registry, declaredProviders)
@@ -401,7 +402,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize virtual models", err)
 	}
 	app.virtualModels = virtualModelsResult
-	closers = append(closers, app.virtualModels.Close)
+	app.register(subsystemVirtualModels, ownedByShutdown, app.virtualModels.Close)
 
 	// The unified virtual models service is the single engine: it serves model
 	// resolution (redirects), access authorization (policies), and exposed-model
@@ -435,7 +436,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize failover rules", err)
 	}
 	app.failover = failoverResult
-	closers = append(closers, app.failover.Close)
+	app.register(subsystemFailover, ownedByShutdown, app.failover.Close)
 
 	var taggingResult *tagging.Result
 	taggingResult, err = tagging.New(ctx, appCfg, sharedStorage)
@@ -443,7 +444,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize tagging", err)
 	}
 	app.tagging = taggingResult
-	closers = append(closers, app.tagging.Close)
+	app.register(subsystemTagging, ownedByShutdown, app.tagging.Close)
 
 	var pricingOverrideResult *pricingoverrides.Result
 	pricingOverrideResult, err = pricingoverrides.New(ctx, appCfg, sharedStorage, providerResult.Registry, providerResult.Registry)
@@ -451,7 +452,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize model pricing overrides", err)
 	}
 	app.pricingOverrides = pricingOverrideResult
-	closers = append(closers, app.pricingOverrides.Close)
+	app.register(subsystemPricingOverrides, ownedByShutdown, app.pricingOverrides.Close)
 	pricingResolver := usage.PricingResolver(providerResult.Registry)
 	if app.pricingOverrides != nil && app.pricingOverrides.Service != nil {
 		pricingResolver = app.pricingOverrides.Service
@@ -470,7 +471,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize guardrails", err)
 	}
 	app.guardrails = guardrailResult
-	closers = append(closers, app.guardrails.Close)
+	app.register(subsystemGuardrails, ownedByShutdown, app.guardrails.Close)
 
 	seedGuardrails, err := configGuardrailDefinitions(appCfg.Guardrails)
 	if err != nil {
@@ -493,7 +494,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if err != nil {
 		return fail("failed to initialize workflows", err)
 	}
-	closers = append(closers, workflowResult.Close)
+	app.register(subsystemWorkflows, ownedByShutdown, workflowResult.Close)
 	defaultWorkflow := defaultWorkflowInput(appCfg, guardrailResult.Service.Names(), seedGuardrails)
 	if err := workflowResult.Service.EnsureDefaultGlobal(ctx, defaultWorkflow); err != nil {
 		return fail("failed to seed workflows", err)
@@ -509,7 +510,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return fail("failed to initialize auth keys", err)
 	}
 	app.authKeys = authKeyResult
-	closers = append(closers, app.authKeys.Close)
+	app.register(subsystemAuthKeys, ownedByShutdown, app.authKeys.Close)
 
 	// Log configuration status after auth has been initialized so the startup
 	// message reflects both bootstrap and managed auth modes.
@@ -561,7 +562,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			return fail("failed to initialize mcp gateway", err)
 		}
 		app.mcpGateway = mcpResult
-		closers = append(closers, app.mcpGateway.Close)
+		app.register(subsystemMCPGateway, ownedByShutdown, app.mcpGateway.Close)
 		slog.Info("mcp gateway enabled",
 			"path", config.JoinBasePath(appCfg.Server.BasePath, "/mcp"),
 			"configured_servers", len(appCfg.MCP.Servers))
@@ -651,7 +652,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	livePublishersEnabled := false
 	usageEnabledForDashboard := usageResult.Logger.Config().Enabled
 	if adminCfg.EndpointsEnabled {
-		adminHandler, dashHandler, adminErr := initAdmin(
+		adminHandler, dashHandler, auditReader, adminErr := initAdmin(
 			usageReader,
 			usageReadStorage,
 			sharedStorage,
@@ -681,6 +682,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		} else {
 			serverCfg.AdminEndpointsEnabled = true
 			serverCfg.AdminHandler = adminHandler
+			serverCfg.AuditReader = auditReader
 			livePublishersEnabled = true
 			slog.Info("admin API enabled",
 				"api", config.JoinBasePath(appCfg.Server.BasePath, "/admin"),
@@ -712,7 +714,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if err != nil {
 		return fail("failed to initialize response cache", err)
 	}
-	closers = append(closers, rcm.Close)
+	app.register(subsystemResponseCache, ownedByServer, rcm.Close)
 	serverCfg.ResponseCacheMiddleware = rcm
 
 	// Wire the readiness cache probe only when a Redis-backed exact cache is
@@ -858,13 +860,12 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 	return nil
 }
 
-// Shutdown gracefully tears down app components in dependency order.
-// Order:
-// 1. Close long-lived streams, cancel the HTTP server context, and wait for it to stop.
-// 2. Provider subsystem close (stops model refresh loop and cache resources).
-// 3. Batch store close.
-// 4. Usage logger close (flushes pending usage records).
-// 5. Audit logger close (flushes pending audit records).
+// Shutdown gracefully tears down app components in dependency order:
+//  1. Close long-lived streams (ownedByPrologue), so they do not hold the HTTP
+//     drain open, then cancel the server context and wait for it to stop.
+//  2. Close server-owned resources (ownedByServer) now that no request is in
+//     flight.
+//  3. Close the remaining subsystems in the order given by shutdownOrder.
 //
 // Shutdown is idempotent and safe for repeated calls; after the first call, subsequent calls are no-ops.
 // It attempts every close step, aggregates failures, and returns a joined error if any step fails.
@@ -925,35 +926,8 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// Remaining subsystems close in dependency order: producers before the
-	// stores they write to, and the shared connection last of all. Order is
-	// load-bearing, so it is spelled out here rather than derived.
-	for _, subsystem := range []struct {
-		name  string
-		close func() error
-	}{
-		// Providers first: stops model refresh and provider-owned resources.
-		{"providers", closerOf(a.providers)},
-		// Terminates upstream MCP sessions.
-		{"mcp gateway", closerOf(a.mcpGateway)},
-		{"provider credentials", closerOf(a.providerCredentials)},
-		{"virtual models", closerOf(a.virtualModels)},
-		{"failover", closerOf(a.failover)},
-		{"tagging", closerOf(a.tagging)},
-		{"workflows", closerOf(a.workflows)},
-		{"model pricing overrides", closerOf(a.pricingOverrides)},
-		{"guardrails", closerOf(a.guardrails)},
-		{"auth keys", closerOf(a.authKeys)},
-		{"file store", closerOf(a.fileStore)},
-		// The remaining three flush buffered work into storage, so they must
-		// close before the connection they write through.
-		{"batch store", closerOf(a.batch)},
-		{"budgets", closerOf(a.budgets)},
-		{"rate limits", closerOf(a.rateLimits)},
-		{"usage", closerOf(a.usage)},
-		{"audit", closerOf(a.audit)},
-		{"storage", closerOf(a.storage)},
-	} {
+	// Remaining subsystems close in dependency order (see shutdownOrder).
+	for _, subsystem := range a.shutdownOrder() {
 		if subsystem.close == nil {
 			continue
 		}
@@ -972,24 +946,6 @@ func (a *App) Shutdown(ctx context.Context) error {
 }
 
 // logStartupInfo logs the application configuration on startup.
-// closerOf returns c.Close, or nil when there is nothing to close.
-//
-// Two distinct kinds of nil arrive here. A subsystem that never initialized is
-// a typed-nil *Result, where taking the method value yields a non-nil func
-// that panics on call. An unset storage.Storage is a nil interface, which
-// reflect reports as an invalid value rather than a nil pointer.
-func closerOf[T interface{ Close() error }](c T) func() error {
-	switch value := reflect.ValueOf(c); value.Kind() {
-	case reflect.Invalid:
-		return nil
-	case reflect.Pointer, reflect.Interface:
-		if value.IsNil() {
-			return nil
-		}
-	}
-	return c.Close
-}
-
 func (a *App) logStartupInfo() {
 	cfg := a.config
 
@@ -1073,7 +1029,7 @@ func initAdmin(
 	usagePricingRecalculationEnabled bool,
 	basePath string,
 	uiEnabled bool,
-) (*admin.Handler, *dashboard.Handler, error) {
+) (*admin.Handler, *dashboard.Handler, auditlog.Reader, error) {
 	// Pricing recalculation writes through the same storage the reader uses.
 	var pricingRecalculator usage.PricingRecalculator
 	if usageReadStorage != nil && usagePricingRecalculationEnabled {
@@ -1093,7 +1049,7 @@ func initAdmin(
 		var err error
 		auditReader, err = auditlog.NewReader(auditStorage)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create audit reader: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create audit reader: %w", err)
 		}
 	}
 
@@ -1138,11 +1094,11 @@ func initAdmin(
 		var err error
 		dashHandler, err = dashboard.NewWithDemoMode(basePath, runtimeConfig.DemoMode == "on")
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize dashboard: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to initialize dashboard: %w", err)
 		}
 	}
 
-	return adminHandler, dashHandler, nil
+	return adminHandler, dashHandler, auditReader, nil
 }
 
 func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Definition, error) {

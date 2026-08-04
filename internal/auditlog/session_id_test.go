@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -60,6 +61,181 @@ func TestSQLStore_SessionIDRoundtripAndFilter(t *testing.T) {
 				t.Fatalf("filter leaked entry %q with session %q", entry.ID, entry.SessionID)
 			}
 		}
+
+		conversation, err := reader.GetConversation(ctx, "s-1", 10)
+		if err != nil {
+			t.Fatalf("GetConversation failed: %v", err)
+		}
+		if conversation.AnchorID != "s-1" || len(conversation.Entries) != 2 {
+			t.Fatalf("conversation = %+v, want the two-entry sess-a thread", conversation)
+		}
+		if conversation.Entries[0].ID != "s-1" || conversation.Entries[1].ID != "s-2" {
+			t.Fatalf("conversation ids = %q, %q; want s-1, s-2",
+				conversation.Entries[0].ID, conversation.Entries[1].ID)
+		}
+	})
+}
+
+func TestSQLReader_GetConversationUsesKeysetPagination(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("NewSQLReader failed: %v", err)
+		}
+
+		base := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+		cases := []struct {
+			name      string
+			count     int
+			timestamp func(int) time.Time
+			truncated bool
+		}{
+			{
+				name:      "distinct timestamps",
+				count:     120,
+				timestamp: func(i int) time.Time { return base.Add(time.Duration(i) * time.Second) },
+			},
+			{
+				name:      "equal timestamps across page boundary",
+				count:     121,
+				timestamp: func(int) time.Time { return base.Add(time.Hour) },
+				truncated: true,
+			},
+		}
+		for caseIndex, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				prefix := fmt.Sprintf("paged-%d-", caseIndex)
+				sessionID := fmt.Sprintf("paged-session-%d", caseIndex)
+				entries := make([]*LogEntry, tc.count)
+				for i := range entries {
+					entries[i] = &LogEntry{
+						ID:        fmt.Sprintf("%s%03d", prefix, i),
+						Timestamp: tc.timestamp(i),
+						SessionID: sessionID,
+					}
+				}
+				if err := store.WriteBatch(ctx, entries); err != nil {
+					t.Fatalf("WriteBatch failed: %v", err)
+				}
+
+				conversation, err := reader.GetConversation(ctx, entries[0].ID, 120)
+				if err != nil {
+					t.Fatalf("GetConversation failed: %v", err)
+				}
+				if len(conversation.Entries) != 120 || conversation.Truncated != tc.truncated {
+					t.Fatalf("conversation entries/truncated = %d/%v, want 120/%v",
+						len(conversation.Entries), conversation.Truncated, tc.truncated)
+				}
+				seen := make(map[string]struct{}, len(conversation.Entries))
+				for i, entry := range conversation.Entries {
+					wantID := fmt.Sprintf("%s%03d", prefix, i)
+					if entry.ID != wantID {
+						t.Fatalf("entry %d = %q, want %q", i, entry.ID, wantID)
+					}
+					if _, exists := seen[entry.ID]; exists {
+						t.Fatalf("duplicate entry %q", entry.ID)
+					}
+					seen[entry.ID] = struct{}{}
+				}
+			})
+		}
+	})
+}
+
+func TestSQLReader_GetInteractionParentAllowsLegacyNulls(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+		entry := &LogEntry{ID: "legacy-parent", Timestamp: time.Now().UTC(), UserPath: "/"}
+		if err := store.WriteBatch(ctx, []*LogEntry{entry}); err != nil {
+			t.Fatalf("WriteBatch failed: %v", err)
+		}
+		if _, err := db.Exec(ctx,
+			"UPDATE audit_logs SET user_path = NULL, session_id = NULL WHERE id = ?", entry.ID); err != nil {
+			t.Fatalf("clear legacy parent fields: %v", err)
+		}
+
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("NewSQLReader failed: %v", err)
+		}
+		parent, err := reader.GetInteractionParent(ctx, entry.ID)
+		if err != nil {
+			t.Fatalf("GetInteractionParent failed: %v", err)
+		}
+		if parent == nil || parent.UserPath != "" || parent.SessionID != "" {
+			t.Fatalf("interaction parent = %#v, want empty legacy fields", parent)
+		}
+	})
+}
+
+func conversationPathIsolationFixture(base time.Time) []*LogEntry {
+	return []*LogEntry{
+		{ID: "tenant-a-1", Timestamp: base, SessionID: "shared-session", UserPath: "/tenants/a"},
+		{ID: "tenant-a-2", Timestamp: base.Add(time.Second), SessionID: "shared-session", UserPath: "/tenants/a"},
+		{ID: "tenant-b-secret", Timestamp: base.Add(2 * time.Second), SessionID: "shared-session", UserPath: "/tenants/b"},
+		{ID: "tenant-a-child-secret", Timestamp: base.Add(3 * time.Second), SessionID: "shared-session", UserPath: "/tenants/a/child"},
+		{ID: "root-1", Timestamp: base.Add(4 * time.Second), SessionID: "root-shared", UserPath: "/"},
+		{ID: "root-legacy", Timestamp: base.Add(5 * time.Second), SessionID: "root-shared"},
+		{ID: "root-child-secret", Timestamp: base.Add(6 * time.Second), SessionID: "root-shared", UserPath: "/tenants/a"},
+	}
+}
+
+func assertConversationUserPathIsolation(t *testing.T, reader Reader) {
+	t.Helper()
+	ctx := context.Background()
+	conversation, err := reader.GetConversation(ctx, "tenant-a-1", 10)
+	if err != nil {
+		t.Fatalf("GetConversation failed: %v", err)
+	}
+	if len(conversation.Entries) != 2 {
+		t.Fatalf("conversation entries = %+v, want only tenant A", conversation.Entries)
+	}
+	for _, entry := range conversation.Entries {
+		if entry.UserPath != "/tenants/a" {
+			t.Fatalf("conversation leaked %q from %q", entry.ID, entry.UserPath)
+		}
+	}
+
+	rootConversation, err := reader.GetConversation(ctx, "root-1", 10)
+	if err != nil {
+		t.Fatalf("root GetConversation failed: %v", err)
+	}
+	if len(rootConversation.Entries) != 2 || rootConversation.Entries[0].ID != "root-1" || rootConversation.Entries[1].ID != "root-legacy" {
+		t.Fatalf("root conversation leaked child paths: %+v", rootConversation.Entries)
+	}
+}
+
+func TestSQLReader_GetConversationScopesSessionToUserPath(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+		if err := store.WriteBatch(ctx, conversationPathIsolationFixture(time.Now().UTC())); err != nil {
+			t.Fatalf("WriteBatch failed: %v", err)
+		}
+
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
+		assertConversationUserPathIsolation(t, reader)
 	})
 }
 

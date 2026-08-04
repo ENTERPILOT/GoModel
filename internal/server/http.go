@@ -72,6 +72,7 @@ type Config struct {
 	BodySizeLimit                   string                                 // Max request body size (e.g., "10M", "1024K")
 	PprofEnabled                    bool                                   // Whether to expose debug profiling routes at /debug/pprof/*
 	AuditLogger                     auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
+	AuditReader                     auditlog.Reader                        // Optional: audit lookup used for dashboard interaction continuations
 	UsageLogger                     usage.LoggerInterface                  // Optional: Usage logger for token tracking
 	BudgetChecker                   BudgetChecker                          // Optional: per-user-path budget checker
 	RateLimiter                     RateLimiter                            // Optional: per-user-path rate limiter
@@ -347,7 +348,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// Authentication (skips public paths)
-	if cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil) {
+	// Register by authenticator presence; its Enabled state can change at runtime.
+	authMiddlewareRegistered := cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil)
+	if authMiddlewareRegistered {
 		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths, userPathHeaderName))
 	}
 
@@ -358,7 +361,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// handler returns, so persisted entries carry it even though they are
 	// created earlier in the chain.
 	if cfg != nil && cfg.SessionDetector != nil {
-		e.Use(SessionCapture(cfg.SessionDetector))
+		e.Use(sessionCapture(cfg.SessionDetector, cfg.AuditReader, !authMiddlewareRegistered))
 	}
 
 	// Request rewriters run post-auth (rewriters only see authenticated
@@ -433,6 +436,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/embeddings", handler.Embeddings)
 	e.POST("/v1/audio/speech", handler.AudioSpeech)
 	e.POST("/v1/audio/transcriptions", handler.AudioTranscriptions)
+	e.POST("/v1/audio/translations", handler.AudioTranslations)
 	if cfg == nil || cfg.RealtimeEnabled {
 		e.GET("/v1/realtime", handler.Realtime)
 		e.POST("/v1/realtime/calls", handler.RealtimeCalls)
@@ -538,14 +542,16 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 	return newGatewayStartConfig(addr).Start(ctx, s.echo)
 }
 
-// StartWithListener starts the HTTP server using a pre-bound listener.
-// This is useful in tests that need an already-reserved loopback port.
+// StartWithListener starts the HTTP server using a pre-bound listener. The
+// gateway serves this way in production — the listening socket outlives each
+// configuration a reload installs — and tests use it to reserve a loopback
+// port up front, so it configures the server exactly like Start does: same
+// inbound timeouts, same drain window.
 func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) error {
-	sc := echo.StartConfig{
-		HideBanner: true,
-		Listener:   listener,
+	if listener == nil {
+		return errors.New("listener is required")
 	}
-	return sc.Start(ctx, s.echo)
+	return newGatewayStartConfigForListener(listener).Start(ctx, s.echo)
 }
 
 // Shutdown releases server resources. The HTTP server itself is stopped by
@@ -604,6 +610,14 @@ func newGatewayStartConfig(addr string) echo.StartConfig {
 			)
 		},
 	}
+}
+
+// newGatewayStartConfig with a pre-bound listener. Echo ignores Address once
+// Listener is set; it is filled in anyway so the two describe the same server.
+func newGatewayStartConfigForListener(listener net.Listener) echo.StartConfig {
+	sc := newGatewayStartConfig(listener.Addr().String())
+	sc.Listener = listener
+	return sc
 }
 
 func configureGatewayHTTPServer(server *http.Server) error {

@@ -4,6 +4,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { rateLimits } from "./rateLimits.svelte.js";
+  import { Activity, Box, Pencil, RotateCcw, Server, Timer, Trash2 } from "lucide";
 
   // rules: the filtered rule list to render (filtering stays on the page).
   let { rules } = $props();
@@ -29,9 +30,9 @@
                     title={"Rule scope: " + rateLimits.rateLimitScopeLabel(item)}
                   >
                     <Icon
-                      name={rateLimits.rateLimitScope(item) === "provider"
-                        ? "server"
-                        : "box"}
+                      icon={rateLimits.rateLimitScope(item) === "provider"
+                        ? Server
+                        : Box}
                       class="budget-period-icon"
                     />
                     <span>{rateLimits.rateLimitScopeLabel(item)}</span>
@@ -39,9 +40,9 @@
                 {/if}
                 <span class="budget-period-label">
                   <Icon
-                    name={rateLimits.rateLimitIsConcurrent(item)
-                      ? "activity"
-                      : "timer"}
+                    icon={rateLimits.rateLimitIsConcurrent(item)
+                      ? Activity
+                      : Timer}
                     class="budget-period-icon"
                   />
                   <span>{rateLimits.rateLimitPeriodLabel(item)}</span>
@@ -65,7 +66,7 @@
                       class="budget-action-btn"
                       onclick={() => rateLimits.openRateLimitForm(item)}
                     >
-                      <Icon name="pencil" class="budget-action-icon" />
+                      <Icon icon={Pencil} class="budget-action-icon" />
                       <span class="budget-action-label">Edit</span>
                     </TableActionButton>
                   {/if}
@@ -75,7 +76,7 @@
                     onclick={() => rateLimits.resetRateLimit(item)}
                     disabled={rateLimits.rateLimitResettingKey === rateLimits.rateLimitKey(item)}
                   >
-                    <Icon name="rotate-ccw" class="budget-action-icon" />
+                    <Icon icon={RotateCcw} class="budget-action-icon" />
                     <span class="budget-action-label">
                       {rateLimits.rateLimitResettingKey ===
                       rateLimits.rateLimitKey(item)
@@ -90,7 +91,7 @@
                       onclick={() => rateLimits.deleteRateLimit(item)}
                       disabled={rateLimits.rateLimitDeletingKey === rateLimits.rateLimitKey(item)}
                     >
-                      <Icon name="trash-2" class="budget-action-icon" />
+                      <Icon icon={Trash2} class="budget-action-icon" />
                       <span class="budget-action-label">
                         {rateLimits.rateLimitDeletingKey ===
                         rateLimits.rateLimitKey(item)

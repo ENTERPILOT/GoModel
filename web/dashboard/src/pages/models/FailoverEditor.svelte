@@ -11,6 +11,7 @@
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { failover } from "./failover.svelte.js";
   import { qualifiedModelName } from "./failover-logic.js";
+  import { Plus, Trash2, WandSparkles } from "lucide";
 </script>
 
 <EditorDialog
@@ -62,7 +63,7 @@
               onclick={() => failover.removePrimaryFailoverTarget()}
               disabled={failover.failoverFormManaged}
             >
-              <Icon name="trash-2" class="table-icon-svg" />
+              <Icon icon={Trash2} class="table-icon-svg" />
             </TableActionButton>
           {/if}
         </div>
@@ -83,7 +84,7 @@
               onclick={() => failover.removeFailoverTarget(index)}
               disabled={failover.failoverFormManaged}
             >
-              <Icon name="trash-2" class="table-icon-svg" />
+              <Icon icon={Trash2} class="table-icon-svg" />
             </TableActionButton>
           </div>
         {/each}
@@ -97,7 +98,7 @@
             failover.failoverSaving}
           onclick={() => failover.addFailoverTarget()}
         >
-          <Icon name="plus" class="form-action-icon" />
+          <Icon icon={Plus} class="form-action-icon" />
           <span>Add fallback model</span>
         </button>
         <button
@@ -109,7 +110,7 @@
             !failover.failoverEnabled()}
           onclick={() => failover.generateFailoverForForm()}
         >
-          <Icon name="wand-sparkles" class="form-action-icon" />
+          <Icon icon={WandSparkles} class="form-action-icon" />
           <span>
             {failover.failoverGenerating
               ? "Generating..."

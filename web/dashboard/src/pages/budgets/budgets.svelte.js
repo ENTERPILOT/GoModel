@@ -24,6 +24,7 @@ import {
   findExistingBudget,
   normalizeBudgetListPayload,
 } from "./budgets-helpers.js";
+import { RotateCcw } from "lucide";
 
 class BudgetsStore {
   budgets = $state([]);
@@ -324,7 +325,7 @@ class BudgetsStore {
       inputId: "budget-reset-confirmation",
       requiredText: "reset",
       confirmLabel: "Reset All Budgets",
-      icon: "rotate-ccw",
+      icon: RotateCcw,
       dialogClass: "budget-reset-dialog",
       onConfirm: () => this.resetAllBudgets(),
     });
