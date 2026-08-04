@@ -74,23 +74,27 @@ func TestNewGatewayStartConfig_ConfiguresGracefulDrain(t *testing.T) {
 }
 
 func TestModelInteractionWriteDeadlineMiddleware_ClearsDeadlineForModelRoutes(t *testing.T) {
-	e := echo.New()
-	writer := &deadlineTrackingWriter{ResponseRecorder: httptest.NewRecorder()}
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	c := e.NewContext(req, writer)
+	for _, path := range []string{"/v1/chat/completions", "/v1/audio/translations"} {
+		t.Run(path, func(t *testing.T) {
+			e := echo.New()
+			writer := &deadlineTrackingWriter{ResponseRecorder: httptest.NewRecorder()}
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			c := e.NewContext(req, writer)
 
-	handler := modelInteractionWriteDeadlineMiddleware()(func(c *echo.Context) error {
-		return c.String(http.StatusOK, "ok")
-	})
+			handler := modelInteractionWriteDeadlineMiddleware()(func(c *echo.Context) error {
+				return c.String(http.StatusOK, "ok")
+			})
 
-	if err := handler(c); err != nil {
-		t.Fatalf("handler() error = %v", err)
-	}
-	if len(writer.deadlines) != 1 {
-		t.Fatalf("deadline calls = %d, want 1", len(writer.deadlines))
-	}
-	if !writer.deadlines[0].IsZero() {
-		t.Fatalf("deadline = %v, want zero time", writer.deadlines[0])
+			if err := handler(c); err != nil {
+				t.Fatalf("handler() error = %v", err)
+			}
+			if len(writer.deadlines) != 1 {
+				t.Fatalf("deadline calls = %d, want 1", len(writer.deadlines))
+			}
+			if !writer.deadlines[0].IsZero() {
+				t.Fatalf("deadline = %v, want zero time", writer.deadlines[0])
+			}
+		})
 	}
 }
 

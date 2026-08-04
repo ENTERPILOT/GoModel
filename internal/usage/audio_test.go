@@ -92,11 +92,40 @@ func TestExtractFromTranscriptionResponse_TokenUsage(t *testing.T) {
 	if entry == nil {
 		t.Fatal("expected a usage entry")
 	}
-	if entry.Endpoint != endpointAudioTranscriptions {
-		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointAudioTranscriptions)
-	}
 	if entry.InputTokens != 14 || entry.OutputTokens != 45 || entry.TotalTokens != 59 {
 		t.Errorf("token counts mismatch: %+v", entry)
+	}
+}
+
+func TestExtractFromAudioTextResponse_UsesEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		extract  func() *UsageEntry
+		endpoint string
+	}{
+		{
+			name: "transcription",
+			extract: func() *UsageEntry {
+				return ExtractFromTranscriptionResponse([]byte(`{"text":"hello"}`), "req", "whisper-1", "openai")
+			},
+			endpoint: endpointAudioTranscriptions,
+		},
+		{
+			name: "translation",
+			extract: func() *UsageEntry {
+				return ExtractFromTranslationResponse([]byte(`{"text":"hello"}`), "req", "whisper-1", "openai")
+			},
+			endpoint: endpointAudioTranslations,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := tt.extract()
+			if entry.Endpoint != tt.endpoint {
+				t.Errorf("endpoint = %q, want %q", entry.Endpoint, tt.endpoint)
+			}
+		})
 	}
 }
 

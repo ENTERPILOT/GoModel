@@ -4173,6 +4173,93 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1/audio/translations": {
+            "post": {
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json",
+                    "text/plain"
+                ],
+                "tags": [
+                    "audio"
+                ],
+                "summary": "Translate audio into English",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Audio file to translate",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "model",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional English text to guide the model",
+                        "name": "prompt",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "json, text, srt, verbose_json, or vtt",
+                        "name": "response_format",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Sampling temperature (0-1)",
+                        "name": "temperature",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "English translation in the requested response_format",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/batches": {
             "get": {
                 "produces": [

@@ -436,6 +436,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/embeddings", handler.Embeddings)
 	e.POST("/v1/audio/speech", handler.AudioSpeech)
 	e.POST("/v1/audio/transcriptions", handler.AudioTranscriptions)
+	e.POST("/v1/audio/translations", handler.AudioTranslations)
 	if cfg == nil || cfg.RealtimeEnabled {
 		e.GET("/v1/realtime", handler.Realtime)
 		e.POST("/v1/realtime/calls", handler.RealtimeCalls)

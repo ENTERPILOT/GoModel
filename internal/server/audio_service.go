@@ -46,6 +46,14 @@ func (s *audioService) router() (core.AudioProvider, error) {
 	return router, nil
 }
 
+func (s *audioService) translationRouter() (core.AudioTranslationProvider, error) {
+	router, ok := s.provider.(core.AudioTranslationProvider)
+	if !ok {
+		return nil, core.NewInvalidRequestError("audio translations are not supported by the current provider router", nil)
+	}
+	return router, nil
+}
+
 // CreateSpeech handles POST /v1/audio/speech.
 func (s *audioService) CreateSpeech(c *echo.Context) error {
 	router, err := s.router()
@@ -111,12 +119,31 @@ func speechResponseFormat(req *core.AudioSpeechRequest, resp *core.AudioResponse
 
 // CreateTranscription handles POST /v1/audio/transcriptions.
 func (s *audioService) CreateTranscription(c *echo.Context) error {
-	router, err := s.router()
-	if err != nil {
-		return handleError(c, err)
+	return s.createAudioTranscription(c, false)
+}
+
+// CreateTranslation handles POST /v1/audio/translations.
+func (s *audioService) CreateTranslation(c *echo.Context) error {
+	return s.createAudioTranscription(c, true)
+}
+
+func (s *audioService) createAudioTranscription(c *echo.Context, translation bool) error {
+	var call func(context.Context, *core.AudioTranscriptionRequest) (*core.AudioResponse, error)
+	if translation {
+		router, err := s.translationRouter()
+		if err != nil {
+			return handleError(c, err)
+		}
+		call = router.CreateTranslation
+	} else {
+		router, err := s.router()
+		if err != nil {
+			return handleError(c, err)
+		}
+		call = router.CreateTranscription
 	}
 
-	req, err := transcriptionRequestFromForm(c)
+	req, err := audioTranscriptionRequestFromForm(c, !translation)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -140,7 +167,7 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	defer release()
-	resp, err := router.CreateTranscription(ctx, req)
+	resp, err := call(ctx, req)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -148,6 +175,9 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 		return s.respondAudio(c, resp) // emits the 502 guard before resp.Data is read
 	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		if translation {
+			return usage.ExtractFromTranslationResponse(resp.Data, route.requestID, route.model, route.providerType, pricing)
+		}
 		return usage.ExtractFromTranscriptionResponse(resp.Data, route.requestID, route.model, route.providerType, pricing)
 	})
 	return s.respondAudio(c, resp)
@@ -236,10 +266,22 @@ func (s *audioService) logUsage(ctx context.Context, route audioRoute, extract f
 	s.usageLogger.Write(entry)
 }
 
-func transcriptionRequestFromForm(c *echo.Context) (*core.AudioTranscriptionRequest, error) {
+func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFields bool) (*core.AudioTranscriptionRequest, error) {
+	form, err := c.MultipartForm()
+	if err != nil {
+		return nil, core.NewInvalidRequestError("invalid multipart form", err)
+	}
 	model := strings.TrimSpace(c.FormValue("model"))
 	if model == "" {
 		return nil, core.NewInvalidRequestError("model is required", nil)
+	}
+
+	if !includeTranscriptionFields && form != nil {
+		for _, field := range []string{"language", "timestamp_granularities", "timestamp_granularities[]"} {
+			if _, present := form.Value[field]; present {
+				return nil, core.NewInvalidRequestError(field+" is not supported for audio translations", nil)
+			}
+		}
 	}
 
 	fileHeader, err := c.FormFile("file")
@@ -256,13 +298,17 @@ func transcriptionRequestFromForm(c *echo.Context) (*core.AudioTranscriptionRequ
 		return nil, core.NewInvalidRequestError("failed to read uploaded file", err)
 	}
 
-	// Accept both the canonical bracketed key and the unbracketed variant some
-	// clients send; the adapter always forwards the bracketed form upstream.
 	var granularities []string
-	if form, err := c.MultipartForm(); err == nil && form != nil {
-		granularities = form.Value["timestamp_granularities[]"]
-		if len(granularities) == 0 {
-			granularities = form.Value["timestamp_granularities"]
+	var language string
+	if includeTranscriptionFields {
+		language = strings.TrimSpace(c.FormValue("language"))
+		// Accept both the canonical bracketed key and the unbracketed variant some
+		// clients send; the adapter always forwards the bracketed form upstream.
+		if form != nil {
+			granularities = form.Value["timestamp_granularities[]"]
+			if len(granularities) == 0 {
+				granularities = form.Value["timestamp_granularities"]
+			}
 		}
 	}
 
@@ -271,7 +317,7 @@ func transcriptionRequestFromForm(c *echo.Context) (*core.AudioTranscriptionRequ
 		Filename:               fileHeader.Filename,
 		FileContentType:        fileHeader.Header.Get("Content-Type"),
 		File:                   data,
-		Language:               strings.TrimSpace(c.FormValue("language")),
+		Language:               language,
 		Prompt:                 c.FormValue("prompt"),
 		ResponseFormat:         strings.TrimSpace(c.FormValue("response_format")),
 		Temperature:            strings.TrimSpace(c.FormValue("temperature")),
