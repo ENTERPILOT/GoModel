@@ -32,6 +32,7 @@ class ConversationDrawerStore {
   followUpText = $state("");
   followUpSending = $state(false);
   followUpError = $state("");
+  followUpParentID = "";
 
   conversationRequestToken = 0;
   conversationReturnFocusEl = null;
@@ -125,6 +126,7 @@ class ConversationDrawerStore {
     this.conversationFollowLatest = false;
     this.followUpText = "";
     this.followUpError = "";
+    this.followUpParentID = "";
     document.body.classList.add("conversation-drawer-open");
     requestAnimationFrame(() => this._focusConversationDrawer());
 
@@ -194,6 +196,12 @@ class ConversationDrawerStore {
       (this.conversationEntries || []).some((candidate) => candidate.id === parentID));
     if (!knownEntry && !sameSession && !linkedParent) return;
 
+    if (entryID && parentID === this.followUpParentID) {
+      this.conversationAnchorID = entryID;
+      this.conversationFollowLatest = true;
+      this.followUpParentID = "";
+    }
+
     const state = String(entry._live_state || "").trim();
     if (state === "audit.flushed" || state === "audit.detail") {
       this.applyLiveConversationEntry(entry);
@@ -228,6 +236,7 @@ class ConversationDrawerStore {
     this.conversationBranchEntryIDs = [];
     this.conversationFollowLatest = false;
     this.conversationOpenedFromID = "";
+    this.followUpParentID = "";
     this.followUpSending = false;
     document.body.classList.remove("conversation-drawer-open");
     const returnFocusEl = this.conversationReturnFocusEl;
@@ -315,13 +324,15 @@ class ConversationDrawerStore {
     const entry = this.selectedConversationEntry();
     const body = buildFollowUpRequest(entry, this.followUpText);
     if (!entry || !body) return;
+    const parentID = this.conversationAnchorID;
 
     this.followUpSending = true;
     this.followUpError = "";
+    this.followUpParentID = parentID;
     try {
       const response = await apiFetch(entry.path, {
         method: "POST",
-        headers: buildFollowUpHeaders(entry, this.conversationAnchorID),
+        headers: buildFollowUpHeaders(entry, parentID),
         body: JSON.stringify(body),
       });
       if (!response.ok) {
@@ -331,17 +342,19 @@ class ConversationDrawerStore {
           message = payload && payload.error && payload.error.message || message;
         } catch { /* keep the generic message */ }
         this.followUpError = message;
+        if (this.followUpParentID === parentID) this.followUpParentID = "";
         return;
       }
       this.followUpText = "";
       await drainResponse(response);
-      if (this.conversationOpen && this.conversationAnchorID) {
+      if (!liveLogs.liveLogsStreaming && this.conversationOpen && this.conversationAnchorID) {
         const requestToken = ++this.conversationRequestToken;
         await this.fetchConversation(this.conversationAnchorID, requestToken, false);
       }
     } catch (error) {
       console.error("Failed to send interaction follow-up:", error);
       this.followUpError = "Failed to send message.";
+      if (this.followUpParentID === parentID) this.followUpParentID = "";
     } finally {
       this.followUpSending = false;
     }

@@ -355,6 +355,48 @@ test("branch projection admits compatible snapshots and explicit parent links", 
   assert.equal(view.messages.some((message) => message.text === "next"), true);
 });
 
+test("a follow-up anchored from history selects its new fork instead of a newer sibling", () => {
+  const anchor = {
+    id: "archived",
+    timestamp: "2026-08-03T11:00:00Z",
+    data: {
+      request_body: { messages: [{ role: "user", content: "start" }] },
+      response_body: { choices: [{ message: { role: "assistant", content: "original" } }] },
+    },
+  };
+  const sibling = {
+    id: "existing-branch",
+    timestamp: "2026-08-03T11:01:00Z",
+    data: {
+      request_headers: { "X-GoModel-Interaction-Parent": anchor.id },
+      request_body: { messages: [
+        { role: "user", content: "start" },
+        { role: "assistant", content: "original" },
+        { role: "user", content: "existing branch" },
+      ] },
+    },
+  };
+  const followUp = {
+    id: "sent-follow-up",
+    timestamp: "2026-08-03T11:02:00Z",
+    data: {
+      request_headers: { "X-GoModel-Interaction-Parent": anchor.id },
+      request_body: { messages: [
+        { role: "user", content: "start" },
+        { role: "assistant", content: "original" },
+        { role: "user", content: "new fork" },
+      ] },
+      response_body: { choices: [{ message: { role: "assistant", content: "new answer" } }] },
+    },
+  };
+
+  const view = buildConversationView([followUp, sibling, anchor], followUp.id);
+  assert.deepEqual(view.entryIDs, [followUp.id]);
+  assert.equal(view.messages.some((message) => message.text === "existing branch"), false);
+  assert.equal(view.messages.some((message) => message.text === "new fork"), true);
+  assert.equal(view.messages.some((message) => message.text === "new answer"), true);
+});
+
 test("unclassified live entries in the same session stay outside the selected branch", () => {
   const view = buildConversationView([
     {

@@ -22,6 +22,7 @@
   import AuditPaneTabs from "./AuditPaneTabs.svelte";
   import { auditList } from "./auditList.svelte.js";
   import { auditWorkflows } from "./audit-workflows.svelte.js";
+  import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import { extractRequestPromptTextSegments } from "./conversation-helpers.js";
   import { auditPanes } from "./audit-logic.js";
 
@@ -30,6 +31,11 @@
   let { entry, thread = null } = $props();
 
   const expanded = $derived(auditList.isAuditEntryExpanded(entry));
+  const interactionsOpen = $derived(
+    conversationDrawer.conversationOpen &&
+      String(conversationDrawer.conversationAnchorID || "") ===
+        String(entry.id || ""),
+  );
   const panes = $derived(
     expanded ? auditPanes(entry, extractRequestPromptTextSegments) : [],
   );
@@ -51,7 +57,11 @@
   }
 </script>
 
-<details class="audit-entry" open>
+<details
+  class="audit-entry"
+  class:audit-entry-interactions-open={interactionsOpen}
+  open
+>
   <AuditEntrySummary {entry} {thread} {expanded} onactivate={toggleExpanded} />
   {#if expanded}
     <div
@@ -73,6 +83,22 @@
     border-radius: var(--radius);
     background: var(--bg);
     overflow: hidden;
+    transition:
+      background 0.12s ease-out,
+      border-color 0.12s ease-out;
+  }
+
+  .audit-entry-interactions-open {
+    border-color: color-mix(
+      in srgb,
+      var(--prompt-cache-color) 38%,
+      var(--border)
+    );
+    background: color-mix(
+      in srgb,
+      var(--prompt-cache-color) 7%,
+      var(--bg)
+    );
   }
 
   .audit-entry-details {
@@ -80,5 +106,18 @@
     padding: 12px;
     background: var(--bg-surface);
     overflow: hidden;
+  }
+
+  .audit-entry-interactions-open .audit-entry-details {
+    border-top-color: color-mix(
+      in srgb,
+      var(--prompt-cache-color) 24%,
+      var(--border)
+    );
+    background: color-mix(
+      in srgb,
+      var(--prompt-cache-color) 5%,
+      var(--bg-surface)
+    );
   }
 </style>
