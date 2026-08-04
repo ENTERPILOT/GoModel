@@ -5,6 +5,7 @@
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import DatePickerCalendar from "./DatePickerCalendar.svelte";
   import { shiftMonth } from "./datePickerLogic.js";
+  import { dismissOnOutside } from "$lib/utils/attachments.js";
 
   let { onchange } = $props();
 
@@ -15,7 +16,6 @@
   let selectingDate = $state("start");
   let calendarMonth = $state(new Date());
   let cursorHint = $state({ show: false, x: 0, y: 0 });
-  let rootEl = $state(null);
 
   function toggle() {
     open = !open;
@@ -32,22 +32,6 @@
     open = false;
     cursorHint = { show: false, x: 0, y: 0 };
   }
-
-  $effect(() => {
-    if (!open) return;
-    const onDocClick = (event) => {
-      if (rootEl && !rootEl.contains(event.target)) close();
-    };
-    const onKeydown = (event) => {
-      if (event.key === "Escape") close();
-    };
-    document.addEventListener("click", onDocClick, true);
-    window.addEventListener("keydown", onKeydown);
-    return () => {
-      document.removeEventListener("click", onDocClick, true);
-      window.removeEventListener("keydown", onKeydown);
-    };
-  });
 
   // A day rollover slides a today-following window without any click, so the
   // host page has to refetch just as it would after a manual pick.
@@ -93,7 +77,9 @@
   }
 </script>
 
-<div class="date-picker" bind:this={rootEl}>
+<!-- The dismiss attachment sits on the root (trigger included), so clicking the
+     trigger is an inside click and `toggle` keeps owning that case. -->
+<div class="date-picker" {@attach open ? dismissOnOutside(close) : undefined}>
   <button
     class="date-picker-trigger"
     title={dateRange.dateRangeSpanLabel()}

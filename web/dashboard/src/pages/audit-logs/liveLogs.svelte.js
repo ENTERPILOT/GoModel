@@ -18,10 +18,12 @@
 // Authorization bearer header can be sent; apiFetch preserves that. The
 // stream uses SSE framing (data: lines, CRLF frames), a replay cursor
 // (&cursor=lastSeq), exponential reconnect backoff (500ms * 2^n, capped at
-// 30s, attempt cap 6) and heartbeat handling.
+// 30s, attempt cap 6) and heartbeat handling. Framing and backoff are shared
+// with the overview's usage-signal stream via $lib/api/eventStream.js.
 
 import { untrack } from "svelte";
 import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
+import { nextReconnect } from "$lib/api/eventStream.js";
 import { readStored } from "$lib/utils/storage.js";
 import { auth } from "$lib/stores/auth.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
@@ -196,9 +198,8 @@ class LiveLogsStore {
     this.liveLogsStreaming = false;
     if (!this.liveLogsEnabled()) return;
     if (this.liveLogsReconnectTimer) return;
-    const attempt = Math.min(this.liveLogsReconnectAttempts + 1, 6);
+    const { attempt, delay } = nextReconnect(this.liveLogsReconnectAttempts);
     this.liveLogsReconnectAttempts = attempt;
-    const delay = Math.min(30000, 500 * Math.pow(2, attempt - 1));
     this.liveLogsReconnectTimer = setTimeout(() => {
       this.liveLogsReconnectTimer = null;
       void this.startLiveLogs();

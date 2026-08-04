@@ -14,7 +14,10 @@
 //     fetchUsage, fetchAuditLog, isAuditEntryExpanded, refreshLiveConversation,
 //     noteLiveTokenUsage, fetchAuditEntryDetail
 //
-// No Svelte runes and no imports here: node --test runs this file directly.
+// No Svelte runes here, and the single import is by relative path: node --test
+// runs this file directly and cannot resolve the `$lib` alias.
+
+import { consumeEventStream } from "../../lib/api/eventStream.js";
 
 const LIVE_LOGS_STREAM_PATH = "/admin/live/logs?types=audit,usage";
 
@@ -52,42 +55,7 @@ export function liveLogsStreamPath(lastSeq) {
 export function liveLogsMethods() {
     return {
         async consumeLiveLogsBody(reader) {
-            const decoder = new TextDecoder();
-            let buffer = '';
-            while (true) {
-                const chunk = await reader.read();
-                if (chunk.done) break;
-                buffer += decoder.decode(chunk.value, { stream: true });
-                let delimiter;
-                while ((delimiter = buffer.match(/\r?\n\r?\n/))) {
-                    const splitAt = delimiter.index;
-                    const frame = buffer.slice(0, splitAt);
-                    buffer = buffer.slice(splitAt + delimiter[0].length);
-                    this.handleLiveLogsFrame(frame);
-                }
-            }
-            buffer += decoder.decode();
-            if (buffer.trim()) {
-                this.handleLiveLogsFrame(buffer);
-            }
-        },
-
-        handleLiveLogsFrame(frame) {
-            const lines = String(frame || '').split(/\r?\n/);
-            const data = [];
-            for (const line of lines) {
-                if (line.indexOf('data:') === 0) {
-                    data.push(line.slice(5).trimStart());
-                }
-            }
-            if (data.length === 0) return;
-            let event;
-            try {
-                event = JSON.parse(data.join('\n'));
-            } catch {
-                return;
-            }
-            this.applyLiveLogEvent(event);
+            await consumeEventStream(reader, (event) => this.applyLiveLogEvent(event));
         },
 
         applyLiveLogEvent(event) {
