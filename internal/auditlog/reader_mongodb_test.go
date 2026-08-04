@@ -119,3 +119,29 @@ func TestMongoUserPathMatchFilter(t *testing.T) {
 		}
 	})
 }
+
+func TestMongoExactUserPathMatchFilter(t *testing.T) {
+	t.Run("root includes only root and legacy rows", func(t *testing.T) {
+		got := mongoExactUserPathMatchFilter("/")
+		want := bson.E{
+			Key: "$or",
+			Value: bson.A{
+				bson.D{{Key: "user_path", Value: "/"}},
+				bson.D{{Key: "user_path", Value: ""}},
+				bson.D{{Key: "user_path", Value: bson.D{{Key: "$exists", Value: false}}}},
+				bson.D{{Key: "user_path", Value: nil}},
+			},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("mongoExactUserPathMatchFilter(%q) = %#v, want %#v", "/", got, want)
+		}
+	})
+
+	t.Run("non-root uses equality", func(t *testing.T) {
+		got := mongoExactUserPathMatchFilter("/team")
+		want := bson.E{Key: "user_path", Value: "/team"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("mongoExactUserPathMatchFilter(%q) = %#v, want %#v", "/team", got, want)
+		}
+	})
+}

@@ -75,6 +75,64 @@ func TestSQLStore_SessionIDRoundtripAndFilter(t *testing.T) {
 	})
 }
 
+func conversationPathIsolationFixture(base time.Time) []*LogEntry {
+	return []*LogEntry{
+		{ID: "tenant-a-1", Timestamp: base, SessionID: "shared-session", UserPath: "/tenants/a"},
+		{ID: "tenant-a-2", Timestamp: base.Add(time.Second), SessionID: "shared-session", UserPath: "/tenants/a"},
+		{ID: "tenant-b-secret", Timestamp: base.Add(2 * time.Second), SessionID: "shared-session", UserPath: "/tenants/b"},
+		{ID: "tenant-a-child-secret", Timestamp: base.Add(3 * time.Second), SessionID: "shared-session", UserPath: "/tenants/a/child"},
+		{ID: "root-1", Timestamp: base.Add(4 * time.Second), SessionID: "root-shared", UserPath: "/"},
+		{ID: "root-legacy", Timestamp: base.Add(5 * time.Second), SessionID: "root-shared"},
+		{ID: "root-child-secret", Timestamp: base.Add(6 * time.Second), SessionID: "root-shared", UserPath: "/tenants/a"},
+	}
+}
+
+func assertConversationUserPathIsolation(t *testing.T, reader Reader) {
+	t.Helper()
+	ctx := context.Background()
+	conversation, err := reader.GetConversation(ctx, "tenant-a-1", 10)
+	if err != nil {
+		t.Fatalf("GetConversation failed: %v", err)
+	}
+	if len(conversation.Entries) != 2 {
+		t.Fatalf("conversation entries = %+v, want only tenant A", conversation.Entries)
+	}
+	for _, entry := range conversation.Entries {
+		if entry.UserPath != "/tenants/a" {
+			t.Fatalf("conversation leaked %q from %q", entry.ID, entry.UserPath)
+		}
+	}
+
+	rootConversation, err := reader.GetConversation(ctx, "root-1", 10)
+	if err != nil {
+		t.Fatalf("root GetConversation failed: %v", err)
+	}
+	if len(rootConversation.Entries) != 2 || rootConversation.Entries[0].ID != "root-1" || rootConversation.Entries[1].ID != "root-legacy" {
+		t.Fatalf("root conversation leaked child paths: %+v", rootConversation.Entries)
+	}
+}
+
+func TestSQLReader_GetConversationScopesSessionToUserPath(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+		if err := store.WriteBatch(ctx, conversationPathIsolationFixture(time.Now().UTC())); err != nil {
+			t.Fatalf("WriteBatch failed: %v", err)
+		}
+
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
+		assertConversationUserPathIsolation(t, reader)
+	})
+}
+
 func TestSQLReader_GetSessions(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := newSQLStoreForTest(t, db, 0)

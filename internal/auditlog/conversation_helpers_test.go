@@ -144,7 +144,7 @@ func TestBuildConversationThreadWalksBothDirections(t *testing.T) {
 func TestBuildSessionConversationFollowsLatestAndKeepsAnchor(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
-	anchor := &LogEntry{ID: "log-1", SessionID: "session-1", Timestamp: base}
+	anchor := &LogEntry{ID: "log-1", SessionID: "session-1", UserPath: "/team/a", Timestamp: base}
 	newestFirst := []LogEntry{
 		{ID: "log-4", SessionID: "session-1", Timestamp: base.Add(3 * time.Minute)},
 		{ID: "log-3", SessionID: "session-1", Timestamp: base.Add(2 * time.Minute)},
@@ -156,6 +156,12 @@ func TestBuildSessionConversationFollowsLatestAndKeepsAnchor(t *testing.T) {
 		func(_ context.Context, params LogQueryParams) (*LogListResult, error) {
 			if params.SessionID != "session-1" {
 				t.Fatalf("session id = %q, want session-1", params.SessionID)
+			}
+			if params.UserPath != "/team/a" {
+				t.Fatalf("user path = %q, want /team/a", params.UserPath)
+			}
+			if !params.ExactUserPath {
+				t.Fatal("session conversation must use an exact user-path filter")
 			}
 			if !params.OmitAttempts {
 				t.Fatal("session conversation must omit attempt hydration")

@@ -27,6 +27,7 @@ type LogQueryParams struct {
 	Limit          int
 	Offset         int
 	OmitAttempts   bool
+	ExactUserPath  bool
 }
 
 // LogListResult holds a paginated list of audit log entries.

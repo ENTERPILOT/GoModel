@@ -32,6 +32,13 @@ func auditUserPathSQLPredicate(userPath, exactExpr, subtreeExpr string) string {
 	return predicate + ")"
 }
 
+func auditExactUserPathSQLPredicate(userPath, exactExpr string) string {
+	if userPath == "/" {
+		return "(" + exactExpr + " OR user_path = '' OR user_path IS NULL)"
+	}
+	return exactExpr
+}
+
 func auditUserPathSubtreeRegex(userPath string) string {
 	if userPath == "/" {
 		return "^/"

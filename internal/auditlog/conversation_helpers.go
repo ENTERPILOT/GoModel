@@ -21,16 +21,22 @@ func buildSessionConversation(ctx context.Context, anchor *LogEntry, limit int, 
 	if anchor == nil {
 		return &ConversationResult{Entries: []LogEntry{}}, nil
 	}
+	userPath := strings.TrimSpace(anchor.UserPath)
+	if userPath == "" {
+		userPath = "/"
+	}
 
 	entries := make([]LogEntry, 0, limit)
 	total := 0
 	for offset := 0; offset < limit; {
 		pageSize := min(limit-offset, 100)
 		page, err := getPage(ctx, LogQueryParams{
-			SessionID:    anchor.SessionID,
-			Limit:        pageSize,
-			Offset:       offset,
-			OmitAttempts: true,
+			SessionID:     anchor.SessionID,
+			UserPath:      userPath,
+			Limit:         pageSize,
+			Offset:        offset,
+			OmitAttempts:  true,
+			ExactUserPath: true,
 		})
 		if err != nil {
 			return nil, err

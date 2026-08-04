@@ -189,8 +189,12 @@ func (r *SQLReader) logFilters(params LogQueryParams) ([]string, []any, error) {
 		add(r.likeClause("path"), contains(params.Path))
 	}
 	if userPath != "" {
-		add(auditUserPathSQLPredicate(userPath, "user_path = ?", r.likeClause("user_path")),
-			userPath, auditUserPathSubtreePattern(userPath))
+		if params.ExactUserPath {
+			add(auditExactUserPathSQLPredicate(userPath, "user_path = ?"), userPath)
+		} else {
+			add(auditUserPathSQLPredicate(userPath, "user_path = ?", r.likeClause("user_path")),
+				userPath, auditUserPathSubtreePattern(userPath))
+		}
 	}
 	if params.ErrorType != "" {
 		add(r.likeClause("error_type"), contains(params.ErrorType))

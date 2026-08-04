@@ -110,6 +110,21 @@ func mongoUserPathMatchFilter(userPath string) bson.E {
 	}
 }
 
+func mongoExactUserPathMatchFilter(userPath string) bson.E {
+	if userPath != "/" {
+		return bson.E{Key: "user_path", Value: userPath}
+	}
+	return bson.E{
+		Key: "$or",
+		Value: bson.A{
+			bson.D{{Key: "user_path", Value: "/"}},
+			bson.D{{Key: "user_path", Value: ""}},
+			bson.D{{Key: "user_path", Value: bson.D{{Key: "$exists", Value: false}}}},
+			bson.D{{Key: "user_path", Value: nil}},
+		},
+	}
+}
+
 // GetLogs returns a paginated list of audit log entries.
 func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
@@ -230,7 +245,11 @@ func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
 	if userPath, err := normalizeAuditUserPathFilter(params.UserPath); err != nil {
 		return nil, core.NewInvalidRequestError(err.Error(), err)
 	} else if userPath != "" {
-		matchFilters = append(matchFilters, mongoUserPathMatchFilter(userPath))
+		if params.ExactUserPath {
+			matchFilters = append(matchFilters, mongoExactUserPathMatchFilter(userPath))
+		} else {
+			matchFilters = append(matchFilters, mongoUserPathMatchFilter(userPath))
+		}
 	}
 	if params.ErrorType != "" {
 		matchFilters = append(matchFilters, bson.E{
