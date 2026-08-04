@@ -11,7 +11,11 @@
 // which cannot resolve the `$lib` alias, so it imports this module by relative
 // path while bundled code uses `$lib/api/eventStream.js`.
 
-/** Stop retrying after this many consecutive failures (the delay stays capped). */
+/**
+ * Ceiling for the attempt counter, NOT a retry limit: the consumers keep
+ * reconnecting indefinitely, and once the counter pins here the delay stops
+ * growing (see nextReconnect).
+ */
 export const MAX_RECONNECT_ATTEMPTS = 6;
 
 /**
@@ -62,8 +66,10 @@ function emitFrame(frame, onEvent) {
 }
 
 /**
- * Next attempt number and its exponential backoff delay (500ms doubling,
- * capped at 30s). `attempts` is the count of consecutive failures so far.
+ * Next attempt number and its exponential backoff delay: 500ms doubling per
+ * attempt, so the delay tops out at 16s once `attempt` reaches
+ * MAX_RECONNECT_ATTEMPTS (the 30s ceiling below is a guard the attempt cap
+ * keeps unreachable). `attempts` is the count of consecutive failures so far.
  *
  * @param {number} attempts
  * @returns {{attempt: number, delay: number}}

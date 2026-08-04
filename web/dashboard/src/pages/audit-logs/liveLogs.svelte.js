@@ -17,9 +17,10 @@
 // Transport: the stream is fetch + ReadableStream (NOT EventSource) so the
 // Authorization bearer header can be sent; apiFetch preserves that. The
 // stream uses SSE framing (data: lines, CRLF frames), a replay cursor
-// (&cursor=lastSeq), exponential reconnect backoff (500ms * 2^n, capped at
-// 30s, attempt cap 6) and heartbeat handling. Framing and backoff are shared
-// with the overview's usage-signal stream via $lib/api/eventStream.js.
+// (&cursor=lastSeq), exponential reconnect backoff (500ms * 2^n, attempt
+// counter capped at 6 so the delay tops out at 16s; reconnects continue
+// indefinitely) and heartbeat handling. Framing and backoff are shared with
+// the overview's usage-signal stream via $lib/api/eventStream.js.
 
 import { untrack } from "svelte";
 import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
