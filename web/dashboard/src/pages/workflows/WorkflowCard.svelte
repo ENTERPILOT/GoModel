@@ -18,6 +18,7 @@
     shortHash,
   } from "./workflowsLogic.js";
   import { workflowChart } from "./workflowChartLogic.js";
+  import { Pencil } from "lucide";
 
   let { workflow, preview = false } = $props();
 
@@ -93,7 +94,7 @@
           class="table-icon-btn"
           onclick={() => wf.openCreate(workflow)}
         >
-          <Icon name="pencil" class="table-icon-svg" />
+          <Icon icon={Pencil} class="table-icon-svg" />
         </TableActionButton>
       </div>
       <div class="workflow-card-meta workflow-card-meta-footer">

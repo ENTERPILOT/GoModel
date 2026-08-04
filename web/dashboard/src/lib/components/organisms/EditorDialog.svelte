@@ -32,6 +32,7 @@
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
+  import { Save } from "lucide";
 
   let {
     open = false,
@@ -42,7 +43,7 @@
     submitDisabled = false,
     submitLabel = "Save",
     submittingLabel = "Saving...",
-    submitIcon = "save",
+    submitIcon = Save,
     cancel = true,
     dialogClass = "",
     novalidate = false,
@@ -113,7 +114,7 @@
           class="btn btn-primary btn-with-icon"
           disabled={submitting || submitDisabled}
         >
-          <Icon name={submitIcon} class="form-action-icon" />
+          <Icon icon={submitIcon} class="form-action-icon" />
           <span>{submitting ? submittingLabel : submitLabel}</span>
         </button>
       </div>

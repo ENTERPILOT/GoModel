@@ -10,6 +10,7 @@
   import BudgetList from "./BudgetList.svelte";
   import BudgetEditor from "./BudgetEditor.svelte";
   import { budgetsStore as store } from "./budgets.svelte.js";
+  import { Plus } from "lucide";
 
   const PAGE = "budgets";
 
@@ -42,7 +43,7 @@
           disabled={store.formSubmitting}
           onclick={() => store.openForm()}
         >
-          <Icon name="plus" class="form-action-icon" />
+          <Icon icon={Plus} class="form-action-icon" />
           <span>Create Budget</span>
         </button>
       {/if}

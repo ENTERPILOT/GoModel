@@ -27,6 +27,7 @@ import {
   filterFailoverDrafts,
   failoverDraftPayload,
 } from "./failover-logic.js";
+import { Trash2 } from "lucide";
 
 function emptyFailoverForm() {
   return {
@@ -330,7 +331,7 @@ class FailoverStore {
         "Remove every dashboard-managed failover mapping. Configuration-managed mappings remain active.",
       requiredText: "remove",
       confirmLabel: "Remove Failover",
-      icon: "trash-2",
+      icon: Trash2,
       dialogClass: "budget-reset-dialog",
       onConfirm: async () => {
         await this.resetFailoverRules();

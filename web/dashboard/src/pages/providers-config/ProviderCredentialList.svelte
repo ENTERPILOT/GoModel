@@ -9,6 +9,7 @@
     providerCredentialAuthLabel,
     providerCredentialModelsLabel,
   } from "./providersConfigLogic.js";
+  import { Pencil, X } from "lucide";
 </script>
 
 <div class="table-wrapper">
@@ -57,7 +58,7 @@
                   class="table-icon-btn"
                   onclick={() => providersConfig.openEdit(row)}
                 >
-                  <Icon name="pencil" class="table-icon-svg" />
+                  <Icon icon={Pencil} class="table-icon-svg" />
                 </TableActionButton>
                 <TableActionButton
                   label={(providersConfig.deletingName === row.name ? "Deleting provider " : "Delete provider ") + row.name}
@@ -65,7 +66,7 @@
                   onclick={() => providersConfig.requestDelete(row.name)}
                   disabled={providersConfig.deletingName === row.name}
                 >
-                  <Icon name="x" class="table-icon-svg" />
+                  <Icon icon={X} class="table-icon-svg" />
                 </TableActionButton>
               {/if}
             </div>

@@ -18,6 +18,7 @@
     rowRedirectCanRemove,
   } from "./virtualModelsLogic.js";
   import AccessToggle from "./AccessToggle.svelte";
+  import { CircleDollarSign, Gauge, Pencil, Shuffle, Trash2 } from "lucide";
 
   // columns: the active category's column spec from categoryColumns.js
   // (ModelTable renders the matching <thead> from the same spec).
@@ -91,7 +92,7 @@
             onclick={() => virtualModels.removeAliasRow(row)}
             disabled={Boolean(virtualModels.rowDeletingKey)}
           >
-            <Icon name="trash-2" class="table-icon-svg" />
+            <Icon icon={Trash2} class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if virtualModels.virtualModelsAvailable}
@@ -100,7 +101,7 @@
             class="table-icon-btn table-action-btn-active"
             onclick={() => virtualModels.openVirtualModelEditAlias(row.alias)}
           >
-            <Icon name="pencil" class="table-icon-svg" />
+            <Icon icon={Pencil} class="table-icon-svg" />
           </TableActionButton>
         {/if}
       </div>
@@ -113,7 +114,7 @@
             class="table-icon-btn {pricingOverrides.modelPricingButtonClass(pricingOverrides.hasModelPricingOverride(row))}"
             onclick={() => pricingOverrides.openModelPricingOverrideEdit(row)}
           >
-            <Icon name="circle-dollar-sign" class="table-icon-svg" />
+            <Icon icon={CircleDollarSign} class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if failover.failoverAvailable && failover.failoverEnabled()}
@@ -122,7 +123,7 @@
             class="table-icon-btn {failover.failoverButtonClass(row)}"
             onclick={() => failover.openFailoverForModel(row)}
           >
-            <Icon name="shuffle" class="table-icon-svg" />
+            <Icon icon={Shuffle} class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if rateLimits.rateLimitsEnabled() && rateLimits.rateLimitInspectorModelID(row)}
@@ -131,7 +132,7 @@
             class="table-icon-btn {rateLimits.rateLimitGaugeClassForModel(row)}"
             onclick={() => rateLimits.openRateLimitInspectorForModel(row)}
           >
-            <Icon name="gauge" class="table-icon-svg" />
+            <Icon icon={Gauge} class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if virtualModels.virtualModelsAvailable && row.masking_alias && row.masking_alias.name}
@@ -140,7 +141,7 @@
             class="table-icon-btn table-action-btn-active"
             onclick={() => virtualModels.openVirtualModelEditAlias(row.masking_alias)}
           >
-            <Icon name="pencil" class="table-icon-svg" />
+            <Icon icon={Pencil} class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if virtualModels.virtualModelsAvailable && !row.masking_alias}
@@ -149,7 +150,7 @@
             class="table-icon-btn {modelOverrideEditButtonClass(hasAccessOverride(row.access))}"
             onclick={() => virtualModels.openVirtualModelEditModel(row)}
           >
-            <Icon name="pencil" class="table-icon-svg" />
+            <Icon icon={Pencil} class="table-icon-svg" />
           </TableActionButton>
         {/if}
       </div>

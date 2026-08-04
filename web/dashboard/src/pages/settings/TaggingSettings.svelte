@@ -15,6 +15,7 @@
     taggingSettingsPayload,
     taggingErrorMessage,
   } from "./tagging-logic.js";
+  import { Plus, Save } from "lucide";
 
   let taggingHeaders = $state([]);
   let editable = $state(true);
@@ -194,7 +195,7 @@
       disabled={!editable || saving || loading}
       onclick={addHeader}
     >
-      <Icon name="plus" class="form-action-icon" />
+      <Icon icon={Plus} class="form-action-icon" />
       <span>Add Header</span>
     </button>
     <button
@@ -204,7 +205,7 @@
       aria-busy={saving ? "true" : "false"}
       onclick={save}
     >
-      <Icon name="save" class="form-action-icon" />
+      <Icon icon={Save} class="form-action-icon" />
       <span>Save Tagging Settings</span>
     </button>
   </div>

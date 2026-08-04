@@ -1,44 +1,58 @@
 // Sidebar navigation registry: the ordered list of dashboard pages with
-// their lucide icon names and optional runtime-config visibility gates.
+// their lucide icons and optional runtime-config visibility gates.
 // Each item is { page, label, icon, visible? }: `page` is the route id under
-// /admin/dashboard/{page} (see $lib/stores/router), `icon` a kebab-case
-// lucide name for the Icon atom, and `visible` an optional feature gate —
+// /admin/dashboard/{page} (see $lib/stores/router), `icon` a lucide icon
+// imported below and passed to the Icon atom, and `visible` a feature gate —
 // it reads the runtimeConfig runes store, so call it inside a reactive
 // context (Sidebar's $derived) to re-filter when flags load.
 
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import {
+  Box,
+  ChartColumn,
+  Gauge,
+  History,
+  KeyRound,
+  LayoutDashboard,
+  Plug,
+  ServerCog,
+  Settings,
+  ShieldCheck,
+  Wallet,
+  Workflow,
+} from "lucide";
 
 export const NAV_ITEMS = [
-  { page: "overview", label: "Overview", icon: "layout-dashboard" },
-  { page: "providers-config", label: "Providers", icon: "server-cog" },
-  { page: "models", label: "Models", icon: "box" },
-  { page: "audit-logs", label: "Audit Logs", icon: "history" },
-  { page: "usage", label: "Usage", icon: "chart-column" },
+  { page: "overview", label: "Overview", icon: LayoutDashboard },
+  { page: "providers-config", label: "Providers", icon: ServerCog },
+  { page: "models", label: "Models", icon: Box },
+  { page: "audit-logs", label: "Audit Logs", icon: History },
+  { page: "usage", label: "Usage", icon: ChartColumn },
   {
     page: "budgets",
     label: "Budgets",
-    icon: "wallet",
+    icon: Wallet,
     visible: () => runtimeConfig.budgetsVisible(),
   },
   {
     page: "rate-limits",
     label: "Rate Limits",
-    icon: "gauge",
+    icon: Gauge,
     visible: () => runtimeConfig.rateLimitsVisible(),
   },
-  { page: "auth-keys", label: "API Keys", icon: "key-round" },
-  { page: "workflows", label: "Workflows", icon: "workflow" },
+  { page: "auth-keys", label: "API Keys", icon: KeyRound },
+  { page: "workflows", label: "Workflows", icon: Workflow },
   {
     page: "guardrails",
     label: "Guardrails (experimental)",
-    icon: "shield-check",
+    icon: ShieldCheck,
     visible: () => runtimeConfig.guardrailsVisible(),
   },
   {
     page: "mcp-servers",
     label: "MCP Servers",
-    icon: "plug",
+    icon: Plug,
     visible: () => runtimeConfig.mcpVisible(),
   },
-  { page: "settings", label: "Settings", icon: "settings" },
+  { page: "settings", label: "Settings", icon: Settings },
 ];

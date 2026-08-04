@@ -3,6 +3,7 @@
   // (from createCopyState) and performs the copy in `onclick`, so the same
   // button works for page-local state and store-held state.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import { CircleCheck, Copy } from "lucide";
 
   let {
     state,
@@ -30,9 +31,9 @@
   }}
 >
   {#if state.copied}
-    <Icon name="circle-check" width="14" height="14" stroke-width="2.5" />
+    <Icon icon={CircleCheck} width="14" height="14" stroke-width="2.5" />
   {:else}
-    <Icon name="copy" width="14" height="14" />
+    <Icon icon={Copy} width="14" height="14" />
   {/if}
   <span aria-live="polite" aria-atomic="true">{text}</span>
 </button>

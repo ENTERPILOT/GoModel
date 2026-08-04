@@ -15,6 +15,7 @@
     mcpServerStatusTitle,
     mcpServerSubCountsLabel,
   } from "./mcp-servers.js";
+  import { List, Pencil, RefreshCw, X } from "lucide";
 
   function statusTitle(server) {
     return mcpServerStatusTitle(server, (ts) => timezone.formatTimestamp(ts));
@@ -82,7 +83,7 @@
                   class="table-icon-btn"
                   onclick={() => mcpServers.openEdit(server)}
                 >
-                  <Icon name="pencil" class="table-icon-svg" />
+                  <Icon icon={Pencil} class="table-icon-svg" />
                 </TableActionButton>
               {/if}
               <TableActionButton
@@ -90,7 +91,7 @@
                 class="table-icon-btn"
                 onclick={() => mcpServers.openCatalog(server)}
               >
-                <Icon name="list" class="form-action-icon" />
+                <Icon icon={List} class="form-action-icon" />
               </TableActionButton>
               <TableActionButton
                 label={(mcpServers.reconnectingName === mcpServerSlug(server) ? "Reconnecting MCP server " : "Reconnect MCP server ") + server.name}
@@ -98,7 +99,7 @@
                 onclick={() => mcpServers.reconnectServer(server)}
                 disabled={mcpServers.reconnectingName === mcpServerSlug(server)}
               >
-                <Icon name="refresh-cw" class="form-action-icon" />
+                <Icon icon={RefreshCw} class="form-action-icon" />
               </TableActionButton>
               {#if !server.managed}
                 <TableActionButton
@@ -107,7 +108,7 @@
                   onclick={() => mcpServers.deleteServer(server)}
                   disabled={mcpServers.deletingName === mcpServerSlug(server)}
                 >
-                  <Icon name="x" class="table-icon-svg" />
+                  <Icon icon={X} class="table-icon-svg" />
                 </TableActionButton>
               {/if}
             </div>
