@@ -69,12 +69,7 @@ func anthropicResponsesUsagePayload(usage *anthropicUsage) map[string]any {
 		"output_tokens": usage.OutputTokens,
 		"total_tokens":  usage.InputTokens + usage.OutputTokens,
 	}
-	if usage.CacheReadInputTokens > 0 {
-		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
-	}
-	if usage.CacheCreationInputTokens > 0 {
-		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
-	}
+	addAnthropicUsagePayloadDetails(payload, usage, "output_tokens_details")
 	return payload
 }
 
