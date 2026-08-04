@@ -32,12 +32,12 @@ type sessionLivePublisher struct {
 
 type sessionParentLookup struct {
 	auditlog.Reader
-	entry *auditlog.LogEntry
+	entry *auditlog.InteractionParent
 	err   error
 	calls int
 }
 
-func (l *sessionParentLookup) GetLogByID(_ context.Context, _ string) (*auditlog.LogEntry, error) {
+func (l *sessionParentLookup) GetInteractionParent(_ context.Context, _ string) (*auditlog.InteractionParent, error) {
 	l.calls++
 	return l.entry, l.err
 }
@@ -151,8 +151,8 @@ func TestSessionCaptureInheritsTrustedInteractionParent(t *testing.T) {
 		"X-Session-Id":          "raw-session-that-must-not-win",
 	})
 	setInteractionContinuationAllowed(c, true)
-	lookup := &sessionParentLookup{entry: &auditlog.LogEntry{
-		ID: "parent-log", SessionID: "auto-resolved-session", UserPath: "/",
+	lookup := &sessionParentLookup{entry: &auditlog.InteractionParent{
+		SessionID: "auto-resolved-session", UserPath: "/",
 	}}
 
 	handler := sessionCapture(detector, lookup, false)(func(c *echo.Context) error {
@@ -174,8 +174,8 @@ func TestSessionCaptureAllowsParentWhenAuthenticationIsDisabled(t *testing.T) {
 	c := sessionTestContext(t, "/v1/responses", map[string]string{
 		interactionParentHeader: "parent-log",
 	})
-	lookup := &sessionParentLookup{entry: &auditlog.LogEntry{
-		ID: "parent-log", SessionID: "parent-session", UserPath: "/",
+	lookup := &sessionParentLookup{entry: &auditlog.InteractionParent{
+		SessionID: "parent-session", UserPath: "/",
 	}}
 
 	handler := sessionCapture(detector, lookup, true)(func(c *echo.Context) error {
@@ -191,8 +191,8 @@ func TestSessionCaptureAllowsParentWhenAuthenticationIsDisabled(t *testing.T) {
 
 func TestSessionCaptureUsesLiveAuthenticationDecision(t *testing.T) {
 	detector := session.NewDetector(session.BuiltinRules(), true)
-	lookup := &sessionParentLookup{entry: &auditlog.LogEntry{
-		ID: "parent-log", SessionID: "parent-session", UserPath: "/",
+	lookup := &sessionParentLookup{entry: &auditlog.InteractionParent{
+		SessionID: "parent-session", UserPath: "/",
 	}}
 	authenticator := &mockAuthenticator{
 		tokenToID: map[string]string{"managed": "key-1"},
@@ -243,17 +243,24 @@ func TestSessionCaptureRejectsUntrustedOrCrossPathParent(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
 		trusted         bool
-		parentPath      string
+		parentID        string
+		parent          *auditlog.InteractionParent
+		lookupErr       error
 		requestUserPath string
 		wantCalls       int
 	}{
-		{name: "untrusted", wantCalls: 0},
-		{name: "different user path", trusted: true, parentPath: "/team", wantCalls: 1},
-		{name: "legacy root parent from user path", trusted: true, requestUserPath: "/team", wantCalls: 1},
+		{name: "untrusted", parentID: "parent-log", parent: &auditlog.InteractionParent{SessionID: "parent-session"}},
+		{name: "comma in parent id", trusted: true, parentID: "parent,log", wantCalls: 0},
+		{name: "oversized parent id", trusted: true, parentID: strings.Repeat("x", 201), wantCalls: 0},
+		{name: "lookup error", trusted: true, parentID: "parent-log", lookupErr: errors.New("lookup failed"), wantCalls: 1},
+		{name: "missing parent", trusted: true, parentID: "parent-log", wantCalls: 1},
+		{name: "blank parent session", trusted: true, parentID: "parent-log", parent: &auditlog.InteractionParent{}, wantCalls: 1},
+		{name: "different user path", trusted: true, parentID: "parent-log", parent: &auditlog.InteractionParent{SessionID: "parent-session", UserPath: "/team"}, wantCalls: 1},
+		{name: "legacy root parent from user path", trusted: true, parentID: "parent-log", parent: &auditlog.InteractionParent{SessionID: "parent-session"}, requestUserPath: "/team", wantCalls: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := sessionTestContext(t, "/v1/chat/completions", map[string]string{
-				interactionParentHeader: "parent-log",
+				interactionParentHeader: tc.parentID,
 				"X-Session-Id":          "detected-session",
 			})
 			if tc.requestUserPath != "" {
@@ -261,9 +268,7 @@ func TestSessionCaptureRejectsUntrustedOrCrossPathParent(t *testing.T) {
 				c.SetRequest(req.WithContext(core.WithEffectiveUserPath(req.Context(), tc.requestUserPath)))
 			}
 			setInteractionContinuationAllowed(c, tc.trusted)
-			lookup := &sessionParentLookup{entry: &auditlog.LogEntry{
-				ID: "parent-log", SessionID: "parent-session", UserPath: tc.parentPath,
-			}}
+			lookup := &sessionParentLookup{entry: tc.parent, err: tc.lookupErr}
 
 			handler := sessionCapture(detector, lookup, false)(func(c *echo.Context) error {
 				got := core.SessionIDFromContext(c.Request().Context())

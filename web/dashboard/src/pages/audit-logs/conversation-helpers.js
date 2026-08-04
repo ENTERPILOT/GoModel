@@ -224,6 +224,18 @@ function appendIfMissing(messages, message) {
 
 // buildFollowUpRequest reuses the latest request's model/options and extends
 // it according to the endpoint's native conversation contract.
+export function canBuildFollowUpRequest(entry) {
+    const kind = followUpEndpointKind(entry && entry.path);
+    const requestBody = entry && entry.data && entry.data.request_body;
+    if (!kind || !requestBody || typeof requestBody !== 'object') return false;
+    if (kind !== 'responses') return true;
+    const responseID = entry.data && entry.data.response_body &&
+        typeof entry.data.response_body.id === 'string'
+        ? entry.data.response_body.id.trim()
+        : '';
+    return responseID !== '' || conversationReference(requestBody) !== '';
+}
+
 export function buildFollowUpRequest(entry, text) {
     const message = String(text || '').trim();
     const kind = followUpEndpointKind(entry && entry.path);
@@ -232,11 +244,13 @@ export function buildFollowUpRequest(entry, text) {
 
     const responseBody = entry && entry.data ? entry.data.response_body : null;
     if (kind === 'responses') {
-        requestBody.input = message;
         const responseID = responseBody && typeof responseBody.id === 'string'
             ? responseBody.id.trim()
             : '';
-        if (responseID && requestBody.conversation == null) {
+        const conversationID = conversationReference(requestBody);
+        if (!responseID && !conversationID) return null;
+        requestBody.input = message;
+        if (responseID && !conversationID) {
             requestBody.previous_response_id = responseID;
         } else {
             delete requestBody.previous_response_id;
@@ -278,7 +292,7 @@ const blockedFollowUpHeaders = new Set([
 // gate prevents redaction placeholders, browser-owned transport headers, and
 // old request/trace IDs from being replayed while preserving captured session,
 // user-path, label, and other application headers.
-export function buildFollowUpHeaders(entry, anchorID) {
+export function buildFollowUpHeaders(entry, anchorID, requestID = '') {
     const original = entry && entry.data && entry.data.request_headers;
     const headers = {};
     if (original && typeof original === 'object') {
@@ -294,7 +308,14 @@ export function buildFollowUpHeaders(entry, anchorID) {
     // The server inherits the resolved session from this parent. Replaying a
     // derived auto-/scoped session as a raw client header would scope it again.
     headers['X-GoModel-Interaction-Parent'] = String(anchorID || entry && entry.id || '').trim();
+    if (String(requestID || '').trim()) headers['X-Request-ID'] = String(requestID).trim();
     return headers;
+}
+
+export function conversationEntryByRequestID(entries, requestID) {
+    const wanted = String(requestID || '').trim();
+    if (!wanted || !Array.isArray(entries)) return null;
+    return entries.find((entry) => String(entry && entry.request_id || '').trim() === wanted) || null;
 }
 
 export function interactionParentID(entry) {
@@ -803,8 +824,13 @@ export function buildConversationView(entries, anchorID) {
             functionName,
         });
 
-        if (requestBody && typeof requestBody.instructions === 'string' && requestBody.instructions.trim()) {
-            messages.push(message('system', requestBody.instructions));
+        if (requestBody && requestBody.system !== undefined) {
+            const text = extractText(requestBody.system);
+            if (text) messages.push(message('system', text));
+        }
+        if (requestBody && requestBody.instructions !== undefined) {
+            const text = extractText(requestBody.instructions);
+            if (text) messages.push(message('system', text));
         }
 
         if (requestBody && Array.isArray(requestBody.messages)) {

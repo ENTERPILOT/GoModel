@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -71,6 +72,47 @@ func TestSQLStore_SessionIDRoundtripAndFilter(t *testing.T) {
 		if conversation.Entries[0].ID != "s-1" || conversation.Entries[1].ID != "s-2" {
 			t.Fatalf("conversation ids = %q, %q; want s-1, s-2",
 				conversation.Entries[0].ID, conversation.Entries[1].ID)
+		}
+	})
+}
+
+func TestSQLReader_GetConversationUsesKeysetPagination(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+		defer store.Close()
+
+		base := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+		entries := make([]*LogEntry, 120)
+		for i := range entries {
+			entries[i] = &LogEntry{
+				ID:        fmt.Sprintf("paged-%03d", i),
+				Timestamp: base.Add(time.Duration(i) * time.Second),
+				SessionID: "paged-session",
+			}
+		}
+		ctx := context.Background()
+		if err := store.WriteBatch(ctx, entries); err != nil {
+			t.Fatalf("WriteBatch failed: %v", err)
+		}
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("NewSQLReader failed: %v", err)
+		}
+
+		conversation, err := reader.GetConversation(ctx, entries[0].ID, 120)
+		if err != nil {
+			t.Fatalf("GetConversation failed: %v", err)
+		}
+		if len(conversation.Entries) != len(entries) || conversation.Truncated {
+			t.Fatalf("conversation entries/truncated = %d/%v, want 120/false", len(conversation.Entries), conversation.Truncated)
+		}
+		for i, entry := range conversation.Entries {
+			if entry.ID != entries[i].ID {
+				t.Fatalf("entry %d = %q, want %q", i, entry.ID, entries[i].ID)
+			}
 		}
 	})
 }

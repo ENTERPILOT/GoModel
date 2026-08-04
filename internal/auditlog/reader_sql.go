@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -123,7 +124,7 @@ func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogLis
 	}
 
 	rows, err := r.db.Query(ctx,
-		selectLogColumns+where+" ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+		selectLogColumns+where+" ORDER BY timestamp DESC, "+r.dialect.idColumn+" DESC LIMIT ? OFFSET ?",
 		append(append([]any(nil), args...), limit, offset)...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query audit logs: %w", err)
@@ -174,6 +175,11 @@ func (r *SQLReader) logFilters(params LogQueryParams) ([]string, []any, error) {
 	}
 	if !params.EndDate.IsZero() {
 		add("timestamp < ?", r.dialect.timestampBound(params.EndDate.AddDate(0, 0, 1)))
+	}
+	if !params.beforeTimestamp.IsZero() && params.beforeID != "" {
+		cursorTime := r.db.Dialect().TimestampArg(params.beforeTimestamp)
+		add("(timestamp < ? OR (timestamp = ? AND "+r.dialect.idColumn+" < ?))",
+			cursorTime, cursorTime, params.beforeID)
 	}
 	if params.RequestedModel != "" {
 		add(r.likeClause("requested_model"), contains(params.RequestedModel))
@@ -234,24 +240,43 @@ func (r *SQLReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error
 		selectLogColumns+" WHERE "+r.dialect.idColumn+" = ? LIMIT 1", id)
 }
 
+func (r *SQLReader) GetInteractionParent(ctx context.Context, id string) (*InteractionParent, error) {
+	var parent InteractionParent
+	err := r.db.QueryRow(ctx,
+		"SELECT user_path, session_id FROM audit_logs WHERE "+r.dialect.idColumn+" = ? LIMIT 1", id,
+	).Scan(&parent.UserPath, &parent.SessionID)
+	if errors.Is(err, sqlx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan interaction parent: %w", err)
+	}
+	return &parent, nil
+}
+
 func (r *SQLReader) GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error) {
-	return buildConversation(ctx, logID, limit, r.GetLogByID, r.GetLogs,
+	return buildConversation(ctx, logID, limit, r.getConversationLogByID, r.GetLogs,
 		r.findByResponseID, r.findByPreviousResponseID)
 }
 
+func (r *SQLReader) getConversationLogByID(ctx context.Context, id string) (*LogEntry, error) {
+	return r.queryLogEntry(ctx,
+		selectLogColumns+" WHERE "+r.dialect.idColumn+" = ? LIMIT 1", id)
+}
+
 func (r *SQLReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
-	return r.queryLogEntryWithAttempts(ctx,
+	return r.queryLogEntry(ctx,
 		selectLogColumns+" WHERE "+r.dialect.responseID+" = ? ORDER BY timestamp ASC LIMIT 1", responseID)
 }
 
 func (r *SQLReader) findByPreviousResponseID(ctx context.Context, previousResponseID string) (*LogEntry, error) {
-	return r.queryLogEntryWithAttempts(ctx,
+	return r.queryLogEntry(ctx,
 		selectLogColumns+" WHERE "+r.dialect.previousResponseID+" = ? ORDER BY timestamp ASC LIMIT 1", previousResponseID)
 }
 
-// queryLogEntryWithAttempts runs a single-row audit log query, scans the entry,
-// and hydrates its provider attempts. Returns (nil, nil) when no row matches.
-func (r *SQLReader) queryLogEntryWithAttempts(ctx context.Context, query, arg string) (*LogEntry, error) {
+// queryLogEntry runs a single-row audit log query without hydrating provider
+// attempts. Conversation and parent lookups never expose attempt history.
+func (r *SQLReader) queryLogEntry(ctx context.Context, query, arg string) (*LogEntry, error) {
 	rows, err := r.db.Query(ctx, query, arg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query audit log: %w", err)
@@ -264,11 +289,19 @@ func (r *SQLReader) queryLogEntryWithAttempts(ctx context.Context, query, arg st
 		}
 		return nil, nil
 	}
-	entry, err := scanSQLLogEntry(rows)
+	return scanSQLLogEntry(rows)
+}
+
+// queryLogEntryWithAttempts runs a single-row audit log query, scans the entry,
+// and hydrates its provider attempts. Returns (nil, nil) when no row matches.
+func (r *SQLReader) queryLogEntryWithAttempts(ctx context.Context, query, arg string) (*LogEntry, error) {
+	entry, err := r.queryLogEntry(ctx, query, arg)
 	if err != nil {
 		return nil, err
 	}
-	rows.Close()
+	if entry == nil {
+		return nil, nil
+	}
 
 	hydrated := []LogEntry{*entry}
 	if err := r.loadAttempts(ctx, hydrated); err != nil {

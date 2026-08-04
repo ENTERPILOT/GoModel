@@ -16,7 +16,7 @@ import (
 const interactionParentHeader = "X-GoModel-Interaction-Parent"
 
 type interactionParentLookup interface {
-	GetLogByID(ctx context.Context, id string) (*auditlog.LogEntry, error)
+	GetInteractionParent(ctx context.Context, id string) (*auditlog.InteractionParent, error)
 }
 
 // sessionCapture resolves session identity after authentication and before
@@ -82,7 +82,7 @@ func interactionParentSession(c *echo.Context, lookup interactionParentLookup, a
 	if parentID == "" || len(parentID) > 200 || strings.ContainsAny(parentID, ",\x00") {
 		return ""
 	}
-	parent, err := lookup.GetLogByID(c.Request().Context(), parentID)
+	parent, err := lookup.GetInteractionParent(c.Request().Context(), parentID)
 	if err != nil || parent == nil {
 		return ""
 	}

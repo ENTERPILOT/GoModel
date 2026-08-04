@@ -28,6 +28,9 @@ type LogQueryParams struct {
 	Offset         int
 	OmitAttempts   bool
 	ExactUserPath  bool
+	// Internal keyset cursor used while assembling multi-page conversations.
+	beforeTimestamp time.Time
+	beforeID        string
 }
 
 // LogListResult holds a paginated list of audit log entries.
@@ -68,6 +71,13 @@ type ConversationResult struct {
 	Truncated bool `json:"truncated,omitempty"`
 }
 
+// InteractionParent contains only the persisted identity needed to attach a
+// dashboard continuation to its parent session.
+type InteractionParent struct {
+	UserPath  string
+	SessionID string
+}
+
 // Reader provides read access to audit log data for the admin API.
 type Reader interface {
 	// GetLogs returns a paginated list of audit log entries with optional filtering.
@@ -82,6 +92,10 @@ type Reader interface {
 	// GetLogByID returns a single audit log entry by ID.
 	// Returns (nil, nil) when no entry exists for the given ID.
 	GetLogByID(ctx context.Context, id string) (*LogEntry, error)
+
+	// GetInteractionParent returns the fields needed to authorize and inherit a
+	// dashboard continuation without loading captured bodies or attempts.
+	GetInteractionParent(ctx context.Context, id string) (*InteractionParent, error)
 
 	// GetConversation returns the anchor's session when it has one. Entries
 	// without a detected session fall back to Responses API linkage fields:

@@ -6,7 +6,9 @@ import {
   buildConversationView,
   buildFollowUpHeaders,
   buildFollowUpRequest,
+  canBuildFollowUpRequest,
   canShowConversation,
+  conversationEntryByRequestID,
   conversationEntryIsLatest,
   conversationFollowUpEntry,
   extractConversationErrorMessage,
@@ -155,6 +157,34 @@ test("responses-API threads shape input items, function calls and outputs", () =
   assert.equal(messages[3].text, "42");
   assert.equal(messages[4].text, "Pong");
   assert.ok(messages.every((m) => m.isAnchor === false));
+});
+
+test("messages top-level system prompts support strings and content blocks", () => {
+  const base = {
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/messages",
+    data: { request_body: { messages: [{ role: "user", content: "Hi" }] } },
+  };
+  const stringEntry = {
+    ...base,
+    id: "system-string",
+    data: { request_body: { ...base.data.request_body, system: "Be concise." } },
+  };
+  const blockEntry = {
+    ...base,
+    id: "system-block",
+    data: { request_body: {
+      ...base.data.request_body,
+      system: [{ type: "text", text: "Use tools carefully." }],
+    } },
+  };
+
+  assert.deepEqual(buildConversationMessages([stringEntry], stringEntry.id).map((m) => m.text), [
+    "Be concise.", "Hi",
+  ]);
+  assert.deepEqual(buildConversationMessages([blockEntry], blockEntry.id).map((m) => m.text), [
+    "Use tools carefully.", "Hi",
+  ]);
 });
 
 test("entries with errors append an error message extracted from nested payloads", () => {
@@ -366,7 +396,7 @@ test("a follow-up anchored from history selects its new fork instead of a newer 
   };
   const sibling = {
     id: "existing-branch",
-    timestamp: "2026-08-03T11:01:00Z",
+    timestamp: "2026-08-03T11:03:00Z",
     data: {
       request_headers: { "X-GoModel-Interaction-Parent": anchor.id },
       request_body: { messages: [
@@ -540,10 +570,16 @@ test("responses follow-ups preserve options and chain from the latest response",
     input: "Next",
     previous_response_id: "resp_123",
   });
-  assert.equal(buildFollowUpRequest({
+  const unchainable = {
     path: "/v1/responses",
     data: { request_body: { input: "Hi", previous_response_id: "resp_old" } },
-  }, "Next").previous_response_id, undefined);
+  };
+  assert.equal(canBuildFollowUpRequest(unchainable), false);
+  assert.equal(buildFollowUpRequest(unchainable, "Next"), null);
+  assert.equal(canBuildFollowUpRequest({
+    path: "/v1/responses",
+    data: { request_body: { input: "Hi", conversation: "  " } },
+  }), false);
   assert.equal(buildFollowUpRequest({
     path: "/v1/responses",
     data: {
@@ -551,6 +587,7 @@ test("responses follow-ups preserve options and chain from the latest response",
       response_body: { id: "resp_123" },
     },
   }, "Next").previous_response_id, undefined);
+  assert.equal(canBuildFollowUpRequest(entry), true);
 });
 
 test("follow-up headers preserve application context without replaying credentials", () => {
@@ -583,11 +620,21 @@ test("follow-up headers preserve application context without replaying credentia
   assert.equal(interactionParentID({ data: { request_headers: headers } }), "log-1");
 });
 
+test("follow-up correlation selects only the submitted child request", () => {
+  const entries = [
+    { id: "sibling", request_id: "request-other" },
+    { id: "submitted", request_id: "request-submitted" },
+  ];
+  assert.equal(conversationEntryByRequestID(entries, "request-submitted").id, "submitted");
+  assert.equal(conversationEntryByRequestID(entries, "request-missing"), null);
+
+  const headers = buildFollowUpHeaders(entries[1], "parent", " request-new ");
+  assert.equal(headers["X-Request-ID"], "request-new");
+});
+
 test("follow-up headers do not change session scoping", () => {
   const rootSession = buildFollowUpHeaders({
     id: "root-log",
-    session_id: "ses_038f24fd0ffepd013fh3piDcdV",
-    user_path: "/",
     data: { request_headers: {
       "X-Session-Id": "ses_038f24fd0ffepd013fh3piDcdV",
     } },
@@ -597,19 +644,20 @@ test("follow-up headers do not change session scoping", () => {
 
   const scopedSession = buildFollowUpHeaders({
     id: "scoped-log",
-    session_id: "scoped-529bff5b6264795393a9fb1e1da35906",
-    user_path: "/team",
-    data: { request_headers: {} },
+    data: { request_headers: {
+      "X-Session-Id": "scoped-529bff5b6264795393a9fb1e1da35906",
+    } },
   }, "scoped-log");
-  assert.equal(scopedSession["X-Session-Id"], undefined);
+  assert.equal(scopedSession["X-Session-Id"], "scoped-529bff5b6264795393a9fb1e1da35906");
   assert.equal(scopedSession["X-GoModel-User-Path"], undefined);
 
   const autoSession = buildFollowUpHeaders({
     id: "auto-log",
-    session_id: "auto-529bff5b6264795393a9fb1e1da35906",
-    data: { request_headers: { "X-GoModel-User-Path": "/team" } },
+    data: { request_headers: {
+      "X-Session-Id": "auto-529bff5b6264795393a9fb1e1da35906",
+    } },
   }, "auto-log");
-  assert.equal(autoSession["X-Session-Id"], undefined);
+  assert.equal(autoSession["X-Session-Id"], "auto-529bff5b6264795393a9fb1e1da35906");
 
   const capturedUserPath = buildFollowUpHeaders({
     id: "team-log",

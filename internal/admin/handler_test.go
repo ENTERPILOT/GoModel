@@ -169,6 +169,16 @@ func (m *mockAuditReader) GetLogByID(_ context.Context, _ string) (*auditlog.Log
 	return m.logByID, nil
 }
 
+func (m *mockAuditReader) GetInteractionParent(_ context.Context, _ string) (*auditlog.InteractionParent, error) {
+	if m.logByIDErr != nil {
+		return nil, m.logByIDErr
+	}
+	if m.logByID == nil {
+		return nil, nil
+	}
+	return &auditlog.InteractionParent{UserPath: m.logByID.UserPath, SessionID: m.logByID.SessionID}, nil
+}
+
 func (m *mockAuditReader) GetRequestStats(_ context.Context, params auditlog.RequestStatsParams) (*auditlog.RequestStats, error) {
 	m.lastStatsParams = params
 	if m.statsErr != nil {

@@ -1,13 +1,15 @@
 // Interactions drawer state. Pure transcript and branch shaping lives in
 // conversation-helpers.js.
 
-import { apiFetch, getJSON } from "$lib/api/client.js";
+import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
 import { liveLogs } from "./liveLogs.svelte.js";
 import {
   buildConversationView,
   buildFollowUpHeaders,
   buildFollowUpRequest,
+  canBuildFollowUpRequest,
   canShowConversation,
+  conversationEntryByRequestID,
   conversationEntryIsLatest,
   conversationFollowUpEntry,
   followUpEndpointKind,
@@ -16,6 +18,10 @@ import {
   latestRenderableConversationEntry,
   renderBodyWithConversationHighlights,
 } from "./conversation-helpers.js";
+
+const FOLLOW_UP_TIMEOUT_MS = 10 * 60 * 1000;
+const FOLLOW_UP_PERSISTENCE_TIMEOUT_MS = 15 * 1000;
+const FOLLOW_UP_POLL_INTERVAL_MS = 250;
 
 class ConversationDrawerStore {
   conversationOpen = $state(false);
@@ -32,7 +38,8 @@ class ConversationDrawerStore {
   followUpText = $state("");
   followUpSending = $state(false);
   followUpError = $state("");
-  followUpParentID = "";
+  followUpRequestID = "";
+  followUpAbort = null;
 
   conversationRequestToken = 0;
   conversationReturnFocusEl = null;
@@ -126,7 +133,7 @@ class ConversationDrawerStore {
     this.conversationFollowLatest = false;
     this.followUpText = "";
     this.followUpError = "";
-    this.followUpParentID = "";
+    this.followUpRequestID = "";
     document.body.classList.add("conversation-drawer-open");
     requestAnimationFrame(() => this._focusConversationDrawer());
 
@@ -186,20 +193,22 @@ class ConversationDrawerStore {
   refreshLiveConversation(entry) {
     if (!this.conversationOpen || !entry) return;
     const entryID = String(entry.id || "").trim();
+    const entryRequestID = String(entry.request_id || "").trim();
     const entrySessionID = String(entry.session_id || "").trim();
     const parentID = interactionParentID(entry);
     const knownEntry = (this.conversationEntries || []).some((candidate) =>
       String(candidate.id || "").trim() === entryID ||
       (entry.request_id && candidate.request_id === entry.request_id));
+    const submittedChild = !!this.followUpRequestID && entryRequestID === this.followUpRequestID;
     const sameSession = !!this.conversationSessionID && entrySessionID === this.conversationSessionID;
     const linkedParent = !!parentID && (parentID === this.conversationAnchorID ||
       (this.conversationEntries || []).some((candidate) => candidate.id === parentID));
-    if (!knownEntry && !sameSession && !linkedParent) return;
+    if (!knownEntry && this.followUpRequestID && !submittedChild) return;
+    if (!knownEntry && !submittedChild && !sameSession && !linkedParent) return;
 
-    if (entryID && parentID === this.followUpParentID) {
+    if (entryID && submittedChild) {
       this.conversationAnchorID = entryID;
       this.conversationFollowLatest = true;
-      this.followUpParentID = "";
     }
 
     const state = String(entry._live_state || "").trim();
@@ -230,13 +239,14 @@ class ConversationDrawerStore {
   }
 
   closeConversation() {
+    if (this.followUpAbort) this.followUpAbort.abort();
     this.conversationOpen = false;
     this.conversationRequestToken++;
     this.conversationSessionID = "";
     this.conversationBranchEntryIDs = [];
     this.conversationFollowLatest = false;
     this.conversationOpenedFromID = "";
-    this.followUpParentID = "";
+    this.followUpRequestID = "";
     this.followUpSending = false;
     document.body.classList.remove("conversation-drawer-open");
     const returnFocusEl = this.conversationReturnFocusEl;
@@ -310,7 +320,7 @@ class ConversationDrawerStore {
 
   followUpKind() {
     const selected = this.selectedConversationEntry();
-    if (!selected || !selected.data || !selected.data.request_body) return "";
+    if (!canBuildFollowUpRequest(selected)) return "";
     return followUpEndpointKind(selected.path);
   }
 
@@ -325,16 +335,28 @@ class ConversationDrawerStore {
     const body = buildFollowUpRequest(entry, this.followUpText);
     if (!entry || !body) return;
     const parentID = this.conversationAnchorID;
+    const requestID = createRequestID();
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, FOLLOW_UP_TIMEOUT_MS);
 
     this.followUpSending = true;
     this.followUpError = "";
-    this.followUpParentID = parentID;
+    this.followUpRequestID = requestID;
+    this.followUpAbort = controller;
     try {
+      const headers = buildFollowUpHeaders(entry, parentID, requestID);
       const response = await apiFetch(entry.path, {
         method: "POST",
-        headers: buildFollowUpHeaders(entry, parentID),
+        headers,
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
+      const responseRequestID = String(response.headers.get("X-Request-ID") || "").trim();
+      if (responseRequestID) this.followUpRequestID = responseRequestID;
       if (!response.ok) {
         let message = "Unable to send message.";
         try {
@@ -342,21 +364,62 @@ class ConversationDrawerStore {
           message = payload && payload.error && payload.error.message || message;
         } catch { /* keep the generic message */ }
         this.followUpError = message;
-        if (this.followUpParentID === parentID) this.followUpParentID = "";
+        if (this.followUpRequestID === requestID || this.followUpRequestID === responseRequestID) {
+          this.followUpRequestID = "";
+        }
         return;
       }
       this.followUpText = "";
       await drainResponse(response);
-      if (!liveLogs.liveLogsStreaming && this.conversationOpen && this.conversationAnchorID) {
+      if (!liveLogs.liveLogsStreaming && this.conversationOpen) {
         const requestToken = ++this.conversationRequestToken;
-        await this.fetchConversation(this.conversationAnchorID, requestToken, false);
+        await this._selectPersistedFollowUp(parentID, this.followUpRequestID, requestToken, controller.signal);
       }
     } catch (error) {
-      console.error("Failed to send interaction follow-up:", error);
-      this.followUpError = "Failed to send message.";
-      if (this.followUpParentID === parentID) this.followUpParentID = "";
+      if (isAbortError(error) || controller.signal.aborted) {
+        if (timedOut && this.conversationOpen) this.followUpError = "The request timed out.";
+      } else {
+        console.error("Failed to send interaction follow-up:", error);
+        this.followUpError = "Failed to send message.";
+      }
     } finally {
-      this.followUpSending = false;
+      clearTimeout(timeout);
+      if (this.followUpAbort === controller) {
+        this.followUpAbort = null;
+        this.followUpSending = false;
+      }
+    }
+  }
+
+  async _selectPersistedFollowUp(parentID, requestID, requestToken, signal) {
+    const deadline = Date.now() + FOLLOW_UP_PERSISTENCE_TIMEOUT_MS;
+    while (this.conversationOpen && requestToken === this.conversationRequestToken && Date.now() < deadline) {
+      const qs = "log_id=" + encodeURIComponent(parentID) + "&limit=120";
+      const result = await getJSON("/admin/audit/conversation?" + qs, {
+        label: "audit conversation",
+        signal,
+      });
+      if (result.stale || requestToken !== this.conversationRequestToken) return;
+      if (result.ok) {
+        const payload = result.data || {};
+        const entries = Array.isArray(payload.entries) ? payload.entries : [];
+        const child = conversationEntryByRequestID(entries, requestID);
+        if (child && child.id) {
+          this.conversationEntries = entries;
+          this.conversationAnchorID = String(child.id);
+          this.conversationFollowLatest = false;
+          this.conversationTruncated = !!payload.truncated;
+          if (child.session_id) this.conversationSessionID = String(child.session_id).trim();
+          this._applyConversationView(entries);
+          this.conversationFollowLatest = true;
+          this._scheduleLatestScroll();
+          return;
+        }
+      }
+      await waitFor(FOLLOW_UP_POLL_INTERVAL_MS, signal);
+    }
+    if (this.conversationOpen && requestToken === this.conversationRequestToken) {
+      this.followUpError = "Message sent, but its saved interaction is not available yet.";
     }
   }
 
@@ -393,6 +456,34 @@ async function drainResponse(response) {
     return;
   }
   while (!(await reader.read()).done) { /* drain without retaining the body */ }
+}
+
+function createRequestID() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return "dashboard-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+}
+
+function waitFor(milliseconds, signal) {
+  return new Promise((resolve, reject) => {
+    let timeout;
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const finish = () => {
+      if (signal) signal.removeEventListener("abort", abort);
+      resolve();
+    };
+    timeout = setTimeout(finish, milliseconds);
+    if (!signal) return;
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 export const conversationDrawer = new ConversationDrawerStore();

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -30,15 +31,18 @@ func buildSessionConversation(ctx context.Context, anchor *LogEntry, limit int, 
 	entries := make([]LogEntry, 0, limit)
 	seen := make(map[string]struct{}, limit)
 	total := 0
-	for offset := 0; offset < limit; {
-		pageSize := min(limit-offset, 100)
+	var beforeTimestamp time.Time
+	var beforeID string
+	for len(entries) < limit {
+		pageSize := min(limit-len(entries), 100)
 		page, err := getPage(ctx, LogQueryParams{
-			SessionID:     anchor.SessionID,
-			UserPath:      userPath,
-			Limit:         pageSize,
-			Offset:        offset,
-			OmitAttempts:  true,
-			ExactUserPath: true,
+			SessionID:       anchor.SessionID,
+			UserPath:        userPath,
+			Limit:           pageSize,
+			OmitAttempts:    true,
+			ExactUserPath:   true,
+			beforeTimestamp: beforeTimestamp,
+			beforeID:        beforeID,
 		})
 		if err != nil {
 			return nil, err
@@ -46,7 +50,9 @@ func buildSessionConversation(ctx context.Context, anchor *LogEntry, limit int, 
 		if page == nil {
 			break
 		}
-		total = page.Total
+		if beforeID == "" {
+			total = page.Total
+		}
 		for _, entry := range page.Entries {
 			if entry.ID != "" {
 				if _, exists := seen[entry.ID]; exists {
@@ -56,10 +62,15 @@ func buildSessionConversation(ctx context.Context, anchor *LogEntry, limit int, 
 			}
 			entries = append(entries, entry)
 		}
-		offset += len(page.Entries)
-		if len(page.Entries) == 0 || offset >= total {
+		if len(page.Entries) == 0 {
 			break
 		}
+		last := page.Entries[len(page.Entries)-1]
+		if last.ID == "" || last.Timestamp.IsZero() ||
+			(last.ID == beforeID && last.Timestamp.Equal(beforeTimestamp)) {
+			break
+		}
+		beforeTimestamp, beforeID = last.Timestamp, last.ID
 	}
 
 	anchorFound := false

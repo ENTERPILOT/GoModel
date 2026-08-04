@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -198,30 +199,28 @@ func TestBuildSessionConversationDeduplicatesOverlappingPages(t *testing.T) {
 
 	result, err := buildSessionConversation(context.Background(), anchor, 4,
 		func(_ context.Context, params LogQueryParams) (*LogListResult, error) {
-			switch params.Offset {
-			case 0:
+			switch params.beforeID {
+			case "":
 				return &LogListResult{Entries: []LogEntry{
 					{ID: "log-c", Timestamp: base.Add(2 * time.Second)},
+					{ID: "log-b", Timestamp: base.Add(time.Second)},
 					*anchor,
 				}, Total: 4}, nil
-			case 2:
+			case anchor.ID:
 				return &LogListResult{Entries: []LogEntry{
 					*anchor,
-					{ID: "log-b", Timestamp: base.Add(time.Second)},
+					{ID: "log-old", Timestamp: base.Add(-time.Second)},
 				}, Total: 4}, nil
 			default:
-				t.Fatalf("unexpected offset %d", params.Offset)
+				t.Fatalf("unexpected cursor %q", params.beforeID)
 				return nil, nil
 			}
 		})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Truncated {
-		t.Fatal("overlapping pages must report the incomplete result")
-	}
-	got := []string{result.Entries[0].ID, result.Entries[1].ID, result.Entries[2].ID}
-	if want := []string{"log-a", "log-b", "log-c"}; !reflect.DeepEqual(got, want) {
+	got := []string{result.Entries[0].ID, result.Entries[1].ID, result.Entries[2].ID, result.Entries[3].ID}
+	if want := []string{"log-old", "log-a", "log-b", "log-c"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("entry ids = %v, want %v", got, want)
 	}
 }
@@ -247,22 +246,125 @@ func TestBuildSessionConversationOrdersEqualTimestampsByID(t *testing.T) {
 
 func TestBuildSessionConversationPagesPastAuditListCap(t *testing.T) {
 	t.Parallel()
-	anchor := &LogEntry{ID: "log-119", SessionID: "session-1", Timestamp: time.Now()}
+	base := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	all := make([]LogEntry, 120)
+	for i := range all {
+		index := 119 - i
+		all[i] = LogEntry{ID: fmt.Sprintf("log-%03d", index), Timestamp: base.Add(time.Duration(index) * time.Second)}
+	}
+	anchor := &LogEntry{ID: "log-119", SessionID: "session-1", Timestamp: base.Add(119 * time.Second)}
 	calls := 0
 	result, err := buildSessionConversation(context.Background(), anchor, 120,
 		func(_ context.Context, params LogQueryParams) (*LogListResult, error) {
 			calls++
-			entries := make([]LogEntry, params.Limit)
-			for i := range entries {
-				entries[i] = LogEntry{ID: fmt.Sprintf("log-%d", params.Offset+i)}
+			if calls == 2 {
+				all = append([]LogEntry{{ID: "live-new", Timestamp: base.Add(time.Hour)}}, all...)
 			}
-			return &LogListResult{Entries: entries, Total: 120}, nil
+			eligible := make([]LogEntry, 0, len(all))
+			for _, entry := range all {
+				if !params.beforeTimestamp.IsZero() &&
+					(entry.Timestamp.After(params.beforeTimestamp) ||
+						(entry.Timestamp.Equal(params.beforeTimestamp) && entry.ID >= params.beforeID)) {
+					continue
+				}
+				eligible = append(eligible, entry)
+			}
+			return &LogListResult{Entries: eligible[:min(params.Limit, len(eligible))], Total: len(all)}, nil
 		})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if calls != 2 || len(result.Entries) != 120 {
 		t.Fatalf("calls/entries = %d/%d, want 2/120", calls, len(result.Entries))
+	}
+	seen := make(map[string]struct{}, len(result.Entries))
+	for _, entry := range result.Entries {
+		if entry.ID == "live-new" {
+			t.Fatal("entry inserted after the first page crossed the keyset cursor")
+		}
+		if _, duplicate := seen[entry.ID]; duplicate {
+			t.Fatalf("duplicate entry %q", entry.ID)
+		}
+		seen[entry.ID] = struct{}{}
+	}
+}
+
+func TestBuildSessionConversationBoundaries(t *testing.T) {
+	t.Parallel()
+	lookupErr := errors.New("lookup failed")
+	tests := []struct {
+		name       string
+		anchor     *LogEntry
+		page       *LogListResult
+		lookupErr  error
+		wantError  bool
+		wantCalled bool
+		wantPath   string
+	}{
+		{name: "nil anchor"},
+		{
+			name:       "root user path",
+			anchor:     &LogEntry{ID: "root", SessionID: "session"},
+			page:       &LogListResult{},
+			wantCalled: true,
+			wantPath:   "/",
+		},
+		{
+			name:       "lookup error",
+			anchor:     &LogEntry{ID: "error", SessionID: "session", UserPath: "/team"},
+			lookupErr:  lookupErr,
+			wantError:  true,
+			wantCalled: true,
+			wantPath:   "/team",
+		},
+		{
+			name:       "nil page",
+			anchor:     &LogEntry{ID: "nil-page", SessionID: "session", UserPath: "/team"},
+			wantCalled: true,
+			wantPath:   "/team",
+		},
+		{
+			name:       "empty page",
+			anchor:     &LogEntry{ID: "empty-page", SessionID: "session", UserPath: "/team"},
+			page:       &LogListResult{Entries: []LogEntry{}, Total: 0},
+			wantCalled: true,
+			wantPath:   "/team",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			result, err := buildSessionConversation(context.Background(), tc.anchor, 40,
+				func(_ context.Context, params LogQueryParams) (*LogListResult, error) {
+					called = true
+					if params.UserPath != tc.wantPath || !params.ExactUserPath || !params.OmitAttempts {
+						t.Fatalf("lookup params = %+v", params)
+					}
+					return tc.page, tc.lookupErr
+				})
+			if !errors.Is(err, lookupErr) && tc.wantError {
+				t.Fatalf("error = %v, want %v", err, lookupErr)
+			}
+			if !tc.wantError && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if called != tc.wantCalled {
+				t.Fatalf("lookup called = %v, want %v", called, tc.wantCalled)
+			}
+			if tc.wantError {
+				return
+			}
+			if tc.anchor == nil {
+				if result == nil || len(result.Entries) != 0 {
+					t.Fatalf("nil-anchor result = %+v", result)
+				}
+				return
+			}
+			if result.AnchorID != tc.anchor.ID || len(result.Entries) != 1 || result.Entries[0].ID != tc.anchor.ID {
+				t.Fatalf("result = %+v, want anchor-only conversation", result)
+			}
+		})
 	}
 }
 

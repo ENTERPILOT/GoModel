@@ -144,7 +144,7 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 
 	pipeline = append(pipeline, bson.D{{Key: "$facet", Value: bson.D{
 		{Key: "data", Value: bson.A{
-			bson.D{{Key: "$sort", Value: bson.D{{Key: "timestamp", Value: -1}}}},
+			bson.D{{Key: "$sort", Value: bson.D{{Key: "timestamp", Value: -1}, {Key: "_id", Value: -1}}}},
 			bson.D{{Key: "$skip", Value: offset}},
 			bson.D{{Key: "$limit", Value: limit}},
 		}},
@@ -204,6 +204,17 @@ func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
 
 	if tsFilter := mongoDateRangeFilter(params.QueryParams); tsFilter != nil {
 		matchFilters = append(matchFilters, bson.E{Key: "timestamp", Value: tsFilter})
+	}
+	if !params.beforeTimestamp.IsZero() && params.beforeID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "$and", Value: bson.A{
+			bson.D{{Key: "$or", Value: bson.A{
+				bson.D{{Key: "timestamp", Value: bson.D{{Key: "$lt", Value: params.beforeTimestamp.UTC()}}}},
+				bson.D{
+					{Key: "timestamp", Value: params.beforeTimestamp.UTC()},
+					{Key: "_id", Value: bson.D{{Key: "$lt", Value: params.beforeID}}},
+				},
+			}}},
+		}})
 	}
 	if params.RequestedModel != "" {
 		matchFilters = append(matchFilters, bson.E{
@@ -315,9 +326,31 @@ func (r *MongoDBReader) GetLogByID(ctx context.Context, id string) (*LogEntry, e
 	return row.toLogEntry(), nil
 }
 
+func (r *MongoDBReader) GetInteractionParent(ctx context.Context, id string) (*InteractionParent, error) {
+	var row struct {
+		UserPath  string `bson:"user_path"`
+		SessionID string `bson:"session_id"`
+	}
+	opts := options.FindOne().SetProjection(bson.D{
+		{Key: "user_path", Value: 1},
+		{Key: "session_id", Value: 1},
+	})
+	if err := r.collection.FindOne(ctx, bson.D{{Key: "_id", Value: id}}, opts).Decode(&row); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to query interaction parent: %w", err)
+	}
+	return &InteractionParent{UserPath: row.UserPath, SessionID: row.SessionID}, nil
+}
+
 func (r *MongoDBReader) GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error) {
-	return buildConversation(ctx, logID, limit, r.GetLogByID, r.GetLogs,
+	return buildConversation(ctx, logID, limit, r.getConversationLogByID, r.GetLogs,
 		r.findByResponseID, r.findByPreviousResponseID)
+}
+
+func (r *MongoDBReader) getConversationLogByID(ctx context.Context, id string) (*LogEntry, error) {
+	return r.findConversationEntry(ctx, bson.D{{Key: "_id", Value: id}}, nil, "id")
 }
 
 func mongoDateRangeFilter(params QueryParams) bson.D {
@@ -346,7 +379,15 @@ func (r *MongoDBReader) findByPreviousResponseID(ctx context.Context, previousRe
 
 func (r *MongoDBReader) findFirstByField(ctx context.Context, field string, value any, label string) (*LogEntry, error) {
 	filter := bson.D{{Key: field, Value: value}}
-	opts := options.FindOne().SetSort(bson.D{{Key: "timestamp", Value: 1}})
+	sort := bson.D{{Key: "timestamp", Value: 1}}
+	return r.findConversationEntry(ctx, filter, sort, label)
+}
+
+func (r *MongoDBReader) findConversationEntry(ctx context.Context, filter bson.D, sort bson.D, label string) (*LogEntry, error) {
+	opts := options.FindOne().SetProjection(bson.D{{Key: "data.attempts", Value: 0}})
+	if len(sort) > 0 {
+		opts.SetSort(sort)
+	}
 
 	var row mongoLogRow
 
