@@ -1,9 +1,9 @@
 // Package ext is the public extension API for building custom gateway
 // binaries on top of GoModel. External modules register request rewriters,
-// HTTP middleware, extra routes, and a route selector on a Registry (usually
-// ext.Default) before starting the gateway; core consumes an immutable
-// snapshot of the registry at server construction. An empty registry adds
-// zero request overhead.
+// HTTP middleware, extra routes, runtime settings, and a route selector on a
+// Registry (usually ext.Default) before starting the gateway; core consumes
+// an immutable snapshot of the registry at server construction. An empty
+// registry adds zero request overhead.
 package ext
 
 import (
@@ -79,6 +79,38 @@ type Result struct {
 type RequestRewriter interface {
 	Name() string
 	Rewrite(ctx context.Context, in Input) (*Result, error)
+}
+
+// SettingOption is one allowed value for a dashboard-editable extension
+// setting. Label and Description are safe to expose in the admin UI.
+type SettingOption struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// SettingDescriptor describes one deployment-wide extension setting.
+// Locked settings are controlled by an environment variable and remain
+// visible, but cannot be changed through the admin API. Options must list
+// every accepted value for an unlocked setting, including Value; registration
+// fails when that contract is not met.
+type SettingDescriptor struct {
+	Key         string          `json:"key"`
+	Label       string          `json:"label"`
+	Description string          `json:"description,omitempty"`
+	Value       string          `json:"value"`
+	Locked      bool            `json:"locked"`
+	ManagedBy   string          `json:"managed_by,omitempty"`
+	Options     []SettingOption `json:"options"`
+}
+
+// RuntimeSetting is a mutable, deployment-wide extension setting. Core owns
+// persistence and the admin API; the extension owns validation and applying
+// the value to its live runtime state. Apply receives only a value advertised
+// in Descriptor.Options. Implementations must be safe for concurrent use.
+type RuntimeSetting interface {
+	Descriptor() SettingDescriptor
+	Apply(value string) error
 }
 
 // RejectionError rejects the request with a client-visible status code and

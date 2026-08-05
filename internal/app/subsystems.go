@@ -47,6 +47,7 @@ const (
 const (
 	subsystemLive                = "live broker"
 	subsystemStorage             = "storage"
+	subsystemRuntimeSettings     = "runtime settings"
 	subsystemProviders           = "providers"
 	subsystemAudit               = "audit"
 	subsystemUsage               = "usage"
@@ -105,7 +106,10 @@ func (a *App) unwind() error {
 // while leaking on SIGTERM.
 func (a *App) shutdownOrder() []registeredSubsystem {
 	return []registeredSubsystem{
-		// Providers first: stops model refresh and provider-owned resources.
+		// Stop live setting reconciliation before tearing down anything it can
+		// reconfigure.
+		{name: subsystemRuntimeSettings, close: closerOf(a.runtimeSettings)},
+		// Stops model refresh and provider-owned resources.
 		{name: subsystemProviders, close: closerOf(a.providers)},
 		// Terminates upstream MCP sessions.
 		{name: subsystemMCPGateway, close: closerOf(a.mcpGateway)},

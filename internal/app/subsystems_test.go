@@ -8,8 +8,17 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
+
+type lifecycleRuntimeSetting struct{}
+
+func (*lifecycleRuntimeSetting) Descriptor() ext.SettingDescriptor {
+	return ext.SettingDescriptor{Key: "test.runtime", Value: "fixed", Locked: true}
+}
+
+func (*lifecycleRuntimeSetting) Apply(string) error { return nil }
 
 // newFullyWiredApp builds an App with every optional subsystem enabled, so the
 // coverage tests below see the complete registry rather than the subset a
@@ -36,9 +45,12 @@ func newFullyWiredApp(t *testing.T) *App {
 		t.Fatalf("config.Load: %v", err)
 	}
 
+	extensions := &ext.Registry{}
+	extensions.RegisterSetting(&lifecycleRuntimeSetting{})
 	application, err := New(context.Background(), Config{
-		AppConfig: loaded,
-		Factory:   providers.NewProviderFactory(),
+		AppConfig:  loaded,
+		Factory:    providers.NewProviderFactory(),
+		Extensions: extensions,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -73,6 +85,19 @@ func TestShutdownOrderCoversEveryRegisteredSubsystem(t *testing.T) {
 			t.Errorf("subsystem %q is registered as ownedByShutdown but missing from shutdownOrder: "+
 				"it would be released on startup failure and leaked on shutdown", registered.name)
 		}
+	}
+}
+
+func TestShutdownStopsRuntimeSettingsBeforeProviders(t *testing.T) {
+	order := newFullyWiredApp(t).shutdownOrder()
+	runtimeSettingsIndex := slices.IndexFunc(order, func(subsystem registeredSubsystem) bool {
+		return subsystem.name == subsystemRuntimeSettings
+	})
+	providersIndex := slices.IndexFunc(order, func(subsystem registeredSubsystem) bool {
+		return subsystem.name == subsystemProviders
+	})
+	if runtimeSettingsIndex < 0 || providersIndex < 0 || runtimeSettingsIndex >= providersIndex {
+		t.Fatalf("shutdown order must stop runtime settings before providers")
 	}
 }
 
