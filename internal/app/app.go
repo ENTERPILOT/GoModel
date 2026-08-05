@@ -146,10 +146,13 @@ func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
 			})
 			return ctx
 		},
-		OnRequestEnd: func(_ context.Context, info llmclient.ResponseInfo) {
+		OnRequestEnd: func(ctx context.Context, info llmclient.ResponseInfo) {
 			observe("attempt_end", func() {
+				source, sessionID := routeAffinityContext(ctx)
 				selector.OnAttemptEnd(ext.RouteOutcome{
 					RouteTarget: ext.RouteTarget{Provider: info.Provider, Model: info.Model},
+					Source:      source,
+					SessionID:   sessionID,
 					Endpoint:    info.Endpoint,
 					StatusCode:  info.StatusCode,
 					Duration:    info.Duration,
@@ -159,6 +162,15 @@ func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
 			})
 		},
 	}
+}
+
+func routeAffinityContext(ctx context.Context) (source, sessionID string) {
+	sessionID = core.SessionIDFromContext(ctx)
+	workflow := core.GetWorkflow(ctx)
+	if workflow == nil || workflow.Resolution == nil || !workflow.Resolution.AliasApplied {
+		return "", sessionID
+	}
+	return workflow.Resolution.RequestedQualifiedModel(), sessionID
 }
 
 // selectorLabel returns the selector's name for logs, tolerating a panicking

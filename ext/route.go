@@ -54,6 +54,11 @@ func (t RouteTarget) Qualified() string { return t.Provider + "/" + t.Model }
 // scores slower than a target that succeeds at once.
 type RouteOutcome struct {
 	RouteTarget
+	// Source is the virtual model originally addressed when this attempt was
+	// selected through one. SessionID is the detected client session. Together
+	// they let selectors update cache affinity only after a successful attempt.
+	Source    string
+	SessionID string
 	// Endpoint is the upstream API endpoint (e.g. "/chat/completions").
 	Endpoint string
 	// StatusCode is the final upstream HTTP status; 0 on a network error.
