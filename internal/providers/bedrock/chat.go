@@ -2,6 +2,7 @@ package bedrock
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -32,18 +33,84 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 		return nil, err
 	}
 
-	out, err := p.runtime.Converse(ctx, &bedrockruntime.ConverseInput{
-		ModelId:         parts.modelID,
-		Messages:        parts.messages,
-		System:          parts.system,
-		InferenceConfig: parts.infCfg,
-		ToolConfig:      parts.toolCfg,
-	})
+	out, err := p.runtime.Converse(ctx, converseInput(parts))
+	if err != nil && partsHaveCachePoints(parts) && isCachePointValidationError(err) {
+		parts = withoutCachePoints(parts)
+		out, err = p.runtime.Converse(ctx, converseInput(parts))
+	}
 	if err != nil {
 		return nil, mapAWSError(err)
 	}
 
 	return convertConverseOutput(req.Model, out), nil
+}
+
+func converseInput(parts converseParts) *bedrockruntime.ConverseInput {
+	return &bedrockruntime.ConverseInput{
+		ModelId: parts.modelID, Messages: parts.messages, System: parts.system,
+		InferenceConfig: parts.infCfg, ToolConfig: parts.toolCfg,
+	}
+}
+
+func partsHaveCachePoints(parts converseParts) bool {
+	for _, block := range parts.system {
+		if _, ok := block.(*brtypes.SystemContentBlockMemberCachePoint); ok {
+			return true
+		}
+	}
+	for _, message := range parts.messages {
+		for _, block := range message.Content {
+			if _, ok := block.(*brtypes.ContentBlockMemberCachePoint); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// withoutCachePoints makes the planner best-effort. If a model or regional
+// endpoint rejects Bedrock cache points, the request is retried once without
+// gateway-generated markers rather than failing an otherwise valid call.
+func withoutCachePoints(parts converseParts) converseParts {
+	clean := parts
+	clean.system = make([]brtypes.SystemContentBlock, 0, len(parts.system))
+	for _, block := range parts.system {
+		if _, ok := block.(*brtypes.SystemContentBlockMemberCachePoint); !ok {
+			clean.system = append(clean.system, block)
+		}
+	}
+	clean.messages = make([]brtypes.Message, 0, len(parts.messages))
+	for _, message := range parts.messages {
+		copyMessage := message
+		copyMessage.Content = make([]brtypes.ContentBlock, 0, len(message.Content))
+		for _, block := range message.Content {
+			if _, ok := block.(*brtypes.ContentBlockMemberCachePoint); !ok {
+				copyMessage.Content = append(copyMessage.Content, block)
+			}
+		}
+		if len(copyMessage.Content) > 0 {
+			clean.messages = append(clean.messages, copyMessage)
+		}
+	}
+	return clean
+}
+
+func isCachePointValidationError(err error) bool {
+	type apiError interface {
+		error
+		ErrorCode() string
+		ErrorMessage() string
+	}
+	var apiErr apiError
+	code, message := "", err.Error()
+	if errors.As(err, &apiErr) {
+		code, message = apiErr.ErrorCode(), apiErr.ErrorMessage()
+	}
+	code = strings.ToLower(code)
+	message = strings.ToLower(message)
+	validation := strings.Contains(code, "validation") || strings.Contains(code, "badrequest")
+	return validation && strings.Contains(message, "cache") &&
+		(strings.Contains(message, "point") || strings.Contains(message, "minimum") || strings.Contains(message, "token"))
 }
 
 // converseParts holds the shared pieces of a Converse / ConverseStream request
@@ -153,6 +220,9 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 				continue
 			}
 			system = append(system, &brtypes.SystemContentBlockMemberText{Value: text})
+			if isGatewayCachePoint(msg.ExtraFields) {
+				system = append(system, &brtypes.SystemContentBlockMemberCachePoint{Value: brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}})
+			}
 		case "tool":
 			block, err := convertToolResultMessage(msg)
 			if err != nil {
@@ -164,12 +234,20 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 			if text == "" {
 				continue
 			}
-			appendOrMerge(brtypes.ConversationRoleUser,
-				[]brtypes.ContentBlock{&brtypes.ContentBlockMemberText{Value: text}})
+			blocks := []brtypes.ContentBlock{&brtypes.ContentBlockMemberText{Value: text}}
+			if isGatewayCachePoint(msg.ExtraFields) {
+				blocks = append(blocks, &brtypes.ContentBlockMemberCachePoint{Value: brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}})
+			}
+			appendOrMerge(brtypes.ConversationRoleUser, blocks)
 		case "assistant":
 			blocks, err := convertAssistantMessage(msg)
 			if err != nil {
 				return nil, nil, err
+			}
+			// A cache point is a boundary after real content, never content by
+			// itself. Bedrock rejects cache-point-only messages.
+			if len(blocks) > 0 && isGatewayCachePoint(msg.ExtraFields) {
+				blocks = append(blocks, &brtypes.ContentBlockMemberCachePoint{Value: brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}})
 			}
 			appendOrMerge(brtypes.ConversationRoleAssistant, blocks)
 		default:
@@ -179,6 +257,11 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 	flushToolResults(pendingToolResults)
 
 	return system, out, nil
+}
+
+func isGatewayCachePoint(fields core.UnknownJSONFields) bool {
+	var enabled bool
+	return json.Unmarshal(fields.Lookup(core.GatewayCachePointField), &enabled) == nil && enabled
 }
 
 func convertAssistantMessage(msg core.Message) ([]brtypes.ContentBlock, error) {

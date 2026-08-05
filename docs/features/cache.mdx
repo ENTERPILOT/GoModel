@@ -90,6 +90,40 @@ The exact cache hashes:
 This means guardrails and workflows affect cache keys when they change the
 resolved workflow or the final body sent through execution.
 
+JSON object member order and insignificant whitespace are canonicalized before
+hashing. Requests that differ only in formatting therefore share one exact
+entry. Concurrent identical misses are also coalesced in-process: one request
+reaches the provider and the waiters replay its response. Failed or otherwise
+non-cacheable responses are never fanned out.
+
+## Provider prompt-cache planning
+
+After routing resolves the concrete provider and model, GoModel adds a cache
+plan when the stable prefix meets that provider's minimum size and the client
+did not already supply a cache directive:
+
+- OpenAI receives a stable `prompt_cache_key`; models supporting explicit
+  caching also receive a breakpoint and explicit cache mode.
+- Anthropic receives top-level automatic ephemeral caching.
+- Amazon Bedrock Converse receives a cache point after the stable prefix.
+- Native Gemini AI Studio creates and reuses a five-minute cached-content
+  object, with concurrent creation coalesced by prefix and stable credential.
+
+The plan is applied post-routing so provider-only fields cannot leak through a
+fallback to another backend. Cache keys include the concrete provider instance
+and model, and caller-supplied cache controls always win.
+
+Provider prompt-cache planning is enabled by default. To disable GoModel's
+automatic planning while continuing to pass through compatible client cache
+directives, set:
+
+```bash
+PROVIDER_PROMPT_CACHE_PLANNER_ENABLED=false
+```
+
+The flag accepts Go boolean values. Missing, empty, or invalid values keep the
+safe default (`true`) and an invalid value emits a startup warning.
+
 ## `user_path` behavior
 
 For the exact cache, `user_path` is not added to the cache key by itself.

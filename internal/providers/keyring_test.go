@@ -82,6 +82,35 @@ func TestKeyringSessionlessTrafficRemainsRoundRobin(t *testing.T) {
 	}
 }
 
+func TestKeyringStableForContext(t *testing.T) {
+	sticky := NewKeyring("k1", "k2")
+	ctx := core.WithSessionID(context.Background(), "conversation-42")
+	want := sticky.NextForContext(ctx)
+	for range 3 {
+		if got, ok := sticky.StableForContext(ctx); !ok || got != want {
+			t.Fatalf("StableForContext() = %q, %v, want %q, true", got, ok, want)
+		}
+	}
+	if got := sticky.Next(); got != "k1" {
+		t.Fatalf("stable lookup advanced round robin to %q", got)
+	}
+
+	for name, ring := range map[string]*Keyring{
+		"sessionless": sticky,
+		"disabled":    NewKeyringWithSessionStickiness(false, "k1", "k2"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			testCtx := context.Background()
+			if name == "disabled" {
+				testCtx = ctx
+			}
+			if key, ok := ring.StableForContext(testCtx); ok || key != "" {
+				t.Fatalf("StableForContext() = %q, %v, want empty, false", key, ok)
+			}
+		})
+	}
+}
+
 func TestKeyringRendezvousHashingOnlyRemapsSessionsOnChangedKey(t *testing.T) {
 	before := NewKeyring("k1", "k2", "k3")
 	after := NewKeyring("k1", "k3")

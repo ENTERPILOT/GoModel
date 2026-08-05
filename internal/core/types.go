@@ -41,6 +41,18 @@ type ChatRequest struct {
 	User              string            `json:"user,omitempty"`
 	ServiceTier       string            `json:"service_tier,omitempty"`
 	ExtraFields       UnknownJSONFields `json:"-" swaggerignore:"true"`
+	// PromptCachePlan carries gateway-internal, post-routing cache metadata.
+	// It is never serialized to clients or upstream OpenAI-compatible APIs.
+	PromptCachePlan *PromptCachePlan `json:"-" swaggerignore:"true"`
+}
+
+// GatewayCachePointField is the internal marker shared by provider cache
+// planners and native request translators. It is never forwarded verbatim.
+const GatewayCachePointField = "_gomodel_cache_point"
+
+// PromptCachePlan identifies a provider-native cached prefix materialization.
+type PromptCachePlan struct {
+	Key string
 }
 
 func (r *ChatRequest) semanticSelector() (string, string) {
