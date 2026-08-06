@@ -12,6 +12,7 @@ import {
   liveLogsMethods,
   liveLogsStreamPath,
 } from "../src/pages/audit-logs/live-logs-logic.js";
+import { auditRecordKey, mergeAuditRecord } from "../src/pages/audit-logs/audit-records.js";
 
 function createLiveLogsApp(overrides = {}) {
   return {
@@ -31,6 +32,8 @@ function createLiveLogsApp(overrides = {}) {
     usageLogHideCached: false,
     auditGroupSessions: false,
     auditThreadChildren: {},
+    auditRecords: {},
+    auditRecordChanges: [],
     customStartDate: null,
     customEndDate: null,
     followsToday: false,
@@ -42,6 +45,13 @@ function createLiveLogsApp(overrides = {}) {
     },
     fetchAuditLog() {
       this.fetchAuditCalls++;
+    },
+    cacheAuditRecord(entry, eventType) {
+      const key = auditRecordKey(entry);
+      const merged = mergeAuditRecord(this.auditRecords[key], entry);
+      this.auditRecords[key] = merged;
+      this.auditRecordChanges.push({ key, eventType });
+      return merged;
     },
     ...liveLogsMethods(),
     ...overrides,
@@ -149,10 +159,8 @@ test("audit.stream events merge partial response bodies and keep rows pending", 
   assert.equal(completed.data.response_body.choices[0].message.content, "final");
 });
 
-test("live audit merges notify an open live conversation drawer", () => {
+test("live audit merges update the normalized record cache", () => {
   const app = createLiveLogsApp();
-  const seen = [];
-  app.refreshLiveConversation = (entry) => seen.push(entry);
 
   app.applyLiveLogEvent({
     seq: 1,
@@ -165,8 +173,8 @@ test("live audit merges notify an open live conversation drawer", () => {
     data: { id: "audit-1", request_id: "req-1", data: { response_body: { choices: [] }, response_body_partial: true } },
   });
 
-  assert.equal(seen.length, 2);
-  assert.equal(seen[1]._response_partial, true);
+  assert.equal(app.auditRecordChanges.length, 2);
+  assert.equal(app.auditRecords["audit-1"]._response_partial, true);
 });
 
 test("live audit removed event drops suppressed preview rows", () => {
@@ -314,6 +322,25 @@ test("live audit inserts are blocked while filters or pagination are active", ()
     data: { id: "audit-2", request_id: "req-2" },
   });
   assert.equal(app.auditLog.entries.length, 0);
+});
+
+test("paused list insertion still updates normalized records", () => {
+  const app = createLiveLogsApp({ auditSearch: "filtered" });
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.updated",
+    data: {
+      id: "audit-hidden",
+      session_id: "session-open-in-drawer",
+      data: { request_body: { input: "keep following me" } },
+    },
+  });
+
+  assert.deepEqual(app.auditLog.entries, []);
+  assert.equal(
+    app.auditRecords["audit-hidden"].data.request_body.input,
+    "keep following me",
+  );
 });
 
 test("live audit inserts cap the preview buffer at the page limit", () => {

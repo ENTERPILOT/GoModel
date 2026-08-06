@@ -18,6 +18,8 @@ import {
   latestConversationEntry,
   latestRenderableConversationEntry,
   matchLiveConversationEntry,
+  mergedConversationEntryIDs,
+  shouldHydrateConversation,
 } from "../src/pages/audit-logs/conversation-helpers.js";
 import { liveLogsMethods } from "../src/pages/audit-logs/live-logs-logic.js";
 
@@ -467,6 +469,23 @@ test("latest-selection detection enables follow-latest only for the newest recor
   assert.equal(latestConversationEntry(entries), entries[0]);
   assert.equal(conversationEntryIsLatest(entries, "newest"), true);
   assert.equal(conversationEntryIsLatest(entries, "older"), false);
+});
+
+test("only the selected anchor's flush triggers persisted hydration", () => {
+  assert.equal(shouldHydrateConversation("audit.flushed", "older", "newer"), false);
+  assert.equal(shouldHydrateConversation("audit.completed", "newer", "newer"), false);
+  assert.equal(shouldHydrateConversation("audit.flushed", "newer", "newer"), true);
+});
+
+test("empty hydration never erases known live conversation records", () => {
+  assert.deepEqual(mergedConversationEntryIDs(["older", "live-anchor"], []), [
+    "older",
+    "live-anchor",
+  ]);
+  assert.deepEqual(mergedConversationEntryIDs(["older"], [
+    { id: "older" },
+    { id: "persisted-anchor" },
+  ]), ["older", "persisted-anchor"]);
 });
 
 test("equal timestamps are ordered deterministically by audit id", () => {

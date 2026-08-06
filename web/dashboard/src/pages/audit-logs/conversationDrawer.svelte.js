@@ -2,7 +2,13 @@
 // conversation-helpers.js.
 
 import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
+import { untrack } from "svelte";
 import { liveLogs } from "./liveLogs.svelte.js";
+import {
+  auditRecordChangesAfter,
+  auditRecordKey,
+  isLiveAuditRecordChange,
+} from "./audit-records.js";
 import {
   buildConversationView,
   buildFollowUpHeaders,
@@ -16,7 +22,9 @@ import {
   formatJSON,
   latestRenderableConversationEntry,
   matchLiveConversationEntry,
+  mergedConversationEntryIDs,
   renderBodyWithConversationHighlights,
+  shouldHydrateConversation,
 } from "./conversation-helpers.js";
 
 const FOLLOW_UP_TIMEOUT_MS = 10 * 60 * 1000;
@@ -28,9 +36,7 @@ class ConversationDrawerStore {
   conversationLoading = $state(false);
   conversationError = $state("");
   conversationAnchorID = $state("");
-  conversationEntries = $state([]);
-  conversationMessages = $state([]);
-  conversationBranchEntryIDs = $state([]);
+  conversationEntryIDs = $state([]);
   conversationSessionID = $state("");
   conversationTruncated = $state(false);
   conversationFollowLatest = $state(false);
@@ -48,6 +54,28 @@ class ConversationDrawerStore {
   conversationDialogEl = $state(null);
   conversationCloseBtnEl = $state(null);
   conversationThreadEl = $state(null);
+
+  get conversationEntries() {
+    return (this.conversationEntryIDs || [])
+      .map((id) => liveLogs.auditRecord(id))
+      .filter(Boolean);
+  }
+
+  conversationView = $derived.by(() =>
+    buildConversationView(this.conversationEntries, this.conversationAnchorID));
+
+  get conversationMessages() {
+    return this.conversationView.messages;
+  }
+
+  get conversationBranchEntryIDs() {
+    return this.conversationView.entryIDs;
+  }
+
+  _setConversationEntryIDs(ids) {
+    this.conversationEntryIDs = [...new Set((Array.isArray(ids) ? ids : []).filter(Boolean))];
+    liveLogs.pinAuditRecords(this.conversationEntryIDs);
+  }
 
   canShowConversation(entry) {
     return canShowConversation(entry);
@@ -126,9 +154,7 @@ class ConversationDrawerStore {
     this.conversationAnchorID = entry.id;
     this.conversationOpenedFromID = entry.id;
     this.conversationSessionID = String(entry.session_id || "").trim();
-    this.conversationEntries = [];
-    this.conversationMessages = [];
-    this.conversationBranchEntryIDs = [];
+    this._setConversationEntryIDs([]);
     this.conversationTruncated = false;
     this.conversationFollowLatest = false;
     this.followUpText = "";
@@ -138,13 +164,14 @@ class ConversationDrawerStore {
     requestAnimationFrame(() => this._focusConversationDrawer());
 
     // A live entry has no persisted row to fetch yet — render it from the
-    // live preview data and keep re-rendering as stream events arrive
-    // (see refreshLiveConversation).
+    // live preview data and keep re-rendering as the shared record cache
+    // receives stream events.
     if (this._conversationEntryLivePending(entry)) {
       this.conversationFollowLatest = true;
       this.conversationLoading = false;
-      this.applyLiveConversationEntry(entry);
-      this._scheduleLatestScroll();
+      this._addConversationRecord(
+        liveLogs.upsertAuditRecord(entry, "conversation.live"),
+      );
       return;
     }
     this.conversationLoading = true;
@@ -156,41 +183,20 @@ class ConversationDrawerStore {
       liveLogs.auditEntryLiveDetailPending(entry);
   }
 
-  applyLiveConversationEntry(entry) {
-    const entries = [...(this.conversationEntries || [])];
-    const id = String(entry.id || "").trim();
-    const requestID = String(entry.request_id || "").trim();
-    const index = entries.findIndex((candidate) =>
-      (id && String(candidate.id || "").trim() === id) ||
-      (requestID && String(candidate.request_id || "").trim() === requestID));
-    if (index >= 0) entries.splice(index, 1, { ...entries[index], ...entry });
-    else entries.push(entry);
-    this.conversationEntries = entries;
-    if (!this.conversationSessionID && entry.session_id) {
-      this.conversationSessionID = String(entry.session_id).trim();
-    }
-    this._applyConversationView(entries);
-    if (this.conversationFollowLatest) this._scheduleLatestScroll();
-  }
-
-  _applyConversationView(entries) {
-    let view = buildConversationView(entries, this.conversationAnchorID);
+  _applyConversationView() {
+    const entries = this.conversationEntries;
+    const view = buildConversationView(entries, this.conversationAnchorID);
     if (this.conversationFollowLatest) {
       const latest = latestRenderableConversationEntry(entries, view.entryIDs);
       if (latest && latest.id && String(latest.id) !== this.conversationAnchorID) {
         this.conversationAnchorID = String(latest.id);
-        view = buildConversationView(entries, this.conversationAnchorID);
       }
     }
-    this.conversationBranchEntryIDs = view.entryIDs;
-    this.conversationMessages = view.messages;
   }
 
-  // refreshLiveConversation re-renders an open live conversation when its
-  // audit entry merges a new live event. Once the entry is persisted, the
-  // full thread (prior turns, final bodies) is hydrated from the store
-  // instead.
-  refreshLiveConversation(entry) {
+  // Re-render an open conversation when its normalized audit record changes.
+  // Once the selected anchor is persisted, hydrate prior turns from storage.
+  handleAuditRecordChange(entry, eventType) {
     if (!this.conversationOpen || !entry) return;
     const entryID = String(entry.id || "").trim();
     const match = matchLiveConversationEntry(this.conversationEntries, this.conversationAnchorID,
@@ -203,15 +209,27 @@ class ConversationDrawerStore {
       this.conversationFollowLatest = true;
     }
 
-    const state = String(entry._live_state || "").trim();
-    if (state === "audit.flushed" || state === "audit.detail") {
-      this.applyLiveConversationEntry(entry);
+    this._addConversationRecord(entry);
+    const state = String(eventType || entry._live_state || "").trim();
+    // A sibling flush says nothing about whether the mutable selected anchor
+    // is queryable. Hydrate only when that anchor itself is persisted.
+    if (shouldHydrateConversation(state, entryID, this.conversationAnchorID)) {
       if (this.conversationMessages.length === 0) this.conversationLoading = true;
       const requestToken = ++this.conversationRequestToken;
-      this.fetchConversation(this.conversationAnchorID || entryID, requestToken, false);
-      return;
+      void this.fetchConversation(entryID, requestToken, false);
     }
-    this.applyLiveConversationEntry(entry);
+  }
+
+  _addConversationRecord(entry) {
+    const id = auditRecordKey(entry);
+    if (id && !this.conversationEntryIDs.includes(id)) {
+      this._setConversationEntryIDs([...this.conversationEntryIDs, id]);
+    }
+    if (!this.conversationSessionID && entry.session_id) {
+      this.conversationSessionID = String(entry.session_id).trim();
+    }
+    this._applyConversationView();
+    if (this.conversationFollowLatest) this._scheduleLatestScroll();
   }
 
   // conversationLiveWaiting reports whether the open live conversation is
@@ -235,7 +253,7 @@ class ConversationDrawerStore {
     this.conversationOpen = false;
     this.conversationRequestToken++;
     this.conversationSessionID = "";
-    this.conversationBranchEntryIDs = [];
+    this._setConversationEntryIDs([]);
     this.conversationFollowLatest = false;
     this.conversationOpenedFromID = "";
     this.followUpRequestID = "";
@@ -273,32 +291,31 @@ class ConversationDrawerStore {
 
       if (!result.ok) {
         this.conversationError = "Unable to load interactions.";
-        this.conversationEntries = [];
-        this.conversationMessages = [];
-        this.conversationBranchEntryIDs = [];
         return;
       }
 
       const payload = result.data || {};
       const responseAnchorID = payload.anchor_id || logID;
-      this.conversationEntries = Array.isArray(payload.entries) ? payload.entries : [];
+      const incoming = Array.isArray(payload.entries) ? payload.entries : [];
+      const stored = liveLogs.upsertAuditRecords(incoming, "conversation.hydrated");
+      const ids = mergedConversationEntryIDs(this.conversationEntryIDs, stored);
+      if (ids.length > this.conversationEntryIDs.length) {
+        this._setConversationEntryIDs(ids);
+      }
       if (detectFollowLatest) {
-        this.conversationFollowLatest = conversationEntryIsLatest(this.conversationEntries, responseAnchorID);
+        this.conversationFollowLatest = conversationEntryIsLatest(stored, responseAnchorID);
       }
       this.conversationAnchorID = responseAnchorID;
       const anchor = this.conversationEntries.find((entry) => entry.id === this.conversationAnchorID);
       if (anchor && anchor.session_id) this.conversationSessionID = String(anchor.session_id).trim();
       this.conversationTruncated = !!payload.truncated;
-      this._applyConversationView(this.conversationEntries);
+      this._applyConversationView();
       if (this.conversationFollowLatest) this._scheduleLatestScroll();
       else if (scrollToAnchor) this._scheduleAnchorScroll();
     } catch (e) {
       if (requestToken !== this.conversationRequestToken) return;
       console.error("Failed to fetch audit conversation:", e);
       this.conversationError = "Failed to load interactions.";
-      this.conversationEntries = [];
-      this.conversationMessages = [];
-      this.conversationBranchEntryIDs = [];
     } finally {
       if (requestToken === this.conversationRequestToken) {
         this.conversationLoading = false;
@@ -397,13 +414,16 @@ class ConversationDrawerStore {
         const entries = Array.isArray(payload.entries) ? payload.entries : [];
         const child = conversationEntryByRequestID(entries, requestID);
         if (child && child.id) {
-          this.conversationEntries = entries;
+          const stored = liveLogs.upsertAuditRecords(entries, "conversation.hydrated");
+          this._setConversationEntryIDs(
+            mergedConversationEntryIDs(this.conversationEntryIDs, stored),
+          );
           this.conversationAnchorID = String(child.id);
           this.conversationFollowLatest = false;
           if (this.followUpRequestID === requestID) this.followUpRequestID = "";
           this.conversationTruncated = !!payload.truncated;
           if (child.session_id) this.conversationSessionID = String(child.session_id).trim();
-          this._applyConversationView(entries);
+          this._applyConversationView();
           this.conversationFollowLatest = true;
           this._scheduleLatestScroll();
           return;
@@ -481,5 +501,24 @@ function waitFor(milliseconds, signal) {
 
 export const conversationDrawer = new ConversationDrawerStore();
 
-// Wire the drawer into the live-log merge loop.
-liveLogs.refreshLiveConversation = (entry) => conversationDrawer.refreshLiveConversation(entry);
+// The shared audit-record cache is the only handoff between the live stream
+// and the drawer. React to its compact change marker instead of registering a
+// mutable callback on the transport store.
+let seenAuditRecordVersion = 0;
+$effect.root(() => {
+  $effect(() => {
+    const changes = auditRecordChangesAfter(
+      liveLogs.auditRecordChanges,
+      seenAuditRecordVersion,
+    );
+    if (changes.length === 0) return;
+    seenAuditRecordVersion = Number(changes[changes.length - 1].version || 0);
+    untrack(() => {
+      changes.forEach((change) => {
+        if (!isLiveAuditRecordChange(change)) return;
+        const entry = liveLogs.auditRecord(change.key);
+        conversationDrawer.handleAuditRecordChange(entry, change.eventType);
+      });
+    });
+  });
+});

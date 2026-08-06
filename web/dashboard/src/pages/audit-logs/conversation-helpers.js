@@ -376,6 +376,21 @@ export function conversationEntryIsLatest(entries, entryID) {
     return !!latest && String(latest.id || '') === String(entryID || '');
 }
 
+export function shouldHydrateConversation(eventType, changedEntryID, selectedAnchorID) {
+    return String(eventType || '').trim() === 'audit.flushed' &&
+        String(changedEntryID || '').trim() !== '' &&
+        String(changedEntryID || '').trim() === String(selectedAnchorID || '').trim();
+}
+
+export function mergedConversationEntryIDs(existingIDs, entries) {
+    const ids = Array.isArray(existingIDs) ? existingIDs.filter(Boolean).map(String) : [];
+    (Array.isArray(entries) ? entries : []).forEach((entry) => {
+        const id = String(entry && (entry.id || entry.request_id) || '').trim();
+        if (id && !ids.includes(id)) ids.push(id);
+    });
+    return ids;
+}
+
 function hasConversationPayload(entry) {
     // Slim list entries carry the server-computed signal instead of the
     // bodies it was derived from.
