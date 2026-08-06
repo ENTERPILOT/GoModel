@@ -17,9 +17,39 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/server"
 )
+
+type routeObservationSelector struct {
+	outcome ext.RouteOutcome
+}
+
+func (*routeObservationSelector) Name() string                           { return "observer" }
+func (*routeObservationSelector) Select(ext.RouteRequest) (string, bool) { return "", false }
+func (*routeObservationSelector) OnAttemptStart(ext.RouteTarget)         {}
+func (s *routeObservationSelector) OnAttemptEnd(outcome ext.RouteOutcome) {
+	s.outcome = outcome
+}
+
+func TestRouteSelectorHooksExposeSuccessfulRouteAffinityContext(t *testing.T) {
+	selector := &routeObservationSelector{}
+	hooks := routeSelectorHooks(selector)
+	ctx := core.WithSessionID(context.Background(), "session-a")
+	ctx = core.WithWorkflow(ctx, &core.Workflow{Resolution: &core.RequestModelResolution{
+		Requested:        core.NewRequestedModelSelector("smart", ""),
+		ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt"},
+		AliasApplied:     true,
+	}})
+	ctx = hooks.OnRequestStart(ctx, llmclient.RequestInfo{Provider: "openai", Model: "gpt"})
+	hooks.OnRequestEnd(ctx, llmclient.ResponseInfo{Provider: "openai", Model: "gpt", StatusCode: http.StatusOK})
+
+	if selector.outcome.Source != "smart" || selector.outcome.SessionID != "session-a" {
+		t.Fatalf("route affinity context = %q/%q, want smart/session-a",
+			selector.outcome.Source, selector.outcome.SessionID)
+	}
+}
 
 type runtimeRefreshMockProvider struct {
 	models *core.ModelsResponse
