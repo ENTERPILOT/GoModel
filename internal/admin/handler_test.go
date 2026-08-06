@@ -1519,6 +1519,54 @@ func TestAuditConversation_Success(t *testing.T) {
 	}
 }
 
+func TestAuditConversation_EnrichesEntriesWithPromptCacheUsage(t *testing.T) {
+	now := time.Now().UTC()
+	usageReader := &mockUsageReader{
+		usageByRequestID: map[string][]usage.UsageLogEntry{
+			"req-cached": {
+				{
+					RequestID:   "req-cached",
+					InputTokens: 100,
+					RawData: map[string]any{
+						"prompt_cached_tokens": 25,
+					},
+				},
+			},
+		},
+	}
+	reader := &mockAuditReader{
+		conversationResult: &auditlog.ConversationResult{
+			AnchorID: "log-cached",
+			Entries: []auditlog.LogEntry{
+				{ID: "log-cached", RequestID: "req-cached", Timestamp: now, Path: "/v1/chat/completions"},
+			},
+		},
+	}
+	h := NewHandler(usageReader, nil, WithAuditReader(reader))
+	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-cached")
+
+	if err := h.AuditConversation(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result auditConversationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(result.Entries) != 1 || result.Entries[0].Usage == nil {
+		t.Fatalf("expected one usage-enriched entry, got %+v", result.Entries)
+	}
+	if result.Entries[0].Usage.CachedInputTokens != 25 {
+		t.Fatalf("CachedInputTokens = %d, want 25", result.Entries[0].Usage.CachedInputTokens)
+	}
+	if result.Entries[0].Usage.EstimatedCachedCharacters != 100 {
+		t.Fatalf("EstimatedCachedCharacters = %d, want 100", result.Entries[0].Usage.EstimatedCachedCharacters)
+	}
+}
+
 func TestAuditConversation_PreservesProviderName(t *testing.T) {
 	now := time.Now().UTC()
 	reader := &mockAuditReader{

@@ -5,11 +5,26 @@
   // role selectors below — those rules must live here, next to the element
   // they scope to (CONVENTIONS rule 3).
   import { timezone } from "$lib/stores/timezone.svelte.js";
-  import { functionExpandedContent } from "./conversation-helpers.js";
+  import {
+    formatFunctionArguments,
+    functionExpandedContent,
+  } from "./conversation-helpers.js";
 
-  let { msg } = $props();
+  let { msg, showPromptCache = true } = $props();
 
   const isFunctionNote = $derived(msg.role === "function_call" || msg.role === "function_result");
+
+  function cacheFill(ratio) {
+    const value = Math.max(0, Math.min(1, Number(ratio || 0)));
+    return (value * 100).toFixed(1) + "%";
+  }
+
+  function cacheTitle(ratio) {
+    const value = Math.max(0, Math.min(1, Number(ratio || 0)));
+    return value > 0
+      ? Math.round(value * 100) + "% of this visible prompt item is estimated provider-cached"
+      : undefined;
+  }
 
   function functionDetailText(m) {
     if (m.role === "function_call") {
@@ -23,33 +38,65 @@
   class={[
     isFunctionNote ? "chat-function-note" : "chat-message",
     msg.roleClass,
-    { "is-anchor": msg.isAnchor, "is-after-anchor": msg.isAfterAnchor },
+    {
+      "is-anchor": msg.isAnchor,
+      "is-after-anchor": msg.isAfterAnchor,
+    },
   ]}
+  style:--prompt-cache-fill={cacheFill(msg.promptCacheRatio)}
+  style:--prompt-cache-visibility={showPromptCache && msg.promptCacheRatio > 0 ? "1" : "0"}
   data-conversation-anchor={msg.isAnchor ? "true" : undefined}
   data-entry-id={msg.entryID}
 >
   {#if isFunctionNote}
-    <details class="chat-function-note-details">
+    <details
+      class="chat-function-note-details"
+      title={showPromptCache ? cacheTitle(msg.promptCacheRatio) : undefined}
+    >
       <summary class="chat-function-note-inner">
         <span class="chat-function-label">{msg.roleLabel}</span>
         <span class="chat-function-detail">{functionDetailText(msg)}</span>
+        <span class="mono chat-time">{timezone.formatTimestamp(msg.timestamp)}</span>
       </summary>
+      {#if msg.functionCallID}
+        <div class="chat-function-call-id mono">Call ID: {msg.functionCallID}</div>
+      {/if}
+      {#if msg.role === "function_call" && msg.toolCalls}
+        {#each msg.toolCalls as tc}
+          {#if tc.id}
+            <div class="chat-function-call-id mono">Call ID{msg.toolCalls.length > 1 ? " (" + tc.name + ")" : ""}: {tc.id}</div>
+          {/if}
+        {/each}
+      {/if}
       <pre class="chat-function-expanded">{functionExpandedContent(msg)}</pre>
     </details>
   {:else}
-    <header class="chat-message-meta">
+    <header
+      class="chat-message-meta"
+      title={showPromptCache ? cacheTitle(msg.promptCacheRatio) : undefined}
+    >
       <span class="chat-role">{msg.roleLabel}</span>
       <span class="mono chat-time">{timezone.formatTimestamp(msg.timestamp)}</span>
     </header>
     {#if msg.text}
-      <pre class="chat-content">{msg.text}</pre>
+      <pre
+        class="chat-content"
+        title={showPromptCache ? cacheTitle(msg.promptCacheRatio) : undefined}
+      >{msg.text}</pre>
     {/if}
     {#if msg.toolCalls}
       <footer class="chat-tool-calls">
         {#each msg.toolCalls as tc, tcIdx (tc.name + "-" + tcIdx)}
-          <div class="chat-tool-call">
-            <span class="chat-tool-call-name">{tc.name + "()"}</span>
-          </div>
+          <details class="chat-tool-call">
+            <summary class="chat-tool-call-summary">
+              <span class="chat-tool-call-name">{tc.name + "()"}</span>
+              <span class="chat-tool-call-preview">{formatFunctionArguments(tc) || "No arguments"}</span>
+            </summary>
+            {#if tc.id}
+              <div class="chat-function-call-id mono">Call ID: {tc.id}</div>
+            {/if}
+            <pre class="chat-tool-call-arguments">{formatFunctionArguments(tc) || "No arguments"}</pre>
+          </details>
         {/each}
       </footer>
     {/if}
@@ -58,6 +105,8 @@
 
 <style>
   .chat-message {
+    position: relative;
+    overflow: hidden;
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 10px 12px;
@@ -138,6 +187,30 @@
     color: var(--text);
   }
 
+  .chat-message::before,
+  .chat-function-note::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: var(--prompt-cache-visibility);
+    transition: opacity 150ms ease;
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--prompt-cache-color) 18%, transparent) 0,
+      color-mix(in srgb, var(--prompt-cache-color) 18%, transparent) var(--prompt-cache-fill),
+      transparent var(--prompt-cache-fill),
+      transparent 100%
+    );
+  }
+
+  .chat-message > *,
+  .chat-function-note > * {
+    position: relative;
+    z-index: 1;
+  }
+
   /* Tool call footer on assistant bubbles */
   .chat-tool-calls {
     margin-top: 8px;
@@ -149,9 +222,45 @@
   }
 
   .chat-tool-call {
+    position: relative;
+    overflow: hidden;
+    padding: 3px 5px;
+    border-radius: 5px;
     font-size: 11px;
     color: var(--text-muted);
     font-family: "SF Mono", Menlo, Consolas, monospace;
+    min-width: 0;
+  }
+
+  .chat-tool-call-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .chat-tool-call-preview {
+    min-width: 0;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.8;
+  }
+
+  .chat-tool-call-arguments {
+    margin-top: 5px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--border) 45%, transparent);
+    color: var(--text);
+    font: inherit;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 200px;
+    overflow: auto;
   }
 
   .chat-tool-call-name::before {
@@ -160,6 +269,8 @@
 
   /* Function call / result notes between bubbles */
   .chat-function-note {
+    position: relative;
+    overflow: hidden;
     align-self: center;
     max-width: 94%;
     padding: 4px 12px;
@@ -181,6 +292,18 @@
     overflow: hidden;
   }
 
+  .chat-function-note-inner .chat-time {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .chat-function-call-id {
+    margin-top: 6px;
+    font-size: 10px;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+  }
+
   .chat-function-label {
     font-weight: 600;
     font-size: 11px;
@@ -188,6 +311,17 @@
     letter-spacing: 0.3px;
     white-space: nowrap;
     flex-shrink: 0;
+  }
+
+  .chat-function-label::before {
+    content: "\25B8";
+    display: inline-block;
+    margin-right: 4px;
+    transition: transform 120ms ease;
+  }
+
+  .chat-function-note-details[open] .chat-function-label::before {
+    transform: rotate(90deg);
   }
 
   .chat-function-detail {

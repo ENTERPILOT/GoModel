@@ -12,6 +12,7 @@ import {
   conversationEntryIsLatest,
   conversationFollowUpEntry,
   extractConversationErrorMessage,
+  formatFunctionArguments,
   functionExpandedContent,
   followUpEndpointKind,
   interactionParentID,
@@ -115,8 +116,10 @@ test("chat-completions threads shape system, tool and assistant turns", () => {
   ]);
   assert.equal(messages[0].roleLabel, "System Prompt");
   assert.equal(messages[2].toolCalls[0].name, "get_weather");
+  assert.equal(messages[2].toolCalls[0].id, "call-1");
   // The tool result resolves its function name through the call-id map.
   assert.equal(messages[3].functionName, "get_weather");
+  assert.equal(messages[3].functionCallID, "call-1");
   assert.equal(messages[3].text, "sunny");
   assert.equal(messages[4].text, "It is sunny.");
   assert.ok(messages.every((m) => m.isAnchor));
@@ -190,6 +193,158 @@ test("messages top-level system prompts support strings and content blocks", () 
   ]);
 });
 
+test("messages API tool-use blocks preserve inputs, results and call IDs", () => {
+  const entry = {
+    id: "anthropic-tools",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/messages",
+    data: {
+      request_body: {
+        messages: [
+          { role: "user", content: "Weather?" },
+          { role: "assistant", content: [
+            { type: "text", text: "I will check." },
+            { type: "tool_use", id: "toolu-1", name: "weather", input: { city: "Paris" } },
+          ] },
+          { role: "user", content: [
+            { type: "tool_result", tool_use_id: "toolu-1", content: "Sunny" },
+          ] },
+        ],
+      },
+      response_body: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "It is sunny." },
+          { type: "tool_use", id: "toolu-2", name: "forecast", input: { days: 3 } },
+        ],
+      },
+    },
+  };
+
+  const messages = buildConversationMessages([entry], entry.id);
+  assert.deepEqual(messages.map((message) => message.role), [
+    "user", "assistant", "function_result", "assistant",
+  ]);
+  assert.deepEqual(messages[1].toolCalls[0], {
+    name: "weather", arguments: { city: "Paris" }, id: "toolu-1",
+  });
+  assert.equal(messages[2].text, "Sunny");
+  assert.equal(messages[2].functionName, "weather");
+  assert.equal(messages[2].functionCallID, "toolu-1");
+  assert.equal(messages[3].text, "It is sunny.");
+  assert.equal(messages[3].toolCalls[0].id, "toolu-2");
+});
+
+test("non-text content gets safe transcript placeholders and refusals remain visible", () => {
+  const entry = {
+    id: "multimodal",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/chat/completions",
+    data: {
+      request_body: { messages: [{ role: "user", content: [
+        { type: "text", text: "Inspect these" },
+        { type: "image_url", image_url: { url: "https://example.com/private.png" } },
+        { type: "input_file", filename: "report.pdf", file_id: "file-1" },
+      ] }] },
+      response_body: { choices: [{ message: { role: "assistant", content: null, refusal: "I cannot inspect it." } }] },
+    },
+  };
+
+  const messages = buildConversationMessages([entry], entry.id);
+  assert.equal(messages[0].text, "Inspect these\n[Image]\n[File: report.pdf]");
+  assert.equal(messages[1].text, "I cannot inspect it.");
+});
+
+test("prompt-cache estimates fill interaction messages by cached share", () => {
+  const entry = {
+    id: "prompt-cache",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/chat/completions",
+    usage: { estimated_cached_characters: 9 },
+    data: { request_body: { messages: [
+      { role: "system", content: "System" },
+      { role: "user", content: "Hello" },
+    ] } },
+  };
+
+  const messages = buildConversationMessages([entry], entry.id);
+  assert.equal(messages[0].promptCacheRatio, 1);
+  assert.equal(messages[1].promptCacheRatio, 3 / 5);
+});
+
+test("prompt-cache fill stays contiguous when rendered text trims whitespace", () => {
+  const entry = {
+    id: "prompt-cache-whitespace",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/chat/completions",
+    usage: { estimated_cached_characters: 7 },
+    data: { request_body: { messages: [
+      { role: "system", content: "  First  " },
+      { role: "user", content: "Second" },
+    ] } },
+  };
+
+  const messages = buildConversationMessages([entry], entry.id);
+  assert.equal(messages[0].text, "First");
+  assert.equal(messages[0].promptCacheRatio, 1);
+  assert.equal(messages[1].promptCacheRatio, 2 / 6);
+});
+
+test("prompt-cache estimates skip non-text attachment placeholders", () => {
+  const entry = {
+    id: "prompt-cache-image",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/chat/completions",
+    usage: { estimated_cached_characters: 20 },
+    data: { request_body: { messages: [{ role: "user", content: [
+      { type: "text", text: "Look" },
+      { type: "image_url", image_url: { url: "https://example.com/image.png" } },
+      { type: "text", text: "again" },
+    ] }] } },
+  };
+
+  const message = buildConversationMessages([entry], entry.id)[0];
+  assert.equal(message.text, "Look\n[Image]\nagain");
+  assert.equal(message.promptCacheRatio, 1);
+});
+
+test("prompt-cache estimates include tool-call names and arguments", () => {
+  const entry = {
+    id: "prompt-cache-tool",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/chat/completions",
+    usage: { estimated_cached_characters: 200 },
+    data: { request_body: { messages: [{
+      role: "assistant",
+      content: "Calling the tool",
+      tool_calls: [{ id: "call-1", function: {
+        name: "get_weather",
+        arguments: '{"city":"Paris"}',
+      } }],
+    }] } },
+  };
+
+  const message = buildConversationMessages([entry], entry.id)[0];
+  assert.equal(message.promptCacheRatio, 1);
+});
+
+test("tool-only assistant bubbles derive their fill from tool-call content", () => {
+  const entry = {
+    id: "prompt-cache-tool-only",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/chat/completions",
+    usage: { estimated_cached_characters: 5 },
+    data: { request_body: { messages: [{
+      role: "assistant",
+      content: "",
+      tool_calls: [{ function: { name: "lookup", arguments: '{"q":"x"}' } }],
+    }] } },
+  };
+
+  const message = buildConversationMessages([entry], entry.id)[0];
+  assert.ok(message.promptCacheRatio > 0 && message.promptCacheRatio < 1);
+});
+
 test("entries with errors append an error message extracted from nested payloads", () => {
   const entry = {
     id: "log-3",
@@ -243,6 +398,7 @@ test("functionExpandedContent pretty-prints function call arguments", () => {
     'lookup({\n  "q": "x"\n})\n\nraw(not-json)',
   );
   assert.equal(functionExpandedContent({ role: "function_result", text: "42" }), "42");
+  assert.equal(formatFunctionArguments({ arguments: { q: "object" } }), '{\n  "q": "object"\n}');
 });
 
 test("the latest request snapshot is displayed once in timestamp order", () => {
@@ -511,6 +667,71 @@ test("equal timestamps are ordered deterministically by audit id", () => {
   assert.deepEqual(view.entryIDs, ["log-a", "log-b"]);
   assert.deepEqual(view.messages.map((message) => message.text), ["First", "Second"]);
   assert.equal(latestConversationEntry([second, first]), second);
+});
+
+test("prompt-cache presentation does not duplicate Responses delta history", () => {
+  const first = {
+    id: "responses-a",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/responses",
+    data: {
+      request_body: { input: "same" },
+      response_body: { id: "resp-a" },
+    },
+  };
+  const second = {
+    id: "responses-b",
+    timestamp: "2026-07-06T12:01:00Z",
+    path: "/v1/responses",
+    usage: { estimated_cached_characters: 4 },
+    data: {
+      request_body: {
+        previous_response_id: "resp-a",
+        input: [
+          { role: "user", content: "same" },
+          { role: "user", content: "next" },
+        ],
+      },
+      response_body: { id: "resp-b" },
+    },
+  };
+
+  const messages = buildConversationMessages([first, second], first.id);
+  assert.deepEqual(messages.map((message) => message.text), ["same", "next"]);
+  assert.equal(messages[1].promptCacheRatio, 0);
+});
+
+test("Responses cache fill covers chained history before the new delta", () => {
+  const first = {
+    id: "responses-cache-a",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/responses",
+    data: {
+      request_body: { input: "same" },
+      response_body: {
+        id: "resp-cache-a",
+        output: [{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "answer" }],
+        }],
+      },
+    },
+  };
+  const second = {
+    id: "responses-cache-b",
+    timestamp: "2026-07-06T12:01:00Z",
+    path: "/v1/responses",
+    usage: { estimated_cached_characters: 10 },
+    data: {
+      request_body: { previous_response_id: "resp-cache-a", input: "next" },
+      response_body: { id: "resp-cache-b" },
+    },
+  };
+
+  const messages = buildConversationMessages([first, second], first.id);
+  assert.deepEqual(messages.map((message) => message.text), ["same", "answer", "next"]);
+  assert.deepEqual(messages.map((message) => message.promptCacheRatio), [1, 1, 0]);
 });
 
 test("follow-latest waits for request data before moving to a classified live entry", () => {

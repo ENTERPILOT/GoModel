@@ -18,6 +18,7 @@
 
   const drawer = conversationDrawer;
   const storedWidth = Number(readStored("gomodel_interactions_panel_width"));
+  const promptCacheFillStorageKey = "gomodel_interactions_prompt_cache_fill";
   let preferredWidth = Number.isFinite(storedWidth) && storedWidth > 0
     ? storedWidth
     : DEFAULT_CONVERSATION_PANEL_WIDTH;
@@ -25,7 +26,13 @@
   let panelMin = $state(320);
   let panelMax = $state(760);
   let fullscreen = $state(false);
+  let showPromptCache = $state(readStored(promptCacheFillStorageKey, "true") !== "false");
   let resizePointerID = null;
+
+  function togglePromptCacheFill() {
+    showPromptCache = !showPromptCache;
+    writeStored(promptCacheFillStorageKey, showPromptCache);
+  }
 
   function leadingShellWidth() {
     const sidebarWidth = document.querySelector(".sidebar")
@@ -212,9 +219,26 @@
     {/if}
 
     {#if drawer.conversationMessages.length > 0}
+      {#if drawer.conversationMessages.some((msg) =>
+        Number(msg.promptCacheRatio || 0) > 0
+      )}
+        <button
+          type="button"
+          class="conversation-cache-legend"
+          role="switch"
+          aria-checked={showPromptCache}
+          title={(showPromptCache ? "Hide" : "Show") + " estimated provider prompt-cache fill"}
+          onclick={togglePromptCacheFill}
+        >
+          <span class="conversation-cache-switch" class:is-active={showPromptCache} aria-hidden="true">
+            <span class="conversation-cache-switch-thumb"></span>
+          </span>
+          <span>Blue fill shows cached prompt share <span class="conversation-cache-estimate">(estimated)</span></span>
+        </button>
+      {/if}
       <div class="conversation-thread" bind:this={drawer.conversationThreadEl}>
         {#each drawer.conversationMessages as msg (msg.uid)}
-          <ChatMessage {msg} />
+          <ChatMessage {msg} {showPromptCache} />
         {/each}
       </div>
     {/if}
@@ -431,6 +455,65 @@
     padding: 0 16px 14px;
     color: var(--text-muted);
     font-size: 12px;
+  }
+
+  .conversation-cache-legend {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 12px 16px 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .conversation-cache-legend:hover {
+    color: var(--text);
+  }
+
+  .conversation-cache-legend:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--prompt-cache-color) 35%, transparent);
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+
+  .conversation-cache-switch {
+    position: relative;
+    width: 28px;
+    height: 16px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-muted) 30%, var(--border));
+    transition: background-color 150ms ease;
+  }
+
+  .conversation-cache-switch.is-active {
+    background: color-mix(in srgb, var(--prompt-cache-color) 80%, var(--bg));
+  }
+
+  .conversation-cache-switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+    transition: transform 150ms ease;
+  }
+
+  .conversation-cache-switch.is-active .conversation-cache-switch-thumb {
+    transform: translateX(12px);
+  }
+
+  .conversation-cache-estimate {
+    opacity: 0.75;
   }
 
   .conversation-thread {
