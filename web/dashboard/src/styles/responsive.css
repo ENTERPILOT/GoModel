@@ -161,10 +161,6 @@
       align-self: flex-start;
     }
 
-  .conversation-drawer {
-      width: 100%;
-    }
-
   .settings-panel {
       padding: 18px;
     }

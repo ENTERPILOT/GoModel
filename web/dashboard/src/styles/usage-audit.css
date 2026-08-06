@@ -272,30 +272,6 @@
   background: color-mix(in srgb, var(--success) 10%, transparent);
 }
 
-.conversation-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(560px, 100vw);
-  background: var(--bg-surface);
-  border-left: 1px solid var(--border);
-  z-index: 60;
-  transform: translateX(100%);
-  transition: transform 0.2s ease-out;
-  display: flex;
-  flex-direction: column;
-  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.2);
-}
-
-.conversation-drawer.open {
-  transform: translateX(0);
-}
-
-body.conversation-drawer-open {
-  overflow: hidden;
-}
-
 #interactions-drawer-content {
   flex: 1;
   overflow-y: auto;

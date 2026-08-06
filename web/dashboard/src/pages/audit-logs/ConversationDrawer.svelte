@@ -1,63 +1,173 @@
 <script>
-  // Interactions drawer (class names match the dashboard.css selectors).
-  // The drawer is not the Modal atom (different markup: slide-in aside +
-  // overlay), so it registers with the modals store itself for the app-shell
-  // scroll lock, and closes on Escape only while no other modal sits on top
-  // of it.
+  // Resizable Interactions side panel. It is a direct child of the app flex
+  // shell, so its width is taken from .content instead of covering it.
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
-  import { untrack } from "svelte";
+  import Icon from "$lib/components/atoms/Icon.svelte";
+  import { readStored, writeStored } from "$lib/utils/storage.js";
+  import { modals } from "$lib/stores/ui.svelte.js";
+  import { router } from "$lib/stores/router.svelte.js";
+  import { Maximize2, Minimize2 } from "lucide";
   import ChatMessage from "./ChatMessage.svelte";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
-  import { modals } from "$lib/stores/ui.svelte.js";
+  import {
+    DEFAULT_CONVERSATION_PANEL_WIDTH,
+    clampConversationPanelWidth,
+    conversationPanelBounds,
+    conversationPanelWidthFromPointer,
+  } from "./conversation-panel.js";
 
   const drawer = conversationDrawer;
+  const storedWidth = Number(readStored("gomodel_interactions_panel_width"));
+  let preferredWidth = Number.isFinite(storedWidth) && storedWidth > 0
+    ? storedWidth
+    : DEFAULT_CONVERSATION_PANEL_WIDTH;
+  let panelWidth = $state(preferredWidth);
+  let panelMin = $state(320);
+  let panelMax = $state(760);
+  let fullscreen = $state(false);
+  let resizePointerID = null;
+
+  function leadingShellWidth() {
+    const sidebarWidth = document.querySelector(".sidebar")
+      ?.getBoundingClientRect().width || 0;
+    const toggleWidth = document.querySelector(".sidebar-toggle")
+      ?.getBoundingClientRect().width || 0;
+    return sidebarWidth + toggleWidth;
+  }
+
+  function syncPanelWidth() {
+    const leading = leadingShellWidth();
+    const bounds = conversationPanelBounds(window.innerWidth, leading);
+    panelMin = bounds.min;
+    panelMax = bounds.max;
+    panelWidth = clampConversationPanelWidth(
+      preferredWidth,
+      window.innerWidth,
+      leading,
+    );
+  }
+
+  function resizeFromPointer(clientX) {
+    panelWidth = conversationPanelWidthFromPointer(
+      clientX,
+      window.innerWidth,
+      leadingShellWidth(),
+    );
+    preferredWidth = panelWidth;
+  }
+
+  function startResize(event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    resizePointerID = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.classList.add("conversation-panel-resizing");
+    resizeFromPointer(event.clientX);
+  }
+
+  function dragResize(event) {
+    if (event.pointerId !== resizePointerID) return;
+    resizeFromPointer(event.clientX);
+  }
+
+  function finishResize(event) {
+    if (resizePointerID === null ||
+        (event.pointerId !== undefined && event.pointerId !== resizePointerID)) return;
+    resizePointerID = null;
+    document.body.classList.remove("conversation-panel-resizing");
+    writeStored("gomodel_interactions_panel_width", preferredWidth);
+  }
+
+  function resizeWithKeyboard(event) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    preferredWidth = panelWidth + (event.key === "ArrowLeft" ? 24 : -24);
+    syncPanelWidth();
+    preferredWidth = panelWidth;
+    writeStored("gomodel_interactions_panel_width", preferredWidth);
+  }
 
   $effect(() => {
     if (!drawer.conversationOpen) return;
-    // untrack: opened() reads AND writes modals.stack; tracking that read
-    // would make the effect invalidate itself and loop (effect_update_depth).
-    const token = untrack(() => modals.opened());
+    syncPanelWidth();
+    const sidebarEl = document.querySelector(".sidebar");
+    const sidebarObserver = new ResizeObserver(syncPanelWidth);
+    if (sidebarEl) sidebarObserver.observe(sidebarEl);
     const onKeydown = (event) => {
-      // openCount includes this drawer; > 1 means another dialog (auth,
-      // editor, confirm) is stacked on top and owns the Escape key.
-      if (event.key === "Escape" && modals.openCount <= 1) {
-        drawer.closeConversation();
+      if (event.key === "Escape" && !modals.anyOpen) {
+        if (fullscreen) fullscreen = false;
+        else drawer.closeConversation();
       }
     };
     window.addEventListener("keydown", onKeydown);
+    window.addEventListener("resize", syncPanelWidth);
     return () => {
-      modals.closed(token);
+      finishResize({});
+      sidebarObserver.disconnect();
       window.removeEventListener("keydown", onKeydown);
+      window.removeEventListener("resize", syncPanelWidth);
     };
+  });
+
+  $effect(() => {
+    if (!drawer.conversationOpen) fullscreen = false;
+  });
+
+  $effect(() => {
+    if (router.page !== "audit-logs" && drawer.conversationOpen) {
+      drawer.closeConversation();
+    }
   });
 </script>
 
 {#if drawer.conversationOpen}
-  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div
-    class="conversation-overlay"
-    aria-hidden="true"
-    onclick={() => drawer.closeConversation()}
-  ></div>
-{/if}
-<div
+<aside
   class="conversation-drawer"
-  class:open={drawer.conversationOpen}
+  class:conversation-drawer-fullscreen={fullscreen}
+  style:--conversation-panel-width={panelWidth + "px"}
   bind:this={drawer.conversationDialogEl}
   tabindex="-1"
-  role="dialog"
-  aria-modal="true"
-  aria-hidden={!drawer.conversationOpen}
   aria-labelledby="interactions-drawer-title"
-  aria-describedby="interactions-drawer-content"
 >
+  <!-- A focusable separator is the ARIA window-splitter pattern. Svelte's
+       static checker treats separator as non-interactive despite aria-valuenow. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+  <div
+    class="conversation-resize-handle"
+    role="separator"
+    aria-label="Resize interactions panel"
+    aria-orientation="vertical"
+    aria-controls="dashboard-content interactions-drawer-content"
+    aria-valuemin={panelMin}
+    aria-valuemax={panelMax}
+    aria-valuenow={panelWidth}
+    tabindex="0"
+    onpointerdown={startResize}
+    onpointermove={dragResize}
+    onpointerup={finishResize}
+    onpointercancel={finishResize}
+    onlostpointercapture={finishResize}
+    onkeydown={resizeWithKeyboard}
+  ></div>
   <div class="conversation-drawer-header">
     <h3 id="interactions-drawer-title">Interactions</h3>
-    <DialogCloseButton
-      label="Close interactions"
-      onclick={() => drawer.closeConversation()}
-      bind:el={drawer.conversationCloseBtnEl}
-    />
+    <div class="conversation-drawer-header-actions">
+      <button
+        type="button"
+        class="table-action-btn table-icon-btn"
+        aria-label={fullscreen ? "Exit fullscreen interactions" : "Show interactions fullscreen"}
+        title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+        aria-pressed={fullscreen}
+        onclick={() => fullscreen = !fullscreen}
+      >
+        <Icon icon={fullscreen ? Minimize2 : Maximize2} class="table-icon-svg" />
+      </button>
+      <DialogCloseButton
+        label="Close interactions"
+        onclick={() => drawer.closeConversation()}
+        bind:el={drawer.conversationCloseBtnEl}
+      />
+    </div>
   </div>
 
   <div id="interactions-drawer-content">
@@ -127,14 +237,74 @@
       </p>
     </div>
   {/if}
-</div>
+</aside>
+{/if}
 
 <style>
-  .conversation-overlay {
+  .conversation-drawer {
+    position: sticky;
+    top: 0;
+    flex: 0 0 var(--conversation-panel-width);
+    width: var(--conversation-panel-width);
+    height: 100vh;
+    min-width: 0;
+    background: var(--bg-surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 12;
+  }
+
+  .conversation-drawer-fullscreen {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.3);
-    z-index: 50;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    flex-basis: auto;
+    border-left: 0;
+    z-index: 70;
+  }
+
+  .conversation-drawer-fullscreen .conversation-resize-handle {
+    display: none;
+  }
+
+  .conversation-resize-handle {
+    position: absolute;
+    z-index: 2;
+    top: 0;
+    bottom: 0;
+    left: -5px;
+    width: 10px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+  }
+
+  .conversation-resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 4px;
+    width: 2px;
+    background: transparent;
+    transition: background 0.15s;
+  }
+
+  .conversation-resize-handle:hover::after,
+  .conversation-resize-handle:focus-visible::after {
+    background: color-mix(in srgb, var(--accent) 70%, var(--border));
+  }
+
+  :global(body.conversation-panel-resizing) {
+    cursor: col-resize;
+    user-select: none;
   }
 
   .conversation-drawer-header {
@@ -144,6 +314,12 @@
     gap: 10px;
     padding: 14px 16px;
     border-bottom: 1px solid var(--border);
+  }
+
+  .conversation-drawer-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .conversation-drawer-header :global(h3) {

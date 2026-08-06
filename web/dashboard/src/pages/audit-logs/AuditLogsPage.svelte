@@ -17,7 +17,6 @@
   import AuditLiveStatus from "./AuditLiveStatus.svelte";
   import AuditEntryRow from "./AuditEntryRow.svelte";
   import AuditThreadGroup from "./AuditThreadGroup.svelte";
-  import ConversationDrawer from "./ConversationDrawer.svelte";
   import { auditList } from "./auditList.svelte.js";
   import { liveLogs } from "./liveLogs.svelte.js";
   import {
@@ -168,7 +167,6 @@
     />
   </div>
 
-  <ConversationDrawer />
 </div>
 
 <style>

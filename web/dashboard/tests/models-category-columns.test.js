@@ -5,9 +5,8 @@ import {
   categoryColspan,
 } from "../src/pages/models/categoryColumns.js";
 
-// Legacy table widths: embedding/image 3, text_generation 5, others 4.
-test("categoryColspan matches the legacy per-category table widths", () => {
-  assert.equal(categoryColspan("all"), 4);
+test("categoryColspan matches each category's rendered columns", () => {
+  assert.equal(categoryColspan("all"), 3);
   assert.equal(categoryColspan("text_generation"), 5);
   assert.equal(categoryColspan("embedding"), 3);
   assert.equal(categoryColspan("image"), 3);
@@ -21,7 +20,8 @@ test("unknown categories fall back to the 'all' columns", () => {
 });
 
 test("price columns carry the col-price class; modes does not", () => {
-  const [modes, inputOutput] = categoryColumns("all");
+  const [inputOutput] = categoryColumns("all");
+  const [modes] = categoryColumns("text_generation");
   assert.equal(modes.class, undefined);
   assert.equal(inputOutput.class, "col-price");
   for (const col of categoryColumns("utility")) {
@@ -30,7 +30,7 @@ test("price columns carry the col-price class; modes does not", () => {
 });
 
 test("modes column joins metadata modes and dashes when empty", () => {
-  const [modes] = categoryColumns("all");
+  const [modes] = categoryColumns("text_generation");
   assert.equal(
     modes.value({ model: { metadata: { modes: ["chat", "vision"] } } }),
     "chat, vision",

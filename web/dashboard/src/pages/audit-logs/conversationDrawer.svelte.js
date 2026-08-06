@@ -160,7 +160,6 @@ class ConversationDrawerStore {
     this.followUpText = "";
     this.followUpError = "";
     this.followUpRequestID = "";
-    document.body.classList.add("conversation-drawer-open");
     requestAnimationFrame(() => this._focusConversationDrawer());
 
     // A live entry has no persisted row to fetch yet — render it from the
@@ -258,7 +257,6 @@ class ConversationDrawerStore {
     this.conversationOpenedFromID = "";
     this.followUpRequestID = "";
     this.followUpSending = false;
-    document.body.classList.remove("conversation-drawer-open");
     const returnFocusEl = this.conversationReturnFocusEl;
     this.conversationReturnFocusEl = null;
     if (returnFocusEl && typeof returnFocusEl.focus === "function" && document.contains(returnFocusEl)) {
