@@ -1,6 +1,8 @@
 /* Content */
 .content {
   flex: 1 1 0;
+  container-name: dashboard-content;
+  container-type: inline-size;
   min-height: 0;
   min-width: 0;
   width: 100%;

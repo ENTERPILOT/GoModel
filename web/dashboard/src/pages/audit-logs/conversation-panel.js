@@ -2,15 +2,12 @@ export const DEFAULT_CONVERSATION_PANEL_WIDTH = 520;
 
 export function conversationPanelBounds(viewportWidth, leadingWidth = 0) {
   const available = Math.max(0, finite(viewportWidth) - Math.max(0, finite(leadingWidth)));
-  if (available >= 680) {
-    return { min: 320, max: Math.max(320, available - 360) };
-  }
-
-  // Compact screens still share the shell instead of covering it. Keep a
-  // usable strip of main content visible and allow a smaller panel only when
-  // the desktop minimum cannot fit.
+  // Grow the content reserve continuously from a compact 128px strip to the
+  // desktop target of 360px. This keeps both panes usable without a breakpoint
+  // that can make the panel jump when the viewport changes by a single pixel.
   const min = Math.min(320, Math.max(180, Math.floor(available * 0.58)));
-  return { min, max: Math.max(min, available - 128) };
+  const contentReserve = Math.min(360, Math.max(128, Math.floor(available * 0.35)));
+  return { min, max: Math.max(min, available - contentReserve) };
 }
 
 export function clampConversationPanelWidth(width, viewportWidth, leadingWidth = 0) {

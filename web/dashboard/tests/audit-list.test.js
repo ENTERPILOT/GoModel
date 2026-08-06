@@ -485,11 +485,16 @@ test("buildAuditLogQuery omits unset filters", () => {
   assert.equal(qs, "start_date=2026-07-01&end_date=2026-07-15&limit=25&offset=50");
 });
 
-test("toggleExpandedEntry flips an audit row's expanded state per id", () => {
+test("toggleExpandedEntry keeps at most one audit row expanded", () => {
   const next = toggleExpandedEntry({}, { id: "audit-1" });
   assert.deepEqual(next, { "audit-1": true });
 
-  // A second toggle collapses; keyless entries leave the map untouched.
+  // Opening another row folds the first; toggling that row again collapses it.
+  const second = toggleExpandedEntry(next, { id: "audit-2" });
+  assert.deepEqual(second, { "audit-2": true });
+  assert.deepEqual(toggleExpandedEntry(second, { id: "audit-2" }), {});
+
+  // Keyless entries leave the map untouched.
   assert.deepEqual(toggleExpandedEntry(next, { id: "audit-1" }), {});
   assert.equal(toggleExpandedEntry(next, {}), next);
 });

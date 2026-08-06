@@ -407,12 +407,10 @@ export function toggleExpandedEntry(expanded, entry) {
   const key = auditEntryKey(entry);
   const current = expanded || {};
   if (!key) return current;
-  if (current[key]) {
-    const next = { ...current };
-    delete next[key];
-    return next;
-  }
-  return { ...current, [key]: true };
+  if (current[key]) return {};
+  // Audit details behave like an accordion: opening one row folds any row that
+  // was already open, including entries nested under a grouped session.
+  return { [key]: true };
 }
 
 export function pruneExpandedEntries(expanded, entries) {
