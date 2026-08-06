@@ -1,7 +1,12 @@
-// Cross-cutting UI state: theme, sidebar collapse, and the count of open
+// Cross-cutting UI state: theme, sidebar sizing, and the count of open
 // overlay dialogs (drives the body-level dashboard-modal-open class).
 
 import { readStored, writeStored } from "$lib/utils/storage.js";
+import {
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  clampSidebarWidth,
+} from "./sidebar-sizing.js";
 
 class ThemeStore {
   theme = $state("system");
@@ -47,14 +52,36 @@ class ThemeStore {
 export const themeStore = new ThemeStore();
 
 class SidebarStore {
-  collapsed = $state(false);
+  width = $state(MAX_SIDEBAR_WIDTH);
+
+  get collapsed() {
+    return this.width === MIN_SIDEBAR_WIDTH;
+  }
 
   init() {
-    this.collapsed = readStored("gomodel_sidebar_collapsed") === "true";
+    const storedWidth = readStored("gomodel_sidebar_width");
+    const legacyCollapsed = readStored("gomodel_sidebar_collapsed") === "true";
+    this.setWidth(
+      storedWidth == null
+        ? (legacyCollapsed ? MIN_SIDEBAR_WIDTH : MAX_SIDEBAR_WIDTH)
+        : storedWidth,
+    );
   }
 
   toggle() {
-    this.collapsed = !this.collapsed;
+    this.setWidth(
+      this.collapsed ? MAX_SIDEBAR_WIDTH : MIN_SIDEBAR_WIDTH,
+      true,
+    );
+  }
+
+  setWidth(value, persist = false) {
+    this.width = clampSidebarWidth(value);
+    if (typeof document !== "undefined") {
+      document.documentElement.style.setProperty("--sidebar-width", `${this.width}px`);
+    }
+    if (!persist) return;
+    writeStored("gomodel_sidebar_width", this.width);
     writeStored("gomodel_sidebar_collapsed", this.collapsed);
   }
 }

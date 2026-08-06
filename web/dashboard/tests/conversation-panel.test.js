@@ -24,3 +24,10 @@ test("compact shells keep both the panel and a content strip visible", () => {
   assert.deepEqual(bounds, { min: 182, max: 187 });
   assert.equal(clampConversationPanelWidth(520, 375, 60), 187);
 });
+
+test("panel bounds stay continuous across the former compact breakpoint", () => {
+  assert.deepEqual(conversationPanelBounds(679), { min: 320, max: 442 });
+  assert.deepEqual(conversationPanelBounds(680), { min: 320, max: 443 });
+  assert.equal(clampConversationPanelWidth(520, 679), 442);
+  assert.equal(clampConversationPanelWidth(520, 680), 443);
+});

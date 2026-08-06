@@ -5,6 +5,11 @@
   import { router } from "$lib/stores/router.svelte.js";
   import { sidebar } from "$lib/stores/ui.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
+  import {
+    MAX_SIDEBAR_WIDTH,
+    MIN_SIDEBAR_WIDTH,
+    sidebarWidthFromPointer,
+  } from "$lib/stores/sidebar-sizing.js";
   import { gomodelPath } from "$lib/api/paths.js";
   import { NAV_ITEMS } from "./navigation.js";
   import { LockKeyhole } from "lucide";
@@ -14,9 +19,69 @@
   const navItems = $derived(
     NAV_ITEMS.filter((item) => !item.visible || item.visible()),
   );
+
+  let resizePointerID = $state(null);
+  let resizeStartX = 0;
+  let resizeStartWidth = 0;
+  let dragged = false;
+
+  function startResize(event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    resizePointerID = event.pointerId;
+    resizeStartX = event.clientX;
+    resizeStartWidth = sidebar.width;
+    dragged = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.classList.add("sidebar-resizing");
+  }
+
+  function dragResize(event) {
+    if (event.pointerId !== resizePointerID) return;
+    if (!dragged && Math.abs(event.clientX - resizeStartX) <= 4) return;
+    dragged = true;
+    sidebar.setWidth(
+      sidebarWidthFromPointer(resizeStartWidth, resizeStartX, event.clientX),
+    );
+  }
+
+  function finishResize(event) {
+    if (resizePointerID === null ||
+        (event.pointerId !== undefined && event.pointerId !== resizePointerID)) return;
+    resizePointerID = null;
+    document.body.classList.remove("sidebar-resizing");
+    sidebar.setWidth(sidebar.width, true);
+  }
+
+  function toggleSidebar() {
+    if (dragged) {
+      dragged = false;
+      return;
+    }
+    sidebar.toggle();
+  }
+
+  function resizeWithKeyboard(event) {
+    let width;
+    if (event.key === "ArrowLeft") width = sidebar.width - 12;
+    else if (event.key === "ArrowRight") width = sidebar.width + 12;
+    else if (event.key === "Home") width = MIN_SIDEBAR_WIDTH;
+    else if (event.key === "End") width = MAX_SIDEBAR_WIDTH;
+    else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      sidebar.toggle();
+      return;
+    } else return;
+    event.preventDefault();
+    sidebar.setWidth(width, true);
+  }
 </script>
 
-<aside class="sidebar" class:sidebar-collapsed={sidebar.collapsed}>
+<aside
+  class="sidebar"
+  class:sidebar-collapsed={sidebar.collapsed}
+  class:sidebar-resizing={resizePointerID !== null}
+>
   <div class="sidebar-header">
     <div class="sidebar-logo">
       <GoModelLogo />
@@ -37,7 +102,7 @@
         }}
       >
         <Icon icon={item.icon} class="nav-icon" />
-        <span>{item.label}</span>
+        <span class="nav-label">{item.label}</span>
       </a>
     {/each}
   </nav>
@@ -58,15 +123,26 @@
     {/if}
   </div>
 </aside>
-<button
-  type="button"
+<!-- A focusable separator is the ARIA window-splitter pattern. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+<div
   class="sidebar-toggle"
-  class:collapsed={sidebar.collapsed}
-  onclick={() => sidebar.toggle()}
-  title={sidebar.collapsed ? "Expand sidebar" : "Collapse sidebar"}
-  aria-label={sidebar.collapsed ? "Expand sidebar" : "Collapse sidebar"}
-  aria-expanded={!sidebar.collapsed}
-></button>
+  role="separator"
+  tabindex="0"
+  title="Drag to resize; click to collapse or expand"
+  aria-label="Resize sidebar"
+  aria-orientation="vertical"
+  aria-valuemin={MIN_SIDEBAR_WIDTH}
+  aria-valuemax={MAX_SIDEBAR_WIDTH}
+  aria-valuenow={sidebar.width}
+  onpointerdown={startResize}
+  onpointermove={dragResize}
+  onpointerup={finishResize}
+  onpointercancel={finishResize}
+  onlostpointercapture={finishResize}
+  onkeydown={resizeWithKeyboard}
+  onclick={toggleSidebar}
+></div>
 
 <style>
 .sidebar {
@@ -80,11 +156,16 @@
     top: 0;
     max-height: 100vh;
     overflow-y: auto;
+    overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
     z-index: 10;
     transition:
       flex-basis 0.2s,
       width 0.2s;
+  }
+
+.sidebar.sidebar-resizing {
+    transition: none;
   }
 
 .sidebar-header {
@@ -144,6 +225,14 @@
     color: #fff;
   }
 
+.nav-label {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+
 .sidebar-footer {
     padding: 16px;
     border-top: 1px solid var(--border);
@@ -195,7 +284,7 @@
     padding: 0;
     background: transparent;
     border: none;
-    cursor: w-resize;
+    cursor: ew-resize;
     z-index: 11;
     transition: background 0.15s;
   }
@@ -204,19 +293,14 @@
     background: color-mix(in srgb, var(--accent) 15%, transparent);
   }
 
-.sidebar-toggle.collapsed {
-    cursor: e-resize;
-  }
-
 .sidebar-toggle:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
     outline-offset: 2px;
   }
 
-/* Collapsed sidebar (desktop) */
-.sidebar.sidebar-collapsed {
-    flex-basis: 60px;
-    width: 60px;
+:global(body.sidebar-resizing) {
+    cursor: ew-resize;
+    user-select: none;
   }
 
 .sidebar.sidebar-collapsed .sidebar-header {
@@ -233,7 +317,7 @@
     padding: 10px;
   }
 
-.sidebar.sidebar-collapsed .sidebar-nav .nav-item :global(span) {
+.sidebar.sidebar-collapsed .sidebar-nav .nav-label {
     display: none;
   }
 
@@ -265,7 +349,7 @@
           padding: 10px;
         }
 
-  .sidebar-nav .nav-item :global(span) {
+  .sidebar-nav .nav-item .nav-label {
           display: none;
         }
 

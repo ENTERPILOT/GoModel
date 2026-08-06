@@ -87,6 +87,14 @@
     writeStored("gomodel_interactions_panel_width", preferredWidth);
   }
 
+  function dashboardShellElements() {
+    return [
+      document.querySelector(".sidebar"),
+      document.querySelector(".sidebar-toggle"),
+      document.getElementById("dashboard-content"),
+    ].filter(Boolean);
+  }
+
   $effect(() => {
     if (!drawer.conversationOpen) return;
     syncPanelWidth();
@@ -114,6 +122,26 @@
   });
 
   $effect(() => {
+    if (!fullscreen) return;
+    const shellElements = dashboardShellElements().map((element) => ({
+      element,
+      inert: element.inert,
+      ariaHidden: element.getAttribute("aria-hidden"),
+    }));
+    shellElements.forEach(({ element }) => {
+      element.inert = true;
+      element.setAttribute("aria-hidden", "true");
+    });
+    return () => {
+      shellElements.forEach(({ element, inert, ariaHidden }) => {
+        element.inert = inert;
+        if (ariaHidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", ariaHidden);
+      });
+    };
+  });
+
+  $effect(() => {
     if (router.page !== "audit-logs" && drawer.conversationOpen) {
       drawer.closeConversation();
     }
@@ -127,6 +155,8 @@
   style:--conversation-panel-width={panelWidth + "px"}
   bind:this={drawer.conversationDialogEl}
   tabindex="-1"
+  role={fullscreen ? "dialog" : undefined}
+  aria-modal={fullscreen ? "true" : undefined}
   aria-labelledby="interactions-drawer-title"
 >
   <!-- A focusable separator is the ARIA window-splitter pattern. Svelte's
