@@ -3,12 +3,13 @@ package auditlog
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
 )
 
-func TestEnrichEntryWithAuthMethodTrimsAndValidatesAllowedValues(t *testing.T) {
+func TestEnrichEntryWithAuthMethodTrimsAndValidatesIdentifiers(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -35,9 +36,14 @@ func TestEnrichEntryWithAuthMethodTrimsAndValidatesAllowedValues(t *testing.T) {
 	if entry.AuthMethod != "unknown" {
 		t.Fatalf("entry auth method = %q, want %q", entry.AuthMethod, "unknown")
 	}
+
+	EnrichEntryWithAuthMethod(c, "  OAuth  ")
+	if entry.AuthMethod != "oauth" {
+		t.Fatalf("entry auth method = %q, want %q", entry.AuthMethod, "oauth")
+	}
 }
 
-func TestEnrichEntryWithAuthMethodIgnoresBlankAndUnsupportedValues(t *testing.T) {
+func TestEnrichEntryWithAuthMethodIgnoresBlankAndUnsafeValues(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -50,7 +56,12 @@ func TestEnrichEntryWithAuthMethodIgnoresBlankAndUnsupportedValues(t *testing.T)
 		t.Fatalf("entry auth method = %q, want empty", entry.AuthMethod)
 	}
 
-	EnrichEntryWithAuthMethod(c, "oauth")
+	EnrichEntryWithAuthMethod(c, "oauth\nsecret")
+	if entry.AuthMethod != "" {
+		t.Fatalf("entry auth method = %q, want empty", entry.AuthMethod)
+	}
+
+	EnrichEntryWithAuthMethod(c, strings.Repeat("a", 65))
 	if entry.AuthMethod != "" {
 		t.Fatalf("entry auth method = %q, want empty", entry.AuthMethod)
 	}

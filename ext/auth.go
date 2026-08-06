@@ -18,7 +18,10 @@ type Authentication struct {
 	UserPath        string
 	Labels          []string
 	DashboardAccess bool
-	Method          string
+	// Method is a short, stable audit identifier such as "oidc" or "saml".
+	// Core normalizes safe identifiers and records "extension" when it is empty
+	// or invalid.
+	Method string
 }
 
 // RequestAuthenticator authenticates requests using a mechanism other than

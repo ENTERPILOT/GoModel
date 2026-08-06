@@ -537,9 +537,9 @@ providers:
   #           output_per_mtok: 0
   #     - Gemma4-31B
 
-# Custom distributions may define strictly validated configuration in named
-# extension sections. Core preserves these values without depending on the
-# extension's schema; the owning extension decodes and validates its section.
+# Extensions are absent by default. Add a named section only when a custom
+# distribution requires it. Core preserves these values without depending on
+# the extension's schema; the owning extension strictly validates its section.
 # extensions:
 #   example:
 #     enabled: true

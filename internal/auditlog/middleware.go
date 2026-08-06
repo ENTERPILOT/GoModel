@@ -209,7 +209,12 @@ func applyAuthentication(entry *LogEntry, ctx context.Context) {
 		entry.AuthKeyID = authKeyID
 	}
 	if authentication, ok := ext.AuthenticationFromContext(ctx); ok {
-		entry.PrincipalID = strings.TrimSpace(authentication.PrincipalID)
+		if principalID := strings.TrimSpace(authentication.PrincipalID); principalID != "" {
+			entry.PrincipalID = principalID
+		}
+		if authMethod := NormalizeAuthMethod(authentication.Method); authMethod != "" {
+			entry.AuthMethod = authMethod
+		}
 	}
 	if userPath := strings.TrimSpace(core.UserPathFromContext(ctx)); userPath != "" {
 		entry.UserPath = userPath

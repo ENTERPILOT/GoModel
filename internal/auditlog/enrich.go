@@ -297,16 +297,32 @@ func EnrichEntryWithCacheType(c *echo.Context, cacheType string) {
 	publishLiveAuditUpdate(c, entry)
 }
 
+// NormalizeAuthMethod returns a bounded lowercase audit identifier. Extension
+// methods are intentionally opaque to Core; restricting their alphabet keeps
+// persisted values safe for logs, filters, and metrics without enumerating
+// provider-specific mechanisms.
+func NormalizeAuthMethod(method string) string {
+	method = strings.ToLower(strings.TrimSpace(method))
+	if method == "" || len(method) > 64 {
+		return ""
+	}
+	for _, char := range method {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '_' || char == '-' || char == '.' {
+			continue
+		}
+		return ""
+	}
+	return method
+}
+
 // EnrichEntryWithAuthMethod records which authentication mechanism was used for the request.
 func EnrichEntryWithAuthMethod(c *echo.Context, method string) {
 	entry := entryFromContext(c)
 	if entry == nil {
 		return
 	}
-	method = strings.ToLower(strings.TrimSpace(method))
-	switch method {
-	case AuthMethodAPIKey, AuthMethodMasterKey, AuthMethodNoKey, AuthMethodSSO, "unknown":
-	default:
+	method = NormalizeAuthMethod(method)
+	if method == "" {
 		return
 	}
 	entry.AuthMethod = method

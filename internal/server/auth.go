@@ -97,13 +97,13 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 				}
 				result, err := requestAuthenticator.AuthenticateRequest(c.Request().Context(), c.Request())
 				if err != nil {
-					return writeGatewayError(c, authenticationErrorWithAudit(c, authFailureMessage(err), "authentication failed"))
+					return writeGatewayError(c, extensionAuthenticationError(c))
 				}
 				if result == nil {
 					continue
 				}
 				if err := applyExtensionAuthResult(c, result, userPathHeaderName); err != nil {
-					return writeGatewayError(c, authenticationErrorWithAudit(c, err.Error(), "authentication failed"))
+					return writeGatewayError(c, extensionAuthenticationError(c))
 				}
 				return next(c)
 			}
@@ -115,18 +115,29 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 }
 
 func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userPathHeaderName string) error {
-	if result == nil || strings.TrimSpace(result.PrincipalID) == "" {
+	if result == nil {
+		return errors.New("extension authenticator returned no identity")
+	}
+	principalID := strings.TrimSpace(result.PrincipalID)
+	if principalID == "" {
 		return errors.New("extension authenticator returned an empty principal id")
 	}
 	userPath, err := core.NormalizeUserPath(result.UserPath)
 	if err != nil {
 		return err
 	}
-	ctx := context.WithValue(c.Request().Context(), managedDashboardAccessKey{}, result.DashboardAccess)
-	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, result.DashboardAccess)
-	ctx = ext.WithAuthentication(ctx, *result)
-	if len(result.Labels) > 0 {
-		ctx = core.WithRequestLabels(ctx, core.MergeLabels(core.RequestLabelsFromContext(ctx), result.Labels))
+	normalized := *result
+	normalized.PrincipalID = principalID
+	normalized.UserPath = userPath
+	normalized.Method = auditlog.NormalizeAuthMethod(result.Method)
+	if normalized.Method == "" {
+		normalized.Method = auditlog.AuthMethodExtension
+	}
+	ctx := context.WithValue(c.Request().Context(), managedDashboardAccessKey{}, normalized.DashboardAccess)
+	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, normalized.DashboardAccess)
+	ctx = ext.WithAuthentication(ctx, normalized)
+	if len(normalized.Labels) > 0 {
+		ctx = core.WithRequestLabels(ctx, core.MergeLabels(core.RequestLabelsFromContext(ctx), normalized.Labels))
 	}
 	if userPath != "" {
 		ctx = core.WithEffectiveUserPath(ctx, userPath)
@@ -138,8 +149,8 @@ func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userP
 		auditlog.EnrichEntryWithUserPath(c, userPath)
 	}
 	c.SetRequest(c.Request().WithContext(ctx))
-	auditlog.EnrichEntryWithAuthMethod(c, result.Method)
-	auditlog.EnrichEntryWithPrincipalID(c, result.PrincipalID)
+	auditlog.EnrichEntryWithAuthMethod(c, normalized.Method)
+	auditlog.EnrichEntryWithPrincipalID(c, normalized.PrincipalID)
 	return nil
 }
 
@@ -150,7 +161,7 @@ func AdminAccessMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			if allowed, isManagedKey := managedDashboardAccess(c.Request().Context()); isManagedKey && !allowed {
-				const message = "API key does not have dashboard access"
+				const message = "identity does not have dashboard access"
 				auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message)
 				gatewayErr := (&core.GatewayError{
 					Type:       core.ErrorTypeAuthentication,
@@ -162,6 +173,15 @@ func AdminAccessMiddleware() echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+func extensionAuthenticationError(c *echo.Context) *core.GatewayError {
+	const (
+		message = "authentication failed"
+		code    = "extension_authentication_failed"
+	)
+	auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message, code)
+	return core.NewAuthenticationError("", message).WithCode(code)
 }
 
 // requestAuthToken extracts the caller's credential from the request. The

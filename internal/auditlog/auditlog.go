@@ -36,7 +36,7 @@ const (
 	AuthMethodAPIKey    = "api_key"
 	AuthMethodMasterKey = "master_key"
 	AuthMethodNoKey     = "no_key"
-	AuthMethodSSO       = "sso"
+	AuthMethodExtension = "extension"
 )
 
 const (

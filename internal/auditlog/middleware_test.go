@@ -36,12 +36,26 @@ func TestApplyAuthenticationKeepsLabelsWhenContextHasNone(t *testing.T) {
 
 func TestApplyAuthenticationPersistsExtensionPrincipal(t *testing.T) {
 	entry := &LogEntry{}
-	ctx := ext.WithAuthentication(t.Context(), ext.Authentication{PrincipalID: "oidc:principal-1"})
+	ctx := ext.WithAuthentication(t.Context(), ext.Authentication{PrincipalID: "oidc:principal-1", Method: "oidc"})
 
 	applyAuthentication(entry, ctx)
 
 	if entry.PrincipalID != "oidc:principal-1" {
 		t.Fatalf("PrincipalID = %q, want oidc:principal-1", entry.PrincipalID)
+	}
+	if entry.AuthMethod != "oidc" {
+		t.Fatalf("AuthMethod = %q, want oidc", entry.AuthMethod)
+	}
+}
+
+func TestApplyAuthenticationDoesNotReplacePrincipalWithBlank(t *testing.T) {
+	entry := &LogEntry{PrincipalID: "existing-principal"}
+	ctx := ext.WithAuthentication(t.Context(), ext.Authentication{PrincipalID: "  "})
+
+	applyAuthentication(entry, ctx)
+
+	if entry.PrincipalID != "existing-principal" {
+		t.Fatalf("PrincipalID = %q, want existing-principal", entry.PrincipalID)
 	}
 }
 

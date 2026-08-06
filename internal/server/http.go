@@ -244,7 +244,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	// When no bootstrap master key is configured, keep admin APIs reachable so
 	// the dashboard can recover managed-key access instead of locking itself out.
-	if cfg != nil && cfg.MasterKey == "" && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
+	if cfg != nil && cfg.MasterKey == "" && len(cfg.RequestAuthenticators) == 0 && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/*")
 	}
 	if cfg != nil && cfg.SwaggerEnabled && SwaggerAvailable() {

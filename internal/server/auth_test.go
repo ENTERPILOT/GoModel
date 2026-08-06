@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -264,11 +265,11 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *te
 func TestAuthMiddlewareWithRequestAuthenticatorEnrichesRequest(t *testing.T) {
 	e := echo.New()
 	requestAuth := &mockRequestAuthenticator{result: &ext.Authentication{
-		PrincipalID:     "oidc:principal-1",
-		UserPath:        "/users/person@example.com",
+		PrincipalID:     "  oidc:principal-1  ",
+		UserPath:        " /users/person@example.com/ ",
 		Labels:          []string{"sso"},
 		DashboardAccess: true,
-		Method:          auditlog.AuthMethodSSO,
+		Method:          " OIDC ",
 	}}
 	handler := RequestSnapshotCapture()(AuthMiddlewareWithRequestAuthenticators(
 		"", nil, []ext.RequestAuthenticator{requestAuth}, nil,
@@ -279,8 +280,10 @@ func TestAuthMiddlewareWithRequestAuthenticatorEnrichesRequest(t *testing.T) {
 		identity, ok := ext.AuthenticationFromContext(c.Request().Context())
 		assert.True(t, ok)
 		assert.Equal(t, "oidc:principal-1", identity.PrincipalID)
+		assert.Equal(t, "/users/person@example.com", identity.UserPath)
+		assert.Equal(t, "oidc", identity.Method)
 		entry := c.Get(string(auditlog.LogEntryKey)).(*auditlog.LogEntry)
-		assert.Equal(t, auditlog.AuthMethodSSO, entry.AuthMethod)
+		assert.Equal(t, "oidc", entry.AuthMethod)
 		assert.Equal(t, "oidc:principal-1", entry.PrincipalID)
 		assert.Equal(t, "/users/person@example.com", entry.UserPath)
 		return c.NoContent(http.StatusNoContent)
@@ -293,6 +296,86 @@ func TestAuthMiddlewareWithRequestAuthenticatorEnrichesRequest(t *testing.T) {
 	require.NoError(t, handler(c))
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, 1, requestAuth.calls)
+}
+
+func TestAuthMiddlewareWithRequestAuthenticatorsFailurePaths(t *testing.T) {
+	secretError := errors.New("provider rejected cookie=super-secret")
+	tests := []struct {
+		name                 string
+		auths                []*mockRequestAuthenticator
+		adminGate            bool
+		wantStatus           int
+		wantCalls            []int
+		wantExtensionFailure bool
+	}{
+		{
+			name:       "authenticator error is sanitized",
+			auths:      []*mockRequestAuthenticator{{err: secretError}},
+			wantStatus: http.StatusUnauthorized, wantCalls: []int{1}, wantExtensionFailure: true,
+		},
+		{
+			name: "nil result falls through to next authenticator",
+			auths: []*mockRequestAuthenticator{{}, {result: &ext.Authentication{
+				PrincipalID: "principal-1", UserPath: "/users/one", DashboardAccess: true, Method: "saml",
+			}}},
+			wantStatus: http.StatusNoContent, wantCalls: []int{1, 1},
+		},
+		{
+			name:       "all nil results reject missing credentials",
+			auths:      []*mockRequestAuthenticator{{}, {}},
+			wantStatus: http.StatusUnauthorized, wantCalls: []int{1, 1},
+		},
+		{
+			name:       "empty principal is rejected",
+			auths:      []*mockRequestAuthenticator{{result: &ext.Authentication{PrincipalID: "  ", UserPath: "/users/one"}}},
+			wantStatus: http.StatusUnauthorized, wantCalls: []int{1}, wantExtensionFailure: true,
+		},
+		{
+			name:       "invalid user path is rejected",
+			auths:      []*mockRequestAuthenticator{{result: &ext.Authentication{PrincipalID: "principal-1", UserPath: "/users/../admin"}}},
+			wantStatus: http.StatusUnauthorized, wantCalls: []int{1}, wantExtensionFailure: true,
+		},
+		{
+			name:      "identity without dashboard access is forbidden",
+			auths:     []*mockRequestAuthenticator{{result: &ext.Authentication{PrincipalID: "principal-1", UserPath: "/users/one"}}},
+			adminGate: true, wantStatus: http.StatusForbidden, wantCalls: []int{1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authenticators := make([]ext.RequestAuthenticator, len(tt.auths))
+			for i, authenticator := range tt.auths {
+				authenticators[i] = authenticator
+			}
+			next := echo.HandlerFunc(func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+			if tt.adminGate {
+				next = AdminAccessMiddleware()(next)
+			}
+			handler := AuthMiddlewareWithRequestAuthenticators("", nil, authenticators, nil)(next)
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodGet, "/admin/auth-keys", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+			c.Set(string(auditlog.LogEntryKey), entry)
+			require.NoError(t, handler(c))
+			assert.Equal(t, tt.wantStatus, rec.Code)
+			for i, wantCalls := range tt.wantCalls {
+				assert.Equal(t, wantCalls, tt.auths[i].calls)
+			}
+			assert.NotContains(t, rec.Body.String(), "super-secret")
+			assert.NotContains(t, entry.Data.ErrorMessage, "super-secret")
+			if tt.wantExtensionFailure {
+				assert.Equal(t, "authentication failed", entry.Data.ErrorMessage)
+				assert.Equal(t, "extension_authentication_failed", entry.Data.ErrorCode)
+			}
+			if tt.adminGate {
+				assert.Equal(t, auditlog.AuthMethodExtension, entry.AuthMethod)
+			}
+		})
+	}
 }
 
 func TestAuthMiddlewareExplicitBearerPrecedesRequestAuthenticator(t *testing.T) {

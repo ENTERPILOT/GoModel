@@ -58,28 +58,31 @@ func TestSQLStoreWriteBatchRoundTrip(t *testing.T) {
 			t.Fatalf("WriteBatch: %v", err)
 		}
 
-		var (
-			requestedModel, userPath, principalID string
-			aliasUsed, stream                     bool
-			statusCode                            int
-		)
-		err := db.QueryRow(ctx, `
-			SELECT requested_model, user_path, principal_id, alias_used, stream, status_code
-			FROM audit_logs WHERE id = ?
-		`, "log-1").Scan(&requestedModel, &userPath, &principalID, &aliasUsed, &stream, &statusCode)
+		reader, err := NewSQLReader(db)
 		if err != nil {
-			t.Fatalf("read back: %v", err)
+			t.Fatalf("NewSQLReader: %v", err)
 		}
-		if requestedModel != "gpt-4o-mini" || userPath != "/team" || statusCode != 200 {
-			t.Errorf("row = (%q, %q, %d), want (gpt-4o-mini, /team, 200)", requestedModel, userPath, statusCode)
+		result, err := reader.GetLogs(ctx, LogQueryParams{Limit: 10, OmitAttempts: true})
+		if err != nil {
+			t.Fatalf("GetLogs: %v", err)
 		}
-		if principalID != "oidc:principal-1" {
-			t.Errorf("principal_id = %q, want oidc:principal-1", principalID)
+		if len(result.Entries) != 1 {
+			t.Fatalf("entries = %d, want 1", len(result.Entries))
+		}
+		entry := result.Entries[0]
+		if entry.RequestedModel != "gpt-4o-mini" || entry.UserPath != "/team" || entry.StatusCode != 200 {
+			t.Errorf("entry = (%q, %q, %d), want (gpt-4o-mini, /team, 200)", entry.RequestedModel, entry.UserPath, entry.StatusCode)
+		}
+		if entry.PrincipalID != "oidc:principal-1" {
+			t.Errorf("principal_id = %q, want oidc:principal-1", entry.PrincipalID)
+		}
+		if entry.RequestID != "req-log-1" || entry.AuthKeyID != "auth-key-1" || entry.AuthMethod != "bearer" {
+			t.Errorf("auth fields = (%q, %q, %q), want (req-log-1, auth-key-1, bearer)", entry.RequestID, entry.AuthKeyID, entry.AuthMethod)
 		}
 		// Booleans round-trip as booleans on both engines, without an
 		// int-conversion helper on either side.
-		if !aliasUsed || !stream {
-			t.Errorf("alias_used=%v stream=%v, want both true", aliasUsed, stream)
+		if !entry.AliasUsed || !entry.Stream {
+			t.Errorf("alias_used=%v stream=%v, want both true", entry.AliasUsed, entry.Stream)
 		}
 	})
 }
