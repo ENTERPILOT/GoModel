@@ -697,6 +697,7 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
 	reg.AddPublicPaths("/sso/callback", "/sso/*")
+	reg.RegisterAuthenticator(&appTestAuthenticator{})
 
 	serverCfg := &server.Config{}
 	applyExtensions(serverCfg, reg)
@@ -713,13 +714,24 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	if len(serverCfg.ExtraAuthSkipPaths) != 2 {
 		t.Errorf("ExtraAuthSkipPaths not copied: %v", serverCfg.ExtraAuthSkipPaths)
 	}
+	if len(serverCfg.RequestAuthenticators) != 1 {
+		t.Errorf("RequestAuthenticators not copied: %v", serverCfg.RequestAuthenticators)
+	}
 
 	// A nil registry must leave the config untouched.
 	empty := &server.Config{}
 	applyExtensions(empty, nil)
-	if empty.RequestRewriters != nil || empty.ExtraMiddleware != nil || empty.ExtraRoutes != nil || empty.ExtraAuthSkipPaths != nil {
+	if empty.RequestRewriters != nil || empty.ExtraMiddleware != nil || empty.ExtraRoutes != nil || empty.ExtraAuthSkipPaths != nil || empty.RequestAuthenticators != nil {
 		t.Error("nil registry must not modify server config")
 	}
+}
+
+type appTestAuthenticator struct{}
+
+func (*appTestAuthenticator) Name() string { return "test" }
+
+func (*appTestAuthenticator) AuthenticateRequest(context.Context, *http.Request) (*ext.Authentication, error) {
+	return nil, nil
 }
 
 type staticRewriter struct{ name string }

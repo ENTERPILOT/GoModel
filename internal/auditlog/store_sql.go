@@ -13,12 +13,12 @@ import (
 )
 
 // SQLite allows 999 bindable parameters per statement
-// (SQLITE_MAX_VARIABLE_NUMBER). At 22 columns per entry that is 45 entries,
+// (SQLITE_MAX_VARIABLE_NUMBER). At 23 columns per entry that is 43 entries,
 // so larger batches are chunked. PostgreSQL's limit is far higher, but one
 // chunk size keeps the write path identical on both.
 const (
 	maxSQLParams       = 999
-	columnsPerEntry    = 22
+	columnsPerEntry    = 23
 	maxEntriesPerBatch = maxSQLParams / columnsPerEntry
 )
 
@@ -46,6 +46,7 @@ var sqlTables = []string{
 		cache_type TEXT,
 		status_code INTEGER DEFAULT 0,
 		request_id TEXT,
+		principal_id TEXT,
 		auth_key_id TEXT,
 		auth_method TEXT,
 		client_ip TEXT,
@@ -87,6 +88,7 @@ var sqlMigrations = []string{
 	"ALTER TABLE audit_logs ADD COLUMN alias_used " + sqlx.TypeBool + " DEFAULT FALSE",
 	"ALTER TABLE audit_logs ADD COLUMN workflow_version_id TEXT",
 	"ALTER TABLE audit_logs ADD COLUMN cache_type TEXT",
+	"ALTER TABLE audit_logs ADD COLUMN principal_id TEXT",
 	"ALTER TABLE audit_logs ADD COLUMN auth_key_id TEXT",
 	"ALTER TABLE audit_logs ADD COLUMN auth_method TEXT",
 	"ALTER TABLE audit_logs ADD COLUMN user_path TEXT",
@@ -106,6 +108,7 @@ var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON audit_logs(provider_name)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_workflow_version_id ON audit_logs(workflow_version_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_principal_id ON audit_logs(principal_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON audit_logs(auth_key_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
@@ -125,7 +128,7 @@ var sqlIndexes = []string{
 const insertAuditLogPrefix = `INSERT INTO audit_logs (
 	id, timestamp, duration_ns, requested_model, resolved_model, provider,
 	provider_name, alias_used, workflow_version_id, cache_type, status_code,
-	request_id, auth_key_id, auth_method, client_ip, method, path, user_path,
+	request_id, principal_id, auth_key_id, auth_method, client_ip, method, path, user_path,
 	session_id, stream, error_type, data
 ) VALUES `
 
@@ -216,7 +219,7 @@ func (s *SQLStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
 		placeholders := make([]string, len(chunk))
 		values := make([]any, 0, len(chunk)*columnsPerEntry)
 		for j, e := range chunk {
-			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 			values = append(values, auditLogValues(dialect, e)...)
 		}
 
@@ -259,6 +262,7 @@ func auditLogValues(dialect sqlx.Dialect, e *LogEntry) []any {
 		cacheTypeValue,
 		e.StatusCode,
 		e.RequestID,
+		e.PrincipalID,
 		e.AuthKeyID,
 		e.AuthMethod,
 		e.ClientIP,

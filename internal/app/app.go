@@ -119,6 +119,7 @@ func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
+	serverCfg.RequestAuthenticators = extensions.Authenticators()
 }
 
 // routeSelectorHooks adapts upstream client lifecycle events into route

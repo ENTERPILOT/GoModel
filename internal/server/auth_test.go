@@ -12,10 +12,24 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
 )
+
+type mockRequestAuthenticator struct {
+	result *ext.Authentication
+	err    error
+	calls  int
+}
+
+func (m *mockRequestAuthenticator) Name() string { return "mock-request-auth" }
+
+func (m *mockRequestAuthenticator) AuthenticateRequest(_ context.Context, _ *http.Request) (*ext.Authentication, error) {
+	m.calls++
+	return m.result, m.err
+}
 
 type mockAuthenticator struct {
 	enabled        bool
@@ -245,6 +259,60 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *te
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "ok", rec.Body.String())
+}
+
+func TestAuthMiddlewareWithRequestAuthenticatorEnrichesRequest(t *testing.T) {
+	e := echo.New()
+	requestAuth := &mockRequestAuthenticator{result: &ext.Authentication{
+		PrincipalID:     "oidc:principal-1",
+		UserPath:        "/users/person@example.com",
+		Labels:          []string{"sso"},
+		DashboardAccess: true,
+		Method:          auditlog.AuthMethodSSO,
+	}}
+	handler := RequestSnapshotCapture()(AuthMiddlewareWithRequestAuthenticators(
+		"", nil, []ext.RequestAuthenticator{requestAuth}, nil,
+	)(func(c *echo.Context) error {
+		assert.Equal(t, "/users/person@example.com", core.UserPathFromContext(c.Request().Context()))
+		assert.Equal(t, []string{"sso"}, core.RequestLabelsFromContext(c.Request().Context()))
+		assert.True(t, interactionContinuationAllowed(c.Request().Context()))
+		identity, ok := ext.AuthenticationFromContext(c.Request().Context())
+		assert.True(t, ok)
+		assert.Equal(t, "oidc:principal-1", identity.PrincipalID)
+		entry := c.Get(string(auditlog.LogEntryKey)).(*auditlog.LogEntry)
+		assert.Equal(t, auditlog.AuthMethodSSO, entry.AuthMethod)
+		assert.Equal(t, "oidc:principal-1", entry.PrincipalID)
+		assert.Equal(t, "/users/person@example.com", entry.UserPath)
+		return c.NoContent(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+	require.NoError(t, handler(c))
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, 1, requestAuth.calls)
+}
+
+func TestAuthMiddlewareExplicitBearerPrecedesRequestAuthenticator(t *testing.T) {
+	requestAuth := &mockRequestAuthenticator{result: &ext.Authentication{
+		PrincipalID: "oidc:principal-1", UserPath: "/users/sso", DashboardAccess: true,
+	}}
+	handler := AuthMiddlewareWithRequestAuthenticators(
+		"master", nil, []ext.RequestAuthenticator{requestAuth}, nil,
+	)(func(c *echo.Context) error {
+		assert.Empty(t, core.UserPathFromContext(c.Request().Context()))
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage", nil)
+	req.Header.Set("Authorization", "Bearer master")
+	rec := httptest.NewRecorder()
+	require.NoError(t, handler(e.NewContext(req, rec)))
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Zero(t, requestAuth.calls)
 }
 
 func TestAuthMiddleware_InteractionContinuationAccess(t *testing.T) {

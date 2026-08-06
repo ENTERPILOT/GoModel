@@ -32,6 +32,7 @@ type mongoLogRow struct {
 	CacheType         string    `bson:"cache_type"`
 	StatusCode        int       `bson:"status_code"`
 	RequestID         string    `bson:"request_id"`
+	PrincipalID       string    `bson:"principal_id"`
 	AuthKeyID         string    `bson:"auth_key_id"`
 	AuthMethod        string    `bson:"auth_method"`
 	ClientIP          string    `bson:"client_ip"`
@@ -58,6 +59,7 @@ func (r mongoLogRow) toLogEntry() *LogEntry {
 		CacheType:         normalizeCacheType(r.CacheType),
 		StatusCode:        r.StatusCode,
 		RequestID:         r.RequestID,
+		PrincipalID:       r.PrincipalID,
 		AuthKeyID:         r.AuthKeyID,
 		AuthMethod:        r.AuthMethod,
 		ClientIP:          r.ClientIP,

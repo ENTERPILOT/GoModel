@@ -256,6 +256,61 @@ func TestBuildDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestDecodeExtensionStrictlyDecodesOpaqueConfig(t *testing.T) {
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte("enabled: true\npkce_enabled: false\n"), &node); err != nil {
+		t.Fatal(err)
+	}
+	type ssoConfig struct {
+		Enabled     bool `yaml:"enabled"`
+		PKCEEnabled bool `yaml:"pkce_enabled"`
+	}
+	result := &LoadResult{Config: &Config{Extensions: map[string]yaml.Node{"sso": node}}}
+	var got ssoConfig
+	found, err := result.DecodeExtension("sso", &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || !got.Enabled || got.PKCEEnabled {
+		t.Fatalf("found=%v config=%+v", found, got)
+	}
+
+	var unknown yaml.Node
+	if err := yaml.Unmarshal([]byte("unknown: true\n"), &unknown); err != nil {
+		t.Fatal(err)
+	}
+	result.Config.Extensions["sso"] = unknown
+	if _, err := result.DecodeExtension("sso", &got); err == nil {
+		t.Fatal("expected extension-owned unknown key to be rejected")
+	}
+}
+
+func TestLoadPreservesOpaqueExtensionConfiguration(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	withTempDir(t, func(dir string) {
+		contents := []byte("extensions:\n  sso:\n    enabled: true\n    provider_specific_option: value\n")
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), contents, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() rejected extension-owned keys: %v", err)
+		}
+		var decoded struct {
+			Enabled                bool   `yaml:"enabled"`
+			ProviderSpecificOption string `yaml:"provider_specific_option"`
+		}
+		found, err := result.DecodeExtension("sso", &decoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !found || !decoded.Enabled || decoded.ProviderSpecificOption != "value" {
+			t.Fatalf("found=%v config=%+v", found, decoded)
+		}
+	})
+}
+
 func TestLoadBudgetEnvUserPath(t *testing.T) {
 	clearAllConfigEnvVars(t)
 

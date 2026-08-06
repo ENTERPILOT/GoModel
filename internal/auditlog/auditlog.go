@@ -36,6 +36,7 @@ const (
 	AuthMethodAPIKey    = "api_key"
 	AuthMethodMasterKey = "master_key"
 	AuthMethodNoKey     = "no_key"
+	AuthMethodSSO       = "sso"
 )
 
 const (
@@ -98,16 +99,17 @@ type LogEntry struct {
 	StatusCode        int    `json:"status_code" bson:"status_code"`
 
 	// Extracted fields for efficient filtering (indexed in relational DBs)
-	RequestID  string `json:"request_id,omitempty" bson:"request_id,omitempty"`
-	AuthKeyID  string `json:"auth_key_id,omitempty" bson:"auth_key_id,omitempty"`
-	AuthMethod string `json:"auth_method,omitempty" bson:"auth_method,omitempty"`
-	ClientIP   string `json:"client_ip,omitempty" bson:"client_ip,omitempty"`
-	Method     string `json:"method,omitempty" bson:"method,omitempty"`
-	Path       string `json:"path,omitempty" bson:"path,omitempty"`
-	UserPath   string `json:"user_path,omitempty" bson:"user_path,omitempty"`
-	SessionID  string `json:"session_id,omitempty" bson:"session_id,omitempty"`
-	Stream     bool   `json:"stream,omitempty" bson:"stream,omitempty"`
-	ErrorType  string `json:"error_type,omitempty" bson:"error_type,omitempty"`
+	RequestID   string `json:"request_id,omitempty" bson:"request_id,omitempty"`
+	PrincipalID string `json:"principal_id,omitempty" bson:"principal_id,omitempty"`
+	AuthKeyID   string `json:"auth_key_id,omitempty" bson:"auth_key_id,omitempty"`
+	AuthMethod  string `json:"auth_method,omitempty" bson:"auth_method,omitempty"`
+	ClientIP    string `json:"client_ip,omitempty" bson:"client_ip,omitempty"`
+	Method      string `json:"method,omitempty" bson:"method,omitempty"`
+	Path        string `json:"path,omitempty" bson:"path,omitempty"`
+	UserPath    string `json:"user_path,omitempty" bson:"user_path,omitempty"`
+	SessionID   string `json:"session_id,omitempty" bson:"session_id,omitempty"`
+	Stream      bool   `json:"stream,omitempty" bson:"stream,omitempty"`
+	ErrorType   string `json:"error_type,omitempty" bson:"error_type,omitempty"`
 
 	// Data contains flexible request/response information as JSON
 	Data *LogData `json:"data,omitempty" bson:"data,omitempty"`

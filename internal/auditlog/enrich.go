@@ -305,7 +305,7 @@ func EnrichEntryWithAuthMethod(c *echo.Context, method string) {
 	}
 	method = strings.ToLower(strings.TrimSpace(method))
 	switch method {
-	case AuthMethodAPIKey, AuthMethodMasterKey, AuthMethodNoKey, "unknown":
+	case AuthMethodAPIKey, AuthMethodMasterKey, AuthMethodNoKey, AuthMethodSSO, "unknown":
 	default:
 		return
 	}
@@ -324,6 +324,21 @@ func EnrichEntryWithAuthKeyID(c *echo.Context, authKeyID string) {
 		return
 	}
 	entry.AuthKeyID = authKeyID
+	publishLiveAuditUpdate(c, entry)
+}
+
+// EnrichEntryWithPrincipalID attaches an extension-authenticated principal to
+// the live audit entry.
+func EnrichEntryWithPrincipalID(c *echo.Context, principalID string) {
+	entry := entryFromContext(c)
+	if entry == nil {
+		return
+	}
+	principalID = strings.TrimSpace(principalID)
+	if principalID == "" {
+		return
+	}
+	entry.PrincipalID = principalID
 	publishLiveAuditUpdate(c, entry)
 }
 

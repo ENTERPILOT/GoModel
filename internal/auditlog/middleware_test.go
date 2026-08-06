@@ -9,6 +9,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -30,6 +31,17 @@ func TestApplyAuthenticationKeepsLabelsWhenContextHasNone(t *testing.T) {
 
 	if got, want := strings.Join(entry.Data.Labels, ","), "from-header"; got != want {
 		t.Fatalf("entry.Data.Labels = %q, want %q", got, want)
+	}
+}
+
+func TestApplyAuthenticationPersistsExtensionPrincipal(t *testing.T) {
+	entry := &LogEntry{}
+	ctx := ext.WithAuthentication(t.Context(), ext.Authentication{PrincipalID: "oidc:principal-1"})
+
+	applyAuthentication(entry, ctx)
+
+	if entry.PrincipalID != "oidc:principal-1" {
+		t.Fatalf("PrincipalID = %q, want oidc:principal-1", entry.PrincipalID)
 	}
 }
 

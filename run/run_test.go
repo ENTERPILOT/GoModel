@@ -2,16 +2,20 @@ package run
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/enterpilot/gomodel/config"
 )
 
 func TestRunVersionSkipsSetup(t *testing.T) {
 	setupCalled := false
+	setupConfigCalled := false
 	var stdout strings.Builder
 
 	err := Run(context.Background(), Options{
@@ -23,6 +27,10 @@ func TestRunVersionSkipsSetup(t *testing.T) {
 			setupCalled = true
 			return nil
 		},
+		SetupConfig: func(context.Context, *config.LoadResult) error {
+			setupConfigCalled = true
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("Run(--version) error = %v", err)
@@ -30,8 +38,35 @@ func TestRunVersionSkipsSetup(t *testing.T) {
 	if setupCalled {
 		t.Error("Setup must not run for --version")
 	}
+	if setupConfigCalled {
+		t.Error("SetupConfig must not run for --version")
+	}
 	if !strings.HasPrefix(stdout.String(), "gomodel-test ") {
 		t.Errorf("version output = %q, want prefix %q", stdout.String(), "gomodel-test ")
+	}
+}
+
+func TestRunSetupConfigReceivesLoadedConfiguration(t *testing.T) {
+	t.Chdir(t.TempDir())
+	wantErr := errors.New("configured extension stopped startup")
+	called := false
+	err := Run(t.Context(), Options{
+		Args:   []string{},
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+		SetupConfig: func(_ context.Context, result *config.LoadResult) error {
+			called = true
+			if result == nil || result.Config == nil {
+				t.Fatal("SetupConfig received nil configuration")
+			}
+			return wantErr
+		},
+	})
+	if !called {
+		t.Fatal("SetupConfig was not called")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Run error = %v, want wrapped sentinel", err)
 	}
 }
 

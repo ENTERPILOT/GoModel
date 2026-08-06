@@ -39,6 +39,11 @@ type Config struct {
 	Session    SessionConfig    `yaml:"session"`
 	MCP        MCPConfig        `yaml:"mcp"`
 
+	// Extensions holds configuration owned by custom distributions. Core keeps
+	// the values opaque; an extension decodes its named section with
+	// LoadResult.DecodeExtension.
+	Extensions map[string]yaml.Node `yaml:"extensions,omitempty"`
+
 	// VirtualModels declares redirects, load balancers, and access policies as
 	// infrastructure-as-code. They override admin-store rows of the same source.
 	VirtualModels []VirtualModelConfig `yaml:"virtual_models"`
@@ -50,6 +55,30 @@ type Config struct {
 type LoadResult struct {
 	Config       *Config
 	RawProviders map[string]RawProviderConfig
+}
+
+// DecodeExtension strictly decodes one named extensions: section into target.
+// It returns false when the section is absent. Core deliberately does not know
+// any extension's schema, while each extension still gets unknown-key safety.
+func (r *LoadResult) DecodeExtension(name string, target any) (bool, error) {
+	if r == nil || r.Config == nil || target == nil {
+		return false, nil
+	}
+	name = strings.TrimSpace(name)
+	node, ok := r.Config.Extensions[name]
+	if !ok {
+		return false, nil
+	}
+	data, err := yaml.Marshal(&node)
+	if err != nil {
+		return false, fmt.Errorf("encode extensions.%s: %w", name, err)
+	}
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(target); err != nil {
+		return false, fmt.Errorf("decode extensions.%s: %w", name, err)
+	}
+	return true, nil
 }
 
 // buildDefaultConfig returns the single source of truth for all configuration defaults.

@@ -38,6 +38,7 @@ func testLogEntry(id string, at time.Time) *LogEntry {
 		CacheType:      CacheTypeExact,
 		StatusCode:     200,
 		RequestID:      "req-" + id,
+		PrincipalID:    "oidc:principal-1",
 		AuthKeyID:      "auth-key-1",
 		AuthMethod:     "bearer",
 		ClientIP:       "127.0.0.1",
@@ -58,19 +59,22 @@ func TestSQLStoreWriteBatchRoundTrip(t *testing.T) {
 		}
 
 		var (
-			requestedModel, userPath string
-			aliasUsed, stream        bool
-			statusCode               int
+			requestedModel, userPath, principalID string
+			aliasUsed, stream                     bool
+			statusCode                            int
 		)
 		err := db.QueryRow(ctx, `
-			SELECT requested_model, user_path, alias_used, stream, status_code
+			SELECT requested_model, user_path, principal_id, alias_used, stream, status_code
 			FROM audit_logs WHERE id = ?
-		`, "log-1").Scan(&requestedModel, &userPath, &aliasUsed, &stream, &statusCode)
+		`, "log-1").Scan(&requestedModel, &userPath, &principalID, &aliasUsed, &stream, &statusCode)
 		if err != nil {
 			t.Fatalf("read back: %v", err)
 		}
 		if requestedModel != "gpt-4o-mini" || userPath != "/team" || statusCode != 200 {
 			t.Errorf("row = (%q, %q, %d), want (gpt-4o-mini, /team, 200)", requestedModel, userPath, statusCode)
+		}
+		if principalID != "oidc:principal-1" {
+			t.Errorf("principal_id = %q, want oidc:principal-1", principalID)
 		}
 		// Booleans round-trip as booleans on both engines, without an
 		// int-conversion helper on either side.

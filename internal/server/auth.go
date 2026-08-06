@@ -9,6 +9,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -26,11 +27,18 @@ type BearerTokenAuthenticator interface {
 // key service. If no auth mechanism is configured, no authentication is
 // required. skipPaths is a list of paths that should bypass authentication.
 func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerTokenAuthenticator, skipPaths []string, userPathHeader ...string) echo.MiddlewareFunc {
+	return AuthMiddlewareWithRequestAuthenticators(masterKey, authenticator, nil, skipPaths, userPathHeader...)
+}
+
+// AuthMiddlewareWithRequestAuthenticators additionally accepts extension
+// authenticators such as OIDC sessions. Explicit bearer credentials always
+// take precedence over ambient request credentials such as cookies.
+func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator BearerTokenAuthenticator, requestAuthenticators []ext.RequestAuthenticator, skipPaths []string, userPathHeader ...string) echo.MiddlewareFunc {
 	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			// If no auth mechanism is configured, allow all requests.
-			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) {
+			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && len(requestAuthenticators) == 0 {
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
 				setInteractionContinuationAllowed(c, true)
 				return next(c)
@@ -53,38 +61,91 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 			}
 
 			token, tokenErr := requestAuthToken(c.Request())
-			if tokenErr != "" {
-				authErr := authenticationError(c, tokenErr)
-				return writeGatewayError(c, authErr)
-			}
-			if masterKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(masterKey)) == 1 {
-				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodMasterKey)
-				setInteractionContinuationAllowed(c, true)
-				return next(c)
-			}
-
-			if authenticator != nil && authenticator.Enabled() {
-				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodAPIKey)
-				authResult, err := authenticator.Authenticate(c.Request().Context(), token)
-				if err == nil {
-					applyAuthKeyResult(c, authResult, userPathHeaderName)
+			hasExplicitCredential := c.Request().Header.Get("Authorization") != "" || c.Request().Header.Get("x-api-key") != ""
+			if hasExplicitCredential {
+				if tokenErr != "" {
+					authErr := authenticationError(c, tokenErr)
+					return writeGatewayError(c, authErr)
+				}
+				if masterKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(masterKey)) == 1 {
+					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodMasterKey)
+					setInteractionContinuationAllowed(c, true)
 					return next(c)
 				}
 
-				authErr := authenticationErrorWithAudit(c, authFailureMessage(err), "authentication failed")
-				return writeGatewayError(c, authErr)
+				if authenticator != nil && authenticator.Enabled() {
+					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodAPIKey)
+					authResult, err := authenticator.Authenticate(c.Request().Context(), token)
+					if err == nil {
+						applyAuthKeyResult(c, authResult, userPathHeaderName)
+						return next(c)
+					}
+
+					authErr := authenticationErrorWithAudit(c, authFailureMessage(err), "authentication failed")
+					return writeGatewayError(c, authErr)
+				}
+				message := "invalid credentials"
+				if masterKey != "" && (authenticator == nil || !authenticator.Enabled()) {
+					message = "invalid master key"
+				}
+				return writeGatewayError(c, authenticationError(c, message))
 			}
 
-			authErr := authenticationError(c, "invalid master key")
+			for _, requestAuthenticator := range requestAuthenticators {
+				if requestAuthenticator == nil {
+					continue
+				}
+				result, err := requestAuthenticator.AuthenticateRequest(c.Request().Context(), c.Request())
+				if err != nil {
+					return writeGatewayError(c, authenticationErrorWithAudit(c, authFailureMessage(err), "authentication failed"))
+				}
+				if result == nil {
+					continue
+				}
+				if err := applyExtensionAuthResult(c, result, userPathHeaderName); err != nil {
+					return writeGatewayError(c, authenticationErrorWithAudit(c, err.Error(), "authentication failed"))
+				}
+				return next(c)
+			}
+
+			authErr := authenticationError(c, tokenErr)
 			return writeGatewayError(c, authErr)
 		}
 	}
 }
 
+func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userPathHeaderName string) error {
+	if result == nil || strings.TrimSpace(result.PrincipalID) == "" {
+		return errors.New("extension authenticator returned an empty principal id")
+	}
+	userPath, err := core.NormalizeUserPath(result.UserPath)
+	if err != nil {
+		return err
+	}
+	ctx := context.WithValue(c.Request().Context(), managedDashboardAccessKey{}, result.DashboardAccess)
+	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, result.DashboardAccess)
+	ctx = ext.WithAuthentication(ctx, *result)
+	if len(result.Labels) > 0 {
+		ctx = core.WithRequestLabels(ctx, core.MergeLabels(core.RequestLabelsFromContext(ctx), result.Labels))
+	}
+	if userPath != "" {
+		ctx = core.WithEffectiveUserPath(ctx, userPath)
+		ctx = core.WithUserPathHeaderName(ctx, userPathHeaderName)
+		if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
+			ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPathHeader(userPath, userPathHeaderName))
+		}
+		c.Request().Header.Set(userPathHeaderName, userPath)
+		auditlog.EnrichEntryWithUserPath(c, userPath)
+	}
+	c.SetRequest(c.Request().WithContext(ctx))
+	auditlog.EnrichEntryWithAuthMethod(c, result.Method)
+	auditlog.EnrichEntryWithPrincipalID(c, result.PrincipalID)
+	return nil
+}
+
 // AdminAccessMiddleware denies admin API requests authenticated with a
-// managed key that lacks dashboard access. Master-key requests and requests
-// that skipped authentication (the no-master-key lockout recovery path) pass
-// through unchanged.
+// managed key or extension identity that lacks dashboard access. Master-key
+// requests and requests that skipped authentication pass through unchanged.
 func AdminAccessMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
