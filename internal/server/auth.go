@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -35,10 +36,11 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 // take precedence over ambient request credentials such as cookies.
 func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator BearerTokenAuthenticator, requestAuthenticators []ext.RequestAuthenticator, skipPaths []string, userPathHeader ...string) echo.MiddlewareFunc {
 	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
+	hasRequestAuthenticator := hasRequestAuthenticators(requestAuthenticators)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			// If no auth mechanism is configured, allow all requests.
-			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && len(requestAuthenticators) == 0 {
+			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && !hasRequestAuthenticator {
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
 				setInteractionContinuationAllowed(c, true)
 				return next(c)
@@ -92,7 +94,7 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 			}
 
 			for _, requestAuthenticator := range requestAuthenticators {
-				if requestAuthenticator == nil {
+				if requestAuthenticatorIsNil(requestAuthenticator) {
 					continue
 				}
 				result, err := requestAuthenticator.AuthenticateRequest(c.Request().Context(), c.Request())
@@ -111,6 +113,28 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 			authErr := authenticationError(c, tokenErr)
 			return writeGatewayError(c, authErr)
 		}
+	}
+}
+
+func hasRequestAuthenticators(authenticators []ext.RequestAuthenticator) bool {
+	for _, authenticator := range authenticators {
+		if !requestAuthenticatorIsNil(authenticator) {
+			return true
+		}
+	}
+	return false
+}
+
+func requestAuthenticatorIsNil(authenticator ext.RequestAuthenticator) bool {
+	if authenticator == nil {
+		return true
+	}
+	value := reflect.ValueOf(authenticator)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
 	}
 }
 

@@ -378,6 +378,28 @@ func TestAuthMiddlewareWithRequestAuthenticatorsFailurePaths(t *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareWithOnlyNilRequestAuthenticatorsStaysDisabled(t *testing.T) {
+	var typedNil *mockRequestAuthenticator
+	tests := []struct {
+		name  string
+		auths []ext.RequestAuthenticator
+	}{
+		{name: "nil interface", auths: []ext.RequestAuthenticator{nil}},
+		{name: "typed nil pointer", auths: []ext.RequestAuthenticator{typedNil}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := AuthMiddlewareWithRequestAuthenticators("", nil, tt.auths, nil)(func(c *echo.Context) error {
+				return c.NoContent(http.StatusNoContent)
+			})
+			e := echo.New()
+			rec := httptest.NewRecorder()
+			require.NoError(t, handler(e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)))
+			assert.Equal(t, http.StatusNoContent, rec.Code)
+		})
+	}
+}
+
 func TestAuthMiddlewareExplicitBearerPrecedesRequestAuthenticator(t *testing.T) {
 	requestAuth := &mockRequestAuthenticator{result: &ext.Authentication{
 		PrincipalID: "oidc:principal-1", UserPath: "/users/sso", DashboardAccess: true,

@@ -136,3 +136,16 @@ func TestAdminGate_RequestAuthenticatorDisablesAnonymousRecoveryBypass(t *testin
 		})
 	}
 }
+
+func TestAdminGate_NilRequestAuthenticatorsKeepRecoveryBypass(t *testing.T) {
+	var typedNil *mockRequestAuthenticator
+	for _, authenticators := range [][]ext.RequestAuthenticator{{nil}, {typedNil}} {
+		srv := New(&mockProvider{}, &Config{
+			AdminEndpointsEnabled: true,
+			AdminHandler:          admin.NewHandler(nil, nil),
+			RequestAuthenticators: authenticators,
+		})
+		status, _ := adminGateStatus(t, srv, "/admin/auth-keys", "")
+		assert.Equal(t, http.StatusServiceUnavailable, status)
+	}
+}
