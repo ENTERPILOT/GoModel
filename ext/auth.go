@@ -8,6 +8,7 @@ import (
 )
 
 type authenticationContextKey struct{}
+type clearedAuthentication struct{}
 
 // Provider-neutral response headers let the bundled dashboard discover an
 // extension-managed browser authentication flow without knowing whether the
@@ -80,6 +81,13 @@ type AuthenticationEventRecorderAware interface {
 func WithAuthentication(ctx context.Context, authentication Authentication) context.Context {
 	authentication.Labels = slices.Clone(authentication.Labels)
 	return context.WithValue(ctx, authenticationContextKey{}, authentication)
+}
+
+// WithoutAuthentication returns a context that hides any extension identity
+// inherited from an outer middleware. Core uses it at the explicit-credential
+// boundary so a bearer token cannot retain an ambient cookie principal.
+func WithoutAuthentication(ctx context.Context) context.Context {
+	return context.WithValue(ctx, authenticationContextKey{}, clearedAuthentication{})
 }
 
 // AuthenticationFromContext returns the extension-established identity, if

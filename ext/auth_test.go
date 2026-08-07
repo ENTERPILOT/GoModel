@@ -30,6 +30,19 @@ func TestAuthenticationContextRoundTripClonesLabels(t *testing.T) {
 	}
 }
 
+func TestWithoutAuthenticationHidesInheritedIdentity(t *testing.T) {
+	ctx := WithAuthentication(t.Context(), Authentication{
+		PrincipalID: "oidc:ambient",
+		UserPath:    "/users/ambient",
+		Labels:      []string{"sso"},
+	})
+	ctx = WithoutAuthentication(ctx)
+
+	if authentication, ok := AuthenticationFromContext(ctx); ok {
+		t.Fatalf("AuthenticationFromContext() = %+v, true; want no identity", authentication)
+	}
+}
+
 func TestAuthenticationFromContextHandlesMissingContext(t *testing.T) {
 	if _, ok := AuthenticationFromContext(nil); ok { //nolint:staticcheck // Exercise the helper's defensive nil-context branch.
 		t.Fatal("nil context returned an authentication")

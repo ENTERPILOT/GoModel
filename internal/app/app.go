@@ -305,7 +305,6 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	app.audit = auditResult
 	app.register(subsystemAudit, ownedByShutdown, app.audit.Close)
-	bindAuthenticationEventRecorders(cfg.Extensions, auditlog.NewAuthenticationEventRecorder(auditResult.Logger))
 
 	// Initialize usage tracking. Disabled tracking yields a noop logger.
 	usageResult, err := usage.New(ctx, appCfg, sharedStorage)
@@ -779,6 +778,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		app.attachLivePublishers()
 	}
 	app.server = server.New(provider, serverCfg)
+
+	// Registries are reused across reload generations, so their authenticators
+	// are shared too. Rebind only after every fallible construction step has
+	// succeeded: otherwise a failed replacement would leave the still-serving
+	// generation pointing at the replacement's already-closed audit logger.
+	bindAuthenticationEventRecorders(cfg.Extensions, auditlog.NewAuthenticationEventRecorder(auditResult.Logger))
 
 	return app, nil
 }

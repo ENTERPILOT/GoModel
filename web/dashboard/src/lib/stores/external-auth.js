@@ -17,8 +17,11 @@ export function authenticationLoginURL(loginPath, location = globalThis.location
 
   const search = String(location?.search || "");
   const returnTo = returnPath + (search.startsWith("?") ? search : "");
-  const separator = loginURL.includes("?") ? "&" : "?";
-  return `${loginURL}${separator}return_to=${encodeURIComponent(returnTo)}`;
+  const fragmentIndex = loginURL.indexOf("#");
+  const baseURL = fragmentIndex < 0 ? loginURL : loginURL.slice(0, fragmentIndex);
+  const fragment = fragmentIndex < 0 ? "" : loginURL.slice(fragmentIndex);
+  const separator = baseURL.includes("?") ? "&" : "?";
+  return `${baseURL}${separator}return_to=${encodeURIComponent(returnTo)}${fragment}`;
 }
 
 export function authenticationResponseMetadata(response) {

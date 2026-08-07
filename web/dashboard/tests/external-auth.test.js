@@ -22,6 +22,13 @@ test("authenticationLoginURL preserves the current dashboard deep link", () => {
     }),
     "/g/sso/login?prompt=login&return_to=%2Fg%2Fadmin%2Fdashboard",
   );
+  assert.equal(
+    authenticationLoginURL("/g/sso/login#provider", {
+      pathname: "/g/admin/dashboard/usage",
+      search: "?window=7d",
+    }),
+    "/g/sso/login?return_to=%2Fg%2Fadmin%2Fdashboard%2Fusage%3Fwindow%3D7d#provider",
+  );
 });
 
 test("safeAuthenticationPath accepts only app-local paths", () => {
@@ -43,5 +50,20 @@ test("authenticationResponseMetadata reads extension auth headers", () => {
     loginURL: "/g/sso/login",
     logoutURL: "/g/sso/logout",
     user: "/users/person@example.com",
+  });
+});
+
+test("authenticationResponseMetadata clears inactive extension auth state", () => {
+  const response = {
+    headers: new Headers({
+      "X-GoModel-Auth-Login": "/g/sso/login",
+      "X-GoModel-Auth-Logout": "",
+      "X-GoModel-Auth-User": "",
+    }),
+  };
+  assert.deepEqual(authenticationResponseMetadata(response), {
+    loginURL: "/g/sso/login",
+    logoutURL: "",
+    user: "",
   });
 });

@@ -409,12 +409,19 @@ func TestAuthMiddlewareExplicitBearerPrecedesRequestAuthenticator(t *testing.T) 
 		"master", nil, []ext.RequestAuthenticator{requestAuth}, nil,
 	)(func(c *echo.Context) error {
 		assert.Empty(t, core.UserPathFromContext(c.Request().Context()))
+		_, inherited := ext.AuthenticationFromContext(c.Request().Context())
+		assert.False(t, inherited)
 		return c.NoContent(http.StatusNoContent)
 	})
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/admin/usage", nil)
 	req.Header.Set("Authorization", "Bearer master")
+	ctx := ext.WithAuthentication(req.Context(), ext.Authentication{
+		PrincipalID: "oidc:ambient", UserPath: "/users/sso", Labels: []string{"sso"},
+	})
+	ctx = core.WithEffectiveUserPath(ctx, "/users/sso")
+	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 	rec.Header().Set(ext.AuthenticationUserHeader, "/users/sso")
 	require.NoError(t, handler(e.NewContext(req, rec)))

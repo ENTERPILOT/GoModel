@@ -66,9 +66,14 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 			hasExplicitCredential := c.Request().Header.Get("Authorization") != "" || c.Request().Header.Get("x-api-key") != ""
 			if hasExplicitCredential {
 				// Explicit credentials take precedence over ambient extension
-				// sessions. Clear any identity advertised by an outer extension
-				// middleware before validating the selected credential.
+				// sessions. Hide every identity value installed by outer extension
+				// middleware before validating the selected credential; clearing only
+				// the response header would leave downstream context consumers scoped
+				// to the wrong principal.
 				setAuthenticationUserHeader(c, "")
+				ctx := ext.WithoutAuthentication(c.Request().Context())
+				ctx = core.WithEffectiveUserPath(ctx, "")
+				c.SetRequest(c.Request().WithContext(ctx))
 				if tokenErr != "" {
 					authErr := authenticationError(c, tokenErr)
 					return writeGatewayError(c, authErr)
