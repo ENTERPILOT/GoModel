@@ -285,6 +285,20 @@ func TestDecodeExtensionStrictlyDecodesOpaqueConfig(t *testing.T) {
 	}
 }
 
+func TestDecodeExtensionHandlesAbsentConfiguration(t *testing.T) {
+	var nilResult *LoadResult
+	if found, err := nilResult.DecodeExtension("sso", &struct{}{}); err != nil || found {
+		t.Fatalf("nil result: found=%v err=%v", found, err)
+	}
+	result := &LoadResult{Config: &Config{}}
+	if found, err := result.DecodeExtension("sso", &struct{}{}); err != nil || found {
+		t.Fatalf("missing extension: found=%v err=%v", found, err)
+	}
+	if found, err := result.DecodeExtension("sso", nil); err != nil || found {
+		t.Fatalf("nil target: found=%v err=%v", found, err)
+	}
+}
+
 func TestLoadPreservesOpaqueExtensionConfiguration(t *testing.T) {
 	clearAllConfigEnvVars(t)
 	withTempDir(t, func(dir string) {

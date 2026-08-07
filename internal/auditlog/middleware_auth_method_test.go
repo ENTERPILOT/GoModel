@@ -66,3 +66,25 @@ func TestEnrichEntryWithAuthMethodIgnoresBlankAndUnsafeValues(t *testing.T) {
 		t.Fatalf("entry auth method = %q, want empty", entry.AuthMethod)
 	}
 }
+
+func TestEnrichEntryWithPrincipalIDTrimsAndPreservesExistingValue(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &LogEntry{PrincipalID: "existing"}
+	c.Set(string(LogEntryKey), entry)
+
+	EnrichEntryWithPrincipalID(c, "   ")
+	if entry.PrincipalID != "existing" {
+		t.Fatalf("blank principal replaced existing value with %q", entry.PrincipalID)
+	}
+
+	EnrichEntryWithPrincipalID(c, "  oidc:principal-1  ")
+	if entry.PrincipalID != "oidc:principal-1" {
+		t.Fatalf("principal ID = %q, want oidc:principal-1", entry.PrincipalID)
+	}
+
+	withoutEntry := e.NewContext(req, httptest.NewRecorder())
+	EnrichEntryWithPrincipalID(withoutEntry, "ignored")
+}
