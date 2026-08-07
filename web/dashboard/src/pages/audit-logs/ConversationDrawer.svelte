@@ -16,7 +16,7 @@
   import {
     DEFAULT_CONVERSATION_PANEL_WIDTH,
     clampConversationPanelWidth,
-    conversationMessageNavigationIndex,
+    conversationMessageNavigationTarget,
     conversationPanelBounds,
     conversationPanelWidthFromPointer,
   } from "./conversation-panel.js";
@@ -125,17 +125,20 @@
     const messages = [...thread.querySelectorAll('[data-conversation-message="true"]')];
     const contentRect = content.getBoundingClientRect();
     const contentTop = contentRect.top + 14;
-    const index = conversationMessageNavigationIndex(
+    const navigation = conversationMessageNavigationTarget(
       messages.map((message) => message.getBoundingClientRect().top),
       contentTop,
+      contentRect.bottom,
       direction,
     );
-    const target = messages[index];
+    const target = messages[navigation.index];
     if (!target) return;
-    const targetTop = content.scrollTop
-      + target.getBoundingClientRect().top
-      - contentRect.top
-      - 14;
+    const targetTop = navigation.align === "end"
+      ? content.scrollHeight
+      : content.scrollTop
+        + target.getBoundingClientRect().top
+        - contentRect.top
+        - 14;
     content.scrollTo({
       top: targetTop,
       behavior: motionDuration(1) > 0 ? "smooth" : "auto",
