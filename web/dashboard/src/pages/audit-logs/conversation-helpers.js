@@ -83,7 +83,11 @@ function extractTextSegments(content) {
 }
 
 function estimatedPromptCachedCharacters(entry) {
-    const value = Number(entry && entry.usage && entry.usage.estimated_cached_characters || 0);
+    const rawValue = entry && entry.usage
+        ? entry.usage.estimated_cached_characters
+        : null;
+    if (rawValue == null) return null;
+    const value = Number(rawValue);
     return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
@@ -168,16 +172,7 @@ function extractResponsesInputMessages(input) {
 }
 
 function extractResponsesOutputText(item) {
-    if (!item || typeof item !== 'object') return '';
-    if (!Array.isArray(item.content)) return extractText(item.content);
-
-    const parts = item.content.map((part) => {
-        if (!part) return '';
-        if (typeof part.text === 'string') return part.text;
-        return '';
-    }).filter(Boolean);
-
-    return parts.join('\n').trim();
+    return extractMessageText(item);
 }
 
 export function extractRequestPromptTextSegments(body) {
@@ -1190,10 +1185,11 @@ export function buildConversationView(entries, anchorID) {
         // previous_response_id, even though they are absent from this request
         // body. Repaint the assembled prompt in display order so the fill can
         // never skip history and resume on a newer message.
-        if (requestBody) {
+        const cachedCharacters = estimatedPromptCachedCharacters(entry);
+        if (requestBody && cachedCharacters !== null) {
             messages.splice(0, messages.length, ...applyPromptCacheFill(
                 messages,
-                estimatedPromptCachedCharacters(entry),
+                cachedCharacters,
             ));
         }
 

@@ -257,6 +257,28 @@ test("non-text content gets safe transcript placeholders and refusals remain vis
   assert.equal(messages[1].text, "I cannot inspect it.");
 });
 
+test("Responses refusal-only output remains visible", () => {
+  const entry = {
+    id: "responses-refusal",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/responses",
+    data: {
+      request_body: { input: "Inspect this" },
+      response_body: {
+        output: [{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "refusal", refusal: "I cannot inspect it." }],
+        }],
+      },
+    },
+  };
+
+  const messages = buildConversationMessages([entry], entry.id);
+  assert.deepEqual(messages.map((message) => message.text), ["Inspect this", "I cannot inspect it."]);
+  assert.equal(messages[1].role, "assistant");
+});
+
 test("prompt-cache estimates fill interaction messages by cached share", () => {
   const entry = {
     id: "prompt-cache",
@@ -774,6 +796,44 @@ test("Responses cache fill covers chained history before the new delta", () => {
   const messages = buildConversationMessages([first, second], first.id);
   assert.deepEqual(messages.map((message) => message.text), ["same", "answer", "next"]);
   assert.deepEqual(messages.map((message) => message.promptCacheRatio), [1, 1, 0]);
+});
+
+test("Responses cache fill distinguishes missing usage from an explicit zero", () => {
+  const first = {
+    id: "responses-known-cache",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/responses",
+    usage: { estimated_cached_characters: 4 },
+    data: {
+      request_body: { input: "same" },
+      response_body: {
+        id: "resp-known-cache",
+        output: [{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "answer" }],
+        }],
+      },
+    },
+  };
+  const second = {
+    id: "responses-unknown-cache",
+    timestamp: "2026-07-06T12:01:00Z",
+    path: "/v1/responses",
+    data: {
+      request_body: { previous_response_id: "resp-known-cache", input: "next" },
+      response_body: { id: "resp-unknown-cache" },
+    },
+  };
+
+  const missingUsage = buildConversationMessages([first, second], first.id);
+  assert.deepEqual(missingUsage.map((message) => message.promptCacheRatio), [1, 0, 0]);
+
+  const explicitZero = buildConversationMessages([
+    first,
+    { ...second, usage: { estimated_cached_characters: 0 } },
+  ], first.id);
+  assert.deepEqual(explicitZero.map((message) => message.promptCacheRatio), [0, 0, 0]);
 });
 
 test("follow-latest waits for request data before moving to a classified live entry", () => {
