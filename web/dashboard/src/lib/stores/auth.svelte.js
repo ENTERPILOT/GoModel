@@ -3,6 +3,8 @@
 // and opens the dialog; authGeneration invalidates responses that were issued
 // under an older key so they cannot clobber fresh data ("stale auth").
 
+import { authenticationResponseMetadata } from "./external-auth.js";
+
 const API_KEY_STORAGE_KEY = "gomodel_api_key";
 
 export function normalizeApiKey(value) {
@@ -21,6 +23,10 @@ class AuthStore {
   // Optional specific error text for the auth dialog; empty = generic copy.
   authErrorMessage = $state("");
   dialogOpen = $state(false);
+  // Provider-neutral browser auth metadata advertised by an extension.
+  externalLoginURL = $state("");
+  externalLogoutURL = $state("");
+  externalUser = $state("");
   generation = $state(0);
   // Incremented whenever the whole dashboard should re-fetch (key change,
   // timezone change, runtime refresh). Pages watch this in an $effect.
@@ -81,6 +87,20 @@ class AuthStore {
 
   refresh() {
     this.refreshTick++;
+  }
+
+  observeResponse(response) {
+    const metadata = authenticationResponseMetadata(response);
+    if (!metadata) return;
+    if (Object.hasOwn(metadata, "loginURL")) {
+      this.externalLoginURL = metadata.loginURL;
+    }
+    if (Object.hasOwn(metadata, "logoutURL")) {
+      this.externalLogoutURL = metadata.logoutURL;
+    }
+    if (Object.hasOwn(metadata, "user")) {
+      this.externalUser = metadata.user;
+    }
   }
 
   // handleUnauthorized reports whether the 401/403 belongs to the current

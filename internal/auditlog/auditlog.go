@@ -122,6 +122,9 @@ type LogData struct {
 	// Identity
 	UserAgent  string `json:"user_agent,omitempty" bson:"user_agent,omitempty"`
 	APIKeyHash string `json:"api_key_hash,omitempty" bson:"api_key_hash,omitempty"`
+	// EventType identifies non-request security lifecycle entries written
+	// through the extension authentication event recorder.
+	EventType string `json:"event_type,omitempty" bson:"event_type,omitempty"`
 
 	// Labels are request labels extracted from configured tagging headers.
 	Labels []string `json:"labels,omitempty" bson:"labels,omitempty"`

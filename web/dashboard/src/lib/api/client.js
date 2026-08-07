@@ -31,6 +31,7 @@ export function apiFetch(path, options = {}) {
 async function request(path, options, { label = path, parse = true } = {}) {
   const generation = auth.generation;
   const res = await apiFetch(path, options);
+  auth.observeResponse(res);
   if (res.status === 401) {
     auth.handleUnauthorized(generation);
     return { ok: false, stale: generation < auth.generation, status: 401, data: null, res };

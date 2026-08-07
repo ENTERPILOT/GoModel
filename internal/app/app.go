@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +75,7 @@ type App struct {
 	server              *server.Server
 	storage             storage.Storage
 	runtimeSettings     *runtimesettings.Service
+	extensionAuth       bool
 
 	// registered records every successfully initialized subsystem in
 	// construction order, together with the teardown path that owns it. It is
@@ -217,7 +219,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	app := &App{
-		config: appCfg,
+		config:        appCfg,
+		extensionAuth: hasUsableRequestAuthenticator(cfg.Extensions),
 	}
 	app.live = live.NewBroker(live.Config{
 		Enabled:     appCfg.Admin.LiveLogsEnabled,
@@ -302,6 +305,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	app.audit = auditResult
 	app.register(subsystemAudit, ownedByShutdown, app.audit.Close)
+	bindAuthenticationEventRecorders(cfg.Extensions, auditlog.NewAuthenticationEventRecorder(auditResult.Logger))
 
 	// Initialize usage tracking. Disabled tracking yields a noop logger.
 	usageResult, err := usage.New(ctx, appCfg, sharedStorage)
@@ -980,6 +984,12 @@ func (a *App) logStartupInfo() {
 	// Security warnings
 	managedKeysConfigured := a.authKeys != nil && a.authKeys.Service != nil && a.authKeys.Service.Enabled()
 	switch {
+	case a.extensionAuth && cfg.Server.MasterKey != "" && managedKeysConfigured:
+		slog.Info("authentication enabled", "mode", "master_key+managed_keys+extension")
+	case a.extensionAuth && (cfg.Server.MasterKey != "" || managedKeysConfigured):
+		slog.Info("authentication enabled", "mode", "extension+bearer")
+	case a.extensionAuth:
+		slog.Info("authentication enabled", "mode", "extension")
 	case cfg.Server.MasterKey != "" && managedKeysConfigured:
 		slog.Info("authentication enabled", "mode", "master_key+managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
 	case managedKeysConfigured:
@@ -1029,6 +1039,45 @@ func (a *App) logStartupInfo() {
 		slog.Info("usage tracking disabled")
 	}
 
+}
+
+func hasUsableRequestAuthenticator(registry *ext.Registry) bool {
+	if registry == nil {
+		return false
+	}
+	for _, authenticator := range registry.Authenticators() {
+		if !nilInterface(authenticator) {
+			return true
+		}
+	}
+	return false
+}
+
+func bindAuthenticationEventRecorders(registry *ext.Registry, recorder ext.AuthenticationEventRecorder) {
+	if registry == nil || recorder == nil {
+		return
+	}
+	for _, authenticator := range registry.Authenticators() {
+		if nilInterface(authenticator) {
+			continue
+		}
+		if aware, ok := authenticator.(ext.AuthenticationEventRecorderAware); ok && !nilInterface(aware) {
+			aware.SetAuthenticationEventRecorder(recorder)
+		}
+	}
+}
+
+func nilInterface(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
 }
 
 // initAdmin creates the admin API handler and optionally the dashboard handler.

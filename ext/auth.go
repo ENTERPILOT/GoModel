@@ -4,9 +4,19 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"time"
 )
 
 type authenticationContextKey struct{}
+
+// Provider-neutral response headers let the bundled dashboard discover an
+// extension-managed browser authentication flow without knowing whether the
+// provider uses OIDC, SAML, or another protocol. Values are app-local paths.
+const (
+	AuthenticationLoginHeader  = "X-GoModel-Auth-Login"
+	AuthenticationLogoutHeader = "X-GoModel-Auth-Logout"
+	AuthenticationUserHeader   = "X-GoModel-Auth-User"
+)
 
 // Authentication describes an identity established by an extension.
 // PrincipalID must be a stable, non-secret identifier within the
@@ -31,6 +41,38 @@ type Authentication struct {
 type RequestAuthenticator interface {
 	Name() string
 	AuthenticateRequest(ctx context.Context, request *http.Request) (*Authentication, error)
+}
+
+// AuthenticationEvent is a security-audit record emitted by an extension
+// authentication flow. Reason must be a short, stable machine identifier; it
+// must not contain provider responses, tokens, claims, or other secrets.
+type AuthenticationEvent struct {
+	Timestamp   time.Time
+	Type        string
+	Outcome     string
+	Method      string
+	PrincipalID string
+	UserPath    string
+	RequestID   string
+	ClientIP    string
+	HTTPMethod  string
+	Path        string
+	UserAgent   string
+	Reason      string
+}
+
+// AuthenticationEventRecorder persists authentication lifecycle events in
+// Core's audit trail. Implementations must be safe for concurrent use and
+// must not block the authentication flow on durable storage I/O.
+type AuthenticationEventRecorder interface {
+	RecordAuthenticationEvent(AuthenticationEvent)
+}
+
+// AuthenticationEventRecorderAware is optionally implemented by a request
+// authenticator that emits login, rejection, and logout lifecycle events.
+// Core installs the recorder after its audit subsystem has initialized.
+type AuthenticationEventRecorderAware interface {
+	SetAuthenticationEventRecorder(AuthenticationEventRecorder)
 }
 
 // WithAuthentication attaches an extension-established identity to a request
