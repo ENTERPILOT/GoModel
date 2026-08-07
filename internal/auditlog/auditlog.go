@@ -364,6 +364,8 @@ func RedactHeaders(headers map[string]string) map[string]string {
 	for key, value := range headers {
 		if core.IsCredentialHeader(key) {
 			result[key] = "[REDACTED]"
+		} else if strings.EqualFold(key, "Location") {
+			result[key] = core.RedactSensitiveURLQuery(value)
 		} else {
 			result[key] = value
 		}

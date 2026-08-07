@@ -258,6 +258,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// Global middleware stack (order matters)
+	// Scrub credential-like query values before the outer request logger
+	// snapshots RequestURI. URL.RawQuery remains intact for handlers.
+	e.Use(redactSensitiveRequestURI())
 	// Request logger with optional filtering for model-only interactions
 	if cfg != nil && cfg.LogOnlyModelInteractions {
 		e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
