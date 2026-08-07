@@ -516,6 +516,7 @@
     justify-content: center;
     width: 30px;
     height: 30px;
+    min-height: 30px;
     padding: 0;
     border: 1px solid var(--border);
     border-radius: 6px;
