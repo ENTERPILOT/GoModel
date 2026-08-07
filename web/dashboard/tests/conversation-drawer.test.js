@@ -136,7 +136,7 @@ test("responses-API threads shape input items, function calls and outputs", () =
         instructions: "Be terse.",
         input: [
           { role: "user", content: "Ping" },
-          { type: "function_call", call_id: "call-9", name: "lookup", arguments: '{"q":"x"}' },
+          { type: "function_call", id: "fc-9", call_id: "call-9", name: "lookup", arguments: '{"q":"x"}' },
           { type: "function_call_output", call_id: "call-9", output: "42" },
         ],
       },
@@ -159,7 +159,9 @@ test("responses-API threads shape input items, function calls and outputs", () =
     "function_call",
   ]);
   assert.equal(messages[0].text, "Be terse.");
+  assert.equal(messages[2].toolCalls[0].id, "call-9");
   assert.equal(messages[3].functionName, "lookup");
+  assert.equal(messages[3].functionCallID, "call-9");
   assert.equal(messages[3].text, "42");
   assert.equal(messages[4].text, "Pong");
   assert.ok(messages.every((m) => m.isAnchor === false));

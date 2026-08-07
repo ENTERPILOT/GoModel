@@ -836,7 +836,7 @@ function extractToolCallsList(toolCalls) {
         return {
             name: fn.name || tc.name || '',
             arguments: args,
-            id: tc.id || tc.call_id || ''
+            id: tc.call_id || tc.id || ''
         };
     }).filter(Boolean);
 }
@@ -856,6 +856,13 @@ function extractContentToolResults(content) {
     }));
 }
 
+function registerCallIds(map, item, name) {
+    if (!item || !name) return;
+    [item.call_id, item.id].forEach((id) => {
+        if (id) map[id] = name;
+    });
+}
+
 function collectCallIds(map, requestBody, responseBody) {
     if (requestBody && Array.isArray(requestBody.messages)) {
         requestBody.messages.forEach((m) => {
@@ -866,19 +873,18 @@ function collectCallIds(map, requestBody, responseBody) {
             ];
             toolCalls.forEach((tc) => {
                 if (!tc) return;
-                const id = tc.id || tc.call_id || '';
                 const fn = tc.function || tc;
                 const name = fn.name || tc.name || '';
-                if (id && name) map[id] = name;
+                registerCallIds(map, tc, name);
             });
         });
     }
     if (requestBody && Array.isArray(requestBody.input)) {
         requestBody.input.forEach((item) => {
-            if (!item || typeof item !== 'object' || item.type !== 'function_call') return;
-            const id = item.id || item.call_id || '';
+            if (!item || typeof item !== 'object' ||
+                (item.type !== 'function_call' && item.type !== 'tool_use')) return;
             const name = item.name || '';
-            if (id && name) map[id] = name;
+            registerCallIds(map, item, name);
         });
     }
     if (responseBody && Array.isArray(responseBody.choices)) {
@@ -886,27 +892,24 @@ function collectCallIds(map, requestBody, responseBody) {
         if (first && first.message && Array.isArray(first.message.tool_calls)) {
             first.message.tool_calls.forEach((tc) => {
                 if (!tc) return;
-                const id = tc.id || '';
                 const fn = tc.function || tc;
                 const name = fn.name || tc.name || '';
-                if (id && name) map[id] = name;
+                registerCallIds(map, tc, name);
             });
         }
     }
     if (responseBody && Array.isArray(responseBody.output)) {
         responseBody.output.forEach((item) => {
-            if (!item || item.type !== 'function_call') return;
-            const id = item.id || item.call_id || '';
+            if (!item || (item.type !== 'function_call' && item.type !== 'tool_use')) return;
             const name = item.name || '';
-            if (id && name) map[id] = name;
+            registerCallIds(map, item, name);
         });
     }
     if (responseBody && Array.isArray(responseBody.content)) {
         responseBody.content.forEach((item) => {
             if (!item || item.type !== 'tool_use') return;
-            const id = item.id || item.call_id || '';
             const name = item.name || '';
-            if (id && name) map[id] = name;
+            registerCallIds(map, item, name);
         });
     }
 }
