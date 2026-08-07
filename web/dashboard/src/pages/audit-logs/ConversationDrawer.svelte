@@ -8,6 +8,7 @@
   import { modals } from "$lib/stores/ui.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
   import { Maximize2, Minimize2 } from "lucide";
+  import { tick } from "svelte";
   import { cubicOut } from "svelte/easing";
   import { fly, slide } from "svelte/transition";
   import ChatMessage from "./ChatMessage.svelte";
@@ -29,13 +30,26 @@
   let panelMin = $state(320);
   let panelMax = $state(760);
   let fullscreen = $state(false);
+  let returningFromFullscreen = $state(false);
   let showPromptCache = $state(readStored(promptCacheFillStorageKey, "true") !== "false");
   let resizePointerID = null;
 
-  function interactionsTransition(node, { fullscreen: isFullscreen }) {
+  function interactionsTransition(node, { fullscreen: isFullscreen, revealWithoutSlide = false }) {
     const duration = motionDuration(180);
-    if (isFullscreen) return fly(node, { x: 56, duration, easing: cubicOut });
+    if (isFullscreen) return fly(node, { x: panelWidth, duration, easing: cubicOut });
+    if (revealWithoutSlide) return { duration: 0 };
     return slide(node, { axis: "x", duration, easing: cubicOut });
+  }
+
+  async function setFullscreen(next) {
+    if (next === fullscreen) return;
+    const returning = fullscreen && !next;
+    returningFromFullscreen = returning;
+    fullscreen = next;
+    if (returning) {
+      await tick();
+      returningFromFullscreen = false;
+    }
   }
 
   function togglePromptCacheFill() {
@@ -119,7 +133,7 @@
     if (sidebarEl) sidebarObserver.observe(sidebarEl);
     const onKeydown = (event) => {
       if (event.key === "Escape" && !modals.anyOpen) {
-        if (fullscreen) fullscreen = false;
+        if (fullscreen) void setFullscreen(false);
         else drawer.closeConversation();
       }
     };
@@ -165,17 +179,20 @@
 </script>
 
 {#if drawer.conversationOpen}
-{#key fullscreen}
+{#each [fullscreen] as renderedFullscreen (renderedFullscreen)}
 <aside
   class="conversation-drawer"
-  class:conversation-drawer-fullscreen={fullscreen}
+  class:conversation-drawer-fullscreen={renderedFullscreen}
   style:--conversation-panel-width={panelWidth + "px"}
   bind:this={drawer.conversationDialogEl}
   tabindex="-1"
-  role={fullscreen ? "dialog" : undefined}
-  aria-modal={fullscreen ? "true" : undefined}
+  role={renderedFullscreen ? "dialog" : undefined}
+  aria-modal={renderedFullscreen ? "true" : undefined}
   aria-labelledby="interactions-drawer-title"
-  transition:interactionsTransition={{ fullscreen }}
+  transition:interactionsTransition={{
+    fullscreen: renderedFullscreen,
+    revealWithoutSlide: !renderedFullscreen && returningFromFullscreen,
+  }}
 >
   <!-- A focusable separator is the ARIA window-splitter pattern. Svelte's
        static checker treats separator as non-interactive despite aria-valuenow. -->
@@ -221,12 +238,12 @@
       <button
         type="button"
         class="table-action-btn table-icon-btn"
-        aria-label={fullscreen ? "Exit fullscreen interactions" : "Show interactions fullscreen"}
-        title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-        aria-pressed={fullscreen}
-        onclick={() => fullscreen = !fullscreen}
+        aria-label={renderedFullscreen ? "Exit fullscreen interactions" : "Show interactions fullscreen"}
+        title={renderedFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        aria-pressed={renderedFullscreen}
+        onclick={() => setFullscreen(!renderedFullscreen)}
       >
-        <Icon icon={fullscreen ? Minimize2 : Maximize2} class="table-icon-svg" />
+        <Icon icon={renderedFullscreen ? Minimize2 : Maximize2} class="table-icon-svg" />
       </button>
       <DialogCloseButton
         label="Close interactions"
@@ -314,7 +331,7 @@
     </div>
   {/if}
 </aside>
-{/key}
+{/each}
 {/if}
 
 <style>
