@@ -1218,7 +1218,7 @@ export function buildConversationView(entries, anchorID) {
         if (responseBody && Array.isArray(responseBody.output)) {
             responseBody.output.forEach((item) => {
                 if (!item) return;
-                if (item.type === 'function_call') {
+                if (item.type === 'function_call' || item.type === 'tool_use') {
                     const responseMessage = message('function_call', '', {
                         toolCalls: extractToolCallsList([item]),
                     });

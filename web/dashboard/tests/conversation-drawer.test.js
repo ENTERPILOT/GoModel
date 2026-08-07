@@ -146,6 +146,7 @@ test("responses-API threads shape input items, function calls and outputs", () =
         output: [
           { type: "message", role: "assistant", content: [{ type: "output_text", text: "Pong" }] },
           { type: "function_call", name: "lookup", arguments: '{"q":"y"}' },
+          { type: "tool_use", id: "toolu-11", name: "store_weather", input: { city: "Rome" } },
         ],
       },
     },
@@ -161,6 +162,7 @@ test("responses-API threads shape input items, function calls and outputs", () =
     "function_result",
     "assistant",
     "function_call",
+    "function_call",
   ]);
   assert.equal(messages[0].text, "Be terse.");
   assert.equal(messages[2].toolCalls[0].id, "call-9");
@@ -174,6 +176,9 @@ test("responses-API threads shape input items, function calls and outputs", () =
   assert.equal(messages[5].functionCallID, "toolu-10");
   assert.equal(messages[5].text, "Weather saved");
   assert.equal(messages[6].text, "Pong");
+  assert.equal(messages[8].toolCalls[0].name, "store_weather");
+  assert.equal(messages[8].toolCalls[0].id, "toolu-11");
+  assert.deepEqual(messages[8].toolCalls[0].arguments, { city: "Rome" });
   assert.ok(messages.every((m) => m.isAnchor === false));
 });
 
