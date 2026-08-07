@@ -82,6 +82,38 @@ function extractTextSegments(content) {
     return text ? [text] : [];
 }
 
+function extractToolArgumentSegments(value) {
+    if (value == null) return [];
+    if (Array.isArray(value)) {
+        return value.flatMap(extractToolArgumentSegments);
+    }
+    if (typeof value === 'object') {
+        return Object.entries(value).flatMap(([key, item]) => [
+            key,
+            ...extractToolArgumentSegments(item),
+        ]);
+    }
+    const text = String(value);
+    return text ? [text] : [];
+}
+
+function extractToolCallPromptTextSegments(toolCalls) {
+    return extractToolCallsList(toolCalls).flatMap((toolCall) => [
+        ...(toolCall.name ? [String(toolCall.name)] : []),
+        ...extractToolArgumentSegments(toolCall.arguments),
+    ]);
+}
+
+function extractContentPromptTextSegments(content) {
+    if (!Array.isArray(content)) return extractTextSegments(content);
+    return content.flatMap((part) => {
+        if (part && typeof part === 'object' && part.type === 'tool_use') {
+            return extractToolCallPromptTextSegments([part]);
+        }
+        return extractTextSegments(part);
+    });
+}
+
 function estimatedPromptCachedCharacters(entry) {
     const rawValue = entry && entry.usage
         ? entry.usage.estimated_cached_characters
@@ -184,7 +216,8 @@ export function extractRequestPromptTextSegments(body) {
     if (Array.isArray(body.messages)) {
         body.messages.forEach((message) => {
             if (!message || typeof message !== 'object') return;
-            segments.push(...extractTextSegments(message.content));
+            segments.push(...extractContentPromptTextSegments(message.content));
+            segments.push(...extractToolCallPromptTextSegments(message.tool_calls));
         });
     }
 
@@ -193,7 +226,11 @@ export function extractRequestPromptTextSegments(body) {
     } else if (Array.isArray(body.input)) {
         body.input.forEach((item) => {
             if (!item || typeof item !== 'object') return;
-            segments.push(...extractTextSegments(item.content));
+            if (item.type === 'function_call' || item.type === 'tool_use') {
+                segments.push(...extractToolCallPromptTextSegments([item]));
+                return;
+            }
+            segments.push(...extractContentPromptTextSegments(item.content));
             if (typeof item.text === 'string') {
                 segments.push(item.text);
             }

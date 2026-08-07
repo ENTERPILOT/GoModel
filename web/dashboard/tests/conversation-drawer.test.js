@@ -12,6 +12,7 @@ import {
   conversationEntryIsLatest,
   conversationFollowUpEntry,
   extractConversationErrorMessage,
+  extractRequestPromptTextSegments,
   formatFunctionArguments,
   functionExpandedContent,
   followUpEndpointKind,
@@ -20,6 +21,7 @@ import {
   latestRenderableConversationEntry,
   matchLiveConversationEntry,
   mergedConversationEntryIDs,
+  renderBodyWithConversationHighlights,
   shouldHydrateConversation,
 } from "../src/pages/audit-logs/conversation-helpers.js";
 import { liveLogsMethods } from "../src/pages/audit-logs/live-logs-logic.js";
@@ -422,6 +424,44 @@ test("tool-call cache measurement uses compact payload JSON, not display formatt
 
   const message = buildConversationMessages([entry], entry.id)[0];
   assert.equal(message.promptCacheRatio, 1);
+});
+
+test("request prompt-cache highlights include tool-call names and arguments", () => {
+  const requestBody = { messages: [{
+    role: "assistant",
+    content: "Calling tools",
+    tool_calls: [{ function: {
+      name: "get_weather",
+      arguments: '{"city":"Paris"}',
+    } }],
+  }, {
+    role: "assistant",
+    content: [{
+      type: "tool_use",
+      name: "store_weather",
+      input: { city: "Rome" },
+    }],
+  }] };
+  const segments = extractRequestPromptTextSegments(requestBody);
+
+  assert.deepEqual(segments, [
+    "Calling tools",
+    "get_weather",
+    '{"city":"Paris"}',
+    "store_weather",
+    "city",
+    "Rome",
+  ]);
+
+  const rendered = renderBodyWithConversationHighlights({}, requestBody, {
+    formatJSON: (value) => JSON.stringify(value, null, 2),
+    canShowConversation: () => false,
+    promptCacheHighlight: { characters: 200, segments },
+  });
+  for (const text of ["get_weather", "store_weather", "city", "Rome"]) {
+    assert.ok(rendered.includes(`<span class="audit-prompt-cache-highlight">${text}</span>`));
+  }
+  assert.match(rendered, /<span class="audit-prompt-cache-highlight">\{\\&quot;city\\&quot;:\\&quot;Paris\\&quot;\}<\/span>/);
 });
 
 test("entries with errors append an error message extracted from nested payloads", () => {
