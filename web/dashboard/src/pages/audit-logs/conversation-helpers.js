@@ -798,7 +798,9 @@ function conversationMessage(role, text, {
     const normalized = roleMeta(role);
     const promptTextCharacters = promptCache && Number.isFinite(Number(promptCache.total))
         ? Math.max(0, Number(promptCache.total))
-        : String(text || '').length;
+        : promptCache === null
+            ? 0
+            : String(text || '').length;
     const toolPromptCharacters = toolPromptCache && Array.isArray(toolPromptCache.characters)
         ? toolPromptCache.characters
         : measureToolCallPromptCache(toolCalls).characters;

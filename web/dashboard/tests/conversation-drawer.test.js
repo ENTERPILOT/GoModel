@@ -308,6 +308,27 @@ test("prompt-cache estimates skip non-text attachment placeholders", () => {
   assert.equal(message.promptCacheRatio, 1);
 });
 
+test("prompt-cache estimates do not count image-only or file-only placeholders", () => {
+  const entry = {
+    id: "prompt-cache-attachments-only",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/chat/completions",
+    usage: { estimated_cached_characters: 100 },
+    data: { request_body: { messages: [
+      { role: "user", content: [
+        { type: "image_url", image_url: { url: "https://example.com/image.png" } },
+      ] },
+      { role: "user", content: [
+        { type: "input_file", filename: "report.pdf", file_id: "file-1" },
+      ] },
+    ] } },
+  };
+
+  const messages = buildConversationMessages([entry], entry.id);
+  assert.deepEqual(messages.map((message) => message.text), ["[Image]", "[File: report.pdf]"]);
+  assert.deepEqual(messages.map((message) => message.promptCacheRatio), [0, 0]);
+});
+
 test("prompt-cache estimates include tool-call names and arguments", () => {
   const entry = {
     id: "prompt-cache-tool",
