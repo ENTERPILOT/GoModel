@@ -151,6 +151,12 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  @container dashboard-content (max-width: 699px) {
+    .audit-pane-split {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
   .audit-pane-split .audit-pane-block-error, .audit-pane-split .audit-pane-empty, .audit-pane-split .audit-size-warning {
     grid-column: 1 / -1;
   }

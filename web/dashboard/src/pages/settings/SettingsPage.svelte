@@ -15,6 +15,7 @@
   import TaggingSettings from "./TaggingSettings.svelte";
   import PricingRecalculation from "./PricingRecalculation.svelte";
   import RuntimeRefresh from "./RuntimeRefresh.svelte";
+  import RuntimeSettings from "./RuntimeSettings.svelte";
 
   const PAGE = "settings";
 
@@ -40,6 +41,7 @@
     <BudgetSettings />
     <BudgetResetSettings />
     <TaggingSettings />
+    <RuntimeSettings />
     <PricingRecalculation />
     <RuntimeRefresh />
   </div>

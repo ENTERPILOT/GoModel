@@ -24,6 +24,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/health"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
@@ -46,6 +47,7 @@ type Handler struct {
 	budgets             *budget.Service
 	rateLimits          *ratelimit.Service
 	tagging             *tagging.Service
+	runtimeSettings     *runtimesettings.Service
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
 	liveBroker          *live.Broker
@@ -155,6 +157,15 @@ type auditLogListResponse struct {
 	Total   int                     `json:"total"`
 	Limit   int                     `json:"limit"`
 	Offset  int                     `json:"offset"`
+}
+
+type auditConversationResponse struct {
+	AnchorID string                  `json:"anchor_id"`
+	Entries  []auditLogEntryResponse `json:"entries"`
+
+	// Truncated reports that more session or linkage entries exist than were
+	// returned.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 type auditSessionResponse struct {
@@ -340,6 +351,13 @@ func WithDashboardRuntimeConfig(values DashboardConfigResponse) Option {
 func WithRuntimeRefresher(refresher RuntimeRefresher) Option {
 	return func(h *Handler) {
 		h.runtimeRefresher = refresher
+	}
+}
+
+// WithRuntimeSettings enables deployment-wide extension settings.
+func WithRuntimeSettings(settings *runtimesettings.Service) Option {
+	return func(h *Handler) {
+		h.runtimeSettings = settings
 	}
 }
 

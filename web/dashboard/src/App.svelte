@@ -24,6 +24,8 @@
   import ProvidersConfigPage from "$pages/providers-config/ProvidersConfigPage.svelte";
   import AuthKeysPage from "$pages/auth-keys/AuthKeysPage.svelte";
   import SettingsPage from "$pages/settings/SettingsPage.svelte";
+  import ConversationDrawer from "$pages/audit-logs/ConversationDrawer.svelte";
+  import { conversationDrawer } from "$pages/audit-logs/conversationDrawer.svelte.js";
 
   const pageComponents = {
     overview: OverviewPage,
@@ -63,13 +65,16 @@
   const PageComponent = $derived(pageComponents[router.page] || OverviewPage);
 </script>
 
-<div class="app">
-  <Sidebar />
-  <main class="content">
-    <DemoModeBanner />
-    <PageComponent />
-  </main>
-  <AuthDialog />
-  <TypedConfirmationDialog />
-  <FlashMessages />
-</div>
+<Sidebar />
+<main
+  id="dashboard-content"
+  class="content"
+  class:interactions-open={conversationDrawer.conversationOpen}
+>
+  <DemoModeBanner />
+  <PageComponent />
+</main>
+<ConversationDrawer />
+<AuthDialog />
+<TypedConfirmationDialog />
+<FlashMessages />

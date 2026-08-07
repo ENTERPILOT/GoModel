@@ -798,3 +798,57 @@ func TestStreamConverter_FormatChunkUsage(t *testing.T) {
 		t.Errorf("total_tokens = %v", usage["total_tokens"])
 	}
 }
+
+func TestGatewayCachePointUsesJSONBooleanAndNeverCreatesEmptyMessage(t *testing.T) {
+	fields := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		core.GatewayCachePointField: json.RawMessage("  true\n"),
+	})
+	if !isGatewayCachePoint(fields) {
+		t.Fatal("formatted JSON true was not recognized")
+	}
+	falseFields := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		core.GatewayCachePointField: json.RawMessage(`false`),
+	})
+	if isGatewayCachePoint(falseFields) {
+		t.Fatal("JSON false was recognized as a cache point")
+	}
+	_, messages, err := convertMessages([]core.Message{{Role: "assistant", ExtraFields: fields}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("empty assistant created a cache-only message: %+v", messages)
+	}
+}
+
+type testBedrockAPIError struct{ code, message string }
+
+func (e testBedrockAPIError) Error() string        { return e.code + ": " + e.message }
+func (e testBedrockAPIError) ErrorCode() string    { return e.code }
+func (e testBedrockAPIError) ErrorMessage() string { return e.message }
+
+func TestCachePointFallbackIsNarrowAndLossless(t *testing.T) {
+	if !isCachePointValidationError(testBedrockAPIError{"ValidationException", "cache point below minimum tokens"}) {
+		t.Fatal("cache-point validation error was not recognized")
+	}
+	if isCachePointValidationError(testBedrockAPIError{"ValidationException", "invalid tool schema"}) {
+		t.Fatal("unrelated validation error would trigger a retry")
+	}
+	parts := converseParts{
+		system: []brtypes.SystemContentBlock{
+			&brtypes.SystemContentBlockMemberText{Value: "system"},
+			&brtypes.SystemContentBlockMemberCachePoint{Value: brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}},
+		},
+		messages: []brtypes.Message{{Role: brtypes.ConversationRoleUser, Content: []brtypes.ContentBlock{
+			&brtypes.ContentBlockMemberText{Value: "user"},
+			&brtypes.ContentBlockMemberCachePoint{Value: brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}},
+		}}},
+	}
+	clean := withoutCachePoints(parts)
+	if partsHaveCachePoints(clean) || len(clean.system) != 1 || len(clean.messages) != 1 || len(clean.messages[0].Content) != 1 {
+		t.Fatalf("cache-point removal damaged request content: %+v", clean)
+	}
+	if !partsHaveCachePoints(parts) {
+		t.Fatal("cache-point removal mutated original parts")
+	}
+}

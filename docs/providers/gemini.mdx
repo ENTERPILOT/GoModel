@@ -35,6 +35,12 @@ providers:
   when per-provider `GEMINI_API_MODE` is unset. Prefer `GEMINI_API_MODE`.
 </Note>
 
+Native AI Studio mode can also materialize GoModel's post-routing prompt-cache
+plans as five-minute Gemini cached-content objects. Reuse is scoped to the API
+key selected for the session; sessionless traffic with rotating keys skips
+object creation so a resource is never reused under the wrong credential.
+Vertex currently receives the original request without cached-content objects.
+
 ## Base URLs
 
 GoModel keeps separate internal bases for native Gemini and the

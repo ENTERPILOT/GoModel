@@ -9,7 +9,7 @@ import (
 
 // Registry collects extensions to be consumed by the gateway at startup.
 // Register everything before the server is constructed (before run.Run or
-// app.New); core snapshots the registry once and never consults it again.
+// app.New); core snapshots each registration list during initialization.
 type Registry struct {
 	mu            sync.Mutex
 	rewriters     []RequestRewriter
@@ -17,6 +17,15 @@ type Registry struct {
 	routes        []func(*echo.Echo)
 	publicPaths   []string
 	routeSelector RouteSelector
+	settings      []RuntimeSetting
+}
+
+// RegisterSetting adds a deployment-wide setting exposed through the generic
+// admin settings API.
+func (r *Registry) RegisterSetting(setting RuntimeSetting) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.settings = append(r.settings, setting)
 }
 
 // RegisterRewriter adds a request rewriter. Rewriters run in registration
@@ -96,6 +105,13 @@ func (r *Registry) RouteSelector() RouteSelector {
 	return r.routeSelector
 }
 
+// Settings returns a defensive copy of the registered runtime settings.
+func (r *Registry) Settings() []RuntimeSetting {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.settings)
+}
+
 // Default is the process-wide registry used by package-level helpers and, by
 // default, by run.Run.
 var Default = &Registry{}
@@ -114,3 +130,6 @@ func AddPublicPaths(paths ...string) { Default.AddPublicPaths(paths...) }
 
 // RegisterRouteSelector installs a route selector on the Default registry.
 func RegisterRouteSelector(sel RouteSelector) { Default.RegisterRouteSelector(sel) }
+
+// RegisterSetting registers a runtime setting on the Default registry.
+func RegisterSetting(setting RuntimeSetting) { Default.RegisterSetting(setting) }

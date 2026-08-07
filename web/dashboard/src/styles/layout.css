@@ -1,12 +1,29 @@
 /* Content */
 .content {
   flex: 1 1 0;
+  container-name: dashboard-content;
+  container-type: inline-size;
+  min-height: 0;
   min-width: 0;
   width: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
   padding: 32px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   transition: width 0.2s;
+}
+
+.content > * {
+  width: 100%;
+  max-width: 1336px;
+  margin-inline: auto;
+}
+
+body.dashboard-modal-open .content {
+  overflow-y: hidden;
+}
+
+.content.interactions-open > * {
+  max-width: none;
 }
 
 .page-header {

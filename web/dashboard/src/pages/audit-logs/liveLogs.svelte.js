@@ -12,7 +12,7 @@
 // fields in sync. Cross-module hooks stay optional and duck-typed: pages
 // assign `liveLogs.fetchAuditLog`, `liveLogs.fetchUsage`,
 // `liveLogs.isAuditEntryExpanded`, `liveLogs.noteLiveTokenUsage`; the
-// conversation drawer registers `liveLogs.refreshLiveConversation` itself.
+// the conversation drawer reacts to normalized audit-record changes.
 //
 // Transport: the stream is fetch + ReadableStream (NOT EventSource) so the
 // Authorization bearer header can be sent; apiFetch preserves that. The
@@ -31,12 +31,24 @@ import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
 import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { liveLogsMethods, liveLogsStreamPath } from "./live-logs-logic.js";
+import { auditRecordKey, mergeAuditRecord } from "./audit-records.js";
+
+const MAX_AUDIT_RECORDS = 200;
+const MAX_AUDIT_RECORD_CHANGES = 512;
 
 class LiveLogsStore {
   // Shared live-preview state the live merge engine writes into. Pages treat
   // these as the live source of truth.
   auditLog = $state({ entries: [], total: 0, limit: 25, offset: 0 });
   usageLog = $state({ entries: [], total: 0, limit: 50, offset: 0 });
+
+  // Normalized source of truth for audit record content. Lists keep their own
+  // ordering/pagination, but every consumer reads record bodies and lifecycle
+  // state from here so a slim fetch cannot downgrade a richer live preview.
+  auditRecords = $state({});
+  auditRecordChanges = $state([]);
+  auditRecordVersion = 0;
+  auditRecordPins = new Set();
 
   // Insert-gate filter fields. The owning pages mirror their filter state
   // here so auditLiveInsertAllowed/usageLiveInsertAllowed pause live inserts
@@ -76,8 +88,56 @@ class LiveLogsStore {
   fetchUsage = null;
   fetchAuditLog = null;
   isAuditEntryExpanded = null;
-  refreshLiveConversation = null;
   noteLiveTokenUsage = null;
+
+  upsertAuditRecord(entry, eventType = "") {
+    const key = auditRecordKey(entry);
+    if (!key) return entry;
+    const merged = mergeAuditRecord(this.auditRecords[key], entry);
+    this.auditRecords = { ...this.auditRecords, [key]: merged };
+    this.pruneAuditRecords();
+    this.auditRecordVersion++;
+    this.auditRecordChanges = [...this.auditRecordChanges, {
+      version: this.auditRecordVersion,
+      key,
+      eventType,
+    }].slice(-MAX_AUDIT_RECORD_CHANGES);
+    return merged;
+  }
+
+  upsertAuditRecords(entries, eventType = "") {
+    return (Array.isArray(entries) ? entries : []).map((entry) =>
+      this.upsertAuditRecord(entry, eventType));
+  }
+
+  auditRecord(entryOrID) {
+    const key = typeof entryOrID === "string"
+      ? String(entryOrID).trim()
+      : auditRecordKey(entryOrID);
+    return key && this.auditRecords[key] || null;
+  }
+
+  cacheAuditRecord(entry, eventType) {
+    return this.upsertAuditRecord(entry, eventType);
+  }
+
+  pinAuditRecords(ids) {
+    this.auditRecordPins = new Set((Array.isArray(ids) ? ids : []).map(String));
+  }
+
+  pruneAuditRecords() {
+    const keys = Object.keys(this.auditRecords);
+    if (keys.length <= MAX_AUDIT_RECORDS) return;
+    const records = { ...this.auditRecords };
+    let remove = keys.length - MAX_AUDIT_RECORDS;
+    for (const key of keys) {
+      if (remove <= 0) break;
+      if (this.auditRecordPins.has(key)) continue;
+      delete records[key];
+      remove--;
+    }
+    this.auditRecords = records;
+  }
 
   // The mixin reads `this.page` (route id) and the date-picker's custom range.
   get page() {

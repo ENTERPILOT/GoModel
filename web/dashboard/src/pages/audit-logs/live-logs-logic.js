@@ -11,7 +11,7 @@
 //     usageFilterModel, usageFilterProvider, usageFilterLabel,
 //     usageFilterUserPath, usageLogHideCached, page
 //   - optional cross-module hooks (guarded with typeof):
-//     fetchUsage, fetchAuditLog, isAuditEntryExpanded, refreshLiveConversation,
+//     fetchUsage, fetchAuditLog, isAuditEntryExpanded, cacheAuditRecord,
 //     noteLiveTokenUsage, fetchAuditEntryDetail
 //
 // No Svelte runes here, and the single import is by relative path: node --test
@@ -147,21 +147,27 @@ export function liveLogsMethods() {
                 // and conversation hooks still target the updated row itself.
                 this.regroupLiveAuditHead(merged);
                 if (!isDetail) this.fetchExpandedAuditDetailIfReady(merged);
-                this.notifyLiveConversation(merged);
+                this.cacheMergedAuditRecord(merged, eventType);
                 return merged;
             }
             const child = this.mergeLiveAuditChild(incoming, patch);
             if (child) {
                 if (!isDetail) this.fetchExpandedAuditDetailIfReady(child);
-                this.notifyLiveConversation(child);
+                this.cacheMergedAuditRecord(child, eventType);
                 return child;
             }
-            if (!this.auditLiveInsertAllowed()) return;
+            // List filters and pagination gate visual insertion only. The
+            // normalized cache still receives every event so an already-open
+            // Interactions drawer cannot lose its live continuation.
+            if (!this.auditLiveInsertAllowed()) {
+                this.cacheMergedAuditRecord(patch, eventType);
+                return;
+            }
             if (!isDetail && this.auditGroupSessions) {
                 const folded = this.foldLiveAuditIntoThread(patch);
                 if (folded) {
                     this.fetchExpandedAuditDetailIfReady(folded);
-                    this.notifyLiveConversation(folded);
+                    this.cacheMergedAuditRecord(folded, eventType);
                     return folded;
                 }
             }
@@ -169,7 +175,7 @@ export function liveLogsMethods() {
             this.auditLog.total = Number(this.auditLog.total || 0) + 1;
             const inserted = this.auditLog.entries[0];
             if (!isDetail) this.fetchExpandedAuditDetailIfReady(inserted);
-            this.notifyLiveConversation(inserted);
+            this.cacheMergedAuditRecord(inserted, eventType);
             return inserted;
         },
 
@@ -369,13 +375,11 @@ export function liveLogsMethods() {
             return this.skippedLiveUsageByRequestId && this.skippedLiveUsageByRequestId[requestID] || null;
         },
 
-        // notifyLiveConversation forwards merged live entries to the
-        // Interactions drawer (when its module is wired in) so an open live
-        // conversation re-renders as stream chunks arrive.
-        notifyLiveConversation(entry) {
-            if (entry && typeof this.refreshLiveConversation === 'function') {
-                this.refreshLiveConversation(entry);
+        cacheMergedAuditRecord(entry, eventType) {
+            if (entry && typeof this.cacheAuditRecord === 'function') {
+                return this.cacheAuditRecord(entry, eventType);
             }
+            return entry;
         },
 
         fetchExpandedAuditDetailIfReady(entry) {

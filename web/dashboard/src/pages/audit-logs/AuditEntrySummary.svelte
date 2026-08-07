@@ -5,21 +5,36 @@
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { auditModelDisplay, formatTimestampUTC } from "$lib/utils/format.js";
   import AuditAttemptTrack from "./AuditAttemptTrack.svelte";
-  import { auditList } from "./auditList.svelte.js";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import {
     auditEntryLiveInProgress,
     formatDurationNs,
     statusCodeClass,
   } from "./audit-logic.js";
-  import { ChevronDown, ChevronRight } from "lucide";
+  import { ChevronDown, ChevronLeft, ChevronRight } from "lucide";
 
   // `thread` marks a session-thread head row (grouped mode):
   // { count, expanded, ontoggle }. `expanded`/`onactivate` wire the
   // Svelte-controlled row expansion: the click is intercepted (the parent
   // <details> stays open so the close can animate) and the state lives in
   // auditList.
-  let { entry, thread = null, expanded = false, onactivate = null } = $props();
+  let {
+    entry,
+    thread = null,
+    expanded = false,
+    onactivate = null,
+    hidePath = false,
+  } = $props();
+
+  const timestamp = $derived(timezone.formatTimestamp(entry.timestamp));
+  const timestampTime = $derived(
+    timestamp === "-" ? timestamp : timestamp.slice(timestamp.lastIndexOf(" ") + 1),
+  );
+  const interactionsOpen = $derived(
+    conversationDrawer.conversationOpen &&
+      String(conversationDrawer.conversationAnchorID || "") ===
+        String(entry.id || ""),
+  );
 
   function onSummaryClick(event) {
     event.preventDefault();
@@ -37,7 +52,10 @@
   function openConversation(event) {
     event.stopPropagation();
     event.preventDefault();
-    auditList.expandAuditEntry(entry);
+    if (interactionsOpen) {
+      conversationDrawer.closeConversation();
+      return;
+    }
     conversationDrawer.openConversation(entry, event.currentTarget);
   }
 </script>
@@ -45,6 +63,9 @@
 <summary
   class="audit-entry-summary"
   class:audit-entry-summary-live-in-progress={auditEntryLiveInProgress(entry)}
+  class:audit-entry-summary-has-interactions={conversationDrawer.canShowConversation(
+    entry,
+  )}
   aria-expanded={expanded}
   onclick={onSummaryClick}
 >
@@ -68,30 +89,50 @@
         <span class="audit-thread-count mono">{thread.count}</span>
       </button>
     {/if}
-    <span class="audit-status-badge {statusCodeClass(entry.status_code)}"
-      >{entry.status_code || "-"}</span
+    <span
+      class="audit-status-badge audit-request-badge {statusCodeClass(
+        entry.status_code,
+      )}"
+      title={"Status " + (entry.status_code || "-") + " · " + (entry.method || "-")}
+      aria-label={(entry.status_code || "-") + " " + (entry.method || "-")}
     >
-    <span class="audit-method-badge">{entry.method || "-"}</span>
+      <span class="audit-request-status" aria-hidden="true"
+        >{entry.status_code || "-"}</span
+      >
+      <span aria-hidden="true">{entry.method || "-"}</span>
+    </span>
     {#if entry.requested_model || entry.model}
       <span class="audit-provider-model mono">{auditModelDisplay(entry)}</span>
     {/if}
-    <span class="audit-path mono">{entry.path || "-"}</span>
+    {#if !hidePath}
+      <span class="audit-path mono">{entry.path || "-"}</span>
+    {/if}
   </div>
   <div class="audit-entry-right">
     <AuditAttemptTrack {entry} />
-    <span class="mono font-size-md" title={formatTimestampUTC(entry.timestamp)}
-      >{timezone.formatTimestamp(entry.timestamp)}</span
+    <span
+      class="audit-timestamp mono font-size-md"
+      title={formatTimestampUTC(entry.timestamp)}
+      aria-label={timestamp}
     >
+      <span class="audit-timestamp-full" aria-hidden="true">{timestamp}</span>
+      <span class="audit-timestamp-time" aria-hidden="true">{timestampTime}</span>
+    </span>
     <span class="mono font-size-md">{formatDurationNs(entry.duration_ns)}</span>
     {#if conversationDrawer.canShowConversation(entry)}
       <button
         type="button"
         class="audit-conversation-trigger"
-        title="Open interactions"
-        aria-label="Open interactions"
+        class:audit-conversation-trigger-active={interactionsOpen}
+        title={interactionsOpen ? "Close interactions" : "Open interactions"}
+        aria-label={interactionsOpen ? "Close interactions" : "Open interactions"}
+        aria-pressed={interactionsOpen}
         onclick={openConversation}
       >
-        <Icon icon={ChevronRight} class="audit-conversation-trigger-svg" />
+        <Icon
+          icon={interactionsOpen ? ChevronLeft : ChevronRight}
+          class="audit-conversation-trigger-svg"
+        />
       </button>
     {/if}
   </div>
@@ -115,6 +156,10 @@
 
   .audit-entry-summary-live-in-progress {
     background: color-mix(in srgb, var(--info) 7%, var(--bg));
+  }
+
+  .audit-entry-summary-has-interactions {
+    padding-right: 44px;
   }
 
   .audit-entry-summary-live-in-progress::before {
@@ -157,6 +202,7 @@
     align-items: center;
     justify-content: center;
     gap: 3px;
+    flex-shrink: 0;
     height: 28px;
     min-width: 28px;
     padding: 0 7px 0 4px;
@@ -186,26 +232,37 @@
   }
 
   .audit-conversation-trigger {
+    position: absolute;
+    inset: 0 0 0 auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
-    margin-right: -9px;
-    border-radius: 6px;
-    border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+    width: 32px;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    border-left: 1px solid var(--border);
+    border-radius: 0;
     background: color-mix(in srgb, var(--accent) 12%, var(--bg));
     color: var(--accent);
     cursor: pointer;
     transition:
-      transform 0.1s ease-out,
       background 0.1s ease-out,
       color 0.1s ease-out;
   }
 
   .audit-conversation-trigger:hover {
     background: color-mix(in srgb, var(--accent) 20%, var(--bg));
-    transform: translateX(1px);
+  }
+
+  .audit-conversation-trigger-active {
+    border-left: 0;
+    color: var(--accent-strong, var(--accent));
+    background: color-mix(in srgb, var(--accent) 28%, var(--bg));
+  }
+
+  .audit-conversation-trigger-active:hover {
+    background: color-mix(in srgb, var(--accent) 34%, var(--bg));
   }
 
   /* The Icon atom hard-codes lucide's round caps and 24px attribute size;
@@ -213,8 +270,8 @@
      chevron rendered exactly like the previous hand-rolled SVG (butt caps,
      miter joins, 14px). */
   .audit-conversation-trigger :global(.audit-conversation-trigger-svg) {
-    width: 14px;
-    height: 14px;
+    width: 18px;
+    height: 18px;
     stroke-linecap: butt;
     stroke-linejoin: miter;
   }
@@ -226,21 +283,14 @@
     white-space: nowrap;
   }
 
-  /* Same pill shape as .audit-status-badge, in the muted palette. */
-  .audit-method-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 52px;
-    height: 24px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    background: var(--bg-surface);
-    color: var(--text-muted);
+  .audit-request-badge {
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .audit-timestamp-time {
+    display: none;
   }
 
   .audit-provider-model {
@@ -259,7 +309,7 @@
     text-overflow: ellipsis;
   }
 
-  @media (max-width: 768px) {
+  @container dashboard-content (max-width: 699px) {
     .audit-entry-summary {
         flex-direction: column;
         align-items: flex-start;
@@ -268,6 +318,14 @@
     .audit-entry-right {
         width: 100%;
         justify-content: space-between;
+      }
+
+    .audit-request-status, .audit-timestamp-full {
+        display: none;
+      }
+
+    .audit-timestamp-time {
+        display: inline;
       }
   }
 </style>

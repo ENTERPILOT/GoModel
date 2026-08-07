@@ -144,6 +144,7 @@ class AuditListStore {
         this.liveFilters(),
       );
       if (!Array.isArray(next.entries)) next.entries = [];
+      next.entries = liveLogs.upsertAuditRecords(next.entries, "audit.list");
       this.auditLog = next;
       this.auditExpandedThreads = pruneThreadMap(
         this.auditExpandedThreads,
@@ -277,6 +278,10 @@ class AuditListStore {
         current,
         result.data.entries,
         currentHead ? [currentHead] : [head],
+      );
+      merged.entries = liveLogs.upsertAuditRecords(
+        merged.entries,
+        "audit.thread",
       );
       liveLogs.auditThreadChildren = {
         ...liveLogs.auditThreadChildren,

@@ -20,7 +20,7 @@ const inputOutput = price(
 );
 
 const CATEGORY_COLUMNS = {
-  all: [modes, inputOutput],
+  all: [inputOutput],
   text_generation: [
     modes,
     inputOutput,

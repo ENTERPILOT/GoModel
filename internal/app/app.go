@@ -38,6 +38,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
+	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/storage"
@@ -72,6 +73,7 @@ type App struct {
 	live                *live.Broker
 	server              *server.Server
 	storage             storage.Storage
+	runtimeSettings     *runtimesettings.Service
 
 	// registered records every successfully initialized subsystem in
 	// construction order, together with the teardown path that owns it. It is
@@ -144,10 +146,13 @@ func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
 			})
 			return ctx
 		},
-		OnRequestEnd: func(_ context.Context, info llmclient.ResponseInfo) {
+		OnRequestEnd: func(ctx context.Context, info llmclient.ResponseInfo) {
 			observe("attempt_end", func() {
+				source, sessionID := routeAffinityContext(ctx)
 				selector.OnAttemptEnd(ext.RouteOutcome{
 					RouteTarget: ext.RouteTarget{Provider: info.Provider, Model: info.Model},
+					Source:      source,
+					SessionID:   sessionID,
 					Endpoint:    info.Endpoint,
 					StatusCode:  info.StatusCode,
 					Duration:    info.Duration,
@@ -157,6 +162,15 @@ func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
 			})
 		},
 	}
+}
+
+func routeAffinityContext(ctx context.Context) (source, sessionID string) {
+	sessionID = core.SessionIDFromContext(ctx)
+	workflow := core.GetWorkflow(ctx)
+	if workflow == nil || workflow.Resolution == nil || !workflow.Resolution.AliasApplied {
+		return "", sessionID
+	}
+	return workflow.Resolution.RequestedQualifiedModel(), sessionID
 }
 
 // selectorLabel returns the selector's name for logs, tolerating a panicking
@@ -244,6 +258,18 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	app.storage = sharedStorage
 	app.register(subsystemStorage, ownedByShutdown, sharedStorage.Close)
+
+	var registeredSettings []ext.RuntimeSetting
+	if cfg.Extensions != nil {
+		registeredSettings = cfg.Extensions.Settings()
+	}
+	app.runtimeSettings, err = runtimesettings.New(ctx, sharedStorage, registeredSettings)
+	if err != nil {
+		return fail("failed to initialize runtime settings", err)
+	}
+	if app.runtimeSettings != nil {
+		app.register(subsystemRuntimeSettings, ownedByShutdown, app.runtimeSettings.Close)
+	}
 
 	// Track real-traffic outcomes per provider/model for the dashboard's
 	// provider status; hooks must be composed before any provider is created.
@@ -667,6 +693,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			budgetResult.Service,
 			rateLimitResult.Service,
 			taggingResult.Service,
+			app.runtimeSettings,
 			mcpResult,
 			app.providerCredentials,
 			app,
@@ -1020,6 +1047,7 @@ func initAdmin(
 	budgetService *budget.Service,
 	rateLimitService *ratelimit.Service,
 	taggingService *tagging.Service,
+	runtimeSettingsService *runtimesettings.Service,
 	mcpResult *mcpgateway.Result,
 	providerCredentialsResult *providers.CredentialsResult,
 	runtimeRefresher admin.RuntimeRefresher,
@@ -1081,6 +1109,7 @@ func initAdmin(
 		admin.WithBudgets(budgetService),
 		admin.WithRateLimits(rateLimitService),
 		admin.WithTagging(taggingService),
+		admin.WithRuntimeSettings(runtimeSettingsService),
 		mcpOption,
 		providerCredentialsOption,
 		admin.WithRuntimeRefresher(runtimeRefresher),

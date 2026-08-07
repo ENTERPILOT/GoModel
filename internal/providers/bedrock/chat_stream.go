@@ -29,18 +29,23 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 		return nil, err
 	}
 
-	out, err := p.runtime.ConverseStream(ctx, &bedrockruntime.ConverseStreamInput{
-		ModelId:         parts.modelID,
-		Messages:        parts.messages,
-		System:          parts.system,
-		InferenceConfig: parts.infCfg,
-		ToolConfig:      parts.toolCfg,
-	})
+	out, err := p.runtime.ConverseStream(ctx, converseStreamInput(parts))
+	if err != nil && partsHaveCachePoints(parts) && isCachePointValidationError(err) {
+		parts = withoutCachePoints(parts)
+		out, err = p.runtime.ConverseStream(ctx, converseStreamInput(parts))
+	}
 	if err != nil {
 		return nil, mapAWSError(err)
 	}
 
 	return newOpenAIStream(out, req.Model), nil
+}
+
+func converseStreamInput(parts converseParts) *bedrockruntime.ConverseStreamInput {
+	return &bedrockruntime.ConverseStreamInput{
+		ModelId: parts.modelID, Messages: parts.messages, System: parts.system,
+		InferenceConfig: parts.infCfg, ToolConfig: parts.toolCfg,
+	}
 }
 
 // streamConverter consumes a Bedrock ConverseStream event channel and emits
