@@ -10,6 +10,17 @@ export function safeAuthenticationPath(value) {
   return path;
 }
 
+export function authenticationLoginURL(loginPath, location = globalThis.location) {
+  const loginURL = safeAuthenticationPath(loginPath);
+  const returnPath = safeAuthenticationPath(location?.pathname);
+  if (!loginURL || !returnPath) return loginURL;
+
+  const search = String(location?.search || "");
+  const returnTo = returnPath + (search.startsWith("?") ? search : "");
+  const separator = loginURL.includes("?") ? "&" : "?";
+  return `${loginURL}${separator}return_to=${encodeURIComponent(returnTo)}`;
+}
+
 export function authenticationResponseMetadata(response) {
   const headers = response?.headers;
   if (!headers || typeof headers.has !== "function") return null;

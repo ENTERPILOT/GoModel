@@ -2,9 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  authenticationLoginURL,
   authenticationResponseMetadata,
   safeAuthenticationPath,
 } from "../src/lib/stores/external-auth.js";
+
+test("authenticationLoginURL preserves the current dashboard deep link", () => {
+  assert.equal(
+    authenticationLoginURL("/g/sso/login", {
+      pathname: "/g/admin/dashboard/usage",
+      search: "?window=7d",
+    }),
+    "/g/sso/login?return_to=%2Fg%2Fadmin%2Fdashboard%2Fusage%3Fwindow%3D7d",
+  );
+  assert.equal(
+    authenticationLoginURL("/g/sso/login?prompt=login", {
+      pathname: "/g/admin/dashboard",
+      search: "",
+    }),
+    "/g/sso/login?prompt=login&return_to=%2Fg%2Fadmin%2Fdashboard",
+  );
+});
 
 test("safeAuthenticationPath accepts only app-local paths", () => {
   assert.equal(safeAuthenticationPath("/g/sso/login"), "/g/sso/login");
