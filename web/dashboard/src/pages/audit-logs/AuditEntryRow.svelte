@@ -94,11 +94,6 @@
       var(--prompt-cache-color) 38%,
       var(--border)
     );
-    background: color-mix(
-      in srgb,
-      var(--prompt-cache-color) 7%,
-      var(--bg)
-    );
   }
 
   .audit-entry-details {
@@ -108,16 +103,4 @@
     overflow: hidden;
   }
 
-  .audit-entry-interactions-open .audit-entry-details {
-    border-top-color: color-mix(
-      in srgb,
-      var(--prompt-cache-color) 24%,
-      var(--border)
-    );
-    background: color-mix(
-      in srgb,
-      var(--prompt-cache-color) 5%,
-      var(--bg-surface)
-    );
-  }
 </style>

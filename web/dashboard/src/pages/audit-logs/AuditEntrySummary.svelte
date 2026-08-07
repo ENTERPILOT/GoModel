@@ -247,6 +247,16 @@
     background: color-mix(in srgb, var(--accent) 20%, var(--bg));
   }
 
+  .audit-conversation-trigger-active {
+    color: var(--accent-strong, var(--accent));
+    background: color-mix(in srgb, var(--accent) 28%, var(--bg));
+    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+
+  .audit-conversation-trigger-active:hover {
+    background: color-mix(in srgb, var(--accent) 34%, var(--bg));
+  }
+
   /* The Icon atom hard-codes lucide's round caps and 24px attribute size;
      these CSS declarations win over presentation attributes, keeping the
      chevron rendered exactly like the previous hand-rolled SVG (butt caps,
