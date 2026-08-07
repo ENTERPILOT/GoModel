@@ -42,6 +42,7 @@
         <a
           class="btn btn-primary btn-with-icon external-login-btn"
           href={gomodelPath(auth.externalLoginURL)}
+          onclick={() => auth.selectExternalAuthentication()}
         >
           <Icon icon={KeyRound} />
           <span>Sign in with SSO</span>

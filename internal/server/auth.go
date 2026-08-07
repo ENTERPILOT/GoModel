@@ -65,6 +65,10 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 			token, tokenErr := requestAuthToken(c.Request())
 			hasExplicitCredential := c.Request().Header.Get("Authorization") != "" || c.Request().Header.Get("x-api-key") != ""
 			if hasExplicitCredential {
+				// Explicit credentials take precedence over ambient extension
+				// sessions. Clear any identity advertised by an outer extension
+				// middleware before validating the selected credential.
+				setAuthenticationUserHeader(c, "")
 				if tokenErr != "" {
 					authErr := authenticationError(c, tokenErr)
 					return writeGatewayError(c, authErr)
@@ -173,6 +177,7 @@ func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userP
 		auditlog.EnrichEntryWithUserPath(c, userPath)
 	}
 	c.SetRequest(c.Request().WithContext(ctx))
+	setAuthenticationUserHeader(c, userPath)
 	auditlog.EnrichEntryWithAuthMethod(c, normalized.Method)
 	auditlog.EnrichEntryWithPrincipalID(c, normalized.PrincipalID)
 	return nil
@@ -276,7 +281,15 @@ func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResul
 		auditlog.EnrichEntryWithUserPath(c, userPath)
 	}
 	c.SetRequest(c.Request().WithContext(ctx))
+	setAuthenticationUserHeader(c, strings.TrimSpace(authResult.UserPath))
 	auditlog.EnrichEntryWithAuthKeyID(c, authResult.ID)
+}
+
+func setAuthenticationUserHeader(c *echo.Context, userPath string) {
+	if c == nil {
+		return
+	}
+	c.Response().Header().Set(ext.AuthenticationUserHeader, strings.TrimSpace(userPath))
 }
 
 func authFailureMessage(err error) string {

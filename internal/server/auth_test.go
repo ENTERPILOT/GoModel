@@ -295,6 +295,7 @@ func TestAuthMiddlewareWithRequestAuthenticatorEnrichesRequest(t *testing.T) {
 	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
 	require.NoError(t, handler(c))
 	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, "/users/person@example.com", rec.Header().Get(ext.AuthenticationUserHeader))
 	assert.Equal(t, 1, requestAuth.calls)
 }
 
@@ -415,8 +416,10 @@ func TestAuthMiddlewareExplicitBearerPrecedesRequestAuthenticator(t *testing.T) 
 	req := httptest.NewRequest(http.MethodGet, "/admin/usage", nil)
 	req.Header.Set("Authorization", "Bearer master")
 	rec := httptest.NewRecorder()
+	rec.Header().Set(ext.AuthenticationUserHeader, "/users/sso")
 	require.NoError(t, handler(e.NewContext(req, rec)))
 	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Empty(t, rec.Header().Get(ext.AuthenticationUserHeader))
 	assert.Zero(t, requestAuth.calls)
 }
 
@@ -565,6 +568,7 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathOverridesHeader(t *te
 	err := handler(c)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/team/auth-key", rec.Header().Get(ext.AuthenticationUserHeader))
 }
 
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathUsesConfiguredHeader(t *testing.T) {

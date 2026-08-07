@@ -4,8 +4,11 @@
 // under an older key so they cannot clobber fresh data ("stale auth").
 
 import { authenticationResponseMetadata } from "./external-auth.js";
-
-const API_KEY_STORAGE_KEY = "gomodel_api_key";
+import {
+  clearStoredApiKey,
+  readStoredApiKey,
+  writeStoredApiKey,
+} from "./api-key-storage.js";
 
 export function normalizeApiKey(value) {
   const key = String(value || "").trim();
@@ -33,13 +36,7 @@ class AuthStore {
   refreshTick = $state(0);
 
   init() {
-    try {
-      this.apiKey = normalizeApiKey(
-        localStorage.getItem(API_KEY_STORAGE_KEY) || "",
-      );
-    } catch {
-      this.apiKey = "";
-    }
+    this.apiKey = normalizeApiKey(readStoredApiKey());
   }
 
   hasApiKey() {
@@ -48,11 +45,16 @@ class AuthStore {
 
   save() {
     this.apiKey = normalizeApiKey(this.apiKey);
-    try {
-      localStorage.setItem(API_KEY_STORAGE_KEY, this.apiKey);
-    } catch {
-      // Keep the in-memory key when storage is unavailable.
-    }
+    writeStoredApiKey(this.apiKey);
+  }
+
+  selectExternalAuthentication() {
+    this.apiKey = "";
+    clearStoredApiKey();
+    this.generation++;
+    this.authError = false;
+    this.authErrorMessage = "";
+    this.needsAuth = true;
   }
 
   openDialog() {
