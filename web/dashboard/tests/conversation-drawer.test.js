@@ -345,6 +345,25 @@ test("tool-only assistant bubbles derive their fill from tool-call content", () 
   assert.ok(message.promptCacheRatio > 0 && message.promptCacheRatio < 1);
 });
 
+test("tool-call cache measurement uses compact payload JSON, not display formatting", () => {
+  const entry = {
+    id: "prompt-cache-tool-compact",
+    timestamp: "2026-07-06T12:00:00Z",
+    path: "/v1/chat/completions",
+    // lookup({"q":"x"}) is 17 characters; display whitespace must not
+    // increase the cache measurement denominator.
+    usage: { estimated_cached_characters: 17 },
+    data: { request_body: { messages: [{
+      role: "assistant",
+      content: "",
+      tool_calls: [{ function: { name: "lookup", arguments: { q: "x" } } }],
+    }] } },
+  };
+
+  const message = buildConversationMessages([entry], entry.id)[0];
+  assert.equal(message.promptCacheRatio, 1);
+});
+
 test("entries with errors append an error message extracted from nested payloads", () => {
   const entry = {
     id: "log-3",

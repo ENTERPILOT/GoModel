@@ -95,11 +95,23 @@ function measurePromptCache(text, sourceSegments) {
     return total > 0 ? { total } : null;
 }
 
+function toolCallPromptCharacters(toolCall) {
+    const value = toolCall && toolCall.arguments !== undefined ? toolCall.arguments : '';
+    let argumentsText = '';
+    if (typeof value === 'string') {
+        argumentsText = value;
+    } else {
+        try {
+            argumentsText = JSON.stringify(value);
+        } catch {
+            argumentsText = String(value);
+        }
+    }
+    return (String(toolCall && toolCall.name || '') + '(' + argumentsText + ')').length;
+}
+
 function measureToolCallPromptCache(toolCalls) {
-    const characters = (Array.isArray(toolCalls) ? toolCalls : []).map((toolCall) => {
-        const text = String(toolCall && toolCall.name || '') + '(' + formatFunctionArguments(toolCall) + ')';
-        return text.length;
-    });
+    const characters = (Array.isArray(toolCalls) ? toolCalls : []).map(toolCallPromptCharacters);
     return { characters };
 }
 

@@ -187,7 +187,25 @@
     onkeydown={resizeWithKeyboard}
   ></div>
   <div class="conversation-drawer-header">
-    <h3 id="interactions-drawer-title">Interactions</h3>
+    <div class="conversation-drawer-title">
+      <h3 id="interactions-drawer-title">Interactions</h3>
+      <span
+        class="conversation-follow-status"
+        role="status"
+        aria-label={drawer.conversationFollowLatest
+          ? "Following the latest interaction"
+          : "Viewing a historical interaction"}
+        title={drawer.conversationFollowLatest
+          ? "Following the latest interaction as new events arrive"
+          : "Viewing a historical interaction; live updates are not followed"}
+      >
+        <span
+          class="live-dot"
+          class:is-streaming={drawer.conversationFollowLatest}
+          aria-hidden="true"
+        ></span>
+      </span>
+    </div>
     <div class="conversation-drawer-header-actions">
       <button
         type="button"
@@ -255,40 +273,33 @@
     {/if}
   </div>
 
-  {#if drawer.conversationAnchorID}
+  {#if drawer.conversationAnchorID && drawer.followUpKind()}
     <div class="conversation-drawer-footer">
-      {#if drawer.followUpKind()}
-        <form
-          class="conversation-composer"
-          onsubmit={(event) => {
-            event.preventDefault();
-            drawer.sendFollowUp();
-          }}
-        >
-          <label for="conversation-follow-up">Send a message</label>
-          <textarea
-            id="conversation-follow-up"
-            rows="3"
-            placeholder="Continue this interaction…"
-            bind:value={drawer.followUpText}
-            disabled={drawer.followUpSending || drawer.conversationLiveWaiting()}
-          ></textarea>
-          {#if drawer.followUpError}
-            <p class="conversation-send-error" role="alert">{drawer.followUpError}</p>
-          {/if}
-          <div class="conversation-composer-actions">
-            <span class="conversation-endpoint mono">{drawer.selectedConversationEntry()?.path || ""}</span>
-            <button class="btn btn-primary" type="submit" disabled={!drawer.canSendFollowUp()}>
-              {drawer.followUpSending ? "Sending…" : "Send"}
-            </button>
-          </div>
-        </form>
-      {/if}
-      <p class="conversation-meta">
-        {drawer.conversationFollowLatest
-          ? "Following latest interaction"
-          : "Opened from log: " + drawer.conversationOpenedFromID}
-      </p>
+      <form
+        class="conversation-composer"
+        onsubmit={(event) => {
+          event.preventDefault();
+          drawer.sendFollowUp();
+        }}
+      >
+        <textarea
+          id="conversation-follow-up"
+          rows="2"
+          aria-label="Send a message"
+          placeholder="Continue this interaction…"
+          bind:value={drawer.followUpText}
+          disabled={drawer.followUpSending || drawer.conversationLiveWaiting()}
+        ></textarea>
+        {#if drawer.followUpError}
+          <p class="conversation-send-error" role="alert">{drawer.followUpError}</p>
+        {/if}
+        <div class="conversation-composer-actions">
+          <span class="conversation-endpoint mono">{drawer.selectedConversationEntry()?.path || ""}</span>
+          <button class="btn btn-primary" type="submit" disabled={!drawer.canSendFollowUp()}>
+            {drawer.followUpSending ? "Sending…" : "Send"}
+          </button>
+        </div>
+      </form>
     </div>
   {/if}
 </aside>
@@ -376,15 +387,24 @@
     gap: 6px;
   }
 
+  .conversation-drawer-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  .conversation-follow-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    margin: -4px;
+  }
+
   .conversation-drawer-header :global(h3) {
     font-size: 16px;
     font-weight: 700;
-  }
-
-  .conversation-meta {
-    color: var(--text-muted);
-    font-size: 12px;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
   }
 
   .conversation-drawer-footer {
@@ -403,14 +423,9 @@
     gap: 7px;
   }
 
-  .conversation-composer label {
-    font-size: 12px;
-    font-weight: 700;
-  }
-
   .conversation-composer textarea {
     width: 100%;
-    min-height: 70px;
+    min-height: 50px;
     resize: vertical;
     border: 1px solid var(--border);
     border-radius: 7px;
