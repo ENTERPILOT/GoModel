@@ -138,6 +138,8 @@ test("responses-API threads shape input items, function calls and outputs", () =
           { role: "user", content: "Ping" },
           { type: "function_call", id: "fc-9", call_id: "call-9", name: "lookup", arguments: '{"q":"x"}' },
           { type: "function_call_output", call_id: "call-9", output: "42" },
+          { type: "tool_use", id: "toolu-10", name: "save_weather", input: { city: "Paris" } },
+          { type: "tool_result", tool_use_id: "toolu-10", content: [{ type: "text", text: "Weather saved" }] },
         ],
       },
       response_body: {
@@ -155,6 +157,8 @@ test("responses-API threads shape input items, function calls and outputs", () =
     "user",
     "function_call",
     "function_result",
+    "function_call",
+    "function_result",
     "assistant",
     "function_call",
   ]);
@@ -163,7 +167,13 @@ test("responses-API threads shape input items, function calls and outputs", () =
   assert.equal(messages[3].functionName, "lookup");
   assert.equal(messages[3].functionCallID, "call-9");
   assert.equal(messages[3].text, "42");
-  assert.equal(messages[4].text, "Pong");
+  assert.equal(messages[4].toolCalls[0].name, "save_weather");
+  assert.equal(messages[4].toolCalls[0].id, "toolu-10");
+  assert.deepEqual(messages[4].toolCalls[0].arguments, { city: "Paris" });
+  assert.equal(messages[5].functionName, "save_weather");
+  assert.equal(messages[5].functionCallID, "toolu-10");
+  assert.equal(messages[5].text, "Weather saved");
+  assert.equal(messages[6].text, "Pong");
   assert.ok(messages.every((m) => m.isAnchor === false));
 });
 

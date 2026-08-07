@@ -1072,14 +1072,22 @@ export function buildConversationView(entries, anchorID) {
             if (Array.isArray(requestBody.input)) {
                 requestBody.input.forEach((item) => {
                     if (!item || typeof item !== 'object') return;
-                    if (item.type === 'function_call_output') {
-                        const text = typeof item.output === 'string' ? item.output : extractText(item.output);
+                    if (item.type === 'function_call_output' || item.type === 'tool_result') {
+                        const isToolResult = item.type === 'tool_result';
+                        const output = isToolResult ? item.content : item.output;
+                        const callID = isToolResult
+                            ? item.tool_use_id || item.call_id || ''
+                            : item.call_id || '';
+                        const text = typeof output === 'string' ? output : extractText(output);
                         if (text) messages.push(message('function_result', text, {
-                            functionName: callIdMap[item.call_id] || item.name || '',
-                            functionCallID: item.call_id || '',
-                            promptCache: cachedPrompt(text, [text]),
+                            functionName: callIdMap[callID] || item.name || '',
+                            functionCallID: callID,
+                            promptCache: cachedPrompt(
+                                text,
+                                isToolResult ? extractTextSegments(item.content) : [text],
+                            ),
                         }));
-                    } else if (item.type === 'function_call') {
+                    } else if (item.type === 'function_call' || item.type === 'tool_use') {
                         const toolCalls = extractToolCallsList([item]);
                         messages.push(message('function_call', '', {
                             toolCalls,
