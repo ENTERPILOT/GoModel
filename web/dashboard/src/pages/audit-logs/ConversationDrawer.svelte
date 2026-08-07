@@ -180,6 +180,7 @@
 
 {#if drawer.conversationOpen}
 {#each [fullscreen] as renderedFullscreen (renderedFullscreen)}
+<!-- The keyed block animates fullscreen swaps; global also covers the parent open/close block. -->
 <aside
   class="conversation-drawer"
   class:conversation-drawer-fullscreen={renderedFullscreen}
@@ -189,7 +190,7 @@
   role={renderedFullscreen ? "dialog" : undefined}
   aria-modal={renderedFullscreen ? "true" : undefined}
   aria-labelledby="interactions-drawer-title"
-  transition:interactionsTransition={{
+  transition:interactionsTransition|global={{
     fullscreen: renderedFullscreen,
     revealWithoutSlide: !renderedFullscreen && returningFromFullscreen,
   }}
