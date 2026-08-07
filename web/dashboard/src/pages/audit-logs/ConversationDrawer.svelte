@@ -9,7 +9,7 @@
   import { router } from "$lib/stores/router.svelte.js";
   import { Maximize2, Minimize2 } from "lucide";
   import { cubicOut } from "svelte/easing";
-  import { fly } from "svelte/transition";
+  import { fly, slide } from "svelte/transition";
   import ChatMessage from "./ChatMessage.svelte";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import {
@@ -32,19 +32,10 @@
   let showPromptCache = $state(readStored(promptCacheFillStorageKey, "true") !== "false");
   let resizePointerID = null;
 
-  function interactionsTransition(node, { fullscreen: isFullscreen, width }) {
+  function interactionsTransition(node, { fullscreen: isFullscreen }) {
     const duration = motionDuration(180);
     if (isFullscreen) return fly(node, { x: 56, duration, easing: cubicOut });
-    return {
-      duration,
-      easing: cubicOut,
-      css: (t) => {
-        const animatedWidth = Math.max(0, Number(width) || 0) * t;
-        return `flex-basis:${animatedWidth}px;width:${animatedWidth}px;` +
-          `transform:translateX(${(1 - t) * 56}px);opacity:${0.8 + (0.2 * t)};` +
-          "overflow:hidden";
-      },
-    };
+    return slide(node, { axis: "x", duration, easing: cubicOut });
   }
 
   function togglePromptCacheFill() {
@@ -184,7 +175,7 @@
   role={fullscreen ? "dialog" : undefined}
   aria-modal={fullscreen ? "true" : undefined}
   aria-labelledby="interactions-drawer-title"
-  transition:interactionsTransition={{ fullscreen, width: panelWidth }}
+  transition:interactionsTransition={{ fullscreen }}
 >
   <!-- A focusable separator is the ARIA window-splitter pattern. Svelte's
        static checker treats separator as non-interactive despite aria-valuenow. -->
@@ -330,7 +321,7 @@
   .conversation-drawer {
     position: sticky;
     top: 0;
-    flex: 0 0 var(--conversation-panel-width);
+    flex: 0 0 auto;
     width: var(--conversation-panel-width);
     height: 100vh;
     min-width: 0;
