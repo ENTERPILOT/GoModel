@@ -28,7 +28,7 @@
 
   // `thread` is set on session-thread head rows (grouped mode): the summary
   // then renders the expander + count badge. { count, expanded, ontoggle }.
-  let { entry, thread = null } = $props();
+  let { entry, thread = null, hidePath = false } = $props();
 
   const expanded = $derived(auditList.isAuditEntryExpanded(entry));
   const interactionsOpen = $derived(
@@ -62,7 +62,7 @@
   class:audit-entry-interactions-open={interactionsOpen}
   open
 >
-  <AuditEntrySummary {entry} {thread} {expanded} onactivate={toggleExpanded} />
+  <AuditEntrySummary {entry} {thread} {expanded} {hidePath} onactivate={toggleExpanded} />
   {#if expanded}
     <div
       class="audit-entry-details"

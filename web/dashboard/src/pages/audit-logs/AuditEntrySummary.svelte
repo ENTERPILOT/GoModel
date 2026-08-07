@@ -18,7 +18,13 @@
   // Svelte-controlled row expansion: the click is intercepted (the parent
   // <details> stays open so the close can animate) and the state lives in
   // auditList.
-  let { entry, thread = null, expanded = false, onactivate = null } = $props();
+  let {
+    entry,
+    thread = null,
+    expanded = false,
+    onactivate = null,
+    hidePath = false,
+  } = $props();
 
   const timestamp = $derived(timezone.formatTimestamp(entry.timestamp));
   const timestampTime = $derived(
@@ -98,7 +104,9 @@
     {#if entry.requested_model || entry.model}
       <span class="audit-provider-model mono">{auditModelDisplay(entry)}</span>
     {/if}
-    <span class="audit-path mono">{entry.path || "-"}</span>
+    {#if !hidePath}
+      <span class="audit-path mono">{entry.path || "-"}</span>
+    {/if}
   </div>
   <div class="audit-entry-right">
     <AuditAttemptTrack {entry} />

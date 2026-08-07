@@ -50,7 +50,7 @@
         {/if}
         {#each (children && children.entries) || [] as child (child.id)}
           <div class="audit-thread-child">
-            <AuditEntryRow entry={child} />
+            <AuditEntryRow entry={child} hidePath={child.path === entry.path} />
           </div>
         {/each}
         {#if truncated}
