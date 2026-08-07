@@ -7,7 +7,7 @@
   import { motionDuration } from "$lib/utils/motion.js";
   import { modals } from "$lib/stores/ui.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
-  import { Maximize2, Minimize2 } from "lucide";
+  import { ArrowDown, ArrowUp, Maximize2, Minimize2 } from "lucide";
   import { tick } from "svelte";
   import { cubicOut } from "svelte/easing";
   import { fly, slide } from "svelte/transition";
@@ -16,6 +16,7 @@
   import {
     DEFAULT_CONVERSATION_PANEL_WIDTH,
     clampConversationPanelWidth,
+    conversationMessageNavigationIndex,
     conversationPanelBounds,
     conversationPanelWidthFromPointer,
   } from "./conversation-panel.js";
@@ -115,6 +116,30 @@
     syncPanelWidth();
     preferredWidth = panelWidth;
     writeStored("gomodel_interactions_panel_width", preferredWidth);
+  }
+
+  function scrollToConversationMessage(direction) {
+    const content = document.getElementById("interactions-drawer-content");
+    const thread = drawer.conversationThreadEl;
+    if (!content || !thread) return;
+    const messages = [...thread.querySelectorAll('[data-conversation-message="true"]')];
+    const contentRect = content.getBoundingClientRect();
+    const contentTop = contentRect.top + 14;
+    const index = conversationMessageNavigationIndex(
+      messages.map((message) => message.getBoundingClientRect().top),
+      contentTop,
+      direction,
+    );
+    const target = messages[index];
+    if (!target) return;
+    const targetTop = content.scrollTop
+      + target.getBoundingClientRect().top
+      - contentRect.top
+      - 14;
+    content.scrollTo({
+      top: targetTop,
+      behavior: motionDuration(1) > 0 ? "smooth" : "auto",
+    });
   }
 
   function dashboardShellElements() {
@@ -255,6 +280,26 @@
   </div>
 
   <div id="interactions-drawer-content">
+    {#if drawer.conversationMessages.length > 1}
+      <div class="conversation-message-navigation" role="group" aria-label="Navigate interaction messages">
+        <button
+          type="button"
+          aria-label="Previous message"
+          title="Previous message"
+          onclick={() => scrollToConversationMessage(-1)}
+        >
+          <Icon icon={ArrowUp} width="14" height="14" />
+        </button>
+        <button
+          type="button"
+          aria-label="Next message"
+          title="Next message"
+          onclick={() => scrollToConversationMessage(1)}
+        >
+          <Icon icon={ArrowDown} width="14" height="14" />
+        </button>
+      </div>
+    {/if}
     {#if drawer.conversationError}
       <div class="alert alert-warning">{drawer.conversationError}</div>
     {/if}
@@ -437,6 +482,58 @@
     font-weight: 700;
   }
 
+  #interactions-drawer-content {
+    position: relative;
+  }
+
+  .conversation-message-navigation {
+    position: sticky;
+    top: 12px;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: max-content;
+    height: 0;
+    margin-left: auto;
+    margin-right: 12px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-3px);
+    transition: opacity 120ms ease, transform 120ms ease;
+  }
+
+  #interactions-drawer-content:hover .conversation-message-navigation,
+  .conversation-message-navigation:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  .conversation-message-navigation button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+    color: var(--text-muted);
+    box-shadow: 0 1px 3px color-mix(in srgb, #000 16%, transparent);
+  }
+
+  .conversation-message-navigation button:hover {
+    color: var(--text);
+    background: var(--bg-surface-hover);
+  }
+
+  .conversation-message-navigation button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 1px;
+  }
+
   .conversation-drawer-footer {
     flex-shrink: 0;
     border-top: 1px solid var(--border);
@@ -575,5 +672,19 @@
     padding: 4px 16px 20px;
     color: var(--text-muted);
     font-size: 13px;
+  }
+
+  @media (hover: none) {
+    .conversation-message-navigation {
+      opacity: 1;
+      pointer-events: auto;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .conversation-message-navigation {
+      transition: none;
+    }
   }
 </style>

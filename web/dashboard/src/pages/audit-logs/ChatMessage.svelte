@@ -4,13 +4,18 @@
   // is partly dynamic (roleClass), which keeps the compiler from pruning the
   // role selectors below — those rules must live here, next to the element
   // they scope to (CONVENTIONS rule 3).
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
+  import { createCopyState } from "$lib/utils/clipboard.svelte.js";
+  import { CircleCheck, Copy } from "lucide";
   import {
+    conversationMessageCopyText,
     formatFunctionArguments,
     functionExpandedContent,
   } from "./conversation-helpers.js";
 
   let { msg, showPromptCache = true } = $props();
+  const copyState = createCopyState({ logPrefix: "Failed to copy interaction message:" });
 
   const isFunctionNote = $derived(msg.role === "function_call" || msg.role === "function_result");
 
@@ -46,6 +51,7 @@
   style:--prompt-cache-fill={cacheFill(msg.promptCacheRatio)}
   style:--prompt-cache-visibility={showPromptCache && msg.promptCacheRatio > 0 ? "1" : "0"}
   data-conversation-anchor={msg.isAnchor ? "true" : undefined}
+  data-conversation-message="true"
   data-entry-id={msg.entryID}
 >
   {#if isFunctionNote}
@@ -101,6 +107,19 @@
       </footer>
     {/if}
   {/if}
+  <button
+    type="button"
+    class="chat-message-copy"
+    class:is-copied={copyState.copied}
+    aria-label={copyState.copied ? "Message copied" : "Copy message"}
+    title={copyState.copied ? "Copied" : "Copy message"}
+    onclick={(event) => {
+      event.stopPropagation();
+      copyState.copy(conversationMessageCopyText(msg));
+    }}
+  >
+    <Icon icon={copyState.copied ? CircleCheck : Copy} width="14" height="14" />
+  </button>
 </article>
 
 <style>
@@ -109,7 +128,7 @@
     overflow: hidden;
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 10px 12px;
+    padding: 10px 42px 10px 12px;
     max-width: 94%;
     background: var(--bg);
   }
@@ -211,6 +230,53 @@
     z-index: 1;
   }
 
+  .chat-message-copy {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+    color: var(--text-muted);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(3px);
+    transition: opacity 120ms ease, transform 120ms ease, color 120ms ease,
+      background-color 120ms ease, border-color 120ms ease;
+  }
+
+  .chat-message:hover .chat-message-copy,
+  .chat-function-note:hover .chat-message-copy,
+  .chat-message:focus-within .chat-message-copy,
+  .chat-function-note:focus-within .chat-message-copy,
+  .chat-message-copy.is-copied {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  .chat-message-copy:hover {
+    color: var(--text);
+    background: var(--bg-surface-hover);
+  }
+
+  .chat-message-copy:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 1px;
+  }
+
+  .chat-message-copy.is-copied {
+    color: var(--success);
+    border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  }
+
   /* Tool call footer on assistant bubbles */
   .chat-tool-calls {
     margin-top: 8px;
@@ -273,7 +339,7 @@
     overflow: hidden;
     align-self: center;
     max-width: 94%;
-    padding: 4px 12px;
+    padding: 4px 42px 4px 12px;
     border-radius: 12px;
     font-size: 12px;
     color: var(--text-muted);
@@ -289,6 +355,7 @@
     display: flex;
     align-items: baseline;
     gap: 6px;
+    min-height: 26px;
     overflow: hidden;
   }
 
@@ -380,5 +447,19 @@
     .chat-message {
         max-width: 100%;
       }
+  }
+
+  @media (hover: none) {
+    .chat-message-copy {
+      opacity: 1;
+      pointer-events: auto;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chat-message-copy {
+      transition: none;
+    }
   }
 </style>

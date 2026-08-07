@@ -1312,6 +1312,15 @@ export function functionExpandedContent(msg) {
     return msg.text || '';
 }
 
+export function conversationMessageCopyText(msg) {
+    if (!msg) return '';
+    const text = String(msg.text || '');
+    const toolCalls = Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0
+        ? functionExpandedContent({ role: 'function_call', toolCalls: msg.toolCalls })
+        : '';
+    return [text, toolCalls].filter(Boolean).join('\n\n');
+}
+
 export function formatFunctionArguments(toolCall) {
     const value = toolCall && toolCall.arguments !== undefined ? toolCall.arguments : '';
     if (typeof value !== 'string') {

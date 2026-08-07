@@ -11,6 +11,7 @@ import {
   conversationEntryByRequestID,
   conversationEntryIsLatest,
   conversationFollowUpEntry,
+  conversationMessageCopyText,
   extractConversationErrorMessage,
   extractRequestPromptTextSegments,
   formatFunctionArguments,
@@ -518,6 +519,14 @@ test("functionExpandedContent pretty-prints function call arguments", () => {
   );
   assert.equal(functionExpandedContent({ role: "function_result", text: "42" }), "42");
   assert.equal(formatFunctionArguments({ arguments: { q: "object" } }), '{\n  "q": "object"\n}');
+});
+
+test("conversationMessageCopyText includes message text and visible tool calls", () => {
+  assert.equal(conversationMessageCopyText({ text: "Hello" }), "Hello");
+  assert.equal(conversationMessageCopyText({
+    text: "Looking it up",
+    toolCalls: [{ name: "lookup", arguments: { q: "x" } }],
+  }), 'Looking it up\n\nlookup({\n  "q": "x"\n})');
 });
 
 test("the latest request snapshot is displayed once in timestamp order", () => {

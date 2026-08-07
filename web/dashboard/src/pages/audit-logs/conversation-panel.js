@@ -24,6 +24,17 @@ export function conversationPanelWidthFromPointer(clientX, viewportWidth, leadin
   );
 }
 
+export function conversationMessageNavigationIndex(messageTops, viewportTop, direction) {
+  if (!Array.isArray(messageTops) || messageTops.length === 0) return -1;
+  const top = finite(viewportTop);
+  let current = 0;
+  messageTops.forEach((messageTop, index) => {
+    if (finite(messageTop) <= top + 1) current = index;
+  });
+  const step = Number(direction) < 0 ? -1 : 1;
+  return Math.min(messageTops.length - 1, Math.max(0, current + step));
+}
+
 function finite(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;

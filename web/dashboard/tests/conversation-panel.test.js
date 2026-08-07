@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   clampConversationPanelWidth,
+  conversationMessageNavigationIndex,
   conversationPanelBounds,
   conversationPanelWidthFromPointer,
 } from "../src/pages/audit-logs/conversation-panel.js";
@@ -30,4 +31,14 @@ test("panel bounds stay continuous across the former compact breakpoint", () => 
   assert.deepEqual(conversationPanelBounds(680), { min: 320, max: 443 });
   assert.equal(clampConversationPanelWidth(520, 679), 442);
   assert.equal(clampConversationPanelWidth(520, 680), 443);
+});
+
+test("message navigation steps from the message nearest the viewport top", () => {
+  const tops = [-80, 40, 180, 320];
+  assert.equal(conversationMessageNavigationIndex(tops, 20, 1), 1);
+  assert.equal(conversationMessageNavigationIndex(tops, 20, -1), 0);
+  assert.equal(conversationMessageNavigationIndex(tops, 185, 1), 3);
+  assert.equal(conversationMessageNavigationIndex(tops, 185, -1), 1);
+  assert.equal(conversationMessageNavigationIndex(tops, -100, -1), 0);
+  assert.equal(conversationMessageNavigationIndex(tops, 400, 1), 3);
 });
