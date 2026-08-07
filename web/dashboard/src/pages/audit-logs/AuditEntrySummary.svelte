@@ -248,6 +248,7 @@
   }
 
   .audit-conversation-trigger-active {
+    border-left: 0;
     color: var(--accent-strong, var(--accent));
     background: color-mix(in srgb, var(--accent) 28%, var(--bg));
     box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 60%, transparent);

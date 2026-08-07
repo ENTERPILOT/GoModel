@@ -89,6 +89,7 @@
   }
 
   .audit-entry-interactions-open {
+    border-width: 2px;
     border-color: color-mix(
       in srgb,
       var(--prompt-cache-color) 38%,

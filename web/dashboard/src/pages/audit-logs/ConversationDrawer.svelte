@@ -4,9 +4,11 @@
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { readStored, writeStored } from "$lib/utils/storage.js";
+  import { motionDuration } from "$lib/utils/motion.js";
   import { modals } from "$lib/stores/ui.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
   import { Maximize2, Minimize2 } from "lucide";
+  import { fly } from "svelte/transition";
   import ChatMessage from "./ChatMessage.svelte";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import {
@@ -156,6 +158,7 @@
 </script>
 
 {#if drawer.conversationOpen}
+{#key fullscreen}
 <aside
   class="conversation-drawer"
   class:conversation-drawer-fullscreen={fullscreen}
@@ -165,6 +168,7 @@
   role={fullscreen ? "dialog" : undefined}
   aria-modal={fullscreen ? "true" : undefined}
   aria-labelledby="interactions-drawer-title"
+  transition:fly={{ x: 40, duration: motionDuration(140) }}
 >
   <!-- A focusable separator is the ARIA window-splitter pattern. Svelte's
        static checker treats separator as non-interactive despite aria-valuenow. -->
@@ -303,6 +307,7 @@
     </div>
   {/if}
 </aside>
+{/key}
 {/if}
 
 <style>
