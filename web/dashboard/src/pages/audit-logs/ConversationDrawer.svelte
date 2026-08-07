@@ -4,20 +4,26 @@
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { readStored, writeStored } from "$lib/utils/storage.js";
+  import { motionDuration } from "$lib/utils/motion.js";
   import { modals } from "$lib/stores/ui.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
-  import { Maximize2, Minimize2 } from "lucide";
+  import { ArrowDown, ArrowUp, Maximize2, Minimize2 } from "lucide";
+  import { tick } from "svelte";
+  import { cubicOut } from "svelte/easing";
+  import { fly, slide } from "svelte/transition";
   import ChatMessage from "./ChatMessage.svelte";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import {
     DEFAULT_CONVERSATION_PANEL_WIDTH,
     clampConversationPanelWidth,
+    conversationMessageNavigationTarget,
     conversationPanelBounds,
     conversationPanelWidthFromPointer,
   } from "./conversation-panel.js";
 
   const drawer = conversationDrawer;
   const storedWidth = Number(readStored("gomodel_interactions_panel_width"));
+  const promptCacheFillStorageKey = "gomodel_interactions_prompt_cache_fill";
   let preferredWidth = Number.isFinite(storedWidth) && storedWidth > 0
     ? storedWidth
     : DEFAULT_CONVERSATION_PANEL_WIDTH;
@@ -25,7 +31,32 @@
   let panelMin = $state(320);
   let panelMax = $state(760);
   let fullscreen = $state(false);
+  let returningFromFullscreen = $state(false);
+  let showPromptCache = $state(readStored(promptCacheFillStorageKey, "true") !== "false");
   let resizePointerID = null;
+
+  function interactionsTransition(node, { fullscreen: isFullscreen, revealWithoutSlide = false }) {
+    const duration = motionDuration(180);
+    if (isFullscreen) return fly(node, { x: panelWidth, duration, easing: cubicOut });
+    if (revealWithoutSlide) return { duration: 0 };
+    return slide(node, { axis: "x", duration, easing: cubicOut });
+  }
+
+  async function setFullscreen(next) {
+    if (next === fullscreen) return;
+    const returning = fullscreen && !next;
+    returningFromFullscreen = returning;
+    fullscreen = next;
+    if (returning) {
+      await tick();
+      returningFromFullscreen = false;
+    }
+  }
+
+  function togglePromptCacheFill() {
+    showPromptCache = !showPromptCache;
+    writeStored(promptCacheFillStorageKey, showPromptCache);
+  }
 
   function leadingShellWidth() {
     const sidebarWidth = document.querySelector(".sidebar")
@@ -87,6 +118,33 @@
     writeStored("gomodel_interactions_panel_width", preferredWidth);
   }
 
+  function scrollToConversationMessage(direction) {
+    const content = document.getElementById("interactions-drawer-content");
+    const thread = drawer.conversationThreadEl;
+    if (!content || !thread) return;
+    const messages = [...thread.querySelectorAll('[data-conversation-message="true"]')];
+    const contentRect = content.getBoundingClientRect();
+    const contentTop = contentRect.top + 14;
+    const navigation = conversationMessageNavigationTarget(
+      messages.map((message) => message.getBoundingClientRect().top),
+      contentTop,
+      contentRect.bottom,
+      direction,
+    );
+    const target = messages[navigation.index];
+    if (!target) return;
+    const targetTop = navigation.align === "end"
+      ? content.scrollHeight
+      : content.scrollTop
+        + target.getBoundingClientRect().top
+        - contentRect.top
+        - 14;
+    content.scrollTo({
+      top: targetTop,
+      behavior: motionDuration(1) > 0 ? "smooth" : "auto",
+    });
+  }
+
   function dashboardShellElements() {
     return [
       document.querySelector(".sidebar"),
@@ -103,7 +161,7 @@
     if (sidebarEl) sidebarObserver.observe(sidebarEl);
     const onKeydown = (event) => {
       if (event.key === "Escape" && !modals.anyOpen) {
-        if (fullscreen) fullscreen = false;
+        if (fullscreen) void setFullscreen(false);
         else drawer.closeConversation();
       }
     };
@@ -149,15 +207,21 @@
 </script>
 
 {#if drawer.conversationOpen}
+{#each [fullscreen] as renderedFullscreen (renderedFullscreen)}
+<!-- The keyed block animates fullscreen swaps; global also covers the parent open/close block. -->
 <aside
   class="conversation-drawer"
-  class:conversation-drawer-fullscreen={fullscreen}
+  class:conversation-drawer-fullscreen={renderedFullscreen}
   style:--conversation-panel-width={panelWidth + "px"}
   bind:this={drawer.conversationDialogEl}
   tabindex="-1"
-  role={fullscreen ? "dialog" : undefined}
-  aria-modal={fullscreen ? "true" : undefined}
+  role={renderedFullscreen ? "dialog" : undefined}
+  aria-modal={renderedFullscreen ? "true" : undefined}
   aria-labelledby="interactions-drawer-title"
+  transition:interactionsTransition|global={{
+    fullscreen: renderedFullscreen,
+    revealWithoutSlide: !renderedFullscreen && returningFromFullscreen,
+  }}
 >
   <!-- A focusable separator is the ARIA window-splitter pattern. Svelte's
        static checker treats separator as non-interactive despite aria-valuenow. -->
@@ -180,17 +244,35 @@
     onkeydown={resizeWithKeyboard}
   ></div>
   <div class="conversation-drawer-header">
-    <h3 id="interactions-drawer-title">Interactions</h3>
+    <div class="conversation-drawer-title">
+      <h3 id="interactions-drawer-title">Interactions</h3>
+      <span
+        class="conversation-follow-status"
+        role="status"
+        aria-label={drawer.conversationFollowLatest
+          ? "Following the latest interaction"
+          : "Viewing a historical interaction"}
+        title={drawer.conversationFollowLatest
+          ? "Following the latest interaction as new events arrive"
+          : "Viewing a historical interaction; live updates are not followed"}
+      >
+        <span
+          class="live-dot"
+          class:is-streaming={drawer.conversationFollowLatest}
+          aria-hidden="true"
+        ></span>
+      </span>
+    </div>
     <div class="conversation-drawer-header-actions">
       <button
         type="button"
         class="table-action-btn table-icon-btn"
-        aria-label={fullscreen ? "Exit fullscreen interactions" : "Show interactions fullscreen"}
-        title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-        aria-pressed={fullscreen}
-        onclick={() => fullscreen = !fullscreen}
+        aria-label={renderedFullscreen ? "Exit fullscreen interactions" : "Show interactions fullscreen"}
+        title={renderedFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        aria-pressed={renderedFullscreen}
+        onclick={() => setFullscreen(!renderedFullscreen)}
       >
-        <Icon icon={fullscreen ? Minimize2 : Maximize2} class="table-icon-svg" />
+        <Icon icon={renderedFullscreen ? Minimize2 : Maximize2} class="table-icon-svg" />
       </button>
       <DialogCloseButton
         label="Close interactions"
@@ -201,6 +283,26 @@
   </div>
 
   <div id="interactions-drawer-content">
+    {#if drawer.conversationMessages.length > 1}
+      <div class="conversation-message-navigation" role="group" aria-label="Navigate interaction messages">
+        <button
+          type="button"
+          aria-label="Previous message"
+          title="Previous message"
+          onclick={() => scrollToConversationMessage(-1)}
+        >
+          <Icon icon={ArrowUp} width="14" height="14" />
+        </button>
+        <button
+          type="button"
+          aria-label="Next message"
+          title="Next message"
+          onclick={() => scrollToConversationMessage(1)}
+        >
+          <Icon icon={ArrowDown} width="14" height="14" />
+        </button>
+      </div>
+    {/if}
     {#if drawer.conversationError}
       <div class="alert alert-warning">{drawer.conversationError}</div>
     {/if}
@@ -212,9 +314,26 @@
     {/if}
 
     {#if drawer.conversationMessages.length > 0}
+      {#if drawer.conversationMessages.some((msg) =>
+        Number(msg.promptCacheRatio || 0) > 0
+      )}
+        <button
+          type="button"
+          class="conversation-cache-legend"
+          role="switch"
+          aria-checked={showPromptCache}
+          title={(showPromptCache ? "Hide" : "Show") + " estimated provider prompt-cache fill"}
+          onclick={togglePromptCacheFill}
+        >
+          <span class="conversation-cache-switch" class:is-active={showPromptCache} aria-hidden="true">
+            <span class="conversation-cache-switch-thumb"></span>
+          </span>
+          <span>Blue fill shows cached prompt share <span class="conversation-cache-estimate">(estimated)</span></span>
+        </button>
+      {/if}
       <div class="conversation-thread" bind:this={drawer.conversationThreadEl}>
         {#each drawer.conversationMessages as msg (msg.uid)}
-          <ChatMessage {msg} />
+          <ChatMessage {msg} {showPromptCache} />
         {/each}
       </div>
     {/if}
@@ -231,50 +350,44 @@
     {/if}
   </div>
 
-  {#if drawer.conversationAnchorID}
+  {#if drawer.conversationAnchorID && drawer.followUpKind()}
     <div class="conversation-drawer-footer">
-      {#if drawer.followUpKind()}
-        <form
-          class="conversation-composer"
-          onsubmit={(event) => {
-            event.preventDefault();
-            drawer.sendFollowUp();
-          }}
-        >
-          <label for="conversation-follow-up">Send a message</label>
-          <textarea
-            id="conversation-follow-up"
-            rows="3"
-            placeholder="Continue this interaction…"
-            bind:value={drawer.followUpText}
-            disabled={drawer.followUpSending || drawer.conversationLiveWaiting()}
-          ></textarea>
-          {#if drawer.followUpError}
-            <p class="conversation-send-error" role="alert">{drawer.followUpError}</p>
-          {/if}
-          <div class="conversation-composer-actions">
-            <span class="conversation-endpoint mono">{drawer.selectedConversationEntry()?.path || ""}</span>
-            <button class="btn btn-primary" type="submit" disabled={!drawer.canSendFollowUp()}>
-              {drawer.followUpSending ? "Sending…" : "Send"}
-            </button>
-          </div>
-        </form>
-      {/if}
-      <p class="conversation-meta">
-        {drawer.conversationFollowLatest
-          ? "Following latest interaction"
-          : "Opened from log: " + drawer.conversationOpenedFromID}
-      </p>
+      <form
+        class="conversation-composer"
+        onsubmit={(event) => {
+          event.preventDefault();
+          drawer.sendFollowUp();
+        }}
+      >
+        <textarea
+          id="conversation-follow-up"
+          rows="2"
+          aria-label="Send a message"
+          placeholder="Continue this interaction…"
+          bind:value={drawer.followUpText}
+          disabled={drawer.followUpSending || drawer.conversationLiveWaiting()}
+        ></textarea>
+        {#if drawer.followUpError}
+          <p class="conversation-send-error" role="alert">{drawer.followUpError}</p>
+        {/if}
+        <div class="conversation-composer-actions">
+          <span class="conversation-endpoint mono">{drawer.selectedConversationEntry()?.path || ""}</span>
+          <button class="btn btn-primary" type="submit" disabled={!drawer.canSendFollowUp()}>
+            {drawer.followUpSending ? "Sending…" : "Send"}
+          </button>
+        </div>
+      </form>
     </div>
   {/if}
 </aside>
+{/each}
 {/if}
 
 <style>
   .conversation-drawer {
     position: sticky;
     top: 0;
-    flex: 0 0 var(--conversation-panel-width);
+    flex: 0 0 auto;
     width: var(--conversation-panel-width);
     height: 100vh;
     min-width: 0;
@@ -352,15 +465,77 @@
     gap: 6px;
   }
 
+  .conversation-drawer-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  .conversation-follow-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    margin: -4px;
+  }
+
   .conversation-drawer-header :global(h3) {
     font-size: 16px;
     font-weight: 700;
   }
 
-  .conversation-meta {
+  #interactions-drawer-content {
+    position: relative;
+  }
+
+  .conversation-message-navigation {
+    position: sticky;
+    top: 12px;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: max-content;
+    height: 0;
+    margin-left: auto;
+    margin-right: 12px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-3px);
+    transition: opacity 120ms ease, transform 120ms ease;
+  }
+
+  #interactions-drawer-content:hover .conversation-message-navigation,
+  .conversation-message-navigation:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  .conversation-message-navigation button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    min-height: 30px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
     color: var(--text-muted);
-    font-size: 12px;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
+    box-shadow: 0 1px 3px color-mix(in srgb, #000 16%, transparent);
+  }
+
+  .conversation-message-navigation button:hover {
+    color: var(--text);
+    background: var(--bg-surface-hover);
+  }
+
+  .conversation-message-navigation button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 1px;
   }
 
   .conversation-drawer-footer {
@@ -379,14 +554,9 @@
     gap: 7px;
   }
 
-  .conversation-composer label {
-    font-size: 12px;
-    font-weight: 700;
-  }
-
   .conversation-composer textarea {
     width: 100%;
-    min-height: 70px;
+    min-height: 50px;
     resize: vertical;
     border: 1px solid var(--border);
     border-radius: 7px;
@@ -433,6 +603,65 @@
     font-size: 12px;
   }
 
+  .conversation-cache-legend {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 12px 16px 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .conversation-cache-legend:hover {
+    color: var(--text);
+  }
+
+  .conversation-cache-legend:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--prompt-cache-color) 35%, transparent);
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+
+  .conversation-cache-switch {
+    position: relative;
+    width: 28px;
+    height: 16px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-muted) 30%, var(--border));
+    transition: background-color 150ms ease;
+  }
+
+  .conversation-cache-switch.is-active {
+    background: color-mix(in srgb, var(--prompt-cache-color) 80%, var(--bg));
+  }
+
+  .conversation-cache-switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+    transition: transform 150ms ease;
+  }
+
+  .conversation-cache-switch.is-active .conversation-cache-switch-thumb {
+    transform: translateX(12px);
+  }
+
+  .conversation-cache-estimate {
+    opacity: 0.75;
+  }
+
   .conversation-thread {
     padding: 14px 16px 20px;
     display: flex;
@@ -447,5 +676,19 @@
     padding: 4px 16px 20px;
     color: var(--text-muted);
     font-size: 13px;
+  }
+
+  @media (hover: none) {
+    .conversation-message-navigation {
+      opacity: 1;
+      pointer-events: auto;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .conversation-message-navigation {
+      transition: none;
+    }
   }
 </style>

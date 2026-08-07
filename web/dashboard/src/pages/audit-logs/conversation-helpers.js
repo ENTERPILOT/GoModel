@@ -8,6 +8,23 @@ export { formatJSON };
 
 const sectionKeys = new Set(['instructions', 'messages', 'input', 'previous_response_id', 'choices', 'output']);
 
+function contentPartLabel(part) {
+    if (!part || typeof part !== 'object') return '';
+    const type = String(part.type || '').toLowerCase();
+    if (type === 'image' || type === 'image_url' || type === 'input_image' || type === 'output_image') {
+        return '[Image]';
+    }
+    if (type === 'audio' || type === 'input_audio' || type === 'output_audio') {
+        return '[Audio]';
+    }
+    if (type === 'file' || type === 'input_file' || type === 'output_file') {
+        const name = String(part.filename || part.name || '').trim();
+        return name ? '[File: ' + name + ']' : '[File]';
+    }
+    if (typeof part.refusal === 'string') return part.refusal;
+    return '';
+}
+
 function extractText(content) {
     if (content == null) return '';
     if (typeof content === 'string') return content.trim();
@@ -18,7 +35,7 @@ function extractText(content) {
             if (!part || typeof part !== 'object') return '';
             if (typeof part.text === 'string') return part.text;
             if (typeof part.output_text === 'string') return part.output_text;
-            return '';
+            return contentPartLabel(part);
         }).filter(Boolean);
         return parts.join('\n').trim();
     }
@@ -33,6 +50,13 @@ function extractText(content) {
     }
 
     return String(content).trim();
+}
+
+function extractMessageText(message) {
+    if (!message || typeof message !== 'object') return '';
+    const text = extractText(message.content);
+    if (text) return text;
+    return typeof message.refusal === 'string' ? message.refusal.trim() : '';
 }
 
 function extractTextSegments(content) {
@@ -58,6 +82,106 @@ function extractTextSegments(content) {
     return text ? [text] : [];
 }
 
+function extractToolArgumentSegments(value) {
+    if (value == null) return [];
+    if (Array.isArray(value)) {
+        return value.flatMap(extractToolArgumentSegments);
+    }
+    if (typeof value === 'object') {
+        return Object.entries(value).flatMap(([key, item]) => [
+            key,
+            ...extractToolArgumentSegments(item),
+        ]);
+    }
+    const text = String(value);
+    return text ? [text] : [];
+}
+
+function extractToolCallPromptTextSegments(toolCalls) {
+    return extractToolCallsList(toolCalls).flatMap((toolCall) => [
+        ...(toolCall.name ? [String(toolCall.name)] : []),
+        ...extractToolArgumentSegments(toolCall.arguments),
+    ]);
+}
+
+function extractContentPromptTextSegments(content) {
+    if (!Array.isArray(content)) return extractTextSegments(content);
+    return content.flatMap((part) => {
+        if (part && typeof part === 'object' && part.type === 'tool_use') {
+            return extractToolCallPromptTextSegments([part]);
+        }
+        return extractTextSegments(part);
+    });
+}
+
+function estimatedPromptCachedCharacters(entry) {
+    const rawValue = entry && entry.usage
+        ? entry.usage.estimated_cached_characters
+        : null;
+    if (rawValue == null) return null;
+    const value = Number(rawValue);
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function measurePromptCache(text, sourceSegments) {
+    if (!text) return null;
+    const sourceCharacters = (Array.isArray(sourceSegments) ? sourceSegments : [])
+        .reduce((total, source) => total + String(source || '').length, 0);
+    const total = Math.min(String(text).length, sourceCharacters);
+    return total > 0 ? { total } : null;
+}
+
+function toolCallPromptCharacters(toolCall) {
+    const value = toolCall && toolCall.arguments !== undefined ? toolCall.arguments : '';
+    let argumentsText = '';
+    if (typeof value === 'string') {
+        argumentsText = value;
+    } else {
+        try {
+            argumentsText = JSON.stringify(value);
+        } catch {
+            argumentsText = String(value);
+        }
+    }
+    return (String(toolCall && toolCall.name || '') + '(' + argumentsText + ')').length;
+}
+
+function measureToolCallPromptCache(toolCalls) {
+    const characters = (Array.isArray(toolCalls) ? toolCalls : []).map(toolCallPromptCharacters);
+    return { characters };
+}
+
+function applyPromptCacheFill(messages, cachedCharacters) {
+    let remaining = Math.max(0, Number(cachedCharacters || 0));
+    return messages.map((message) => {
+        if (!message || message.role === 'error') return message;
+
+        const textCharacters = Math.max(0, Number(message._promptTextCharacters || 0));
+        const cachedTextCharacters = Math.min(remaining, textCharacters);
+        remaining -= cachedTextCharacters;
+
+        let cachedToolCharacters = 0;
+        (Array.isArray(message._toolPromptCharacters)
+            ? message._toolPromptCharacters
+            : []).forEach((value) => {
+            const characters = Math.max(0, Number(value || 0));
+            const cached = Math.min(remaining, characters);
+            remaining -= cached;
+            cachedToolCharacters += cached;
+        });
+
+        const toolCharacters = (message._toolPromptCharacters || [])
+            .reduce((total, value) => total + Math.max(0, Number(value || 0)), 0);
+        const totalCharacters = textCharacters + toolCharacters;
+        return {
+            ...message,
+            promptCacheRatio: totalCharacters > 0
+                ? (cachedTextCharacters + cachedToolCharacters) / totalCharacters
+                : 0,
+        };
+    });
+}
+
 function extractResponsesInputMessages(input) {
     if (input == null) return [];
     if (typeof input === 'string') {
@@ -80,16 +204,7 @@ function extractResponsesInputMessages(input) {
 }
 
 function extractResponsesOutputText(item) {
-    if (!item || typeof item !== 'object') return '';
-    if (!Array.isArray(item.content)) return extractText(item.content);
-
-    const parts = item.content.map((part) => {
-        if (!part) return '';
-        if (typeof part.text === 'string') return part.text;
-        return '';
-    }).filter(Boolean);
-
-    return parts.join('\n').trim();
+    return extractMessageText(item);
 }
 
 export function extractRequestPromptTextSegments(body) {
@@ -101,7 +216,8 @@ export function extractRequestPromptTextSegments(body) {
     if (Array.isArray(body.messages)) {
         body.messages.forEach((message) => {
             if (!message || typeof message !== 'object') return;
-            segments.push(...extractTextSegments(message.content));
+            segments.push(...extractContentPromptTextSegments(message.content));
+            segments.push(...extractToolCallPromptTextSegments(message.tool_calls));
         });
     }
 
@@ -110,7 +226,11 @@ export function extractRequestPromptTextSegments(body) {
     } else if (Array.isArray(body.input)) {
         body.input.forEach((item) => {
             if (!item || typeof item !== 'object') return;
-            segments.push(...extractTextSegments(item.content));
+            if (item.type === 'function_call' || item.type === 'tool_use') {
+                segments.push(...extractToolCallPromptTextSegments([item]));
+                return;
+            }
+            segments.push(...extractContentPromptTextSegments(item.content));
             if (typeof item.text === 'string') {
                 segments.push(item.text);
             }
@@ -703,8 +823,19 @@ function conversationMessage(role, text, {
     index,
     toolCalls,
     functionName,
+    functionCallID,
+    promptCache,
+    toolPromptCache,
 }) {
     const normalized = roleMeta(role);
+    const promptTextCharacters = promptCache && Number.isFinite(Number(promptCache.total))
+        ? Math.max(0, Number(promptCache.total))
+        : promptCache === null
+            ? 0
+            : String(text || '').length;
+    const toolPromptCharacters = toolPromptCache && Array.isArray(toolPromptCache.characters)
+        ? toolPromptCache.characters
+        : measureToolCallPromptCache(toolCalls).characters;
     return {
         uid: entryID + '-' + index,
         entryID,
@@ -716,7 +847,11 @@ function conversationMessage(role, text, {
         isAnchor,
         isAfterAnchor,
         toolCalls: Array.isArray(toolCalls) && toolCalls.length > 0 ? toolCalls : null,
-        functionName: functionName || ''
+        functionName: functionName || '',
+        functionCallID: functionCallID || '',
+        promptCacheRatio: 0,
+        _promptTextCharacters: promptTextCharacters,
+        _toolPromptCharacters: toolPromptCharacters,
     };
 }
 
@@ -725,32 +860,63 @@ function extractToolCallsList(toolCalls) {
     return toolCalls.map((tc) => {
         if (!tc) return null;
         const fn = tc.function || tc;
+        let args = '';
+        if (fn.arguments !== undefined) args = fn.arguments;
+        else if (tc.arguments !== undefined) args = tc.arguments;
+        else if (fn.input !== undefined) args = fn.input;
+        else if (tc.input !== undefined) args = tc.input;
         return {
             name: fn.name || tc.name || '',
-            arguments: fn.arguments || tc.arguments || ''
+            arguments: args,
+            id: tc.call_id || tc.id || ''
         };
     }).filter(Boolean);
+}
+
+function extractContentToolCalls(content) {
+    if (!Array.isArray(content)) return [];
+    return extractToolCallsList(content.filter((part) =>
+        part && typeof part === 'object' && part.type === 'tool_use'));
+}
+
+function extractContentToolResults(content) {
+    if (!Array.isArray(content)) return [];
+    return content.filter((part) =>
+        part && typeof part === 'object' && part.type === 'tool_result').map((part) => ({
+        id: part.tool_use_id || part.call_id || '',
+        text: extractText(part.content),
+    }));
+}
+
+function registerCallIds(map, item, name) {
+    if (!item || !name) return;
+    [item.call_id, item.id].forEach((id) => {
+        if (id) map[id] = name;
+    });
 }
 
 function collectCallIds(map, requestBody, responseBody) {
     if (requestBody && Array.isArray(requestBody.messages)) {
         requestBody.messages.forEach((m) => {
-            if (!m || !Array.isArray(m.tool_calls)) return;
-            m.tool_calls.forEach((tc) => {
+            if (!m) return;
+            const toolCalls = [
+                ...(Array.isArray(m.tool_calls) ? m.tool_calls : []),
+                ...(Array.isArray(m.content) ? m.content.filter((part) => part && part.type === 'tool_use') : []),
+            ];
+            toolCalls.forEach((tc) => {
                 if (!tc) return;
-                const id = tc.id || '';
                 const fn = tc.function || tc;
                 const name = fn.name || tc.name || '';
-                if (id && name) map[id] = name;
+                registerCallIds(map, tc, name);
             });
         });
     }
     if (requestBody && Array.isArray(requestBody.input)) {
         requestBody.input.forEach((item) => {
-            if (!item || typeof item !== 'object' || item.type !== 'function_call') return;
-            const id = item.id || item.call_id || '';
+            if (!item || typeof item !== 'object' ||
+                (item.type !== 'function_call' && item.type !== 'tool_use')) return;
             const name = item.name || '';
-            if (id && name) map[id] = name;
+            registerCallIds(map, item, name);
         });
     }
     if (responseBody && Array.isArray(responseBody.choices)) {
@@ -758,19 +924,24 @@ function collectCallIds(map, requestBody, responseBody) {
         if (first && first.message && Array.isArray(first.message.tool_calls)) {
             first.message.tool_calls.forEach((tc) => {
                 if (!tc) return;
-                const id = tc.id || '';
                 const fn = tc.function || tc;
                 const name = fn.name || tc.name || '';
-                if (id && name) map[id] = name;
+                registerCallIds(map, tc, name);
             });
         }
     }
     if (responseBody && Array.isArray(responseBody.output)) {
         responseBody.output.forEach((item) => {
-            if (!item || item.type !== 'function_call') return;
-            const id = item.id || item.call_id || '';
+            if (!item || (item.type !== 'function_call' && item.type !== 'tool_use')) return;
             const name = item.name || '';
-            if (id && name) map[id] = name;
+            registerCallIds(map, item, name);
+        });
+    }
+    if (responseBody && Array.isArray(responseBody.content)) {
+        responseBody.content.forEach((item) => {
+            if (!item || item.type !== 'tool_use') return;
+            const name = item.name || '';
+            registerCallIds(map, item, name);
         });
     }
 }
@@ -843,6 +1014,7 @@ export function buildConversationView(entries, anchorID) {
         text: message.text,
         toolCalls: message.toolCalls,
         functionName: message.functionName,
+        functionCallID: message.functionCallID,
     });
 
     sorted.forEach((entry, entryIndex) => {
@@ -852,7 +1024,17 @@ export function buildConversationView(entries, anchorID) {
         const requestBody = entry.data && entry.data.request_body ? entry.data.request_body : null;
         const responseBody = entry.data && entry.data.response_body ? entry.data.response_body : null;
         const requestStart = messages.length;
-        const message = (role, text, { toolCalls, functionName } = {}) => conversationMessage(role, text, {
+        const cachedPrompt = (text, sourceSegments) =>
+            measurePromptCache(text, sourceSegments);
+        const cachedToolCalls = (toolCalls) =>
+            measureToolCallPromptCache(toolCalls);
+        const message = (role, text, {
+            toolCalls,
+            functionName,
+            functionCallID,
+            promptCache,
+            toolPromptCache,
+        } = {}) => conversationMessage(role, text, {
             timestamp: ts,
             entryID: entry.id,
             isAnchor,
@@ -860,15 +1042,22 @@ export function buildConversationView(entries, anchorID) {
             index: ++idx,
             toolCalls,
             functionName,
+            functionCallID,
+            promptCache,
+            toolPromptCache,
         });
 
         if (requestBody && requestBody.system !== undefined) {
             const text = extractText(requestBody.system);
-            if (text) messages.push(message('system', text));
+            if (text) messages.push(message('system', text, {
+                promptCache: cachedPrompt(text, extractTextSegments(requestBody.system)),
+            }));
         }
         if (requestBody && requestBody.instructions !== undefined) {
             const text = extractText(requestBody.instructions);
-            if (text) messages.push(message('system', text));
+            if (text) messages.push(message('system', text, {
+                promptCache: cachedPrompt(text, extractTextSegments(requestBody.instructions)),
+            }));
         }
 
         if (requestBody && Array.isArray(requestBody.messages)) {
@@ -878,19 +1067,41 @@ export function buildConversationView(entries, anchorID) {
                 if (role === 'tool') {
                     const text = extractText(m.content);
                     const fnName = m.name || callIdMap[m.tool_call_id] || '';
-                    if (text) messages.push(message('function_result', text, { functionName: fnName }));
+                    if (text) messages.push(message('function_result', text, {
+                        functionName: fnName,
+                        functionCallID: m.tool_call_id || '',
+                        promptCache: cachedPrompt(text, extractTextSegments(m.content)),
+                    }));
                     return;
                 }
                 if (role === 'assistant') {
-                    const text = extractText(m.content);
-                    const toolCalls = extractToolCallsList(m.tool_calls);
+                    const text = extractMessageText(m);
+                    const toolCalls = [
+                        ...extractToolCallsList(m.tool_calls),
+                        ...extractContentToolCalls(m.content),
+                    ];
                     if (text || toolCalls.length > 0) {
-                        messages.push(message(role, text, { toolCalls }));
+                        const promptCache = cachedPrompt(text, extractTextSegments(m.content));
+                        messages.push(message(role, text, {
+                            toolCalls,
+                            promptCache,
+                            toolPromptCache: cachedToolCalls(toolCalls),
+                        }));
                     }
                     return;
                 }
-                const text = extractText(m.content);
-                if (text) messages.push(message(role, text));
+                extractContentToolResults(m.content).forEach((result) => {
+                    if (!result.text) return;
+                    messages.push(message('function_result', result.text, {
+                        functionName: callIdMap[result.id] || '',
+                        functionCallID: result.id,
+                        promptCache: cachedPrompt(result.text, [result.text]),
+                    }));
+                });
+                const text = extractMessageText(m);
+                if (text) messages.push(message(role, text, {
+                    promptCache: cachedPrompt(text, extractTextSegments(m.content)),
+                }));
             });
         }
 
@@ -898,20 +1109,47 @@ export function buildConversationView(entries, anchorID) {
             if (Array.isArray(requestBody.input)) {
                 requestBody.input.forEach((item) => {
                     if (!item || typeof item !== 'object') return;
-                    if (item.type === 'function_call_output') {
-                        const text = typeof item.output === 'string' ? item.output : extractText(item.output);
-                        if (text) messages.push(message('function_result', text, { functionName: callIdMap[item.call_id] || '' }));
-                    } else if (item.type === 'function_call') {
-                        messages.push(message('function_call', '', { toolCalls: [{ name: item.name || '', arguments: item.arguments || '' }] }));
+                    if (item.type === 'function_call_output' || item.type === 'tool_result') {
+                        const isToolResult = item.type === 'tool_result';
+                        const output = isToolResult ? item.content : item.output;
+                        const callID = isToolResult
+                            ? item.tool_use_id || item.call_id || ''
+                            : item.call_id || '';
+                        const text = typeof output === 'string' ? output : extractText(output);
+                        if (text) messages.push(message('function_result', text, {
+                            functionName: callIdMap[callID] || item.name || '',
+                            functionCallID: callID,
+                            promptCache: cachedPrompt(
+                                text,
+                                isToolResult ? extractTextSegments(item.content) : [text],
+                            ),
+                        }));
+                    } else if (item.type === 'function_call' || item.type === 'tool_use') {
+                        const toolCalls = extractToolCallsList([item]);
+                        messages.push(message('function_call', '', {
+                            toolCalls,
+                            toolPromptCache: cachedToolCalls(toolCalls),
+                        }));
                     } else if (item.role) {
                         const role = String(item.role).toLowerCase();
                         const text = extractText(item.content);
-                        if (text) messages.push(message(role, text));
+                        if (text) messages.push(message(role, text, {
+                            promptCache: cachedPrompt(text, extractTextSegments(item.content)),
+                        }));
                     }
                 });
             } else {
                 extractResponsesInputMessages(requestBody.input).forEach((m) => {
-                    if (m.text) messages.push(message(m.role, m.text));
+                    if (!m.text) return;
+                    let sourceSegments = [];
+                    if (typeof requestBody.input === 'string') sourceSegments = [requestBody.input];
+                    else if (requestBody.input && typeof requestBody.input === 'object') {
+                        sourceSegments = extractTextSegments(requestBody.input.content);
+                        if (typeof requestBody.input.text === 'string') sourceSegments.push(requestBody.input.text);
+                    }
+                    messages.push(message(m.role, m.text, {
+                        promptCache: cachedPrompt(m.text, sourceSegments),
+                    }));
                 });
             }
         }
@@ -987,11 +1225,24 @@ export function buildConversationView(entries, anchorID) {
             historySignatures.push(...requestSignatures.slice(overlap));
         }
 
+        // Provider cache reads cover a prefix of the complete input context.
+        // For Responses chains that context includes earlier turns retained by
+        // previous_response_id, even though they are absent from this request
+        // body. Repaint the assembled prompt in display order so the fill can
+        // never skip history and resume on a newer message.
+        const cachedCharacters = estimatedPromptCachedCharacters(entry);
+        if (requestBody && cachedCharacters !== null) {
+            messages.splice(0, messages.length, ...applyPromptCacheFill(
+                messages,
+                cachedCharacters,
+            ));
+        }
+
         if (responseBody && Array.isArray(responseBody.choices)) {
             const first = responseBody.choices[0];
             if (first && first.message) {
                 const role = (first.message.role || 'assistant').toLowerCase();
-                const text = extractText(first.message.content);
+                const text = extractMessageText(first.message);
                 const toolCalls = extractToolCallsList(first.message.tool_calls);
                 if (text || toolCalls.length > 0) {
                     const responseMessage = message(role, text, { toolCalls });
@@ -1004,9 +1255,9 @@ export function buildConversationView(entries, anchorID) {
         if (responseBody && Array.isArray(responseBody.output)) {
             responseBody.output.forEach((item) => {
                 if (!item) return;
-                if (item.type === 'function_call') {
+                if (item.type === 'function_call' || item.type === 'tool_use') {
                     const responseMessage = message('function_call', '', {
-                        toolCalls: [{ name: item.name || '', arguments: item.arguments || '' }],
+                        toolCalls: extractToolCallsList([item]),
                     });
                     messages.push(responseMessage);
                     historySignatures.push(signature(responseMessage));
@@ -1028,8 +1279,9 @@ export function buildConversationView(entries, anchorID) {
             !Array.isArray(responseBody.choices) && !Array.isArray(responseBody.output)) {
             const role = String(responseBody.role || 'assistant').toLowerCase();
             const text = extractText(responseBody.content);
-            if (text) {
-                const responseMessage = message(role, text);
+            const toolCalls = extractContentToolCalls(responseBody.content);
+            if (text || toolCalls.length > 0) {
+                const responseMessage = message(role, text, { toolCalls });
                 messages.push(responseMessage);
                 historySignatures.push(signature(responseMessage));
             }
@@ -1054,10 +1306,25 @@ export function buildConversationMessages(entries, anchorID) {
 export function functionExpandedContent(msg) {
     if (msg.role === 'function_call') {
         return (msg.toolCalls || []).map(function (tc) {
-            let args = tc.arguments || '';
-            try { args = JSON.stringify(JSON.parse(args), null, 2); } catch { /* keep raw */ }
-            return tc.name + '(' + args + ')';
+            return tc.name + '(' + formatFunctionArguments(tc) + ')';
         }).join('\n\n');
     }
     return msg.text || '';
+}
+
+export function conversationMessageCopyText(msg) {
+    if (!msg) return '';
+    const text = String(msg.text || '');
+    const toolCalls = Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0
+        ? functionExpandedContent({ role: 'function_call', toolCalls: msg.toolCalls })
+        : '';
+    return [text, toolCalls].filter(Boolean).join('\n\n');
+}
+
+export function formatFunctionArguments(toolCall) {
+    const value = toolCall && toolCall.arguments !== undefined ? toolCall.arguments : '';
+    if (typeof value !== 'string') {
+        try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+    }
+    try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
 }

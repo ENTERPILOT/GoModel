@@ -28,7 +28,7 @@
 
   // `thread` is set on session-thread head rows (grouped mode): the summary
   // then renders the expander + count badge. { count, expanded, ontoggle }.
-  let { entry, thread = null } = $props();
+  let { entry, thread = null, hidePath = false } = $props();
 
   const expanded = $derived(auditList.isAuditEntryExpanded(entry));
   const interactionsOpen = $derived(
@@ -62,7 +62,7 @@
   class:audit-entry-interactions-open={interactionsOpen}
   open
 >
-  <AuditEntrySummary {entry} {thread} {expanded} onactivate={toggleExpanded} />
+  <AuditEntrySummary {entry} {thread} {expanded} {hidePath} onactivate={toggleExpanded} />
   {#if expanded}
     <div
       class="audit-entry-details"
@@ -89,15 +89,11 @@
   }
 
   .audit-entry-interactions-open {
+    border-width: 2px;
     border-color: color-mix(
       in srgb,
       var(--prompt-cache-color) 38%,
       var(--border)
-    );
-    background: color-mix(
-      in srgb,
-      var(--prompt-cache-color) 7%,
-      var(--bg)
     );
   }
 
@@ -108,16 +104,4 @@
     overflow: hidden;
   }
 
-  .audit-entry-interactions-open .audit-entry-details {
-    border-top-color: color-mix(
-      in srgb,
-      var(--prompt-cache-color) 24%,
-      var(--border)
-    );
-    background: color-mix(
-      in srgb,
-      var(--prompt-cache-color) 5%,
-      var(--bg-surface)
-    );
-  }
 </style>
