@@ -31,12 +31,14 @@ export function apiFetch(path, options = {}) {
 async function request(path, options, { label = path, parse = true } = {}) {
   const generation = auth.generation;
   const res = await apiFetch(path, options);
-  auth.observeResponse(res);
+  const stale = generation < auth.generation;
+  if (!stale) {
+    auth.observeResponse(res);
+  }
   if (res.status === 401) {
     auth.handleUnauthorized(generation);
-    return { ok: false, stale: generation < auth.generation, status: 401, data: null, res };
+    return { ok: false, stale, status: 401, data: null, res };
   }
-  const stale = generation < auth.generation;
   if (!res.ok) {
     let data = null;
     try {

@@ -14,7 +14,8 @@ func TestAuthenticationEventRecorderWritesDurableAuditEntry(t *testing.T) {
 	recorder.RecordAuthenticationEvent(ext.AuthenticationEvent{
 		Timestamp: timestamp, Type: "login", Outcome: "failure", Method: "sso",
 		RequestID: "request-1", ClientIP: "192.0.2.10", HTTPMethod: "GET",
-		Path: "/sso/callback", UserAgent: "browser", Reason: "group_denied",
+		Path:      "/sso/callback?code=secret-code&state=secret-state&id_token=secret-token&return_to=%2Fadmin%2Fdashboard",
+		UserAgent: "browser", Reason: "group_denied",
 	})
 
 	if len(logger.entries) != 1 {
@@ -22,7 +23,8 @@ func TestAuthenticationEventRecorderWritesDurableAuditEntry(t *testing.T) {
 	}
 	entry := logger.entries[0]
 	if entry.Provider != authenticationEventProvider || entry.StatusCode != 401 ||
-		entry.AuthMethod != "sso" || entry.Path != "/sso/callback" ||
+		entry.AuthMethod != "sso" ||
+		entry.Path != "/sso/callback?code=REDACTED&id_token=REDACTED&return_to=%2Fadmin%2Fdashboard&state=REDACTED" ||
 		entry.ErrorType != "authentication_error" || entry.Data.EventType != "login" ||
 		entry.Data.ErrorCode != "group_denied" {
 		t.Fatalf("entry = %+v, data = %+v", entry, entry.Data)

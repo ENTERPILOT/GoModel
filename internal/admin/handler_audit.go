@@ -420,14 +420,15 @@ func (h *Handler) AuditLogDetail(c *echo.Context) error {
 // @Summary      Get the interaction session containing an audit log entry
 // @Description  Thread entries carry the request/response bodies the
 // @Description  transcript is built from; attempts, request revisions, and
-// @Description  response headers are omitted; redacted request headers are
-// @Description  retained so the dashboard can continue the same session.
+// @Description  response headers are omitted; redacted request headers and
+// @Description  per-request usage summaries are retained for continuation
+// @Description  and prompt-cache visualization.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
 // @Param        log_id  query     string  true   "Anchor audit log entry ID"
 // @Param        limit   query     int     false  "Max entries in thread (default 40, max 200)"
-// @Success      200  {object}  auditlog.ConversationResult
+// @Success      200  {object}  auditConversationResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/audit/conversation [get]
@@ -453,9 +454,9 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 	}
 
 	if h.auditReader == nil {
-		return c.JSON(http.StatusOK, auditlog.ConversationResult{
+		return c.JSON(http.StatusOK, auditConversationResponse{
 			AnchorID: logID,
-			Entries:  []auditlog.LogEntry{},
+			Entries:  []auditLogEntryResponse{},
 		})
 	}
 
@@ -478,9 +479,17 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 	if result.Entries == nil {
 		result.Entries = []auditlog.LogEntry{}
 	}
-	for i := range result.Entries {
-		slimConversationEntry(&result.Entries[i])
+	enriched, err := h.auditLogResponse(ctx, &auditlog.LogListResult{Entries: result.Entries})
+	if err != nil {
+		return handleError(c, err)
+	}
+	for i := range enriched.Entries {
+		slimConversationEntry(&enriched.Entries[i].LogEntry)
 	}
 
-	return c.JSON(http.StatusOK, result)
+	return c.JSON(http.StatusOK, auditConversationResponse{
+		AnchorID:  result.AnchorID,
+		Entries:   enriched.Entries,
+		Truncated: result.Truncated,
+	})
 }

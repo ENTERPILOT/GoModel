@@ -18,7 +18,7 @@ const docTemplate = `{
     "paths": {
         "/admin/audit/conversation": {
             "get": {
-                "description": "Thread entries carry the request/response bodies the\ntranscript is built from; attempts, request revisions, and\nresponse headers are omitted; redacted request headers are\nretained so the dashboard can continue the same session.",
+                "description": "Thread entries carry the request/response bodies the\ntranscript is built from; attempts, request revisions, and\nresponse headers are omitted; redacted request headers and\nper-request usage summaries are retained for continuation\nand prompt-cache visualization.",
                 "produces": [
                     "application/json"
                 ],
@@ -45,7 +45,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/auditlog.ConversationResult"
+                            "$ref": "#/definitions/admin.auditConversationResponse"
                         }
                     },
                     "400": {
@@ -6860,6 +6860,24 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.auditConversationResponse": {
+            "type": "object",
+            "properties": {
+                "anchor_id": {
+                    "type": "string"
+                },
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.auditLogEntryResponse"
+                    }
+                },
+                "truncated": {
+                    "description": "Truncated reports that more session or linkage entries exist than were\nreturned.",
+                    "type": "boolean"
+                }
+            }
+        },
         "admin.auditLogEntryResponse": {
             "type": "object",
             "properties": {
@@ -8259,24 +8277,6 @@ const docTemplate = `{
                 }
             }
         },
-        "auditlog.ConversationResult": {
-            "type": "object",
-            "properties": {
-                "anchor_id": {
-                    "type": "string"
-                },
-                "entries": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/auditlog.LogEntry"
-                    }
-                },
-                "truncated": {
-                    "description": "Truncated reports that the thread walk stopped early because the\ncaller's deadline expired; the entries collected up to that point are\nreturned rather than failing the whole request.",
-                    "type": "boolean"
-                }
-            }
-        },
         "auditlog.FailoverSnapshot": {
             "type": "object",
             "properties": {
@@ -8369,88 +8369,6 @@ const docTemplate = `{
                             "$ref": "#/definitions/auditlog.WorkflowFeaturesSnapshot"
                         }
                     ]
-                }
-            }
-        },
-        "auditlog.LogEntry": {
-            "type": "object",
-            "properties": {
-                "alias_used": {
-                    "type": "boolean"
-                },
-                "auth_key_id": {
-                    "type": "string"
-                },
-                "auth_method": {
-                    "type": "string"
-                },
-                "cache_type": {
-                    "type": "string"
-                },
-                "client_ip": {
-                    "type": "string"
-                },
-                "data": {
-                    "description": "Data contains flexible request/response information as JSON",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/auditlog.LogData"
-                        }
-                    ]
-                },
-                "duration_ns": {
-                    "description": "DurationNs is the request duration in nanoseconds",
-                    "type": "integer"
-                },
-                "error_type": {
-                    "type": "string"
-                },
-                "id": {
-                    "description": "ID is a unique identifier for this log entry (UUID)",
-                    "type": "string"
-                },
-                "method": {
-                    "type": "string"
-                },
-                "path": {
-                    "type": "string"
-                },
-                "provider": {
-                    "description": "canonical provider type used for routing and filters",
-                    "type": "string"
-                },
-                "provider_name": {
-                    "type": "string"
-                },
-                "request_id": {
-                    "description": "Extracted fields for efficient filtering (indexed in relational DBs)",
-                    "type": "string"
-                },
-                "requested_model": {
-                    "description": "Core fields (indexed for queries)",
-                    "type": "string"
-                },
-                "resolved_model": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "status_code": {
-                    "type": "integer"
-                },
-                "stream": {
-                    "type": "boolean"
-                },
-                "timestamp": {
-                    "description": "Timestamp is when the request started",
-                    "type": "string"
-                },
-                "user_path": {
-                    "type": "string"
-                },
-                "workflow_version_id": {
-                    "type": "string"
                 }
             }
         },

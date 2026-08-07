@@ -159,6 +159,15 @@ type auditLogListResponse struct {
 	Offset  int                     `json:"offset"`
 }
 
+type auditConversationResponse struct {
+	AnchorID string                  `json:"anchor_id"`
+	Entries  []auditLogEntryResponse `json:"entries"`
+
+	// Truncated reports that more session or linkage entries exist than were
+	// returned.
+	Truncated bool `json:"truncated,omitempty"`
+}
+
 type auditSessionResponse struct {
 	SessionID      string                `json:"session_id,omitempty"`
 	Count          int                   `json:"count"`

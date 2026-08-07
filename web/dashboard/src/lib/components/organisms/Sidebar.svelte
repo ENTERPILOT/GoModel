@@ -108,12 +108,14 @@
   </nav>
   <div class="sidebar-footer">
     <ThemeToggle compact={sidebar.collapsed} />
-    {#if auth.externalUser && auth.externalLogoutURL}
+    {#if auth.externalLogoutURL}
       <div class="external-auth-section">
-        <div class="external-auth-user" title={auth.externalUser}>
-          <Icon icon={UserRound} class="api-key-open-icon" />
-          <span>{auth.externalUser}</span>
-        </div>
+        {#if auth.externalUser}
+          <div class="external-auth-user" title={auth.externalUser}>
+            <Icon icon={UserRound} class="api-key-open-icon" />
+            <span>{auth.externalUser}</span>
+          </div>
+        {/if}
         <a
           class="api-key-open-btn"
           href={gomodelPath(auth.externalLogoutURL)}

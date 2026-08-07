@@ -65,7 +65,7 @@ func (r *authenticationEventRecorder) RecordAuthenticationEvent(event ext.Authen
 		AuthMethod:  method,
 		ClientIP:    strings.TrimSpace(event.ClientIP),
 		Method:      strings.TrimSpace(event.HTTPMethod),
-		Path:        strings.TrimSpace(event.Path),
+		Path:        core.RedactSensitiveURLQuery(strings.TrimSpace(event.Path)),
 		UserPath:    userPath,
 		ErrorType:   errorType,
 		Data: &LogData{
