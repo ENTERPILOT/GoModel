@@ -106,7 +106,6 @@ func safelyWantsResponseFeedback(name string, filter ext.ResponseFeedbackFilter,
 			wants = false
 			slog.Warn("response feedback filter panicked; feedback disabled for request",
 				"rewriter", name,
-				"panic", recovered,
 			)
 		}
 	}()
