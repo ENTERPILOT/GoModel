@@ -47,10 +47,20 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 
 			changed := false
 			tokensSaved := 0
+			feedbackObservers := make([]ext.ResponseFeedbackObserver, 0, len(rewriters))
 			for _, rw := range rewriters {
 				res, rwErr := rw.Rewrite(c.Request().Context(), in)
 				if rwErr != nil {
 					return handleError(c, rewriterGatewayError(rw.Name(), rwErr))
+				}
+				if observer, ok := rw.(ext.ResponseFeedbackObserver); ok {
+					wantsFeedback := true
+					if filter, filtered := rw.(ext.ResponseFeedbackFilter); filtered {
+						wantsFeedback = filter.WantsResponseFeedback(in, res)
+					}
+					if wantsFeedback {
+						feedbackObservers = append(feedbackObservers, observer)
+					}
 				}
 				if res != nil {
 					applyRewriteResponseHeaders(c, res.ResponseHeader)
@@ -77,6 +87,9 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 					req := c.Request()
 					c.SetRequest(req.WithContext(core.WithRewriteTokensSaved(req.Context(), tokensSaved)))
 				}
+			}
+			if len(feedbackObservers) > 0 {
+				setResponseFeedbackObservers(c, feedbackObservers)
 			}
 			return next(c)
 		}

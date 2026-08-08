@@ -14,6 +14,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -105,7 +106,15 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	ctx = adm.dispatchContext(ctx)
 
 	if req.Stream {
-		if len(s.inference().FailoverSelectors(workflow)) == 0 {
+		feedbackEnabled := hasResponseFeedbackObservers(c)
+		if feedbackEnabled {
+			req = gateway.CloneChatRequestForStreamUsage(req)
+			if req.StreamOptions == nil {
+				req.StreamOptions = &core.StreamOptions{}
+			}
+			req.StreamOptions.IncludeUsage = true
+		}
+		if !feedbackEnabled && len(s.inference().FailoverSelectors(workflow)) == 0 {
 			if handled, err := s.tryFastPathStreamingChatPassthrough(c, workflow, req); handled {
 				return err
 			}
@@ -141,6 +150,14 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	auditlog.EnrichEntryWithResolvedRoute(
 		c,
 		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
+		result.Meta.ProviderType,
+		result.Meta.ProviderName,
+	)
+	notifyChatResponseFeedback(
+		c,
+		ext.Endpoint(c.Request().URL.Path),
+		result.Response,
+		result.Meta.Model,
 		result.Meta.ProviderType,
 		result.Meta.ProviderName,
 	)
@@ -273,6 +290,9 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	ctx = adm.dispatchContext(ctx)
 
 	if req.Stream {
+		if hasResponseFeedbackObservers(c) {
+			ctx = core.WithEnforceReturningUsageData(ctx, true)
+		}
 		result, err := s.inference().StreamResponses(ctx, workflow, req)
 		if err != nil {
 			return handleStreamingDispatchError(c, err)
@@ -308,6 +328,14 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	auditlog.EnrichEntryWithResolvedRoute(
 		c,
 		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
+		result.Meta.ProviderType,
+		result.Meta.ProviderName,
+	)
+	notifyResponsesResponseFeedback(
+		c,
+		ext.Endpoint(c.Request().URL.Path),
+		result.Response,
+		result.Meta.Model,
 		result.Meta.ProviderType,
 		result.Meta.ProviderName,
 	)
@@ -550,7 +578,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	endpoint := c.Request().URL.Path
-	observers := make([]streaming.Observer, 0, 2)
+	observers := make([]streaming.Observer, 0, 3)
 	if auditEnabled && streamEntry != nil {
 		observers = append(observers, auditlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
 	}
@@ -562,6 +590,18 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 			usageObserver.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
 			observers = append(observers, usageObserver)
 		}
+	}
+	if hasResponseFeedbackObservers(c) {
+		observers = append(observers, &responseFeedbackStreamObserver{
+			ctx:          c.Request().Context(),
+			observers:    responseFeedbackObservers(c),
+			requestID:    requestID,
+			sessionID:    core.SessionIDFromContext(c.Request().Context()),
+			endpoint:     ext.Endpoint(endpoint),
+			model:        model,
+			providerType: provider,
+			providerName: providerName,
+		})
 	}
 	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
 	if outerWrap != nil {

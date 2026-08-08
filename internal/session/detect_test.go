@@ -196,6 +196,37 @@ func TestDetectAutoStability(t *testing.T) {
 	}
 }
 
+func TestDetectAutoCanonicalizesStablePrefixJSON(t *testing.T) {
+	detector := newBuiltinDetector(true)
+	first := `{
+		"model":"gpt-4o",
+		"tools":[{"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"}}}}}],
+		"messages":[{"role":"user","content":[{"type":"text","text":"open\u0020file"}]}]
+	}`
+	reordered := `{"messages":[{"content":[{"text":"open file","type":"text"}],"role":"user"}],"tools":[{"function":{"parameters":{"properties":{"line":{"type":"integer"},"path":{"type":"string"}},"type":"object"},"name":"read"},"type":"function"}],"model":"gpt-4o"}`
+
+	idFirst := detector.Detect(chatSnapshot(nil, first), "team")
+	idReordered := detector.Detect(chatSnapshot(nil, reordered), "team")
+	if idFirst == "" || idFirst != idReordered {
+		t.Fatalf("semantic JSON changes split auto session: %q vs %q", idFirst, idReordered)
+	}
+}
+
+func TestDetectAutoPreservesArrayOrderAndValues(t *testing.T) {
+	detector := newBuiltinDetector(true)
+	base := `{"model":"gpt-4o","tools":[{"type":"function","function":{"name":"first"}},{"type":"function","function":{"name":"second"}}],"messages":[{"role":"user","content":"hello"}]}`
+	reorderedTools := `{"model":"gpt-4o","tools":[{"type":"function","function":{"name":"second"}},{"type":"function","function":{"name":"first"}}],"messages":[{"role":"user","content":"hello"}]}`
+	changedValue := `{"model":"gpt-4o","tools":[{"type":"function","function":{"name":"first"}},{"type":"function","function":{"name":"second"}}],"messages":[{"role":"user","content":"hello!"}]}`
+
+	id := detector.Detect(chatSnapshot(nil, base), "")
+	if id == detector.Detect(chatSnapshot(nil, reorderedTools), "") {
+		t.Fatal("tool array order must remain part of the session anchor")
+	}
+	if id == detector.Detect(chatSnapshot(nil, changedValue), "") {
+		t.Fatal("changed message value must change the session anchor")
+	}
+}
+
 func TestDetectAutoSystemPromptShape(t *testing.T) {
 	detector := newBuiltinDetector(true)
 	first := `{"model":"gpt-4o","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"opener A"}]}`
