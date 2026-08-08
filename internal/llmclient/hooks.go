@@ -8,12 +8,16 @@ import "context"
 func JoinHooks(hooks ...Hooks) Hooks {
 	var starts []func(ctx context.Context, info RequestInfo) context.Context
 	var ends []func(ctx context.Context, info ResponseInfo)
+	var firstChunks []func(ctx context.Context, info ResponseInfo)
 	for _, h := range hooks {
 		if h.OnRequestStart != nil {
 			starts = append(starts, h.OnRequestStart)
 		}
 		if h.OnRequestEnd != nil {
 			ends = append(ends, h.OnRequestEnd)
+		}
+		if h.OnStreamFirstChunk != nil {
+			firstChunks = append(firstChunks, h.OnStreamFirstChunk)
 		}
 	}
 
@@ -34,6 +38,15 @@ func JoinHooks(hooks ...Hooks) Hooks {
 		joined.OnRequestEnd = func(ctx context.Context, info ResponseInfo) {
 			for _, end := range ends {
 				end(ctx, info)
+			}
+		}
+	}
+	if len(firstChunks) == 1 {
+		joined.OnStreamFirstChunk = firstChunks[0]
+	} else if len(firstChunks) > 1 {
+		joined.OnStreamFirstChunk = func(ctx context.Context, info ResponseInfo) {
+			for _, firstChunk := range firstChunks {
+				firstChunk(ctx, info)
 			}
 		}
 	}

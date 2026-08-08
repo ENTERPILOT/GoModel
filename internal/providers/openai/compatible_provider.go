@@ -155,6 +155,14 @@ func (p *CompatibleProvider) Do(ctx context.Context, req llmclient.Request, resu
 	return p.client.Do(ctx, p.prepareRequest(req), result)
 }
 
+func (p *CompatibleProvider) doModelRequest(ctx context.Context, req llmclient.Request, result any, responseModel *string) error {
+	if err := p.Do(ctx, req, result); err != nil {
+		return err
+	}
+	core.EnsureModel(responseModel, req.Model)
+	return nil
+}
+
 func (p *CompatibleProvider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("chat request is required", nil)
@@ -169,10 +177,12 @@ func (p *CompatibleProvider) ChatCompletion(ctx context.Context, req *core.ChatR
 		return nil, err
 	}
 	err = p.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/chat/completions",
-		Body:     body,
-		Headers:  p.chatHeaders(ctx, adapted),
+		Method:    http.MethodPost,
+		Endpoint:  "/chat/completions",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      body,
+		Headers:   p.chatHeaders(ctx, adapted),
 	}, &resp)
 	if err != nil {
 		return nil, err
@@ -195,10 +205,12 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 		return nil, err
 	}
 	stream, err := p.client.DoStream(ctx, p.prepareRequest(llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/chat/completions",
-		Body:     body,
-		Headers:  p.chatHeaders(ctx, streamReq),
+		Method:    http.MethodPost,
+		Endpoint:  "/chat/completions",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      body,
+		Headers:   p.chatHeaders(ctx, streamReq),
 	}))
 	if err != nil {
 		return nil, err
@@ -252,15 +264,16 @@ func (p *CompatibleProvider) Responses(ctx context.Context, req *core.ResponsesR
 		return nil, core.NewInvalidRequestError("responses request is required", nil)
 	}
 	var resp core.ResponsesResponse
-	err := p.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/responses",
-		Body:     req,
-	}, &resp)
+	err := p.doModelRequest(ctx, llmclient.Request{
+		Method:    http.MethodPost,
+		Endpoint:  "/responses",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      req,
+	}, &resp, &resp.Model)
 	if err != nil {
 		return nil, err
 	}
-	core.EnsureModel(&resp.Model, req.Model)
 	return &resp, nil
 }
 
@@ -269,9 +282,11 @@ func (p *CompatibleProvider) StreamResponses(ctx context.Context, req *core.Resp
 		return nil, core.NewInvalidRequestError("responses request is required", nil)
 	}
 	stream, err := p.client.DoStream(ctx, p.prepareRequest(llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/responses",
-		Body:     req.WithStreaming(),
+		Method:    http.MethodPost,
+		Endpoint:  "/responses",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      req.WithStreaming(),
 	}))
 	if err != nil {
 		return nil, err
@@ -393,15 +408,16 @@ func (p *CompatibleProvider) Embeddings(ctx context.Context, req *core.Embedding
 		return nil, core.NewInvalidRequestError("embedding request is required", nil)
 	}
 	var resp core.EmbeddingResponse
-	err := p.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/embeddings",
-		Body:     req,
-	}, &resp)
+	err := p.doModelRequest(ctx, llmclient.Request{
+		Method:    http.MethodPost,
+		Endpoint:  "/embeddings",
+		Operation: llmclient.OperationEmbeddings,
+		Model:     req.Model,
+		Body:      req,
+	}, &resp, &resp.Model)
 	if err != nil {
 		return nil, err
 	}
-	core.EnsureModel(&resp.Model, req.Model)
 	return &resp, nil
 }
 
@@ -413,6 +429,9 @@ func (p *CompatibleProvider) Passthrough(ctx context.Context, req *core.Passthro
 	resp, err := p.client.DoPassthrough(ctx, p.prepareRequest(llmclient.Request{
 		Method:        req.Method,
 		Endpoint:      providers.PassthroughEndpoint(req.Endpoint),
+		Operation:     req.Operation,
+		Model:         req.Model,
+		Stream:        req.Stream,
 		RawBodyReader: req.Body,
 		Headers:       req.Headers,
 	}))

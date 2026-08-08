@@ -14,8 +14,9 @@ const defaultBaseURL = "https://api.z.ai/api/paas/v4"
 
 // Registration provides factory registration for the Z.ai provider.
 var Registration = providers.Registration{
-	Type: "zai",
-	New:  New,
+	Type:                        "zai",
+	New:                         New,
+	PassthroughSemanticEnricher: passthroughSemanticEnricher,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
 	},

@@ -15,6 +15,10 @@ import (
 // ProviderConfig holds the fully resolved provider configuration after merging
 // global defaults with per-provider overrides.
 type ProviderConfig struct {
+	// Name is the configured provider instance name (for example "openai-eu").
+	// It is populated by configuration resolution and may be empty in tests or
+	// direct constructor calls.
+	Name string
 	Type string
 	// APIKey is the provider's primary credential: the first entry of APIKeys,
 	// or "" for keyless providers. Prefer APIKeys for anything that
@@ -817,7 +821,9 @@ func HasResolvedProviderValue(value string) bool {
 func buildProviderConfigs(raw map[string]config.RawProviderConfig, global config.ResilienceConfig) map[string]ProviderConfig {
 	result := make(map[string]ProviderConfig, len(raw))
 	for name, r := range raw {
-		result[name] = buildProviderConfig(r, global)
+		resolved := buildProviderConfig(r, global)
+		resolved.Name = name
+		result[name] = resolved
 	}
 	return result
 }

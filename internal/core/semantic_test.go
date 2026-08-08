@@ -133,6 +133,9 @@ func TestDeriveWhiteBoxPrompt_PassthroughRouteParams(t *testing.T) {
 	if info.Model != "gpt-5-mini" {
 		t.Fatalf("PassthroughRouteInfo.Model = %q, want gpt-5-mini", info.Model)
 	}
+	if !info.Stream {
+		t.Fatal("PassthroughRouteInfo.Stream = false, want true")
+	}
 	if info.AuditPath != "/p/openai/responses" {
 		t.Fatalf("PassthroughRouteInfo.AuditPath = %q, want /p/openai/responses", info.AuditPath)
 	}

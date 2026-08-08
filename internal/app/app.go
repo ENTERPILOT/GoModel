@@ -118,6 +118,7 @@ func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 		return
 	}
 	serverCfg.RequestRewriters = extensions.Rewriters()
+	serverCfg.OuterMiddleware = extensions.OuterMiddleware()
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
@@ -165,6 +166,98 @@ func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
 			})
 		},
 	}
+}
+
+// upstreamObserverHooks adapts the public extension observer contract to the
+// internal provider client hooks. Optional observer code is isolated from the
+// request path: a panic is logged with fixed metadata and the call continues.
+func upstreamObserverHooks(observer ext.UpstreamObserver) llmclient.Hooks {
+	name := upstreamObserverLabel(observer)
+	hooks := llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) (next context.Context) {
+			next = ctx
+			defer func() {
+				if recover() != nil {
+					next = ctx
+					slog.Error("upstream observer panicked during observation",
+						"observer", name, "event", "call_start")
+				}
+			}()
+			if derived := observer.Start(ctx, upstreamCallFromRequest(info)); derived != nil {
+				next = derived
+			}
+			return next
+		},
+		OnRequestEnd: func(ctx context.Context, info llmclient.ResponseInfo) {
+			defer func() {
+				if recover() != nil {
+					slog.Error("upstream observer panicked during observation",
+						"observer", name, "event", "call_end")
+				}
+			}()
+			observer.End(ctx, ext.UpstreamResult{
+				UpstreamCall: upstreamCallFromResponse(info),
+				StatusCode:   info.StatusCode,
+				Duration:     info.Duration,
+				Err:          info.Error,
+			})
+		},
+	}
+	streamObserver, ok := observer.(ext.UpstreamStreamObserver)
+	if !ok {
+		return hooks
+	}
+	hooks.OnStreamFirstChunk = func(ctx context.Context, info llmclient.ResponseInfo) {
+		defer func() {
+			if recover() != nil {
+				slog.Error("upstream observer panicked during observation",
+					"observer", name, "event", "first_response_chunk")
+			}
+		}()
+		streamObserver.FirstResponseChunk(ctx, ext.UpstreamResult{
+			UpstreamCall: upstreamCallFromResponse(info),
+			StatusCode:   info.StatusCode,
+			Duration:     info.Duration,
+			Err:          info.Error,
+		})
+	}
+	return hooks
+}
+
+func upstreamCallFromRequest(info llmclient.RequestInfo) ext.UpstreamCall {
+	return ext.UpstreamCall{
+		Provider:     info.Provider,
+		ProviderType: info.ProviderType,
+		Model:        info.Model,
+		Operation:    info.Operation,
+		Endpoint:     info.Endpoint,
+		Method:       info.Method,
+		Stream:       info.Stream,
+	}
+}
+
+func upstreamCallFromResponse(info llmclient.ResponseInfo) ext.UpstreamCall {
+	return ext.UpstreamCall{
+		Provider:     info.Provider,
+		ProviderType: info.ProviderType,
+		Model:        info.Model,
+		Operation:    info.Operation,
+		Endpoint:     info.Endpoint,
+		Method:       info.Method,
+		Stream:       info.Stream,
+	}
+}
+
+func upstreamObserverLabel(observer ext.UpstreamObserver) (name string) {
+	if observer == nil {
+		return "unknown"
+	}
+	defer func() {
+		if recover() != nil || name == "" {
+			name = "unknown"
+		}
+	}()
+	return observer.Name()
 }
 
 func routeAffinityContext(ctx context.Context) (source, sessionID string) {
@@ -289,6 +382,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	if routeSelector != nil {
 		cfg.Factory.AddHooks(routeSelectorHooks(routeSelector))
+	}
+	if cfg.Extensions != nil {
+		for _, observer := range cfg.Extensions.UpstreamObservers() {
+			if observer != nil {
+				cfg.Factory.AddHooks(upstreamObserverHooks(observer))
+			}
+		}
 	}
 
 	providerResult, err := providers.Init(ctx, cfg.AppConfig, cfg.Factory)

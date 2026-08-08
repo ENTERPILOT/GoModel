@@ -29,6 +29,76 @@ type routeObservationSelector struct {
 	outcome ext.RouteOutcome
 }
 
+type upstreamObservation struct {
+	call       ext.UpstreamCall
+	result     ext.UpstreamResult
+	firstChunk ext.UpstreamResult
+}
+
+func (*upstreamObservation) Name() string { return "test" }
+func (o *upstreamObservation) Start(ctx context.Context, call ext.UpstreamCall) context.Context {
+	o.call = call
+	return context.WithValue(ctx, upstreamContextKey{}, "derived")
+}
+func (o *upstreamObservation) End(_ context.Context, result ext.UpstreamResult) {
+	o.result = result
+}
+func (o *upstreamObservation) FirstResponseChunk(_ context.Context, result ext.UpstreamResult) {
+	o.firstChunk = result
+}
+
+type upstreamContextKey struct{}
+
+func TestUpstreamObserverHooksExposeProviderCall(t *testing.T) {
+	observer := &upstreamObservation{}
+	hooks := upstreamObserverHooks(observer)
+	ctx := hooks.OnRequestStart(t.Context(), llmclient.RequestInfo{
+		Provider: "openai-eu", ProviderType: "openai", Model: "gpt-5", Operation: llmclient.OperationChat, Endpoint: "/chat/completions", Method: http.MethodPost, Stream: true,
+	})
+	if got := ctx.Value(upstreamContextKey{}); got != "derived" {
+		t.Fatalf("derived context value = %v, want derived", got)
+	}
+	hooks.OnRequestEnd(ctx, llmclient.ResponseInfo{
+		Provider: "openai-eu", ProviderType: "openai", Model: "gpt-5", Operation: llmclient.OperationChat, Endpoint: "/chat/completions",
+		Method: http.MethodPost, StatusCode: http.StatusOK, Duration: time.Second, Stream: true,
+	})
+	hooks.OnStreamFirstChunk(ctx, llmclient.ResponseInfo{
+		Provider: "openai-eu", ProviderType: "openai", Model: "gpt-5", Operation: llmclient.OperationChat,
+		Endpoint: "/chat/completions", Method: http.MethodPost, StatusCode: http.StatusOK, Duration: 2 * time.Second, Stream: true,
+	})
+
+	if observer.call.ProviderType != "openai" || observer.call.Method != http.MethodPost || !observer.call.Stream {
+		t.Fatalf("call = %+v, want POST streaming call", observer.call)
+	}
+	if observer.result.StatusCode != http.StatusOK || observer.result.Duration != time.Second || !observer.result.Stream {
+		t.Fatalf("result = %+v, want successful one-second streaming result", observer.result)
+	}
+	if observer.call.Operation != llmclient.OperationChat || observer.firstChunk.Duration != 2*time.Second {
+		t.Fatalf("operation/first chunk = %q/%v, want chat/2s", observer.call.Operation, observer.firstChunk.Duration)
+	}
+}
+
+type panickingUpstreamObserver struct{}
+
+func (*panickingUpstreamObserver) Name() string { panic("name") }
+func (*panickingUpstreamObserver) Start(context.Context, ext.UpstreamCall) context.Context {
+	panic("start")
+}
+func (*panickingUpstreamObserver) End(context.Context, ext.UpstreamResult) { panic("end") }
+func (*panickingUpstreamObserver) FirstResponseChunk(context.Context, ext.UpstreamResult) {
+	panic("first chunk")
+}
+
+func TestUpstreamObserverHooksContainExtensionPanics(t *testing.T) {
+	hooks := upstreamObserverHooks(&panickingUpstreamObserver{})
+	ctx := t.Context()
+	if got := hooks.OnRequestStart(ctx, llmclient.RequestInfo{}); got != ctx {
+		t.Fatal("panicking observer must preserve the original context")
+	}
+	hooks.OnRequestEnd(ctx, llmclient.ResponseInfo{})
+	hooks.OnStreamFirstChunk(ctx, llmclient.ResponseInfo{})
+}
+
 func (*routeObservationSelector) Name() string                           { return "observer" }
 func (*routeObservationSelector) Select(ext.RouteRequest) (string, bool) { return "", false }
 func (*routeObservationSelector) OnAttemptStart(ext.RouteTarget)         {}
@@ -697,6 +767,7 @@ func TestUsagePricingRecalculationConfigured(t *testing.T) {
 func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	reg := &ext.Registry{}
 	reg.RegisterRewriter(&staticRewriter{name: "r1"})
+	reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
 	reg.AddPublicPaths("/sso/callback", "/sso/*")
@@ -707,6 +778,9 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 
 	if len(serverCfg.RequestRewriters) != 1 || serverCfg.RequestRewriters[0].Name() != "r1" {
 		t.Errorf("RequestRewriters not copied: %+v", serverCfg.RequestRewriters)
+	}
+	if len(serverCfg.OuterMiddleware) != 1 {
+		t.Errorf("OuterMiddleware not copied: %d entries", len(serverCfg.OuterMiddleware))
 	}
 	if len(serverCfg.ExtraMiddleware) != 1 {
 		t.Errorf("ExtraMiddleware not copied: %d entries", len(serverCfg.ExtraMiddleware))
@@ -724,7 +798,7 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	// A nil registry must leave the config untouched.
 	empty := &server.Config{}
 	applyExtensions(empty, nil)
-	if empty.RequestRewriters != nil || empty.ExtraMiddleware != nil || empty.ExtraRoutes != nil || empty.ExtraAuthSkipPaths != nil || empty.RequestAuthenticators != nil {
+	if empty.RequestRewriters != nil || empty.OuterMiddleware != nil || empty.ExtraMiddleware != nil || empty.ExtraRoutes != nil || empty.ExtraAuthSkipPaths != nil || empty.RequestAuthenticators != nil {
 		t.Error("nil registry must not modify server config")
 	}
 }

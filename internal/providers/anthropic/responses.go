@@ -82,9 +82,11 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 
 	var anthropicResp anthropicResponse
 	err = p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/messages",
-		Body:     anthropicReq,
+		Method:    http.MethodPost,
+		Endpoint:  "/messages",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      anthropicReq,
 	}, &anthropicResp)
 	if err != nil {
 		return nil, err
@@ -102,9 +104,11 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	anthropicReq.Stream = true
 
 	stream, err := p.client.DoStream(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/messages",
-		Body:     anthropicReq,
+		Method:    http.MethodPost,
+		Endpoint:  "/messages",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      anthropicReq,
 	})
 	if err != nil {
 		return nil, err

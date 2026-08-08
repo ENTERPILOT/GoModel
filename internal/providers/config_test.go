@@ -295,6 +295,9 @@ func TestBuildProviderConfigs_MultipleProviders(t *testing.T) {
 	if got["anthropic"].Resilience.Retry.MaxRetries != globalRetry.MaxRetries {
 		t.Errorf("anthropic MaxRetries = %d, want %d (global)", got["anthropic"].Resilience.Retry.MaxRetries, globalRetry.MaxRetries)
 	}
+	if got["openai"].Name != "openai" || got["anthropic"].Name != "anthropic" {
+		t.Fatalf("provider names = %q/%q, want map keys", got["openai"].Name, got["anthropic"].Name)
+	}
 }
 
 func TestBuildProviderConfigs_EmptyMap(t *testing.T) {

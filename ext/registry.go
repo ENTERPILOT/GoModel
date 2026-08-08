@@ -11,14 +11,36 @@ import (
 // Register everything before the server is constructed (before run.Run or
 // app.New); core snapshots each registration list during initialization.
 type Registry struct {
-	mu             sync.Mutex
-	rewriters      []RequestRewriter
-	middleware     []echo.MiddlewareFunc
-	routes         []func(*echo.Echo)
-	publicPaths    []string
-	routeSelector  RouteSelector
-	settings       []RuntimeSetting
-	authenticators []RequestAuthenticator
+	mu              sync.Mutex
+	rewriters       []RequestRewriter
+	outerMiddleware []echo.MiddlewareFunc
+	middleware      []echo.MiddlewareFunc
+	routes          []func(*echo.Echo)
+	publicPaths     []string
+	routeSelector   RouteSelector
+	settings        []RuntimeSetting
+	authenticators  []RequestAuthenticator
+	observers       []UpstreamObserver
+}
+
+// UseOuterMiddleware adds middleware at the outer HTTP boundary, after
+// credential-like request URI values are redacted and before request logging,
+// recovery, limits, audit capture, and authentication. It is intended for
+// observability and correlation middleware that must cover the whole request.
+// It must not depend on an authenticated identity.
+func (r *Registry) UseOuterMiddleware(m echo.MiddlewareFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.outerMiddleware = append(r.outerMiddleware, m)
+}
+
+// RegisterUpstreamObserver adds an observer for logical provider calls.
+// Observers run in registration order and may derive the context passed to
+// later observers and to the provider request.
+func (r *Registry) RegisterUpstreamObserver(observer UpstreamObserver) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.observers = append(r.observers, observer)
 }
 
 // RegisterAuthenticator adds a request authentication mechanism. Core bearer
@@ -93,6 +115,13 @@ func (r *Registry) Middleware() []echo.MiddlewareFunc {
 	return slices.Clone(r.middleware)
 }
 
+// OuterMiddleware returns a defensive copy of registered outer middleware.
+func (r *Registry) OuterMiddleware() []echo.MiddlewareFunc {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.outerMiddleware)
+}
+
 // Routes returns a defensive copy of the registered route callbacks.
 func (r *Registry) Routes() []func(*echo.Echo) {
 	r.mu.Lock()
@@ -128,6 +157,13 @@ func (r *Registry) Authenticators() []RequestAuthenticator {
 	return slices.Clone(r.authenticators)
 }
 
+// UpstreamObservers returns a defensive copy of registered observers.
+func (r *Registry) UpstreamObservers() []UpstreamObserver {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.observers)
+}
+
 // Default is the process-wide registry used by package-level helpers and, by
 // default, by run.Run.
 var Default = &Registry{}
@@ -137,6 +173,9 @@ func RegisterRewriter(rw RequestRewriter) { Default.RegisterRewriter(rw) }
 
 // UseMiddleware registers middleware on the Default registry.
 func UseMiddleware(m echo.MiddlewareFunc) { Default.UseMiddleware(m) }
+
+// UseOuterMiddleware registers outer HTTP middleware on the Default registry.
+func UseOuterMiddleware(m echo.MiddlewareFunc) { Default.UseOuterMiddleware(m) }
 
 // RegisterRoutes registers a route callback on the Default registry.
 func RegisterRoutes(fn func(e *echo.Echo)) { Default.RegisterRoutes(fn) }
@@ -153,4 +192,9 @@ func RegisterSetting(setting RuntimeSetting) { Default.RegisterSetting(setting) 
 // RegisterAuthenticator registers a request authenticator on the Default registry.
 func RegisterAuthenticator(authenticator RequestAuthenticator) {
 	Default.RegisterAuthenticator(authenticator)
+}
+
+// RegisterUpstreamObserver registers an observer on the Default registry.
+func RegisterUpstreamObserver(observer UpstreamObserver) {
+	Default.RegisterUpstreamObserver(observer)
 }

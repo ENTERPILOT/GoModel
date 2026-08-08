@@ -57,8 +57,9 @@ func PassthroughEndpointPath(info *core.PassthroughRouteInfo) string {
 // PassthroughEndpointSemantics names the semantic operation and audit path
 // for one provider passthrough endpoint.
 type PassthroughEndpointSemantics struct {
-	Operation string
-	AuditPath string
+	Operation      string
+	GenAIOperation string
+	AuditPath      string
 }
 
 // SemanticEnricher implements core.PassthroughSemanticEnricher from a static
@@ -73,6 +74,16 @@ type SemanticEnricher struct {
 // endpoint table; keys are normalized endpoint paths such as "/embeddings".
 func NewSemanticEnricher(providerType string, endpoints map[string]PassthroughEndpointSemantics) SemanticEnricher {
 	return SemanticEnricher{providerType: providerType, endpoints: endpoints}
+}
+
+// NewOpenAICompatibleSemanticEnricher describes the common inference surface
+// while retaining the concrete provider type used to select the enricher.
+func NewOpenAICompatibleSemanticEnricher(providerType string) SemanticEnricher {
+	return NewSemanticEnricher(providerType, map[string]PassthroughEndpointSemantics{
+		"/chat/completions": {Operation: providerType + ".chat_completions", GenAIOperation: "chat", AuditPath: "/v1/chat/completions"},
+		"/responses":        {Operation: providerType + ".responses", GenAIOperation: "chat", AuditPath: "/v1/responses"},
+		"/embeddings":       {Operation: providerType + ".embeddings", GenAIOperation: "embeddings", AuditPath: "/v1/embeddings"},
+	})
 }
 
 // ProviderType returns the provider type this enricher serves.
@@ -90,6 +101,7 @@ func (e SemanticEnricher) Enrich(_ *core.RequestSnapshot, _ *core.WhiteBoxPrompt
 	normalizedEndpoint := strings.TrimLeft(strings.TrimSpace(PassthroughEndpointPath(&enriched)), "/")
 	if semantics, ok := e.endpoints["/"+normalizedEndpoint]; ok {
 		enriched.SemanticOperation = semantics.Operation
+		enriched.GenAIOperation = semantics.GenAIOperation
 		enriched.AuditPath = semantics.AuditPath
 	} else if strings.TrimSpace(enriched.AuditPath) == "" && normalizedEndpoint != "" {
 		enriched.AuditPath = "/p/" + e.providerType + "/" + normalizedEndpoint

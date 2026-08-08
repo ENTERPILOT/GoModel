@@ -51,6 +51,9 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
 		Method:       c.Request().Method,
 		Endpoint:     endpoint,
+		Operation:    info.GenAIOperation,
+		Model:        info.Model,
+		Stream:       info.Stream,
 		Body:         c.Request().Body,
 		Headers:      buildPassthroughHeaders(ctx, c.Request().Header),
 		ProviderName: providerName,

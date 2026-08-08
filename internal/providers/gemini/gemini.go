@@ -462,9 +462,11 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	}
 	var resp core.ChatResponse
 	err = p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/chat/completions",
-		Body:     body,
+		Method:    http.MethodPost,
+		Endpoint:  "/chat/completions",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      body,
 	}, &resp)
 	if err != nil {
 		return nil, err
@@ -484,9 +486,11 @@ func (p *Provider) nativeChatCompletion(ctx context.Context, req *core.ChatReque
 	p.prepareCachedContent(ctx, req, body)
 	var geminiResp geminiGenerateContentResponse
 	err = p.nativeClient.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: nativeGenerateEndpoint(req.Model),
-		Body:     body,
+		Method:    http.MethodPost,
+		Endpoint:  nativeGenerateEndpoint(req.Model),
+		Operation: llmclient.OperationGenerateContent,
+		Model:     req.Model,
+		Body:      body,
 	}, &geminiResp)
 	if err != nil {
 		return nil, err
@@ -511,9 +515,11 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 		return nil, err
 	}
 	stream, err := p.client.DoStream(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/chat/completions",
-		Body:     body,
+		Method:    http.MethodPost,
+		Endpoint:  "/chat/completions",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      body,
 	})
 	if err != nil {
 		return nil, err
@@ -531,9 +537,11 @@ func (p *Provider) nativeStreamChatCompletion(ctx context.Context, req *core.Cha
 	}
 	p.prepareCachedContent(ctx, req, body)
 	stream, err := p.nativeClient.DoStream(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: nativeStreamEndpoint(req.Model),
-		Body:     body,
+		Method:    http.MethodPost,
+		Endpoint:  nativeStreamEndpoint(req.Model),
+		Operation: llmclient.OperationGenerateContent,
+		Model:     req.Model,
+		Body:      body,
 	})
 	if err != nil {
 		return nil, err
@@ -828,9 +836,11 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	}
 	var resp core.EmbeddingResponse
 	err = p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/embeddings",
-		Body:     body,
+		Method:    http.MethodPost,
+		Endpoint:  "/embeddings",
+		Operation: llmclient.OperationEmbeddings,
+		Model:     req.Model,
+		Body:      body,
 	}, &resp)
 	if err != nil {
 		return nil, err

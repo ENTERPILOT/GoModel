@@ -1086,7 +1086,7 @@ func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 	}
 	srv := New(mock, &Config{})
 
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{"model":"gpt-5-mini","stream":true}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -1097,6 +1097,9 @@ func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 	}
 	if got := mock.lastPassthroughProvider; got != "openai" {
 		t.Fatalf("provider = %q, want openai", got)
+	}
+	if mock.lastPassthroughReq == nil || !mock.lastPassthroughReq.Stream {
+		t.Fatalf("passthrough stream intent = %+v, want true", mock.lastPassthroughReq)
 	}
 
 	mock.lastPassthroughProvider = ""

@@ -110,6 +110,7 @@ type Config struct {
 	StorageProbe                    ReadinessProbe                         // Optional: primary storage connectivity check; failure makes /health/ready report not_ready (503)
 	CacheProbe                      ReadinessProbe                         // Optional: Redis cache connectivity check; failure makes /health/ready report degraded (200, non-blocking)
 	RequestRewriters                []ext.RequestRewriter                  // Optional: raw-body rewriters invoked on inference ingress (post-auth, pre-workflow-resolution)
+	OuterMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware after sensitive URI redaction, before logging/recovery/limits
 	ExtraMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware registered after audit, before gateway auth
 	ExtraRoutes                     []func(*echo.Echo)                     // Optional: extension route registration callbacks invoked after core routes
 	ExtraAuthSkipPaths              []string                               // Optional: extension paths appended to the auth skip list ("/*" suffix matches a prefix)
@@ -221,19 +222,15 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	authSkipPaths := []string{"/health", "/health/ready"}
 
 	// Determine metrics path
-	metricsPath := "/metrics"
+	metricsPath := config.ResolveMetricsEndpoint("")
 	if cfg != nil && cfg.MetricsEnabled {
-		if cfg.MetricsEndpoint != "" {
-			// Normalize path to prevent traversal attacks
-			metricsPath = path.Clean(cfg.MetricsEndpoint)
-		}
+		configuredPath := path.Clean(cfg.MetricsEndpoint)
+		metricsPath = config.ResolveMetricsEndpoint(cfg.MetricsEndpoint)
 		// Prevent metrics endpoint from shadowing API routes (security: auth bypass)
-		if metricsPath == "/v1" || strings.HasPrefix(metricsPath, "/v1/") ||
-			metricsPath == "/p" || strings.HasPrefix(metricsPath, "/p/") {
+		if metricsPath != configuredPath && cfg.MetricsEndpoint != "" {
 			slog.Warn("metrics endpoint conflicts with API routes, using /metrics instead",
 				"configured", cfg.MetricsEndpoint,
-				"normalized", metricsPath)
-			metricsPath = "/metrics"
+				"normalized", configuredPath)
 		}
 		authSkipPaths = append(authSkipPaths, metricsPath)
 	}
@@ -261,6 +258,14 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Scrub credential-like query values before the outer request logger
 	// snapshots RequestURI. URL.RawQuery remains intact for handlers.
 	e.Use(redactSensitiveRequestURI())
+	// Outer extension middleware covers the complete HTTP request while still
+	// seeing the credential-redacted URI. It runs before request logging,
+	// recovery, limits, audit, and auth, so it must not depend on identity.
+	if cfg != nil {
+		for _, m := range cfg.OuterMiddleware {
+			e.Use(m)
+		}
+	}
 	// Request logger with optional filtering for model-only interactions
 	if cfg != nil && cfg.LogOnlyModelInteractions {
 		e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{

@@ -2,6 +2,7 @@
 package providers
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"sort"
@@ -134,13 +135,45 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 	// One Keyring per provider instance: every client this provider builds
 	// shares session affinity and the sessionless round-robin sequence.
 	opts := ProviderOptions{
-		Hooks:      hooks,
+		Hooks:      hooksWithProviderIdentity(hooks, cfg.Name, cfg.Type),
 		Models:     cfg.Models,
 		Resilience: cfg.Resilience,
 		Keys:       NewKeyringWithSessionStickiness(cfg.SessionStickyKeys, cfg.APIKeys...),
 	}
 
 	return builder(cfg, opts), nil
+}
+
+func hooksWithProviderIdentity(hooks llmclient.Hooks, providerName, providerType string) llmclient.Hooks {
+	if hooks.OnRequestStart == nil && hooks.OnRequestEnd == nil && hooks.OnStreamFirstChunk == nil {
+		return hooks
+	}
+	setIdentity := func(provider *string, implementation *string) {
+		if providerName != "" {
+			*provider = providerName
+		}
+		*implementation = providerType
+	}
+	typed := llmclient.Hooks{}
+	if hooks.OnRequestStart != nil {
+		typed.OnRequestStart = func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+			setIdentity(&info.Provider, &info.ProviderType)
+			return hooks.OnRequestStart(ctx, info)
+		}
+	}
+	if hooks.OnRequestEnd != nil {
+		typed.OnRequestEnd = func(ctx context.Context, info llmclient.ResponseInfo) {
+			setIdentity(&info.Provider, &info.ProviderType)
+			hooks.OnRequestEnd(ctx, info)
+		}
+	}
+	if hooks.OnStreamFirstChunk != nil {
+		typed.OnStreamFirstChunk = func(ctx context.Context, info llmclient.ResponseInfo) {
+			setIdentity(&info.Provider, &info.ProviderType)
+			hooks.OnStreamFirstChunk(ctx, info)
+		}
+	}
+	return typed
 }
 
 // discoveryConfigsSnapshot returns provider discovery metadata keyed by provider type.

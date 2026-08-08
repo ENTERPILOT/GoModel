@@ -42,6 +42,8 @@ type PassthroughRouteInfo struct {
 	RawEndpoint        string
 	NormalizedEndpoint string
 	SemanticOperation  string
+	GenAIOperation     string // standard GenAI operation, if this is an inference call
+	Stream             bool   // explicit streaming intent derived from the request body
 	AuditPath          string
 	Model              string
 }
@@ -280,6 +282,7 @@ func ApplyBodySelectorHints(env *WhiteBoxPrompt, model, provider string, stream 
 		if model != "" {
 			cloned.Model = model
 		}
+		cloned.Stream = stream
 		CachePassthroughRouteInfo(env, &cloned)
 	}
 }

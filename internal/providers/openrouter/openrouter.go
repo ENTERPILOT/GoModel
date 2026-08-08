@@ -20,7 +20,7 @@ const (
 var Registration = providers.Registration{
 	Type:                        "openrouter",
 	New:                         New,
-	PassthroughSemanticEnricher: openai.Registration.PassthroughSemanticEnricher,
+	PassthroughSemanticEnricher: passthroughSemanticEnricher,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
 	},

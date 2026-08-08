@@ -686,6 +686,80 @@ func TestClient_DoStream_Success(t *testing.T) {
 	}
 }
 
+func TestClient_DoPassthrough_FirstChunkHookUsesOpaqueStreamBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: passthrough\n\n"))
+	}))
+	defer server.Close()
+
+	var firstChunk ResponseInfo
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Hooks.OnStreamFirstChunk = func(_ context.Context, info ResponseInfo) { firstChunk = info }
+	client := New(cfg, nil)
+	resp, err := client.DoPassthrough(t.Context(), Request{
+		Method:    http.MethodPost,
+		Endpoint:  "/v2/chat",
+		Operation: OperationChat,
+		Model:     "command-r",
+		Stream:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if firstChunk.Duration != 0 {
+		t.Fatal("first chunk hook fired at passthrough response headers")
+	}
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	if firstChunk.Operation != OperationChat || firstChunk.Model != "command-r" || !firstChunk.Stream {
+		t.Fatalf("first chunk = %+v, want streaming command-r chat", firstChunk)
+	}
+}
+
+func TestClient_DoStream_FirstChunkHookWaitsForBodyBytes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: first\n\n"))
+	}))
+	defer server.Close()
+
+	var firstChunks []ResponseInfo
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Hooks.OnStreamFirstChunk = func(_ context.Context, info ResponseInfo) {
+		firstChunks = append(firstChunks, info)
+	}
+	client := New(cfg, nil)
+	stream, err := client.DoStream(t.Context(), Request{
+		Method:    http.MethodPost,
+		Endpoint:  "/stream",
+		Operation: OperationChat,
+		Body:      map[string]bool{"stream": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if len(firstChunks) != 0 {
+		t.Fatalf("first chunk hook fired at response headers: %+v", firstChunks)
+	}
+	buf := make([]byte, 1)
+	if _, err := stream.Read(buf); err != nil {
+		t.Fatal(err)
+	}
+	if len(firstChunks) != 1 || firstChunks[0].Operation != OperationChat || !firstChunks[0].Stream {
+		t.Fatalf("first chunk observations = %+v, want one streaming chat observation", firstChunks)
+	}
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatal(err)
+	}
+	if len(firstChunks) != 1 {
+		t.Fatalf("first chunk hook fired %d times, want once", len(firstChunks))
+	}
+}
+
 func TestClient_DoStream_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

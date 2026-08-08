@@ -10,6 +10,9 @@ import (
 type PassthroughRequest struct {
 	Method       string
 	Endpoint     string
+	Operation    string // optional semantic GenAI operation derived at ingress
+	Model        string // optional model derived from the opaque request body
+	Stream       bool   // explicit streaming intent derived from the request body
 	Body         io.ReadCloser
 	Headers      http.Header
 	ProviderName string // optional: concrete configured provider instance name for name-based routing

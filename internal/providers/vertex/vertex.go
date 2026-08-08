@@ -248,9 +248,11 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 
 	var resp vertexEmbeddingPredictResponse
 	err = p.nativeClient.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: vertexPredictEndpoint(req.Model),
-		Body:     body,
+		Method:    http.MethodPost,
+		Endpoint:  vertexPredictEndpoint(req.Model),
+		Operation: llmclient.OperationEmbeddings,
+		Model:     req.Model,
+		Body:      body,
 	}, &resp)
 	if err != nil {
 		return nil, err

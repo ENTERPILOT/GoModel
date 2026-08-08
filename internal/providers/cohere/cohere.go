@@ -16,8 +16,9 @@ const defaultBaseURL = "https://api.cohere.com"
 
 // Registration provides factory registration for the Cohere provider.
 var Registration = providers.Registration{
-	Type: "cohere",
-	New:  New,
+	Type:                        "cohere",
+	New:                         New,
+	PassthroughSemanticEnricher: passthroughSemanticEnricher,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
 	},
@@ -134,6 +135,9 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	resp, err := p.client.DoPassthrough(ctx, llmclient.Request{
 		Method:        req.Method,
 		Endpoint:      providers.PassthroughEndpoint(req.Endpoint),
+		Operation:     req.Operation,
+		Model:         req.Model,
+		Stream:        req.Stream,
 		RawBodyReader: req.Body,
 		Headers:       req.Headers,
 	})

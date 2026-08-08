@@ -2189,6 +2189,9 @@ func TestChatCompletionStreaming_FastPathUsesPassthroughForOpenAICompatibleProvi
 	if mock.lastPassthroughReq == nil {
 		t.Fatal("lastPassthroughReq = nil, want passthrough request")
 	}
+	if !mock.lastPassthroughReq.Stream {
+		t.Fatal("passthrough request lost explicit stream intent")
+	}
 	if body := readPassthroughRequestBody(t, mock.lastPassthroughReq.Body); body != reqBody {
 		t.Fatalf("passthrough body = %q, want %q", body, reqBody)
 	}
