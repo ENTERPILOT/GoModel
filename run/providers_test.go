@@ -47,6 +47,12 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			required:     nil,
 		},
 		{
+			// llm-d can be keyless, but it has no meaningful universal endpoint.
+			providerType: "llmd",
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			required:     []string{"base_url"},
+		},
+		{
 			// SGLang supports both unauthenticated and --api-key deployments.
 			providerType: "sglang",
 			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
@@ -150,7 +156,7 @@ var credentialPayloadFields = []string{
 func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
 		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "cohere", "deepseek", "fireworks",
-		"gemini", "groq", "kilo", "kimicode", "meta", "minimax", "ollama", "openai", "opencode_go",
+		"gemini", "groq", "kilo", "kimicode", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
 		"openrouter", "oracle", "sglang", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}
 

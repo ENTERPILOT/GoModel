@@ -42,7 +42,7 @@ auth:
 # LLM Provider configuration
 providers:
   # -- Use an existing secret for all provider API keys
-  # Secret should contain keys for enabled providers, such as OPENAI_API_KEY, ANTHROPIC_API_KEY, COHERE_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, XAI_API_KEY, ZAI_API_KEY, KILO_API_KEY, ORACLE_API_KEY, SGLANG_API_KEY, or VLLM_API_KEY
+  # Secret should contain keys for enabled providers, such as OPENAI_API_KEY, ANTHROPIC_API_KEY, COHERE_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, XAI_API_KEY, ZAI_API_KEY, KILO_API_KEY, ORACLE_API_KEY, SGLANG_API_KEY, VLLM_API_KEY, or LLMD_API_KEY
   existingSecret: ""
 
   openai:
@@ -126,6 +126,18 @@ providers:
     apiKey: ""
     # -- vLLM OpenAI-compatible base URL
     baseUrl: ""
+
+  llmd:
+    # -- Enable llm-d provider (API key optional; baseUrl required when enabled)
+    enabled: false
+    # -- Optional bearer token required by the Gateway in front of llm-d
+    apiKey: ""
+    # -- llm-d Router / EPP OpenAI-compatible base URL
+    baseUrl: ""
+    # -- Optional trusted llm-d InferenceObjective name
+    inferenceObjective: ""
+    # -- Derive the llm-d fairness ID from GoModel's effective user path
+    fairnessFromUserPath: true
 
   sglang:
     # -- Enable SGLang provider (API key optional; baseUrl required when enabled)

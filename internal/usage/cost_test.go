@@ -747,7 +747,8 @@ func TestCalculateGranularCost_OutputOnlyPricing(t *testing.T) {
 // TestCalculateGranularCost_OpenAICompatibleProvidersDefaultMappings is a
 // regression test for issue #435. Providers that speak the OpenAI usage schema
 // but are not explicitly listed in providerMappings (xiaomi, deepseek, zai,
-// minimax, bailian, oracle, azure, sglang, vllm, ollama, opencode_go) must still apply
+// minimax, bailian, oracle, azure, sglang, vllm, llmd, ollama, opencode_go) must
+// still apply
 // the cached-input discount instead of billing cached tokens at the full input
 // rate. Previously these providers produced a much higher cost than "openai"
 // for the same response, over-charging cache-heavy workloads.
@@ -768,7 +769,7 @@ func TestCalculateGranularCost_OpenAICompatibleProvidersDefaultMappings(t *testi
 
 	for _, provider := range []string{
 		"xiaomi", "deepseek", "zai", "minimax", "bailian",
-		"oracle", "azure", "sglang", "vllm", "ollama", "opencode_go",
+		"oracle", "azure", "sglang", "vllm", "llmd", "ollama", "opencode_go",
 	} {
 		got := CalculateGranularCost(1_000_000, 200_000, rawData, provider, pricing)
 		assertCostNear(t, provider+" InputCost", got.InputCost, *want.InputCost)

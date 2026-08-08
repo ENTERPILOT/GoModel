@@ -115,6 +115,33 @@
         "properties": {
           "providers": {
             "properties": {
+              "llmd": {
+                "properties": { "enabled": { "const": true } }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "providers": {
+            "properties": {
+              "llmd": {
+                "properties": {
+                  "baseUrl": { "minLength": 1 }
+                },
+                "required": ["baseUrl"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "providers": {
+            "properties": {
               "sglang": {
                 "properties": { "enabled": { "const": true } }
               }
@@ -266,6 +293,20 @@
       "properties": {
         "providers": {
           "properties": {
+            "llmd": {
+              "properties": {
+                "enabled": { "const": true },
+                "baseUrl": { "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "providers": {
+          "properties": {
             "sglang": {
               "properties": {
                 "enabled": { "const": true },
@@ -376,6 +417,16 @@
             "enabled": { "type": "boolean" },
             "apiKey": { "type": "string" },
             "baseUrl": { "type": "string" }
+          }
+        },
+        "llmd": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "apiKey": { "type": "string" },
+            "baseUrl": { "type": "string" },
+            "inferenceObjective": { "type": "string" },
+            "fairnessFromUserPath": { "type": "boolean" }
           }
         },
         "sglang": {
