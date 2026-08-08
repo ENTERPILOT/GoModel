@@ -151,6 +151,51 @@ func TestOpenAICompatibleEndpoints(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleStreamingEndpoints(t *testing.T) {
+	tests := []struct {
+		name     string
+		wantPath string
+		call     func(*Provider) (io.ReadCloser, error)
+	}{
+		{
+			name:     "chat completions",
+			wantPath: "/v1/chat/completions",
+			call: func(p *Provider) (io.ReadCloser, error) {
+				return p.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "test"})
+			},
+		},
+		{
+			name:     "responses",
+			wantPath: "/v1/responses",
+			call: func(p *Provider) (io.ReadCloser, error) {
+				return p.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "test"})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPath string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			}))
+			defer server.Close()
+
+			provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+			body, err := tt.call(provider)
+			if err != nil {
+				t.Fatalf("streaming call error = %v", err)
+			}
+			defer body.Close()
+			if gotPath != tt.wantPath {
+				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
+			}
+		})
+	}
+}
+
 func TestProviderExposesOnlyVerifiedOptionalInterfaces(t *testing.T) {
 	provider := NewWithHTTPClient("", "", nil, llmclient.Hooks{})
 
@@ -177,6 +222,8 @@ func TestPassthroughRoutesNativeAndOpenAIEndpoints(t *testing.T) {
 		{name: "native generate", endpoint: "generate", wantPath: "/generate"},
 		{name: "native health", endpoint: "health", wantPath: "/health"},
 		{name: "explicit v1 rerank", endpoint: "v1/rerank", wantPath: "/v1/rerank"},
+		{name: "normalized v1 rerank alias", endpoint: "rerank", wantPath: "/v1/rerank"},
+		{name: "normalized v1 tokenize alias", endpoint: "tokenize", wantPath: "/v1/tokenize"},
 		{name: "OpenAI chat", endpoint: "chat/completions", wantPath: "/v1/chat/completions"},
 		{name: "OpenAI models with query", endpoint: "models?limit=1", wantPath: "/v1/models"},
 		{name: "OpenAI responses lifecycle", endpoint: "responses/resp-1", wantPath: "/v1/responses/resp-1"},

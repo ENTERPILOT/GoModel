@@ -168,6 +168,8 @@ func usesV1PassthroughBase(endpoint string) bool {
 		"/responses",
 		"/completions",
 		"/embeddings",
+		"/rerank",
+		"/tokenize",
 		"/audio",
 		"/files",
 		"/batches",

@@ -109,11 +109,14 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			if !slices.Equal(names, tt.fields) {
 				t.Errorf("fields = %v, want %v", names, tt.fields)
 			}
-			for _, name := range tt.required {
-				field, found := schema.Field(name)
-				if !found || !field.Required {
-					t.Errorf("%s.Required = %v (present=%v), want true", name, field.Required, found)
+			var requiredNames []string
+			for _, field := range schema.Fields {
+				if field.Required {
+					requiredNames = append(requiredNames, field.Name)
 				}
+			}
+			if !slices.Equal(requiredNames, tt.required) {
+				t.Errorf("required = %v, want %v", requiredNames, tt.required)
 			}
 			for _, name := range tt.absent {
 				if schema.Accepts(name) {
