@@ -1,0 +1,194 @@
+---
+title: "GoModel & Kimi Code CLI"
+description: "Route Kimi Code CLI through GoModel without an api.json registry URL, configure a model profile, and verify prompts and tool calls."
+icon: "terminal"
+keywords: ["Kimi Code", "Kimi Code CLI", "Kimi CLI", "api.json", "coding agent", "setup guide"]
+---
+
+Kimi Code CLI can use GoModel as an OpenAI-compatible provider. You configure
+the GoModel base URL, master key, and at least one model in Kimi's
+`~/.kimi-code/config.toml` file.
+
+Flow:
+
+`Kimi Code CLI -> GoModel -> upstream model provider`
+
+## You do not need an `api.json` URL
+
+Kimi's **Custom registry (`api.json`)** option imports a models.dev-shaped
+provider catalog. It is optional and is not the normal OpenAI-compatible setup
+path.
+
+GoModel exposes its model catalog at `/v1/models`, but that response uses the
+OpenAI model-list format rather than Kimi's custom-registry format. Do not paste
+`http://localhost:8080/v1/models` into Kimi's `api.json` prompt. Exit that
+prompt and use the direct configuration below instead.
+
+<Note>
+  If you searched for `pi.json`, the file name shown by Kimi is `api.json`.
+  Neither file is required for this setup.
+</Note>
+
+## Before you start
+
+- Install [Kimi Code CLI](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started).
+- Choose a GoModel master key, for example `change-me`.
+- Make sure GoModel has an upstream credential for the model you want to use.
+
+## 1. Run GoModel
+
+Start GoModel with a master key and at least one upstream provider. This
+example uses OpenAI:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
+
+`GOMODEL_MASTER_KEY` is the credential Kimi sends to GoModel.
+`OPENAI_API_KEY` belongs to GoModel and is used only for the upstream request.
+
+## 2. Choose a model
+
+List the models visible through GoModel:
+
+```bash
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer change-me" \
+  | jq '.data[] | {
+      id,
+      context_window: .metadata.context_window,
+      max_output_tokens: .metadata.max_output_tokens
+    }'
+```
+
+This guide uses `openai/gpt-4.1-mini`, with a 1,000,000-token context window
+and a 32,768-token output limit. Prefer a provider-qualified ID from this
+response so GoModel routes the request to the intended provider.
+
+## 3. Configure Kimi Code CLI
+
+Open `~/.kimi-code/config.toml` and add:
+
+```toml
+default_model = "gomodel/gpt-4.1-mini"
+
+[providers.gomodel]
+type = "openai"
+base_url = "http://localhost:8080/v1"
+api_key = "change-me"
+
+[models."gomodel/gpt-4.1-mini"]
+provider = "gomodel"
+model = "openai/gpt-4.1-mini"
+max_context_size = 1000000
+max_output_size = 32768
+capabilities = ["tool_use", "image_in"]
+```
+
+The alias `gomodel/gpt-4.1-mini` is local to Kimi. The `model` value is the
+exact selector Kimi sends to GoModel.
+
+<Warning>
+  Kimi does not automatically read ordinary provider credentials such as
+  `OPENAI_API_KEY` from your shell for persistent providers. In this file,
+  `api_key` must contain the GoModel master key, not an upstream provider key.
+  Restrict access with `chmod 600 ~/.kimi-code/config.toml`.
+</Warning>
+
+Use the `context_window` and `max_output_tokens` values returned by GoModel
+when you configure a different model. Setting `max_output_size` matters: if it
+is omitted, Kimi may send a larger `max_tokens` value than the selected model
+accepts.
+
+If GoModel runs on another host, replace `localhost:8080`. Keep `/v1` in the
+base URL; do not append `/chat/completions`.
+
+## 4. Validate the setup
+
+Check the Kimi configuration:
+
+```bash
+kimi doctor
+```
+
+Then run a small prompt:
+
+```bash
+kimi -p 'Reply with exactly ok and no punctuation.'
+```
+
+The expected model response is:
+
+```text
+ok
+```
+
+You can also verify tool calling:
+
+```bash
+kimi -p 'Use the Shell tool to run pwd. After it succeeds, reply with exactly tool-ok and no punctuation.'
+```
+
+The final model response should be:
+
+```text
+tool-ok
+```
+
+## 5. Check the traffic in GoModel
+
+Open the GoModel dashboard audit logs:
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+Use the audit trail to confirm that Kimi is sending streaming requests to
+`POST /v1/chat/completions` and that GoModel is routing them to the selected
+provider.
+
+## Troubleshooting
+
+### Kimi asks for an `api.json` URL
+
+You selected Kimi's custom-registry import flow. Cancel it and edit
+`~/.kimi-code/config.toml` as shown above. GoModel does not need a registry
+endpoint for Kimi to work.
+
+### `401 Unauthorized`
+
+Make sure Kimi's `api_key` matches `GOMODEL_MASTER_KEY`. Do not put the
+upstream provider key in Kimi's config.
+
+### `max_tokens is too large`
+
+Set the model's `max_output_size` to the `max_output_tokens` value returned by
+GoModel's `/v1/models` response.
+
+### Model not found
+
+Copy the exact model ID from `/v1/models`. If more than one provider exposes
+the same model, use the provider-qualified ID, such as
+`openai/gpt-4.1-mini`.
+
+## References
+
+- Kimi Code CLI: [Getting started](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started)
+- Kimi Code CLI: [Providers and models](https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/providers)
+- Kimi Code CLI: [Configuration files](https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/config-files)
+
+## Validated on August 8, 2026
+
+This guide was validated against:
+
+- a local GoModel instance on `http://localhost:8080`
+- Kimi Code CLI `0.34.0`
+- `openai/gpt-4.1-mini` through GoModel's OpenAI-compatible Chat Completions API
+
+Local validation confirmed:
+
+- `kimi doctor` accepted the documented TOML configuration
+- `kimi -p` returned `ok` through `Kimi Code CLI -> GoModel -> OpenAI`
+- Kimi invoked its Shell tool and returned `tool-ok` through the same route
+- no GoModel application change or `api.json` endpoint was required
