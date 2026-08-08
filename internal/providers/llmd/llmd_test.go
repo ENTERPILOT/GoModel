@@ -166,6 +166,33 @@ func TestPassthroughReplacesClientSuppliedControlHeaders(t *testing.T) {
 	}
 }
 
+func TestPassthroughPreservesDroppedReasonOnRawErrorResponses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(droppedReasonHeader, "rejected-saturated")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"request dropped"}}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("", server.URL+"/v1", ControlConfig{}, server.Client(), llmclient.Hooks{})
+	for _, endpoint := range []string{"tokenize", "chat/completions"} {
+		resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+			Method:   http.MethodPost,
+			Endpoint: endpoint,
+			Body:     io.NopCloser(strings.NewReader(`{}`)),
+		})
+		if err != nil {
+			t.Fatalf("Passthrough(%q) error = %v", endpoint, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusTooManyRequests {
+			t.Errorf("Passthrough(%q) status = %d, want %d", endpoint, resp.StatusCode, http.StatusTooManyRequests)
+		}
+		assertHeader(t, http.Header(resp.Headers), droppedReasonHeader, "rejected-saturated")
+	}
+}
+
 func TestPassthroughSelectsV1AndRouterRootPaths(t *testing.T) {
 	var gotPaths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

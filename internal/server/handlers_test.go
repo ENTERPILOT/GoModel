@@ -6659,6 +6659,53 @@ func TestProviderPassthrough_NormalizesErrorResponse(t *testing.T) {
 	}
 }
 
+func TestProviderPassthrough_LLMDDroppedReasonOnNormalizedError(t *testing.T) {
+	for _, path := range []string{
+		"/p/llmd/tokenize",
+		"/p/llmd/v1/chat/completions",
+	} {
+		t.Run(path, func(t *testing.T) {
+			provider := &mockProvider{
+				passthroughResponse: &core.PassthroughResponse{
+					StatusCode: http.StatusTooManyRequests,
+					Headers: http.Header{
+						"Content-Type":          {"application/json"},
+						llmdDroppedReasonHeader: {"rejected-saturated"},
+						"X-Upstream":            {"must-not-leak"},
+						"Set-Cookie":            {"session=secret"},
+					},
+					Body: io.NopCloser(strings.NewReader(`{"error":{"message":"request dropped","type":"rate_limit_error"}}`)),
+				},
+			}
+
+			e := echo.New()
+			handler := NewHandler(provider, nil, nil, nil)
+			e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+			}
+			if got := rec.Header().Get(llmdDroppedReasonHeader); got != "rejected-saturated" {
+				t.Fatalf("%s = %q, want rejected-saturated", llmdDroppedReasonHeader, got)
+			}
+			if got := rec.Header().Get("X-Upstream"); got != "" {
+				t.Fatalf("X-Upstream should not be forwarded, got %q", got)
+			}
+			if got := rec.Header().Get("Set-Cookie"); got != "" {
+				t.Fatalf("Set-Cookie should not be forwarded, got %q", got)
+			}
+			if body := rec.Body.String(); !strings.Contains(body, `"message":"request dropped"`) {
+				t.Fatalf("unexpected error body: %s", body)
+			}
+		})
+	}
+}
+
 func TestProviderPassthrough_OpenAIV1AliasNormalizesByDefault(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
