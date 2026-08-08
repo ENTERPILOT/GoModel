@@ -28,8 +28,9 @@ func TestNew_ConstructsRegisteredProvider(t *testing.T) {
 }
 
 func TestSetBaseURL_ChangesRequestTarget(t *testing.T) {
-	var gotPath string
+	var gotMethod, gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
@@ -41,8 +42,8 @@ func TestSetBaseURL_ChangesRequestTarget(t *testing.T) {
 	if _, err := provider.ListModels(context.Background()); err != nil {
 		t.Fatalf("ListModels() error = %v", err)
 	}
-	if gotPath != "/models" {
-		t.Fatalf("path = %q, want /models", gotPath)
+	if gotMethod != http.MethodGet || gotPath != "/models" {
+		t.Fatalf("method/path = %q/%q, want GET /models", gotMethod, gotPath)
 	}
 }
 
@@ -84,7 +85,10 @@ func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 
 func TestStreamChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 	var gotPath, gotAuth string
-	var gotBody map[string]any
+	var gotBody struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -115,7 +119,7 @@ func TestStreamChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 	if gotPath != "/chat/completions" || gotAuth != "Bearer cpk_test" {
 		t.Fatalf("request path/auth = %q/%q, want /chat/completions/Bearer cpk_test", gotPath, gotAuth)
 	}
-	if gotBody["model"] != "Qwen/Qwen3-32B-TEE" || gotBody["stream"] != true {
+	if gotBody.Model != "Qwen/Qwen3-32B-TEE" || !gotBody.Stream {
 		t.Fatalf("stream request body = %#v", gotBody)
 	}
 	if !strings.Contains(string(body), "data: [DONE]") {
@@ -195,7 +199,9 @@ func TestPassthrough_ForwardsOpaqueRequest(t *testing.T) {
 
 func TestResponses_TranslatesToChatCompletions(t *testing.T) {
 	var gotPath string
-	var gotBody map[string]any
+	var gotBody struct {
+		Model string `json:"model"`
+	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -225,8 +231,8 @@ func TestResponses_TranslatesToChatCompletions(t *testing.T) {
 	if gotPath != "/chat/completions" {
 		t.Fatalf("path = %q, want /chat/completions", gotPath)
 	}
-	if gotBody["model"] != "Qwen/Qwen3-32B-TEE" {
-		t.Fatalf("request model = %#v, want Qwen/Qwen3-32B-TEE", gotBody["model"])
+	if gotBody.Model != "Qwen/Qwen3-32B-TEE" {
+		t.Fatalf("request model = %q, want Qwen/Qwen3-32B-TEE", gotBody.Model)
 	}
 	if resp.Object != "response" || resp.Status != "completed" {
 		t.Fatalf("response metadata = object %q status %q, want response/completed", resp.Object, resp.Status)
@@ -234,10 +240,14 @@ func TestResponses_TranslatesToChatCompletions(t *testing.T) {
 }
 
 func TestStreamResponses_TranslatesToChatCompletions(t *testing.T) {
-	var gotPath, gotAuth string
-	var gotBody map[string]any
+	var gotMethod, gotPath, gotAuth string
+	var gotBody struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -263,10 +273,10 @@ func TestStreamResponses_TranslatesToChatCompletions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
-	if gotPath != "/chat/completions" || gotAuth != "Bearer cpk_test" {
-		t.Fatalf("request path/auth = %q/%q", gotPath, gotAuth)
+	if gotMethod != http.MethodPost || gotPath != "/chat/completions" || gotAuth != "Bearer cpk_test" {
+		t.Fatalf("request method/path/auth = %q/%q/%q", gotMethod, gotPath, gotAuth)
 	}
-	if gotBody["model"] != "Qwen/Qwen3-32B-TEE" || gotBody["stream"] != true {
+	if gotBody.Model != "Qwen/Qwen3-32B-TEE" || !gotBody.Stream {
 		t.Fatalf("stream request body = %#v", gotBody)
 	}
 	if raw := string(body); !strings.Contains(raw, "response.output_text.delta") || !strings.Contains(raw, "data: [DONE]") {

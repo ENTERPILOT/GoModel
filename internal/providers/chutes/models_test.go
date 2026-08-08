@@ -11,8 +11,9 @@ import (
 )
 
 func TestListModels_PreservesChutesMetadata(t *testing.T) {
-	var gotPath, gotAuth string
+	var gotMethod, gotPath, gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
@@ -38,8 +39,8 @@ func TestListModels_PreservesChutesMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListModels() error = %v", err)
 	}
-	if gotPath != "/models" || gotAuth != "Bearer cpk_test" {
-		t.Fatalf("request path/auth = %q/%q, want /models/Bearer cpk_test", gotPath, gotAuth)
+	if gotMethod != http.MethodGet || gotPath != "/models" || gotAuth != "Bearer cpk_test" {
+		t.Fatalf("request method/path/auth = %q/%q/%q, want GET /models/Bearer cpk_test", gotMethod, gotPath, gotAuth)
 	}
 	if len(resp.Data) != 1 {
 		t.Fatalf("len(resp.Data) = %d, want 1", len(resp.Data))
