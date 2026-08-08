@@ -7178,8 +7178,37 @@ func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `provider passthrough for \"groq\" is not enabled`) {
 		t.Fatalf("unexpected error body: %s", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "anthropic, deepseek, kilo, llmd, openai, openrouter, sglang, vllm, zai") {
+	if !strings.Contains(rec.Body.String(), "anthropic, chutes, deepseek, kilo, llmd, openai, openrouter, sglang, vllm, zai") {
 		t.Fatalf("unexpected error body: %s", rec.Body.String())
+	}
+}
+
+func TestProviderPassthrough_DefaultAllowsChutes(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+	req := httptest.NewRequest(http.MethodPost, "/p/chutes/chat/completions", strings.NewReader(`{"model":"Qwen/Qwen3-32B-TEE"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if provider.lastPassthroughProvider != "chutes" {
+		t.Fatalf("providerType = %q, want chutes", provider.lastPassthroughProvider)
+	}
+	if provider.lastPassthroughReq == nil || provider.lastPassthroughReq.Endpoint != "chat/completions" {
+		t.Fatalf("passthrough request = %+v, want chat/completions endpoint", provider.lastPassthroughReq)
 	}
 }
 

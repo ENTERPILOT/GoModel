@@ -97,6 +97,7 @@ func buildDefaultConfig() *Config {
 			EnabledPassthroughProviders: []string{
 				"openai",
 				"anthropic",
+				"chutes",
 				"openrouter",
 				"kilo",
 				"zai",
