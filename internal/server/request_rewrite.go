@@ -47,10 +47,20 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 
 			changed := false
 			tokensSaved := 0
+			feedbackObservers := make([]ext.ResponseFeedbackObserver, 0, len(rewriters))
 			for _, rw := range rewriters {
 				res, rwErr := rw.Rewrite(c.Request().Context(), in)
 				if rwErr != nil {
 					return handleError(c, rewriterGatewayError(rw.Name(), rwErr))
+				}
+				if observer, ok := rw.(ext.ResponseFeedbackObserver); ok {
+					wantsFeedback := true
+					if filter, filtered := rw.(ext.ResponseFeedbackFilter); filtered {
+						wantsFeedback = safelyWantsResponseFeedback(rw.Name(), filter, in, res)
+					}
+					if wantsFeedback {
+						feedbackObservers = append(feedbackObservers, observer)
+					}
 				}
 				if res != nil {
 					applyRewriteResponseHeaders(c, res.ResponseHeader)
@@ -78,9 +88,28 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 					c.SetRequest(req.WithContext(core.WithRewriteTokensSaved(req.Context(), tokensSaved)))
 				}
 			}
+			if len(feedbackObservers) > 0 {
+				setResponseFeedbackObservers(c, feedbackObservers)
+			}
 			return next(c)
 		}
 	}
+}
+
+// safelyWantsResponseFeedback isolates an optional extension hook from the
+// inference path. A broken filter declines feedback for this request but must
+// never prevent the provider call itself.
+func safelyWantsResponseFeedback(name string, filter ext.ResponseFeedbackFilter, in ext.Input, res *ext.Result) (wants bool) {
+	wants = true
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			wants = false
+			slog.Warn("response feedback filter panicked; feedback disabled for request",
+				"rewriter", name,
+			)
+		}
+	}()
+	return filter.WantsResponseFeedback(in, res)
 }
 
 // redactCredentialHeaders clones the request headers with credential values

@@ -1,9 +1,12 @@
 package session
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -134,17 +137,17 @@ func contentSessionID(snapshot *core.RequestSnapshot, body []byte, userPath stri
 	root := gjson.ParseBytes(body)
 	anchor := contentAnchor{
 		UserPath:     userPath,
-		Model:        rawSegment(root.Get("model")),
-		System:       rawSegment(root.Get("system")),
-		Instructions: rawSegment(root.Get("instructions")),
-		Tools:        rawSegment(root.Get("tools")),
+		Model:        canonicalSegment(root.Get("model")),
+		System:       canonicalSegment(root.Get("system")),
+		Instructions: canonicalSegment(root.Get("instructions")),
+		Tools:        canonicalSegment(root.Get("tools")),
 	}
 	messages := root.Get("messages")
 	if !messages.Exists() {
 		messages = root.Get("input")
 	}
 	if messages.Type == gjson.String {
-		anchor.Opening = []json.RawMessage{rawSegment(messages)}
+		anchor.Opening = []json.RawMessage{canonicalSegment(messages)}
 	} else {
 		anchor.Opening = openingMessages(messages)
 	}
@@ -170,7 +173,7 @@ const maxOpeningMessages = 8
 func openingMessages(messages gjson.Result) []json.RawMessage {
 	var opening []json.RawMessage
 	messages.ForEach(func(_, message gjson.Result) bool {
-		opening = append(opening, rawSegment(message))
+		opening = append(opening, canonicalSegment(message))
 		if message.Get("role").Str == "user" || len(opening) >= maxOpeningMessages {
 			return false
 		}
@@ -186,4 +189,42 @@ func rawSegment(result gjson.Result) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(strings.Clone(result.Raw))
+}
+
+// canonicalSegment gives semantically equivalent JSON the same session
+// anchor. In particular, object-key order, insignificant whitespace, and
+// equivalent string escapes must not split one conversation into multiple
+// auto-detected sessions. UseNumber preserves number spelling/precision while
+// arrays retain their original order.
+func canonicalSegment(result gjson.Result) json.RawMessage {
+	raw := rawSegment(result)
+	if len(raw) == 0 {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return raw
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return raw
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return raw
+	}
+	return canonical
+}
+
+func ensureJSONEOF(decoder *json.Decoder) error {
+	var trailing any
+	err := decoder.Decode(&trailing)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err == nil {
+		return errors.New("multiple JSON values")
+	}
+	return err
 }

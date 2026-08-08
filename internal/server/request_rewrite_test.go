@@ -15,12 +15,31 @@ import (
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/session"
 )
 
 type stubRewriter struct {
 	name    string
 	calls   int
 	rewrite func(in ext.Input) (*ext.Result, error)
+}
+
+type feedbackRewriter struct {
+	stubRewriter
+	feedbackCaptureObserver
+}
+
+type filteredFeedbackRewriter struct {
+	feedbackRewriter
+	want        bool
+	panicFilter bool
+}
+
+func (r *filteredFeedbackRewriter) WantsResponseFeedback(ext.Input, *ext.Result) bool {
+	if r.panicFilter {
+		panic("feedback filter failed")
+	}
+	return r.want
 }
 
 func (r *stubRewriter) Name() string { return r.name }
@@ -116,6 +135,84 @@ func TestRequestRewriteMiddlewareRewritesChatCompletions(t *testing.T) {
 	}
 	if seenPlain != "trace-1" {
 		t.Errorf("rewriter saw X-Custom-Trace %q, want original value", seenPlain)
+	}
+}
+
+func TestRequestRewriteMiddlewareDeliversProviderFeedback(t *testing.T) {
+	provider := newRewriteTestProvider()
+	provider.response.Usage = core.Usage{
+		PromptTokens:        2048,
+		PromptTokensDetails: &core.PromptTokensDetails{CachedTokens: 1536},
+	}
+	rewriter := &feedbackRewriter{stubRewriter: stubRewriter{name: "feedback"}}
+	srv := New(provider, &Config{
+		RequestRewriters: []ext.RequestRewriter{rewriter},
+		SessionDetector:  session.NewDetector(session.BuiltinRules(), false),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Session-Id", "feedback-session")
+	req.Header.Set("X-Request-Id", "feedback-request")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if len(rewriter.feedback) != 1 {
+		t.Fatalf("feedback count = %d, want 1", len(rewriter.feedback))
+	}
+	got := rewriter.feedback[0]
+	if got.requestID != "feedback-request" || got.sessionID != "feedback-session" || got.cacheRead != 1536 || !got.usageObserved {
+		t.Fatalf("feedback = %+v", got)
+	}
+}
+
+func TestRequestRewriteMiddlewareHonorsResponseFeedbackFilter(t *testing.T) {
+	for _, want := range []bool{false, true} {
+		rewriter := &filteredFeedbackRewriter{
+			feedbackRewriter: feedbackRewriter{stubRewriter: stubRewriter{name: "filtered"}},
+			want:             want,
+		}
+		var attached bool
+		next := func(c *echo.Context) error {
+			attached = hasResponseFeedbackObservers(c)
+			return c.NoContent(http.StatusOK)
+		}
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+			strings.NewReader(`{"model":"gpt-4o-mini","messages":[]}`))
+		c := e.NewContext(req, httptest.NewRecorder())
+		if err := RequestRewriteMiddleware([]ext.RequestRewriter{rewriter}, nil)(next)(c); err != nil {
+			t.Fatalf("want=%v: middleware: %v", want, err)
+		}
+		if attached != want {
+			t.Fatalf("want=%v: attached=%v", want, attached)
+		}
+	}
+}
+
+func TestRequestRewriteMiddlewareIsolatesResponseFeedbackFilterPanic(t *testing.T) {
+	provider := newRewriteTestProvider()
+	rewriter := &filteredFeedbackRewriter{
+		feedbackRewriter: feedbackRewriter{stubRewriter: stubRewriter{name: "panicking-filter"}},
+		panicFilter:      true,
+	}
+	srv := New(provider, &Config{RequestRewriters: []ext.RequestRewriter{rewriter}})
+
+	rec := postJSON(t, srv, "/v1/chat/completions",
+		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body.String())
+	}
+	if provider.capturedChatReq == nil {
+		t.Fatal("provider was not called after feedback filter panic")
+	}
+	if len(rewriter.feedback) != 0 {
+		t.Fatalf("feedback count = %d, want 0 after filter panic", len(rewriter.feedback))
 	}
 }
 

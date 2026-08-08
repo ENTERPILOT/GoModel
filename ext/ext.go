@@ -81,6 +81,45 @@ type RequestRewriter interface {
 	Rewrite(ctx context.Context, in Input) (*Result, error)
 }
 
+// ResponseFeedbackObserver receives content-free feedback after a rewritten
+// request completes successfully at a provider. For ordinary responses the
+// callback runs after the provider returns; for streaming responses it runs
+// after the stream closes. Failed requests do not produce feedback.
+//
+// It is an optional companion to RequestRewriter: core detects implementations
+// structurally. usageObserved distinguishes a provider-confirmed zero from a
+// provider or stream that returned no usage breakdown. Implementations can be
+// called concurrently, must therefore be concurrency-safe, and must return
+// promptly so they do not delay completion of the client request.
+//
+// The flat signature intentionally uses only long-standing extension types so
+// extensions can implement the hook while supporting older core releases;
+// older cores simply never call it.
+type ResponseFeedbackObserver interface {
+	ObserveResponse(
+		ctx context.Context,
+		requestID string,
+		endpoint Endpoint,
+		sessionID string,
+		model string,
+		providerType string,
+		providerName string,
+		inputTokens int,
+		cachedInputTokens int,
+		cacheWriteInputTokens int,
+		usageObserved bool,
+	)
+}
+
+// ResponseFeedbackFilter lets an observer control registration per request.
+// Core calls it after Rewrite and registers the observer only when it returns
+// true. Observers without this optional interface receive feedback for every
+// successful rewritten request. A panic is isolated and treated as false so
+// this optional hook cannot abort inference.
+type ResponseFeedbackFilter interface {
+	WantsResponseFeedback(in Input, result *Result) bool
+}
+
 // SettingOption is one allowed value for a dashboard-editable extension
 // setting. Label and Description are safe to expose in the admin UI.
 type SettingOption struct {
