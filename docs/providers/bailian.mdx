@@ -75,7 +75,9 @@ GoModel transparently maps the standard `max_tokens` parameter to
 `max_tokens` as you normally would, and GoModel rewrites it before forwarding to
 Model Studio.
 
-```bash
+<CodeGroup>
+
+```bash curl
 # max_tokens=4096 is automatically sent as max_completion_tokens=4096
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -85,6 +87,41 @@ curl http://localhost:8080/v1/chat/completions \
     "max_tokens": 4096
   }'
 ```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="unused")
+
+# max_tokens=4096 is automatically sent as max_completion_tokens=4096
+completion = client.chat.completions.create(
+    model="qwen3-max",
+    messages=[{"role": "user", "content": "Hello"}],
+    max_tokens=4096,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "unused",
+});
+
+// max_tokens=4096 is automatically sent as max_completion_tokens=4096
+const completion = await client.chat.completions.create({
+  model: "qwen3-max",
+  messages: [{ role: "user", content: "Hello" }],
+  max_tokens: 4096,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
 
 ## Supported features
 

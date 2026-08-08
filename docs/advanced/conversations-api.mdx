@@ -98,7 +98,9 @@ idempotency mechanism when duplicate calls have material cost or side effects.
 
 Create a conversation:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/conversations \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -107,16 +109,79 @@ curl http://localhost:8080/v1/conversations \
   }'
 ```
 
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+conversation = client.conversations.create(metadata={"topic": "support"})
+print(conversation.id)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const conversation = await client.conversations.create({
+  metadata: { topic: "support" },
+});
+
+console.log(conversation.id);
+```
+
+</CodeGroup>
+
 Retrieve it:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/conversations/conv_abc123 \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+conversation = client.conversations.retrieve("conv_abc123")
+print(conversation)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const conversation = await client.conversations.retrieve("conv_abc123");
+console.log(conversation);
+```
+
+</CodeGroup>
+
 Update its metadata (existing keys not supplied here are retained):
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/conversations/conv_abc123 \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -125,9 +190,45 @@ curl http://localhost:8080/v1/conversations/conv_abc123 \
   }'
 ```
 
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+conversation = client.conversations.update(
+    "conv_abc123",
+    metadata={"topic": "billing"},
+)
+print(conversation)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const conversation = await client.conversations.update("conv_abc123", {
+  metadata: { topic: "billing" },
+});
+
+console.log(conversation);
+```
+
+</CodeGroup>
+
 Add advanced Responses items:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl 'http://localhost:8080/v1/conversations/conv_abc123/items?include=reasoning.encrypted_content' \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -148,16 +249,147 @@ curl 'http://localhost:8080/v1/conversations/conv_abc123/items?include=reasoning
   }'
 ```
 
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+items = client.conversations.items.create(
+    "conv_abc123",
+    include=["reasoning.encrypted_content"],
+    items=[
+        {
+            "type": "function_call",
+            "call_id": "call_lookup_1",
+            "name": "lookup_order",
+            "arguments": '{"order_id":"A-42"}',
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_lookup_1",
+            "output": '{"status":"shipped"}',
+        },
+    ],
+)
+
+print(items)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const items = await client.conversations.items.create("conv_abc123", {
+  include: ["reasoning.encrypted_content"],
+  items: [
+    {
+      type: "function_call",
+      call_id: "call_lookup_1",
+      name: "lookup_order",
+      arguments: '{"order_id":"A-42"}',
+    },
+    {
+      type: "function_call_output",
+      call_id: "call_lookup_1",
+      output: '{"status":"shipped"}',
+    },
+  ],
+});
+
+console.log(items);
+```
+
+</CodeGroup>
+
 List the next page in chronological order:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl 'http://localhost:8080/v1/conversations/conv_abc123/items?order=asc&limit=10&after=msg_abc123' \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+for item in client.conversations.items.list(
+    "conv_abc123",
+    order="asc",
+    limit=10,
+    after="msg_abc123",
+):
+    print(item)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+for await (const item of client.conversations.items.list("conv_abc123", {
+  order: "asc",
+  limit: 10,
+  after: "msg_abc123",
+})) {
+  console.log(item);
+}
+```
+
+</CodeGroup>
+
 Delete it:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X DELETE http://localhost:8080/v1/conversations/conv_abc123 \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+deleted = client.conversations.delete("conv_abc123")
+print(deleted.deleted)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const deleted = await client.conversations.delete("conv_abc123");
+console.log(deleted.deleted);
+```
+
+</CodeGroup>

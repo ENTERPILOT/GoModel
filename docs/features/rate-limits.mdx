@@ -237,15 +237,48 @@ x-ratelimit-reset-tokens: 42
 
 ## Admin API
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   http://localhost:8080/admin/rate-limits
 ```
 
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+rate_limits = client.get("/admin/rate-limits", cast_to=httpx.Response)
+
+print(rate_limits.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const rateLimits = await client.get("/admin/rate-limits");
+console.log(rateLimits);
+```
+
+</CodeGroup>
+
 Create or update a rule (`user_path` is shorthand for
 `"scope": "user_path", "subject": ...`):
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X PUT http://localhost:8080/admin/rate-limits \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -257,9 +290,57 @@ curl -X PUT http://localhost:8080/admin/rate-limits \
   }'
 ```
 
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+rate_limit = client.put(
+    "/admin/rate-limits",
+    cast_to=httpx.Response,
+    body={
+        "user_path": "/team/alpha",
+        "limit_key": {"period": "minute"},
+        "max_requests": 100,
+        "max_tokens": 50000,
+    },
+)
+
+print(rate_limit.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const rateLimit = await client.put("/admin/rate-limits", {
+  body: {
+    user_path: "/team/alpha",
+    limit_key: { period: "minute" },
+    max_requests: 100,
+    max_tokens: 50000,
+  },
+});
+
+console.log(rateLimit);
+```
+
+</CodeGroup>
+
 Provider and model rules name their subject explicitly:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X PUT http://localhost:8080/admin/rate-limits \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -271,14 +352,106 @@ curl -X PUT http://localhost:8080/admin/rate-limits \
   }'
 ```
 
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+rate_limit = client.put(
+    "/admin/rate-limits",
+    cast_to=httpx.Response,
+    body={
+        "scope": "provider",
+        "subject": "openai",
+        "limit_key": {"period": "minute"},
+        "max_requests": 500,
+    },
+)
+
+print(rate_limit.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const rateLimit = await client.put("/admin/rate-limits", {
+  body: {
+    scope: "provider",
+    subject: "openai",
+    limit_key: { period: "minute" },
+    max_requests: 500,
+  },
+});
+
+console.log(rateLimit);
+```
+
+</CodeGroup>
+
 Delete a rule:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X DELETE http://localhost:8080/admin/rate-limits \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"scope": "provider", "subject": "openai", "limit_key": {"period": "minute"}}'
 ```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+deleted = client.delete(
+    "/admin/rate-limits",
+    cast_to=httpx.Response,
+    body={
+        "scope": "provider",
+        "subject": "openai",
+        "limit_key": {"period": "minute"},
+    },
+)
+
+print(deleted.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const deleted = await client.delete("/admin/rate-limits", {
+  body: {
+    scope: "provider",
+    subject: "openai",
+    limit_key: { period: "minute" },
+  },
+});
+
+console.log(deleted);
+```
+
+</CodeGroup>
 
 Reset live counters for one rule (`POST /admin/rate-limits/reset-one` with
 `{"scope": ..., "subject": ..., "period": ...}`) or for all rules

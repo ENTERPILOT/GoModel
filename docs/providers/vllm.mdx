@@ -55,7 +55,9 @@ make build
 
 ## Verify
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
@@ -64,6 +66,37 @@ curl -s http://localhost:8080/v1/chat/completions \
     "messages": [{"role": "user", "content": "Reply with exactly ok."}]
   }'
 ```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="vllm/meta-llama/Llama-3.1-8B-Instruct",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "vllm/meta-llama/Llama-3.1-8B-Instruct",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
 
 `GET /v1/models` returns vLLM's model IDs prefixed by provider name, e.g.
 `vllm/meta-llama/Llama-3.1-8B-Instruct`.
@@ -85,12 +118,52 @@ VLLM_TEST_BASE_URL=http://host.docker.internal:8001/v1
 Passthrough is enabled by default. Use it for vLLM-specific endpoints such as
 `/tokenize`, `/detokenize`, `/pooling`, `/rerank`:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/p/vllm/tokenize \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
   -d '{"model": "meta-llama/Llama-3.1-8B-Instruct", "prompt": "Hello"}'
 ```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="change-me")
+tokens = client.post(
+    "/p/vllm/tokenize",
+    cast_to=httpx.Response,
+    body={
+        "model": "meta-llama/Llama-3.1-8B-Instruct",
+        "prompt": "Hello",
+    },
+)
+
+print(tokens.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const tokens = await client.post("/p/vllm/tokenize", {
+  body: {
+    model: "meta-llama/Llama-3.1-8B-Instruct",
+    prompt: "Hello",
+  },
+});
+
+console.log(tokens);
+```
+
+</CodeGroup>
 
 GoModel strips client auth headers before forwarding and applies `VLLM_API_KEY`
 to upstream requests when configured.

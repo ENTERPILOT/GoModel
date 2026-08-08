@@ -54,7 +54,9 @@ make build
 
 ## Verify
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -64,6 +66,44 @@ curl -s http://localhost:8080/v1/chat/completions \
     "max_tokens": 80
   }'
 ```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="anthropic.claude-3-5-haiku-20241022-v1:0",
+    messages=[{"role": "user", "content": "Reply with the single word ok."}],
+    max_tokens=80,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "anthropic.claude-3-5-haiku-20241022-v1:0",
+  messages: [{ role: "user", content: "Reply with the single word ok." }],
+  max_tokens: 80,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
 
 `GET /v1/models` returns Bedrock models with `owned_by` set to the originating
 vendor (e.g. `anthropic`, `amazon`). Streaming (`stream: true`) and the

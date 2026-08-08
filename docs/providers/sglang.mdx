@@ -62,7 +62,9 @@ make build
 
 ## Verify
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
@@ -72,6 +74,39 @@ curl -s http://localhost:8080/v1/chat/completions \
     "max_tokens": 8
   }'
 ```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="sglang/Qwen/Qwen2.5-0.5B-Instruct",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+    max_tokens=8,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "sglang/Qwen/Qwen2.5-0.5B-Instruct",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+  max_tokens: 8,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
 
 `GET /v1/models` returns SGLang model IDs prefixed by provider name, for
 example `sglang/Qwen/Qwen2.5-0.5B-Instruct`.
@@ -94,7 +129,9 @@ underscores become hyphens.
 Passthrough is enabled by default. Root-relative SGLang endpoints such as
 `/generate` are sent without the configured `/v1` prefix:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/p/sglang/generate \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
@@ -103,6 +140,44 @@ curl -s http://localhost:8080/p/sglang/generate \
     "sampling_params": {"max_new_tokens": 8}
   }'
 ```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="change-me")
+generation = client.post(
+    "/p/sglang/generate",
+    cast_to=httpx.Response,
+    body={
+        "text": "Hello",
+        "sampling_params": {"max_new_tokens": 8},
+    },
+)
+
+print(generation.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const generation = await client.post("/p/sglang/generate", {
+  body: {
+    text: "Hello",
+    sampling_params: { max_new_tokens: 8 },
+  },
+});
+
+console.log(generation);
+```
+
+</CodeGroup>
 
 Keep the explicit `v1/` segment for SGLang endpoints that include it, such as
 `/v1/rerank` or `/v1/tokenize`:

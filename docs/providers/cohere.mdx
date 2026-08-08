@@ -34,7 +34,9 @@ model discovery with `COHERE_MODELS`.
 
 Use a Cohere Command model with either OpenAI-compatible endpoint:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer $GOMODEL_API_KEY" \
   -H "Content-Type: application/json" \
@@ -43,6 +45,42 @@ curl http://localhost:8080/v1/chat/completions \
     "messages": [{"role": "user", "content": "Explain vector search briefly"}]
   }'
 ```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="command-a-plus-05-2026",
+    messages=[{"role": "user", "content": "Explain vector search briefly"}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_API_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "command-a-plus-05-2026",
+  messages: [{ role: "user", content: "Explain vector search briefly" }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
 
 Chat streaming, system and developer messages, image URL parts, JSON response
 formats, tool definitions, tool calls, and tool results are translated to the
@@ -68,7 +106,9 @@ Cohere audio uses a dedicated speech-to-text model and endpoint; Command chat
 models do not accept audio content mixed into Chat Completions or Responses.
 Transcribe audio through the OpenAI-compatible endpoint:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/audio/transcriptions \
   -H "Authorization: Bearer $GOMODEL_API_KEY" \
   -F "model=cohere/cohere-transcribe-03-2026" \
@@ -76,6 +116,48 @@ curl http://localhost:8080/v1/audio/transcriptions \
   -F "response_format=json" \
   -F "file=@recording.wav"
 ```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+)
+
+with open("recording.wav", "rb") as audio_file:
+    transcription = client.audio.transcriptions.create(
+        file=audio_file,
+        model="cohere/cohere-transcribe-03-2026",
+        language="en",
+        response_format="json",
+    )
+
+print(transcription.text)
+```
+
+```javascript JavaScript
+import { createReadStream } from "node:fs";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_API_KEY,
+});
+
+const transcription = await client.audio.transcriptions.create({
+  file: createReadStream("recording.wav"),
+  model: "cohere/cohere-transcribe-03-2026",
+  language: "en",
+  response_format: "json",
+});
+
+console.log(transcription.text);
+```
+
+</CodeGroup>
 
 The Cohere transcription API requires `language` and returns JSON. GoModel
 accepts the OpenAI-compatible `response_format=json` field but omits it from the
@@ -88,7 +170,9 @@ transcription.
 GoModel supplies Cohere's required embedding fields while retaining the
 OpenAI request shape:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/embeddings \
   -H "Authorization: Bearer $GOMODEL_API_KEY" \
   -H "Content-Type: application/json" \
@@ -99,6 +183,46 @@ curl http://localhost:8080/v1/embeddings \
     "input_type": "search_document"
   }'
 ```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+)
+
+embeddings = client.embeddings.create(
+    model="embed-v4.0",
+    input=["first document", "second document"],
+    dimensions=1024,
+    extra_body={"input_type": "search_document"},
+)
+
+print(embeddings.data[0].embedding)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_API_KEY,
+});
+
+const embeddings = await client.embeddings.create({
+  model: "embed-v4.0",
+  input: ["first document", "second document"],
+  dimensions: 1024,
+  input_type: "search_document",
+});
+
+console.log(embeddings.data[0].embedding);
+```
+
+</CodeGroup>
 
 `input_type` defaults to `search_document`. Set it to `search_query`,
 `classification`, or `clustering` when that better describes the input.

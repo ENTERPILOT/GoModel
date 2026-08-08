@@ -106,7 +106,9 @@ code identifies the unsupported operation, returned with HTTP `501 Not Implement
 
 Create a response:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/responses \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -116,16 +118,113 @@ curl http://localhost:8080/v1/responses \
   }'
 ```
 
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+response = client.responses.create(
+    model="gpt-5-mini",
+    input="Write one short sentence about reliable gateways.",
+)
+
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const response = await client.responses.create({
+  model: "gpt-5-mini",
+  input: "Write one short sentence about reliable gateways.",
+});
+
+console.log(response.output_text);
+```
+
+</CodeGroup>
+
 Retrieve it later:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/responses/resp_abc123 \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+response = client.responses.retrieve("resp_abc123")
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const response = await client.responses.retrieve("resp_abc123");
+console.log(response.output_text);
+```
+
+</CodeGroup>
+
 List its stored input items:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/responses/resp_abc123/input_items \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+for item in client.responses.input_items.list("resp_abc123"):
+    print(item)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+for await (const item of client.responses.inputItems.list("resp_abc123")) {
+  console.log(item);
+}
+```
+
+</CodeGroup>
