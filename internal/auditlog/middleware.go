@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -206,6 +207,14 @@ func applyAuthentication(entry *LogEntry, ctx context.Context) {
 	}
 	if authKeyID := strings.TrimSpace(core.GetAuthKeyID(ctx)); authKeyID != "" {
 		entry.AuthKeyID = authKeyID
+	}
+	if authentication, ok := ext.AuthenticationFromContext(ctx); ok {
+		if principalID := strings.TrimSpace(authentication.PrincipalID); principalID != "" {
+			entry.PrincipalID = principalID
+		}
+		if authMethod := NormalizeAuthMethod(authentication.Method); authMethod != "" {
+			entry.AuthMethod = authMethod
+		}
 	}
 	if userPath := strings.TrimSpace(core.UserPathFromContext(ctx)); userPath != "" {
 		entry.UserPath = userPath

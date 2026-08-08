@@ -11,13 +11,22 @@ import (
 // Register everything before the server is constructed (before run.Run or
 // app.New); core snapshots each registration list during initialization.
 type Registry struct {
-	mu            sync.Mutex
-	rewriters     []RequestRewriter
-	middleware    []echo.MiddlewareFunc
-	routes        []func(*echo.Echo)
-	publicPaths   []string
-	routeSelector RouteSelector
-	settings      []RuntimeSetting
+	mu             sync.Mutex
+	rewriters      []RequestRewriter
+	middleware     []echo.MiddlewareFunc
+	routes         []func(*echo.Echo)
+	publicPaths    []string
+	routeSelector  RouteSelector
+	settings       []RuntimeSetting
+	authenticators []RequestAuthenticator
+}
+
+// RegisterAuthenticator adds a request authentication mechanism. Core bearer
+// tokens keep precedence when a request explicitly supplies one.
+func (r *Registry) RegisterAuthenticator(authenticator RequestAuthenticator) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.authenticators = append(r.authenticators, authenticator)
 }
 
 // RegisterSetting adds a deployment-wide setting exposed through the generic
@@ -112,6 +121,13 @@ func (r *Registry) Settings() []RuntimeSetting {
 	return slices.Clone(r.settings)
 }
 
+// Authenticators returns a defensive copy of registered request authenticators.
+func (r *Registry) Authenticators() []RequestAuthenticator {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.authenticators)
+}
+
 // Default is the process-wide registry used by package-level helpers and, by
 // default, by run.Run.
 var Default = &Registry{}
@@ -133,3 +149,8 @@ func RegisterRouteSelector(sel RouteSelector) { Default.RegisterRouteSelector(se
 
 // RegisterSetting registers a runtime setting on the Default registry.
 func RegisterSetting(setting RuntimeSetting) { Default.RegisterSetting(setting) }
+
+// RegisterAuthenticator registers a request authenticator on the Default registry.
+func RegisterAuthenticator(authenticator RequestAuthenticator) {
+	Default.RegisterAuthenticator(authenticator)
+}

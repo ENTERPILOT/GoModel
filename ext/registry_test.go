@@ -2,6 +2,7 @@ package ext
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"testing"
 
@@ -11,6 +12,14 @@ import (
 )
 
 type namedRewriter struct{ name string }
+
+type namedAuthenticator struct{ name string }
+
+func (a *namedAuthenticator) Name() string { return a.name }
+
+func (a *namedAuthenticator) AuthenticateRequest(context.Context, *http.Request) (*Authentication, error) {
+	return nil, nil
+}
 
 type testRuntimeSetting struct{ value string }
 
@@ -67,6 +76,17 @@ func TestRegistryCollectsMiddlewareAndRoutes(t *testing.T) {
 
 	assert.Len(t, reg.Middleware(), 1)
 	assert.Len(t, reg.Routes(), 1)
+}
+
+func TestRegistryCollectsRequestAuthenticators(t *testing.T) {
+	reg := &Registry{}
+	reg.RegisterAuthenticator(&namedAuthenticator{name: "oidc"})
+
+	snapshot := reg.Authenticators()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, "oidc", snapshot[0].Name())
+	reg.RegisterAuthenticator(&namedAuthenticator{name: "other"})
+	assert.Len(t, snapshot, 1, "earlier snapshot must not grow")
 }
 
 func TestRegistryCollectsRuntimeSettings(t *testing.T) {

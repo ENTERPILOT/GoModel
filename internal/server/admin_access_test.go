@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/admin"
 )
 
@@ -98,4 +99,53 @@ func TestAdminGate_LockoutRecoveryPathStaysOpen(t *testing.T) {
 
 	status, _ := adminGateStatus(t, srv, "/admin/auth-keys", "")
 	assert.Equal(t, http.StatusServiceUnavailable, status)
+}
+
+func TestAdminGate_RequestAuthenticatorDisablesAnonymousRecoveryBypass(t *testing.T) {
+	tests := []struct {
+		name       string
+		identity   *ext.Authentication
+		wantStatus int
+	}{
+		{name: "anonymous", wantStatus: http.StatusUnauthorized},
+		{
+			name:       "identity without dashboard access",
+			identity:   &ext.Authentication{PrincipalID: "principal-1", UserPath: "/users/one", Method: "oidc"},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "identity with dashboard access",
+			identity:   &ext.Authentication{PrincipalID: "principal-1", UserPath: "/users/one", Method: "oidc", DashboardAccess: true},
+			wantStatus: http.StatusServiceUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := New(&mockProvider{}, &Config{
+				AdminEndpointsEnabled: true,
+				AdminHandler:          admin.NewHandler(nil, nil),
+				RequestAuthenticators: []ext.RequestAuthenticator{&mockRequestAuthenticator{result: tt.identity}},
+			})
+			status, body := adminGateStatus(t, srv, "/admin/auth-keys", "")
+			assert.Equal(t, tt.wantStatus, status)
+			if tt.wantStatus == http.StatusForbidden {
+				errObj, ok := body["error"].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "identity does not have dashboard access", errObj["message"])
+			}
+		})
+	}
+}
+
+func TestAdminGate_NilRequestAuthenticatorsKeepRecoveryBypass(t *testing.T) {
+	var typedNil *mockRequestAuthenticator
+	for _, authenticators := range [][]ext.RequestAuthenticator{{nil}, {typedNil}} {
+		srv := New(&mockProvider{}, &Config{
+			AdminEndpointsEnabled: true,
+			AdminHandler:          admin.NewHandler(nil, nil),
+			RequestAuthenticators: authenticators,
+		})
+		status, _ := adminGateStatus(t, srv, "/admin/auth-keys", "")
+		assert.Equal(t, http.StatusServiceUnavailable, status)
+	}
 }

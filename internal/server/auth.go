@@ -5,10 +5,12 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -26,11 +28,19 @@ type BearerTokenAuthenticator interface {
 // key service. If no auth mechanism is configured, no authentication is
 // required. skipPaths is a list of paths that should bypass authentication.
 func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerTokenAuthenticator, skipPaths []string, userPathHeader ...string) echo.MiddlewareFunc {
+	return AuthMiddlewareWithRequestAuthenticators(masterKey, authenticator, nil, skipPaths, userPathHeader...)
+}
+
+// AuthMiddlewareWithRequestAuthenticators additionally accepts extension
+// authenticators such as OIDC sessions. Explicit bearer credentials always
+// take precedence over ambient request credentials such as cookies.
+func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator BearerTokenAuthenticator, requestAuthenticators []ext.RequestAuthenticator, skipPaths []string, userPathHeader ...string) echo.MiddlewareFunc {
 	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
+	hasRequestAuthenticator := hasRequestAuthenticators(requestAuthenticators)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			// If no auth mechanism is configured, allow all requests.
-			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) {
+			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && !hasRequestAuthenticator {
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
 				setInteractionContinuationAllowed(c, true)
 				return next(c)
@@ -53,43 +63,139 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 			}
 
 			token, tokenErr := requestAuthToken(c.Request())
-			if tokenErr != "" {
-				authErr := authenticationError(c, tokenErr)
-				return writeGatewayError(c, authErr)
-			}
-			if masterKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(masterKey)) == 1 {
-				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodMasterKey)
-				setInteractionContinuationAllowed(c, true)
-				return next(c)
-			}
-
-			if authenticator != nil && authenticator.Enabled() {
-				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodAPIKey)
-				authResult, err := authenticator.Authenticate(c.Request().Context(), token)
-				if err == nil {
-					applyAuthKeyResult(c, authResult, userPathHeaderName)
+			hasExplicitCredential := c.Request().Header.Get("Authorization") != "" || c.Request().Header.Get("x-api-key") != ""
+			if hasExplicitCredential {
+				// Explicit credentials take precedence over ambient extension
+				// sessions. Hide every identity value installed by outer extension
+				// middleware before validating the selected credential; clearing only
+				// the response header would leave downstream context consumers scoped
+				// to the wrong principal.
+				setAuthenticationUserHeader(c, "")
+				ctx := ext.WithoutAuthentication(c.Request().Context())
+				ctx = core.WithEffectiveUserPath(ctx, "")
+				c.SetRequest(c.Request().WithContext(ctx))
+				if tokenErr != "" {
+					authErr := authenticationError(c, tokenErr)
+					return writeGatewayError(c, authErr)
+				}
+				if masterKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(masterKey)) == 1 {
+					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodMasterKey)
+					setInteractionContinuationAllowed(c, true)
 					return next(c)
 				}
 
-				authErr := authenticationErrorWithAudit(c, authFailureMessage(err), "authentication failed")
-				return writeGatewayError(c, authErr)
+				if authenticator != nil && authenticator.Enabled() {
+					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodAPIKey)
+					authResult, err := authenticator.Authenticate(c.Request().Context(), token)
+					if err == nil {
+						applyAuthKeyResult(c, authResult, userPathHeaderName)
+						return next(c)
+					}
+
+					authErr := authenticationErrorWithAudit(c, authFailureMessage(err), "authentication failed")
+					return writeGatewayError(c, authErr)
+				}
+				message := "invalid credentials"
+				if masterKey != "" && (authenticator == nil || !authenticator.Enabled()) {
+					message = "invalid master key"
+				}
+				return writeGatewayError(c, authenticationError(c, message))
 			}
 
-			authErr := authenticationError(c, "invalid master key")
+			for _, requestAuthenticator := range requestAuthenticators {
+				if requestAuthenticatorIsNil(requestAuthenticator) {
+					continue
+				}
+				result, err := requestAuthenticator.AuthenticateRequest(c.Request().Context(), c.Request())
+				if err != nil {
+					return writeGatewayError(c, extensionAuthenticationError(c))
+				}
+				if result == nil {
+					continue
+				}
+				if err := applyExtensionAuthResult(c, result, userPathHeaderName); err != nil {
+					return writeGatewayError(c, extensionAuthenticationError(c))
+				}
+				return next(c)
+			}
+
+			authErr := authenticationError(c, tokenErr)
 			return writeGatewayError(c, authErr)
 		}
 	}
 }
 
+func hasRequestAuthenticators(authenticators []ext.RequestAuthenticator) bool {
+	for _, authenticator := range authenticators {
+		if !requestAuthenticatorIsNil(authenticator) {
+			return true
+		}
+	}
+	return false
+}
+
+func requestAuthenticatorIsNil(authenticator ext.RequestAuthenticator) bool {
+	if authenticator == nil {
+		return true
+	}
+	value := reflect.ValueOf(authenticator)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userPathHeaderName string) error {
+	if result == nil {
+		return errors.New("extension authenticator returned no identity")
+	}
+	principalID := strings.TrimSpace(result.PrincipalID)
+	if principalID == "" {
+		return errors.New("extension authenticator returned an empty principal id")
+	}
+	userPath, err := core.NormalizeUserPath(result.UserPath)
+	if err != nil {
+		return err
+	}
+	normalized := *result
+	normalized.PrincipalID = principalID
+	normalized.UserPath = userPath
+	normalized.Method = auditlog.NormalizeAuthMethod(result.Method)
+	if normalized.Method == "" {
+		normalized.Method = auditlog.AuthMethodExtension
+	}
+	ctx := context.WithValue(c.Request().Context(), managedDashboardAccessKey{}, normalized.DashboardAccess)
+	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, normalized.DashboardAccess)
+	ctx = ext.WithAuthentication(ctx, normalized)
+	if len(normalized.Labels) > 0 {
+		ctx = core.WithRequestLabels(ctx, core.MergeLabels(core.RequestLabelsFromContext(ctx), normalized.Labels))
+	}
+	if userPath != "" {
+		ctx = core.WithEffectiveUserPath(ctx, userPath)
+		ctx = core.WithUserPathHeaderName(ctx, userPathHeaderName)
+		if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
+			ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPathHeader(userPath, userPathHeaderName))
+		}
+		c.Request().Header.Set(userPathHeaderName, userPath)
+		auditlog.EnrichEntryWithUserPath(c, userPath)
+	}
+	c.SetRequest(c.Request().WithContext(ctx))
+	setAuthenticationUserHeader(c, userPath)
+	auditlog.EnrichEntryWithAuthMethod(c, normalized.Method)
+	auditlog.EnrichEntryWithPrincipalID(c, normalized.PrincipalID)
+	return nil
+}
+
 // AdminAccessMiddleware denies admin API requests authenticated with a
-// managed key that lacks dashboard access. Master-key requests and requests
-// that skipped authentication (the no-master-key lockout recovery path) pass
-// through unchanged.
+// managed key or extension identity that lacks dashboard access. Master-key
+// requests and requests that skipped authentication pass through unchanged.
 func AdminAccessMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			if allowed, isManagedKey := managedDashboardAccess(c.Request().Context()); isManagedKey && !allowed {
-				const message = "API key does not have dashboard access"
+				const message = "identity does not have dashboard access"
 				auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message)
 				gatewayErr := (&core.GatewayError{
 					Type:       core.ErrorTypeAuthentication,
@@ -101,6 +207,15 @@ func AdminAccessMiddleware() echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+func extensionAuthenticationError(c *echo.Context) *core.GatewayError {
+	const (
+		message = "authentication failed"
+		code    = "extension_authentication_failed"
+	)
+	auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message, code)
+	return core.NewAuthenticationError("", message).WithCode(code)
 }
 
 // requestAuthToken extracts the caller's credential from the request. The
@@ -171,7 +286,15 @@ func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResul
 		auditlog.EnrichEntryWithUserPath(c, userPath)
 	}
 	c.SetRequest(c.Request().WithContext(ctx))
+	setAuthenticationUserHeader(c, strings.TrimSpace(authResult.UserPath))
 	auditlog.EnrichEntryWithAuthKeyID(c, authResult.ID)
+}
+
+func setAuthenticationUserHeader(c *echo.Context, userPath string) {
+	if c == nil {
+		return
+	}
+	c.Response().Header().Set(ext.AuthenticationUserHeader, strings.TrimSpace(userPath))
 }
 
 func authFailureMessage(err error) string {

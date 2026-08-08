@@ -536,3 +536,10 @@ providers:
   #           input_per_mtok: 0
   #           output_per_mtok: 0
   #     - Gemma4-31B
+
+# Extensions are absent by default. Add a named section only when a custom
+# distribution requires it. Core preserves these values without depending on
+# the extension's schema; the owning extension strictly validates its section.
+# extensions:
+#   example:
+#     enabled: true

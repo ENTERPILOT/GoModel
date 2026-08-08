@@ -236,15 +236,16 @@ func CreateStreamEntry(ctx context.Context, baseEntry *LogEntry) *LogEntry {
 		CacheType:         baseEntry.CacheType,
 		StatusCode:        baseEntry.StatusCode,
 		// Copy extracted fields
-		RequestID:  baseEntry.RequestID,
-		AuthKeyID:  baseEntry.AuthKeyID,
-		AuthMethod: baseEntry.AuthMethod,
-		ClientIP:   baseEntry.ClientIP,
-		Method:     baseEntry.Method,
-		Path:       baseEntry.Path,
-		UserPath:   baseEntry.UserPath,
-		SessionID:  baseEntry.SessionID,
-		Stream:     true, // Mark as streaming
+		RequestID:   baseEntry.RequestID,
+		PrincipalID: baseEntry.PrincipalID,
+		AuthKeyID:   baseEntry.AuthKeyID,
+		AuthMethod:  baseEntry.AuthMethod,
+		ClientIP:    baseEntry.ClientIP,
+		Method:      baseEntry.Method,
+		Path:        baseEntry.Path,
+		UserPath:    baseEntry.UserPath,
+		SessionID:   baseEntry.SessionID,
+		Stream:      true, // Mark as streaming
 	}
 
 	// This is a whitelist copy, so every request-side field of LogData must be
@@ -257,6 +258,7 @@ func CreateStreamEntry(ctx context.Context, baseEntry *LogEntry) *LogEntry {
 		entryCopy.Data = &LogData{
 			UserAgent:                 baseEntry.Data.UserAgent,
 			APIKeyHash:                baseEntry.Data.APIKeyHash,
+			EventType:                 baseEntry.Data.EventType,
 			Labels:                    baseEntry.Data.Labels,
 			Temperature:               baseEntry.Data.Temperature,
 			MaxTokens:                 baseEntry.Data.MaxTokens,

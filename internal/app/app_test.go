@@ -1,11 +1,14 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -697,6 +700,7 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
 	reg.AddPublicPaths("/sso/callback", "/sso/*")
+	reg.RegisterAuthenticator(&appTestAuthenticator{})
 
 	serverCfg := &server.Config{}
 	applyExtensions(serverCfg, reg)
@@ -713,12 +717,82 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	if len(serverCfg.ExtraAuthSkipPaths) != 2 {
 		t.Errorf("ExtraAuthSkipPaths not copied: %v", serverCfg.ExtraAuthSkipPaths)
 	}
+	if len(serverCfg.RequestAuthenticators) != 1 {
+		t.Errorf("RequestAuthenticators not copied: %v", serverCfg.RequestAuthenticators)
+	}
 
 	// A nil registry must leave the config untouched.
 	empty := &server.Config{}
 	applyExtensions(empty, nil)
-	if empty.RequestRewriters != nil || empty.ExtraMiddleware != nil || empty.ExtraRoutes != nil || empty.ExtraAuthSkipPaths != nil {
+	if empty.RequestRewriters != nil || empty.ExtraMiddleware != nil || empty.ExtraRoutes != nil || empty.ExtraAuthSkipPaths != nil || empty.RequestAuthenticators != nil {
 		t.Error("nil registry must not modify server config")
+	}
+}
+
+type appTestAuthenticator struct{}
+
+func (*appTestAuthenticator) Name() string { return "test" }
+
+func (*appTestAuthenticator) AuthenticateRequest(context.Context, *http.Request) (*ext.Authentication, error) {
+	return nil, nil
+}
+
+type recorderAwareAppAuthenticator struct {
+	recorder ext.AuthenticationEventRecorder
+}
+
+func (*recorderAwareAppAuthenticator) Name() string { return "recorder-aware" }
+
+func (*recorderAwareAppAuthenticator) AuthenticateRequest(context.Context, *http.Request) (*ext.Authentication, error) {
+	return nil, nil
+}
+
+func (a *recorderAwareAppAuthenticator) SetAuthenticationEventRecorder(recorder ext.AuthenticationEventRecorder) {
+	a.recorder = recorder
+}
+
+type appAuthenticationEventRecorder struct{}
+
+func (*appAuthenticationEventRecorder) RecordAuthenticationEvent(ext.AuthenticationEvent) {}
+
+func TestExtensionAuthenticationDetectionAndRecorderBinding(t *testing.T) {
+	if hasUsableRequestAuthenticator(nil) {
+		t.Fatal("nil registry reported extension authentication")
+	}
+
+	registry := &ext.Registry{}
+	var typedNil *appTestAuthenticator
+	registry.RegisterAuthenticator(typedNil)
+	if hasUsableRequestAuthenticator(registry) {
+		t.Fatal("typed-nil authenticator reported extension authentication")
+	}
+
+	authenticator := &recorderAwareAppAuthenticator{}
+	registry.RegisterAuthenticator(authenticator)
+	if !hasUsableRequestAuthenticator(registry) {
+		t.Fatal("usable authenticator was not detected")
+	}
+	recorder := &appAuthenticationEventRecorder{}
+	bindAuthenticationEventRecorders(registry, recorder)
+	if authenticator.recorder != recorder {
+		t.Fatal("authentication event recorder was not installed")
+	}
+}
+
+func TestLogStartupInfoTreatsExtensionAuthenticatorAsEffectiveAuth(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	app := &App{config: &config.Config{}, extensionAuth: true}
+	app.logStartupInfo()
+	output := logs.String()
+	if strings.Contains(output, "UNSAFE MODE") || strings.Contains(output, "unauthenticated access allowed") {
+		t.Fatalf("extension-authenticated startup emitted unsafe warning: %s", output)
+	}
+	if !strings.Contains(output, `mode=extension`) {
+		t.Fatalf("extension authentication mode was not logged: %s", output)
 	}
 }
 

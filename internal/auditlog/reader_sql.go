@@ -90,7 +90,7 @@ const sqliteTimestampBoundaryLayout = "2006-01-02T15:04:05"
 
 const logColumns = `id, timestamp, duration_ns, requested_model, resolved_model,
 	provider, provider_name, alias_used, workflow_version_id, cache_type, status_code,
-	request_id, auth_key_id, auth_method, client_ip, method, path, user_path, session_id,
+	request_id, principal_id, auth_key_id, auth_method, client_ip, method, path, user_path, session_id,
 	stream, error_type, data`
 
 const selectLogColumns = `SELECT ` + logColumns + `
@@ -372,6 +372,7 @@ func scanSQLLogEntry(scanner sqlx.Row) (*LogEntry, error) {
 		providerName      *string
 		workflowVersionID *string
 		cacheType         *string
+		principalID       *string
 		authKeyID         *string
 		authMethod        *string
 		userPath          *string
@@ -383,7 +384,7 @@ func scanSQLLogEntry(scanner sqlx.Row) (*LogEntry, error) {
 	if err := scanner.Scan(
 		&entry.ID, &timestamp, &entry.DurationNs, &entry.RequestedModel, &entry.ResolvedModel,
 		&entry.Provider, &providerName, &entry.AliasUsed, &workflowVersionID, &cacheType,
-		&entry.StatusCode, &entry.RequestID, &authKeyID, &authMethod, &entry.ClientIP,
+		&entry.StatusCode, &entry.RequestID, &principalID, &authKeyID, &authMethod, &entry.ClientIP,
 		&entry.Method, &entry.Path, &userPath, &sessionID, &entry.Stream, &errorType, &dataJSON,
 	); err != nil {
 		return nil, fmt.Errorf("failed to scan audit log row: %w", err)
@@ -394,6 +395,7 @@ func scanSQLLogEntry(scanner sqlx.Row) (*LogEntry, error) {
 	}
 	entry.Timestamp = timestamp.Time
 	entry.WorkflowVersionID = sqlutil.DerefTrimmed(workflowVersionID)
+	entry.PrincipalID = derefString(principalID)
 	entry.AuthKeyID = derefString(authKeyID)
 	entry.AuthMethod = derefString(authMethod)
 	entry.UserPath = derefString(userPath)

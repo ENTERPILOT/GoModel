@@ -12,7 +12,7 @@
   } from "$lib/stores/sidebar-sizing.js";
   import { gomodelPath } from "$lib/api/paths.js";
   import { NAV_ITEMS } from "./navigation.js";
-  import { LockKeyhole } from "lucide";
+  import { LockKeyhole, LogOut, UserRound } from "lucide";
 
   // Visibility gates read the runtimeConfig store, so this re-filters when
   // the flags load.
@@ -108,6 +108,24 @@
   </nav>
   <div class="sidebar-footer">
     <ThemeToggle compact={sidebar.collapsed} />
+    {#if auth.externalLogoutURL}
+      <div class="external-auth-section">
+        {#if auth.externalUser}
+          <div class="external-auth-user" title={auth.externalUser}>
+            <Icon icon={UserRound} class="api-key-open-icon" />
+            <span>{auth.externalUser}</span>
+          </div>
+        {/if}
+        <a
+          class="api-key-open-btn"
+          href={gomodelPath(auth.externalLogoutURL)}
+          aria-label="Sign out"
+        >
+          <Icon icon={LogOut} class="api-key-open-icon" />
+          <span>Sign out</span>
+        </a>
+      </div>
+    {/if}
     {#if auth.needsAuth || auth.hasApiKey()}
       <div class="api-key-section">
         <button
@@ -243,6 +261,27 @@
     gap: 8px;
   }
 
+.external-auth-section {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.external-auth-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.external-auth-user span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .api-key-open-btn {
     width: 100%;
     display: inline-flex;
@@ -329,6 +368,10 @@
     display: none;
   }
 
+.sidebar.sidebar-collapsed .sidebar-footer .external-auth-section {
+    display: none;
+}
+
 @media (max-width: 768px) {
   .sidebar {
           width: 60px;
@@ -361,6 +404,15 @@
 
   .sidebar-footer .api-key-section {
           display: grid;
+        }
+
+  .sidebar-footer .external-auth-section,
+  .sidebar.sidebar-collapsed .sidebar-footer .external-auth-section {
+          display: grid;
+        }
+
+  .sidebar-footer .external-auth-user {
+          display: none;
         }
 
   .sidebar.sidebar-collapsed .sidebar-footer .api-key-section { display: grid; }

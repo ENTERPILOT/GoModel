@@ -113,6 +113,7 @@ type Config struct {
 	ExtraMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware registered after audit, before gateway auth
 	ExtraRoutes                     []func(*echo.Echo)                     // Optional: extension route registration callbacks invoked after core routes
 	ExtraAuthSkipPaths              []string                               // Optional: extension paths appended to the auth skip list ("/*" suffix matches a prefix)
+	RequestAuthenticators           []ext.RequestAuthenticator             // Optional extension-provided request authentication mechanisms
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
 	SessionDetector                 *session.Detector                      // Optional: client session identification for sticky routing and audit grouping
 }
@@ -243,7 +244,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	// When no bootstrap master key is configured, keep admin APIs reachable so
 	// the dashboard can recover managed-key access instead of locking itself out.
-	if cfg != nil && cfg.MasterKey == "" && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
+	if cfg != nil && cfg.MasterKey == "" && !hasRequestAuthenticators(cfg.RequestAuthenticators) && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/*")
 	}
 	if cfg != nil && cfg.SwaggerEnabled && SwaggerAvailable() {
@@ -257,6 +258,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// Global middleware stack (order matters)
+	// Scrub credential-like query values before the outer request logger
+	// snapshots RequestURI. URL.RawQuery remains intact for handlers.
+	e.Use(redactSensitiveRequestURI())
 	// Request logger with optional filtering for model-only interactions
 	if cfg != nil && cfg.LogOnlyModelInteractions {
 		e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
@@ -349,9 +353,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Authentication (skips public paths)
 	// Register by authenticator presence; its Enabled state can change at runtime.
-	authMiddlewareRegistered := cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil)
+	authMiddlewareRegistered := cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil || hasRequestAuthenticators(cfg.RequestAuthenticators))
 	if authMiddlewareRegistered {
-		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths, userPathHeaderName))
+		e.Use(AuthMiddlewareWithRequestAuthenticators(cfg.MasterKey, cfg.Authenticator, cfg.RequestAuthenticators, authSkipPaths, userPathHeaderName))
 	}
 
 	// Session identification runs after auth so session ids are scoped by the

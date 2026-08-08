@@ -36,6 +36,7 @@ const (
 	AuthMethodAPIKey    = "api_key"
 	AuthMethodMasterKey = "master_key"
 	AuthMethodNoKey     = "no_key"
+	AuthMethodExtension = "extension"
 )
 
 const (
@@ -98,16 +99,17 @@ type LogEntry struct {
 	StatusCode        int    `json:"status_code" bson:"status_code"`
 
 	// Extracted fields for efficient filtering (indexed in relational DBs)
-	RequestID  string `json:"request_id,omitempty" bson:"request_id,omitempty"`
-	AuthKeyID  string `json:"auth_key_id,omitempty" bson:"auth_key_id,omitempty"`
-	AuthMethod string `json:"auth_method,omitempty" bson:"auth_method,omitempty"`
-	ClientIP   string `json:"client_ip,omitempty" bson:"client_ip,omitempty"`
-	Method     string `json:"method,omitempty" bson:"method,omitempty"`
-	Path       string `json:"path,omitempty" bson:"path,omitempty"`
-	UserPath   string `json:"user_path,omitempty" bson:"user_path,omitempty"`
-	SessionID  string `json:"session_id,omitempty" bson:"session_id,omitempty"`
-	Stream     bool   `json:"stream,omitempty" bson:"stream,omitempty"`
-	ErrorType  string `json:"error_type,omitempty" bson:"error_type,omitempty"`
+	RequestID   string `json:"request_id,omitempty" bson:"request_id,omitempty"`
+	PrincipalID string `json:"principal_id,omitempty" bson:"principal_id,omitempty"`
+	AuthKeyID   string `json:"auth_key_id,omitempty" bson:"auth_key_id,omitempty"`
+	AuthMethod  string `json:"auth_method,omitempty" bson:"auth_method,omitempty"`
+	ClientIP    string `json:"client_ip,omitempty" bson:"client_ip,omitempty"`
+	Method      string `json:"method,omitempty" bson:"method,omitempty"`
+	Path        string `json:"path,omitempty" bson:"path,omitempty"`
+	UserPath    string `json:"user_path,omitempty" bson:"user_path,omitempty"`
+	SessionID   string `json:"session_id,omitempty" bson:"session_id,omitempty"`
+	Stream      bool   `json:"stream,omitempty" bson:"stream,omitempty"`
+	ErrorType   string `json:"error_type,omitempty" bson:"error_type,omitempty"`
 
 	// Data contains flexible request/response information as JSON
 	Data *LogData `json:"data,omitempty" bson:"data,omitempty"`
@@ -120,6 +122,9 @@ type LogData struct {
 	// Identity
 	UserAgent  string `json:"user_agent,omitempty" bson:"user_agent,omitempty"`
 	APIKeyHash string `json:"api_key_hash,omitempty" bson:"api_key_hash,omitempty"`
+	// EventType identifies non-request security lifecycle entries written
+	// through the extension authentication event recorder.
+	EventType string `json:"event_type,omitempty" bson:"event_type,omitempty"`
 
 	// Labels are request labels extracted from configured tagging headers.
 	Labels []string `json:"labels,omitempty" bson:"labels,omitempty"`
@@ -359,6 +364,8 @@ func RedactHeaders(headers map[string]string) map[string]string {
 	for key, value := range headers {
 		if core.IsCredentialHeader(key) {
 			result[key] = "[REDACTED]"
+		} else if strings.EqualFold(key, "Location") {
+			result[key] = core.RedactSensitiveURLQuery(value)
 		} else {
 			result[key] = value
 		}

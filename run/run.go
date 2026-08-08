@@ -57,6 +57,12 @@ type Options struct {
 	// config loading. Register extensions here so operator tooling modes
 	// stay silent. A returned error aborts startup.
 	Setup func(ctx context.Context) error
+	// SetupConfig runs once after the initial configuration has been loaded and
+	// before the application is constructed. It lets custom distributions
+	// decode their opaque extensions: configuration and register corresponding
+	// extensions. Configuration registered here is startup-only; reloads reuse
+	// the resulting extension instances.
+	SetupConfig func(ctx context.Context, result *config.LoadResult) error
 }
 
 func (o Options) withDefaults() Options {
@@ -182,6 +188,8 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
+	setupConfigDone := false
+
 	// build produces one generation of the gateway from the configuration as it
 	// stands right now. It is called again for every reload, which is what lets
 	// a reload re-read every configuration value rather than a hand-picked
@@ -191,6 +199,12 @@ func Run(ctx context.Context, opts Options) error {
 		result, err := config.Load()
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to load config: %w", err)
+		}
+		if !setupConfigDone && opts.SetupConfig != nil {
+			if err := opts.SetupConfig(ctx, result); err != nil {
+				return nil, nil, fmt.Errorf("failed to set up configured extensions: %w", err)
+			}
+			setupConfigDone = true
 		}
 		opts.ConfigureSwaggerDocs(result.Config.Server.BasePath)
 

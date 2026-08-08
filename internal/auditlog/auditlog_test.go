@@ -83,6 +83,15 @@ func TestRedactHeaders(t *testing.T) {
 			},
 		},
 		{
+			name: "redact authentication transaction from location",
+			input: map[string]string{
+				"Location": "https://id.example.com/authorize?client_id=gomodel&code_challenge=challenge&nonce=nonce&state=state",
+			},
+			expected: map[string]string{
+				"Location": "https://id.example.com/authorize?client_id=gomodel&code_challenge=REDACTED&nonce=REDACTED&state=REDACTED",
+			},
+		},
+		{
 			name: "redact authorization",
 			input: map[string]string{
 				"Authorization": "Bearer sk-secret-key",
