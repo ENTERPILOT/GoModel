@@ -42,7 +42,7 @@ auth:
 # LLM Provider configuration
 providers:
   # -- Use an existing secret for all provider API keys
-  # Secret should contain keys for enabled providers, such as OPENAI_API_KEY, ANTHROPIC_API_KEY, COHERE_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, XAI_API_KEY, ZAI_API_KEY, KILO_API_KEY, ORACLE_API_KEY, or VLLM_API_KEY
+  # Secret should contain keys for enabled providers, such as OPENAI_API_KEY, ANTHROPIC_API_KEY, COHERE_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, XAI_API_KEY, ZAI_API_KEY, KILO_API_KEY, ORACLE_API_KEY, SGLANG_API_KEY, or VLLM_API_KEY
   existingSecret: ""
 
   openai:
@@ -125,6 +125,14 @@ providers:
     # -- Optional vLLM API key, matching vllm serve --api-key when configured
     apiKey: ""
     # -- vLLM OpenAI-compatible base URL
+    baseUrl: ""
+
+  sglang:
+    # -- Enable SGLang provider (API key optional; baseUrl required when enabled)
+    enabled: false
+    # -- Optional SGLang API key, matching launch_server --api-key when configured
+    apiKey: ""
+    # -- SGLang OpenAI-compatible base URL
     baseUrl: ""
 
 # Cache configuration

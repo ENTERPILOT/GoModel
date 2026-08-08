@@ -109,6 +109,33 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "providers": {
+            "properties": {
+              "sglang": {
+                "properties": { "enabled": { "const": true } }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "providers": {
+            "properties": {
+              "sglang": {
+                "properties": {
+                  "baseUrl": { "minLength": 1 }
+                },
+                "required": ["baseUrl"]
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "anyOf": [
@@ -234,6 +261,20 @@
           }
         }
       }
+    },
+    {
+      "properties": {
+        "providers": {
+          "properties": {
+            "sglang": {
+              "properties": {
+                "enabled": { "const": true },
+                "baseUrl": { "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "properties": {
@@ -330,6 +371,14 @@
           }
         },
         "vllm": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "apiKey": { "type": "string" },
+            "baseUrl": { "type": "string" }
+          }
+        },
+        "sglang": {
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },

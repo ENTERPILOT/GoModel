@@ -24,6 +24,7 @@ const PROVIDER_DOC_SLUGS = {
   gemini: "gemini",
   opencode_go: "opencode-go",
   oracle: "oracle",
+  sglang: "sglang",
   vertex: "vertex",
   vllm: "vllm",
   xiaomi: "xiaomi",

@@ -175,8 +175,9 @@ call the gateway directly. Add the headers at your proxy if you need that.
 **GoModel runs fully air-gapped.** There is no telemetry, no phone-home, no
 update check, and no license check. The admin dashboard is embedded in the
 binary and its fonts are vendored, so the UI loads no CDN assets. Paired with
-local model servers such as [Ollama](/providers/multiple-ollama) or
-[vLLM](/providers/vllm), the gateway needs no route to the public internet.
+local model servers such as [Ollama](/providers/multiple-ollama),
+[SGLang](/providers/sglang), or [vLLM](/providers/vllm), the gateway needs no
+route to the public internet.
 
 There is exactly one outbound call that is not to a configured provider: the
 model metadata registry at `MODEL_LIST_URL`, which supplies pricing, context
