@@ -31,6 +31,7 @@ func clearProviderEnvVars(t *testing.T) {
 		"ORACLE_API_KEY", "ORACLE_BASE_URL", "ORACLE_MODELS",
 		"VLLM_API_KEY", "VLLM_BASE_URL", "VLLM_MODELS",
 		"LLMD_API_KEY", "LLMD_BASE_URL", "LLMD_MODELS", "LLMD_INFERENCE_OBJECTIVE", "LLMD_FAIRNESS_FROM_USER_PATH",
+		"SGLANG_API_KEY", "SGLANG_BASE_URL", "SGLANG_MODELS",
 		"OLLAMA_API_KEY", "OLLAMA_BASE_URL", "OLLAMA_MODELS",
 	} {
 		t.Setenv(key, "")
@@ -125,7 +126,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if !cfg.Server.AllowPassthroughV1Alias {
 		t.Error("expected Server.AllowPassthroughV1Alias=true")
 	}
-	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "vllm", "llmd", "deepseek"}; !reflect.DeepEqual(got, want) {
+	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("expected Server.EnabledPassthroughProviders=%v, got %v", want, got)
 	}
 	if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeFallback {
@@ -1202,7 +1203,7 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 			t.Fatalf("expected Cache.Model.Redis to be nil in example config, got %+v", result.Config.Cache.Model.Redis)
 		}
 		gotProviders := result.Config.Server.EnabledPassthroughProviders
-		wantProviders := []string{"openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "vllm", "llmd", "deepseek", "bailian"}
+		wantProviders := []string{"openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"}
 		if !reflect.DeepEqual(gotProviders, wantProviders) {
 			t.Fatalf("Server.EnabledPassthroughProviders = %v, want %v", gotProviders, wantProviders)
 		}

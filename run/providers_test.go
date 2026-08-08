@@ -53,6 +53,12 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			required:     []string{"base_url"},
 		},
 		{
+			// SGLang supports both unauthenticated and --api-key deployments.
+			providerType: "sglang",
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			required:     nil,
+		},
+		{
 			// Authenticates through the AWS SDK credential chain, never a key.
 			providerType: "bedrock",
 			fields:       []string{"base_url", "models"},
@@ -109,11 +115,14 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			if !slices.Equal(names, tt.fields) {
 				t.Errorf("fields = %v, want %v", names, tt.fields)
 			}
-			for _, name := range tt.required {
-				field, found := schema.Field(name)
-				if !found || !field.Required {
-					t.Errorf("%s.Required = %v (present=%v), want true", name, field.Required, found)
+			var requiredNames []string
+			for _, field := range schema.Fields {
+				if field.Required {
+					requiredNames = append(requiredNames, field.Name)
 				}
+			}
+			if !slices.Equal(requiredNames, tt.required) {
+				t.Errorf("required = %v, want %v", requiredNames, tt.required)
 			}
 			for _, name := range tt.absent {
 				if schema.Accepts(name) {
@@ -148,7 +157,7 @@ func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
 		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "cohere", "deepseek", "fireworks",
 		"gemini", "groq", "kilo", "kimicode", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
-		"openrouter", "oracle", "vertex", "vllm", "xai", "xiaomi", "zai",
+		"openrouter", "oracle", "sglang", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}
 
 	for _, metricsEnabled := range []bool{false, true} {

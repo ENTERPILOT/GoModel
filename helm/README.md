@@ -1,6 +1,6 @@
 # GoModel Helm Chart
 
-High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Cohere, Gemini, DeepSeek, Groq, Kilo AI, Z.ai, xAI, Oracle).
+High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Cohere, Gemini, DeepSeek, Groq, Kilo AI, Z.ai, xAI, Oracle, SGLang, vLLM).
 
 ## Prerequisites
 
@@ -72,6 +72,8 @@ helm install gomodel ./helm \
 | `providers.oracle.baseUrl`       | Oracle OpenAI-compatible base URL mapped to `ORACLE_BASE_URL`; required when Oracle is enabled | `""`                   |
 | `providers.vllm.enabled`         | Enable vLLM                                                                                    | `false`                |
 | `providers.vllm.baseUrl`         | vLLM OpenAI-compatible base URL mapped to `VLLM_BASE_URL`; required when vLLM is enabled       | `""`                   |
+| `providers.sglang.enabled`       | Enable SGLang                                                                                  | `false`                |
+| `providers.sglang.baseUrl`       | SGLang OpenAI-compatible base URL mapped to `SGLANG_BASE_URL`; required when enabled           | `""`                   |
 | `providers.llmd.enabled`         | Enable llm-d                                                                                   | `false`                |
 | `providers.llmd.baseUrl`         | llm-d Router/EPP base URL mapped to `LLMD_BASE_URL`; required when llm-d is enabled            | `""`                   |
 | `providers.llmd.inferenceObjective` | Trusted llm-d objective mapped to `LLMD_INFERENCE_OBJECTIVE`                                | `""`                   |
@@ -103,6 +105,7 @@ stringData:
   ZAI_API_KEY: "..."
   KILO_API_KEY: "..."
   ORACLE_API_KEY: "..."
+  SGLANG_API_KEY: "..."
   VLLM_API_KEY: "..."
   LLMD_API_KEY: "..."
 ```
@@ -119,6 +122,10 @@ authentication. The chart maps `providers.llmd.baseUrl` to `LLMD_BASE_URL` and
 the optional scheduling controls to their `LLMD_*` environment variables. When
 using `providers.existingSecret`, its `LLMD_API_KEY` entry may be omitted for a
 keyless llm-d route.
+
+SGLang does not require an API key unless the upstream server was started with
+`--api-key`. The chart maps `providers.sglang.baseUrl` to the container env var
+`SGLANG_BASE_URL`.
 
 Then reference it (use `enabled=true` when using existingSecret since apiKey isn't set directly):
 
@@ -152,6 +159,14 @@ helm install gomodel ./helm \
   --set providers.llmd.enabled=true \
   --set providers.llmd.baseUrl="http://quickstart-epp.llm-d.svc.cluster.local/v1" \
   --set providers.llmd.inferenceObjective="standard-traffic"
+```
+
+Example keyless SGLang setup:
+
+```bash
+helm install gomodel ./helm \
+  --set providers.sglang.enabled=true \
+  --set providers.sglang.baseUrl="http://sglang.default.svc.cluster.local:30000/v1"
 ```
 
 ### Ingress Example

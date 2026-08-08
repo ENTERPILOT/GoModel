@@ -61,6 +61,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Azure OpenAI | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Azure OpenAI](/providers/azure) |
 | Oracle GenAI | `ORACLE_API_KEY` + `ORACLE_BASE_URL` | `openai.gpt-oss-120b` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Oracle GenAI](/providers/oracle) |
 | Ollama | `OLLAMA_BASE_URL` | `llama3.2` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Ollama](/providers/multiple-ollama) |
+| SGLang | `SGLANG_BASE_URL` (`SGLANG_API_KEY` optional) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [SGLang](/providers/sglang) |
 | vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/providers/vllm) |
 | llm-d | `LLMD_BASE_URL` (`LLMD_API_KEY` optional) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/providers/llmd) |
 | Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + AWS credentials | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/providers/bedrock) |
@@ -128,6 +129,8 @@ support, not every individual model capability exposed by an upstream provider.
   `--api-key`.
 - **llm-d** — `LLMD_BASE_URL` is required. `LLMD_API_KEY` is optional and is
   sent only when the Gateway in front of the Router requires bearer auth.
+- **SGLang** — set `SGLANG_API_KEY` only if the upstream server was started
+  with `--api-key`; otherwise `SGLANG_BASE_URL` is enough.
 - **Multiple API keys for one provider** — set `OPENAI_API_KEY_2`,
   `OPENAI_API_KEY_3`, and so on to spread sessions across keys while keeping
   each conversation on one key for prompt-cache affinity. See
@@ -160,7 +163,7 @@ These are the providers most users hit friction on:
 - **Anthropic** — reasoning effort maps to Claude's adaptive thinking and
   effort control, which differ across model generations.
 - **DeepSeek** — reasoning effort mapping quirks for DeepSeek V4.
-- **Ollama / vLLM** — local-model hosting with optional multi-instance setup
+- **Ollama / SGLang / vLLM** — local-model hosting with optional multi-instance setup
   through suffixed env vars and provider-qualified model IDs.
 - **Xiaomi MiMo** — thinking mode on by default, a `[1m]` context suffix, and
   TTS/ASR that run through chat completions rather than native audio endpoints.

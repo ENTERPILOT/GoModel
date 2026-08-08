@@ -161,6 +161,10 @@ test("providerDocUrl links provider types with docs and stays empty otherwise", 
     providerDocUrl({ type: "llmd" }),
     "https://gomodel.enterpilot.io/docs/providers/llmd?utm_source=gomodel_dashboard",
   );
+  assert.equal(
+    providerDocUrl({ type: "sglang" }),
+    "https://gomodel.enterpilot.io/docs/providers/sglang?utm_source=gomodel_dashboard",
+  );
   // Types without a provider-specific doc → no link (no icon).
   assert.equal(providerDocUrl({ type: "openai" }), "");
   assert.equal(providerDocUrl({ type: "ollama" }), "");

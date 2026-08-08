@@ -58,6 +58,10 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 		RequireBaseURL:  true,
 		AllowAPIKeyless: true,
 	},
+	"sglang": {
+		DefaultBaseURL:  "http://localhost:30000/v1",
+		AllowAPIKeyless: true,
+	},
 	"azure": {
 		RequireBaseURL:     true,
 		SupportsAPIVersion: true,
@@ -409,6 +413,15 @@ func TestFilterEmptyProviders_VLLMAllowsKeylessConfig(t *testing.T) {
 	}, testDiscoveryConfigs)
 	if _, exists := got["vllm"]; !exists {
 		t.Fatal("expected vllm to be kept without an API key")
+	}
+}
+
+func TestFilterEmptyProvidersSGLangAllowsKeylessConfig(t *testing.T) {
+	got := filterEmptyProviders(map[string]config.RawProviderConfig{
+		"sglang": {Type: "sglang", BaseURL: "http://localhost:30000/v1"},
+	}, testDiscoveryConfigs)
+	if _, exists := got["sglang"]; !exists {
+		t.Fatal("expected sglang to be kept without an API key")
 	}
 }
 
@@ -1017,6 +1030,46 @@ func TestApplyProviderEnvVars_DiscoversVLLMFromBaseURLWithoutAPIKey(t *testing.T
 	}
 	if p.BaseURL != "http://localhost:8000/v1" {
 		t.Errorf("BaseURL = %q, want http://localhost:8000/v1", p.BaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
+	tests := []struct {
+		name        string
+		apiKey      string
+		baseURL     string
+		wantAPIKey  string
+		wantBaseURL string
+	}{
+		{
+			name:        "base URL without API key",
+			baseURL:     "http://localhost:30000/v1",
+			wantBaseURL: "http://localhost:30000/v1",
+		},
+		{
+			name:        "API key with default base URL",
+			apiKey:      "sglang-key",
+			wantAPIKey:  "sglang-key",
+			wantBaseURL: testDiscoveryConfigs["sglang"].DefaultBaseURL,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set both variables so ambient provider configuration cannot leak
+			// between the keyless and authenticated discovery cases.
+			t.Setenv("SGLANG_API_KEY", tt.apiKey)
+			t.Setenv("SGLANG_BASE_URL", tt.baseURL)
+
+			got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+			p, exists := got["sglang"]
+			if !exists {
+				t.Fatal("expected sglang to be discovered")
+			}
+			if p.Type != "sglang" || p.APIKey != tt.wantAPIKey || p.BaseURL != tt.wantBaseURL {
+				t.Fatalf("sglang config = %+v, want api_key=%q base_url=%q", p, tt.wantAPIKey, tt.wantBaseURL)
+			}
+		})
 	}
 }
 

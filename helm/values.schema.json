@@ -136,6 +136,33 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "providers": {
+            "properties": {
+              "sglang": {
+                "properties": { "enabled": { "const": true } }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "providers": {
+            "properties": {
+              "sglang": {
+                "properties": {
+                  "baseUrl": { "minLength": 1 }
+                },
+                "required": ["baseUrl"]
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "anyOf": [
@@ -275,6 +302,20 @@
           }
         }
       }
+    },
+    {
+      "properties": {
+        "providers": {
+          "properties": {
+            "sglang": {
+              "properties": {
+                "enabled": { "const": true },
+                "baseUrl": { "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "properties": {
@@ -386,6 +427,14 @@
             "baseUrl": { "type": "string" },
             "inferenceObjective": { "type": "string" },
             "fairnessFromUserPath": { "type": "boolean" }
+          }
+        },
+        "sglang": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "apiKey": { "type": "string" },
+            "baseUrl": { "type": "string" }
           }
         }
       }

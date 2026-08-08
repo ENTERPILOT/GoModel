@@ -169,6 +169,7 @@
                     "providers/xiaomi",
                     "providers/minimax",
                     "providers/opencode-go",
+                    "providers/sglang",
                     "providers/vllm",
                     "providers/llmd",
                     "providers/multiple-ollama",
