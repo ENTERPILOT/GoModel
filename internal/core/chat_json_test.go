@@ -1,9 +1,33 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
+
+func TestChatRequestJSON_CanonicalizesToolObjectKeyOrder(t *testing.T) {
+	bodies := [][]byte{
+		[]byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{"z":{"type":"string"},"a":{"type":"string"}}}}}]}`),
+		[]byte(`{"tools":[{"function":{"parameters":{"properties":{"a":{"type":"string"},"z":{"type":"string"}},"type":"object"},"name":"lookup"},"type":"function"}],"messages":[{"content":"hi","role":"user"}],"model":"gpt-4o-mini"}`),
+	}
+
+	encoded := make([][]byte, len(bodies))
+	for i, body := range bodies {
+		var req ChatRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("json.Unmarshal(body %d) error = %v", i, err)
+		}
+		var err error
+		encoded[i], err = json.Marshal(req)
+		if err != nil {
+			t.Fatalf("json.Marshal(body %d) error = %v", i, err)
+		}
+	}
+	if !bytes.Equal(encoded[0], encoded[1]) {
+		t.Fatalf("equivalent tool maps produced different provider shapes:\nfirst:  %s\nsecond: %s", encoded[0], encoded[1])
+	}
+}
 
 func lookupUnknownField(t *testing.T, fields UnknownJSONFields, key string) json.RawMessage {
 	t.Helper()
