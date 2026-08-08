@@ -37,6 +37,10 @@ LLMD_FAIRNESS_FROM_USER_PATH=true
 optional; set it when the Gateway in front of llm-d requires bearer
 authentication.
 
+When `LLMD_INFERENCE_OBJECTIVE` is omitted, GoModel does not send an inference
+objective header. Set it when the llm-d deployment defines multiple inference
+objectives and this GoModel provider should select one of them.
+
 Declare `LLMD_MODELS` when your route does not serve `GET /v1/models`. GoModel
 uses that list as the provider's model inventory.
 
@@ -82,11 +86,15 @@ distinguish rejection from post-dispatch eviction.
 
 ## Verify
 
+First create a managed GoModel API key in the dashboard, bind its `user_path`
+to `/team/alpha`, and assign the returned value to `TEAM_ALPHA_GOMODEL_KEY`.
+The key binding, rather than a client-asserted header, establishes the fairness
+ID used by this request.
+
 ```bash
 curl -s http://localhost:8080/v1/chat/completions \
-  -H "Authorization: Bearer change-me" \
+  -H "Authorization: Bearer ${TEAM_ALPHA_GOMODEL_KEY}" \
   -H "Content-Type: application/json" \
-  -H "X-GoModel-User-Path: /team/alpha" \
   -d '{
     "model": "llmd/Qwen/Qwen2.5-0.5B-Instruct",
     "messages": [{"role": "user", "content": "Reply with exactly ok."}]

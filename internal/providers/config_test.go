@@ -532,21 +532,31 @@ func TestApplyProviderEnvVars_LLMDControls(t *testing.T) {
 	t.Setenv("LLMD_FAIRNESS_FROM_USER_PATH", "false")
 	t.Setenv("LLMD_CANARY_BASE_URL", "http://llmd-canary.default.svc/v1")
 	t.Setenv("LLMD_CANARY_INFERENCE_OBJECTIVE", "canary-traffic")
+	t.Setenv("LLMD_CANARY_FAIRNESS_FROM_USER_PATH", "false")
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-	primary := got["llmd"]
-	if primary.InferenceObjective != "premium-traffic" {
-		t.Errorf("primary InferenceObjective = %q, want premium-traffic", primary.InferenceObjective)
+	tests := []struct {
+		name      string
+		provider  string
+		baseURL   string
+		objective string
+	}{
+		{name: "primary", provider: "llmd", baseURL: "http://llmd-epp.default.svc/v1", objective: "premium-traffic"},
+		{name: "suffixed", provider: "llmd-canary", baseURL: "http://llmd-canary.default.svc/v1", objective: "canary-traffic"},
 	}
-	if primary.FairnessFromUserPath == nil || *primary.FairnessFromUserPath {
-		t.Fatalf("primary FairnessFromUserPath = %v, want false", primary.FairnessFromUserPath)
-	}
-	canary := got["llmd-canary"]
-	if canary.BaseURL != "http://llmd-canary.default.svc/v1" {
-		t.Errorf("canary BaseURL = %q", canary.BaseURL)
-	}
-	if canary.InferenceObjective != "canary-traffic" {
-		t.Errorf("canary InferenceObjective = %q, want canary-traffic", canary.InferenceObjective)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := got[tt.provider]
+			if provider.BaseURL != tt.baseURL {
+				t.Errorf("BaseURL = %q, want %q", provider.BaseURL, tt.baseURL)
+			}
+			if provider.InferenceObjective != tt.objective {
+				t.Errorf("InferenceObjective = %q, want %q", provider.InferenceObjective, tt.objective)
+			}
+			if provider.FairnessFromUserPath == nil || *provider.FairnessFromUserPath {
+				t.Fatalf("FairnessFromUserPath = %v, want false", provider.FairnessFromUserPath)
+			}
+		})
 	}
 }
 

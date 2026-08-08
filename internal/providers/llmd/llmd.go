@@ -146,13 +146,13 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 }
 
 // Passthrough routes an opaque request through llm-d after removing all
-// client-supplied llm-d and Gateway API Inference Extension control headers.
+// client-supplied credentials and llm-d control headers.
 func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
 	}
 	clean := *req
-	clean.Headers = cloneWithoutControlHeaders(req.Headers)
+	clean.Headers = cloneWithoutSensitiveHeaders(req.Headers)
 	endpoint := providers.PassthroughEndpoint(clean.Endpoint)
 	if usesV1PassthroughBase(endpoint) {
 		resp, err := p.compatible.Passthrough(ctx, &clean)
@@ -207,13 +207,13 @@ func trustedValue(value string) string {
 	return value
 }
 
-func cloneWithoutControlHeaders(src http.Header) http.Header {
+func cloneWithoutSensitiveHeaders(src http.Header) http.Header {
 	if len(src) == 0 {
 		return nil
 	}
 	dst := make(http.Header, len(src))
 	for key, values := range src {
-		if isControlHeader(key) {
+		if core.IsCredentialHeader(key) || isControlHeader(key) {
 			continue
 		}
 		dst[key] = append([]string(nil), values...)

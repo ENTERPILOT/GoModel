@@ -27,86 +27,141 @@ func TestRegistrationRequiresEndpointAndAllowsKeyless(t *testing.T) {
 }
 
 func TestChatCompletionInjectsTrustedLLMDHeaders(t *testing.T) {
-	var got http.Header
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = r.Header.Clone()
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-llmd",
-			"created":1677652288,
-			"model":"Qwen/Qwen2.5-0.5B-Instruct",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("router-token", server.URL, ControlConfig{
-		InferenceObjective:   "premium-traffic",
-		FairnessFromUserPath: true,
-	}, server.Client(), llmclient.Hooks{})
-	ctx := core.WithEffectiveUserPath(context.Background(), "/team/alpha")
-	ctx = core.WithRequestID(ctx, "req-llmd-1")
-
-	_, err := provider.ChatCompletion(ctx, &core.ChatRequest{
-		Model:    "Qwen/Qwen2.5-0.5B-Instruct",
-		Messages: []core.Message{{Role: "user", Content: "hello"}},
-	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
+	trustedCtx := core.WithEffectiveUserPath(context.Background(), "/team/alpha")
+	trustedCtx = core.WithRequestID(trustedCtx, "req-llmd-1")
+	tests := []struct {
+		name        string
+		apiKey      string
+		controls    ControlConfig
+		ctx         context.Context
+		wantHeaders map[string]string
+	}{
+		{
+			name:   "configured controls",
+			apiKey: "router-token",
+			controls: ControlConfig{
+				InferenceObjective:   "premium-traffic",
+				FairnessFromUserPath: true,
+			},
+			ctx: trustedCtx,
+			wantHeaders: map[string]string{
+				"Authorization":          "Bearer router-token",
+				"X-Request-Id":           "req-llmd-1",
+				canonicalObjectiveHeader: "premium-traffic",
+				legacyObjectiveHeader:    "premium-traffic",
+				canonicalFairnessHeader:  "/team/alpha",
+				legacyFairnessHeader:     "/team/alpha",
+			},
+		},
+		{
+			name:     "keyless without controls",
+			ctx:      context.Background(),
+			controls: ControlConfig{},
+			wantHeaders: map[string]string{
+				"Authorization":          "",
+				canonicalObjectiveHeader: "",
+				legacyObjectiveHeader:    "",
+				canonicalFairnessHeader:  "",
+				legacyFairnessHeader:     "",
+			},
+		},
 	}
 
-	assertHeader(t, got, "Authorization", "Bearer router-token")
-	assertHeader(t, got, "X-Request-Id", "req-llmd-1")
-	assertHeader(t, got, canonicalObjectiveHeader, "premium-traffic")
-	assertHeader(t, got, legacyObjectiveHeader, "premium-traffic")
-	assertHeader(t, got, canonicalFairnessHeader, "/team/alpha")
-	assertHeader(t, got, legacyFairnessHeader, "/team/alpha")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got http.Header
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Clone()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{
+					"id":"chatcmpl-llmd",
+					"created":1677652288,
+					"model":"Qwen/Qwen2.5-0.5B-Instruct",
+					"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
+				}`))
+			}))
+			defer server.Close()
+
+			provider := NewWithHTTPClient(tt.apiKey, server.URL, tt.controls, server.Client(), llmclient.Hooks{})
+			resp, err := provider.ChatCompletion(tt.ctx, &core.ChatRequest{
+				Model:    "Qwen/Qwen2.5-0.5B-Instruct",
+				Messages: []core.Message{{Role: "user", Content: "hello"}},
+			})
+			if err != nil {
+				t.Fatalf("ChatCompletion() error = %v", err)
+			}
+			if resp.ID != "chatcmpl-llmd" || resp.Model != "Qwen/Qwen2.5-0.5B-Instruct" {
+				t.Errorf("response identity = (%q, %q), want normalized ID and model", resp.ID, resp.Model)
+			}
+			if len(resp.Choices) != 1 || resp.Choices[0].Message.Role != "assistant" || resp.Choices[0].Message.Content != "ok" {
+				t.Errorf("response choices = %#v, want one assistant choice containing ok", resp.Choices)
+			}
+			for key, want := range tt.wantHeaders {
+				assertHeader(t, got, key, want)
+			}
+		})
+	}
 }
 
 func TestPassthroughReplacesClientSuppliedControlHeaders(t *testing.T) {
-	var got http.Header
+	var got []http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = r.Header.Clone()
+		got = append(got, r.Header.Clone())
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"tokens":[1,2,3]}`))
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("", server.URL+"/v1", ControlConfig{
+	provider := NewWithHTTPClient("router-token", server.URL+"/v1", ControlConfig{
 		InferenceObjective:   "trusted-objective",
 		FairnessFromUserPath: true,
 	}, server.Client(), llmclient.Hooks{})
 	ctx := core.WithEffectiveUserPath(context.Background(), "/trusted/tenant")
 
-	resp, err := provider.Passthrough(ctx, &core.PassthroughRequest{
-		Method:   http.MethodPost,
-		Endpoint: "tokenize",
-		Body:     io.NopCloser(strings.NewReader(`{}`)),
-		Headers: http.Header{
-			"Content-Type":                          {"application/json"},
-			canonicalObjectiveHeader:                {"attacker-objective"},
-			legacyFairnessHeader:                    {"attacker-tenant"},
-			"X-Llm-D-Slo-Ttft-Ms":                   {"1"},
-			"X-Gateway-Model-Name-Rewrite":          {"other-model"},
-			"X-Gateway-Destination-Endpoint-Served": {"10.0.0.1:8000"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Passthrough() error = %v", err)
+	for _, endpoint := range []string{"tokenize", "chat/completions"} {
+		resp, err := provider.Passthrough(ctx, &core.PassthroughRequest{
+			Method:   http.MethodPost,
+			Endpoint: endpoint,
+			Body:     io.NopCloser(strings.NewReader(`{}`)),
+			Headers: http.Header{
+				"Content-Type":                          {"application/json"},
+				"Authorization":                         {"Bearer client-token"},
+				"X-Api-Key":                             {"client-api-key"},
+				"Api-Key":                               {"client-azure-key"},
+				"X-Goog-Api-Key":                        {"client-google-key"},
+				canonicalObjectiveHeader:                {"attacker-objective"},
+				legacyFairnessHeader:                    {"attacker-tenant"},
+				"X-Llm-D-Slo-Ttft-Ms":                   {"1"},
+				"X-Gateway-Model-Name-Rewrite":          {"other-model"},
+				"X-Gateway-Destination-Endpoint-Served": {"10.0.0.1:8000"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Passthrough(%q) error = %v", endpoint, err)
+		}
+		_ = resp.Body.Close()
 	}
-	defer resp.Body.Close()
 
-	assertHeader(t, got, canonicalObjectiveHeader, "trusted-objective")
-	assertHeader(t, got, legacyObjectiveHeader, "trusted-objective")
-	assertHeader(t, got, canonicalFairnessHeader, "/trusted/tenant")
-	assertHeader(t, got, legacyFairnessHeader, "/trusted/tenant")
-	for _, key := range []string{
-		"X-Llm-D-Slo-Ttft-Ms",
-		"X-Gateway-Model-Name-Rewrite",
-		"X-Gateway-Destination-Endpoint-Served",
-	} {
-		if value := got.Get(key); value != "" {
-			t.Errorf("%s = %q, want stripped", key, value)
+	if len(got) != 2 {
+		t.Fatalf("upstream requests = %d, want root and /v1 requests", len(got))
+	}
+	for i, headers := range got {
+		assertHeader(t, headers, "Authorization", "Bearer router-token")
+		assertHeader(t, headers, canonicalObjectiveHeader, "trusted-objective")
+		assertHeader(t, headers, legacyObjectiveHeader, "trusted-objective")
+		assertHeader(t, headers, canonicalFairnessHeader, "/trusted/tenant")
+		assertHeader(t, headers, legacyFairnessHeader, "/trusted/tenant")
+		for _, key := range []string{
+			"X-Api-Key",
+			"Api-Key",
+			"X-Goog-Api-Key",
+			"X-Llm-D-Slo-Ttft-Ms",
+			"X-Gateway-Model-Name-Rewrite",
+			"X-Gateway-Destination-Endpoint-Served",
+		} {
+			if value := headers.Get(key); value != "" {
+				t.Errorf("request %d: %s = %q, want stripped", i, key, value)
+			}
 		}
 	}
 }
