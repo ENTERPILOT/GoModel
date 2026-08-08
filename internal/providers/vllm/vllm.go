@@ -124,13 +124,14 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	endpoint := providers.PassthroughEndpoint(req.Endpoint)
 	if !usesV1PassthroughBase(endpoint) {
 		resp, err := p.rootClient.DoPassthrough(ctx, llmclient.Request{
-			Method:        req.Method,
-			Endpoint:      endpoint,
-			Operation:     req.Operation,
-			Model:         req.Model,
-			Stream:        req.Stream,
-			RawBodyReader: req.Body,
-			Headers:       req.Headers,
+			Method:          req.Method,
+			Endpoint:        endpoint,
+			Operation:       req.Operation,
+			Model:           req.Model,
+			Stream:          req.Stream,
+			StreamUncertain: req.StreamUncertain,
+			RawBodyReader:   req.Body,
+			Headers:         req.Headers,
 		})
 		if err != nil {
 			return nil, err

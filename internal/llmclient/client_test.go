@@ -719,6 +719,78 @@ func TestClient_DoPassthrough_FirstChunkHookUsesOpaqueStreamBody(t *testing.T) {
 	}
 }
 
+func TestClient_DoPassthrough_FirstChunkHookUsesSuccessfulSSEContentType(t *testing.T) {
+	body := `{"padding":"` + strings.Repeat("x", 65*1024) + `","stream":true}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		_, _ = w.Write([]byte("data: passthrough\n\n"))
+	}))
+	defer server.Close()
+
+	var firstChunks []ResponseInfo
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Hooks.OnStreamFirstChunk = func(_ context.Context, info ResponseInfo) {
+		firstChunks = append(firstChunks, info)
+	}
+	client := New(cfg, nil)
+	resp, err := client.DoPassthrough(t.Context(), Request{
+		Method:        http.MethodPost,
+		Endpoint:      "/chat/completions",
+		Operation:     OperationChat,
+		RawBodyReader: io.NopCloser(strings.NewReader(body)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if len(firstChunks) != 0 {
+		t.Fatalf("first chunk hook fired at response headers: %+v", firstChunks)
+	}
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	if len(firstChunks) != 1 || !firstChunks[0].Stream || firstChunks[0].Operation != OperationChat {
+		t.Fatalf("first chunk observations = %+v, want one streaming chat observation", firstChunks)
+	}
+}
+
+func TestClient_DoPassthrough_ErrorResponseDoesNotFireFirstChunkHook(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte("data: error\n\n"))
+			}))
+			defer server.Close()
+
+			firstChunks := 0
+			cfg := DefaultConfig("test", server.URL)
+			cfg.Retry.MaxRetries = 0
+			cfg.Hooks.OnStreamFirstChunk = func(context.Context, ResponseInfo) { firstChunks++ }
+			client := New(cfg, nil)
+			resp, err := client.DoPassthrough(t.Context(), Request{
+				Method:   http.MethodPost,
+				Endpoint: "/chat/completions",
+				Stream:   true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if _, err := io.ReadAll(resp.Body); err != nil {
+				t.Fatal(err)
+			}
+			if firstChunks != 0 {
+				t.Fatalf("first chunk hook calls = %d, want 0", firstChunks)
+			}
+		})
+	}
+}
+
 func TestClient_DoStream_FirstChunkHookWaitsForBodyBytes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

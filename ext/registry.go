@@ -1,11 +1,22 @@
 package ext
 
 import (
+	"fmt"
 	"slices"
 	"sync"
 
 	"github.com/labstack/echo/v5"
 )
+
+// HTTPServerConfig exposes generation-specific HTTP settings needed when an
+// extension constructs outer middleware. A new value is supplied on reload.
+type HTTPServerConfig struct {
+	MetricsEndpoint string
+}
+
+// OuterMiddlewareFactory constructs middleware for one server generation.
+// It is intended for middleware whose configuration can change on reload.
+type OuterMiddlewareFactory func(HTTPServerConfig) (echo.MiddlewareFunc, error)
 
 // Registry collects extensions to be consumed by the gateway at startup.
 // Register everything before the server is constructed (before run.Run or
@@ -14,6 +25,7 @@ type Registry struct {
 	mu              sync.Mutex
 	rewriters       []RequestRewriter
 	outerMiddleware []echo.MiddlewareFunc
+	outerFactories  []OuterMiddlewareFactory
 	middleware      []echo.MiddlewareFunc
 	routes          []func(*echo.Echo)
 	publicPaths     []string
@@ -32,6 +44,14 @@ func (r *Registry) UseOuterMiddleware(m echo.MiddlewareFunc) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.outerMiddleware = append(r.outerMiddleware, m)
+}
+
+// UseOuterMiddlewareFactory registers generation-specific outer middleware.
+// Core invokes the factory whenever it constructs or reloads the HTTP server.
+func (r *Registry) UseOuterMiddlewareFactory(factory OuterMiddlewareFactory) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.outerFactories = append(r.outerFactories, factory)
 }
 
 // RegisterUpstreamObserver adds an observer for logical provider calls.
@@ -122,6 +142,29 @@ func (r *Registry) OuterMiddleware() []echo.MiddlewareFunc {
 	return slices.Clone(r.outerMiddleware)
 }
 
+// OuterMiddlewareFor returns static outer middleware followed by middleware
+// constructed for the supplied server generation.
+func (r *Registry) OuterMiddlewareFor(cfg HTTPServerConfig) ([]echo.MiddlewareFunc, error) {
+	r.mu.Lock()
+	middleware := slices.Clone(r.outerMiddleware)
+	factories := slices.Clone(r.outerFactories)
+	r.mu.Unlock()
+
+	for i, factory := range factories {
+		if factory == nil {
+			continue
+		}
+		m, err := factory(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("construct outer middleware %d: %w", i, err)
+		}
+		if m != nil {
+			middleware = append(middleware, m)
+		}
+	}
+	return middleware, nil
+}
+
 // Routes returns a defensive copy of the registered route callbacks.
 func (r *Registry) Routes() []func(*echo.Echo) {
 	r.mu.Lock()
@@ -176,6 +219,11 @@ func UseMiddleware(m echo.MiddlewareFunc) { Default.UseMiddleware(m) }
 
 // UseOuterMiddleware registers outer HTTP middleware on the Default registry.
 func UseOuterMiddleware(m echo.MiddlewareFunc) { Default.UseOuterMiddleware(m) }
+
+// UseOuterMiddlewareFactory registers generation-specific outer HTTP middleware.
+func UseOuterMiddlewareFactory(factory OuterMiddlewareFactory) {
+	Default.UseOuterMiddlewareFactory(factory)
+}
 
 // RegisterRoutes registers a route callback on the Default registry.
 func RegisterRoutes(fn func(e *echo.Echo)) { Default.RegisterRoutes(fn) }

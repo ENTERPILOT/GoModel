@@ -17,7 +17,7 @@ func TestPassthroughSemanticEnricherUsesOpenRouterType(t *testing.T) {
 	info := enricher.Enrich(nil, nil, &core.PassthroughRouteInfo{
 		Provider: "openrouter", NormalizedEndpoint: "chat/completions",
 	})
-	if info == nil || info.GenAIOperation != "chat" || info.SemanticOperation != "openrouter.chat_completions" {
+	if info == nil || info.GenAIOperation != "chat" || info.SemanticOperation != "openrouter.chat_completions" || info.AuditPath != "/v1/chat/completions" {
 		t.Fatalf("enriched info = %+v, want OpenRouter chat semantics", info)
 	}
 }

@@ -5,8 +5,11 @@ import "testing"
 func TestResolveMetricsEndpoint(t *testing.T) {
 	tests := map[string]string{
 		"":                       "/metrics",
+		"metrics":                "/metrics",
 		"/monitoring/metrics/":   "/monitoring/metrics",
 		"/foo/../metrics-custom": "/metrics-custom",
+		"v1/models":              "/metrics",
+		"../v1/models":           "/metrics",
 		"/v1/models":             "/metrics",
 		"/p/internal":            "/metrics",
 	}

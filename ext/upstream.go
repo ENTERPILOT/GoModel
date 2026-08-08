@@ -20,6 +20,9 @@ type UpstreamCall struct {
 	Endpoint  string
 	Method    string
 	Stream    bool
+	// StreamUncertain is true when a bounded opaque-body peek could not
+	// determine request intent. A later first-chunk event can still confirm SSE.
+	StreamUncertain bool
 }
 
 // UpstreamResult describes a completed logical provider call. For streaming

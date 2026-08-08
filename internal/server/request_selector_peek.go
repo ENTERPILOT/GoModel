@@ -28,6 +28,7 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 
 	hints := peekRequestBodySelectorHints(req, requestSelectorPeekLimit)
 	if !hints.parsed || !hints.complete {
+		core.MarkPassthroughStreamUncertain(env)
 		return
 	}
 	core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)

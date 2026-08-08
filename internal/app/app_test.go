@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +76,21 @@ func TestUpstreamObserverHooksExposeProviderCall(t *testing.T) {
 	}
 	if observer.call.Operation != llmclient.OperationChat || observer.firstChunk.Duration != 2*time.Second {
 		t.Fatalf("operation/first chunk = %q/%v, want chat/2s", observer.call.Operation, observer.firstChunk.Duration)
+	}
+}
+
+func TestUpstreamObserverHooksExposeUncertainStreamIntent(t *testing.T) {
+	observer := &upstreamObservation{}
+	hooks := upstreamObserverHooks(observer)
+	ctx := hooks.OnRequestStart(t.Context(), llmclient.RequestInfo{
+		Provider: "openai", Operation: llmclient.OperationChat, StreamUncertain: true,
+	})
+	hooks.OnRequestEnd(ctx, llmclient.ResponseInfo{
+		Provider: "openai", Operation: llmclient.OperationChat, StreamUncertain: true,
+	})
+
+	if !observer.call.StreamUncertain || !observer.result.StreamUncertain {
+		t.Fatalf("stream uncertainty was not propagated: call=%+v result=%+v", observer.call, observer.result)
 	}
 }
 
@@ -768,19 +784,29 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	reg := &ext.Registry{}
 	reg.RegisterRewriter(&staticRewriter{name: "r1"})
 	reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
+	var factoryMetricsEndpoints []string
+	reg.UseOuterMiddlewareFactory(func(cfg ext.HTTPServerConfig) (echo.MiddlewareFunc, error) {
+		factoryMetricsEndpoints = append(factoryMetricsEndpoints, cfg.MetricsEndpoint)
+		return func(next echo.HandlerFunc) echo.HandlerFunc { return next }, nil
+	})
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
 	reg.AddPublicPaths("/sso/callback", "/sso/*")
 	reg.RegisterAuthenticator(&appTestAuthenticator{})
 
-	serverCfg := &server.Config{}
-	applyExtensions(serverCfg, reg)
+	serverCfg := &server.Config{MetricsEndpoint: "/monitoring/metrics"}
+	if err := applyExtensions(serverCfg, reg); err != nil {
+		t.Fatal(err)
+	}
 
 	if len(serverCfg.RequestRewriters) != 1 || serverCfg.RequestRewriters[0].Name() != "r1" {
 		t.Errorf("RequestRewriters not copied: %+v", serverCfg.RequestRewriters)
 	}
-	if len(serverCfg.OuterMiddleware) != 1 {
+	if len(serverCfg.OuterMiddleware) != 2 {
 		t.Errorf("OuterMiddleware not copied: %d entries", len(serverCfg.OuterMiddleware))
+	}
+	if !slices.Equal(factoryMetricsEndpoints, []string{"/monitoring/metrics"}) {
+		t.Errorf("factory MetricsEndpoints = %q", factoryMetricsEndpoints)
 	}
 	if len(serverCfg.ExtraMiddleware) != 1 {
 		t.Errorf("ExtraMiddleware not copied: %d entries", len(serverCfg.ExtraMiddleware))
@@ -795,11 +821,33 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 		t.Errorf("RequestAuthenticators not copied: %v", serverCfg.RequestAuthenticators)
 	}
 
+	reloaded := &server.Config{MetricsEndpoint: "/new/metrics"}
+	if err := applyExtensions(reloaded, reg); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(factoryMetricsEndpoints, []string{"/monitoring/metrics", "/new/metrics"}) {
+		t.Errorf("factory MetricsEndpoints after reload = %q", factoryMetricsEndpoints)
+	}
+
 	// A nil registry must leave the config untouched.
 	empty := &server.Config{}
-	applyExtensions(empty, nil)
+	if err := applyExtensions(empty, nil); err != nil {
+		t.Fatal(err)
+	}
 	if empty.RequestRewriters != nil || empty.OuterMiddleware != nil || empty.ExtraMiddleware != nil || empty.ExtraRoutes != nil || empty.ExtraAuthSkipPaths != nil || empty.RequestAuthenticators != nil {
 		t.Error("nil registry must not modify server config")
+	}
+}
+
+func TestApplyExtensionsReturnsOuterMiddlewareFactoryError(t *testing.T) {
+	reg := &ext.Registry{}
+	reg.UseOuterMiddlewareFactory(func(ext.HTTPServerConfig) (echo.MiddlewareFunc, error) {
+		return nil, errors.New("factory failed")
+	})
+
+	err := applyExtensions(&server.Config{}, reg)
+	if err == nil || !strings.Contains(err.Error(), "factory failed") {
+		t.Fatalf("applyExtensions() error = %v", err)
 	}
 }
 

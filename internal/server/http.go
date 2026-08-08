@@ -224,8 +224,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Determine metrics path
 	metricsPath := config.ResolveMetricsEndpoint("")
 	if cfg != nil && cfg.MetricsEnabled {
-		configuredPath := path.Clean(cfg.MetricsEndpoint)
+		configuredPath := path.Clean("/" + cfg.MetricsEndpoint)
 		metricsPath = config.ResolveMetricsEndpoint(cfg.MetricsEndpoint)
+		if cfg.PprofEnabled && (metricsPath == "/debug/pprof" || strings.HasPrefix(metricsPath, "/debug/pprof/")) {
+			metricsPath = "/metrics"
+		}
 		// Prevent metrics endpoint from shadowing API routes (security: auth bypass)
 		if metricsPath != configuredPath && cfg.MetricsEndpoint != "" {
 			slog.Warn("metrics endpoint conflicts with API routes, using /metrics instead",
@@ -258,9 +261,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Scrub credential-like query values before the outer request logger
 	// snapshots RequestURI. URL.RawQuery remains intact for handlers.
 	e.Use(redactSensitiveRequestURI())
+	e.Use(middleware.Recover())
 	// Outer extension middleware covers the complete HTTP request while still
 	// seeing the credential-redacted URI. It runs before request logging,
-	// recovery, limits, audit, and auth, so it must not depend on identity.
+	// limits, audit, and auth, so it must not depend on identity.
 	if cfg != nil {
 		for _, m := range cfg.OuterMiddleware {
 			e.Use(m)
@@ -303,8 +307,6 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	} else {
 		e.Use(middleware.RequestLogger())
 	}
-	e.Use(middleware.Recover())
-
 	// Body size limit (default: 10MB)
 	bodySizeLimit := "10M"
 	if cfg != nil && cfg.BodySizeLimit != "" {

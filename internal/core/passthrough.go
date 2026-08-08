@@ -8,14 +8,17 @@ import (
 
 // PassthroughRequest is the transport-oriented request for opaque provider-native forwarding.
 type PassthroughRequest struct {
-	Method       string
-	Endpoint     string
-	Operation    string // optional semantic GenAI operation derived at ingress
-	Model        string // optional model derived from the opaque request body
-	Stream       bool   // explicit streaming intent derived from the request body
-	Body         io.ReadCloser
-	Headers      http.Header
-	ProviderName string // optional: concrete configured provider instance name for name-based routing
+	Method    string
+	Endpoint  string
+	Operation string // optional semantic GenAI operation derived at ingress
+	Model     string // optional model derived from the opaque request body
+	Stream    bool   // explicit streaming intent derived from the request body
+	// StreamUncertain means ingress intentionally stopped its bounded body peek
+	// before it could prove whether this opaque request streams.
+	StreamUncertain bool
+	Body            io.ReadCloser
+	Headers         http.Header
+	ProviderName    string // optional: concrete configured provider instance name for name-based routing
 }
 
 // PassthroughResponse is the raw upstream response for opaque forwarding.

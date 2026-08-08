@@ -450,13 +450,14 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 	const endpoint = "/chat/completions"
 	providerType := strings.TrimSpace(workflow.ProviderType)
 	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
-		Method:    c.Request().Method,
-		Endpoint:  endpoint,
-		Operation: llmclient.OperationChat,
-		Model:     resolvedModelFromWorkflow(workflow, req.Model),
-		Stream:    req.Stream,
-		Body:      c.Request().Body,
-		Headers:   buildPassthroughHeaders(ctx, c.Request().Header),
+		Method:       c.Request().Method,
+		Endpoint:     endpoint,
+		Operation:    llmclient.OperationChat,
+		Model:        resolvedModelFromWorkflow(workflow, req.Model),
+		Stream:       req.Stream,
+		Body:         c.Request().Body,
+		Headers:      buildPassthroughHeaders(ctx, c.Request().Header),
+		ProviderName: providerNameFromWorkflow(workflow),
 	})
 	if err != nil {
 		return true, handleError(c, err)

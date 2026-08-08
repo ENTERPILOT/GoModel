@@ -44,6 +44,7 @@ type PassthroughRouteInfo struct {
 	SemanticOperation  string
 	GenAIOperation     string // standard GenAI operation, if this is an inference call
 	Stream             bool   // explicit streaming intent derived from the request body
+	StreamUncertain    bool   // bounded opaque-body inspection could not determine stream intent
 	AuditPath          string
 	Model              string
 }
@@ -283,6 +284,20 @@ func ApplyBodySelectorHints(env *WhiteBoxPrompt, model, provider string, stream 
 			cloned.Model = model
 		}
 		cloned.Stream = stream
+		cloned.StreamUncertain = false
+		CachePassthroughRouteInfo(env, &cloned)
+	}
+}
+
+// MarkPassthroughStreamUncertain records that bounded opaque-body inspection
+// stopped before it could determine explicit streaming intent.
+func MarkPassthroughStreamUncertain(env *WhiteBoxPrompt) {
+	if env == nil {
+		return
+	}
+	if passthrough := env.CachedPassthroughRouteInfo(); passthrough != nil {
+		cloned := *passthrough
+		cloned.StreamUncertain = true
 		CachePassthroughRouteInfo(env, &cloned)
 	}
 }

@@ -257,6 +257,47 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpointDoesNotCollideWithPprof(t *testing.T) {
+	srv := New(&mockProvider{}, &Config{
+		MetricsEnabled:  true,
+		MetricsEndpoint: "/debug/pprof/goroutine",
+		PprofEnabled:    true,
+	})
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsRec := httptest.NewRecorder()
+	srv.ServeHTTP(metricsRec, metricsReq)
+	if metricsRec.Code != http.StatusOK || !strings.Contains(metricsRec.Body.String(), "go_goroutines") {
+		t.Fatalf("fallback metrics response = %d %q", metricsRec.Code, metricsRec.Body.String())
+	}
+
+	pprofReq := httptest.NewRequest(http.MethodGet, "/debug/pprof/goroutine", nil)
+	pprofRec := httptest.NewRecorder()
+	srv.ServeHTTP(pprofRec, pprofReq)
+	if pprofRec.Code != http.StatusOK || strings.Contains(pprofRec.Body.String(), "# HELP go_") {
+		t.Fatalf("pprof response = %d, unexpectedly served metrics", pprofRec.Code)
+	}
+}
+
+func TestOuterMiddlewarePanicIsRecovered(t *testing.T) {
+	srv := New(&mockProvider{}, &Config{
+		OuterMiddleware: []echo.MiddlewareFunc{
+			func(next echo.HandlerFunc) echo.HandlerFunc {
+				return func(*echo.Context) error {
+					panic("outer middleware panic")
+				}
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
 func TestBasePathStripsPrefixBeforeRouting(t *testing.T) {
 	mock := &mockProvider{
 		modelsResponse: &core.ModelsResponse{
@@ -1123,6 +1164,30 @@ func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 	}
 	if got := mock.lastPassthroughProvider; got != "openai" {
 		t.Fatalf("normalized v1 provider = %q, want openai", got)
+	}
+}
+
+func TestProviderPassthroughRoute_MarksOversizedStreamIntentUncertain(t *testing.T) {
+	mock := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+	}
+	srv := New(mock, &Config{})
+	body := `{"model":"gpt-5-mini","padding":"` + strings.Repeat("x", 65*1024) + `","stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if mock.lastPassthroughReq == nil || !mock.lastPassthroughReq.StreamUncertain {
+		t.Fatalf("passthrough stream metadata = %+v, want uncertain", mock.lastPassthroughReq)
 	}
 }
 

@@ -2242,6 +2242,12 @@ func TestChatCompletionStreaming_FastPathUsageCarriesResolvedProviderName(t *tes
 	if got := usageLog.entries[0].ProviderName; got != "openai_test" {
 		t.Fatalf("ProviderName = %q, want openai_test", got)
 	}
+	if mock.lastPassthroughReq == nil {
+		t.Fatal("lastPassthroughReq = nil, want passthrough request")
+	}
+	if got := mock.lastPassthroughReq.ProviderName; got != "openai_test" {
+		t.Fatalf("passthrough ProviderName = %q, want openai_test", got)
+	}
 }
 
 func TestChatCompletionStreaming_FastPathSkipsQualifiedModelRewrite(t *testing.T) {

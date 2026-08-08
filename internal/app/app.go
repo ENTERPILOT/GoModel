@@ -113,16 +113,23 @@ type Config struct {
 
 // applyExtensions snapshots a registered extension set into the server
 // configuration. A nil registry leaves the config untouched.
-func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
+func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) error {
 	if extensions == nil {
-		return
+		return nil
+	}
+	outerMiddleware, err := extensions.OuterMiddlewareFor(ext.HTTPServerConfig{
+		MetricsEndpoint: serverCfg.MetricsEndpoint,
+	})
+	if err != nil {
+		return err
 	}
 	serverCfg.RequestRewriters = extensions.Rewriters()
-	serverCfg.OuterMiddleware = extensions.OuterMiddleware()
+	serverCfg.OuterMiddleware = outerMiddleware
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
 	serverCfg.RequestAuthenticators = extensions.Authenticators()
+	return nil
 }
 
 // routeSelectorHooks adapts upstream client lifecycle events into route
@@ -226,25 +233,27 @@ func upstreamObserverHooks(observer ext.UpstreamObserver) llmclient.Hooks {
 
 func upstreamCallFromRequest(info llmclient.RequestInfo) ext.UpstreamCall {
 	return ext.UpstreamCall{
-		Provider:     info.Provider,
-		ProviderType: info.ProviderType,
-		Model:        info.Model,
-		Operation:    info.Operation,
-		Endpoint:     info.Endpoint,
-		Method:       info.Method,
-		Stream:       info.Stream,
+		Provider:        info.Provider,
+		ProviderType:    info.ProviderType,
+		Model:           info.Model,
+		Operation:       info.Operation,
+		Endpoint:        info.Endpoint,
+		Method:          info.Method,
+		Stream:          info.Stream,
+		StreamUncertain: info.StreamUncertain,
 	}
 }
 
 func upstreamCallFromResponse(info llmclient.ResponseInfo) ext.UpstreamCall {
 	return ext.UpstreamCall{
-		Provider:     info.Provider,
-		ProviderType: info.ProviderType,
-		Model:        info.Model,
-		Operation:    info.Operation,
-		Endpoint:     info.Endpoint,
-		Method:       info.Method,
-		Stream:       info.Stream,
+		Provider:        info.Provider,
+		ProviderType:    info.ProviderType,
+		Model:           info.Model,
+		Operation:       info.Operation,
+		Endpoint:        info.Endpoint,
+		Method:          info.Method,
+		Stream:          info.Stream,
+		StreamUncertain: info.StreamUncertain,
 	}
 }
 
@@ -764,7 +773,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		serverCfg.UsageSummarizer = usageReader
 	}
 
-	applyExtensions(serverCfg, cfg.Extensions)
+	if err := applyExtensions(serverCfg, cfg.Extensions); err != nil {
+		return fail("failed to configure extensions", err)
+	}
 
 	// Wire the readiness storage probe. Storage is a required dependency, so a
 	// failed ping makes /health/ready report not_ready (503). When no storage

@@ -35,20 +35,24 @@ type RequestInfo struct {
 	Endpoint     string // API endpoint (e.g., "/chat/completions", "/models")
 	Method       string // HTTP method (e.g., "POST", "GET")
 	Stream       bool   // Whether this is a streaming request
+	// StreamUncertain means a bounded opaque-body inspection could not
+	// determine intent before the upstream call began.
+	StreamUncertain bool
 }
 
 // ResponseInfo contains metadata about a response for observability hooks
 type ResponseInfo struct {
-	Provider     string        // Configured provider name
-	ProviderType string        // Provider implementation type
-	Model        string        // Model name
-	Operation    string        // Semantic GenAI operation
-	Endpoint     string        // API endpoint
-	Method       string        // HTTP method
-	StatusCode   int           // HTTP status code (0 if network error)
-	Duration     time.Duration // Request duration
-	Stream       bool          // Whether this was a streaming request
-	Error        error         // Error if request failed (nil on success)
+	Provider        string        // Configured provider name
+	ProviderType    string        // Provider implementation type
+	Model           string        // Model name
+	Operation       string        // Semantic GenAI operation
+	Endpoint        string        // API endpoint
+	Method          string        // HTTP method
+	StatusCode      int           // HTTP status code (0 if network error)
+	Duration        time.Duration // Request duration
+	Stream          bool          // Whether this was a streaming request
+	StreamUncertain bool          // Whether request stream intent was unknown at dispatch
+	Error           error         // Error if request failed (nil on success)
 	// CircuitState is the provider's circuit breaker state after this request
 	// completed ("closed", "half-open", "open"); empty when the breaker is
 	// disabled. It reflects the moment of completion, so metrics built from it
@@ -156,10 +160,11 @@ type Request struct {
 	Model    string
 	// Operation explicitly identifies model inference semantics for
 	// observability. Leave empty for control-plane and other non-inference calls.
-	Operation string
-	Stream    bool   // explicit stream intent; Accept: text/event-stream remains a fallback
-	Body      any    // Will be JSON marshaled if not nil
-	RawBody   []byte // Used as-is (e.g., multipart form bodies). Mutually exclusive with Body and RawBodyReader.
+	Operation       string
+	Stream          bool   // explicit stream intent; Accept: text/event-stream remains a fallback
+	StreamUncertain bool   // bounded opaque-body inspection could not determine stream intent
+	Body            any    // Will be JSON marshaled if not nil
+	RawBody         []byte // Used as-is (e.g., multipart form bodies). Mutually exclusive with Body and RawBodyReader.
 	// RawBodyReader streams the request body without buffering it in memory.
 	// It is intended for one-shot passthrough requests and is not replayable for retries.
 	RawBodyReader io.Reader
@@ -209,12 +214,13 @@ func (c *Client) beginRequest(ctx context.Context, req Request, stream bool) (re
 		ctx:       ctx,
 		startedAt: time.Now(),
 		requestInfo: RequestInfo{
-			Provider:  c.config.ProviderName,
-			Model:     requestModel(req),
-			Operation: req.Operation,
-			Endpoint:  req.Endpoint,
-			Method:    req.Method,
-			Stream:    stream,
+			Provider:        c.config.ProviderName,
+			Model:           requestModel(req),
+			Operation:       req.Operation,
+			Endpoint:        req.Endpoint,
+			Method:          req.Method,
+			Stream:          stream,
+			StreamUncertain: req.StreamUncertain,
 		},
 	}
 
@@ -252,17 +258,18 @@ func (c *Client) finishRequest(scope requestScope, statusCode int, err error) {
 		circuitState = c.circuitBreaker.State()
 	}
 	c.config.Hooks.OnRequestEnd(scope.ctx, ResponseInfo{
-		Provider:     c.config.ProviderName,
-		ProviderType: scope.requestInfo.ProviderType,
-		Model:        scope.requestInfo.Model,
-		Operation:    scope.requestInfo.Operation,
-		Endpoint:     scope.requestInfo.Endpoint,
-		Method:       scope.requestInfo.Method,
-		StatusCode:   statusCode,
-		Duration:     time.Since(scope.startedAt),
-		Stream:       scope.requestInfo.Stream,
-		Error:        err,
-		CircuitState: circuitState,
+		Provider:        c.config.ProviderName,
+		ProviderType:    scope.requestInfo.ProviderType,
+		Model:           scope.requestInfo.Model,
+		Operation:       scope.requestInfo.Operation,
+		Endpoint:        scope.requestInfo.Endpoint,
+		Method:          scope.requestInfo.Method,
+		StatusCode:      statusCode,
+		Duration:        time.Since(scope.startedAt),
+		Stream:          scope.requestInfo.Stream,
+		StreamUncertain: scope.requestInfo.StreamUncertain,
+		Error:           err,
+		CircuitState:    circuitState,
 	})
 }
 
@@ -271,20 +278,21 @@ func (c *Client) finishStreamFirstChunk(scope requestScope, statusCode int) {
 		return
 	}
 	c.config.Hooks.OnStreamFirstChunk(scope.ctx, ResponseInfo{
-		Provider:     c.config.ProviderName,
-		ProviderType: scope.requestInfo.ProviderType,
-		Model:        scope.requestInfo.Model,
-		Operation:    scope.requestInfo.Operation,
-		Endpoint:     scope.requestInfo.Endpoint,
-		Method:       scope.requestInfo.Method,
-		StatusCode:   statusCode,
-		Duration:     time.Since(scope.startedAt),
-		Stream:       true,
+		Provider:        c.config.ProviderName,
+		ProviderType:    scope.requestInfo.ProviderType,
+		Model:           scope.requestInfo.Model,
+		Operation:       scope.requestInfo.Operation,
+		Endpoint:        scope.requestInfo.Endpoint,
+		Method:          scope.requestInfo.Method,
+		StatusCode:      statusCode,
+		Duration:        time.Since(scope.startedAt),
+		Stream:          true,
+		StreamUncertain: scope.requestInfo.StreamUncertain,
 	})
 }
 
-func (c *Client) observeFirstChunk(scope requestScope, resp *http.Response) {
-	if resp == nil || resp.Body == nil || !scope.requestInfo.Stream {
+func (c *Client) observeFirstChunk(scope requestScope, resp *http.Response, stream bool) {
+	if resp == nil || resp.Body == nil || !stream {
 		return
 	}
 	resp.Body = &firstChunkReadCloser{
@@ -576,7 +584,7 @@ func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, erro
 	}
 
 	c.completeScope(scope, resp.StatusCode, nil, nil)
-	c.observeFirstChunk(scope, resp)
+	c.observeFirstChunk(scope, resp, true)
 	return resp.Body, nil
 }
 
@@ -652,7 +660,6 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 		if retryable {
 			if scope.halfOpenProbe || attempt == maxAttempts-1 {
 				c.completeScope(scope, resp.StatusCode, nil, nil)
-				c.observeFirstChunk(scope, resp)
 				return resp, nil
 			}
 			_ = resp.Body.Close()
@@ -660,7 +667,10 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 		}
 
 		c.completeScope(scope, resp.StatusCode, nil, nil)
-		c.observeFirstChunk(scope, resp)
+		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+			responseStream := stream || strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
+			c.observeFirstChunk(scope, resp, responseStream)
+		}
 		return resp, nil
 	}
 

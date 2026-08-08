@@ -22,7 +22,7 @@ type MetricsConfig struct {
 func ResolveMetricsEndpoint(endpoint string) string {
 	metricsPath := "/metrics"
 	if endpoint != "" {
-		metricsPath = path.Clean(endpoint)
+		metricsPath = path.Clean("/" + endpoint)
 	}
 	if metricsPath == "/v1" || strings.HasPrefix(metricsPath, "/v1/") ||
 		metricsPath == "/p" || strings.HasPrefix(metricsPath, "/p/") {
