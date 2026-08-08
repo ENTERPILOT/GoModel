@@ -417,7 +417,7 @@ run_release_budget_enforcement() {
     -H 'Content-Type: application/json' \
     -H "X-Request-ID: $req1" \
     -H "X-GoModel-User-Path: $leaf_path" \
-    -d "{\"model\":\"gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly $expected_reply\"}],\"max_tokens\":20,\"temperature\":0}"
+    -d "{\"model\":\"gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly $expected_reply\"}],\"max_tokens\":32,\"temperature\":0}"
   assert_chat_response_contains "$body_file" "" "$expected_reply"
 
   wait_release_usage_entry "$base_url" "$req1" "$leaf_path" "$usage_json_file"
@@ -2635,7 +2635,7 @@ requests resolve to each provider three times.
 SRC="qa-lb-rrd-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/llama-3.1-8b-instant\"}]}" >/dev/null
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/llama-3.1-8b-instant\"}]}" >/dev/null
 for M in openai/gpt-4.1-nano groq/llama-3.1-8b-instant; do
   curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
     -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" >/dev/null
