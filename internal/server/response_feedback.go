@@ -64,6 +64,7 @@ func notifyResponsesResponseFeedback(c *echo.Context, endpoint ext.Endpoint, res
 	if resp != nil {
 		if resp.Usage != nil {
 			usage = cacheUsageFromCore(resp.Usage.InputTokens, resp.Usage.PromptTokensDetails, resp.Usage.RawUsage)
+			usage.observed = true
 		}
 		if resp.Model != "" {
 			model = resp.Model
@@ -204,15 +205,22 @@ func numericInt(value any) (int, bool) {
 	case int32:
 		return int(typed), true
 	case int64:
-		return int(typed), true
+		return parseNumericInt(strconv.FormatInt(typed, 10))
 	case float64:
-		return int(typed), true
+		return parseNumericInt(strconv.FormatFloat(typed, 'f', -1, 64))
 	case json.Number:
-		parsed, err := strconv.ParseInt(string(typed), 10, 64)
-		return int(parsed), err == nil
+		return parseNumericInt(string(typed))
 	default:
 		return 0, false
 	}
+}
+
+func parseNumericInt(value string) (int, bool) {
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
 }
 
 func nestedMap(value any) (map[string]any, bool) {

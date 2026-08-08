@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tidwall/gjson"
+
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -209,6 +211,18 @@ func TestDetectAutoCanonicalizesStablePrefixJSON(t *testing.T) {
 	idReordered := detector.Detect(chatSnapshot(nil, reordered), "team")
 	if idFirst == "" || idFirst != idReordered {
 		t.Fatalf("semantic JSON changes split auto session: %q vs %q", idFirst, idReordered)
+	}
+}
+
+func TestCanonicalSegmentFallsBackToExactRawJSON(t *testing.T) {
+	for _, raw := range []string{
+		`{"unterminated":`,
+		`{"first":1}{"second":2}`,
+	} {
+		result := gjson.Result{Type: gjson.JSON, Raw: raw}
+		if got := string(canonicalSegment(result)); got != raw {
+			t.Errorf("canonicalSegment(%q) = %q, want exact raw fallback", raw, got)
+		}
 	}
 }
 

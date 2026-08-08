@@ -56,7 +56,7 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 				if observer, ok := rw.(ext.ResponseFeedbackObserver); ok {
 					wantsFeedback := true
 					if filter, filtered := rw.(ext.ResponseFeedbackFilter); filtered {
-						wantsFeedback = filter.WantsResponseFeedback(in, res)
+						wantsFeedback = safelyWantsResponseFeedback(rw.Name(), filter, in, res)
 					}
 					if wantsFeedback {
 						feedbackObservers = append(feedbackObservers, observer)
@@ -94,6 +94,23 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 			return next(c)
 		}
 	}
+}
+
+// safelyWantsResponseFeedback isolates an optional extension hook from the
+// inference path. A broken filter declines feedback for this request but must
+// never prevent the provider call itself.
+func safelyWantsResponseFeedback(name string, filter ext.ResponseFeedbackFilter, in ext.Input, res *ext.Result) (wants bool) {
+	wants = true
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			wants = false
+			slog.Warn("response feedback filter panicked; feedback disabled for request",
+				"rewriter", name,
+				"panic", recovered,
+			)
+		}
+	}()
+	return filter.WantsResponseFeedback(in, res)
 }
 
 // redactCredentialHeaders clones the request headers with credential values

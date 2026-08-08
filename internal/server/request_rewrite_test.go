@@ -31,10 +31,14 @@ type feedbackRewriter struct {
 
 type filteredFeedbackRewriter struct {
 	feedbackRewriter
-	want bool
+	want        bool
+	panicFilter bool
 }
 
 func (r *filteredFeedbackRewriter) WantsResponseFeedback(ext.Input, *ext.Result) bool {
+	if r.panicFilter {
+		panic("feedback filter failed")
+	}
 	return r.want
 }
 
@@ -187,6 +191,28 @@ func TestRequestRewriteMiddlewareHonorsResponseFeedbackFilter(t *testing.T) {
 		if attached != want {
 			t.Fatalf("want=%v: attached=%v", want, attached)
 		}
+	}
+}
+
+func TestRequestRewriteMiddlewareIsolatesResponseFeedbackFilterPanic(t *testing.T) {
+	provider := newRewriteTestProvider()
+	rewriter := &filteredFeedbackRewriter{
+		feedbackRewriter: feedbackRewriter{stubRewriter: stubRewriter{name: "panicking-filter"}},
+		panicFilter:      true,
+	}
+	srv := New(provider, &Config{RequestRewriters: []ext.RequestRewriter{rewriter}})
+
+	rec := postJSON(t, srv, "/v1/chat/completions",
+		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body.String())
+	}
+	if provider.capturedChatReq == nil {
+		t.Fatal("provider was not called after feedback filter panic")
+	}
+	if len(rewriter.feedback) != 0 {
+		t.Fatalf("feedback count = %d, want 0 after filter panic", len(rewriter.feedback))
 	}
 }
 

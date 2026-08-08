@@ -82,11 +82,15 @@ type RequestRewriter interface {
 }
 
 // ResponseFeedbackObserver receives content-free feedback after a rewritten
-// request successfully reaches a provider. It is an optional companion to
-// RequestRewriter: core detects implementations structurally and invokes them
-// for both ordinary and streaming responses. usageObserved distinguishes a
-// confirmed zero from a provider/stream that returned no usage breakdown.
-// Implementations must be safe for concurrent use and return promptly.
+// request completes successfully at a provider. For ordinary responses the
+// callback runs after the provider returns; for streaming responses it runs
+// after the stream closes. Failed requests do not produce feedback.
+//
+// It is an optional companion to RequestRewriter: core detects implementations
+// structurally. usageObserved distinguishes a provider-confirmed zero from a
+// provider or stream that returned no usage breakdown. Implementations can be
+// called concurrently, must therefore be concurrency-safe, and must return
+// promptly so they do not delay completion of the client request.
 //
 // The flat signature intentionally uses only long-standing extension types so
 // extensions can implement the hook while supporting older core releases;
@@ -107,9 +111,11 @@ type ResponseFeedbackObserver interface {
 	)
 }
 
-// ResponseFeedbackFilter lets an observer decline feedback per request. Core
-// calls it after Rewrite and registers the observer only when it returns true.
-// Observers without this optional interface receive every successful response.
+// ResponseFeedbackFilter lets an observer control registration per request.
+// Core calls it after Rewrite and registers the observer only when it returns
+// true. Observers without this optional interface receive feedback for every
+// successful rewritten request. A panic is isolated and treated as false so
+// this optional hook cannot abort inference.
 type ResponseFeedbackFilter interface {
 	WantsResponseFeedback(in Input, result *Result) bool
 }
