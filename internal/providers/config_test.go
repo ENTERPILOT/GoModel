@@ -54,6 +54,10 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 		DefaultBaseURL:  "http://localhost:8000/v1",
 		AllowAPIKeyless: true,
 	},
+	"sglang": {
+		DefaultBaseURL:  "http://localhost:30000/v1",
+		AllowAPIKeyless: true,
+	},
 	"azure": {
 		RequireBaseURL:     true,
 		SupportsAPIVersion: true,
@@ -368,6 +372,15 @@ func TestFilterEmptyProviders_VLLMAllowsKeylessConfig(t *testing.T) {
 	}, testDiscoveryConfigs)
 	if _, exists := got["vllm"]; !exists {
 		t.Fatal("expected vllm to be kept without an API key")
+	}
+}
+
+func TestFilterEmptyProvidersSGLangAllowsKeylessConfig(t *testing.T) {
+	got := filterEmptyProviders(map[string]config.RawProviderConfig{
+		"sglang": {Type: "sglang", BaseURL: "http://localhost:30000/v1"},
+	}, testDiscoveryConfigs)
+	if _, exists := got["sglang"]; !exists {
+		t.Fatal("expected sglang to be kept without an API key")
 	}
 }
 
@@ -927,6 +940,32 @@ func TestApplyProviderEnvVars_DiscoversVLLMFromBaseURLWithoutAPIKey(t *testing.T
 	}
 	if p.BaseURL != "http://localhost:8000/v1" {
 		t.Errorf("BaseURL = %q, want http://localhost:8000/v1", p.BaseURL)
+	}
+}
+
+func TestApplyProviderEnvVarsDiscoversSGLangWithoutAPIKey(t *testing.T) {
+	t.Setenv("SGLANG_BASE_URL", "http://localhost:30000/v1")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	p, exists := got["sglang"]
+	if !exists {
+		t.Fatal("expected sglang to be discovered from SGLANG_BASE_URL")
+	}
+	if p.Type != "sglang" || p.BaseURL != "http://localhost:30000/v1" || p.APIKey != "" {
+		t.Fatalf("sglang config = %+v", p)
+	}
+}
+
+func TestApplyProviderEnvVarsDiscoversSGLangFromAPIKeyWithDefaultBaseURL(t *testing.T) {
+	t.Setenv("SGLANG_API_KEY", "sglang-key")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	p, exists := got["sglang"]
+	if !exists {
+		t.Fatal("expected sglang to be discovered from SGLANG_API_KEY")
+	}
+	if p.APIKey != "sglang-key" || p.BaseURL != testDiscoveryConfigs["sglang"].DefaultBaseURL {
+		t.Fatalf("sglang config = %+v", p)
 	}
 }
 

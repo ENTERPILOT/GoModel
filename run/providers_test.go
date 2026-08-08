@@ -47,6 +47,12 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			required:     nil,
 		},
 		{
+			// SGLang supports both unauthenticated and --api-key deployments.
+			providerType: "sglang",
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			required:     nil,
+		},
+		{
 			// Authenticates through the AWS SDK credential chain, never a key.
 			providerType: "bedrock",
 			fields:       []string{"base_url", "models"},
@@ -142,7 +148,7 @@ func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
 		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "cohere", "deepseek", "fireworks",
 		"gemini", "groq", "kilo", "kimicode", "meta", "minimax", "ollama", "openai", "opencode_go",
-		"openrouter", "oracle", "vertex", "vllm", "xai", "xiaomi", "zai",
+		"openrouter", "oracle", "sglang", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}
 
 	for _, metricsEnabled := range []bool{false, true} {

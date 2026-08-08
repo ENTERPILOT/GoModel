@@ -1,6 +1,6 @@
 # GoModel Helm Chart
 
-High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Cohere, Gemini, DeepSeek, Groq, Kilo AI, Z.ai, xAI, Oracle).
+High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Cohere, Gemini, DeepSeek, Groq, Kilo AI, Z.ai, xAI, Oracle, SGLang, vLLM).
 
 ## Prerequisites
 
@@ -72,6 +72,8 @@ helm install gomodel ./helm \
 | `providers.oracle.baseUrl`       | Oracle OpenAI-compatible base URL mapped to `ORACLE_BASE_URL`; required when Oracle is enabled | `""`                   |
 | `providers.vllm.enabled`         | Enable vLLM                                                                                    | `false`                |
 | `providers.vllm.baseUrl`         | vLLM OpenAI-compatible base URL mapped to `VLLM_BASE_URL`; required when vLLM is enabled       | `""`                   |
+| `providers.sglang.enabled`       | Enable SGLang                                                                                  | `false`                |
+| `providers.sglang.baseUrl`       | SGLang OpenAI-compatible base URL mapped to `SGLANG_BASE_URL`; required when enabled           | `""`                   |
 | `cache.type`                     | Cache type (local/redis)                                                                       | `"redis"`              |
 | `redis.enabled`                  | Deploy Redis subchart                                                                          | `true`                 |
 | `metrics.enabled`                | Enable Prometheus metrics                                                                      | `true`                 |
@@ -99,6 +101,7 @@ stringData:
   ZAI_API_KEY: "..."
   KILO_API_KEY: "..."
   ORACLE_API_KEY: "..."
+  SGLANG_API_KEY: "..."
   VLLM_API_KEY: "..."
 ```
 
@@ -108,6 +111,10 @@ to the container env var `ORACLE_BASE_URL`.
 vLLM does not require an API key unless the upstream server was started with
 `--api-key`. The chart maps `providers.vllm.baseUrl` to the container env var
 `VLLM_BASE_URL`.
+
+SGLang does not require an API key unless the upstream server was started with
+`--api-key`. The chart maps `providers.sglang.baseUrl` to the container env var
+`SGLANG_BASE_URL`.
 
 Then reference it (use `enabled=true` when using existingSecret since apiKey isn't set directly):
 
@@ -132,6 +139,14 @@ Example keyless vLLM setup:
 helm install gomodel ./helm \
   --set providers.vllm.enabled=true \
   --set providers.vllm.baseUrl="http://vllm.default.svc.cluster.local:8000/v1"
+```
+
+Example keyless SGLang setup:
+
+```bash
+helm install gomodel ./helm \
+  --set providers.sglang.enabled=true \
+  --set providers.sglang.baseUrl="http://sglang.default.svc.cluster.local:30000/v1"
 ```
 
 ### Ingress Example

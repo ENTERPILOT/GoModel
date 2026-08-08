@@ -1,0 +1,125 @@
+---
+title: "SGLang"
+description: "Route OpenAI-compatible GoModel requests to one or more self-hosted SGLang servers."
+icon: "server"
+keywords: ["SGLang", "self-hosted", "Hugging Face models", "OpenAI-compatible server"]
+---
+
+GoModel talks to SGLang through its OpenAI-compatible `/v1` API and exposes
+SGLang-native endpoints through provider passthrough. Hugging Face model IDs
+with slashes work because GoModel splits provider-qualified selectors on the
+first slash only.
+
+Start SGLang first:
+
+```bash
+python -m sglang.launch_server \
+  --model-path Qwen/Qwen2.5-0.5B-Instruct \
+  --host 0.0.0.0 \
+  --port 30000
+# Add --api-key token-abc123 if the server should require bearer auth.
+```
+
+See SGLang's [OpenAI-compatible API documentation](https://docs.sglang.io/docs/basic_usage/openai_api_completions)
+for current launch and accelerator-specific options.
+
+## Configure
+
+```bash
+SGLANG_BASE_URL=http://host.docker.internal:30000/v1   # include /v1
+# SGLANG_API_KEY=token-abc123                          # only with --api-key
+GOMODEL_MASTER_KEY=change-me
+```
+
+<Note>
+  These examples assume GoModel runs in Docker and SGLang runs on the host. If
+  both run in the same Docker or Kubernetes network, use the SGLang service
+  name. If GoModel runs directly on the host, use
+  `http://localhost:30000/v1`.
+</Note>
+
+## Run GoModel
+
+<CodeGroup>
+
+```bash Docker (.env file)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e SGLANG_BASE_URL="http://host.docker.internal:30000/v1" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## Verify
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "sglang/Qwen/Qwen2.5-0.5B-Instruct",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}],
+    "max_tokens": 8
+  }'
+```
+
+`GET /v1/models` returns SGLang model IDs prefixed by provider name, for
+example `sglang/Qwen/Qwen2.5-0.5B-Instruct`.
+
+## Multiple SGLang instances
+
+Use suffixed environment variables to register more than one instance without
+YAML:
+
+```bash
+SGLANG_BASE_URL=http://host.docker.internal:30000/v1
+SGLANG_TEST_BASE_URL=http://host.docker.internal:30001/v1
+```
+
+This registers `sglang` and `sglang-test`. The suffix is lowercased and
+underscores become hyphens.
+
+## Native passthrough
+
+Passthrough is enabled by default. Root-relative SGLang endpoints such as
+`/generate` are sent without the configured `/v1` prefix:
+
+```bash
+curl -s http://localhost:8080/p/sglang/generate \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello",
+    "sampling_params": {"max_new_tokens": 8}
+  }'
+```
+
+Keep the explicit `v1/` segment for SGLang endpoints that include it, such as
+`/v1/rerank` or `/v1/tokenize`:
+
+```text
+/p/sglang/v1/rerank
+/p/sglang/v1/tokenize
+```
+
+GoModel strips client authorization before forwarding and applies
+`SGLANG_API_KEY` when configured.
+
+## Capability notes
+
+- Chat completions, streaming, model listing, Responses, and embeddings use
+  SGLang's OpenAI-compatible API.
+- Embeddings and model-specific features depend on the model loaded by SGLang.
+- Native batch, file, and stored-response lifecycle interfaces are not yet
+  exposed as typed GoModel provider capabilities; use passthrough where the
+  installed SGLang version supports them.

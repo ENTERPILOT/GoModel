@@ -100,6 +100,7 @@ func buildDefaultConfig() *Config {
 				"openrouter",
 				"kilo",
 				"zai",
+				"sglang",
 				"vllm",
 				"deepseek",
 			},

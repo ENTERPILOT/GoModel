@@ -76,7 +76,7 @@ var openAICompatibleTokenCostMappings = []tokenCostMapping{
 // mappings. Providers not listed here fall back to
 // openAICompatibleTokenCostMappings (see tokenCostMappingsForProvider): every
 // other registered provider type (xiaomi, deepseek, zai, minimax, bailian,
-// oracle, azure, vllm, ollama, opencode_go, …) speaks the OpenAI usage schema,
+// oracle, azure, sglang, vllm, ollama, opencode_go, …) speaks the OpenAI usage schema,
 // so its cached/reasoning/audio token breakdowns must be priced the same way.
 // Only providers whose usage schema differs (anthropic, gemini) or that report
 // extra token types (xai) need an explicit entry.
