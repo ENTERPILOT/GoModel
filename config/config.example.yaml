@@ -383,7 +383,8 @@ providers:
   chutes:
     type: chutes
     api_key: "${CHUTES_API_KEY}"
-    # base_url defaults to "https://llm.chutes.ai/v1"
+    # base_url defaults to "https://llm.chutes.ai/v1".
+    # Set base_url when using a different compatible endpoint.
 
   meta:
     type: meta

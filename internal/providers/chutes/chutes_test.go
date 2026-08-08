@@ -3,8 +3,10 @@ package chutes
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -44,6 +46,117 @@ func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 	}
 	if resp.Model != "Qwen/Qwen3-32B-TEE" || resp.Usage.TotalTokens != 4 {
 		t.Fatalf("response = %+v, want model and usage preserved", resp)
+	}
+}
+
+func TestStreamChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
+	var gotPath, gotAuth string
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			http.Error(w, "decode error", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl-chutes\",\"object\":\"chat.completion.chunk\",\"choices\":[]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "Qwen/Qwen3-32B-TEE",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChatCompletion() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if gotPath != "/chat/completions" || gotAuth != "Bearer cpk_test" {
+		t.Fatalf("request path/auth = %q/%q, want /chat/completions/Bearer cpk_test", gotPath, gotAuth)
+	}
+	if gotBody["model"] != "Qwen/Qwen3-32B-TEE" || gotBody["stream"] != true {
+		t.Fatalf("stream request body = %#v", gotBody)
+	}
+	if !strings.Contains(string(body), "data: [DONE]") {
+		t.Fatalf("stream body = %q, want SSE terminator", body)
+	}
+}
+
+func TestChatCompletion_ReturnsUpstreamError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit_error"}}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "Qwen/Qwen3-32B-TEE",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("ChatCompletion() error = nil, want upstream error")
+	}
+	gatewayErr, ok := err.(*core.GatewayError)
+	if !ok {
+		t.Fatalf("error type = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.StatusCode != http.StatusTooManyRequests || gatewayErr.Type != core.ErrorTypeRateLimit {
+		t.Fatalf("gateway error = %+v, want 429 rate_limit_error", gatewayErr)
+	}
+}
+
+func TestPassthrough_ForwardsOpaqueRequest(t *testing.T) {
+	var gotURI, gotAuth, gotBeta, gotBody string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.URL.RequestURI()
+		gotAuth = r.Header.Get("Authorization")
+		gotBeta = r.Header.Get("X-Chutes-Beta")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"accepted":true}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "chat/completions?trace=true",
+		Body:     io.NopCloser(strings.NewReader(`{"model":"Qwen/Qwen3-32B-TEE"}`)),
+		Headers: http.Header{
+			"Content-Type":  {"application/json"},
+			"X-Chutes-Beta": {"test"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Passthrough() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if gotURI != "/chat/completions?trace=true" || gotAuth != "Bearer cpk_test" {
+		t.Fatalf("request URI/auth = %q/%q", gotURI, gotAuth)
+	}
+	if gotBeta != "test" || gotBody != `{"model":"Qwen/Qwen3-32B-TEE"}` {
+		t.Fatalf("request beta/body = %q/%q", gotBeta, gotBody)
+	}
+	if resp.StatusCode != http.StatusAccepted || string(responseBody) != `{"accepted":true}` {
+		t.Fatalf("response status/body = %d/%q", resp.StatusCode, responseBody)
 	}
 }
 
@@ -94,7 +207,7 @@ func TestListModels_PreservesChutesMetadata(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"object":"list",
+			"object":"chutes-model-catalog",
 			"data":[{
 				"id":"Qwen/Qwen3.5-397B-A17B-TEE",
 				"owned_by":"sglang",
@@ -120,6 +233,9 @@ func TestListModels_PreservesChutesMetadata(t *testing.T) {
 	}
 	if len(resp.Data) != 1 {
 		t.Fatalf("len(resp.Data) = %d, want 1", len(resp.Data))
+	}
+	if resp.Object != "list" {
+		t.Fatalf("resp.Object = %q, want list", resp.Object)
 	}
 	model := resp.Data[0]
 	if model.Object != "model" {

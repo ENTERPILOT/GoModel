@@ -44,10 +44,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		return nil, err
 	}
 
-	result := &core.ModelsResponse{Object: strings.TrimSpace(upstream.Object)}
-	if result.Object == "" {
-		result.Object = "list"
-	}
+	result := &core.ModelsResponse{Object: "list"}
 	result.Data = make([]core.Model, 0, len(upstream.Data))
 	for _, model := range upstream.Data {
 		if strings.TrimSpace(model.ID) == "" {
@@ -58,6 +55,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	return result, nil
 }
 
+// toCore normalizes a Chutes catalog entry into GoModel's provider-neutral model shape.
 func (m modelInfo) toCore() core.Model {
 	object := strings.TrimSpace(m.Object)
 	if object == "" {
@@ -87,6 +85,7 @@ func (m modelInfo) toCore() core.Model {
 	}
 }
 
+// modelCapabilities maps Chutes features and input modalities to GoModel capabilities.
 func modelCapabilities(m modelInfo) map[string]bool {
 	capabilities := make(map[string]bool, len(m.SupportedFeatures)+3)
 	for _, feature := range m.SupportedFeatures {
@@ -113,6 +112,7 @@ func modelCapabilities(m modelInfo) map[string]bool {
 	return capabilities
 }
 
+// toCore converts Chutes' per-million-token prices to GoModel pricing metadata.
 func (p *modelPricing) toCore() *core.ModelPricing {
 	if p == nil || (p.Prompt == nil && p.Completion == nil && p.InputCacheRead == nil) {
 		return nil
@@ -125,6 +125,7 @@ func (p *modelPricing) toCore() *core.ModelPricing {
 	}
 }
 
+// cloneFloat copies optional prices so the normalized model does not retain upstream pointers.
 func cloneFloat(value *float64) *float64 {
 	if value == nil {
 		return nil

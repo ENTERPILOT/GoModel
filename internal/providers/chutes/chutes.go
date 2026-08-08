@@ -48,6 +48,7 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 	))}
 }
 
+// compatibleConfig returns the shared OpenAI-compatible transport settings for Chutes.
 func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
 	return openai.CompatibleProviderConfig{
 		ProviderName: "chutes",
@@ -56,6 +57,7 @@ func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
 	}
 }
 
+// setHeaders applies Chutes' bearer-token authentication.
 func setHeaders(req *http.Request, apiKey string) {
 	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{AuthScheme: "Bearer "})
 }
