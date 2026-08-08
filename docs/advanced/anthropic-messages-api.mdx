@@ -84,7 +84,9 @@ client.messages.create(
 
 ## Example
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl https://your-gateway/v1/messages \
   -H "Authorization: Bearer $GOMODEL_KEY" \
   -H "Content-Type: application/json" \
@@ -95,6 +97,46 @@ curl https://your-gateway/v1/messages \
     "messages": [{"role": "user", "content": "Hello"}]
   }'
 ```
+
+```python Python
+import os
+
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="https://your-gateway",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+message = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=256,
+    system="Be concise.",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+
+print(message.content[0].text)
+```
+
+```javascript JavaScript
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "https://your-gateway",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const message = await client.messages.create({
+  model: "claude-sonnet-4-6",
+  max_tokens: 256,
+  system: "Be concise.",
+  messages: [{ role: "user", content: "Hello" }],
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>
 
 The response uses the Anthropic Messages shape (`type: "message"`, `content` blocks,
 `stop_reason`, `usage`). Errors use the Anthropic error envelope

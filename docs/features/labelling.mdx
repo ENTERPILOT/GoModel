@@ -37,12 +37,50 @@ each key. Click **Edit Labels** on a row to change them later.
 
 Or via the admin API:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X POST http://localhost:8080/admin/auth-keys \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "team-a-batch", "labels": ["team-a", "batch-jobs"]}'
 ```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+auth_key = client.post(
+    "/admin/auth-keys",
+    cast_to=httpx.Response,
+    body={"name": "team-a-batch", "labels": ["team-a", "batch-jobs"]},
+)
+
+print(auth_key.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const authKey = await client.post("/admin/auth-keys", {
+  body: { name: "team-a-batch", labels: ["team-a", "batch-jobs"] },
+});
+
+console.log(authKey);
+```
+
+</CodeGroup>
 
 Every request authenticated with that key carries those labels — no client
 changes needed. This is the simplest way to attribute traffic per team or
@@ -51,12 +89,50 @@ service: issue each consumer its own labelled key.
 Labels can be changed later without rotating the key, in the dashboard
 (`API Keys -> Edit Labels`) or via the admin API:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X PUT http://localhost:8080/admin/auth-keys/<key-id>/labels \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"labels": ["team-a", "realtime"]}'
 ```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+auth_key = client.put(
+    "/admin/auth-keys/<key-id>/labels",
+    cast_to=httpx.Response,
+    body={"labels": ["team-a", "realtime"]},
+)
+
+print(auth_key.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const authKey = await client.put("/admin/auth-keys/<key-id>/labels", {
+  body: { labels: ["team-a", "realtime"] },
+});
+
+console.log(authKey);
+```
+
+</CodeGroup>
 
 The new list replaces the old one; send `[]` to remove all labels. Changes
 apply to new requests immediately on the instance that served the update and

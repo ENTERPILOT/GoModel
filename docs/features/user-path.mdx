@@ -102,10 +102,37 @@ See [Budgets](/features/budgets) for spend limits and workflow enforcement.
 
 Callers can check their own consumption without admin access:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/usage \
   -H "Authorization: Bearer sk_gom_..."
 ```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="sk_gom_...")
+usage = client.get("/v1/usage", cast_to=httpx.Response)
+
+print(usage.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "sk_gom_...",
+});
+
+const usage = await client.get("/v1/usage");
+console.log(usage);
+```
+
+</CodeGroup>
 
 The response covers the caller's effective user path: recorded usage over a
 date window, plus the status of every budget and rate limit rule gating that

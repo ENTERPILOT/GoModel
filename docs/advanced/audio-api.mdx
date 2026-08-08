@@ -30,7 +30,9 @@ doesn't support audio returns a clear error rather than mis-routing.
 
 ## Text-to-speech
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl https://your-gateway/v1/audio/speech \
   -H "Authorization: Bearer $GOMODEL_KEY" \
   -H "Content-Type: application/json" \
@@ -43,6 +45,46 @@ curl https://your-gateway/v1/audio/speech \
   --output speech.wav
 ```
 
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+speech = client.audio.speech.create(
+    model="gpt-4o-mini-tts",
+    input="Hello from GoModel.",
+    voice="alloy",
+    response_format="wav",
+)
+speech.write_to_file("speech.wav")
+```
+
+```javascript JavaScript
+import { writeFile } from "node:fs/promises";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const speech = await client.audio.speech.create({
+  model: "gpt-4o-mini-tts",
+  input: "Hello from GoModel.",
+  voice: "alloy",
+  response_format: "wav",
+});
+
+await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
+```
+
+</CodeGroup>
+
 `model`, `input`, and `voice` are required. Optional fields — `instructions`,
 `response_format` (`mp3` default, plus `opus`, `aac`, `flac`, `wav`, `pcm`), and
 `speed` — are forwarded to the provider. The response `Content-Type` is derived
@@ -50,13 +92,55 @@ from `response_format` (for example `wav` → `audio/wav`).
 
 ## Speech-to-text
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl https://your-gateway/v1/audio/transcriptions \
   -H "Authorization: Bearer $GOMODEL_KEY" \
   -F "file=@speech.wav" \
   -F "model=gpt-4o-transcribe" \
   -F "response_format=json"
 ```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+with open("speech.wav", "rb") as audio_file:
+    transcription = client.audio.transcriptions.create(
+        file=audio_file,
+        model="gpt-4o-transcribe",
+        response_format="json",
+    )
+
+print(transcription.text)
+```
+
+```javascript JavaScript
+import { createReadStream } from "node:fs";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const transcription = await client.audio.transcriptions.create({
+  file: createReadStream("speech.wav"),
+  model: "gpt-4o-transcribe",
+  response_format: "json",
+});
+
+console.log(transcription.text);
+```
+
+</CodeGroup>
 
 `file` and `model` are required. Optional form fields — `language`, `prompt`,
 `response_format`, `temperature`, and `timestamp_granularities[]` — are forwarded.

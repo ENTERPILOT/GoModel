@@ -91,7 +91,9 @@ to `/team/alpha`, and assign the returned value to `TEAM_ALPHA_GOMODEL_KEY`.
 The key binding, rather than a client-asserted header, establishes the fairness
 ID used by this request.
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer ${TEAM_ALPHA_GOMODEL_KEY}" \
   -H "Content-Type: application/json" \
@@ -100,6 +102,42 @@ curl -s http://localhost:8080/v1/chat/completions \
     "messages": [{"role": "user", "content": "Reply with exactly ok."}]
   }'
 ```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["TEAM_ALPHA_GOMODEL_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="llmd/Qwen/Qwen2.5-0.5B-Instruct",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.TEAM_ALPHA_GOMODEL_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "llmd/Qwen/Qwen2.5-0.5B-Instruct",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
 
 GoModel removes the outer `llmd/` routing qualifier before sending the model
 name upstream. Slash-shaped Hugging Face model IDs remain intact.
@@ -112,7 +150,9 @@ for the other routes in the
 [llm-d HTTP API reference](https://llm-d.ai/docs/dev/api-reference/epp-http-apis),
 including OpenAI completions, Anthropic Messages, and vLLM Generate:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/p/llmd/completions \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
@@ -121,6 +161,44 @@ curl -s http://localhost:8080/p/llmd/completions \
     "prompt": "Hello"
   }'
 ```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="change-me")
+completion = client.post(
+    "/p/llmd/completions",
+    cast_to=httpx.Response,
+    body={
+        "model": "Qwen/Qwen2.5-0.5B-Instruct",
+        "prompt": "Hello",
+    },
+)
+
+print(completion.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const completion = await client.post("/p/llmd/completions", {
+  body: {
+    model: "Qwen/Qwen2.5-0.5B-Instruct",
+    prompt: "Hello",
+  },
+});
+
+console.log(completion);
+```
+
+</CodeGroup>
 
 The separate llm-d Batch Gateway is not exposed as GoModel's native batch API.
 Files, audio, and Responses lifecycle utility endpoints are also not

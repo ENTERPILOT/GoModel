@@ -1,6 +1,6 @@
 ---
 title: "GoModel & Codex"
-description: "Route OpenAI Codex through GoModel's Responses API: run the gateway with Docker, point Codex at it with a master key, and verify the setup with curl."
+description: "Route OpenAI Codex through GoModel's Responses API: run the gateway with Docker, point Codex at it with a master key, and verify the setup."
 icon: "code-xml"
 keywords: ["Codex", "OpenAI Codex", "coding agent", "setup guide"]
 ---
@@ -36,7 +36,7 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-## 2. Confirm the Responses API with curl
+## 2. Confirm the Responses API
 
 Before testing Codex itself, you can optionally verify that GoModel answers a
 normal Responses API request:
@@ -45,7 +45,9 @@ This step is optional. If you are sure you have configured a valid
 `OPENAI_API_KEY` in GoModel, you can skip it and go straight to
 [step 3](#3-configure-codex-to-use-gomodel).
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/v1/responses \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
@@ -55,6 +57,39 @@ curl -s http://localhost:8080/v1/responses \
     "max_output_tokens": 16
   }'
 ```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+response = client.responses.create(
+    model="gpt-4.1-mini",
+    input="Reply with exactly ok",
+    max_output_tokens=16,
+)
+
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const response = await client.responses.create({
+  model: "gpt-4.1-mini",
+  input: "Reply with exactly ok",
+  max_output_tokens: 16,
+});
+
+console.log(response.output_text);
+```
+
+</CodeGroup>
 
 If the gateway is wired correctly, the response will contain `ok`.
 

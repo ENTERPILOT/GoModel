@@ -21,10 +21,37 @@ uses for inference. Polling does not consume rate limit quota.
 
 ## Quick example
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/usage \
   -H "Authorization: Bearer sk_gom_..."
 ```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="sk_gom_...")
+usage = client.get("/v1/usage", cast_to=httpx.Response)
+
+print(usage.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "sk_gom_...",
+});
+
+const usage = await client.get("/v1/usage");
+console.log(usage);
+```
+
+</CodeGroup>
 
 ```json
 {
@@ -88,11 +115,44 @@ curl http://localhost:8080/v1/usage \
 - **Master key (or unsafe mode)** — pass `X-GoModel-User-Path` to pick a path,
   or omit it to see `/` (everything):
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/v1/usage \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "X-GoModel-User-Path: /team/alpha"
 ```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+    default_headers={"X-GoModel-User-Path": "/team/alpha"},
+)
+usage = client.get("/v1/usage", cast_to=httpx.Response)
+
+print(usage.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+  defaultHeaders: { "X-GoModel-User-Path": "/team/alpha" },
+});
+
+const usage = await client.get("/v1/usage");
+console.log(usage);
+```
+
+</CodeGroup>
 
 ## Response fields
 
@@ -140,13 +200,51 @@ The `usage` block defaults to the last 30 days (UTC day boundaries). Narrow it
 with query parameters — `days`, or explicit `start_date`/`end_date`
 (YYYY-MM-DD, 365-day maximum):
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl "http://localhost:8080/v1/usage?days=7" \
   -H "Authorization: Bearer sk_gom_..."
 
 curl "http://localhost:8080/v1/usage?start_date=2026-07-01&end_date=2026-07-07" \
   -H "Authorization: Bearer sk_gom_..."
 ```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="sk_gom_...")
+
+last_seven_days = client.get("/v1/usage?days=7", cast_to=httpx.Response)
+date_range = client.get(
+    "/v1/usage?start_date=2026-07-01&end_date=2026-07-07",
+    cast_to=httpx.Response,
+)
+
+print(last_seven_days.json())
+print(date_range.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "sk_gom_...",
+});
+
+const lastSevenDays = await client.get("/v1/usage?days=7");
+const dateRange = await client.get(
+  "/v1/usage?start_date=2026-07-01&end_date=2026-07-07",
+);
+
+console.log(lastSevenDays);
+console.log(dateRange);
+```
+
+</CodeGroup>
 
 Budgets and rate limits always report their own live periods; the window only
 affects `usage`.

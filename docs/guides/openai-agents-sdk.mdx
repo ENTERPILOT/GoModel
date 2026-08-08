@@ -43,7 +43,9 @@ that your provider exposes through GoModel.
 
 Send one small request through GoModel:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/v1/responses \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
@@ -52,6 +54,37 @@ curl -s http://localhost:8080/v1/responses \
     "input": "Reply with exactly ok."
   }'
 ```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+response = client.responses.create(
+    model="gpt-5-mini",
+    input="Reply with exactly ok.",
+)
+
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const response = await client.responses.create({
+  model: "gpt-5-mini",
+  input: "Reply with exactly ok.",
+});
+
+console.log(response.output_text);
+```
+
+</CodeGroup>
 
 If the gateway is wired correctly, the response will contain `ok`.
 

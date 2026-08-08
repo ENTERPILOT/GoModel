@@ -169,17 +169,72 @@ Start the server and look for log messages:
 
 **When Enabled:**
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/metrics
 # Returns Prometheus metrics in text format
 ```
 
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="unused")
+metrics = client.get("/metrics", cast_to=str)
+
+print(metrics)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "unused",
+});
+
+const metrics = await client.get("/metrics");
+console.log(metrics);
+```
+
+</CodeGroup>
+
 **When Disabled:**
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl http://localhost:8080/metrics
 # Returns 404 Not Found
 ```
+
+```python Python
+from openai import NotFoundError, OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="unused")
+
+try:
+    client.get("/metrics", cast_to=str)
+except NotFoundError as error:
+    print(error.status_code)  # 404
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "unused",
+});
+
+try {
+  await client.get("/metrics");
+} catch (error) {
+  console.log(error.status); // 404
+}
+```
+
+</CodeGroup>
 
 ## Performance Impact
 
@@ -278,7 +333,9 @@ for the three launch forms), then restart GoModel.
 
 **Solution:** make some requests to generate metrics:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-master-key" \
@@ -287,6 +344,51 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 # Then check metrics
 curl http://localhost:8080/metrics | grep gomodel_requests_total
 ```
+
+```python Python
+from openai import OpenAI
+
+models = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="your-master-key",
+)
+models.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Hi"}],
+)
+
+gateway = OpenAI(base_url="http://localhost:8080", api_key="your-master-key")
+metrics = gateway.get("/metrics", cast_to=str)
+
+for line in metrics.splitlines():
+    if "gomodel_requests_total" in line:
+        print(line)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const models = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "your-master-key",
+});
+await models.chat.completions.create({
+  model: "gpt-4",
+  messages: [{ role: "user", content: "Hi" }],
+});
+
+const gateway = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "your-master-key",
+});
+const metrics = await gateway.get("/metrics");
+
+for (const line of metrics.split("\n")) {
+  if (line.includes("gomodel_requests_total")) console.log(line);
+}
+```
+
+</CodeGroup>
 
 ### Custom Endpoint Not Working
 

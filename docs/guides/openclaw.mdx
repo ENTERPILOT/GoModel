@@ -48,10 +48,36 @@ docker run --rm -p 8080:8080 \
 
 Confirm your model list:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/v1/models \
   -H "Authorization: Bearer change-me"
 ```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+for model in client.models.list():
+    print(model.id)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+for await (const model of client.models.list()) {
+  console.log(model.id);
+}
+```
+
+</CodeGroup>
 
 ## 2. Add a GoModel provider in OpenClaw
 

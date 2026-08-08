@@ -36,9 +36,11 @@ docker run --rm -p 8080:8080 \
   upstream provider configured.
 </Note>
 
-## 2. Confirm the OpenAI-compatible API with curl
+## 2. Confirm the OpenAI-compatible API
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
@@ -52,6 +54,37 @@ curl -s http://localhost:8080/v1/chat/completions \
     ]
   }'
 ```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="gpt-4.1-mini",
+    messages=[{"role": "user", "content": "Reply with exactly ok"}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Reply with exactly ok" }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
 
 If the gateway is wired correctly, the response will contain `ok`.
 
