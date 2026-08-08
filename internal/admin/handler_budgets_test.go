@@ -172,7 +172,7 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 	upsertReq := httptest.NewRequest(
 		http.MethodPut,
 		"/admin/budgets",
-		strings.NewReader(`{"user_path":"/team/beta","budget_key":{"period":"weekly"},"amount":12.5}`),
+		strings.NewReader(`{"user_path":"/team/beta","per_child":true,"budget_key":{"period":"weekly"},"amount":12.5}`),
 	)
 	upsertReq.Header.Set("Content-Type", "application/json")
 	upsertRec := httptest.NewRecorder()
@@ -183,7 +183,7 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 	if upsertRec.Code != http.StatusOK {
 		t.Fatalf("upsert status = %d, want %d body=%s", upsertRec.Code, http.StatusOK, upsertRec.Body.String())
 	}
-	if len(store.budgets) != 1 || store.budgets[0].Subject != "/team/beta" || store.budgets[0].PeriodSeconds != budget.PeriodWeeklySeconds {
+	if len(store.budgets) != 1 || store.budgets[0].Subject != "/team/beta" || !store.budgets[0].PerChild || store.budgets[0].PeriodSeconds != budget.PeriodWeeklySeconds {
 		t.Fatalf("stored budgets = %+v", store.budgets)
 	}
 

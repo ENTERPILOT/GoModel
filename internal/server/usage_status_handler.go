@@ -55,6 +55,7 @@ type usageStatusSummary struct {
 type usageStatusBudget struct {
 	Scope         string  `json:"scope"`
 	Subject       string  `json:"subject"`
+	PerChild      bool    `json:"per_child"`
 	UserPath      string  `json:"user_path,omitempty"`
 	PeriodSeconds int64   `json:"period_seconds"`
 	PeriodLabel   string  `json:"period_label"`
@@ -71,6 +72,8 @@ type usageStatusBudget struct {
 }
 
 type usageStatusRateLimit struct {
+	Subject           string `json:"subject"`
+	PerChild          bool   `json:"per_child"`
 	UserPath          string `json:"user_path"`
 	PeriodSeconds     int64  `json:"period_seconds"`
 	PeriodLabel       string `json:"period_label"`
@@ -209,6 +212,7 @@ func usageStatusBudgets(results []budget.CheckResult, now time.Time) []usageStat
 		status := usageStatusBudget{
 			Scope:           string(result.Budget.Scope),
 			Subject:         result.Budget.Subject,
+			PerChild:        result.Budget.PerChild,
 			PeriodSeconds:   result.Budget.PeriodSeconds,
 			PeriodLabel:     budget.PeriodLabel(result.Budget.PeriodSeconds),
 			Amount:          result.Budget.Amount,
@@ -223,7 +227,7 @@ func usageStatusBudgets(results []budget.CheckResult, now time.Time) []usageStat
 		}
 		// Convenience duplicate: user-path budgets keep the natural spelling.
 		if result.Budget.Scope == budget.ScopeUserPath {
-			status.UserPath = result.Budget.Subject
+			status.UserPath = result.Budget.SubjectLabel()
 		}
 		statuses = append(statuses, status)
 	}
@@ -234,7 +238,9 @@ func usageStatusRateLimits(statuses []ratelimit.Status, now time.Time) []usageSt
 	limits := make([]usageStatusRateLimit, 0, len(statuses))
 	for _, status := range statuses {
 		item := usageStatusRateLimit{
-			UserPath:          status.Rule.Subject,
+			Subject:           status.Rule.Subject,
+			PerChild:          status.Rule.PerChild,
+			UserPath:          status.Rule.SubjectLabel(),
 			PeriodSeconds:     status.Rule.PeriodSeconds,
 			PeriodLabel:       ratelimit.PeriodLabel(status.Rule.PeriodSeconds),
 			MaxRequests:       status.Rule.MaxRequests,

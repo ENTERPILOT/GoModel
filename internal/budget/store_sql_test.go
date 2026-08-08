@@ -26,12 +26,31 @@ func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore)) {
 	})
 }
 
+func TestSQLStoreRoundTripsPerChild(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		ctx := context.Background()
+		if err := store.UpsertBudgets(ctx, []Budget{{
+			Scope: ScopeUserPath, Subject: "/users", PerChild: true,
+			PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceManual,
+		}}); err != nil {
+			t.Fatalf("UpsertBudgets() failed: %v", err)
+		}
+		budgets, err := store.ListBudgets(ctx)
+		if err != nil {
+			t.Fatalf("ListBudgets() failed: %v", err)
+		}
+		if len(budgets) != 1 || !budgets[0].PerChild {
+			t.Fatalf("budgets = %+v, want one per-child budget", budgets)
+		}
+	})
+}
+
 func TestSQLStoreReplaceConfigBudgetsRemovesStaleConfigRowsOnly(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()
 		resetAt := time.Date(2026, time.April, 25, 9, 0, 0, 0, time.UTC)
 		if err := store.UpsertBudgets(ctx, []Budget{
-			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceConfig},
+			{Scope: ScopeUserPath, Subject: "/team", PerChild: true, PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceConfig},
 			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodWeeklySeconds, Amount: 50, Source: SourceConfig, LastResetAt: &resetAt},
 			{Scope: ScopeUserPath, Subject: "/manual", PeriodSeconds: PeriodDailySeconds, Amount: 5, Source: SourceManual},
 			{Scope: ScopeLabel, Subject: "prod", PeriodSeconds: PeriodDailySeconds, Amount: 20, Source: SourceConfig},

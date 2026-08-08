@@ -83,6 +83,11 @@ budgets:
           amount: 10.00
         - period: "weekly"
           amount: 50.00
+    - path: "/customers"
+      per_child: true
+      limits:
+        - period: "daily"
+          amount: 5.00
     - path: "/"
       limits:
         - period: "monthly"
@@ -99,6 +104,8 @@ Or use environment variables:
 ```env
 SET_BUDGET_TEAM__ALPHA="daily=10,weekly=50"
 SET_BUDGET_="monthly=500"
+# JSON-array form exposes per_child:
+SET_BUDGET_CUSTOMERS='[{"period":"daily","amount":5,"per_child":true}]'
 ```
 
 The suffix after `SET_BUDGET_` becomes a user path. Use double underscores
@@ -174,6 +181,21 @@ request carrying several labels is charged against every matching label budget.
 If multiple budgets match a request, GoModel checks all matching limits in one
 lookup. The request is rejected if any matching limit is exhausted.
 
+### Dynamic per-child budgets
+
+Set `per_child: true` on a user-path entry when its limit is a template for
+direct children rather than one shared subtree budget. For a template on
+`/customers`:
+
+- `/customers/alice` and `/customers/alice/app` spend from Alice's budget
+- `/customers/bob` spends from an independent Bob budget
+- `/customers` itself does not match the template because it has no child
+
+The dashboard shows the definition as a `per child` template instead of
+inventing an aggregate usage value. Use `GET /v1/usage` with a child's effective
+user path to inspect that child's resolved budget. Resetting the template starts
+a new period for all of its children.
+
 ## Workflow enforcement
 
 The active workflow controls whether budget checks run for a request.
@@ -241,6 +263,7 @@ curl -X PUT http://localhost:8080/admin/budgets \
   -d '{
     "scope": "user_path",
     "subject": "/team/alpha",
+    "per_child": false,
     "budget_key": { "period": "daily" },
     "amount": 10.00
   }'

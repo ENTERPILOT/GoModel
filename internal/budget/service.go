@@ -243,8 +243,8 @@ func (s *Service) match(subjects *Subjects, now time.Time) ([]Budget, Settings, 
 
 	matching := make([]Budget, 0, len(budgets))
 	for _, budget := range budgets {
-		if budget.appliesTo(resolved) {
-			matching = append(matching, budget)
+		if matched, ok := budget.resolve(resolved); ok {
+			matching = append(matching, matched)
 		}
 	}
 	return matching, settings, now, nil
@@ -258,19 +258,29 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 		return []CheckResult{}, nil
 	}
 	results := make([]CheckResult, len(budgets))
-	windows := make([]SpendWindow, len(budgets))
+	windows := make([]SpendWindow, 0, len(budgets))
+	windowIndexes := make([]int, 0, len(budgets))
 	for i, budget := range budgets {
 		start, end := PeriodBounds(now, budget.PeriodSeconds, settings)
 		if budget.LastResetAt != nil && budget.LastResetAt.After(start) {
 			start = budget.LastResetAt.UTC()
 		}
-		results[i] = CheckResult{Budget: budget, PeriodStart: start, PeriodEnd: end}
-		windows[i] = SpendWindow{
+		results[i] = CheckResult{Budget: budget, PeriodStart: start, PeriodEnd: end, Remaining: budget.Amount}
+		// A template shown in the global admin list has no single usage total.
+		// Only resolved request/user-path checks query one child partition.
+		if budget.PerChild && budget.EffectiveSubject == "" {
+			continue
+		}
+		windows = append(windows, SpendWindow{
 			Scope:   budget.Scope,
-			Subject: budget.Subject,
+			Subject: budget.evaluationSubject(),
 			Start:   start,
 			End:     now,
-		}
+		})
+		windowIndexes = append(windowIndexes, i)
+	}
+	if len(windows) == 0 {
+		return results, nil
 	}
 
 	spends, err := s.store.SumSpend(ctx, windows)
@@ -281,9 +291,10 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 		return nil, fmt.Errorf("budget store returned %d spends for %d windows", len(spends), len(windows))
 	}
 	for i, spend := range spends {
-		results[i].Spent = spend.Total
-		results[i].HasUsage = spend.HasUsage
-		results[i].Remaining = results[i].Budget.Amount - spend.Total
+		result := &results[windowIndexes[i]]
+		result.Spent = spend.Total
+		result.HasUsage = spend.HasUsage
+		result.Remaining = result.Budget.Amount - spend.Total
 	}
 	return results, nil
 }

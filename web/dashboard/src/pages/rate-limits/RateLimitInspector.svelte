@@ -44,7 +44,9 @@
     {#if rateLimits.rateLimitsLoading}
       <LoadingState label="Loading rate limits..." />
     {:else if !rateLimits.rateLimitsAvailable}
-      <div class="alert alert-warning">Rate limit management is unavailable.</div>
+      <div class="alert alert-warning">
+        Rate limit management is unavailable.
+      </div>
     {:else}
       {#each rateLimits.rateLimitInspectorSections() as section (section.key)}
         <section class="form-section">
@@ -74,8 +76,10 @@
                 <section
                   class="budget-row {rateLimits.rateLimitPressureClass(item)}"
                   style={rateLimits.rateLimitPressureStyle(item)}
-                  title={rateLimits.rateLimitPressurePercent(item) +
-                    "% of the most constrained cap used"}
+                  title={item.per_child
+                    ? "Independent counters for each direct child path"
+                    : rateLimits.rateLimitPressurePercent(item) +
+                      "% of the most constrained cap used"}
                 >
                   <div class="budget-row-main">
                     <div class="budget-row-head">
@@ -83,6 +87,9 @@
                         {rateLimits.rateLimitSubject(item)}
                       </code>
                       <div class="budget-row-period">
+                        {#if item.per_child}
+                          <span class="budget-period-label">per child</span>
+                        {/if}
                         <span class="budget-period-label">
                           <Icon
                             icon={rateLimits.rateLimitIsConcurrent(item)

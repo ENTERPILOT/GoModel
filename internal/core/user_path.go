@@ -89,6 +89,34 @@ func UserPathAncestors(path string) []string {
 	return ancestors
 }
 
+// UserPathChild resolves the direct child of base that contains path. It is
+// used by per-child policies so deeper descendants share their direct child's
+// quota. The base path itself has no child and therefore does not match.
+func UserPathChild(base, path string) (string, bool) {
+	base, baseErr := NormalizeUserPath(base)
+	path, pathErr := NormalizeUserPath(path)
+	if baseErr != nil || pathErr != nil || base == "" || path == "" || base == path {
+		return "", false
+	}
+
+	prefix := base + "/"
+	if base == "/" {
+		prefix = "/"
+	}
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	child, _, _ := strings.Cut(rest, "/")
+	if child == "" {
+		return "", false
+	}
+	if base == "/" {
+		return "/" + child, true
+	}
+	return base + "/" + child, true
+}
+
 // UserPathFromContext returns the canonical request user path when available.
 func UserPathFromContext(ctx context.Context) string {
 	if userPath := GetEffectiveUserPath(ctx); userPath != "" {

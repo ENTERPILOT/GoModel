@@ -122,3 +122,29 @@ func TestUserPathAncestors_Root(t *testing.T) {
 		t.Fatalf("UserPathAncestors(\"/\")[0] = %q, want /", got[0])
 	}
 }
+
+func TestUserPathChild(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		base      string
+		path      string
+		want      string
+		wantMatch bool
+	}{
+		{name: "direct child", base: "/users", path: "/users/alice", want: "/users/alice", wantMatch: true},
+		{name: "deeper descendant", base: "/users", path: "/users/alice/app", want: "/users/alice", wantMatch: true},
+		{name: "root template", base: "/", path: "/alice/app", want: "/alice", wantMatch: true},
+		{name: "base itself", base: "/users", path: "/users"},
+		{name: "sibling prefix", base: "/users", path: "/users-old/alice"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, matched := UserPathChild(tt.base, tt.path)
+			if got != tt.want || matched != tt.wantMatch {
+				t.Fatalf("UserPathChild(%q, %q) = %q, %v; want %q, %v", tt.base, tt.path, got, matched, tt.want, tt.wantMatch)
+			}
+		})
+	}
+}

@@ -193,6 +193,7 @@ class RateLimitsStore {
           item.max_tokens === null || item.max_tokens === undefined
             ? ""
             : String(item.max_tokens),
+        per_child: Boolean(item.per_child),
         source: String(item.source || "manual"),
       };
     } else {
@@ -245,12 +246,17 @@ class RateLimitsStore {
     this.rateLimitFormSubmitting = true;
     this.rateLimitFormError = "";
     try {
-      const outcome = await sendAdminMutation("/admin/rate-limits", "PUT", payload, {
-        label: "save rate limit",
-        errorFallback: "Unable to save rate limit.",
-        // Rate-limit mutations never had a dedicated 503 branch; keep 503 an error.
-        unavailableStatuses: [],
-      });
+      const outcome = await sendAdminMutation(
+        "/admin/rate-limits",
+        "PUT",
+        payload,
+        {
+          label: "save rate limit",
+          errorFallback: "Unable to save rate limit.",
+          // Rate-limit mutations never had a dedicated 503 branch; keep 503 an error.
+          unavailableStatuses: [],
+        },
+      );
       if (outcome.status === "stale") {
         return;
       }
@@ -258,7 +264,9 @@ class RateLimitsStore {
         this.rateLimitFormError = outcome.error;
         return;
       }
-      this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
+      this.rateLimits = logic.normalizeRateLimitListPayload(
+        outcome.result.data,
+      );
       // Identity change = move: the new rule exists, now drop
       // the one it replaces. The new rule is created first so a
       // failed delete can never lose the rule.

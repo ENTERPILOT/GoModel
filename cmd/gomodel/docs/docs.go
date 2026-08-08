@@ -6857,6 +6857,10 @@ const docTemplate = `{
                 },
                 "USAGE_PRICING_RECALCULATION_ENABLED": {
                     "type": "string"
+                },
+                "VIRTUAL_MODEL_STRATEGIES": {
+                    "description": "VirtualModelStrategies is the comma-separated list of load-balancing\nstrategies this deployment supports. \"adaptive\" appears only when a\nroute-selector extension is registered, so the dashboard never offers\na strategy that would silently fall back to round robin.",
+                    "type": "string"
                 }
             }
         },
@@ -6927,6 +6931,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                },
+                "principal_id": {
                     "type": "string"
                 },
                 "provider": {
@@ -7065,11 +7072,17 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "effective_subject": {
+                    "type": "string"
+                },
                 "has_usage": {
                     "type": "boolean"
                 },
                 "last_reset_at": {
                     "type": "string"
+                },
+                "per_child": {
+                    "type": "boolean"
                 },
                 "period_end": {
                     "type": "string"
@@ -7391,6 +7404,9 @@ const docTemplate = `{
                 "service_account_json_base64": {
                     "type": "string"
                 },
+                "session_sticky_keys": {
+                    "type": "boolean"
+                },
                 "type": {
                     "type": "string"
                 },
@@ -7436,6 +7452,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "effective_subject": {
+                    "type": "string"
+                },
                 "in_flight": {
                     "type": "integer"
                 },
@@ -7444,6 +7463,9 @@ const docTemplate = `{
                 },
                 "max_tokens": {
                     "type": "integer"
+                },
+                "per_child": {
+                    "type": "boolean"
                 },
                 "period_label": {
                     "type": "string"
@@ -7652,6 +7674,9 @@ const docTemplate = `{
                 "budget_key": {
                     "$ref": "#/definitions/admin.budgetKeyRequest"
                 },
+                "per_child": {
+                    "type": "boolean"
+                },
                 "scope": {
                     "type": "string"
                 },
@@ -7789,6 +7814,9 @@ const docTemplate = `{
                 "service_account_json_base64": {
                     "type": "string"
                 },
+                "session_sticky_keys": {
+                    "type": "boolean"
+                },
                 "type": {
                     "type": "string"
                 },
@@ -7811,6 +7839,9 @@ const docTemplate = `{
                 },
                 "max_tokens": {
                     "type": "integer"
+                },
+                "per_child": {
+                    "type": "boolean"
                 },
                 "scope": {
                     "type": "string"
@@ -8043,6 +8074,9 @@ const docTemplate = `{
         "anthropicapi.MessagesRequest": {
             "type": "object",
             "properties": {
+                "cache_control": {
+                    "type": "object"
+                },
                 "max_tokens": {
                     "type": "integer"
                 },
@@ -8181,6 +8215,9 @@ const docTemplate = `{
         "anthropicapi.Tool": {
             "type": "object",
             "properties": {
+                "cache_control": {
+                    "type": "object"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -8303,6 +8340,10 @@ const docTemplate = `{
                 },
                 "error_message": {
                     "description": "Error details (message can be long, so kept in JSON)",
+                    "type": "string"
+                },
+                "event_type": {
+                    "description": "EventType identifies non-request security lifecycle entries written\nthrough the extension authentication event recorder.",
                     "type": "string"
                 },
                 "failover": {
@@ -10399,6 +10440,9 @@ const docTemplate = `{
                 "exceeded": {
                     "type": "boolean"
                 },
+                "per_child": {
+                    "type": "boolean"
+                },
                 "period_end": {
                     "type": "string"
                 },
@@ -10450,6 +10494,9 @@ const docTemplate = `{
                 "max_tokens": {
                     "type": "integer"
                 },
+                "per_child": {
+                    "type": "boolean"
+                },
                 "period_label": {
                     "type": "string"
                 },
@@ -10468,6 +10515,9 @@ const docTemplate = `{
                 },
                 "resets_in_seconds": {
                     "type": "integer"
+                },
+                "subject": {
+                    "type": "string"
                 },
                 "tokens_remaining": {
                     "type": "integer"

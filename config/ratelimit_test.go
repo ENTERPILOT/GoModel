@@ -59,7 +59,7 @@ func TestLoadRateLimitEnvJSONSyntax(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(string) {
-		t.Setenv("SET_RATE_LIMIT_", `[{"period":"minute","max_requests":50},{"period_seconds":7200,"max_tokens":900}]`)
+		t.Setenv("SET_RATE_LIMIT_", `[{"period":"minute","max_requests":50,"per_child":true},{"period_seconds":7200,"max_tokens":900}]`)
 
 		result, err := Load()
 		if err != nil {
@@ -77,8 +77,38 @@ func TestLoadRateLimitEnvJSONSyntax(t *testing.T) {
 		if limits[0].PeriodSeconds == nil || *limits[0].PeriodSeconds != 60 || *limits[0].MaxRequests != 50 {
 			t.Fatalf("first limit = %+v, want minute/50", limits[0])
 		}
+		if !limits[0].PerChild {
+			t.Fatal("first limit per_child = false, want true")
+		}
 		if limits[1].PeriodSeconds == nil || *limits[1].PeriodSeconds != 7200 || *limits[1].MaxTokens != 900 {
 			t.Fatalf("second limit = %+v, want 7200s/900 tokens", limits[1])
+		}
+	})
+}
+
+func TestLoadRateLimitYAMLSupportsPerChild(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yamlConfig := `
+rate_limits:
+  user_paths:
+    - path: /customers
+      per_child: true
+      limits:
+        - period: minute
+          max_requests: 100
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
+			t.Fatalf("write config.yaml: %v", err)
+		}
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		entry := result.Config.RateLimits.UserPaths[0]
+		if entry.Path != "/customers" || !entry.PerChild {
+			t.Fatalf("rate-limit YAML entry = %+v, want per-child /customers", entry)
 		}
 	})
 }

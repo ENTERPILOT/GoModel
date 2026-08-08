@@ -74,6 +74,18 @@
         {/each}
       </select>
     </FormField>
+    {#if store.form.scope === "user_path"}
+      <label class="per-child-option">
+        <input type="checkbox" bind:checked={store.form.per_child} />
+        <span>
+          <strong>Apply per direct child</strong>
+          <small
+            >Each child below {store.form.subject || "/"} gets an independent budget.
+            Deeper descendants share their direct child's budget.</small
+          >
+        </span>
+      </label>
+    {/if}
     {#if store.form.period === "custom"}
       <FormField id="budget-period-seconds" label="Period Seconds">
         <input
@@ -102,8 +114,8 @@
   </div>
   {#if store.editing}
     <p class="form-hint">
-      Editing a budget updates its limit only. Use Reset to start a new
-      budget period.
+      Editing a budget updates its limit only. Use Reset to start a new budget
+      period.
     </p>
   {/if}
 </EditorDialog>
@@ -163,6 +175,28 @@
 </Modal>
 
 <style>
+  .per-child-option {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 0.65rem;
+    align-items: flex-start;
+    cursor: pointer;
+  }
+
+  .per-child-option input {
+    margin-top: 0.2rem;
+  }
+
+  .per-child-option span {
+    display: grid;
+    gap: 0.2rem;
+  }
+
+  .per-child-option small {
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
   .budget-override-dialog {
     max-width: 460px;
   }

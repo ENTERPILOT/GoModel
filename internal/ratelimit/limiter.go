@@ -70,21 +70,23 @@ func (w *windowCounter) retryAfter(now time.Time, periodSeconds, limit int64) ti
 type ruleKey struct {
 	scope         RuleScope
 	subject       string
+	partition     string
 	periodSeconds int64
 }
 
 func keyForRule(rule Rule) ruleKey {
-	return ruleKey{scope: rule.Scope, subject: rule.Subject, periodSeconds: rule.PeriodSeconds}
+	return ruleKey{scope: rule.Scope, subject: rule.Subject, partition: rule.EffectiveSubject, periodSeconds: rule.PeriodSeconds}
 }
 
-// limiter holds all live counters. Counters exist per rule (one shared
-// counter for the rule's whole subject), so cardinality equals the number of
-// configured rules and a single mutex is sufficient.
+// limiter holds all live counters. Ordinary rules own one counter; per-child
+// rules own one counter per active direct child. Expired child partitions are
+// pruned below, and a single mutex keeps admission atomic across all matches.
 type limiter struct {
-	mu       sync.Mutex
-	requests map[ruleKey]*windowCounter
-	tokens   map[ruleKey]*windowCounter
-	inFlight map[ruleKey]int64
+	mu         sync.Mutex
+	requests   map[ruleKey]*windowCounter
+	tokens     map[ruleKey]*windowCounter
+	inFlight   map[ruleKey]int64
+	operations uint64
 }
 
 func newLimiter() *limiter {
@@ -112,6 +114,7 @@ func (l *limiter) counter(counters map[ruleKey]*windowCounter, key ruleKey) *win
 func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey, *ExceededError) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.pruneExpired(now)
 
 	var exceeded *ExceededError
 	for _, rule := range rules {
@@ -229,6 +232,9 @@ func (l *limiter) release(held []ruleKey) {
 		if l.inFlight[key] > 0 {
 			l.inFlight[key]--
 		}
+		if l.inFlight[key] == 0 {
+			delete(l.inFlight, key)
+		}
 	}
 }
 
@@ -236,6 +242,7 @@ func (l *limiter) release(held []ruleKey) {
 func (l *limiter) recordTokens(rules []Rule, tokens int64, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.pruneExpired(now)
 	for _, rule := range rules {
 		if rule.PeriodSeconds == PeriodConcurrent || rule.MaxTokens == nil {
 			continue
@@ -250,6 +257,7 @@ func (l *limiter) recordTokens(rules []Rule, tokens int64, now time.Time) {
 func (l *limiter) status(rule Rule, now time.Time) Status {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.pruneExpired(now)
 
 	key := keyForRule(rule)
 	status := Status{Rule: rule}
@@ -287,8 +295,42 @@ func (l *limiter) status(rule Rule, now time.Time) Status {
 func (l *limiter) reset(key ruleKey) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	delete(l.requests, key)
-	delete(l.tokens, key)
+	for candidate := range l.requests {
+		if candidate.sameDefinition(key) {
+			delete(l.requests, candidate)
+		}
+	}
+	for candidate := range l.tokens {
+		if candidate.sameDefinition(key) {
+			delete(l.tokens, candidate)
+		}
+	}
+}
+
+func (k ruleKey) sameDefinition(other ruleKey) bool {
+	return k.scope == other.scope && k.subject == other.subject && k.periodSeconds == other.periodSeconds
+}
+
+// pruneExpired periodically reclaims dynamic child counters after their
+// sliding-window history can no longer affect enforcement. Static rule
+// counters remain bounded by the configured rule count.
+func (l *limiter) pruneExpired(now time.Time) {
+	l.operations++
+	if l.operations%256 != 0 {
+		return
+	}
+	prune := func(counters map[ruleKey]*windowCounter) {
+		for key, counter := range counters {
+			if key.partition == "" || key.periodSeconds <= 0 || counter.windowStart == 0 {
+				continue
+			}
+			if now.Unix() >= counter.windowStart+2*key.periodSeconds {
+				delete(counters, key)
+			}
+		}
+	}
+	prune(l.requests)
+	prune(l.tokens)
 }
 
 // resetAll clears every window counter.

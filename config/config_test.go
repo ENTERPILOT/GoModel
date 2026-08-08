@@ -404,6 +404,49 @@ func TestLoadBudgetEnvJSONLimitsAreSorted(t *testing.T) {
 	})
 }
 
+func TestLoadBudgetEnvJSONArraySupportsPerChild(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		t.Setenv("SET_BUDGET_USERS", `[{"period":"daily","amount":10,"per_child":true}]`)
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		entry := result.Config.Budgets.UserPaths[0]
+		if entry.Path != "/users" || len(entry.Limits) != 1 || !entry.Limits[0].PerChild {
+			t.Fatalf("budget env entry = %+v, want per-child /users", entry)
+		}
+	})
+}
+
+func TestLoadBudgetYAMLSupportsPerChild(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yamlConfig := `
+budgets:
+  user_paths:
+    - path: /customers
+      per_child: true
+      limits:
+        - period: daily
+          amount: 10
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
+			t.Fatalf("write config.yaml: %v", err)
+		}
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		entry := result.Config.Budgets.UserPaths[0]
+		if entry.Path != "/customers" || !entry.PerChild {
+			t.Fatalf("budget YAML entry = %+v, want per-child /customers", entry)
+		}
+	})
+}
+
 func TestLoadBudgetEnvReplacesMatchingYAMLUserPath(t *testing.T) {
 	clearAllConfigEnvVars(t)
 

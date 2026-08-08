@@ -53,8 +53,22 @@ func (s *Service) Refresh(ctx context.Context) error {
 		return rules[i].PeriodSeconds < rules[j].PeriodSeconds
 	})
 	s.mu.Lock()
+	previous := s.rules
 	s.rules = rules
 	s.mu.Unlock()
+
+	// Removed definitions and shared/per-child mode changes must not leave
+	// counters that can reappear if the same key is added again later.
+	next := make(map[ruleKey]Rule, len(rules))
+	for _, rule := range rules {
+		next[keyForRule(rule)] = rule
+	}
+	for _, old := range previous {
+		newRule, exists := next[keyForRule(old)]
+		if !exists || old.PerChild != newRule.PerChild {
+			s.limiter.reset(keyForRule(old))
+		}
+	}
 	return nil
 }
 
@@ -221,6 +235,12 @@ func (s *Service) Statuses(now time.Time) []Status {
 	rules := s.Rules()
 	statuses := make([]Status, 0, len(rules))
 	for _, rule := range rules {
+		// A per-child definition has no single aggregate counter. Child-specific
+		// status is available through StatusesForUserPath.
+		if rule.PerChild {
+			statuses = append(statuses, Status{Rule: rule})
+			continue
+		}
 		statuses = append(statuses, s.limiter.status(rule, now))
 	}
 	return statuses
@@ -244,10 +264,14 @@ func (s *Service) StatusesForUserPath(userPath string, now time.Time) []Status {
 
 	var statuses []Status
 	for _, rule := range s.Rules() {
-		if rule.Scope != ScopeUserPath || !ruleAppliesToPath(rule.Subject, userPath) {
+		if rule.Scope != ScopeUserPath {
 			continue
 		}
-		statuses = append(statuses, s.limiter.status(rule, now))
+		resolved, ok := rule.resolve(Subjects{UserPath: userPath})
+		if !ok {
+			continue
+		}
+		statuses = append(statuses, s.limiter.status(resolved, now))
 	}
 	return statuses
 }
@@ -279,8 +303,8 @@ func (s *Service) matchingRules(subjects Subjects) []Rule {
 	defer s.mu.RUnlock()
 	var matching []Rule
 	for _, rule := range s.rules {
-		if rule.appliesTo(subjects) {
-			matching = append(matching, rule)
+		if matched, ok := rule.resolve(subjects); ok {
+			matching = append(matching, matched)
 		}
 	}
 	return matching

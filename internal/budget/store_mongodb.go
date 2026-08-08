@@ -121,6 +121,7 @@ func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Bu
 		update := bson.D{{Key: "$set", Value: bson.D{
 			{Key: "scope", Value: budget.Scope},
 			{Key: "subject", Value: budget.Subject},
+			{Key: "per_child", Value: budget.PerChild},
 			{Key: "period_seconds", Value: budget.PeriodSeconds},
 			{Key: "amount", Value: budget.Amount},
 			{Key: "source", Value: budget.Source},

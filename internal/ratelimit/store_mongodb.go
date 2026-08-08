@@ -111,6 +111,7 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 		update := bson.D{{Key: "$set", Value: bson.D{
 			{Key: "scope", Value: rule.Scope},
 			{Key: "subject", Value: rule.Subject},
+			{Key: "per_child", Value: rule.PerChild},
 			{Key: "period_seconds", Value: rule.PeriodSeconds},
 			{Key: "max_requests", Value: rule.MaxRequests},
 			{Key: "max_tokens", Value: rule.MaxTokens},

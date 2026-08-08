@@ -87,6 +87,7 @@ test("rateLimitFormPayload validates and builds the upsert payload", () => {
   assert.deepEqual(payload, {
     scope: "user_path",
     subject: "/team/alpha",
+    per_child: false,
     limit_key: { period_seconds: 60 },
     max_requests: 100,
     max_tokens: 5000,
@@ -190,6 +191,7 @@ test("rateLimitFormPayload handles provider and model scopes", () => {
   assert.equal(provider.error, undefined);
   assert.equal(provider.payload.scope, "provider");
   assert.equal(provider.payload.subject, "openai");
+  assert.equal(provider.payload.per_child, false);
 
   // A provider or model rule cannot be saved without its subject.
   assert.match(
@@ -218,12 +220,24 @@ test("rateLimitFormPayload handles provider and model scopes", () => {
   assert.equal(model.payload.max_tokens, 100000);
 });
 
+test("rateLimitFormPayload enables independent child counters for user paths", () => {
+  const result = rateLimitFormPayload({
+    ...defaultRateLimitForm(),
+    subject: "/users",
+    max_requests: "100",
+    per_child: true,
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.payload.per_child, true);
+});
+
 test("syncRateLimitScope resets the subject per scope", () => {
   const form = defaultRateLimitForm();
 
   form.scope = "provider";
   syncRateLimitScope(form);
   assert.equal(form.subject, "");
+  assert.equal(form.per_child, false);
   assert.equal(rateLimitSubjectFieldLabel(form), "Provider Name");
   assert.equal(rateLimitSubjectPlaceholder(form), "openai");
 
@@ -240,11 +254,39 @@ test("scope meta falls back to user_path for unknown scopes", () => {
 
 test("filteredRateLimits sorts by scope, subject, period and filters", () => {
   const rules = [
-    { scope: "user_path", subject: "/team", user_path: "/team", period_seconds: 86400, period_label: "day" },
-    { scope: "model", subject: "openai/gpt-4o", period_seconds: 60, period_label: "minute" },
-    { scope: "user_path", subject: "/alpha", user_path: "/alpha", period_seconds: 60, period_label: "minute" },
-    { scope: "provider", subject: "openai", period_seconds: 0, period_label: "concurrent" },
-    { scope: "user_path", subject: "/team", user_path: "/team", period_seconds: 0, period_label: "concurrent" },
+    {
+      scope: "user_path",
+      subject: "/team",
+      user_path: "/team",
+      period_seconds: 86400,
+      period_label: "day",
+    },
+    {
+      scope: "model",
+      subject: "openai/gpt-4o",
+      period_seconds: 60,
+      period_label: "minute",
+    },
+    {
+      scope: "user_path",
+      subject: "/alpha",
+      user_path: "/alpha",
+      period_seconds: 60,
+      period_label: "minute",
+    },
+    {
+      scope: "provider",
+      subject: "openai",
+      period_seconds: 0,
+      period_label: "concurrent",
+    },
+    {
+      scope: "user_path",
+      subject: "/team",
+      user_path: "/team",
+      period_seconds: 0,
+      period_label: "concurrent",
+    },
   ];
   const sorted = filteredRateLimits(rules, "");
   assert.deepEqual(
@@ -311,19 +353,29 @@ test("rateLimitNormalizedIdentity mirrors server normalization per scope", () =>
 });
 
 test("rateLimitIdentityMoved detects real moves but not respellings", () => {
-  const original = { scope: "model", subject: "openai/gpt-4o", period_seconds: 60 };
+  const original = {
+    scope: "model",
+    subject: "openai/gpt-4o",
+    period_seconds: 60,
+  };
   const payload = (subject, seconds) => ({
     scope: "model",
     subject,
     limit_key: { period_seconds: seconds },
   });
 
-  assert.equal(rateLimitIdentityMoved(original, payload("OpenAI/GPT-4o", 60)), false);
+  assert.equal(
+    rateLimitIdentityMoved(original, payload("OpenAI/GPT-4o", 60)),
+    false,
+  );
   assert.equal(
     rateLimitIdentityMoved(original, payload("openai/gpt-4o-mini", 60)),
     true,
   );
-  assert.equal(rateLimitIdentityMoved(original, payload("openai/gpt-4o", 3600)), true);
+  assert.equal(
+    rateLimitIdentityMoved(original, payload("openai/gpt-4o", 3600)),
+    true,
+  );
 
   assert.equal(rateLimitIdentityMoved(null, payload("anything", 60)), false);
 });
@@ -336,7 +388,12 @@ test("inspector sections group model, provider, and global rules", () => {
     { scope: "provider", subject: "openai", period_seconds: 0 },
     { scope: "provider", subject: "anthropic", period_seconds: 60 },
     { scope: "user_path", subject: "/", user_path: "/", period_seconds: 60 },
-    { scope: "user_path", subject: "/team", user_path: "/team", period_seconds: 60 },
+    {
+      scope: "user_path",
+      subject: "/team",
+      user_path: "/team",
+      period_seconds: 60,
+    },
   ];
 
   const sections = rateLimitInspectorSections(
@@ -462,7 +519,15 @@ test("gauge indicator distinguishes direct, inherited, and no limits", () => {
 
 test("inspector summary reports in-flight or per-cap usage", () => {
   assert.equal(
-    rateLimitInspectorSummary({ period_seconds: 0, in_flight: 3, max_requests: 4 }),
+    rateLimitInspectorSummary({ per_child: true }),
+    "Independent counters per direct child",
+  );
+  assert.equal(
+    rateLimitInspectorSummary({
+      period_seconds: 0,
+      in_flight: 3,
+      max_requests: 4,
+    }),
     "3 of 4 in flight",
   );
   assert.equal(

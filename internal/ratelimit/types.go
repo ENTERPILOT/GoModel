@@ -47,14 +47,18 @@ const (
 // Rule stores the limits for one scope, subject, and period.
 // A period of PeriodConcurrent caps in-flight requests via MaxRequests.
 type Rule struct {
-	Scope         RuleScope `json:"scope" bson:"scope"`
-	Subject       string    `json:"subject" bson:"subject"`
-	PeriodSeconds int64     `json:"period_seconds" bson:"period_seconds"`
-	MaxRequests   *int64    `json:"max_requests,omitempty" bson:"max_requests,omitempty"`
-	MaxTokens     *int64    `json:"max_tokens,omitempty" bson:"max_tokens,omitempty"`
-	Source        string    `json:"source,omitempty" bson:"source,omitempty"`
-	CreatedAt     time.Time `json:"created_at" bson:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at" bson:"updated_at"`
+	Scope    RuleScope `json:"scope" bson:"scope"`
+	Subject  string    `json:"subject" bson:"subject"`
+	PerChild bool      `json:"per_child" bson:"per_child"`
+	// EffectiveSubject identifies the runtime child partition for a per-child
+	// rule. It is never persisted or exposed as part of the rule definition.
+	EffectiveSubject string    `json:"-" bson:"-"`
+	PeriodSeconds    int64     `json:"period_seconds" bson:"period_seconds"`
+	MaxRequests      *int64    `json:"max_requests,omitempty" bson:"max_requests,omitempty"`
+	MaxTokens        *int64    `json:"max_tokens,omitempty" bson:"max_tokens,omitempty"`
+	Source           string    `json:"source,omitempty" bson:"source,omitempty"`
+	CreatedAt        time.Time `json:"created_at" bson:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at" bson:"updated_at"`
 }
 
 // Subjects identifies the dimensions one request can be limited by. UserPath
@@ -76,6 +80,21 @@ func (r Rule) appliesTo(s Subjects) bool {
 	default:
 		return s.UserPath != "" && ruleAppliesToPath(r.Subject, s.UserPath)
 	}
+}
+
+func (r Rule) resolve(s Subjects) (Rule, bool) {
+	if !r.PerChild {
+		return r, r.appliesTo(s)
+	}
+	if r.Scope != ScopeUserPath {
+		return Rule{}, false
+	}
+	child, ok := core.UserPathChild(r.Subject, s.UserPath)
+	if !ok {
+		return Rule{}, false
+	}
+	r.EffectiveSubject = child
+	return r, true
 }
 
 // modelSubjectMatches compares a model rule subject against the routed model.
@@ -109,6 +128,9 @@ func (r Rule) SubjectLabel() string {
 	case ScopeModel:
 		return "model " + r.Subject
 	default:
+		if r.EffectiveSubject != "" {
+			return r.EffectiveSubject
+		}
 		return r.Subject
 	}
 }
@@ -238,6 +260,10 @@ func NormalizeRule(r Rule) (Rule, error) {
 		return Rule{}, err
 	}
 	r.Subject = subject
+	r.EffectiveSubject = ""
+	if r.PerChild && scope != ScopeUserPath {
+		return Rule{}, fmt.Errorf("per_child is only valid for user_path rules")
+	}
 	if err := validatePeriodSeconds(r.PeriodSeconds); err != nil {
 		return Rule{}, err
 	}

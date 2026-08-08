@@ -62,6 +62,21 @@
         {/each}
       </select>
     </FormField>
+    {#if rateLimits.rateLimitForm.scope === "user_path"}
+      <label class="per-child-option">
+        <input
+          type="checkbox"
+          bind:checked={rateLimits.rateLimitForm.per_child}
+        />
+        <span>
+          <strong>Apply per direct child</strong>
+          <small
+            >Each child below {rateLimits.rateLimitForm.subject || "/"} gets independent
+            counters. Deeper descendants share their direct child's counters.</small
+          >
+        </span>
+      </label>
+    {/if}
     {#if rateLimits.rateLimitForm.period === "custom"}
       <FormField id="rate-limit-period-seconds" label="Period Seconds">
         <input
@@ -106,15 +121,39 @@
     {/if}
   </div>
   <p class="form-hint">
-    A user path rule limits the whole subtree; provider and model rules cap
-    all traffic routed there and make load balancing skip the target while
-    it is saturated. One shared counter per rule. Leave a field empty to
-    skip that limit. Token limits require usage tracking.
+    A user path rule limits the whole subtree; provider and model rules cap all
+    traffic routed there and make load balancing skip the target while it is
+    saturated. One shared counter per rule. Leave a field empty to skip that
+    limit. Token limits require usage tracking.
   </p>
   {#if rateLimits.rateLimitEditing}
     <p class="form-hint">
-      Scope, subject, and period identify the rule: changing any of them
-      moves the rule to a new key and restarts its live counters.
+      Scope, subject, and period identify the rule: changing any of them moves
+      the rule to a new key and restarts its live counters.
     </p>
   {/if}
 </EditorDialog>
+
+<style>
+  .per-child-option {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 0.65rem;
+    align-items: flex-start;
+    cursor: pointer;
+  }
+
+  .per-child-option input {
+    margin-top: 0.2rem;
+  }
+
+  .per-child-option span {
+    display: grid;
+    gap: 0.2rem;
+  }
+
+  .per-child-option small {
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+</style>

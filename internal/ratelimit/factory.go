@@ -81,7 +81,7 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 		return nil
 	}
 	rules := make([]Rule, 0)
-	appendRules := func(scope RuleScope, subject string, limits []config.RateLimitRuleConfig) error {
+	appendRules := func(scope RuleScope, subject string, perChild bool, limits []config.RateLimitRuleConfig) error {
 		normalized, err := NormalizeSubject(scope, subject)
 		if err != nil {
 			return fmt.Errorf("invalid rate limit %s subject %q: %w", scope, subject, err)
@@ -100,6 +100,7 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 			rules = append(rules, Rule{
 				Scope:         scope,
 				Subject:       normalized,
+				PerChild:      perChild || limit.PerChild,
 				PeriodSeconds: seconds,
 				MaxRequests:   limit.MaxRequests,
 				MaxTokens:     limit.MaxTokens,
@@ -109,17 +110,17 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 		return nil
 	}
 	for _, entry := range cfg.UserPaths {
-		if err := appendRules(ScopeUserPath, entry.Path, entry.Limits); err != nil {
+		if err := appendRules(ScopeUserPath, entry.Path, entry.PerChild, entry.Limits); err != nil {
 			return err
 		}
 	}
 	for _, entry := range cfg.Providers {
-		if err := appendRules(ScopeProvider, entry.Name, entry.Limits); err != nil {
+		if err := appendRules(ScopeProvider, entry.Name, false, entry.Limits); err != nil {
 			return err
 		}
 	}
 	for _, entry := range cfg.Models {
-		if err := appendRules(ScopeModel, entry.Model, entry.Limits); err != nil {
+		if err := appendRules(ScopeModel, entry.Model, false, entry.Limits); err != nil {
 			return err
 		}
 	}

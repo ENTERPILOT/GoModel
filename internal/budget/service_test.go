@@ -233,7 +233,7 @@ func TestSeedConfiguredBudgetsSeedsBothScopes(t *testing.T) {
 
 	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{
 		UserPaths: []config.BudgetUserPathConfig{
-			{Path: "team", Limits: []config.BudgetLimitConfig{{Period: "daily", Amount: 10}}},
+			{Path: "team", PerChild: true, Limits: []config.BudgetLimitConfig{{Period: "daily", Amount: 10}}},
 		},
 		Labels: []config.BudgetLabelConfig{
 			{Label: "Mobile-App-iOS", Limits: []config.BudgetLimitConfig{{Period: "monthly", Amount: 500}}},
@@ -244,7 +244,7 @@ func TestSeedConfiguredBudgetsSeedsBothScopes(t *testing.T) {
 	}
 
 	want := []Budget{
-		{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceConfig},
+		{Scope: ScopeUserPath, Subject: "/team", PerChild: true, PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceConfig},
 		{Scope: ScopeLabel, Subject: "Mobile-App-iOS", PeriodSeconds: PeriodMonthlySeconds, Amount: 500, Source: SourceConfig},
 	}
 	if len(store.replacedBudgets) != len(want) {
@@ -253,7 +253,7 @@ func TestSeedConfiguredBudgetsSeedsBothScopes(t *testing.T) {
 	for i, budget := range want {
 		got := store.replacedBudgets[i]
 		if got.Scope != budget.Scope || got.Subject != budget.Subject ||
-			got.PeriodSeconds != budget.PeriodSeconds || got.Amount != budget.Amount || got.Source != budget.Source {
+			got.PerChild != budget.PerChild || got.PeriodSeconds != budget.PeriodSeconds || got.Amount != budget.Amount || got.Source != budget.Source {
 			t.Fatalf("replaced budget[%d] = %+v, want %+v", i, got, budget)
 		}
 	}
@@ -315,6 +315,71 @@ func TestServiceCheckRejectsExceededBudgetForMatchingUserPath(t *testing.T) {
 	}
 	if got := exceeded.Result.Budget.Subject; got != "/team" {
 		t.Fatalf("exceeded budget subject = %q, want /team", got)
+	}
+}
+
+func TestServicePerChildBudgetUsesDirectChildSpendPartition(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{{
+			Scope: ScopeUserPath, Subject: "/users", PerChild: true,
+			PeriodSeconds: PeriodDailySeconds, Amount: 10,
+		}},
+		sum: func(window SpendWindow) (float64, bool, error) {
+			switch window.Subject {
+			case "/users/alice":
+				return 10, true, nil
+			case "/users/bob":
+				return 2, true, nil
+			default:
+				t.Fatalf("unexpected spend partition %q", window.Subject)
+				return 0, false, nil
+			}
+		},
+	}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+
+	var exceeded *ExceededError
+	if err := service.Check(ctx, path("/users/alice/app"), now); !errors.As(err, &exceeded) {
+		t.Fatalf("alice Check() error = %v, want ExceededError", err)
+	}
+	if exceeded.Result.Budget.Subject != "/users" || exceeded.Result.Budget.EffectiveSubject != "/users/alice" {
+		t.Fatalf("resolved alice budget = %+v", exceeded.Result.Budget)
+	}
+	if err := service.Check(ctx, path("/users/bob/app"), now); err != nil {
+		t.Fatalf("bob Check() error = %v, want independent available budget", err)
+	}
+	results, err := service.StatusesFor(ctx, path("/users"), now)
+	if err != nil {
+		t.Fatalf("base StatusesFor() error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("base StatusesFor() = %+v, want no child template match", results)
+	}
+}
+
+func TestServiceGlobalPerChildBudgetStatusDoesNotInventAggregate(t *testing.T) {
+	store := &fakeStore{budgets: []Budget{{
+		Scope: ScopeUserPath, Subject: "/users", PerChild: true,
+		PeriodSeconds: PeriodDailySeconds, Amount: 10,
+	}}}
+	service, err := NewService(context.Background(), store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	results, err := service.Statuses(context.Background(), time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("Statuses() failed: %v", err)
+	}
+	if len(results) != 1 || results[0].HasUsage || results[0].Remaining != 10 {
+		t.Fatalf("Statuses() = %+v, want unresolved template with full nominal remaining", results)
+	}
+	if store.sumCalls != 0 {
+		t.Fatalf("SumSpend calls = %d, want 0 for unresolved template", store.sumCalls)
 	}
 }
 
