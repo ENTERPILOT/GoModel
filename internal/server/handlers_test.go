@@ -7178,12 +7178,12 @@ func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `provider passthrough for \"groq\" is not enabled`) {
 		t.Fatalf("unexpected error body: %s", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "anthropic, chutes, deepseek, kilo, llmd, openai, openrouter, sglang, vllm, zai") {
+	if !strings.Contains(rec.Body.String(), "anthropic, deepseek, kilo, llmd, openai, openrouter, sglang, vllm, zai") {
 		t.Fatalf("unexpected error body: %s", rec.Body.String())
 	}
 }
 
-func TestProviderPassthrough_DefaultAllowsChutes(t *testing.T) {
+func TestProviderPassthrough_ChutesRequiresExplicitOptIn(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
 			StatusCode: http.StatusOK,
@@ -7196,13 +7196,25 @@ func TestProviderPassthrough_DefaultAllowsChutes(t *testing.T) {
 	handler := NewHandler(provider, nil, nil, nil)
 	e.POST("/p/:provider/*", handler.ProviderPassthrough)
 
+	blockedReq := httptest.NewRequest(http.MethodPost, "/p/chutes/provider-native/admin/keys", strings.NewReader(`{}`))
+	blockedRec := httptest.NewRecorder()
+	e.ServeHTTP(blockedRec, blockedReq)
+
+	if blockedRec.Code != http.StatusBadRequest {
+		t.Fatalf("default status = %d, want 400: %s", blockedRec.Code, blockedRec.Body.String())
+	}
+	if provider.lastPassthroughReq != nil {
+		t.Fatal("default Chutes passthrough reached provider, want rejection before forwarding")
+	}
+
+	handler.setEnabledPassthroughProviders([]string{"chutes"})
 	req := httptest.NewRequest(http.MethodPost, "/p/chutes/chat/completions", strings.NewReader(`{"model":"Qwen/Qwen3-32B-TEE"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+		t.Fatalf("opt-in status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	if provider.lastPassthroughProvider != "chutes" {
 		t.Fatalf("providerType = %q, want chutes", provider.lastPassthroughProvider)

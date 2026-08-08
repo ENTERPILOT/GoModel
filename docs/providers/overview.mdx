@@ -94,7 +94,9 @@ support, not every individual model capability exposed by an upstream provider.
 - **Chutes AI** — defaults to `https://llm.chutes.ai/v1` and discovers its
   current model IDs, context limits, capabilities, and pricing from the live
   catalog. GoModel translates `/v1/responses` requests to chat completions;
-  Chutes' shared LLM endpoint does not expose embeddings.
+  Chutes' shared LLM endpoint does not expose embeddings. Passthrough support
+  requires explicit operator opt-in by adding `chutes` to
+  `ENABLED_PASSTHROUGH_PROVIDERS`.
 - **Meta (Muse Spark)** — the Meta Model API is OpenAI-compatible; set
   `META_API_KEY` and route to `muse-spark-1.1`. Muse Spark models are not in
   the upstream model catalog yet, so declare `context_window` and `pricing`
