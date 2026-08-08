@@ -47,6 +47,12 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			required:     nil,
 		},
 		{
+			// llm-d can be keyless, but it has no meaningful universal endpoint.
+			providerType: "llmd",
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			required:     []string{"base_url"},
+		},
+		{
 			// Authenticates through the AWS SDK credential chain, never a key.
 			providerType: "bedrock",
 			fields:       []string{"base_url", "models"},
@@ -141,7 +147,7 @@ var credentialPayloadFields = []string{
 func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
 		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "cohere", "deepseek", "fireworks",
-		"gemini", "groq", "kilo", "kimicode", "meta", "minimax", "ollama", "openai", "opencode_go",
+		"gemini", "groq", "kilo", "kimicode", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
 		"openrouter", "oracle", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}
 

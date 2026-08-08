@@ -22,6 +22,7 @@ const PROVIDER_DOC_SLUGS = {
   cohere: "cohere",
   deepseek: "deepseek",
   gemini: "gemini",
+  llmd: "llmd",
   opencode_go: "opencode-go",
   oracle: "oracle",
   vertex: "vertex",

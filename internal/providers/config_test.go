@@ -54,6 +54,10 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 		DefaultBaseURL:  "http://localhost:8000/v1",
 		AllowAPIKeyless: true,
 	},
+	"llmd": {
+		RequireBaseURL:  true,
+		AllowAPIKeyless: true,
+	},
 	"azure": {
 		RequireBaseURL:     true,
 		SupportsAPIVersion: true,
@@ -90,6 +94,43 @@ func TestBuildProviderConfig_InheritsGlobal(t *testing.T) {
 	}
 	if !got.SessionStickyKeys {
 		t.Error("SessionStickyKeys = false, want default true")
+	}
+}
+
+func TestBuildProviderConfig_LLMDControlDefaults(t *testing.T) {
+	disabled := false
+	tests := []struct {
+		name          string
+		raw           config.RawProviderConfig
+		wantObjective string
+		wantFair      bool
+	}{
+		{
+			name:          "defaults fairness to effective user path",
+			raw:           config.RawProviderConfig{Type: "llmd", InferenceObjective: "premium"},
+			wantObjective: "premium",
+			wantFair:      true,
+		},
+		{
+			name:     "explicitly disables fairness derivation",
+			raw:      config.RawProviderConfig{Type: "llmd", FairnessFromUserPath: &disabled},
+			wantFair: false,
+		},
+		{
+			name: "ignores llmd-only fields for another provider type",
+			raw:  config.RawProviderConfig{Type: "openai", InferenceObjective: "premium"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildProviderConfig(tt.raw, globalResilience)
+			if got.InferenceObjective != tt.wantObjective {
+				t.Errorf("InferenceObjective = %q, want %q", got.InferenceObjective, tt.wantObjective)
+			}
+			if got.FairnessFromUserPath != tt.wantFair {
+				t.Errorf("FairnessFromUserPath = %v, want %v", got.FairnessFromUserPath, tt.wantFair)
+			}
+		})
 	}
 }
 
@@ -451,6 +492,21 @@ func TestFilterEmptyProviders_RemovesOracleByTypeWithoutBaseURL(t *testing.T) {
 	}
 }
 
+func TestFilterEmptyProviders_LLMDRequiresBaseURLButNotAPIKey(t *testing.T) {
+	raw := map[string]config.RawProviderConfig{
+		"missing-endpoint": {Type: "llmd"},
+		"router":           {Type: "llmd", BaseURL: "http://llmd-epp.default.svc/v1"},
+	}
+
+	got := filterEmptyProviders(raw, testDiscoveryConfigs)
+	if _, exists := got["missing-endpoint"]; exists {
+		t.Fatal("llmd without base URL must be removed")
+	}
+	if _, exists := got["router"]; !exists {
+		t.Fatal("keyless llmd with base URL must be retained")
+	}
+}
+
 // --- applyProviderEnvVars ---
 
 func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
@@ -467,6 +523,30 @@ func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
 	}
 	if p.Type != "openai" {
 		t.Errorf("Type = %q, want openai", p.Type)
+	}
+}
+
+func TestApplyProviderEnvVars_LLMDControls(t *testing.T) {
+	t.Setenv("LLMD_BASE_URL", "http://llmd-epp.default.svc/v1")
+	t.Setenv("LLMD_INFERENCE_OBJECTIVE", "premium-traffic")
+	t.Setenv("LLMD_FAIRNESS_FROM_USER_PATH", "false")
+	t.Setenv("LLMD_CANARY_BASE_URL", "http://llmd-canary.default.svc/v1")
+	t.Setenv("LLMD_CANARY_INFERENCE_OBJECTIVE", "canary-traffic")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	primary := got["llmd"]
+	if primary.InferenceObjective != "premium-traffic" {
+		t.Errorf("primary InferenceObjective = %q, want premium-traffic", primary.InferenceObjective)
+	}
+	if primary.FairnessFromUserPath == nil || *primary.FairnessFromUserPath {
+		t.Fatalf("primary FairnessFromUserPath = %v, want false", primary.FairnessFromUserPath)
+	}
+	canary := got["llmd-canary"]
+	if canary.BaseURL != "http://llmd-canary.default.svc/v1" {
+		t.Errorf("canary BaseURL = %q", canary.BaseURL)
+	}
+	if canary.InferenceObjective != "canary-traffic" {
+		t.Errorf("canary InferenceObjective = %q, want canary-traffic", canary.InferenceObjective)
 	}
 }
 

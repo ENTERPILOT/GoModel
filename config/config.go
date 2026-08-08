@@ -101,6 +101,7 @@ func buildDefaultConfig() *Config {
 				"kilo",
 				"zai",
 				"vllm",
+				"llmd",
 				"deepseek",
 			},
 		},

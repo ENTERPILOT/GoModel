@@ -62,6 +62,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Oracle GenAI | `ORACLE_API_KEY` + `ORACLE_BASE_URL` | `openai.gpt-oss-120b` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Oracle GenAI](/providers/oracle) |
 | Ollama | `OLLAMA_BASE_URL` | `llama3.2` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Ollama](/providers/multiple-ollama) |
 | vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/providers/vllm) |
+| llm-d | `LLMD_BASE_URL` (`LLMD_API_KEY` optional) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/providers/llmd) |
 | Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + AWS credentials | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/providers/bedrock) |
 | Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` or AWS credentials | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/providers/bedrock-mantle) |
 
@@ -69,6 +70,9 @@ support, not every individual model capability exposed by an upstream provider.
 
 ## Provider notes
 
+- **llm-d** — point `LLMD_BASE_URL` at the Router/EPP service and declare
+  `LLMD_MODELS` when the route does not serve `/v1/models`. The dedicated
+  provider injects trusted inference-objective and user-path fairness headers.
 - **Z.ai GLM Coding Plan** — set
   `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
 - **MiniMax regions and current text models** — the default global endpoint is
@@ -122,6 +126,8 @@ support, not every individual model capability exposed by an upstream provider.
   for providers that define a list, skipping their upstream `/models` calls.
 - **vLLM** — set `VLLM_API_KEY` only if the upstream server was started with
   `--api-key`.
+- **llm-d** — `LLMD_BASE_URL` is required. `LLMD_API_KEY` is optional and is
+  sent only when the Gateway in front of the Router requires bearer auth.
 - **Multiple API keys for one provider** — set `OPENAI_API_KEY_2`,
   `OPENAI_API_KEY_3`, and so on to spread sessions across keys while keeping
   each conversation on one key for prompt-cache affinity. See

@@ -170,6 +170,7 @@
                     "providers/minimax",
                     "providers/opencode-go",
                     "providers/vllm",
+                    "providers/llmd",
                     "providers/multiple-ollama",
                     "providers/kimicode",
                     {

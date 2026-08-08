@@ -166,6 +166,9 @@ Generate provider environment variables for the Deployment.
     secretKeyRef:
       name: {{ $secretName }}
       key: {{ upper $name }}_API_KEY
+{{- if eq $name "llmd" }}
+      optional: true
+{{- end }}
 {{- end }}
 {{- if or (or $hasAPIKey $enabledWithExistingSecret) $enabledWithBaseURL }}
 {{- if $config.baseUrl }}
@@ -176,6 +179,16 @@ Generate provider environment variables for the Deployment.
 {{- if and (eq $name "gemini") (hasKey $config "useNativeApi") }}
 - name: USE_GOOGLE_GEMINI_NATIVE_API
   value: {{ $config.useNativeApi | quote }}
+{{- end }}
+{{- if and (eq $name "llmd") (or (or $hasAPIKey $enabledWithExistingSecret) $enabledWithBaseURL) }}
+{{- if $config.inferenceObjective }}
+- name: LLMD_INFERENCE_OBJECTIVE
+  value: {{ $config.inferenceObjective | quote }}
+{{- end }}
+{{- if hasKey $config "fairnessFromUserPath" }}
+- name: LLMD_FAIRNESS_FROM_USER_PATH
+  value: {{ $config.fairnessFromUserPath | quote }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
