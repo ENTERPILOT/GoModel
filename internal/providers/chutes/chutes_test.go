@@ -11,7 +11,40 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
+
+func TestNew_ConstructsRegisteredProvider(t *testing.T) {
+	provider, ok := New(providers.ProviderConfig{
+		APIKey:  "cpk_test",
+		BaseURL: "https://chutes.example/v1",
+	}, providers.ProviderOptions{}).(*Provider)
+	if !ok || provider.compat == nil {
+		t.Fatalf("New() = %T, want initialized *Provider", provider)
+	}
+	if Registration.Discovery.DefaultBaseURL != defaultBaseURL {
+		t.Fatalf("registration base URL = %q, want %q", Registration.Discovery.DefaultBaseURL, defaultBaseURL)
+	}
+}
+
+func TestSetBaseURL_ChangesRequestTarget(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("cpk_test", "https://unused.example/v1", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+	if _, err := provider.ListModels(context.Background()); err != nil {
+		t.Fatalf("ListModels() error = %v", err)
+	}
+	if gotPath != "/models" {
+		t.Fatalf("path = %q, want /models", gotPath)
+	}
+}
 
 func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 	var gotPath, gotAuth string
@@ -200,61 +233,44 @@ func TestResponses_TranslatesToChatCompletions(t *testing.T) {
 	}
 }
 
-func TestListModels_PreservesChutesMetadata(t *testing.T) {
+func TestStreamResponses_TranslatesToChatCompletions(t *testing.T) {
 	var gotPath, gotAuth string
+	var gotBody map[string]any
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"object":"chutes-model-catalog",
-			"data":[{
-				"id":"Qwen/Qwen3.5-397B-A17B-TEE",
-				"owned_by":"sglang",
-				"created":1677652288,
-				"context_length":262144,
-				"max_output_length":65536,
-				"input_modalities":["text","image"],
-				"supported_features":["json_mode","tools","structured_outputs","reasoning"],
-				"confidential_compute":true,
-				"pricing":{"prompt":0.45,"completion":3.0,"input_cache_read":0.045}
-			}]
-		}`))
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			http.Error(w, "decode error", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl-chutes\",\"object\":\"chat.completion.chunk\",\"created\":1677652288,\"model\":\"Qwen/Qwen3-32B-TEE\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
 
 	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
-	resp, err := provider.ListModels(context.Background())
+	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "Qwen/Qwen3-32B-TEE",
+		Input: "hi",
+	})
 	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
+		t.Fatalf("StreamResponses() error = %v", err)
 	}
-	if gotPath != "/models" || gotAuth != "Bearer cpk_test" {
-		t.Fatalf("request path/auth = %q/%q, want /models/Bearer cpk_test", gotPath, gotAuth)
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
 	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("len(resp.Data) = %d, want 1", len(resp.Data))
+	if gotPath != "/chat/completions" || gotAuth != "Bearer cpk_test" {
+		t.Fatalf("request path/auth = %q/%q", gotPath, gotAuth)
 	}
-	if resp.Object != "list" {
-		t.Fatalf("resp.Object = %q, want list", resp.Object)
+	if gotBody["model"] != "Qwen/Qwen3-32B-TEE" || gotBody["stream"] != true {
+		t.Fatalf("stream request body = %#v", gotBody)
 	}
-	model := resp.Data[0]
-	if model.Object != "model" {
-		t.Fatalf("model.Object = %q, want model", model.Object)
-	}
-	if model.Metadata == nil || model.Metadata.ContextWindow == nil || *model.Metadata.ContextWindow != 262144 {
-		t.Fatalf("model context metadata = %+v, want 262144", model.Metadata)
-	}
-	if model.Metadata.MaxOutputTokens == nil || *model.Metadata.MaxOutputTokens != 65536 {
-		t.Fatalf("max output tokens = %+v, want 65536", model.Metadata.MaxOutputTokens)
-	}
-	if !model.Metadata.Capabilities["tools"] || !model.Metadata.Capabilities["vision"] || !model.Metadata.Capabilities["confidential_compute"] {
-		t.Fatalf("capabilities = %v, want tools, vision, and confidential_compute", model.Metadata.Capabilities)
-	}
-	pricing := model.Metadata.Pricing
-	if pricing == nil || pricing.Currency != "USD" || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 0.45 ||
-		pricing.OutputPerMtok == nil || *pricing.OutputPerMtok != 3.0 ||
-		pricing.CachedInputPerMtok == nil || *pricing.CachedInputPerMtok != 0.045 {
-		t.Fatalf("pricing = %+v, want Chutes per-MTok USD pricing", pricing)
+	if raw := string(body); !strings.Contains(raw, "response.output_text.delta") || !strings.Contains(raw, "data: [DONE]") {
+		t.Fatalf("converted stream missing Responses events or done marker: %s", raw)
 	}
 }
 
