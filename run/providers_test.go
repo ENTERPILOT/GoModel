@@ -21,6 +21,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 
 	tests := []struct {
 		providerType string
+		defaultURL   string
 		fields       []string // exact, in display order
 		required     []string
 		absent       []string
@@ -29,9 +30,18 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 		{
 			// The plain shape every API-key provider derives.
 			providerType: "openai",
+			defaultURL:   "https://api.openai.com/v1",
 			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
 			required:     []string{"api_keys"},
 			absent:       []string{"api_version", "vertex_project"},
+		},
+		{
+			// Newly registered API-key providers use the same schema feed as
+			// every other type, so the dashboard can offer them immediately.
+			providerType: "chutes",
+			defaultURL:   "https://llm.chutes.ai/v1",
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			required:     []string{"api_keys"},
 		},
 		{
 			// A deployment URL is the provider, so it is required, and Azure
@@ -107,6 +117,9 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			if !ok {
 				t.Fatalf("no credential schema for provider type %q", tt.providerType)
 			}
+			if tt.defaultURL != "" && schema.DefaultBaseURL != tt.defaultURL {
+				t.Errorf("DefaultBaseURL = %q, want %q", schema.DefaultBaseURL, tt.defaultURL)
+			}
 
 			var names []string
 			for _, field := range schema.Fields {
@@ -170,6 +183,17 @@ func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 
 		if !slices.Equal(got, expected) {
 			t.Errorf("metrics=%v: registered types = %v, want %v", metricsEnabled, got, expected)
+		}
+
+		// CredentialSchemas is the source for
+		// GET /admin/provider-credentials/types, which drives the dashboard's
+		// Add Provider selector. Keep it in exact lockstep with construction.
+		dashboardTypes := make([]string, 0, len(expected))
+		for _, schema := range factory.CredentialSchemas() {
+			dashboardTypes = append(dashboardTypes, schema.Type)
+		}
+		if !slices.Equal(dashboardTypes, expected) {
+			t.Errorf("metrics=%v: dashboard provider types = %v, want %v", metricsEnabled, dashboardTypes, expected)
 		}
 	}
 }
