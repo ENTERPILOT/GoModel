@@ -48,6 +48,7 @@ support, not every individual model capability exposed by an upstream provider.
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/providers/deepseek) |
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
 | Fireworks AI | `FIREWORKS_API_KEY` (`FIREWORKS_BASE_URL` optional) | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
+| Chutes AI | `CHUTES_API_KEY` (`CHUTES_BASE_URL` optional) | `Qwen/Qwen3-32B-TEE` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
 | Meta (Muse Spark) | `META_API_KEY` (`META_BASE_URL` optional) | `muse-spark-1.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
 | OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Kilo AI | `KILO_API_KEY` (`KILO_BASE_URL` optional) | `anthropic/claude-sonnet-4.5` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
@@ -90,6 +91,12 @@ support, not every individual model capability exposed by an upstream provider.
 - **Fireworks AI** — model IDs are account-scoped paths such as
   `accounts/fireworks/models/gpt-oss-120b`; use them verbatim in requests and
   in `FIREWORKS_MODELS`.
+- **Chutes AI** — defaults to `https://llm.chutes.ai/v1` and discovers its
+  current model IDs, context limits, capabilities, and pricing from the live
+  catalog. GoModel translates `/v1/responses` requests to chat completions;
+  Chutes' shared LLM endpoint does not expose embeddings. Passthrough support
+  requires explicit operator opt-in by adding `chutes` to
+  `ENABLED_PASSTHROUGH_PROVIDERS`.
 - **Meta (Muse Spark)** — the Meta Model API is OpenAI-compatible; set
   `META_API_KEY` and route to `muse-spark-1.1`. Muse Spark models are not in
   the upstream model catalog yet, so declare `context_window` and `pricing`

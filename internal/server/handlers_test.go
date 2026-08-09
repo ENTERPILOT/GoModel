@@ -7183,6 +7183,47 @@ func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
 	}
 }
 
+func TestProviderPassthrough_ChutesRequiresExplicitOptIn(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+	blockedReq := httptest.NewRequest(http.MethodPost, "/p/chutes/provider-native/admin/keys", strings.NewReader(`{}`))
+	blockedRec := httptest.NewRecorder()
+	e.ServeHTTP(blockedRec, blockedReq)
+
+	if blockedRec.Code != http.StatusBadRequest {
+		t.Fatalf("default status = %d, want 400: %s", blockedRec.Code, blockedRec.Body.String())
+	}
+	if provider.lastPassthroughReq != nil {
+		t.Fatal("default Chutes passthrough reached provider, want rejection before forwarding")
+	}
+
+	handler.setEnabledPassthroughProviders([]string{"chutes"})
+	req := httptest.NewRequest(http.MethodPost, "/p/chutes/chat/completions", strings.NewReader(`{"model":"Qwen/Qwen3-32B-TEE"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("opt-in status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if provider.lastPassthroughProvider != "chutes" {
+		t.Fatalf("providerType = %q, want chutes", provider.lastPassthroughProvider)
+	}
+	if provider.lastPassthroughReq == nil || provider.lastPassthroughReq.Endpoint != "chat/completions" {
+		t.Fatalf("passthrough request = %+v, want chat/completions endpoint", provider.lastPassthroughReq)
+	}
+}
+
 func TestProviderPassthrough_UsesConfiguredSupportedProviders(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{

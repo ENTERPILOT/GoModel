@@ -133,6 +133,10 @@ Passthrough is intentionally narrow while the API is in beta.
 
 - `openai`, `anthropic`, `openrouter`, `kilo`, `zai`, `sglang`, `vllm`, `llmd`, and `deepseek` are enabled by
   default.
+- Chutes supports passthrough but requires explicit operator opt-in because
+  passthrough can forward provider-native routes that do not identify a model.
+  Add `chutes` to `ENABLED_PASSTHROUGH_PROVIDERS` only when you intend to expose
+  that surface.
 - GoModel does not translate passthrough request bodies or response bodies.
 - Provider-native error bodies and status codes are proxied instead of converted
   into OpenAI-compatible responses.
