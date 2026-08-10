@@ -30,3 +30,13 @@ func ResolveMetricsEndpoint(endpoint string) string {
 	}
 	return metricsPath
 }
+
+// ResolveMetricsEndpointWithPprof also prevents the metrics route from
+// shadowing an enabled pprof route.
+func ResolveMetricsEndpointWithPprof(endpoint string, pprofEnabled bool) string {
+	metricsPath := ResolveMetricsEndpoint(endpoint)
+	if pprofEnabled && (metricsPath == "/debug/pprof" || strings.HasPrefix(metricsPath, "/debug/pprof/")) {
+		return "/metrics"
+	}
+	return metricsPath
+}

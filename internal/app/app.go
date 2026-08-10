@@ -117,6 +117,7 @@ func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) error {
 	if extensions == nil {
 		return nil
 	}
+	serverCfg.MetricsEndpoint = config.ResolveMetricsEndpointWithPprof(serverCfg.MetricsEndpoint, serverCfg.PprofEnabled)
 	outerMiddleware, err := extensions.OuterMiddlewareFor(ext.HTTPServerConfig{
 		MetricsEndpoint: serverCfg.MetricsEndpoint,
 	})

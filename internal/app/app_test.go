@@ -808,6 +808,9 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	if !slices.Equal(factoryMetricsEndpoints, []string{"/monitoring/metrics"}) {
 		t.Errorf("factory MetricsEndpoints = %q", factoryMetricsEndpoints)
 	}
+	if serverCfg.MetricsEndpoint != "/monitoring/metrics" {
+		t.Errorf("server MetricsEndpoint = %q, want /monitoring/metrics", serverCfg.MetricsEndpoint)
+	}
 	if len(serverCfg.ExtraMiddleware) != 1 {
 		t.Errorf("ExtraMiddleware not copied: %d entries", len(serverCfg.ExtraMiddleware))
 	}
@@ -821,12 +824,31 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 		t.Errorf("RequestAuthenticators not copied: %v", serverCfg.RequestAuthenticators)
 	}
 
-	reloaded := &server.Config{MetricsEndpoint: "/new/metrics"}
-	if err := applyExtensions(reloaded, reg); err != nil {
-		t.Fatal(err)
+	endpointTests := []struct {
+		name         string
+		endpoint     string
+		pprofEnabled bool
+		want         string
+	}{
+		{name: "reload endpoint", endpoint: "/new/metrics", want: "/new/metrics"},
+		{name: "default endpoint", want: "/metrics"},
+		{name: "custom endpoint without leading slash", endpoint: "monitoring/custom", want: "/monitoring/custom"},
+		{name: "API route conflict", endpoint: "/v1", want: "/metrics"},
+		{name: "pprof conflict", endpoint: "/debug/pprof", pprofEnabled: true, want: "/metrics"},
 	}
-	if !slices.Equal(factoryMetricsEndpoints, []string{"/monitoring/metrics", "/new/metrics"}) {
-		t.Errorf("factory MetricsEndpoints after reload = %q", factoryMetricsEndpoints)
+	for _, test := range endpointTests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := &server.Config{MetricsEndpoint: test.endpoint, PprofEnabled: test.pprofEnabled}
+			if err := applyExtensions(cfg, reg); err != nil {
+				t.Fatal(err)
+			}
+			if got := factoryMetricsEndpoints[len(factoryMetricsEndpoints)-1]; got != test.want {
+				t.Errorf("factory MetricsEndpoint = %q, want %q", got, test.want)
+			}
+			if cfg.MetricsEndpoint != test.want {
+				t.Errorf("server MetricsEndpoint = %q, want %q", cfg.MetricsEndpoint, test.want)
+			}
+		})
 	}
 
 	// A nil registry must leave the config untouched.

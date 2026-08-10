@@ -81,6 +81,7 @@ func newCredentialsTestFactory(t *testing.T) *ProviderFactory {
 func TestCredentialsService_BuildProviderPreservesManagedHookIdentity(t *testing.T) {
 	var start llmclient.RequestInfo
 	var end llmclient.ResponseInfo
+	var firstChunk llmclient.ResponseInfo
 	factory := NewProviderFactory()
 	factory.SetHooks(llmclient.Hooks{
 		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
@@ -89,6 +90,9 @@ func TestCredentialsService_BuildProviderPreservesManagedHookIdentity(t *testing
 		},
 		OnRequestEnd: func(_ context.Context, info llmclient.ResponseInfo) {
 			end = info
+		},
+		OnStreamFirstChunk: func(_ context.Context, info llmclient.ResponseInfo) {
+			firstChunk = info
 		},
 	})
 	var providerHooks llmclient.Hooks
@@ -115,8 +119,12 @@ func TestCredentialsService_BuildProviderPreservesManagedHookIdentity(t *testing
 	}
 	providerHooks.OnRequestStart(t.Context(), llmclient.RequestInfo{})
 	providerHooks.OnRequestEnd(t.Context(), llmclient.ResponseInfo{})
-	if start.Provider != "managed-eu" || start.ProviderType != "test" || end.Provider != "managed-eu" || end.ProviderType != "test" {
-		t.Fatalf("hook identities = start %q/%q end %q/%q, want managed-eu/test", start.Provider, start.ProviderType, end.Provider, end.ProviderType)
+	providerHooks.OnStreamFirstChunk(t.Context(), llmclient.ResponseInfo{})
+	if start.Provider != "managed-eu" || start.ProviderType != "test" ||
+		end.Provider != "managed-eu" || end.ProviderType != "test" ||
+		firstChunk.Provider != "managed-eu" || firstChunk.ProviderType != "test" {
+		t.Fatalf("hook identities = start %q/%q end %q/%q first chunk %q/%q, want managed-eu/test",
+			start.Provider, start.ProviderType, end.Provider, end.ProviderType, firstChunk.Provider, firstChunk.ProviderType)
 	}
 }
 

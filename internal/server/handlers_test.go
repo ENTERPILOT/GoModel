@@ -31,6 +31,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/observability"
 	provideradapter "github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/responsestore"
@@ -2245,8 +2246,22 @@ func TestChatCompletionStreaming_FastPathUsageCarriesResolvedProviderName(t *tes
 	if mock.lastPassthroughReq == nil {
 		t.Fatal("lastPassthroughReq = nil, want passthrough request")
 	}
-	if got := mock.lastPassthroughReq.ProviderName; got != "openai_test" {
-		t.Fatalf("passthrough ProviderName = %q, want openai_test", got)
+	checks := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{name: "Operation", got: mock.lastPassthroughReq.Operation, want: llmclient.OperationChat},
+		{name: "Model", got: mock.lastPassthroughReq.Model, want: "gpt-4o-mini"},
+		{name: "Stream", got: mock.lastPassthroughReq.Stream, want: true},
+		{name: "ProviderName", got: mock.lastPassthroughReq.ProviderName, want: "openai_test"},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			if check.got != check.want {
+				t.Errorf("passthrough %s = %v, want %v", check.name, check.got, check.want)
+			}
+		})
 	}
 }
 

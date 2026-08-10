@@ -65,3 +65,44 @@ func TestSeedRequestBodySelectorHintsDoesNotMarkModelOnlyPeekAsParsed(t *testing
 		t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
 	}
 }
+
+func TestSeedRequestBodySelectorHintsTracksStreamConfidenceIndependently(t *testing.T) {
+	tests := []struct {
+		name          string
+		body          string
+		wantStream    bool
+		wantUncertain bool
+	}{
+		{
+			name:          "stream before model and provider",
+			body:          `{"stream":true,"model":"gpt-4o-mini","provider":"openai","padding":"` + strings.Repeat("x", 65*1024) + `"}`,
+			wantStream:    true,
+			wantUncertain: false,
+		},
+		{
+			name:          "stream absent before bounded peek stops",
+			body:          `{"model":"gpt-4o-mini","provider":"openai","padding":"` + strings.Repeat("x", 65*1024) + `"}`,
+			wantStream:    false,
+			wantUncertain: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(test.body))
+			env := &core.WhiteBoxPrompt{}
+			core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
+
+			seedRequestBodySelectorHints(req, core.BodyModeJSON, env)
+
+			info := env.CachedPassthroughRouteInfo()
+			if info == nil {
+				t.Fatal("CachedPassthroughRouteInfo() = nil")
+			}
+			if info.Stream != test.wantStream || info.StreamUncertain != test.wantUncertain {
+				t.Errorf("stream metadata = stream %v uncertain %v, want stream %v uncertain %v",
+					info.Stream, info.StreamUncertain, test.wantStream, test.wantUncertain)
+			}
+		})
+	}
+}
