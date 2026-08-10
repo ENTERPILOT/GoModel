@@ -6801,18 +6801,20 @@ func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
 			},
 			Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
 		},
+		providerTypes: map[string]string{"openai_test/gpt-5-mini": "openai"},
+		providerNames: map[string]string{"openai_test/gpt-5-mini": "openai_test"},
 	}
 
 	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req := httptest.NewRequest(http.MethodPost, "/p/openai_test/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{
-			Provider:           "openai",
+			Provider:           "openai_test",
 			RawEndpoint:        "chat/completions",
 			NormalizedEndpoint: "chat/completions",
 			Model:              "gpt-5-mini",
@@ -6836,6 +6838,9 @@ func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
 	}
 	if entry.Provider != "openai" {
 		t.Fatalf("audit entry provider = %q, want openai", entry.Provider)
+	}
+	if entry.ProviderName != "openai_test" {
+		t.Fatalf("audit entry provider name = %q, want openai_test", entry.ProviderName)
 	}
 }
 
@@ -7056,6 +7061,8 @@ func TestProviderPassthrough_OpenAIStreamWritesUsageEntry(t *testing.T) {
 					"data: [DONE]\n\n",
 			)),
 		},
+		providerTypes: map[string]string{"openai_test/gpt-5-mini": "openai"},
+		providerNames: map[string]string{"openai_test/gpt-5-mini": "openai_test"},
 	}
 	usageLog := &collectingUsageLogger{
 		config: usage.Config{Enabled: true},
@@ -7065,7 +7072,7 @@ func TestProviderPassthrough_OpenAIStreamWritesUsageEntry(t *testing.T) {
 	handler := NewHandler(provider, nil, usageLog, nil)
 	e.POST("/p/:provider/*", handler.ProviderPassthrough)
 
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req := httptest.NewRequest(http.MethodPost, "/p/openai_test/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-pass-stream-usage")
 	rec := httptest.NewRecorder()
@@ -7082,8 +7089,11 @@ func TestProviderPassthrough_OpenAIStreamWritesUsageEntry(t *testing.T) {
 	if entry.Provider != "openai" {
 		t.Fatalf("Provider = %q, want openai", entry.Provider)
 	}
-	if entry.Endpoint != "/p/openai/responses" {
-		t.Fatalf("Endpoint = %q, want /p/openai/responses", entry.Endpoint)
+	if entry.ProviderName != "openai_test" {
+		t.Fatalf("ProviderName = %q, want openai_test", entry.ProviderName)
+	}
+	if entry.Endpoint != "/p/openai_test/responses" {
+		t.Fatalf("Endpoint = %q, want /p/openai_test/responses", entry.Endpoint)
 	}
 	if entry.Model != "gpt-5-mini" {
 		t.Fatalf("Model = %q, want gpt-5-mini", entry.Model)

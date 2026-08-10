@@ -99,4 +99,7 @@ func TestPassthroughExecutionTarget_ResolvesConfiguredProviderNameToType(t *test
 	if info == nil || info.Provider != "openai" {
 		t.Fatalf("info.Provider = %#v, want openai", info)
 	}
+	if info.ProviderName != "openai_test" {
+		t.Fatalf("info.ProviderName = %q, want openai_test", info.ProviderName)
+	}
 }
