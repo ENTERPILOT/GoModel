@@ -21,6 +21,7 @@ const PROVIDER_DOC_SLUGS = {
   "bedrock-mantle": "bedrock-mantle",
   cohere: "cohere",
   deepseek: "deepseek",
+  elevenlabs: "elevenlabs",
   gemini: "gemini",
   llmd: "llmd",
   opencode_go: "opencode-go",

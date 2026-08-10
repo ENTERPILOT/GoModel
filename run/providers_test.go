@@ -44,6 +44,13 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			required:     []string{"api_keys"},
 		},
 		{
+			// Voice-only provider (no chat); same plain API-key shape.
+			providerType: "elevenlabs",
+			defaultURL:   "https://api.elevenlabs.io",
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			required:     []string{"api_keys"},
+		},
+		{
 			// A deployment URL is the provider, so it is required, and Azure
 			// is the one type that takes an API version.
 			providerType: "azure",
@@ -168,8 +175,8 @@ var credentialPayloadFields = []string{
 
 func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
-		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "chutes", "cohere", "deepseek", "fireworks",
-		"gemini", "groq", "kilo", "kimicode", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
+		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "chutes", "cohere", "deepseek", "elevenlabs",
+		"fireworks", "gemini", "groq", "kilo", "kimicode", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
 		"openrouter", "oracle", "sglang", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}
 
