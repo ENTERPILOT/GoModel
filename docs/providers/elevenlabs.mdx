@@ -1,0 +1,77 @@
+---
+title: "ElevenLabs"
+description: "Configure ElevenLabs in GoModel: voice_id vs named voices, supported audio formats, and speech-to-text timestamps."
+icon: "waveform-lines"
+keywords: ["ElevenLabs", "text-to-speech", "TTS", "speech-to-text", "STT", "voice", "provider setup"]
+---
+
+ElevenLabs is a voice-only provider: it exposes text-to-speech and
+speech-to-text behind the standard `/v1/audio/speech` and
+`/v1/audio/transcriptions` endpoints. It has no chat, `/responses`, or
+embeddings API, so those endpoints return `invalid_request_error` for
+ElevenLabs-routed models.
+
+## Configure
+
+```bash
+ELEVENLABS_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  elevenlabs:
+    type: elevenlabs
+    api_key: "${ELEVENLABS_API_KEY}"
+    # base_url defaults to "https://api.elevenlabs.io".
+```
+
+## Voices are IDs, not names
+
+Unlike OpenAI's fixed voice names (`alloy`, `verse`, ...), ElevenLabs has no
+built-in named voices — every voice is an ID from your ElevenLabs voice
+library (built-in, cloned, or shared). Pass that ID as the OpenAI-compatible
+`voice` field:
+
+```json
+{
+  "model": "eleven_multilingual_v2",
+  "input": "Hello there",
+  "voice": "21m00Tcm4TlvDq8ikWAM"
+}
+```
+
+List your available voice IDs from the ElevenLabs dashboard or the
+`GET /v1/voices` API (available under `/p/elevenlabs/v1/voices` via
+[passthrough](/features/passthrough-api) once `elevenlabs` is added to
+`ENABLED_PASSTHROUGH_PROVIDERS`).
+
+## Supported speech formats
+
+`response_format` accepts `mp3` (default), `opus`, `pcm`, and `wav`; each maps
+to a fixed ElevenLabs `output_format` (`mp3_44100_128`, `opus_48000_128`,
+`pcm_44100`, `wav_44100`). `aac` and `flac` are not supported and return
+`invalid_request_error`. `speed` must be between `0.7` and `1.2` when set,
+matching ElevenLabs' voice setting range; `instructions` is not supported.
+
+## Speech-to-text models and timestamps
+
+Transcription models (`scribe_v2`, current; `scribe_v1`, still valid) are a
+separate model family from the text-to-speech catalog and are not returned by
+ElevenLabs' `/v1/models` listing — GoModel adds them to `/v1/models` output
+itself. `response_format` accepts `json` (default), `text`, and
+`verbose_json`; `srt`/`vtt` are not supported. Requesting `verbose_json`, or
+`word` in `timestamp_granularities`, asks ElevenLabs for word-level timing,
+which GoModel maps into the OpenAI `words` array. `prompt` is not supported.
+
+## Not supported by ElevenLabs
+
+All of these return `invalid_request_error` rather than silently dropping the
+option:
+
+- Chat completions, `/v1/responses`, and embeddings.
+- Speech `instructions`, and `response_format` values other than
+  `mp3`/`opus`/`pcm`/`wav`.
+- Transcription `prompt`, and `response_format` values other than
+  `json`/`text`/`verbose_json`.

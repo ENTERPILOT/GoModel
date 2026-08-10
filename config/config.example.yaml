@@ -386,6 +386,13 @@ providers:
     # base_url defaults to "https://llm.chutes.ai/v1".
     # Set base_url when using a different compatible endpoint.
 
+  elevenlabs:
+    type: elevenlabs
+    api_key: "${ELEVENLABS_API_KEY}"
+    # base_url defaults to "https://api.elevenlabs.io".
+    # Voice-only provider: text-to-speech and speech-to-text, no chat. The
+    # OpenAI "voice" field must be an ElevenLabs voice_id.
+
   meta:
     type: meta
     api_key: "..."

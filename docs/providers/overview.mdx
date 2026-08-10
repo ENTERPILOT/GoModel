@@ -57,6 +57,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/providers/bailian) |
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [MiniMax](/providers/minimax) |
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
+| ElevenLabs (voice only) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` optional) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/providers/elevenlabs) |
 | OpenCode Go | `OPENCODE_GO_API_KEY` (`OPENCODE_GO_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [OpenCode Go](/providers/opencode-go) |
 | Kimi Code | `KIMICODE_API_KEY` | `kimi-for-coding` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Kimi Code](/providers/kimicode) |
 | Azure OpenAI | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Azure OpenAI](/providers/azure) |
@@ -91,6 +92,12 @@ support, not every individual model capability exposed by an upstream provider.
 - **Fireworks AI** — model IDs are account-scoped paths such as
   `accounts/fireworks/models/gpt-oss-120b`; use them verbatim in requests and
   in `FIREWORKS_MODELS`.
+- **ElevenLabs** — a voice-only provider: `/v1/audio/speech` (text-to-speech)
+  and `/v1/audio/transcriptions` (speech-to-text) are supported, but chat,
+  `/v1/responses`, and embeddings are not (the ❌s above reflect that, not a
+  gateway limitation). The OpenAI `voice` field must be an ElevenLabs
+  voice_id. See the [ElevenLabs guide](/providers/elevenlabs) for supported
+  audio formats and speech-to-text models.
 - **Chutes AI** — defaults to `https://llm.chutes.ai/v1` and discovers its
   current model IDs, context limits, capabilities, and pricing from the live
   catalog. GoModel translates `/v1/responses` requests to chat completions;

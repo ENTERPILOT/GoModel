@@ -170,6 +170,7 @@
                     "providers/bailian",
                     "providers/xiaomi",
                     "providers/minimax",
+                    "providers/elevenlabs",
                     "providers/opencode-go",
                     "providers/sglang",
                     "providers/vllm",

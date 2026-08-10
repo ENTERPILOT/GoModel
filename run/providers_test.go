@@ -168,8 +168,8 @@ var credentialPayloadFields = []string{
 
 func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
-		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "chutes", "cohere", "deepseek", "fireworks",
-		"gemini", "groq", "kilo", "kimicode", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
+		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "chutes", "cohere", "deepseek", "elevenlabs",
+		"fireworks", "gemini", "groq", "kilo", "kimicode", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
 		"openrouter", "oracle", "sglang", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}
 
