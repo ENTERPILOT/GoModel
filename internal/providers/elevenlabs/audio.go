@@ -37,16 +37,17 @@ func speechFormat(responseFormat string) (openAIFormat, outputFormat string, err
 	}
 }
 
-// speechSpeed validates the OpenAI speed parameter against ElevenLabs' voice
-// setting range. A zero value means "unset" and is left out of the request.
-func speechSpeed(speed float64) (*float64, error) {
+// speechSpeed clamps the OpenAI speed parameter to ElevenLabs' voice setting
+// range (0.7-1.2). OpenAI accepts a wider range (0.25-4.0); per Postel's Law,
+// GoModel adapts the request to the provider's requirements rather than
+// rejecting values OpenAI clients legitimately send. A zero value means
+// "unset" and is left out of the request.
+func speechSpeed(speed float64) *float64 {
 	if speed == 0 {
-		return nil, nil
+		return nil
 	}
-	if speed < 0.7 || speed > 1.2 {
-		return nil, core.NewInvalidRequestError("elevenlabs speech speed must be between 0.7 and 1.2", nil)
-	}
-	return &speed, nil
+	speed = min(max(speed, 0.7), 1.2)
+	return &speed
 }
 
 type speechRequest struct {
@@ -86,10 +87,7 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 	if err != nil {
 		return nil, err
 	}
-	speed, err := speechSpeed(req.Speed)
-	if err != nil {
-		return nil, err
-	}
+	speed := speechSpeed(req.Speed)
 
 	body := speechRequest{Text: req.Input, ModelID: model}
 	if speed != nil {

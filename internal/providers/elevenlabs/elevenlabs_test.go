@@ -107,23 +107,85 @@ func TestListModels_FiltersToTextToSpeechAndAddsScribe(t *testing.T) {
 	}
 }
 
+func TestListModels_FallsBackToStaticModelsOnFirstFetchFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	resp, err := provider.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels() error = %v, want static fallback on first-ever fetch failure", err)
+	}
+	if len(resp.Data) != len(staticTranscriptionModels) {
+		t.Fatalf("ListModels() data = %+v, want only the static transcription models", resp.Data)
+	}
+	if _, ok := func() (core.Model, bool) {
+		for _, m := range resp.Data {
+			if m.ID == "scribe_v2" {
+				return m, true
+			}
+		}
+		return core.Model{}, false
+	}(); !ok {
+		t.Fatal("ListModels() fallback should include scribe_v2")
+	}
+}
+
+func TestListModels_PropagatesErrorOnceCatalogHasSucceededOnce(t *testing.T) {
+	fail := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if fail {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"model_id":"eleven_multilingual_v2","name":"Eleven Multilingual v2","can_do_text_to_speech":true}]`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	if _, err := provider.ListModels(context.Background()); err != nil {
+		t.Fatalf("first ListModels() error = %v, want success", err)
+	}
+
+	fail = true
+	if _, err := provider.ListModels(context.Background()); err == nil {
+		t.Fatal("ListModels() error = nil, want propagated catalog error once a fetch has already succeeded, so the registry's stale-inventory carry-forward keeps the larger prior list instead of this call shrinking it")
+	}
+}
+
 func TestUnsupportedCapabilities_ReturnInvalidRequestErrors(t *testing.T) {
 	provider := NewWithHTTPClient("key", "", nil, llmclient.Hooks{})
 
-	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{}); err == nil || !strings.Contains(err.Error(), "does not support chat") {
-		t.Fatalf("ChatCompletion() error = %v", err)
+	tests := []struct {
+		name string
+		call func() error
+		want string
+	}{
+		{"chat", func() error { _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{}); return err }, "does not support chat"},
+		{"chat stream", func() error {
+			_, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{})
+			return err
+		}, "does not support chat"},
+		{"responses", func() error { _, err := provider.Responses(context.Background(), &core.ResponsesRequest{}); return err }, "does not support the responses"},
+		{"responses stream", func() error {
+			_, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{})
+			return err
+		}, "does not support the responses"},
+		{"embeddings", func() error {
+			_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{})
+			return err
+		}, "does not support embeddings"},
 	}
-	if _, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{}); err == nil || !strings.Contains(err.Error(), "does not support chat") {
-		t.Fatalf("StreamChatCompletion() error = %v", err)
-	}
-	if _, err := provider.Responses(context.Background(), &core.ResponsesRequest{}); err == nil || !strings.Contains(err.Error(), "does not support the responses") {
-		t.Fatalf("Responses() error = %v", err)
-	}
-	if _, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{}); err == nil || !strings.Contains(err.Error(), "does not support the responses") {
-		t.Fatalf("StreamResponses() error = %v", err)
-	}
-	if _, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{}); err == nil || !strings.Contains(err.Error(), "does not support embeddings") {
-		t.Fatalf("Embeddings() error = %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.call()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want substring %q", err, tt.want)
+			}
+		})
 	}
 }
 

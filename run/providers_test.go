@@ -44,6 +44,13 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			required:     []string{"api_keys"},
 		},
 		{
+			// Voice-only provider (no chat); same plain API-key shape.
+			providerType: "elevenlabs",
+			defaultURL:   "https://api.elevenlabs.io",
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			required:     []string{"api_keys"},
+		},
+		{
 			// A deployment URL is the provider, so it is required, and Azure
 			// is the one type that takes an API version.
 			providerType: "azure",

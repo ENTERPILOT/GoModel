@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -30,12 +31,17 @@ var Registration = providers.Registration{
 }
 
 // Provider implements ElevenLabs' native text-to-speech and speech-to-text
-// APIs behind the OpenAI-compatible audio endpoints. It does not implement
-// core.PassthroughProvider's chat/Responses/Embeddings surface since
+// APIs behind the OpenAI-compatible audio endpoints, plus native passthrough.
+// Chat, Responses, and embeddings return invalid_request_error because
 // ElevenLabs has no such endpoints.
 type Provider struct {
 	client *llmclient.Client
 	keys   *providers.Keyring
+	// everFetchedCatalog tracks whether GET /v1/models has ever succeeded, so
+	// ListModels can tell a cold-start catalog failure (no prior inventory to
+	// fall back on) from a later transient one (where the registry's own
+	// stale-inventory carry-forward should keep the last known-good list).
+	everFetchedCatalog atomic.Bool
 }
 
 var _ core.Provider = (*Provider)(nil)
@@ -165,15 +171,27 @@ type modelInfo struct {
 }
 
 // ListModels returns ElevenLabs' text-to-speech catalog (from GET /v1/models)
-// plus the fixed speech-to-text model list.
+// plus the fixed speech-to-text model list. On the very first fetch, a
+// catalog failure would otherwise leave the registry with no ElevenLabs
+// models at all — including the always-available static transcription
+// models, which don't depend on this call — so a first-fetch failure still
+// returns the static list. Once a fetch has succeeded, later failures
+// propagate normally so the registry's existing stale-inventory carry-forward
+// keeps the last known-good (larger) list instead of this call shrinking it
+// down to the static-only fallback.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	var upstream []modelInfo
-	if err := p.client.Do(ctx, llmclient.Request{
+	catalogErr := p.client.Do(ctx, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/v1/models",
-	}, &upstream); err != nil {
-		return nil, err
+	}, &upstream)
+	if catalogErr != nil {
+		if p.everFetchedCatalog.Load() {
+			return nil, catalogErr
+		}
+		return &core.ModelsResponse{Object: "list", Data: append([]core.Model{}, staticTranscriptionModels...)}, nil
 	}
+	p.everFetchedCatalog.Store(true)
 
 	models := make([]core.Model, 0, len(upstream)+len(staticTranscriptionModels))
 	for _, model := range upstream {

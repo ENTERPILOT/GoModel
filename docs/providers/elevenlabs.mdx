@@ -52,8 +52,9 @@ List your available voice IDs from the ElevenLabs dashboard or the
 `response_format` accepts `mp3` (default), `opus`, `pcm`, and `wav`; each maps
 to a fixed ElevenLabs `output_format` (`mp3_44100_128`, `opus_48000_128`,
 `pcm_44100`, `wav_44100`). `aac` and `flac` are not supported and return
-`invalid_request_error`. `speed` must be between `0.7` and `1.2` when set,
-matching ElevenLabs' voice setting range; `instructions` is not supported.
+`invalid_request_error`. `speed`, when set, is clamped to ElevenLabs' `0.7`-`1.2`
+voice setting range (OpenAI accepts `0.25`-`4.0`); `instructions` is not
+supported.
 
 ## Speech-to-text models and timestamps
 

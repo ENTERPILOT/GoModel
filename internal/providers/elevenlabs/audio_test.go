@@ -65,64 +65,75 @@ func TestCreateSpeech_UsesVoiceIDInPathAndDefaultsToMP3(t *testing.T) {
 	}
 }
 
-func TestCreateSpeech_MapsFormatsAndSpeed(t *testing.T) {
-	var gotQuery string
-	var gotBody speechRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
-		body, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(body, &gotBody)
-		w.Header().Set("Content-Type", "audio/ogg")
-		_, _ = w.Write([]byte{0x01})
-	}))
-	defer server.Close()
+func TestCreateSpeech_MapsResponseFormats(t *testing.T) {
+	tests := []struct {
+		name           string
+		responseFormat string
+		wantQuery      string
+		wantContent    string
+	}{
+		{"default mp3", "", "output_format=mp3_44100_128", "audio/mpeg"},
+		{"opus", "opus", "output_format=opus_48000_128", "audio/ogg"},
+		{"pcm", "pcm", "output_format=pcm_44100", "audio/pcm"},
+		{"wav", "wav", "output_format=wav_44100", "audio/wav"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotQuery string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.RawQuery
+				_, _ = w.Write([]byte{0x01})
+			}))
+			defer server.Close()
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
-	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
-		Model:          "eleven_flash_v2_5",
-		Input:          "hi",
-		Voice:          "voice-id",
-		ResponseFormat: "opus",
-		Speed:          1.1,
-	})
-	if err != nil {
-		t.Fatalf("CreateSpeech() error = %v", err)
-	}
-	if gotQuery != "output_format=opus_48000_128" {
-		t.Fatalf("query = %q, want opus output format", gotQuery)
-	}
-	if gotBody.VoiceSetting == nil || gotBody.VoiceSetting.Speed != 1.1 {
-		t.Fatalf("voice_settings = %+v, want speed 1.1", gotBody.VoiceSetting)
-	}
-	if resp.ContentType != "audio/ogg" {
-		t.Fatalf("content type = %q, want audio/ogg", resp.ContentType)
+			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+			resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+				Model: "eleven_multilingual_v2", Input: "hi", Voice: "voice-id",
+				ResponseFormat: tt.responseFormat,
+			})
+			if err != nil {
+				t.Fatalf("CreateSpeech() error = %v", err)
+			}
+			if gotQuery != tt.wantQuery {
+				t.Fatalf("query = %q, want %q", gotQuery, tt.wantQuery)
+			}
+			if resp.ContentType != tt.wantContent {
+				t.Fatalf("content type = %q, want %q", resp.ContentType, tt.wantContent)
+			}
+		})
 	}
 }
 
-func TestCreateSpeech_SupportsWAV(t *testing.T) {
-	var gotQuery string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
-		w.Header().Set("Content-Type", "audio/wav")
-		_, _ = w.Write([]byte{0x52, 0x49, 0x46, 0x46})
-	}))
-	defer server.Close()
+func TestCreateSpeech_ClampsSpeedToSupportedRange(t *testing.T) {
+	tests := []struct {
+		name      string
+		speed     float64
+		wantSpeed float64
+	}{
+		{"within range", 1.1, 1.1},
+		{"too slow clamps to minimum", 0.3, 0.7},
+		{"too fast clamps to maximum", 3.0, 1.2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody speechRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(body, &gotBody)
+				_, _ = w.Write([]byte{0x01})
+			}))
+			defer server.Close()
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
-	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
-		Model:          "eleven_multilingual_v2",
-		Input:          "hi",
-		Voice:          "voice-id",
-		ResponseFormat: "wav",
-	})
-	if err != nil {
-		t.Fatalf("CreateSpeech() error = %v", err)
-	}
-	if gotQuery != "output_format=wav_44100" {
-		t.Fatalf("query = %q, want wav_44100 output format", gotQuery)
-	}
-	if resp.ContentType != "audio/wav" {
-		t.Fatalf("content type = %q, want audio/wav", resp.ContentType)
+			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+			if _, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+				Model: "eleven_multilingual_v2", Input: "hi", Voice: "voice-id", Speed: tt.speed,
+			}); err != nil {
+				t.Fatalf("CreateSpeech() error = %v", err)
+			}
+			if gotBody.VoiceSetting == nil || gotBody.VoiceSetting.Speed != tt.wantSpeed {
+				t.Fatalf("voice_settings = %+v, want speed %v", gotBody.VoiceSetting, tt.wantSpeed)
+			}
+		})
 	}
 }
 
@@ -139,8 +150,6 @@ func TestCreateSpeech_ValidatesRequest(t *testing.T) {
 		{name: "missing voice", req: &core.AudioSpeechRequest{Model: "m", Input: "hi"}, want: "voice is required"},
 		{name: "instructions", req: &core.AudioSpeechRequest{Model: "m", Input: "hi", Voice: "v", Instructions: "whisper"}, want: "does not support instructions"},
 		{name: "format", req: &core.AudioSpeechRequest{Model: "m", Input: "hi", Voice: "v", ResponseFormat: "aac"}, want: "supports mp3, opus, pcm, or wav"},
-		{name: "speed too low", req: &core.AudioSpeechRequest{Model: "m", Input: "hi", Voice: "v", Speed: 0.5}, want: "between 0.7 and 1.2"},
-		{name: "speed too high", req: &core.AudioSpeechRequest{Model: "m", Input: "hi", Voice: "v", Speed: 2}, want: "between 0.7 and 1.2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -246,6 +255,47 @@ func TestCreateTranscription_SendsMultipartAndReturnsJSON(t *testing.T) {
 	}
 	if err := json.Unmarshal(resp.Data, &decoded); err != nil || decoded.Text != "hello world" {
 		t.Fatalf("response body = %s, err = %v", resp.Data, err)
+	}
+}
+
+func TestCreateTranscription_WordGranularityFromRequest(t *testing.T) {
+	var gotGranularity string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil {
+			http.Error(w, "bad content type", http.StatusBadRequest)
+			return
+		}
+		reader := multipart.NewReader(r.Body, params["boundary"])
+		for {
+			part, err := reader.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				http.Error(w, "multipart error", http.StatusBadRequest)
+				return
+			}
+			if part.FormName() == "timestamps_granularity" {
+				data, _ := io.ReadAll(part)
+				gotGranularity = string(data)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"hi"}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	if _, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
+		Model:                  "scribe_v1",
+		File:                   []byte("audio"),
+		TimestampGranularities: []string{"word"},
+	}); err != nil {
+		t.Fatalf("CreateTranscription() error = %v", err)
+	}
+	if gotGranularity != "word" {
+		t.Fatalf("timestamps_granularity = %q, want word", gotGranularity)
 	}
 }
 
