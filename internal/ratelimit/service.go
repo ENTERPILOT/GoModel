@@ -13,21 +13,43 @@ import (
 // ErrUnavailable indicates a rate limit service was used without an initialized store.
 var ErrUnavailable = errors.New("rate limit service is unavailable")
 
+// ErrQuotaTemplatesUnavailable indicates that a per-child template was found
+// while the deployment does not have the quota-templates capability.
+var ErrQuotaTemplatesUnavailable = errors.New("per-child quota templates are not enabled")
+
+// ServiceOption configures a rate limit service.
+type ServiceOption func(*Service)
+
+// WithQuotaTemplates controls whether per-child user-path rules are accepted.
+func WithQuotaTemplates(enabled bool) ServiceOption {
+	return func(service *Service) {
+		service.quotaTemplates = enabled
+	}
+}
+
 type Service struct {
 	store   Store
 	limiter *limiter
 
 	mu    sync.RWMutex
 	rules []Rule
+
+	quotaTemplates bool
 }
 
-func NewService(ctx context.Context, store Store) (*Service, error) {
+func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("rate limit store is required")
 	}
 	service := &Service{
-		store:   store,
-		limiter: newLimiter(),
+		store:          store,
+		limiter:        newLimiter(),
+		quotaTemplates: true,
+	}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
 	}
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err
@@ -41,6 +63,9 @@ func (s *Service) Refresh(ctx context.Context) error {
 	}
 	rules, err := s.store.ListRules(ctx)
 	if err != nil {
+		return err
+	}
+	if err := s.validateQuotaTemplates(rules); err != nil {
 		return err
 	}
 	sort.SliceStable(rules, func(i, j int) bool {
@@ -85,6 +110,9 @@ func (s *Service) UpsertRules(ctx context.Context, rules []Rule) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
+	if err := s.validateQuotaTemplates(rules); err != nil {
+		return err
+	}
 	if err := s.store.UpsertRules(ctx, rules); err != nil {
 		return err
 	}
@@ -110,10 +138,25 @@ func (s *Service) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
+	if err := s.validateQuotaTemplates(rules); err != nil {
+		return err
+	}
 	if err := s.store.ReplaceConfigRules(ctx, rules); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
+}
+
+func (s *Service) validateQuotaTemplates(rules []Rule) error {
+	if s == nil || s.quotaTemplates {
+		return nil
+	}
+	for _, rule := range rules {
+		if rule.PerChild {
+			return fmt.Errorf("%w: rate limit for user path %q", ErrQuotaTemplatesUnavailable, rule.Subject)
+		}
+	}
+	return nil
 }
 
 // HasTokenRules reports whether any rule limits tokens. Used at startup to

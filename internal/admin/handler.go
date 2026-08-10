@@ -56,6 +56,7 @@ type Handler struct {
 	configuredProviders []providers.SanitizedProviderConfig
 	providerCredentials ProviderCredentialsAdmin
 	requestHealth       RequestHealthSource
+	quotaTemplates      bool
 
 	mutationMu sync.Mutex
 	pricingMu  sync.Mutex
@@ -72,6 +73,7 @@ const (
 	DashboardConfigUsageEnabled         = "USAGE_ENABLED"
 	DashboardConfigBudgetsEnabled       = "BUDGETS_ENABLED"
 	DashboardConfigRateLimitsEnabled    = "RATE_LIMITS_ENABLED"
+	DashboardConfigQuotaTemplates       = "PER_CHILD_QUOTAS_ENABLED"
 	DashboardConfigGuardrailsEnabled    = "GUARDRAILS_ENABLED"
 	DashboardConfigCacheEnabled         = "CACHE_ENABLED"
 	DashboardConfigRedisURL             = "REDIS_URL"
@@ -87,20 +89,21 @@ const statusClientClosedRequest = 499
 
 // DashboardConfigResponse is the allowlisted runtime config contract exposed to the dashboard UI.
 type DashboardConfigResponse struct {
-	DemoMode             string `json:"DEMO_MODE,omitempty"`
-	FailoverEnabled      string `json:"FAILOVER_ENABLED,omitempty"`
-	LoggingEnabled       string `json:"LOGGING_ENABLED,omitempty"`
-	LoggingRetentionDays string `json:"LOGGING_RETENTION_DAYS,omitempty"`
-	UsageEnabled         string `json:"USAGE_ENABLED,omitempty"`
-	BudgetsEnabled       string `json:"BUDGETS_ENABLED,omitempty"`
-	RateLimitsEnabled    string `json:"RATE_LIMITS_ENABLED,omitempty"`
-	GuardrailsEnabled    string `json:"GUARDRAILS_ENABLED,omitempty"`
-	CacheEnabled         string `json:"CACHE_ENABLED,omitempty"`
-	RedisURL             string `json:"REDIS_URL,omitempty"`
-	SemanticCacheEnabled string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
-	PricingRecalculation string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
-	LiveLogsEnabled      string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
-	MCPEnabled           string `json:"MCP_ENABLED,omitempty"`
+	DemoMode              string `json:"DEMO_MODE,omitempty"`
+	FailoverEnabled       string `json:"FAILOVER_ENABLED,omitempty"`
+	LoggingEnabled        string `json:"LOGGING_ENABLED,omitempty"`
+	LoggingRetentionDays  string `json:"LOGGING_RETENTION_DAYS,omitempty"`
+	UsageEnabled          string `json:"USAGE_ENABLED,omitempty"`
+	BudgetsEnabled        string `json:"BUDGETS_ENABLED,omitempty"`
+	RateLimitsEnabled     string `json:"RATE_LIMITS_ENABLED,omitempty"`
+	QuotaTemplatesEnabled string `json:"PER_CHILD_QUOTAS_ENABLED,omitempty"`
+	GuardrailsEnabled     string `json:"GUARDRAILS_ENABLED,omitempty"`
+	CacheEnabled          string `json:"CACHE_ENABLED,omitempty"`
+	RedisURL              string `json:"REDIS_URL,omitempty"`
+	SemanticCacheEnabled  string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
+	PricingRecalculation  string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
+	LiveLogsEnabled       string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
+	MCPEnabled            string `json:"MCP_ENABLED,omitempty"`
 	// VirtualModelStrategies is the comma-separated list of load-balancing
 	// strategies this deployment supports. "adaptive" appears only when a
 	// route-selector extension is registered, so the dashboard never offers
@@ -304,6 +307,14 @@ func WithRateLimits(service *ratelimit.Service) Option {
 	}
 }
 
+// WithQuotaTemplatesEnabled controls whether admin writes may create
+// per-child budget and rate-limit templates.
+func WithQuotaTemplatesEnabled(enabled bool) Option {
+	return func(h *Handler) {
+		h.quotaTemplates = enabled
+	}
+}
+
 // WithTagging wires the header tagging service for label rule management.
 func WithTagging(service *tagging.Service) Option {
 	return func(h *Handler) {
@@ -398,6 +409,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		UsageEnabled:           strings.TrimSpace(values.UsageEnabled),
 		BudgetsEnabled:         strings.TrimSpace(values.BudgetsEnabled),
 		RateLimitsEnabled:      strings.TrimSpace(values.RateLimitsEnabled),
+		QuotaTemplatesEnabled:  strings.TrimSpace(values.QuotaTemplatesEnabled),
 		GuardrailsEnabled:      strings.TrimSpace(values.GuardrailsEnabled),
 		CacheEnabled:           strings.TrimSpace(values.CacheEnabled),
 		RedisURL:               strings.TrimSpace(values.RedisURL),

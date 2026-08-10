@@ -83,6 +83,32 @@ func newTestService(t *testing.T, rules ...Rule) *Service {
 	return service
 }
 
+func TestServiceRejectsQuotaTemplatesWhenDisabled(t *testing.T) {
+	template := Rule{
+		Scope: ScopeUserPath, Subject: "/customers", PerChild: true,
+		PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(10)),
+	}
+
+	if _, err := NewService(context.Background(), &memStore{rules: []Rule{template}}, WithQuotaTemplates(false)); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
+		t.Fatalf("NewService() error = %v, want ErrQuotaTemplatesUnavailable", err)
+	}
+
+	store := &memStore{}
+	service, err := NewService(context.Background(), store, WithQuotaTemplates(false))
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	if err := service.UpsertRules(context.Background(), []Rule{template}); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
+		t.Fatalf("UpsertRules() error = %v, want ErrQuotaTemplatesUnavailable", err)
+	}
+	if err := service.ReplaceConfigRules(context.Background(), []Rule{template}); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
+		t.Fatalf("ReplaceConfigRules() error = %v, want ErrQuotaTemplatesUnavailable", err)
+	}
+	if len(store.rules) != 0 {
+		t.Fatalf("stored rules = %+v, want none", store.rules)
+	}
+}
+
 func TestSeedConfiguredRulesCarriesPerChild(t *testing.T) {
 	store := &memStore{}
 	service, err := NewService(context.Background(), store)

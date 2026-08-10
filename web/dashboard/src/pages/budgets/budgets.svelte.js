@@ -55,6 +55,10 @@ class BudgetsStore {
     return runtimeConfig.budgetsVisible();
   }
 
+  quotaTemplatesEnabled() {
+    return runtimeConfig.quotaTemplatesVisible();
+  }
+
   filteredBudgets() {
     return filterAndSortBudgets(this.budgets, this.filter, this.sortBy);
   }

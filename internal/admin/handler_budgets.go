@@ -58,6 +58,9 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
+	if req.PerChild && !h.quotaTemplates {
+		return handleError(c, quotaTemplatesUnavailableError())
+	}
 	scope, subject, periodSeconds, err := budgetRequestKey(req.Scope, req.Subject, req.UserPath, req.BudgetKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))

@@ -39,7 +39,7 @@ func (r *Result) Close() error {
 	return r.closeErr
 }
 
-func New(ctx context.Context, cfg *config.Config, shared storage.Storage) (*Result, error) {
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage, quotaTemplatesEnabled bool) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -49,15 +49,15 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage) (*Resu
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	return newResult(ctx, cfg, shared)
+	return newResult(ctx, cfg, shared, quotaTemplatesEnabled)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage) (*Result, error) {
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, quotaTemplatesEnabled bool) (*Result, error) {
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(ctx, store)
+	service, err := NewService(ctx, store, WithQuotaTemplates(quotaTemplatesEnabled))
 	if err != nil {
 		return nil, err
 	}

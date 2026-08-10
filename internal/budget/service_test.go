@@ -143,6 +143,32 @@ func TestServiceUnavailableOperationsReturnErrors(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsQuotaTemplatesWhenDisabled(t *testing.T) {
+	template := Budget{
+		Scope: ScopeUserPath, Subject: "/customers", PerChild: true,
+		PeriodSeconds: PeriodDailySeconds, Amount: 10,
+	}
+
+	if _, err := NewService(context.Background(), &fakeStore{budgets: []Budget{template}}, WithQuotaTemplates(false)); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
+		t.Fatalf("NewService() error = %v, want ErrQuotaTemplatesUnavailable", err)
+	}
+
+	store := &fakeStore{}
+	service, err := NewService(context.Background(), store, WithQuotaTemplates(false))
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	if err := service.UpsertBudgets(context.Background(), []Budget{template}); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
+		t.Fatalf("UpsertBudgets() error = %v, want ErrQuotaTemplatesUnavailable", err)
+	}
+	if err := service.ReplaceConfigBudgets(context.Background(), []Budget{template}); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
+		t.Fatalf("ReplaceConfigBudgets() error = %v, want ErrQuotaTemplatesUnavailable", err)
+	}
+	if store.replaceCalls != 0 {
+		t.Fatalf("replace calls = %d, want 0", store.replaceCalls)
+	}
+}
+
 func TestServiceSaveSettingsReturnsSavedSnapshotWhenRefreshFails(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}

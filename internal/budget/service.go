@@ -13,21 +13,43 @@ import (
 // ErrUnavailable indicates a budget service was used without an initialized store.
 var ErrUnavailable = errors.New("budget service is unavailable")
 
+// ErrQuotaTemplatesUnavailable indicates that a per-child template was found
+// while the deployment does not have the quota-templates capability.
+var ErrQuotaTemplatesUnavailable = errors.New("per-child quota templates are not enabled")
+
+// ServiceOption configures a budget service.
+type ServiceOption func(*Service)
+
+// WithQuotaTemplates controls whether per-child user-path budgets are accepted.
+func WithQuotaTemplates(enabled bool) ServiceOption {
+	return func(service *Service) {
+		service.quotaTemplates = enabled
+	}
+}
+
 type Service struct {
 	store Store
 	mu    sync.RWMutex
 
 	budgets  []Budget
 	settings Settings
+
+	quotaTemplates bool
 }
 
-func NewService(ctx context.Context, store Store) (*Service, error) {
+func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("budget store is required")
 	}
 	service := &Service{
-		store:    store,
-		settings: DefaultSettings(),
+		store:          store,
+		settings:       DefaultSettings(),
+		quotaTemplates: true,
+	}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
 	}
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err
@@ -41,6 +63,9 @@ func (s *Service) Refresh(ctx context.Context) error {
 	}
 	budgets, err := s.store.ListBudgets(ctx)
 	if err != nil {
+		return err
+	}
+	if err := s.validateQuotaTemplates(budgets); err != nil {
 		return err
 	}
 	settings, err := s.store.GetSettings(ctx)
@@ -67,6 +92,9 @@ func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
+	if err := s.validateQuotaTemplates(budgets); err != nil {
+		return err
+	}
 	if err := s.store.UpsertBudgets(ctx, budgets); err != nil {
 		return err
 	}
@@ -91,10 +119,25 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
+	if err := s.validateQuotaTemplates(budgets); err != nil {
+		return err
+	}
 	if err := s.store.ReplaceConfigBudgets(ctx, budgets); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
+}
+
+func (s *Service) validateQuotaTemplates(budgets []Budget) error {
+	if s == nil || s.quotaTemplates {
+		return nil
+	}
+	for _, item := range budgets {
+		if item.PerChild {
+			return fmt.Errorf("%w: budget for user path %q", ErrQuotaTemplatesUnavailable, item.Subject)
+		}
+	}
+	return nil
 }
 
 func (s *Service) Budgets() []Budget {

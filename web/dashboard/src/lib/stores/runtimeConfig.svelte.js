@@ -14,6 +14,7 @@ const CONFIG_KEYS = [
   "USAGE_ENABLED",
   "BUDGETS_ENABLED",
   "RATE_LIMITS_ENABLED",
+  "PER_CHILD_QUOTAS_ENABLED",
   "GUARDRAILS_ENABLED",
   "CACHE_ENABLED",
   "REDIS_URL",
@@ -92,6 +93,10 @@ class RuntimeConfigStore {
 
   rateLimitsVisible() {
     return this.booleanFlag("RATE_LIMITS_ENABLED", true);
+  }
+
+  quotaTemplatesVisible() {
+    return this.booleanFlag("PER_CHILD_QUOTAS_ENABLED", false);
   }
 
   guardrailsVisible() {

@@ -74,7 +74,7 @@
         {/each}
       </select>
     </FormField>
-    {#if store.form.scope === "user_path"}
+    {#if store.form.scope === "user_path" && store.quotaTemplatesEnabled()}
       <label class="per-child-option">
         <input type="checkbox" bind:checked={store.form.per_child} />
         <span>

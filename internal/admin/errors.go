@@ -37,6 +37,14 @@ func featureUnavailableError(message string) error {
 		WithCode("feature_unavailable")
 }
 
+func quotaTemplatesUnavailableError() error {
+	return core.NewInvalidRequestErrorWithStatus(
+		http.StatusForbidden,
+		"per-child quota templates require a GoModel Pro quota_templates entitlement",
+		nil,
+	).WithCode("quota_templates_not_entitled")
+}
+
 func validationWriter(isValidation func(error) bool) func(error) error {
 	return func(err error) error {
 		if err == nil {

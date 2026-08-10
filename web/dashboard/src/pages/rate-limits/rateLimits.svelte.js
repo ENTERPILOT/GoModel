@@ -31,6 +31,10 @@ class RateLimitsStore {
     return runtimeConfig.rateLimitsVisible();
   }
 
+  quotaTemplatesEnabled() {
+    return runtimeConfig.quotaTemplatesVisible();
+  }
+
   defaultRateLimitForm() {
     return logic.defaultRateLimitForm();
   }

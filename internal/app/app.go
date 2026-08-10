@@ -206,6 +206,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	appCfg := cfg.AppConfig.Config
+	quotaTemplatesEnabled := cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityQuotaTemplates)
 	// Install config-file HTTP timeouts before any provider constructs a
 	// transport; env vars still take precedence inside httpclient.
 	httpclient.SetConfiguredTimeouts(appCfg.HTTP.Timeout, appCfg.HTTP.ResponseHeaderTimeout)
@@ -322,7 +323,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	var budgetResult *budget.Result
 	if appCfg.Budgets.Enabled {
-		budgetResult, err = budget.New(ctx, appCfg, sharedStorage)
+		budgetResult, err = budget.New(ctx, appCfg, sharedStorage, quotaTemplatesEnabled)
 		if err != nil {
 			return fail("failed to initialize budgets", err)
 		}
@@ -335,7 +336,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	var rateLimitResult *ratelimit.Result
 	if appCfg.RateLimits.Enabled {
-		rateLimitResult, err = ratelimit.New(ctx, appCfg, sharedStorage)
+		rateLimitResult, err = ratelimit.New(ctx, appCfg, sharedStorage, quotaTemplatesEnabled)
 		if err != nil {
 			return fail("failed to initialize rate limits", err)
 		}
@@ -682,6 +683,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	livePublishersEnabled := false
 	usageEnabledForDashboard := usageResult.Logger.Config().Enabled
 	if adminCfg.EndpointsEnabled {
+		adminRuntimeConfig := dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, cfg.DemoMode, routeSelector != nil)
+		adminRuntimeConfig.QuotaTemplatesEnabled = dashboardEnabledValue(quotaTemplatesEnabled)
 		adminHandler, dashHandler, auditReader, adminErr := initAdmin(
 			usageReader,
 			usageReadStorage,
@@ -701,7 +704,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			mcpResult,
 			app.providerCredentials,
 			app,
-			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, cfg.DemoMode, routeSelector != nil),
+			adminRuntimeConfig,
 			app.live,
 			requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
@@ -1163,6 +1166,7 @@ func initAdmin(
 		admin.WithGuardrailService(guardrailService),
 		admin.WithBudgets(budgetService),
 		admin.WithRateLimits(rateLimitService),
+		admin.WithQuotaTemplatesEnabled(runtimeConfig.QuotaTemplatesEnabled == "on"),
 		admin.WithTagging(taggingService),
 		admin.WithRuntimeSettings(runtimeSettingsService),
 		mcpOption,

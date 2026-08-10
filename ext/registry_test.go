@@ -100,6 +100,17 @@ func TestRegistryCollectsRuntimeSettings(t *testing.T) {
 	assert.Len(t, reg.Settings(), 2)
 }
 
+func TestRegistryCapabilitiesDefaultOffAndCanBeEnabled(t *testing.T) {
+	reg := &Registry{}
+
+	assert.False(t, reg.HasCapability(CapabilityQuotaTemplates))
+	reg.EnableCapability("")
+	assert.False(t, reg.HasCapability(CapabilityQuotaTemplates))
+
+	reg.EnableCapability(CapabilityQuotaTemplates)
+	assert.True(t, reg.HasCapability(CapabilityQuotaTemplates))
+}
+
 func TestRegistryConcurrentRegistration(t *testing.T) {
 	reg := &Registry{}
 	const workers = 16
@@ -110,7 +121,9 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 			reg.RegisterRewriter(&namedRewriter{name: "w"})
 			reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 			reg.AddPublicPaths("/p")
+			reg.EnableCapability(CapabilityQuotaTemplates)
 			_ = reg.Rewriters()
+			_ = reg.HasCapability(CapabilityQuotaTemplates)
 		})
 	}
 	wg.Wait()

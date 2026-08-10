@@ -62,7 +62,7 @@
         {/each}
       </select>
     </FormField>
-    {#if rateLimits.rateLimitForm.scope === "user_path"}
+    {#if rateLimits.rateLimitForm.scope === "user_path" && rateLimits.quotaTemplatesEnabled()}
       <label class="per-child-option">
         <input
           type="checkbox"

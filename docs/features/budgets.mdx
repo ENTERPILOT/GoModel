@@ -84,6 +84,7 @@ budgets:
         - period: "weekly"
           amount: 50.00
     - path: "/customers"
+      # GoModel Pro: requires the quota_templates entitlement.
       per_child: true
       limits:
         - period: "daily"
@@ -104,7 +105,7 @@ Or use environment variables:
 ```env
 SET_BUDGET_TEAM__ALPHA="daily=10,weekly=50"
 SET_BUDGET_="monthly=500"
-# JSON-array form exposes per_child:
+# GoModel Pro (quota_templates entitlement):
 SET_BUDGET_CUSTOMERS='[{"period":"daily","amount":5,"per_child":true}]'
 ```
 
@@ -182,6 +183,12 @@ If multiple budgets match a request, GoModel checks all matching limits in one
 lookup. The request is rejected if any matching limit is exhausted.
 
 ### Dynamic per-child budgets
+
+<Info>
+  Dynamic per-child budgets are available in GoModel Pro and require the
+  `quota_templates` license entitlement. Without that entitlement, GoModel
+  rejects `per_child: true` configuration and admin API writes.
+</Info>
 
 Set `per_child: true` on a user-path entry when its limit is a template for
 direct children rather than one shared subtree budget. For a template on

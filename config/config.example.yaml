@@ -181,7 +181,7 @@ budgets:
     # Env equivalent:
     # SET_BUDGET_USER__PATH__EXAMPLE="daily=10,weekly=50"
     - path: "/user/path/example"
-      per_child: false # true gives each direct child path an independent budget
+      per_child: false # GoModel Pro: true gives each direct child an independent budget
       limits:
         - period: "daily" # hourly, daily, weekly, monthly; stored in DB as period_seconds
           amount: 10.00
@@ -201,7 +201,7 @@ rate_limits:
     # Env equivalent:
     # SET_RATE_LIMIT_USER__PATH__EXAMPLE="rpm=100,tpm=50000,rpd=10000,concurrent=10"
     - path: "/user/path/example"
-      per_child: false # true gives each direct child path independent counters
+      per_child: false # GoModel Pro: true gives each direct child independent counters
       limits:
         - period: "minute" # minute, hour, day, concurrent; stored in DB as period_seconds
           max_requests: 100

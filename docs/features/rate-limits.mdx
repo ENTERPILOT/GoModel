@@ -99,6 +99,7 @@ rate_limits:
         - period: "concurrent"
           max_requests: 10
     - path: "/customers"
+      # GoModel Pro: requires the quota_templates entitlement.
       per_child: true
       limits:
         - period: "minute"
@@ -126,7 +127,7 @@ path segments); provider rules use `SET_PROVIDER_RATE_LIMIT_<NAME>`
 SET_RATE_LIMIT_TEAM__ALPHA="rpm=100,tpm=50000,rpd=10000,concurrent=10"
 SET_RATE_LIMIT_="rpm=1000"
 SET_PROVIDER_RATE_LIMIT_OPENAI="rpm=500,concurrent=50"
-# JSON-array form exposes per_child:
+# GoModel Pro (quota_templates entitlement):
 SET_RATE_LIMIT_CUSTOMERS='[{"period":"minute","max_requests":100,"per_child":true}]'
 ```
 
@@ -168,6 +169,12 @@ any provider. Matching is case-insensitive.
 combined; a `500 rpm` rule on provider `openai` is shared by every consumer
 and model routed there. For per-key limits, bind each managed API key to its
 own user path and define rules there.
+
+<Info>
+  Dynamic per-child rate limits are available in GoModel Pro and require the
+  `quota_templates` license entitlement. Without that entitlement, GoModel
+  rejects `per_child: true` configuration and admin API writes.
+</Info>
 
 Set `per_child: true` on a user-path entry to turn it into a dynamic template.
 Each direct child then owns independent counters: with a template on
