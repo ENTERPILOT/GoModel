@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 // fakeCredentialStore is an in-memory CredentialStore for CredentialsService tests.
@@ -75,6 +76,56 @@ func newCredentialsTestFactory(t *testing.T) *ProviderFactory {
 		},
 	})
 	return factory
+}
+
+func TestCredentialsService_BuildProviderPreservesManagedHookIdentity(t *testing.T) {
+	var start llmclient.RequestInfo
+	var end llmclient.ResponseInfo
+	var firstChunk llmclient.ResponseInfo
+	factory := NewProviderFactory()
+	factory.SetHooks(llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+			start = info
+			return ctx
+		},
+		OnRequestEnd: func(_ context.Context, info llmclient.ResponseInfo) {
+			end = info
+		},
+		OnStreamFirstChunk: func(_ context.Context, info llmclient.ResponseInfo) {
+			firstChunk = info
+		},
+	})
+	var providerHooks llmclient.Hooks
+	factory.Add(Registration{
+		Type: "test",
+		New: func(_ ProviderConfig, opts ProviderOptions) core.Provider {
+			providerHooks = opts.Hooks
+			return &registryMockProvider{}
+		},
+	})
+
+	service, err := NewCredentialsService(t.Context(), factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = service.buildProvider(ManagedProviderCredential{
+		Name:    "managed-eu",
+		Type:    "test",
+		APIKeys: []string{"sk-test"},
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerHooks.OnRequestStart(t.Context(), llmclient.RequestInfo{})
+	providerHooks.OnRequestEnd(t.Context(), llmclient.ResponseInfo{})
+	providerHooks.OnStreamFirstChunk(t.Context(), llmclient.ResponseInfo{})
+	if start.Provider != "managed-eu" || start.ProviderType != "test" ||
+		end.Provider != "managed-eu" || end.ProviderType != "test" ||
+		firstChunk.Provider != "managed-eu" || firstChunk.ProviderType != "test" {
+		t.Fatalf("hook identities = start %q/%q end %q/%q first chunk %q/%q, want managed-eu/test",
+			start.Provider, start.ProviderType, end.Provider, end.ProviderType, firstChunk.Provider, firstChunk.ProviderType)
+	}
 }
 
 func TestCredentialsService_UpsertRegistersAndRoutesImmediately(t *testing.T) {

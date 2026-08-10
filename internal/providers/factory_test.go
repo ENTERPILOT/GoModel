@@ -239,10 +239,19 @@ func TestProviderFactory_Create_PassesResolvedProviderConfig(t *testing.T) {
 
 func TestProviderFactory_SetHooks(t *testing.T) {
 	factory := NewProviderFactory()
+	var startName, startType, endName, endType, chunkName, chunkType string
 
 	mockHooks := llmclient.Hooks{
 		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+			startName = info.Provider
+			startType = info.ProviderType
 			return ctx
+		},
+		OnRequestEnd: func(_ context.Context, info llmclient.ResponseInfo) {
+			endName, endType = info.Provider, info.ProviderType
+		},
+		OnStreamFirstChunk: func(_ context.Context, info llmclient.ResponseInfo) {
+			chunkName, chunkType = info.Provider, info.ProviderType
 		},
 	}
 	factory.SetHooks(mockHooks)
@@ -257,6 +266,7 @@ func TestProviderFactory_SetHooks(t *testing.T) {
 	})
 
 	cfg := ProviderConfig{
+		Name:   "test-eu",
 		Type:   "test",
 		APIKey: "test-key",
 	}
@@ -268,6 +278,14 @@ func TestProviderFactory_SetHooks(t *testing.T) {
 
 	if receivedOpts.Hooks.OnRequestStart == nil {
 		t.Error("expected hooks to be passed to builder via ProviderOptions")
+	}
+	receivedOpts.Hooks.OnRequestStart(t.Context(), llmclient.RequestInfo{})
+	receivedOpts.Hooks.OnRequestEnd(t.Context(), llmclient.ResponseInfo{})
+	receivedOpts.Hooks.OnStreamFirstChunk(t.Context(), llmclient.ResponseInfo{})
+	if startName != "test-eu" || endName != "test-eu" || chunkName != "test-eu" ||
+		startType != "test" || endType != "test" || chunkType != "test" {
+		t.Fatalf("provider identities = %q/%q, %q/%q, %q/%q; want test-eu/test",
+			startName, startType, endName, endType, chunkName, chunkType)
 	}
 }
 
@@ -327,7 +345,7 @@ func TestProviderFactory_ZeroHooks(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if receivedOpts.Hooks.OnRequestStart != nil || receivedOpts.Hooks.OnRequestEnd != nil {
+	if receivedOpts.Hooks.OnRequestStart != nil || receivedOpts.Hooks.OnRequestEnd != nil || receivedOpts.Hooks.OnStreamFirstChunk != nil {
 		t.Error("expected zero hooks when SetHooks not called")
 	}
 }

@@ -451,6 +451,9 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 		if model := strings.TrimSpace(workflow.Passthrough.Model); model != "" {
 			entry.RequestedModel = model
 		}
+		if providerName := strings.TrimSpace(workflow.Passthrough.ProviderName); providerName != "" && !executedProviderName {
+			entry.ProviderName = providerName
+		}
 	}
 	if !executedProvider {
 		if providerType := strings.TrimSpace(workflow.ProviderType); providerType != "" {

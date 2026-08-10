@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/googlecommon"
 
@@ -36,6 +37,7 @@ func TestProviderDoesNotExposeFilesOrBatches(t *testing.T) {
 }
 
 func TestEmbeddingsUsesNativePrediction(t *testing.T) {
+	var operation string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/text-embedding-005:predict" {
 			t.Errorf("Path = %q, want Vertex native predict endpoint", r.URL.Path)
@@ -74,7 +76,12 @@ func TestEmbeddingsUsesNativePrediction(t *testing.T) {
 	dimensions := 3
 	cfg := testConfig()
 	cfg.BaseURL = server.URL + "/v1/projects/prod-ai/locations/us-central1/publishers/google"
-	provider := newProvider(cfg, providers.ProviderOptions{}, authedTestClient(server.Client()))
+	provider := newProvider(cfg, providers.ProviderOptions{Hooks: llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+			operation = info.Operation
+			return ctx
+		},
+	}}, authedTestClient(server.Client()))
 
 	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model:      "google/text-embedding-005",
@@ -95,6 +102,9 @@ func TestEmbeddingsUsesNativePrediction(t *testing.T) {
 	}
 	if resp.Usage.PromptTokens != 9 || resp.Usage.TotalTokens != 9 {
 		t.Fatalf("usage = %+v, want 9 prompt/total tokens", resp.Usage)
+	}
+	if operation != llmclient.OperationEmbeddings {
+		t.Fatalf("operation = %q, want embeddings", operation)
 	}
 }
 

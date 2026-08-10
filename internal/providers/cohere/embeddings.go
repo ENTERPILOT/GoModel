@@ -20,9 +20,11 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	}
 	var upstream embedResponse
 	if err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/v2/embed",
-		Body:     upstreamReq,
+		Method:    http.MethodPost,
+		Endpoint:  "/v2/embed",
+		Operation: llmclient.OperationEmbeddings,
+		Model:     req.Model,
+		Body:      upstreamReq,
 	}, &upstream); err != nil {
 		return nil, err
 	}

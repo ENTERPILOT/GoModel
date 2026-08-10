@@ -75,9 +75,11 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 
 	var anthropicResp anthropicResponse
 	err = p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/messages",
-		Body:     anthropicReq,
+		Method:    http.MethodPost,
+		Endpoint:  "/messages",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      anthropicReq,
 	}, &anthropicResp)
 	if err != nil {
 		return nil, err

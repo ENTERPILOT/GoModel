@@ -52,5 +52,6 @@ func passthroughExecutionTarget(c *echo.Context, provider core.RoutableProvider,
 	}
 
 	info.Provider = providerType
+	info.ProviderName = providerName
 	return providerType, providerName, endpoint, info, nil
 }

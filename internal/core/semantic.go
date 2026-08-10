@@ -42,6 +42,9 @@ type PassthroughRouteInfo struct {
 	RawEndpoint        string
 	NormalizedEndpoint string
 	SemanticOperation  string
+	GenAIOperation     string // standard GenAI operation, if this is an inference call
+	Stream             bool   // explicit streaming intent derived from the request body
+	StreamUncertain    bool   // bounded opaque-body inspection could not determine stream intent
 	AuditPath          string
 	Model              string
 }
@@ -259,6 +262,39 @@ func DeriveWhiteBoxPrompt(snapshot *RequestSnapshot) *WhiteBoxPrompt {
 	return env
 }
 
+// RefreshWhiteBoxPrompt rebuilds request semantics after a deferred body read
+// while retaining passthrough metadata added by provider-owned enrichment.
+// Body-derived model and stream intent from the refreshed snapshot remain
+// authoritative when the complete body parses successfully.
+func RefreshWhiteBoxPrompt(snapshot *RequestSnapshot, previous *WhiteBoxPrompt) *WhiteBoxPrompt {
+	refreshed := DeriveWhiteBoxPrompt(snapshot)
+	if refreshed == nil || previous == nil {
+		return refreshed
+	}
+
+	current := refreshed.CachedPassthroughRouteInfo()
+	prior := previous.CachedPassthroughRouteInfo()
+	if current == nil || prior == nil {
+		return refreshed
+	}
+
+	merged := *prior
+	if current.Provider != "" && merged.Provider == "" {
+		merged.Provider = current.Provider
+	}
+	if current.RawEndpoint != "" {
+		merged.RawEndpoint = current.RawEndpoint
+	}
+	if refreshed.JSONBodyParsed {
+		merged.Model = current.Model
+		merged.Stream = current.Stream
+		merged.StreamUncertain = current.StreamUncertain
+	}
+	CachePassthroughRouteInfo(refreshed, &merged)
+	refreshed.StreamRequested = merged.Stream
+	return refreshed
+}
+
 // ApplyBodySelectorHints records selector hints parsed from a request body.
 // The hints are intentionally sparse and best-effort; canonical request decode
 // remains authoritative for translated JSON requests.
@@ -280,6 +316,21 @@ func ApplyBodySelectorHints(env *WhiteBoxPrompt, model, provider string, stream 
 		if model != "" {
 			cloned.Model = model
 		}
+		cloned.Stream = stream
+		cloned.StreamUncertain = false
+		CachePassthroughRouteInfo(env, &cloned)
+	}
+}
+
+// MarkPassthroughStreamUncertain records that bounded opaque-body inspection
+// stopped before it could determine explicit streaming intent.
+func MarkPassthroughStreamUncertain(env *WhiteBoxPrompt) {
+	if env == nil {
+		return
+	}
+	if passthrough := env.CachedPassthroughRouteInfo(); passthrough != nil {
+		cloned := *passthrough
+		cloned.StreamUncertain = true
 		CachePassthroughRouteInfo(env, &cloned)
 	}
 }

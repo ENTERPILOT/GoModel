@@ -173,6 +173,61 @@ func TestSemanticJSONBodyRefreshesPromptFromFullBody(t *testing.T) {
 	assert.Nil(t, updated.CapturedBodyView())
 }
 
+func TestStoreRequestBodySnapshot_PreservesPassthroughEnrichment(t *testing.T) {
+	e := echo.New()
+	padding := strings.Repeat("x", int(requestSnapshotInlineBodyLimit)+1)
+	reqBody := `{"model":"stub-model","padding":"` + padding + `","stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/p/vllm/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	snapshot := core.NewRequestSnapshot(
+		http.MethodPost,
+		"/p/vllm/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		nil,
+		false,
+		"",
+		nil,
+	)
+	prompt := core.DeriveWhiteBoxPrompt(snapshot)
+	require.NotNil(t, prompt)
+	core.CachePassthroughRouteInfo(prompt, &core.PassthroughRouteInfo{
+		Provider:           "vllm",
+		ProviderName:       "vllm-eu",
+		RawEndpoint:        "chat/completions",
+		NormalizedEndpoint: "chat/completions",
+		SemanticOperation:  "vllm.chat_completions",
+		GenAIOperation:     "chat",
+		StreamUncertain:    true,
+		AuditPath:          "/v1/chat/completions",
+		Model:              "stub-model",
+	})
+	ctx := core.WithRequestSnapshot(req.Context(), snapshot)
+	ctx = core.WithWhiteBoxPrompt(ctx, prompt)
+	c.SetRequest(req.WithContext(ctx))
+
+	storeRequestBodySnapshot(c, []byte(reqBody))
+
+	refreshed := core.GetWhiteBoxPrompt(c.Request().Context())
+	require.NotNil(t, refreshed)
+	info := refreshed.CachedPassthroughRouteInfo()
+	require.NotNil(t, info)
+	assert.Equal(t, "vllm", info.Provider)
+	assert.Equal(t, "vllm-eu", info.ProviderName)
+	assert.Equal(t, "chat/completions", info.NormalizedEndpoint)
+	assert.Equal(t, "vllm.chat_completions", info.SemanticOperation)
+	assert.Equal(t, "chat", info.GenAIOperation)
+	assert.Equal(t, "/v1/chat/completions", info.AuditPath)
+	assert.Equal(t, "stub-model", info.Model)
+	assert.True(t, info.Stream)
+	assert.False(t, info.StreamUncertain)
+}
+
 func TestRequestSnapshotCapture_NormalizesUserPathHeader(t *testing.T) {
 	e := echo.New()
 

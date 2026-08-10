@@ -34,7 +34,7 @@ func TestPassthroughSemanticEnrichment_EnrichesPromptBeforeWorkflowResolution(t 
 	provider := &mockProvider{}
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","stream":true}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -63,5 +63,8 @@ func TestPassthroughSemanticEnrichment_EnrichesPromptBeforeWorkflowResolution(t 
 	}
 	if capturedWorkflow.Passthrough.AuditPath != "/v1/responses" {
 		t.Fatalf("AuditPath = %q, want /v1/responses", capturedWorkflow.Passthrough.AuditPath)
+	}
+	if !capturedWorkflow.Passthrough.Stream {
+		t.Fatal("passthrough workflow lost stream intent")
 	}
 }
