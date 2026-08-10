@@ -158,6 +158,10 @@ test("providerDocUrl links provider types with docs and stays empty otherwise", 
     "https://gomodel.enterpilot.io/docs/providers/gemini?utm_source=gomodel_dashboard",
   );
   assert.equal(
+    providerDocUrl({ type: "llmd" }),
+    "https://gomodel.enterpilot.io/docs/providers/llmd?utm_source=gomodel_dashboard",
+  );
+  assert.equal(
     providerDocUrl({ type: "sglang" }),
     "https://gomodel.enterpilot.io/docs/providers/sglang?utm_source=gomodel_dashboard",
   );

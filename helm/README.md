@@ -74,6 +74,10 @@ helm install gomodel ./helm \
 | `providers.vllm.baseUrl`         | vLLM OpenAI-compatible base URL mapped to `VLLM_BASE_URL`; required when vLLM is enabled       | `""`                   |
 | `providers.sglang.enabled`       | Enable SGLang                                                                                  | `false`                |
 | `providers.sglang.baseUrl`       | SGLang OpenAI-compatible base URL mapped to `SGLANG_BASE_URL`; required when enabled           | `""`                   |
+| `providers.llmd.enabled`         | Enable llm-d                                                                                   | `false`                |
+| `providers.llmd.baseUrl`         | llm-d Router/EPP base URL mapped to `LLMD_BASE_URL`; required when llm-d is enabled            | `""`                   |
+| `providers.llmd.inferenceObjective` | Trusted llm-d objective mapped to `LLMD_INFERENCE_OBJECTIVE`                                | `""`                   |
+| `providers.llmd.fairnessFromUserPath` | Derive llm-d fairness ID from GoModel's effective user path                               | `true`                 |
 | `cache.type`                     | Cache type (local/redis)                                                                       | `"redis"`              |
 | `redis.enabled`                  | Deploy Redis subchart                                                                          | `true`                 |
 | `metrics.enabled`                | Enable Prometheus metrics                                                                      | `true`                 |
@@ -103,6 +107,7 @@ stringData:
   ORACLE_API_KEY: "..."
   SGLANG_API_KEY: "..."
   VLLM_API_KEY: "..."
+  LLMD_API_KEY: "..."
 ```
 
 Oracle also requires a base URL in values. The chart maps `providers.oracle.baseUrl`
@@ -111,6 +116,12 @@ to the container env var `ORACLE_BASE_URL`.
 vLLM does not require an API key unless the upstream server was started with
 `--api-key`. The chart maps `providers.vllm.baseUrl` to the container env var
 `VLLM_BASE_URL`.
+
+llm-d also allows keyless access when its Gateway does not require bearer
+authentication. The chart maps `providers.llmd.baseUrl` to `LLMD_BASE_URL` and
+the optional scheduling controls to their `LLMD_*` environment variables. When
+using `providers.existingSecret`, its `LLMD_API_KEY` entry may be omitted for a
+keyless llm-d route.
 
 SGLang does not require an API key unless the upstream server was started with
 `--api-key`. The chart maps `providers.sglang.baseUrl` to the container env var
@@ -139,6 +150,15 @@ Example keyless vLLM setup:
 helm install gomodel ./helm \
   --set providers.vllm.enabled=true \
   --set providers.vllm.baseUrl="http://vllm.default.svc.cluster.local:8000/v1"
+```
+
+Example keyless llm-d setup:
+
+```bash
+helm install gomodel ./helm \
+  --set providers.llmd.enabled=true \
+  --set providers.llmd.baseUrl="http://quickstart-epp.llm-d.svc.cluster.local/v1" \
+  --set providers.llmd.inferenceObjective="standard-traffic"
 ```
 
 Example keyless SGLang setup:

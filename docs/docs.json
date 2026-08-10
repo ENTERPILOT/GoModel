@@ -150,6 +150,8 @@
                     "guides/openclaw",
                     "guides/claude-code",
                     "guides/codex",
+                    "guides/cursor",
+                    "guides/kimi-code-cli",
                     "guides/opencode-and-other-agents",
                     "guides/prometheus-metrics"
                 ]
@@ -171,6 +173,7 @@
                     "providers/opencode-go",
                     "providers/sglang",
                     "providers/vllm",
+                    "providers/llmd",
                     "providers/multiple-ollama",
                     "providers/kimicode",
                     {

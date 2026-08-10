@@ -41,7 +41,9 @@ a zero or negative temperature to `1.0` so OpenAI-style requests that pin
 [`t2a_v2`](https://platform.minimax.io/docs/api-reference/speech-t2a-v2)
 API and the hex-encoded audio is decoded back to binary:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl https://your-gateway/v1/audio/speech \
   -H "Authorization: Bearer $GOMODEL_KEY" \
   -H "Content-Type: application/json" \
@@ -53,6 +55,46 @@ curl https://your-gateway/v1/audio/speech \
   }' \
   --output speech.mp3
 ```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+speech = client.audio.speech.create(
+    model="speech-2.6-hd",
+    input="Hello from GoModel.",
+    voice="English_expressive_narrator",
+    response_format="mp3",
+)
+speech.write_to_file("speech.mp3")
+```
+
+```javascript JavaScript
+import { writeFile } from "node:fs/promises";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const speech = await client.audio.speech.create({
+  model: "speech-2.6-hd",
+  input: "Hello from GoModel.",
+  voice: "English_expressive_narrator",
+  response_format: "mp3",
+});
+
+await writeFile("speech.mp3", Buffer.from(await speech.arrayBuffer()));
+```
+
+</CodeGroup>
 
 - `voice` takes a **MiniMax voice ID** (for example
   `English_expressive_narrator`), not an OpenAI voice name like `alloy`.

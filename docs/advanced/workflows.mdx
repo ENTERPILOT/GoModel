@@ -96,7 +96,9 @@ Even though both have provider type `openai`, they are different workflow scopes
 
 Create a workflow scoped to one configured provider name, one model, and one user-path subtree:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X POST http://localhost:8080/admin/workflows \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -120,6 +122,79 @@ curl -X POST http://localhost:8080/admin/workflows \
     }
   }'
 ```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+workflow = client.post(
+    "/admin/workflows",
+    cast_to=httpx.Response,
+    body={
+        "scope_provider_name": "openai_primary",
+        "scope_model": "gpt-5",
+        "scope_user_path": "/team/alpha",
+        "name": "team-alpha-openai-primary",
+        "description": "Disable cache for this tenant on the primary OpenAI provider",
+        "workflow_payload": {
+            "schema_version": 1,
+            "features": {
+                "cache": False,
+                "budget": True,
+                "audit": True,
+                "usage": True,
+                "guardrails": False,
+                "failover": True,
+            },
+            "guardrails": [],
+        },
+    },
+)
+
+print(workflow.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const workflow = await client.post("/admin/workflows", {
+  body: {
+    scope_provider_name: "openai_primary",
+    scope_model: "gpt-5",
+    scope_user_path: "/team/alpha",
+    name: "team-alpha-openai-primary",
+    description: "Disable cache for this tenant on the primary OpenAI provider",
+    workflow_payload: {
+      schema_version: 1,
+      features: {
+        cache: false,
+        budget: true,
+        audit: true,
+        usage: true,
+        guardrails: false,
+        failover: true,
+      },
+      guardrails: [],
+    },
+  },
+});
+
+console.log(workflow);
+```
+
+</CodeGroup>
 
 ## Notes
 

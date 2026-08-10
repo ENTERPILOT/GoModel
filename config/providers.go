@@ -13,18 +13,25 @@ type RawProviderConfig struct {
 	APIKeys []string `yaml:"api_keys"`
 	// SessionStickyKeys defaults to true. Set false to restore round-robin key
 	// selection for every request, including requests carrying a session ID.
-	SessionStickyKeys        *bool                `yaml:"session_sticky_keys"`
-	BaseURL                  string               `yaml:"base_url"`
-	APIVersion               string               `yaml:"api_version"`
-	Backend                  string               `yaml:"backend"`
-	AuthType                 string               `yaml:"auth_type"`
-	APIMode                  string               `yaml:"api_mode"`
-	VertexProject            string               `yaml:"vertex_project"`
-	VertexLocation           string               `yaml:"vertex_location"`
-	ServiceAccountFile       string               `yaml:"service_account_file"`
-	ServiceAccountJSON       string               `yaml:"service_account_json"`
-	ServiceAccountJSONBase64 string               `yaml:"service_account_json_base64"`
-	GCPScope                 string               `yaml:"gcp_scope"`
-	Models                   []RawProviderModel   `yaml:"models"`
-	Resilience               *RawResilienceConfig `yaml:"resilience"`
+	SessionStickyKeys        *bool  `yaml:"session_sticky_keys"`
+	BaseURL                  string `yaml:"base_url"`
+	APIVersion               string `yaml:"api_version"`
+	Backend                  string `yaml:"backend"`
+	AuthType                 string `yaml:"auth_type"`
+	APIMode                  string `yaml:"api_mode"`
+	VertexProject            string `yaml:"vertex_project"`
+	VertexLocation           string `yaml:"vertex_location"`
+	ServiceAccountFile       string `yaml:"service_account_file"`
+	ServiceAccountJSON       string `yaml:"service_account_json"`
+	ServiceAccountJSONBase64 string `yaml:"service_account_json_base64"`
+	GCPScope                 string `yaml:"gcp_scope"`
+	// InferenceObjective is the trusted llm-d InferenceObjective name injected
+	// into outbound requests. It is ignored by provider types other than llmd.
+	InferenceObjective string `yaml:"inference_objective"`
+	// FairnessFromUserPath controls whether the llmd provider derives its
+	// fairness ID from GoModel's effective (authenticated) user path. It
+	// defaults to true; nil preserves that default.
+	FairnessFromUserPath *bool                `yaml:"fairness_from_user_path"`
+	Models               []RawProviderModel   `yaml:"models"`
+	Resilience           *RawResilienceConfig `yaml:"resilience"`
 }

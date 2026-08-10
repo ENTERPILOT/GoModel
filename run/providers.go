@@ -9,6 +9,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/bailian"
 	"github.com/enterpilot/gomodel/internal/providers/bedrock"
 	"github.com/enterpilot/gomodel/internal/providers/bedrockmantle"
+	"github.com/enterpilot/gomodel/internal/providers/chutes"
 	"github.com/enterpilot/gomodel/internal/providers/cohere"
 	"github.com/enterpilot/gomodel/internal/providers/deepseek"
 	"github.com/enterpilot/gomodel/internal/providers/fireworks"
@@ -16,6 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/groq"
 	"github.com/enterpilot/gomodel/internal/providers/kilo"
 	"github.com/enterpilot/gomodel/internal/providers/kimicode"
+	"github.com/enterpilot/gomodel/internal/providers/llmd"
 	"github.com/enterpilot/gomodel/internal/providers/meta"
 	"github.com/enterpilot/gomodel/internal/providers/minimax"
 	"github.com/enterpilot/gomodel/internal/providers/ollama"
@@ -48,6 +50,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(anthropic.Registration)
 	factory.Add(bedrock.Registration)
 	factory.Add(bedrockmantle.Registration)
+	factory.Add(chutes.Registration)
 	factory.Add(cohere.Registration)
 	factory.Add(deepseek.Registration)
 	factory.Add(fireworks.Registration)
@@ -56,6 +59,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(groq.Registration)
 	factory.Add(kilo.Registration)
 	factory.Add(kimicode.Registration)
+	factory.Add(llmd.Registration)
 	factory.Add(meta.Registration)
 	factory.Add(minimax.Registration)
 	factory.Add(ollama.Registration)

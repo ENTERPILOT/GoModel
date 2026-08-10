@@ -40,6 +40,8 @@ type ProviderConfig struct {
 	ServiceAccountJSON       string
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
+	InferenceObjective       string
+	FairnessFromUserPath     bool
 	Models                   []string
 	// ModelMetadataOverrides holds operator-supplied metadata keyed by raw model
 	// ID (as it appears in the provider's /models response). The registry merges
@@ -147,6 +149,8 @@ const (
 	providerEnvFieldServiceAccountJSONBase64
 	providerEnvFieldGCPScope
 	providerEnvFieldSessionStickyKeys
+	providerEnvFieldInferenceObjective
+	providerEnvFieldFairnessFromUserPath
 )
 
 type providerEnvSource struct {
@@ -173,8 +177,10 @@ type providerEnvValues struct {
 	ServiceAccountJSON       string
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
+	InferenceObjective       string
 	Models                   []string
 	SessionStickyKeys        *bool
+	FairnessFromUserPath     *bool
 }
 
 // apiKeys returns the ordered key set this env group declares: the unsuffixed
@@ -240,7 +246,9 @@ func (v providerEnvValues) empty() bool {
 		strings.TrimSpace(v.ServiceAccountJSON) == "" &&
 		strings.TrimSpace(v.ServiceAccountJSONBase64) == "" &&
 		strings.TrimSpace(v.GCPScope) == "" &&
+		strings.TrimSpace(v.InferenceObjective) == "" &&
 		v.SessionStickyKeys == nil &&
+		v.FairnessFromUserPath == nil &&
 		len(v.Models) == 0
 }
 
@@ -311,6 +319,12 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
 				values.SessionStickyKeys = &parsed
 			}
+		case providerEnvFieldInferenceObjective:
+			values.InferenceObjective = value
+		case providerEnvFieldFairnessFromUserPath:
+			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+				values.FairnessFromUserPath = &parsed
+			}
 		}
 		groups[suffix] = values
 	}
@@ -378,6 +392,15 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 			{name: "PROJECT", field: providerEnvFieldVertexProject},
 			{name: "LOCATION", field: providerEnvFieldVertexLocation},
 			{name: "GCP_SCOPE", field: providerEnvFieldGCPScope},
+		}, fields...)
+	}
+	if strings.EqualFold(prefix, "LLMD") {
+		fields = append([]struct {
+			name  string
+			field providerEnvField
+		}{
+			{name: "FAIRNESS_FROM_USER_PATH", field: providerEnvFieldFairnessFromUserPath},
+			{name: "INFERENCE_OBJECTIVE", field: providerEnvFieldInferenceObjective},
 		}, fields...)
 	}
 
@@ -520,6 +543,8 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		ServiceAccountJSON:       v.ServiceAccountJSON,
 		ServiceAccountJSONBase64: v.ServiceAccountJSONBase64,
 		GCPScope:                 v.GCPScope,
+		InferenceObjective:       v.InferenceObjective,
+		FairnessFromUserPath:     v.FairnessFromUserPath,
 		Models:                   rawProviderModelsFromIDs(v.Models),
 		SessionStickyKeys:        v.SessionStickyKeys,
 	}
@@ -575,6 +600,12 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	}
 	if values.GCPScope != "" {
 		existing.GCPScope = values.GCPScope
+	}
+	if values.InferenceObjective != "" {
+		existing.InferenceObjective = values.InferenceObjective
+	}
+	if values.FairnessFromUserPath != nil {
+		existing.FairnessFromUserPath = values.FairnessFromUserPath
 	}
 	if values.SessionStickyKeys != nil {
 		existing.SessionStickyKeys = values.SessionStickyKeys
@@ -851,6 +882,10 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
 		Resilience:               global,
 	}
+	if resolved.Type == "llmd" {
+		resolved.InferenceObjective = raw.InferenceObjective
+		resolved.FairnessFromUserPath = enabledByDefault(raw.FairnessFromUserPath)
+	}
 
 	if raw.Resilience == nil {
 		return resolved
@@ -890,6 +925,10 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 }
 
 func sessionStickyKeysEnabled(value *bool) bool {
+	return enabledByDefault(value)
+}
+
+func enabledByDefault(value *bool) bool {
 	return value == nil || *value
 }
 

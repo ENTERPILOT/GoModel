@@ -276,17 +276,19 @@ Set these to automatically register providers. No YAML configuration required.
 | `ZAI_API_KEY`        | Z.ai                                               |
 | `XAI_API_KEY`        | xAI (Grok)                                         |
 | `GROQ_API_KEY`       | Groq                                               |
+| `CHUTES_API_KEY`     | Chutes AI (`CHUTES_BASE_URL` optional)             |
 | `AZURE_API_KEY`      | Azure OpenAI (`AZURE_BASE_URL` also required)     |
 | `ORACLE_API_KEY`     | Oracle GenAI (`ORACLE_BASE_URL` also required)    |
 | `OLLAMA_BASE_URL`    | Ollama (no API key needed)                        |
 | `SGLANG_BASE_URL`    | SGLang (no API key needed unless upstream requires) |
 | `VLLM_BASE_URL`      | vLLM (no API key needed unless upstream requires) |
+| `LLMD_BASE_URL`      | llm-d Router/EPP (no API key needed unless its Gateway requires one) |
 
-Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). DeepSeek defaults to `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only for a compatible proxy or alternate DeepSeek endpoint. OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Kilo AI defaults to `https://api.kilo.ai/api/gateway` and can be overridden with `KILO_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. SGLang defaults to `http://localhost:30000/v1` when `SGLANG_API_KEY` is set, but keyless deployments should set `SGLANG_BASE_URL` explicitly to register the provider. vLLM follows the same pattern at `http://localhost:8000/v1`. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
+Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). Chutes AI defaults to `https://llm.chutes.ai/v1` and can be overridden with `CHUTES_BASE_URL`. DeepSeek defaults to `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only for a compatible proxy or alternate DeepSeek endpoint. OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Kilo AI defaults to `https://api.kilo.ai/api/gateway` and can be overridden with `KILO_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. SGLang defaults to `http://localhost:30000/v1` when `SGLANG_API_KEY` is set, but keyless deployments should set `SGLANG_BASE_URL` explicitly to register the provider. vLLM follows the same pattern at `http://localhost:8000/v1`. llm-d has no universal endpoint, so `LLMD_BASE_URL` is always required; `LLMD_API_KEY` is optional. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
 
 Every provider type also accepts a comma-separated configured model list via
 `<PROVIDER>_MODELS`, for example `OPENROUTER_MODELS`, `ORACLE_MODELS`,
-`AZURE_MODELS`, `SGLANG_MODELS`, or `VLLM_MODELS`. By default,
+`AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS`, or `LLMD_MODELS`. By default,
 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses configured lists only when
 upstream `/models` fails, returns nil, or returns an empty list. Set
 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models for
@@ -408,6 +410,7 @@ export GEMINI_API_KEY="..."          # Registers "gemini" provider
 export DEEPSEEK_API_KEY="..."        # Registers "deepseek" provider
 export XAI_API_KEY="..."             # Registers "xai" provider
 export GROQ_API_KEY="gsk_..."        # Registers "groq" provider
+export CHUTES_API_KEY="cpk_..."      # Registers "chutes" provider
 export OPENROUTER_API_KEY="sk-or-..." # Registers "openrouter" provider
 export KILO_API_KEY="..."            # Registers "kilo" provider
 export ZAI_API_KEY="..."             # Registers "zai" provider
@@ -425,6 +428,10 @@ export SGLANG_BASE_URL="http://localhost:30000/v1" # Registers keyless "sglang" 
 # Optional: export SGLANG_API_KEY="token-abc123"
 export VLLM_BASE_URL="http://localhost:8000/v1" # Registers keyless "vllm" provider
 # Optional: export VLLM_API_KEY="token-abc123"
+export LLMD_BASE_URL="http://quickstart-epp.llm-d.svc.cluster.local/v1" # Registers keyless "llmd" provider
+export LLMD_MODELS="Qwen/Qwen2.5-0.5B-Instruct"
+# Optional: export LLMD_INFERENCE_OBJECTIVE="standard-traffic"
+# Optional: export LLMD_FAIRNESS_FROM_USER_PATH="true"
 ```
 
 Use suffixed variables to register more than one instance of the same provider

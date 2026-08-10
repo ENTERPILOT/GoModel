@@ -6668,6 +6668,53 @@ func TestProviderPassthrough_NormalizesErrorResponse(t *testing.T) {
 	}
 }
 
+func TestProviderPassthrough_LLMDDroppedReasonOnNormalizedError(t *testing.T) {
+	for _, path := range []string{
+		"/p/llmd/tokenize",
+		"/p/llmd/v1/chat/completions",
+	} {
+		t.Run(path, func(t *testing.T) {
+			provider := &mockProvider{
+				passthroughResponse: &core.PassthroughResponse{
+					StatusCode: http.StatusTooManyRequests,
+					Headers: http.Header{
+						"Content-Type":          {"application/json"},
+						llmdDroppedReasonHeader: {"rejected-saturated"},
+						"X-Upstream":            {"must-not-leak"},
+						"Set-Cookie":            {"session=secret"},
+					},
+					Body: io.NopCloser(strings.NewReader(`{"error":{"message":"request dropped","type":"rate_limit_error"}}`)),
+				},
+			}
+
+			e := echo.New()
+			handler := NewHandler(provider, nil, nil, nil)
+			e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+			}
+			if got := rec.Header().Get(llmdDroppedReasonHeader); got != "rejected-saturated" {
+				t.Fatalf("%s = %q, want rejected-saturated", llmdDroppedReasonHeader, got)
+			}
+			if got := rec.Header().Get("X-Upstream"); got != "" {
+				t.Fatalf("X-Upstream should not be forwarded, got %q", got)
+			}
+			if got := rec.Header().Get("Set-Cookie"); got != "" {
+				t.Fatalf("Set-Cookie should not be forwarded, got %q", got)
+			}
+			if body := rec.Body.String(); !strings.Contains(body, `"message":"request dropped"`) {
+				t.Fatalf("unexpected error body: %s", body)
+			}
+		})
+	}
+}
+
 func TestProviderPassthrough_OpenAIV1AliasNormalizesByDefault(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
@@ -7140,8 +7187,49 @@ func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `provider passthrough for \"groq\" is not enabled`) {
 		t.Fatalf("unexpected error body: %s", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "anthropic, deepseek, kilo, openai, openrouter, sglang, vllm, zai") {
+	if !strings.Contains(rec.Body.String(), "anthropic, deepseek, kilo, llmd, openai, openrouter, sglang, vllm, zai") {
 		t.Fatalf("unexpected error body: %s", rec.Body.String())
+	}
+}
+
+func TestProviderPassthrough_ChutesRequiresExplicitOptIn(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+	blockedReq := httptest.NewRequest(http.MethodPost, "/p/chutes/provider-native/admin/keys", strings.NewReader(`{}`))
+	blockedRec := httptest.NewRecorder()
+	e.ServeHTTP(blockedRec, blockedReq)
+
+	if blockedRec.Code != http.StatusBadRequest {
+		t.Fatalf("default status = %d, want 400: %s", blockedRec.Code, blockedRec.Body.String())
+	}
+	if provider.lastPassthroughReq != nil {
+		t.Fatal("default Chutes passthrough reached provider, want rejection before forwarding")
+	}
+
+	handler.setEnabledPassthroughProviders([]string{"chutes"})
+	req := httptest.NewRequest(http.MethodPost, "/p/chutes/chat/completions", strings.NewReader(`{"model":"Qwen/Qwen3-32B-TEE"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("opt-in status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if provider.lastPassthroughProvider != "chutes" {
+		t.Fatalf("providerType = %q, want chutes", provider.lastPassthroughProvider)
+	}
+	if provider.lastPassthroughReq == nil || provider.lastPassthroughReq.Endpoint != "chat/completions" {
+		t.Fatalf("passthrough request = %+v, want chat/completions endpoint", provider.lastPassthroughReq)
 	}
 }
 

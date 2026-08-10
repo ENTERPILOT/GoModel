@@ -16,7 +16,9 @@ import (
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
-var defaultEnabledPassthroughProviders = []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "deepseek"}
+var defaultEnabledPassthroughProviders = []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek"}
+
+const llmdDroppedReasonHeader = "X-Llm-D-Request-Dropped-Reason"
 
 func (h *Handler) setEnabledPassthroughProviders(providerTypes []string) {
 	h.enabledPassthroughProviders = normalizeEnabledPassthroughProviders(providerTypes)
@@ -253,7 +255,12 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 		if err != nil {
 			return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider passthrough error response", err))
 		}
-		return handleError(c, core.ParseProviderError(providerType, resp.StatusCode, body, nil))
+		gatewayErr := core.ParseProviderError(providerType, resp.StatusCode, body, nil)
+		headers := passthroughErrorResponseHeaders(providerType, resp.StatusCode, http.Header(resp.Headers))
+		if len(headers) == 0 {
+			return handleError(c, gatewayErr)
+		}
+		return handleError(c, &gatewayErrorWithResponseHeaders{GatewayError: gatewayErr, headers: headers})
 	}
 
 	copyPassthroughResponseHeaders(c.Response().Header(), http.Header(resp.Headers))
@@ -325,4 +332,15 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 		f.Flush()
 	}
 	return nil
+}
+
+func passthroughErrorResponseHeaders(providerType string, statusCode int, src http.Header) http.Header {
+	if providerType != "llmd" || statusCode != http.StatusTooManyRequests {
+		return nil
+	}
+	reason := strings.TrimSpace(src.Get(llmdDroppedReasonHeader))
+	if reason == "" || strings.ContainsAny(reason, "\r\n") {
+		return nil
+	}
+	return http.Header{llmdDroppedReasonHeader: []string{reason}}
 }

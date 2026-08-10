@@ -35,6 +35,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"deepseek": {
 		DefaultBaseURL: "https://api.deepseek.com",
 	},
+	"chutes": {
+		DefaultBaseURL: "https://llm.chutes.ai/v1",
+	},
 	"xai": {
 		DefaultBaseURL: "https://api.x.ai/v1",
 	},
@@ -52,6 +55,10 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	},
 	"vllm": {
 		DefaultBaseURL:  "http://localhost:8000/v1",
+		AllowAPIKeyless: true,
+	},
+	"llmd": {
+		RequireBaseURL:  true,
 		AllowAPIKeyless: true,
 	},
 	"sglang": {
@@ -94,6 +101,43 @@ func TestBuildProviderConfig_InheritsGlobal(t *testing.T) {
 	}
 	if !got.SessionStickyKeys {
 		t.Error("SessionStickyKeys = false, want default true")
+	}
+}
+
+func TestBuildProviderConfig_LLMDControlDefaults(t *testing.T) {
+	disabled := false
+	tests := []struct {
+		name          string
+		raw           config.RawProviderConfig
+		wantObjective string
+		wantFair      bool
+	}{
+		{
+			name:          "defaults fairness to effective user path",
+			raw:           config.RawProviderConfig{Type: "llmd", InferenceObjective: "premium"},
+			wantObjective: "premium",
+			wantFair:      true,
+		},
+		{
+			name:     "explicitly disables fairness derivation",
+			raw:      config.RawProviderConfig{Type: "llmd", FairnessFromUserPath: &disabled},
+			wantFair: false,
+		},
+		{
+			name: "ignores llmd-only fields for another provider type",
+			raw:  config.RawProviderConfig{Type: "openai", InferenceObjective: "premium"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildProviderConfig(tt.raw, globalResilience)
+			if got.InferenceObjective != tt.wantObjective {
+				t.Errorf("InferenceObjective = %q, want %q", got.InferenceObjective, tt.wantObjective)
+			}
+			if got.FairnessFromUserPath != tt.wantFair {
+				t.Errorf("FairnessFromUserPath = %v, want %v", got.FairnessFromUserPath, tt.wantFair)
+			}
+		})
 	}
 }
 
@@ -467,6 +511,21 @@ func TestFilterEmptyProviders_RemovesOracleByTypeWithoutBaseURL(t *testing.T) {
 	}
 }
 
+func TestFilterEmptyProviders_LLMDRequiresBaseURLButNotAPIKey(t *testing.T) {
+	raw := map[string]config.RawProviderConfig{
+		"missing-endpoint": {Type: "llmd"},
+		"router":           {Type: "llmd", BaseURL: "http://llmd-epp.default.svc/v1"},
+	}
+
+	got := filterEmptyProviders(raw, testDiscoveryConfigs)
+	if _, exists := got["missing-endpoint"]; exists {
+		t.Fatal("llmd without base URL must be removed")
+	}
+	if _, exists := got["router"]; !exists {
+		t.Fatal("keyless llmd with base URL must be retained")
+	}
+}
+
 // --- applyProviderEnvVars ---
 
 func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
@@ -483,6 +542,40 @@ func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
 	}
 	if p.Type != "openai" {
 		t.Errorf("Type = %q, want openai", p.Type)
+	}
+}
+
+func TestApplyProviderEnvVars_LLMDControls(t *testing.T) {
+	t.Setenv("LLMD_BASE_URL", "http://llmd-epp.default.svc/v1")
+	t.Setenv("LLMD_INFERENCE_OBJECTIVE", "premium-traffic")
+	t.Setenv("LLMD_FAIRNESS_FROM_USER_PATH", "false")
+	t.Setenv("LLMD_CANARY_BASE_URL", "http://llmd-canary.default.svc/v1")
+	t.Setenv("LLMD_CANARY_INFERENCE_OBJECTIVE", "canary-traffic")
+	t.Setenv("LLMD_CANARY_FAIRNESS_FROM_USER_PATH", "false")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	tests := []struct {
+		name      string
+		provider  string
+		baseURL   string
+		objective string
+	}{
+		{name: "primary", provider: "llmd", baseURL: "http://llmd-epp.default.svc/v1", objective: "premium-traffic"},
+		{name: "suffixed", provider: "llmd-canary", baseURL: "http://llmd-canary.default.svc/v1", objective: "canary-traffic"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := got[tt.provider]
+			if provider.BaseURL != tt.baseURL {
+				t.Errorf("BaseURL = %q, want %q", provider.BaseURL, tt.baseURL)
+			}
+			if provider.InferenceObjective != tt.objective {
+				t.Errorf("InferenceObjective = %q, want %q", provider.InferenceObjective, tt.objective)
+			}
+			if provider.FairnessFromUserPath == nil || *provider.FairnessFromUserPath {
+				t.Fatalf("FairnessFromUserPath = %v, want false", provider.FairnessFromUserPath)
+			}
+		})
 	}
 }
 
@@ -654,6 +747,26 @@ func TestApplyProviderEnvVars_DiscoversDeepSeekFromAPIKey(t *testing.T) {
 	}
 	if p.BaseURL != testDiscoveryConfigs["deepseek"].DefaultBaseURL {
 		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["deepseek"].DefaultBaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversChutesFromAPIKey(t *testing.T) {
+	t.Setenv("CHUTES_API_KEY", "cpk_test")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["chutes"]
+	if !exists {
+		t.Fatal("expected chutes to be discovered from env var")
+	}
+	if p.APIKey != "cpk_test" {
+		t.Errorf("APIKey = %q, want cpk_test", p.APIKey)
+	}
+	if p.Type != "chutes" {
+		t.Errorf("Type = %q, want chutes", p.Type)
+	}
+	if p.BaseURL != testDiscoveryConfigs["chutes"].DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["chutes"].DefaultBaseURL)
 	}
 }
 
