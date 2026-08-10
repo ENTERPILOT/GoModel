@@ -180,6 +180,35 @@ func TestCreateSpeech_ReturnsUpstreamError(t *testing.T) {
 	if gatewayErr.StatusCode != http.StatusUnauthorized || gatewayErr.Type != core.ErrorTypeAuthentication {
 		t.Fatalf("gateway error = %+v, want 401 authentication", gatewayErr)
 	}
+	if gatewayErr.Message != "bad key" {
+		t.Fatalf("message = %q, want the unwrapped detail.message, not the raw JSON body", gatewayErr.Message)
+	}
+}
+
+func TestRefineElevenLabsError_UnwrapsDetailShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"string detail", `{"detail":"Not Found"}`, "Not Found"},
+		{"object detail with message", `{"detail":{"type":"authorization_error","code":"subscription_required","message":"Output format 'wav_44100' is only available on the Pro tier and above.","status":"output_format_not_allowed"}}`, "Output format 'wav_44100' is only available on the Pro tier and above."},
+		{"no detail field keeps the generic-parser message", `{"error":"something else"}`, "something else"},
+		{"not JSON falls back to raw body", `plain text error`, "plain text error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := core.ParseProviderError("elevenlabs", http.StatusBadRequest, []byte(tt.body), nil)
+			refined := refineElevenLabsError(original)
+			gatewayErr, ok := refined.(*core.GatewayError)
+			if !ok {
+				t.Fatalf("error type = %T, want *core.GatewayError", refined)
+			}
+			if gatewayErr.Message != tt.want {
+				t.Fatalf("message = %q, want %q", gatewayErr.Message, tt.want)
+			}
+		})
+	}
 }
 
 func TestCreateTranscription_SendsMultipartAndReturnsJSON(t *testing.T) {

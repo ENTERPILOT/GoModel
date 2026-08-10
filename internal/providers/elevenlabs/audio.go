@@ -3,6 +3,7 @@ package elevenlabs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -14,6 +15,48 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
+
+// refineElevenLabsError improves the message on a *core.GatewayError that
+// llmclient.Client already built from a non-2xx response. ElevenLabs wraps
+// errors as {"detail": "..."} or {"detail": {"message": "...", ...}} rather
+// than the {"message": ...}/{"error": {...}} shapes the generic client-level
+// parser recognizes, so without this the message is the raw JSON body.
+// Non-GatewayErrors (e.g. transport failures) pass through unchanged.
+func refineElevenLabsError(err error) error {
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) || gatewayErr == nil {
+		return err
+	}
+	message := elevenlabsErrorDetailMessage(gatewayErr.ResponseBody)
+	if message == "" {
+		return err
+	}
+	refined := *gatewayErr
+	refined.Message = message
+	return &refined
+}
+
+func elevenlabsErrorDetailMessage(body []byte) string {
+	var envelope struct {
+		Detail json.RawMessage `json:"detail"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil || len(envelope.Detail) == 0 {
+		return ""
+	}
+
+	var asString string
+	if err := json.Unmarshal(envelope.Detail, &asString); err == nil {
+		return asString
+	}
+
+	var asObject struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(envelope.Detail, &asObject); err == nil {
+		return asObject.Message
+	}
+	return ""
+}
 
 // speechFormat maps an OpenAI-compatible response_format to the ElevenLabs
 // output_format query value. ElevenLabs has no aac/flac encoders, so those
@@ -105,10 +148,7 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 		Headers:  http.Header{"Content-Type": {"application/json"}},
 	})
 	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, core.ParseProviderError("elevenlabs", resp.StatusCode, resp.Body, nil)
+		return nil, refineElevenLabsError(err)
 	}
 	if len(resp.Body) == 0 {
 		return nil, core.NewEmptyProviderResponseError("elevenlabs")
@@ -182,10 +222,7 @@ func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTrans
 		Headers:       http.Header{"Content-Type": {contentType}},
 	})
 	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, core.ParseProviderError("elevenlabs", resp.StatusCode, resp.Body, nil)
+		return nil, refineElevenLabsError(err)
 	}
 
 	var upstream transcriptionResponse

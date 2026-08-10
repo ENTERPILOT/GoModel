@@ -42,10 +42,16 @@ library (built-in, cloned, or shared). Pass that ID as the OpenAI-compatible
 }
 ```
 
-List your available voice IDs from the ElevenLabs dashboard or the
-`GET /v1/voices` API (available under `/p/elevenlabs/v1/voices` via
-[passthrough](/features/passthrough-api) once `elevenlabs` is added to
-`ENABLED_PASSTHROUGH_PROVIDERS`).
+List your available voice IDs from the ElevenLabs dashboard, or via
+[passthrough](/features/passthrough-api) (once `elevenlabs` is added to
+`ENABLED_PASSTHROUGH_PROVIDERS`) at `/p/elevenlabs/v2/voices` — the newer
+`GET /v2/voices` search endpoint. `/p/elevenlabs/v1/voices` does not currently
+work: GoModel's provider-passthrough router treats a leading `v1/` segment in
+the path as an alias for providers whose base URL already embeds `/v1` (e.g.
+OpenAI), and strips it before forwarding. ElevenLabs' base URL is
+`https://api.elevenlabs.io` with no `/v1`, so every `/p/elevenlabs/v1/...`
+passthrough call currently 404s. This affects all of ElevenLabs' native `/v1`
+surface via passthrough, not just voice listing — see "Not implemented" below.
 
 ## Supported speech formats
 
@@ -76,3 +82,29 @@ option:
   `mp3`/`opus`/`pcm`/`wav`.
 - Transcription `prompt`, and `response_format` values other than
   `json`/`text`/`verbose_json`.
+
+## Not implemented
+
+GoModel only implements the two ElevenLabs capabilities that map onto
+OpenAI-compatible endpoints: text-to-speech and speech-to-text. Everything
+else ElevenLabs offers has no typed support in GoModel today:
+
+- **Speech-to-speech (voice changer)** — `POST /v1/speech-to-speech/{voice_id}`
+  has no OpenAI-compatible equivalent to translate from, so there's no typed
+  endpoint for it. It could be added as a native passthrough route in the
+  future, but **passthrough for it does not currently work either** — see the
+  `/v1` alias limitation above; speech-to-speech has no `/v2` path to work
+  around it with, so it is entirely unreachable through GoModel right now.
+- **Dubbing, voice cloning/design, projects (Studio), and conversational AI
+  (agents)** — same reasoning: no OpenAI-compatible shape to translate to, and
+  (for the `/v1`-only parts of these APIs) the same passthrough limitation
+  applies. These are reasonable candidates for future native passthrough
+  support once that limitation is fixed.
+- **Realtime/streaming TTS and STT** (`/v1/text-to-speech/{voice_id}/stream`,
+  WebSocket streaming) — GoModel's `/v1/audio/speech` and
+  `/v1/audio/transcriptions` are synchronous request/response; no streaming
+  variant is implemented for ElevenLabs.
+
+None of this is ElevenLabs-specific scope creep avoidance — it reflects that
+GoModel's audio surface is deliberately OpenAI-shaped, and ElevenLabs' API is
+much larger than OpenAI's TTS/STT pair.
