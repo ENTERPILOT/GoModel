@@ -2,12 +2,18 @@ package virtualmodels
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modelselectors"
 	"github.com/enterpilot/gomodel/internal/validation"
+)
+
+const (
+	MinSlowdownFactor = 0.1
+	MaxSlowdownFactor = 10.0
 )
 
 // IsValidationError reports whether err is a validation error.
@@ -26,6 +32,9 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 	vm.Source = strings.TrimSpace(vm.Source)
 	vm.Description = strings.TrimSpace(vm.Description)
 	vm.Strategy = normalizeStrategy(vm.Strategy)
+	if err := validateSlowdown(vm.Slowdown); err != nil {
+		return VirtualModel{}, nil, err
+	}
 
 	if vm.Source == "" {
 		return VirtualModel{}, nil, newValidationError("source is required", nil)
@@ -78,6 +87,9 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 // normalizePolicyInput trims a policy virtual model and normalizes its selector
 // and user paths from user-supplied input.
 func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error) {
+	if err := validateSlowdown(vm.Slowdown); err != nil {
+		return VirtualModel{}, err
+	}
 	parts, err := modelselectors.NormalizeInput(catalog, vm.Source)
 	if err != nil {
 		return VirtualModel{}, err
@@ -85,6 +97,9 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	vm.Source = parts.Selector
 	vm.ProviderName = parts.ProviderName
 	vm.Model = parts.Model
+	if vm.Slowdown != nil && parts.Model == "" {
+		return VirtualModel{}, newValidationError("slowdown can only be configured for a model or redirect", nil)
+	}
 
 	paths, err := normalizeUserPaths(vm.UserPaths)
 	if err != nil {
@@ -97,6 +112,9 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 
 // normalizeStoredPolicy normalizes a policy row loaded from storage.
 func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
+	if err := validateSlowdown(vm.Slowdown); err != nil {
+		return VirtualModel{}, err
+	}
 	parts, err := modelselectors.NormalizeStored(vm.Source, vm.ProviderName, vm.Model)
 	if err != nil {
 		return VirtualModel{}, err
@@ -104,6 +122,9 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	vm.Source = parts.Selector
 	vm.ProviderName = parts.ProviderName
 	vm.Model = parts.Model
+	if vm.Slowdown != nil && parts.Model == "" {
+		return VirtualModel{}, newValidationError("slowdown can only be configured for a model or redirect", nil)
+	}
 
 	paths, err := normalizeUserPaths(vm.UserPaths)
 	if err != nil {
@@ -111,6 +132,17 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	}
 	vm.UserPaths = paths
 	return vm, nil
+}
+
+func validateSlowdown(configured *float64) error {
+	if configured == nil || *configured == 0 {
+		return nil
+	}
+	factor := *configured
+	if math.IsNaN(factor) || math.IsInf(factor, 0) || factor < MinSlowdownFactor || factor > MaxSlowdownFactor {
+		return newValidationError(fmt.Sprintf("slowdown must be 0 (disabled) or between %.1f and %.0f", MinSlowdownFactor, MaxSlowdownFactor), nil)
+	}
+	return nil
 }
 
 // normalizeUserPaths dedupes, normalizes, and sorts user paths. Empty input is

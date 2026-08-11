@@ -13,7 +13,7 @@ func TestConfigModels_Conversion(t *testing.T) {
 	t.Parallel()
 	enabled := false
 	got := ConfigModels([]config.VirtualModelConfig{
-		{Source: "alias", Target: "openai/gpt-4o"},
+		{Source: "alias", Target: "openai/gpt-4o", Slowdown: new(0.5)},
 		{
 			Source:   "smart",
 			Strategy: StrategyCost,
@@ -28,7 +28,7 @@ func TestConfigModels_Conversion(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("ConfigModels len = %d, want 3", len(got))
 	}
-	if got[0].Targets[0].Model != "openai/gpt-4o" || !got[0].Enabled || !got[0].Managed {
+	if got[0].Targets[0].Model != "openai/gpt-4o" || got[0].Slowdown == nil || *got[0].Slowdown != 0.5 || !got[0].Enabled || !got[0].Managed {
 		t.Fatalf("shorthand target conversion = %#v", got[0])
 	}
 	if len(got[1].Targets) != 2 || got[1].Strategy != StrategyCost || got[1].Targets[0].Weight != 2 {
@@ -36,6 +36,40 @@ func TestConfigModels_Conversion(t *testing.T) {
 	}
 	if got[2].Enabled {
 		t.Fatalf("explicit enabled=false not honored: %#v", got[2])
+	}
+}
+
+func TestConfigModels_PreservesSlowdownPresence(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   *float64
+		want *float64
+	}{
+		{name: "omitted", in: nil, want: nil},
+		{name: "explicit zero", in: new(0.0), want: new(0.0)},
+		{name: "minimum active factor", in: new(MinSlowdownFactor), want: new(MinSlowdownFactor)},
+		{name: "maximum active factor", in: new(MaxSlowdownFactor), want: new(MaxSlowdownFactor)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ConfigModels([]config.VirtualModelConfig{{
+				Source: "alias", Target: "openai/gpt-4o", Slowdown: tt.in,
+			}})
+			if len(got) != 1 {
+				t.Fatalf("ConfigModels len = %d, want 1", len(got))
+			}
+			if tt.want == nil {
+				if got[0].Slowdown != nil {
+					t.Fatalf("Slowdown = %v, want nil", got[0].Slowdown)
+				}
+				return
+			}
+			if got[0].Slowdown == nil || *got[0].Slowdown != *tt.want {
+				t.Fatalf("Slowdown = %v, want %v", got[0].Slowdown, *tt.want)
+			}
+		})
 	}
 }
 

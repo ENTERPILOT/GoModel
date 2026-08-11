@@ -30,6 +30,7 @@ import {
   vmFormIsRedirect,
   vmFormShowStrategy,
   vmFormShowWeights,
+  vmFormSupportsSlowdown,
 } from "../src/pages/models/virtualModelsLogic.js";
 
 function display(models, aliases, { available = true, activeCategory = "" } = {}) {
@@ -87,6 +88,7 @@ test("splitVirtualModelViews parses redirect and policy Views", () => {
       enabled: true,
       valid: true,
       user_paths: ["/team/alpha"],
+      slowdown: 0.4,
     },
     {
       source: "openai/gpt-4o",
@@ -94,6 +96,7 @@ test("splitVirtualModelViews parses redirect and policy Views", () => {
       enabled: false,
       user_paths: ["/team/alpha"],
       managed: true,
+      slowdown: 0.2,
     },
     null,
   ]);
@@ -103,10 +106,12 @@ test("splitVirtualModelViews parses redirect and policy Views", () => {
   assert.equal(aliases[0].target_provider, "openai");
   assert.equal(aliases[0].target_model, "gpt-4o");
   assert.deepEqual(aliases[0].user_paths, ["/team/alpha"]);
+  assert.equal(aliases[0].slowdown, 0.4);
   assert.equal(policies.length, 1);
   assert.equal(policies[0].selector, "openai/gpt-4o");
   assert.equal(policies[0].enabled, false);
   assert.equal(policies[0].managed, true);
+  assert.equal(policies[0].slowdown, 0.2);
 });
 
 test("mapRedirectView keeps load-balanced targets, strategy, and labels them", () => {
@@ -351,6 +356,27 @@ test("buildModelTogglePayload enabling a model with restricted paths sends PUT e
   assert.deepEqual(payload, { source: "openai/gpt-4o", enabled: true, user_paths: ["/team/alpha"] });
 });
 
+test("buildModelTogglePayload preserves a configured slowdown instead of deleting the policy", () => {
+  const { method, payload } = buildModelTogglePayload(
+    "openai/gpt-4o",
+    { selector: "openai/gpt-4o", user_paths: [], enabled: false, slowdown: 0.5 },
+    { selector: "openai/gpt-4o", default_enabled: true, effective_enabled: false },
+  );
+  assert.equal(method, "PUT");
+  assert.equal(payload.enabled, true);
+  assert.equal(payload.slowdown, 0.5);
+});
+
+test("buildModelTogglePayload preserves an explicit zero slowdown override", () => {
+  const { method, payload } = buildModelTogglePayload(
+    "openai/gpt-4o",
+    { selector: "openai/gpt-4o", user_paths: [], enabled: false, slowdown: 0 },
+    { selector: "openai/gpt-4o", default_enabled: true, effective_enabled: false },
+  );
+  assert.equal(method, "PUT");
+  assert.equal(payload.slowdown, 0);
+});
+
 test("buildAliasTogglePayload flips an alias enabled flag preserving the target", () => {
   const payload = buildAliasTogglePayload({
     name: "smart",
@@ -367,6 +393,26 @@ test("buildAliasTogglePayload flips an alias enabled flag preserving the target"
     user_paths: ["/team/alpha"],
     enabled: false,
   });
+});
+
+test("buildAliasTogglePayload preserves an alias slowdown", () => {
+  const payload = buildAliasTogglePayload({
+    name: "slow",
+    target_model: "openai/gpt-4o",
+    slowdown: 1.5,
+    enabled: true,
+  });
+  assert.equal(payload.slowdown, 1.5);
+});
+
+test("buildAliasTogglePayload preserves an explicit zero slowdown", () => {
+  const payload = buildAliasTogglePayload({
+    name: "fast",
+    target_model: "openai/gpt-4o",
+    slowdown: 0,
+    enabled: true,
+  });
+  assert.equal(payload.slowdown, 0);
 });
 
 test("buildAliasTogglePayload round-trips every target and strategy for a cost alias", () => {
@@ -452,6 +498,43 @@ test("save payload sends a policy body when target_model is empty", () => {
     description: "",
     enabled: false,
   });
+});
+
+test("save payload distinguishes configured slowdown, explicit zero, and inherited slowdown", () => {
+  const configured = buildVirtualModelSavePayload(
+    { source: "slow", target_model: "openai/gpt-4o", targets: [], slowdown: 2.5, enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(configured.payload.slowdown, 2.5);
+
+  const disabled = buildVirtualModelSavePayload(
+    { source: "fast", target_model: "openai/gpt-4o", targets: [], slowdown: "", enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(Object.prototype.hasOwnProperty.call(disabled.payload, "slowdown"), false);
+
+  const explicitlyDisabled = buildVirtualModelSavePayload(
+    { source: "fast", target_model: "openai/gpt-4o", targets: [], slowdown: 0, enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(explicitlyDisabled.payload.slowdown, 0);
+
+  const invalid = buildVirtualModelSavePayload(
+    { source: "invalid", target_model: "openai/gpt-4o", targets: [], slowdown: 10.1, enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(invalid.payload.slowdown, 10.1);
+});
+
+test("slowdown is available for redirects and model policies only", () => {
+  assert.equal(vmFormSupportsSlowdown({ source: "slow", target_model: "openai/gpt-4o" }), true);
+  assert.equal(vmFormSupportsSlowdown({ source: "openai/gpt-4o", target_model: "" }), true);
+  assert.equal(vmFormSupportsSlowdown({ source: "openai/", target_model: "" }), false);
+  assert.equal(vmFormSupportsSlowdown({ source: "/", target_model: "" }), false);
 });
 
 test("save payload carries old_source only when an edit renames the Source", () => {

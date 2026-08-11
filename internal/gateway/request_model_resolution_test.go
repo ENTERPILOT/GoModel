@@ -99,6 +99,62 @@ func (r requestAliasResolver) ResolveModel(requested core.RequestedModelSelector
 	return selector, false, err
 }
 
+type requestSlowdownResolver struct {
+	requestAliasResolver
+	factor    float64
+	requested string
+	resolved  string
+}
+
+func (r *requestSlowdownResolver) ResolveSlowdown(_ context.Context, requested core.RequestedModelSelector, resolved core.ModelSelector) float64 {
+	r.requested = requested.RequestedQualifiedModel()
+	r.resolved = resolved.QualifiedModel()
+	return r.factor
+}
+
+func TestResolveRequestModelCarriesResolvedSlowdownFactor(t *testing.T) {
+	aliasResolver := &requestSlowdownResolver{
+		requestAliasResolver: requestAliasResolver{
+			"smart": {Provider: "openai", Model: "gpt-4o"},
+		},
+		factor: 0.5,
+	}
+	directResolver := &requestSlowdownResolver{factor: 0.3}
+	tests := []struct {
+		name         string
+		resolver     ModelResolver
+		requested    string
+		wantSlowdown float64
+		capture      *requestSlowdownResolver
+		wantResolved string
+	}{
+		{name: "alias factor", resolver: aliasResolver, requested: "smart", wantSlowdown: 0.5, capture: aliasResolver, wantResolved: "openai/gpt-4o"},
+		{name: "direct model factor", resolver: directResolver, requested: "openai/gpt-4o", wantSlowdown: 0.3, capture: directResolver, wantResolved: "openai/gpt-4o"},
+		{name: "resolver without slowdown contract", resolver: requestAliasResolver{}, requested: "openai/gpt-4o", wantSlowdown: 0, wantResolved: "openai/gpt-4o"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolution, err := ResolveRequestModelWithAuthorizer(
+				context.Background(), newRequestRefreshProvider(1), tt.resolver, nil,
+				core.NewRequestedModelSelector(tt.requested, ""),
+			)
+			if err != nil {
+				t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v", err)
+			}
+			if resolution.Slowdown != tt.wantSlowdown {
+				t.Fatalf("resolution.Slowdown = %v, want %v", resolution.Slowdown, tt.wantSlowdown)
+			}
+			if got := resolution.ResolvedSelector.QualifiedModel(); got != tt.wantResolved {
+				t.Fatalf("resolved selector = %q, want %q", got, tt.wantResolved)
+			}
+			if tt.capture != nil && (tt.capture.requested != tt.requested || tt.capture.resolved != tt.wantResolved) {
+				t.Fatalf("slowdown resolver inputs = (%q, %q), want (%q, %q)", tt.capture.requested, tt.capture.resolved, tt.requested, tt.wantResolved)
+			}
+		})
+	}
+}
+
 type requestRefreshTargetResolver struct {
 	provider *requestRefreshProvider
 	target   core.ModelSelector

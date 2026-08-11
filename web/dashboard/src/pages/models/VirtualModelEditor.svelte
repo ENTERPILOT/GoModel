@@ -175,6 +175,26 @@
     ></textarea>
   </FormField>
 
+  {#if vm.vmFormSupportsSlowdown()}
+    <FormField id="virtual-model-slowdown" label="Slowdown (extra inference time)">
+      <input
+        id="virtual-model-slowdown"
+        type="number"
+        min="0"
+        max="10"
+        step="0.1"
+        placeholder="Off"
+        bind:value={vm.vmForm.slowdown}
+        disabled={vm.vmFormManaged}
+      />
+      <span class="form-hint">
+        Adds a fraction of measured inference time: 0.5 adds 50%. Streaming chunks are buffered
+        and released on the slowed timeline. Use 0 to override inherited slowdown, or leave empty
+        to inherit it; active values are 0.1–10.
+      </span>
+    </FormField>
+  {/if}
+
   <div class="vm-status-row">
     {#if vm.vmFormMode === "edit"}
       <span class="form-hint vm-status-summary">
