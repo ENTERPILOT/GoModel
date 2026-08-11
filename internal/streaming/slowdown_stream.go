@@ -54,6 +54,7 @@ type slowdownStream struct {
 	mu              sync.Mutex
 	queue           []slowdownChunk
 	closed          bool
+	terminalErr     error
 	closeOnce       sync.Once
 	sourceCloseOnce sync.Once
 	sourceCloseErr  error
@@ -119,9 +120,9 @@ func (s *slowdownStream) Read(p []byte) (int, error) {
 		return 0, nil
 	}
 	for {
-		chunk, ok, closed := s.peek()
-		if closed {
-			return 0, io.ErrClosedPipe
+		chunk, ok, err := s.peek()
+		if err != nil {
+			return 0, err
 		}
 		if !ok {
 			select {
@@ -161,26 +162,30 @@ func (s *slowdownStream) Read(p []byte) (int, error) {
 			s.mu.Unlock()
 			return n, nil
 		}
-		err := front.err
-		s.popLocked()
-		s.mu.Unlock()
+		err = front.err
 		if err == nil {
 			err = io.EOF
 		}
+		s.terminalErr = err
+		s.popLocked()
+		s.mu.Unlock()
 		return 0, err
 	}
 }
 
-func (s *slowdownStream) peek() (slowdownChunk, bool, bool) {
+func (s *slowdownStream) peek() (slowdownChunk, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return slowdownChunk{}, false, true
+		return slowdownChunk{}, false, io.ErrClosedPipe
+	}
+	if s.terminalErr != nil {
+		return slowdownChunk{}, false, s.terminalErr
 	}
 	if len(s.queue) == 0 {
-		return slowdownChunk{}, false, false
+		return slowdownChunk{}, false, nil
 	}
-	return s.queue[0], true, false
+	return s.queue[0], true, nil
 }
 
 func (s *slowdownStream) popLocked() {

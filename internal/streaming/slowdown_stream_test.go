@@ -2,7 +2,9 @@ package streaming
 
 import (
 	"context"
+	"errors"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -52,6 +54,49 @@ func TestSlowdownStreamReadStopsOnCancellation(t *testing.T) {
 	buf := make([]byte, 8)
 	if _, err := stream.Read(buf); err != context.Canceled {
 		t.Fatalf("Read() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestSlowdownStreamPreservesTerminalError(t *testing.T) {
+	sourceErr := errors.New("upstream failed")
+	tests := []struct {
+		name       string
+		source     io.ReadCloser
+		firstChunk string
+		wantErr    error
+	}{
+		{name: "EOF", source: io.NopCloser(strings.NewReader("x")), firstChunk: "x", wantErr: io.EOF},
+		{name: "source error", source: io.NopCloser(terminalErrorReader{err: sourceErr}), wantErr: sourceErr},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := NewSlowdownStream(context.Background(), tt.source, 0.1, time.Now().Add(-time.Second))
+			t.Cleanup(func() { _ = stream.Close() })
+			buf := make([]byte, 8)
+			if tt.firstChunk != "" {
+				n, err := stream.Read(buf)
+				if err != nil || string(buf[:n]) != tt.firstChunk {
+					t.Fatalf("first Read() = (%q, %v), want (%q, nil)", buf[:n], err, tt.firstChunk)
+				}
+			}
+
+			for read := 1; read <= 2; read++ {
+				result := make(chan error, 1)
+				go func() {
+					_, err := stream.Read(buf)
+					result <- err
+				}()
+				select {
+				case err := <-result:
+					if !errors.Is(err, tt.wantErr) {
+						t.Fatalf("terminal Read() %d error = %v, want %v", read, err, tt.wantErr)
+					}
+				case <-time.After(time.Second):
+					t.Fatalf("terminal Read() %d blocked", read)
+				}
+			}
+		})
 	}
 }
 
@@ -134,3 +179,9 @@ func (s *blockingCloseSource) Close() error {
 	s.closeOnce.Do(func() { close(s.closed) })
 	return nil
 }
+
+type terminalErrorReader struct {
+	err error
+}
+
+func (r terminalErrorReader) Read([]byte) (int, error) { return 0, r.err }
