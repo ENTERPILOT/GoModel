@@ -56,22 +56,37 @@ func TestSlowdownStreamReadStopsOnCancellation(t *testing.T) {
 }
 
 func TestSlowdownStreamCancellationClosesBlockedUpstream(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	source := newBlockingCloseSource()
-	stream := NewSlowdownStream(ctx, source, 1, time.Now())
-	t.Cleanup(func() { _ = stream.Close() })
-
-	select {
-	case <-source.readStarted:
-	case <-time.After(time.Second):
-		t.Fatal("upstream Read did not start")
+	tests := []struct {
+		name     string
+		shutdown func(context.CancelFunc, io.Closer)
+	}{
+		{name: "parent context cancellation", shutdown: func(cancel context.CancelFunc, _ io.Closer) { cancel() }},
+		{name: "explicit stream close", shutdown: func(_ context.CancelFunc, stream io.Closer) { _ = stream.Close() }},
 	}
-	cancel()
 
-	select {
-	case <-source.closed:
-	case <-time.After(time.Second):
-		t.Fatal("upstream Close was not called after cancellation")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			source := newBlockingCloseSource()
+			stream := NewSlowdownStream(ctx, source, 1, time.Now())
+			t.Cleanup(func() {
+				cancel()
+				_ = stream.Close()
+			})
+
+			select {
+			case <-source.readStarted:
+			case <-time.After(time.Second):
+				t.Fatal("upstream Read did not start")
+			}
+			tt.shutdown(cancel, stream)
+
+			select {
+			case <-source.closed:
+			case <-time.After(time.Second):
+				t.Fatal("upstream Close was not called after shutdown")
+			}
+		})
 	}
 }
 

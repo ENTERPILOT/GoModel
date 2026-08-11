@@ -116,6 +116,10 @@ func (v VirtualModel) Kind() string {
 // clone returns a deep copy of the virtual model so snapshot consumers cannot
 // mutate cached slices.
 func (v VirtualModel) clone() VirtualModel {
+	if v.Slowdown != nil {
+		slowdown := *v.Slowdown
+		v.Slowdown = &slowdown
+	}
 	if len(v.Targets) > 0 {
 		v.Targets = append([]Target(nil), v.Targets...)
 	}

@@ -36,6 +36,8 @@ type audioMockProvider struct {
 	providerDelay         time.Duration
 	providerCalled        chan struct{}
 	providerCalledOnce    sync.Once
+	providerCompleted     chan struct{}
+	providerCompletedOnce sync.Once
 }
 
 // ResolveModel lets the fake stand in for the Router so the service can authorize
@@ -82,6 +84,9 @@ func (m *audioMockProvider) waitForAudioResponse() {
 	}
 	if m.providerDelay > 0 {
 		time.Sleep(m.providerDelay)
+	}
+	if m.providerCompleted != nil {
+		m.providerCompletedOnce.Do(func() { close(m.providerCompleted) })
 	}
 }
 
@@ -174,9 +179,10 @@ func TestAudioSlowdownAppliesAfterInferenceAndHonorsCancellation(t *testing.T) {
 		t.Run(tt.name+" cancellation", func(t *testing.T) {
 			resolver := &audioSlowdownResolver{factor: 10}
 			provider := &audioMockProvider{
-				mockProvider:   &mockProvider{supportedModels: []string{tt.model}},
-				providerDelay:  15 * time.Millisecond,
-				providerCalled: make(chan struct{}),
+				mockProvider:      &mockProvider{supportedModels: []string{tt.model}},
+				providerDelay:     15 * time.Millisecond,
+				providerCalled:    make(chan struct{}),
+				providerCompleted: make(chan struct{}),
 			}
 			tt.response(provider)
 			handler := newHandler(provider, nil, nil, nil, resolver, nil, nil, nil)
@@ -193,6 +199,11 @@ func TestAudioSlowdownAppliesAfterInferenceAndHonorsCancellation(t *testing.T) {
 			case <-provider.providerCalled:
 			case <-time.After(time.Second):
 				t.Fatal("provider was not called")
+			}
+			select {
+			case <-provider.providerCompleted:
+			case <-time.After(time.Second):
+				t.Fatal("provider did not complete")
 			}
 			cancel()
 			select {

@@ -91,6 +91,16 @@ func TestResolveSlowdown(t *testing.T) {
 	}
 }
 
+func TestVirtualModelCloneDoesNotShareSlowdown(t *testing.T) {
+	original := VirtualModel{Slowdown: new(0.5)}
+	cloned := original.clone()
+
+	*cloned.Slowdown = 1
+	if *original.Slowdown != 0.5 {
+		t.Fatalf("mutating clone changed original slowdown to %v", *original.Slowdown)
+	}
+}
+
 func TestUpsertValidatesSlowdown(t *testing.T) {
 	tests := []struct {
 		name        string
