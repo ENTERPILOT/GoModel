@@ -429,9 +429,7 @@ class VirtualModelsStore {
         user_paths: Array.isArray(alias.user_paths) ? alias.user_paths : [],
         description: String(alias.description || "").trim(),
         enabled: alias.enabled !== false,
-        ...(Number(alias.slowdown || 0) > 0
-          ? { slowdown: Number(alias.slowdown) }
-          : {}),
+        ...(alias.slowdown != null ? { slowdown: Number(alias.slowdown) } : {}),
       },
       operation: "virtual model redirect",
       failureMessage: "Failed to remove redirect.",
@@ -607,7 +605,7 @@ class VirtualModelsStore {
       session_affinity: alias.session_affinity !== false,
       user_paths: (Array.isArray(alias.user_paths) ? alias.user_paths : []).join("\n"),
       description: alias.description || "",
-      slowdown: alias.slowdown || "",
+      slowdown: alias.slowdown ?? "",
       enabled: alias.enabled !== false,
     };
   }
@@ -652,7 +650,7 @@ class VirtualModelsStore {
       strategy: "round_robin",
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
-      slowdown: override && override.slowdown ? override.slowdown : "",
+      slowdown: override && override.slowdown != null ? override.slowdown : "",
       enabled: overrideEnabled,
     };
   }
@@ -681,7 +679,7 @@ class VirtualModelsStore {
       strategy: "round_robin",
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
-      slowdown: override && override.slowdown ? override.slowdown : "",
+      slowdown: override && override.slowdown != null ? override.slowdown : "",
       enabled: override ? override.enabled !== false : defaultEnabled,
     };
   }

@@ -20,7 +20,7 @@ type mongoVirtualModelDocument struct {
 	Model        string    `bson:"model,omitempty"`
 	UserPaths    []string  `bson:"user_paths,omitempty"`
 	Description  string    `bson:"description,omitempty"`
-	Slowdown     float64   `bson:"slowdown,omitempty"`
+	Slowdown     *float64  `bson:"slowdown,omitempty"`
 	Enabled      bool      `bson:"enabled"`
 	CreatedAt    time.Time `bson:"created_at"`
 	UpdatedAt    time.Time `bson:"updated_at"`

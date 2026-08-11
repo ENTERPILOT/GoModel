@@ -11054,7 +11054,19 @@
           },
           "slowdown": {
             "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it.",
-            "type": "number"
+            "oneOf": [
+              {
+                "type": "number",
+                "enum": [
+                  0
+                ]
+              },
+              {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 10
+              }
+            ]
           },
           "source": {
             "type": "string"
@@ -14397,7 +14409,19 @@
           },
           "slowdown": {
             "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it.",
-            "type": "number"
+            "oneOf": [
+              {
+                "type": "number",
+                "enum": [
+                  0
+                ]
+              },
+              {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 10
+              }
+            ]
           },
           "source": {
             "type": "string"
@@ -14452,8 +14476,20 @@
             "type": "boolean"
           },
           "slowdown": {
-            "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it.",
-            "type": "number"
+            "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it. Nil\nleaves the setting unspecified so an alias can inherit its target model.",
+            "oneOf": [
+              {
+                "type": "number",
+                "enum": [
+                  0
+                ]
+              },
+              {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 10
+              }
+            ]
           },
           "source": {
             "type": "string"

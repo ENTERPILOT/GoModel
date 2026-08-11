@@ -25,14 +25,15 @@
   let { row, columns } = $props();
 
   const pricing = $derived(pricingOverrides.modelRowPricing(row));
+  const configuredSlowdown = $derived(
+    row.is_alias
+      ? row.alias && row.alias.slowdown
+      : row.masking_alias && row.masking_alias.slowdown != null
+        ? row.masking_alias.slowdown
+        : row.access && row.access.override && row.access.override.slowdown,
+  );
   const slowdown = $derived(
-    Number(
-      row.is_alias
-        ? row.alias && row.alias.slowdown
-        : (row.masking_alias && row.masking_alias.slowdown) ||
-            (row.access && row.access.override && row.access.override.slowdown) ||
-            0,
-    ),
+    Number(configuredSlowdown == null ? 0 : configuredSlowdown),
   );
 </script>
 

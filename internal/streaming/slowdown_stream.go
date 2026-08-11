@@ -23,14 +23,16 @@ func NewSlowdownStream(ctx context.Context, source io.ReadCloser, factor float64
 	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	s := &slowdownStream{
-		source:  source,
-		factor:  factor,
-		started: inferenceStarted,
-		ctx:     streamCtx,
-		cancel:  cancel,
-		notify:  make(chan struct{}, 1),
+		source:    source,
+		factor:    factor,
+		started:   inferenceStarted,
+		ctx:       streamCtx,
+		cancel:    cancel,
+		notify:    make(chan struct{}, 1),
+		drainDone: make(chan struct{}),
 	}
 	go s.drain()
+	go s.closeSourceOnCancellation()
 	return s
 }
 
@@ -41,21 +43,24 @@ type slowdownChunk struct {
 }
 
 type slowdownStream struct {
-	source  io.ReadCloser
-	factor  float64
-	started time.Time
-	ctx     context.Context
-	cancel  context.CancelFunc
-	notify  chan struct{}
+	source    io.ReadCloser
+	factor    float64
+	started   time.Time
+	ctx       context.Context
+	cancel    context.CancelFunc
+	notify    chan struct{}
+	drainDone chan struct{}
 
-	mu        sync.Mutex
-	queue     []slowdownChunk
-	closed    bool
-	closeErr  error
-	closeOnce sync.Once
+	mu              sync.Mutex
+	queue           []slowdownChunk
+	closed          bool
+	closeOnce       sync.Once
+	sourceCloseOnce sync.Once
+	sourceCloseErr  error
 }
 
 func (s *slowdownStream) drain() {
+	defer close(s.drainDone)
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := s.source.Read(buf)
@@ -68,9 +73,25 @@ func (s *slowdownStream) drain() {
 		}
 		if err != nil {
 			s.enqueue(slowdownChunk{due: due, err: err})
+			_ = s.closeSource()
 			return
 		}
 	}
+}
+
+func (s *slowdownStream) closeSourceOnCancellation() {
+	select {
+	case <-s.ctx.Done():
+		_ = s.closeSource()
+	case <-s.drainDone:
+	}
+}
+
+func (s *slowdownStream) closeSource() error {
+	s.sourceCloseOnce.Do(func() {
+		s.sourceCloseErr = s.source.Close()
+	})
+	return s.sourceCloseErr
 }
 
 func (s *slowdownStream) scaledDue(elapsed time.Duration) time.Time {
@@ -177,11 +198,11 @@ func (s *slowdownStream) Close() error {
 		s.closed = true
 		s.queue = nil
 		s.mu.Unlock()
-		s.closeErr = s.source.Close()
+		_ = s.closeSource()
 		select {
 		case s.notify <- struct{}{}:
 		default:
 		}
 	})
-	return s.closeErr
+	return s.sourceCloseErr
 }

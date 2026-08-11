@@ -367,6 +367,16 @@ test("buildModelTogglePayload preserves a configured slowdown instead of deletin
   assert.equal(payload.slowdown, 0.5);
 });
 
+test("buildModelTogglePayload preserves an explicit zero slowdown override", () => {
+  const { method, payload } = buildModelTogglePayload(
+    "openai/gpt-4o",
+    { selector: "openai/gpt-4o", user_paths: [], enabled: false, slowdown: 0 },
+    { selector: "openai/gpt-4o", default_enabled: true, effective_enabled: false },
+  );
+  assert.equal(method, "PUT");
+  assert.equal(payload.slowdown, 0);
+});
+
 test("buildAliasTogglePayload flips an alias enabled flag preserving the target", () => {
   const payload = buildAliasTogglePayload({
     name: "smart",
@@ -393,6 +403,16 @@ test("buildAliasTogglePayload preserves an alias slowdown", () => {
     enabled: true,
   });
   assert.equal(payload.slowdown, 1.5);
+});
+
+test("buildAliasTogglePayload preserves an explicit zero slowdown", () => {
+  const payload = buildAliasTogglePayload({
+    name: "fast",
+    target_model: "openai/gpt-4o",
+    slowdown: 0,
+    enabled: true,
+  });
+  assert.equal(payload.slowdown, 0);
 });
 
 test("buildAliasTogglePayload round-trips every target and strategy for a cost alias", () => {
@@ -480,7 +500,7 @@ test("save payload sends a policy body when target_model is empty", () => {
   });
 });
 
-test("save payload includes a configured slowdown and omits disabled slowdown", () => {
+test("save payload distinguishes configured slowdown, explicit zero, and inherited slowdown", () => {
   const configured = buildVirtualModelSavePayload(
     { source: "slow", target_model: "openai/gpt-4o", targets: [], slowdown: 2.5, enabled: true },
     "",
@@ -494,6 +514,13 @@ test("save payload includes a configured slowdown and omits disabled slowdown", 
     "create",
   );
   assert.equal(Object.prototype.hasOwnProperty.call(disabled.payload, "slowdown"), false);
+
+  const explicitlyDisabled = buildVirtualModelSavePayload(
+    { source: "fast", target_model: "openai/gpt-4o", targets: [], slowdown: 0, enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(explicitlyDisabled.payload.slowdown, 0);
 
   const invalid = buildVirtualModelSavePayload(
     { source: "invalid", target_model: "openai/gpt-4o", targets: [], slowdown: 10.1, enabled: true },

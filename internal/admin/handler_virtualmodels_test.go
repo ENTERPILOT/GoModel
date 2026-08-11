@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -399,41 +400,45 @@ func TestUpsertPolicyVirtualModelAcceptsEmptyUserPaths(t *testing.T) {
 	}
 }
 
-func TestUpsertVirtualModelPersistsSlowdown(t *testing.T) {
-	h := newVMHandler(t)
-	e := echo.New()
+func TestUpsertVirtualModelValidatesSlowdown(t *testing.T) {
+	tests := []struct {
+		name       string
+		slowdown   float64
+		wantStatus int
+	}{
+		{name: "explicit zero", slowdown: 0, wantStatus: http.StatusOK},
+		{name: "minimum", slowdown: 0.1, wantStatus: http.StatusOK},
+		{name: "maximum", slowdown: 10, wantStatus: http.StatusOK},
+		{name: "below minimum", slowdown: 0.09, wantStatus: http.StatusBadRequest},
+		{name: "above maximum", slowdown: 10.1, wantStatus: http.StatusBadRequest},
+	}
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"slow","target_model":"openai/gpt-4o","slowdown":0.5}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newVMHandler(t)
+			e := echo.New()
+			body := fmt.Sprintf(`{"source":"slow","target_model":"openai/gpt-4o","slowdown":%v}`, tt.slowdown)
+			req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+				t.Fatalf("UpsertVirtualModel() error = %v", err)
+			}
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if tt.wantStatus != http.StatusOK {
+				return
+			}
 
-	var view virtualmodels.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if view.Slowdown != 0.5 {
-		t.Fatalf("view.Slowdown = %v, want 0.5", view.Slowdown)
-	}
-}
-
-func TestUpsertVirtualModelRejectsSlowdownOutsideRange(t *testing.T) {
-	h := newVMHandler(t)
-	e := echo.New()
-
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"slow","target_model":"openai/gpt-4o","slowdown":10.1}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+			var view virtualmodels.View
+			if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if view.Slowdown == nil || *view.Slowdown != tt.slowdown {
+				t.Fatalf("view.Slowdown = %v, want %v", view.Slowdown, tt.slowdown)
+			}
+		})
 	}
 }
 

@@ -41,8 +41,9 @@ type VirtualModelConfig struct {
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 
 	// Slowdown is an optional extra-time factor. For example, 0.5 adds 50% of
-	// measured inference time. Zero disables slowdown.
-	Slowdown float64 `yaml:"slowdown,omitempty" json:"slowdown,omitempty"`
+	// measured inference time. Zero explicitly disables inherited slowdown;
+	// nil leaves the setting unspecified.
+	Slowdown *float64 `yaml:"slowdown,omitempty" json:"slowdown,omitempty"`
 
 	// Enabled toggles the entry. It defaults to true when omitted.
 	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`

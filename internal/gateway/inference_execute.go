@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -48,7 +47,9 @@ func (o *InferenceOrchestrator) StreamChatCompletion(ctx context.Context, workfl
 		return nil, err
 	}
 	return &StreamResult{
-		Stream: streaming.NewSlowdownStream(ctx, stream, workflowSlowdown(workflow), started),
+		Stream:           stream,
+		slowdownFactor:   workflowSlowdown(workflow),
+		inferenceStarted: started,
 		Meta: ExecutionMeta{
 			ProviderType:  resolvedProviderType,
 			ProviderName:  resolvedProviderName,
@@ -98,7 +99,9 @@ func (o *InferenceOrchestrator) StreamResponses(ctx context.Context, workflow *c
 		return nil, err
 	}
 	return &StreamResult{
-		Stream: streaming.NewSlowdownStream(ctx, stream, workflowSlowdown(workflow), started),
+		Stream:           stream,
+		slowdownFactor:   workflowSlowdown(workflow),
+		inferenceStarted: started,
 		Meta: ExecutionMeta{
 			ProviderType:  resolvedProviderType,
 			ProviderName:  resolvedProviderName,

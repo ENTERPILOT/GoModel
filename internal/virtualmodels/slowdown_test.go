@@ -2,111 +2,132 @@ package virtualmodels
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-func TestResolveSlowdown_AliasOverridesConcreteModel(t *testing.T) {
-	service := newSlowdownService(t,
-		VirtualModel{
-			Source:   "slow-alias",
-			Targets:  []Target{{Provider: "openai", Model: "gpt-4o"}},
-			Slowdown: 0.4,
-			Enabled:  true,
-		},
-		VirtualModel{
-			Source:       "openai/gpt-4o",
-			ProviderName: "openai",
-			Model:        "gpt-4o",
-			Slowdown:     0.2,
-			Enabled:      true,
-		},
-	)
-
-	got := service.ResolveSlowdown(
-		context.Background(),
-		core.NewRequestedModelSelector("slow-alias", ""),
-		core.ModelSelector{Provider: "openai", Model: "gpt-4o"},
-	)
-	if got != 0.4 {
-		t.Fatalf("ResolveSlowdown(alias) = %v, want 0.4", got)
-	}
-}
-
-func TestResolveSlowdown_AliasFallsBackToConcreteModel(t *testing.T) {
-	service := newSlowdownService(t,
-		VirtualModel{
-			Source:  "plain-alias",
-			Targets: []Target{{Provider: "openai", Model: "gpt-4o"}},
-			Enabled: true,
-		},
-		VirtualModel{
-			Source:       "openai/gpt-4o",
-			ProviderName: "openai",
-			Model:        "gpt-4o",
-			Slowdown:     0.2,
-			Enabled:      true,
-		},
-	)
-
-	got := service.ResolveSlowdown(
-		context.Background(),
-		core.NewRequestedModelSelector("plain-alias", ""),
-		core.ModelSelector{Provider: "openai", Model: "gpt-4o"},
-	)
-	if got != 0.2 {
-		t.Fatalf("ResolveSlowdown(alias target) = %v, want 0.2", got)
-	}
-}
-
-func TestResolveSlowdown_HonorsUserPathScope(t *testing.T) {
-	service := newSlowdownService(t, VirtualModel{
+func TestResolveSlowdown(t *testing.T) {
+	concrete := VirtualModel{
 		Source:       "openai/gpt-4o",
 		ProviderName: "openai",
 		Model:        "gpt-4o",
-		UserPaths:    []string{"/team/alpha"},
-		Slowdown:     0.3,
+		Slowdown:     new(0.2),
 		Enabled:      true,
-	})
-	requested := core.NewRequestedModelSelector("openai/gpt-4o", "")
-	resolved := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
-
-	matching := core.WithEffectiveUserPath(context.Background(), "/team/alpha/member")
-	if got := service.ResolveSlowdown(matching, requested, resolved); got != 0.3 {
-		t.Fatalf("ResolveSlowdown(matching path) = %v, want 0.3", got)
 	}
-	nonMatching := core.WithEffectiveUserPath(context.Background(), "/team/beta")
-	if got := service.ResolveSlowdown(nonMatching, requested, resolved); got != 0 {
-		t.Fatalf("ResolveSlowdown(non-matching path) = %v, want 0", got)
+	tests := []struct {
+		name      string
+		rows      []VirtualModel
+		requested core.RequestedModelSelector
+		resolved  core.ModelSelector
+		ctx       context.Context
+		want      float64
+	}{
+		{
+			name: "alias overrides concrete model",
+			rows: []VirtualModel{
+				{Source: "slow-alias", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Slowdown: new(0.4), Enabled: true},
+				concrete,
+			},
+			requested: core.NewRequestedModelSelector("slow-alias", ""),
+			resolved:  core.ModelSelector{Provider: "openai", Model: "gpt-4o"},
+			ctx:       context.Background(),
+			want:      0.4,
+		},
+		{
+			name: "alias inherits concrete model when omitted",
+			rows: []VirtualModel{
+				{Source: "plain-alias", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true},
+				concrete,
+			},
+			requested: core.NewRequestedModelSelector("plain-alias", ""),
+			resolved:  core.ModelSelector{Provider: "openai", Model: "gpt-4o"},
+			ctx:       context.Background(),
+			want:      0.2,
+		},
+		{
+			name: "explicit alias zero disables concrete model slowdown",
+			rows: []VirtualModel{
+				{Source: "fast-alias", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Slowdown: new(0.0), Enabled: true},
+				concrete,
+			},
+			requested: core.NewRequestedModelSelector("fast-alias", ""),
+			resolved:  core.ModelSelector{Provider: "openai", Model: "gpt-4o"},
+			ctx:       context.Background(),
+			want:      0,
+		},
+		{
+			name: "matching user path",
+			rows: []VirtualModel{{
+				Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o",
+				UserPaths: []string{"/team/alpha"}, Slowdown: new(0.3), Enabled: true,
+			}},
+			requested: core.NewRequestedModelSelector("openai/gpt-4o", ""),
+			resolved:  core.ModelSelector{Provider: "openai", Model: "gpt-4o"},
+			ctx:       core.WithEffectiveUserPath(context.Background(), "/team/alpha/member"),
+			want:      0.3,
+		},
+		{
+			name: "non-matching user path",
+			rows: []VirtualModel{{
+				Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o",
+				UserPaths: []string{"/team/alpha"}, Slowdown: new(0.3), Enabled: true,
+			}},
+			requested: core.NewRequestedModelSelector("openai/gpt-4o", ""),
+			resolved:  core.ModelSelector{Provider: "openai", Model: "gpt-4o"},
+			ctx:       core.WithEffectiveUserPath(context.Background(), "/team/beta"),
+			want:      0,
+		},
 	}
-}
 
-func TestUpsertRejectsSlowdownOutsideRange(t *testing.T) {
-	service := newSlowdownService(t)
-	for _, slowdown := range []float64{0.09, 10.01} {
-		err := service.Upsert(context.Background(), VirtualModel{
-			Source:       "openai/gpt-4o",
-			ProviderName: "openai",
-			Model:        "gpt-4o",
-			Slowdown:     slowdown,
-			Enabled:      true,
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := newSlowdownService(t, tt.rows...)
+			if got := service.ResolveSlowdown(tt.ctx, tt.requested, tt.resolved); got != tt.want {
+				t.Fatalf("ResolveSlowdown() = %v, want %v", got, tt.want)
+			}
 		})
-		if err == nil || !IsValidationError(err) {
-			t.Fatalf("Upsert(slowdown=%v) error = %v, want validation error", slowdown, err)
-		}
 	}
 }
 
-func TestUpsertRejectsProviderWideSlowdown(t *testing.T) {
-	service := newSlowdownService(t)
-	err := service.Upsert(context.Background(), VirtualModel{
-		Source:   "openai/",
-		Slowdown: 0.5,
-		Enabled:  true,
-	})
-	if err == nil || !IsValidationError(err) {
-		t.Fatalf("Upsert(provider slowdown) error = %v, want validation error", err)
+func TestUpsertValidatesSlowdown(t *testing.T) {
+	tests := []struct {
+		name        string
+		source      string
+		slowdown    *float64
+		wantInvalid bool
+	}{
+		{name: "omitted", source: "openai/gpt-4o", slowdown: nil},
+		{name: "disabled zero", source: "openai/gpt-4o", slowdown: new(0.0)},
+		{name: "minimum", source: "openai/gpt-4o", slowdown: new(MinSlowdownFactor)},
+		{name: "maximum", source: "openai/gpt-4o", slowdown: new(MaxSlowdownFactor)},
+		{name: "below minimum", source: "openai/gpt-4o", slowdown: new(0.09), wantInvalid: true},
+		{name: "above maximum", source: "openai/gpt-4o", slowdown: new(10.01), wantInvalid: true},
+		{name: "NaN", source: "openai/gpt-4o", slowdown: new(math.NaN()), wantInvalid: true},
+		{name: "positive infinity", source: "openai/gpt-4o", slowdown: new(math.Inf(1)), wantInvalid: true},
+		{name: "negative infinity", source: "openai/gpt-4o", slowdown: new(math.Inf(-1)), wantInvalid: true},
+		{name: "provider scope", source: "openai/", slowdown: new(0.5), wantInvalid: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := newSlowdownService(t)
+			err := service.Upsert(context.Background(), VirtualModel{
+				Source:   tt.source,
+				Slowdown: tt.slowdown,
+				Enabled:  true,
+			})
+			if tt.wantInvalid {
+				if err == nil || !IsValidationError(err) {
+					t.Fatalf("Upsert() error = %v, want validation error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Upsert() error = %v, want nil", err)
+			}
+		})
 	}
 }
 

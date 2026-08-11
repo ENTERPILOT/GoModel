@@ -3,6 +3,7 @@ package streaming
 import (
 	"context"
 	"io"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -54,6 +55,26 @@ func TestSlowdownStreamReadStopsOnCancellation(t *testing.T) {
 	}
 }
 
+func TestSlowdownStreamCancellationClosesBlockedUpstream(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	source := newBlockingCloseSource()
+	stream := NewSlowdownStream(ctx, source, 1, time.Now())
+	t.Cleanup(func() { _ = stream.Close() })
+
+	select {
+	case <-source.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("upstream Read did not start")
+	}
+	cancel()
+
+	select {
+	case <-source.closed:
+	case <-time.After(time.Second):
+		t.Fatal("upstream Close was not called after cancellation")
+	}
+}
+
 type timedChunkSource struct {
 	reads atomic.Int32
 }
@@ -73,3 +94,28 @@ func (s *timedChunkSource) Read(p []byte) (int, error) {
 }
 
 func (*timedChunkSource) Close() error { return nil }
+
+type blockingCloseSource struct {
+	readStarted chan struct{}
+	closed      chan struct{}
+	readOnce    sync.Once
+	closeOnce   sync.Once
+}
+
+func newBlockingCloseSource() *blockingCloseSource {
+	return &blockingCloseSource{
+		readStarted: make(chan struct{}),
+		closed:      make(chan struct{}),
+	}
+}
+
+func (s *blockingCloseSource) Read([]byte) (int, error) {
+	s.readOnce.Do(func() { close(s.readStarted) })
+	<-s.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (s *blockingCloseSource) Close() error {
+	s.closeOnce.Do(func() { close(s.closed) })
+	return nil
+}

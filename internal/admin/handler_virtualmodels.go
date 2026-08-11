@@ -27,8 +27,8 @@ type upsertVirtualModelRequest struct {
 	UserPaths       []string `json:"user_paths,omitempty"`
 	Description     string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
-	Slowdown float64 `json:"slowdown,omitempty"`
-	Enabled  *bool   `json:"enabled,omitempty"`
+	Slowdown *float64 `json:"slowdown,omitempty"`
+	Enabled  *bool    `json:"enabled,omitempty"`
 }
 
 // virtualModelTargetRequest is one load-balancing destination. Model may be a

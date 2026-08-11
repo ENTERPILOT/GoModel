@@ -214,7 +214,7 @@ export function mapRedirectView(view) {
     // Tri-state on the wire; only explicit false disables session affinity.
     session_affinity: view.session_affinity !== false,
     description: view.description || "",
-    slowdown: Number(view.slowdown || 0),
+    slowdown: view.slowdown == null ? null : Number(view.slowdown),
     enabled: view.enabled !== false,
     managed: Boolean(view.managed),
     valid: Boolean(view.valid),
@@ -243,7 +243,7 @@ export function splitVirtualModelViews(views) {
         model: view.model || "",
         user_paths: Array.isArray(view.user_paths) ? view.user_paths : [],
         description: view.description || "",
-        slowdown: Number(view.slowdown || 0),
+        slowdown: view.slowdown == null ? null : Number(view.slowdown),
         enabled: view.enabled !== false,
         managed: Boolean(view.managed),
         scope_kind: view.scope_kind || "",
@@ -834,9 +834,12 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
     description: String((form && form.description) || "").trim(),
     enabled: Boolean(form && form.enabled),
   };
-  const slowdown = Number((form && form.slowdown) || 0);
-  if (Number.isFinite(slowdown) && slowdown !== 0) {
-    payload.slowdown = slowdown;
+  const slowdownInput = form && form.slowdown;
+  if (slowdownInput !== "" && slowdownInput != null) {
+    const slowdown = Number(slowdownInput);
+    if (Number.isFinite(slowdown)) {
+      payload.slowdown = slowdown;
+    }
   }
   if (isRename) {
     // Carry the prior key so the backend moves the row instead of leaving an
@@ -879,9 +882,11 @@ export function buildAliasTogglePayload(alias) {
     user_paths: Array.isArray(alias.user_paths) ? alias.user_paths : [],
     enabled: alias.enabled === false,
   };
-  const slowdown = Number(alias.slowdown || 0);
-  if (slowdown > 0) {
-    payload.slowdown = slowdown;
+  if (alias.slowdown != null) {
+    const slowdown = Number(alias.slowdown);
+    if (Number.isFinite(slowdown)) {
+      payload.slowdown = slowdown;
+    }
   }
   const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
   if (lbTargets.length > 1) {
@@ -912,11 +917,14 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
   const existingPaths =
     existingPolicy && Array.isArray(existingPolicy.user_paths) ? existingPolicy.user_paths : [];
   const existingDescription = String((existingPolicy && existingPolicy.description) || "").trim();
-  const existingSlowdown = Number((existingPolicy && existingPolicy.slowdown) || 0);
+  const hasExistingSlowdown = Boolean(existingPolicy && existingPolicy.slowdown != null);
+  const existingSlowdown = Number(hasExistingSlowdown ? existingPolicy.slowdown : 0);
 
   const preserved = {};
   if (existingDescription) preserved.description = existingDescription;
-  if (existingSlowdown > 0) preserved.slowdown = existingSlowdown;
+  if (hasExistingSlowdown && Number.isFinite(existingSlowdown)) {
+    preserved.slowdown = existingSlowdown;
+  }
 
   let method = "PUT";
   let payload;
@@ -926,7 +934,7 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
     existingPolicy &&
     existingPaths.length === 0 &&
     !existingDescription &&
-    existingSlowdown === 0 &&
+    !hasExistingSlowdown &&
     safeAccess.default_enabled !== false
   ) {
     // Removing a path-less policy only enables the model when the default is

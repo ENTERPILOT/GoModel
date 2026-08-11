@@ -23,14 +23,14 @@ func (s *Service) ResolveSlowdown(
 	snap := s.snapshot()
 	userPath := core.UserPathFromContext(ctx)
 	if !requested.ExplicitProvider {
-		if redirect, ok := snap.findRedirect(requested.Model, userPath, true); ok && redirect.vm.Slowdown > 0 {
-			return redirect.vm.Slowdown
+		if redirect, ok := snap.findRedirect(requested.Model, userPath, true); ok && redirect.vm.Slowdown != nil {
+			return *redirect.vm.Slowdown
 		}
 	}
 
 	if policy, ok := snap.matchingPolicy(resolved.Provider, resolved.Model); ok &&
-		policy.Slowdown > 0 && userPathAllowed(userPath, policy.UserPaths) {
-		return policy.Slowdown
+		policy.Slowdown != nil && userPathAllowed(userPath, policy.UserPaths) {
+		return *policy.Slowdown
 	}
 	return 0
 }

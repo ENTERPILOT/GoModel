@@ -25,7 +25,7 @@ var sqlSchema = []string{
 		model TEXT NOT NULL DEFAULT '',
 		user_paths TEXT NOT NULL DEFAULT '[]',
 		description TEXT NOT NULL DEFAULT '',
-		slowdown DOUBLE PRECISION NOT NULL DEFAULT 0,
+		slowdown DOUBLE PRECISION DEFAULT NULL,
 		enabled ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
@@ -39,7 +39,7 @@ var sqlSchema = []string{
 // virtualModelMigrations backfill columns added after the table's first release.
 var virtualModelMigrations = []string{
 	"ALTER TABLE virtual_models ADD COLUMN session_affinity TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE virtual_models ADD COLUMN slowdown DOUBLE PRECISION NOT NULL DEFAULT 0",
+	"ALTER TABLE virtual_models ADD COLUMN slowdown DOUBLE PRECISION DEFAULT NULL",
 }
 
 const selectVirtualModelColumns = `

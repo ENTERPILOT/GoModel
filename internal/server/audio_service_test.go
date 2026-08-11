@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -31,6 +33,9 @@ type audioMockProvider struct {
 	capturedSpeech        *core.AudioSpeechRequest
 	capturedTranscription *core.AudioTranscriptionRequest
 	capturedTranslation   *core.AudioTranscriptionRequest
+	providerDelay         time.Duration
+	providerCalled        chan struct{}
+	providerCalledOnce    sync.Once
 }
 
 // ResolveModel lets the fake stand in for the Router so the service can authorize
@@ -46,6 +51,7 @@ func (m *audioMockProvider) ResolveModel(requested core.RequestedModelSelector) 
 
 func (m *audioMockProvider) CreateSpeech(_ context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
 	m.capturedSpeech = req
+	m.waitForAudioResponse()
 	if m.audioErr != nil {
 		return nil, m.audioErr
 	}
@@ -54,6 +60,7 @@ func (m *audioMockProvider) CreateSpeech(_ context.Context, req *core.AudioSpeec
 
 func (m *audioMockProvider) CreateTranscription(_ context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
 	m.capturedTranscription = req
+	m.waitForAudioResponse()
 	if m.audioErr != nil {
 		return nil, m.audioErr
 	}
@@ -62,10 +69,152 @@ func (m *audioMockProvider) CreateTranscription(_ context.Context, req *core.Aud
 
 func (m *audioMockProvider) CreateTranslation(_ context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
 	m.capturedTranslation = req
+	m.waitForAudioResponse()
 	if m.audioErr != nil {
 		return nil, m.audioErr
 	}
 	return m.translationResp, nil
+}
+
+func (m *audioMockProvider) waitForAudioResponse() {
+	if m.providerCalled != nil {
+		m.providerCalledOnce.Do(func() { close(m.providerCalled) })
+	}
+	if m.providerDelay > 0 {
+		time.Sleep(m.providerDelay)
+	}
+}
+
+type audioSlowdownResolver struct {
+	factor    float64
+	requested string
+	resolved  string
+}
+
+func (r *audioSlowdownResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	selector, err := requested.Normalize()
+	return selector, false, err
+}
+
+func (r *audioSlowdownResolver) ResolveSlowdown(_ context.Context, requested core.RequestedModelSelector, resolved core.ModelSelector) float64 {
+	r.requested = requested.RequestedQualifiedModel()
+	r.resolved = resolved.QualifiedModel()
+	return r.factor
+}
+
+func TestAudioSlowdownAppliesAfterInferenceAndHonorsCancellation(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		newContext func() (*echo.Context, *httptest.ResponseRecorder)
+		call       func(*Handler, *echo.Context) error
+		response   func(*audioMockProvider)
+	}{
+		{
+			name:  "speech",
+			model: "gpt-4o-mini-tts",
+			newContext: func() (*echo.Context, *httptest.ResponseRecorder) {
+				c, rec, _ := newSpeechRequestWithAuditEntry()
+				return c, rec
+			},
+			call: func(h *Handler, c *echo.Context) error { return h.AudioSpeech(c) },
+			response: func(p *audioMockProvider) {
+				p.speechResp = &core.AudioResponse{ContentType: "audio/mpeg", Data: []byte("audio")}
+			},
+		},
+		{
+			name:  "transcription",
+			model: "gpt-4o-transcribe",
+			newContext: func() (*echo.Context, *httptest.ResponseRecorder) {
+				c, rec, _ := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("audio"))
+				return c, rec
+			},
+			call: func(h *Handler, c *echo.Context) error { return h.AudioTranscriptions(c) },
+			response: func(p *audioMockProvider) {
+				p.transcriptionResp = &core.AudioResponse{ContentType: "application/json", Data: []byte(`{"text":"hi"}`)}
+			},
+		},
+		{
+			name:       "translation",
+			model:      "whisper-1",
+			newContext: newTranslationSlowdownTestContext,
+			call:       func(h *Handler, c *echo.Context) error { return h.AudioTranslations(c) },
+			response: func(p *audioMockProvider) {
+				p.translationResp = &core.AudioResponse{ContentType: "application/json", Data: []byte(`{"text":"hello"}`)}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+" success", func(t *testing.T) {
+			resolver := &audioSlowdownResolver{factor: 1}
+			provider := &audioMockProvider{
+				mockProvider:  &mockProvider{supportedModels: []string{tt.model}},
+				providerDelay: 15 * time.Millisecond,
+			}
+			tt.response(provider)
+			handler := newHandler(provider, nil, nil, nil, resolver, nil, nil, nil)
+			c, rec := tt.newContext()
+
+			started := time.Now()
+			if err := tt.call(handler, c); err != nil {
+				t.Fatalf("audio handler error = %v", err)
+			}
+			if elapsed := time.Since(started); elapsed < 25*time.Millisecond {
+				t.Fatalf("handler returned after %v, want provider time plus matching slowdown", elapsed)
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+			}
+			if resolver.requested != tt.model || resolver.resolved != tt.model {
+				t.Fatalf("slowdown resolver inputs = (%q, %q), want (%q, %q)", resolver.requested, resolver.resolved, tt.model, tt.model)
+			}
+		})
+
+		t.Run(tt.name+" cancellation", func(t *testing.T) {
+			resolver := &audioSlowdownResolver{factor: 10}
+			provider := &audioMockProvider{
+				mockProvider:   &mockProvider{supportedModels: []string{tt.model}},
+				providerDelay:  15 * time.Millisecond,
+				providerCalled: make(chan struct{}),
+			}
+			tt.response(provider)
+			handler := newHandler(provider, nil, nil, nil, resolver, nil, nil, nil)
+			c, _ := tt.newContext()
+			ctx, cancel := context.WithCancel(c.Request().Context())
+			c.SetRequest(c.Request().WithContext(ctx))
+
+			done := make(chan struct{})
+			go func() {
+				_ = tt.call(handler, c)
+				close(done)
+			}()
+			select {
+			case <-provider.providerCalled:
+			case <-time.After(time.Second):
+				t.Fatal("provider was not called")
+			}
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(150 * time.Millisecond):
+				t.Fatal("handler did not cancel the post-inference slowdown")
+			}
+		})
+	}
+}
+
+func newTranslationSlowdownTestContext() (*echo.Context, *httptest.ResponseRecorder) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("model", "whisper-1")
+	part, _ := w.CreateFormFile("file", "speech.mp3")
+	_, _ = part.Write([]byte("audio"))
+	_ = w.Close()
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/translations", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	return echo.New().NewContext(req, rec), rec
 }
 
 func TestAudioSpeech_HappyPath(t *testing.T) {

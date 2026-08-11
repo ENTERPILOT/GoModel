@@ -38,10 +38,11 @@ user-path restriction.
 ## Add artificial model latency
 
 Set **Slowdown** on a concrete model or redirect to add a fraction of measured
-inference time. The accepted range is `0.1` to `10`; for example, `0.5` adds
-50%, so a response that takes 2 seconds upstream is returned after about 3
-seconds. Leaving the field empty disables slowdown. Delays honor request
-cancellation.
+inference time. Active values range from `0.1` to `10`; for example, `0.5`
+adds 50%, so a response that takes 2 seconds upstream is returned after about
+3 seconds. Set `0` to explicitly disable slowdown, including slowdown inherited
+from a concrete model. Leaving the field empty leaves the setting unspecified.
+Delays honor request cancellation.
 
 For Chat Completions and Responses API SSE streams, GoModel drains the upstream
 in the background and releases each read chunk on the scaled timeline. This
@@ -51,8 +52,8 @@ substantial memory. Realtime WebSocket sessions are not slowed.
 
 When an alias and its concrete target both have a slowdown, the alias value
 wins. An alias without its own value inherits the selected target model's
-slowdown. This also applies to load-balanced virtual models after a target is
-selected.
+slowdown; set the alias to `0` to override that inheritance. This also applies
+to load-balanced virtual models after a target is selected.
 
 The rest of this page covers redirects.
 
@@ -164,7 +165,8 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 `strategy` (`round_robin` or `cost`), `session_affinity` (default `true`; see
 [Session Keeping](/features/session-keeping)), `user_paths`, `description`,
-`slowdown` (an extra-time factor from `0.1` to `10`), and `enabled`.
+`slowdown` (`0` disables inherited slowdown; active factors range from `0.1` to
+`10`), and `enabled`.
 Leave the targets empty to declare an access policy on the `source` selector. An
 invalid declaration (unknown strategy, missing or self-referential target, or a
 target `provider` that matches no configured provider — a typo) fails startup

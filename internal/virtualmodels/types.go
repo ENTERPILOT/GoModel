@@ -47,9 +47,10 @@ type VirtualModel struct {
 	Model        string   `json:"model,omitempty" bson:"model,omitempty"`
 	UserPaths    []string `json:"user_paths,omitempty" bson:"user_paths,omitempty"`
 	Description  string   `json:"description,omitempty" bson:"description,omitempty"`
-	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
-	Slowdown float64 `json:"slowdown,omitempty" bson:"slowdown,omitempty"`
-	Enabled  bool    `json:"enabled" bson:"enabled"`
+	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it. Nil
+	// leaves the setting unspecified so an alias can inherit its target model.
+	Slowdown *float64 `json:"slowdown,omitempty" bson:"slowdown,omitempty"`
+	Enabled  bool     `json:"enabled" bson:"enabled"`
 
 	// SessionAffinity keeps requests of one detected session on the target that
 	// served it before, while that target stays available. Tri-state: nil means
@@ -146,7 +147,7 @@ type View struct {
 	UserPaths       []string `json:"user_paths,omitempty"`
 	Description     string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
-	Slowdown      float64   `json:"slowdown,omitempty"`
+	Slowdown      *float64  `json:"slowdown,omitempty"`
 	Enabled       bool      `json:"enabled"`
 	Managed       bool      `json:"managed,omitempty"`
 	ResolvedModel string    `json:"resolved_model,omitempty"`

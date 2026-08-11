@@ -97,7 +97,7 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	vm.Source = parts.Selector
 	vm.ProviderName = parts.ProviderName
 	vm.Model = parts.Model
-	if vm.Slowdown > 0 && parts.Model == "" {
+	if vm.Slowdown != nil && parts.Model == "" {
 		return VirtualModel{}, newValidationError("slowdown can only be configured for a model or redirect", nil)
 	}
 
@@ -122,7 +122,7 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	vm.Source = parts.Selector
 	vm.ProviderName = parts.ProviderName
 	vm.Model = parts.Model
-	if vm.Slowdown > 0 && parts.Model == "" {
+	if vm.Slowdown != nil && parts.Model == "" {
 		return VirtualModel{}, newValidationError("slowdown can only be configured for a model or redirect", nil)
 	}
 
@@ -134,10 +134,11 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	return vm, nil
 }
 
-func validateSlowdown(factor float64) error {
-	if factor == 0 {
+func validateSlowdown(configured *float64) error {
+	if configured == nil || *configured == 0 {
 		return nil
 	}
+	factor := *configured
 	if math.IsNaN(factor) || math.IsInf(factor, 0) || factor < MinSlowdownFactor || factor > MaxSlowdownFactor {
 		return newValidationError(fmt.Sprintf("slowdown must be 0 (disabled) or between %.1f and %.0f", MinSlowdownFactor, MaxSlowdownFactor), nil)
 	}

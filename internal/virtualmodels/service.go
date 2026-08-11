@@ -499,7 +499,7 @@ func (s *Service) policyIsRedundant(policy VirtualModel, fallbackRows []VirtualM
 // policyIsNoop reports whether an otherwise empty policy changes effective
 // access compared with the snapshot that would remain without that policy.
 func policyIsNoop(policy VirtualModel, fallback snapshot) bool {
-	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown > 0 {
+	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil {
 		return false
 	}
 
