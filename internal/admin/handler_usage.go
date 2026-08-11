@@ -23,6 +23,11 @@ const maxUsageLogLimit = 200
 // reports the same limit an enabled reader would.
 const defaultUsageLogLimit = 50
 
+const (
+	defaultSessionUsageLimit = 50
+	maxSessionUsageLimit     = 200
+)
+
 // UsageSummary handles GET /admin/usage/summary
 //
 // @Summary      Get usage summary
@@ -35,6 +40,7 @@ const defaultUsageLogLimit = 50
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {object}  usage.UsageSummary
@@ -103,6 +109,7 @@ func usageSliceResponse[T any](
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.DailyUsage
@@ -127,6 +134,7 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.ModelUsage
@@ -155,6 +163,7 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.UserPathUsage
@@ -186,6 +195,7 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.LabelUsage
@@ -202,6 +212,72 @@ func (h *Handler) UsageByLabel(c *echo.Context) error {
 	})
 }
 
+// UsageBySession handles GET /admin/usage/sessions
+//
+// @Summary      Get usage breakdown by detected session
+// @Description  Returns a bounded page of request, token, and cost aggregates
+// @Description  for detected, user-path-scoped sessions. Requests and tokens
+// @Description  include local-cache hits; costs represent provider spend only.
+// @Description  Usage without a detected session is omitted.
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Param        days        query     int     false  "Number of days (default 30)"
+// @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
+// @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
+// @Param        model       query     string  false  "Filter by exact model name"
+// @Param        provider    query     string  false  "Filter by provider name or provider type"
+// @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        limit       query     int     false  "Page size (default 50, max 200)"
+// @Param        offset      query     int     false  "Offset for pagination"
+// @Success      200  {object}  usage.SessionUsageResult
+// @Failure      400  {object}  core.GatewayError
+// @Failure      401  {object}  core.GatewayError
+// @Router       /admin/usage/sessions [get]
+func (h *Handler) UsageBySession(c *echo.Context) error {
+	baseParams, err := parseUsageParams(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+	params := usage.SessionUsageParams{UsageQueryParams: baseParams}
+	if raw := c.QueryParam("limit"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit <= 0 || limit > maxSessionUsageLimit {
+			return handleError(c, core.NewInvalidRequestError("invalid limit parameter: limit must be between 1 and 200", nil))
+		}
+		params.Limit = limit
+	}
+	if raw := c.QueryParam("offset"); raw != "" {
+		offset, err := strconv.Atoi(raw)
+		if err != nil || offset < 0 {
+			return handleError(c, core.NewInvalidRequestError("invalid offset, expected non-negative integer", nil))
+		}
+		params.Offset = offset
+	}
+	if params.Limit == 0 {
+		params.Limit = defaultSessionUsageLimit
+	}
+
+	if h.usageReader == nil {
+		return c.JSON(http.StatusOK, usage.SessionUsageResult{
+			Entries: []usage.SessionUsage{}, Limit: params.Limit, Offset: params.Offset,
+		})
+	}
+	result, err := h.usageReader.GetUsageBySession(c.Request().Context(), params)
+	if err != nil {
+		return handleError(c, err)
+	}
+	if result == nil {
+		result = &usage.SessionUsageResult{Limit: params.Limit, Offset: params.Offset}
+	}
+	if result.Entries == nil {
+		result.Entries = []usage.SessionUsage{}
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
 // UsageLog handles GET /admin/usage/log
 //
 // @Summary      Get paginated usage log entries
@@ -216,7 +292,8 @@ func (h *Handler) UsageByLabel(c *echo.Context) error {
 // @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
-// @Param        search      query     string  false  "Search across model, provider, request_id, provider_id"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        search      query     string  false  "Search across model, provider, request_id, provider_id, session_id"
 // @Param        limit       query     int     false  "Page size (default 50, max 200)"
 // @Param        offset      query     int     false  "Offset for pagination"
 // @Success      200  {object}  usage.UsageLogResult
@@ -350,6 +427,7 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (cache overview always uses cached mode)"
 // @Success      200  {object}  usage.CacheOverview

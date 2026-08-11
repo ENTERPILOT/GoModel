@@ -3,9 +3,39 @@ package usage
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestPostgreSQLSessionUsageQueriesArePagedAndExcludeCachedCost(t *testing.T) {
+	countQuery, dataQuery, args, dataArgs, limit, offset, err := postgresqlSessionUsageQueries(SessionUsageParams{
+		UsageQueryParams: UsageQueryParams{SessionID: "scoped-session", CacheMode: CacheModeUncached},
+		Limit:            25,
+		Offset:           10,
+	})
+	if err != nil {
+		t.Fatalf("postgresqlSessionUsageQueries: %v", err)
+	}
+	if limit != 25 || offset != 10 {
+		t.Fatalf("pagination = %d/%d, want 25/10", limit, offset)
+	}
+	if !strings.Contains(countQuery, "GROUP BY session_id") || strings.Contains(countQuery, "cache_type") {
+		t.Fatalf("count query has unexpected scope: %s", countQuery)
+	}
+	for _, fragment := range []string{
+		"session_id = $1",
+		"COUNT(CASE WHEN (cache_type IS NULL OR cache_type = '') THEN 1 END)",
+		"LIMIT $2 OFFSET $3",
+	} {
+		if !strings.Contains(dataQuery, fragment) {
+			t.Fatalf("data query missing %q: %s", fragment, dataQuery)
+		}
+	}
+	if !reflect.DeepEqual(args, []any{"scoped-session"}) || !reflect.DeepEqual(dataArgs, []any{"scoped-session", 25, 10}) {
+		t.Fatalf("args = %#v / %#v", args, dataArgs)
+	}
+}
 
 // fakePgxRows feeds scanPostgreSQLUsageLogEntries rows whose values are laid
 // out in the reader's SELECT column order. Scan assigns via reflection and
@@ -42,16 +72,16 @@ func (f *fakePgxRows) Scan(dest ...any) error {
 // Covers the row-scanning half of the PostgreSQL usage log queries, pinning
 // the rewrite-savings columns appended to the SELECT list: id, request_id,
 // provider_id, timestamp, model, provider, provider_name, endpoint, user_path,
-// cache_type, labels, input_tokens, output_tokens, total_tokens, input_cost,
+// session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, input_cost,
 // output_cost, total_cost, cost_source, raw_data, costs_calculation_caveat,
 // rewrite_tokens_saved, rewrite_cost_saved.
 func TestScanPostgreSQLUsageLogEntries_CarriesRewriteSavings(t *testing.T) {
 	cost := 0.0375
 	ts := time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC)
 	rows := &fakePgxRows{rows: [][]any{
-		{"with-savings", "req-saved", "provider-1", ts, "gpt-5", "openai", nil, "/v1/chat/completions", nil, nil, nil,
+		{"with-savings", "req-saved", "provider-1", ts, "gpt-5", "openai", nil, "/v1/chat/completions", nil, nil, nil, nil,
 			100, 10, 110, nil, nil, nil, "", nil, "", int64(89), &cost},
-		{"without-savings", "req-plain", "provider-2", ts, "gpt-5", "openai", nil, "/v1/chat/completions", nil, nil, nil,
+		{"without-savings", "req-plain", "provider-2", ts, "gpt-5", "openai", nil, "/v1/chat/completions", nil, nil, nil, nil,
 			50, 10, 60, nil, nil, nil, "", nil, "", int64(0), nil},
 	}}
 

@@ -26,6 +26,16 @@ export function emptyUsageLog() {
   return { entries: [], total: 0, limit: 50, offset: 0 };
 }
 
+export function emptySessionUsage() {
+  return { entries: [], total: 0, limit: 50, offset: 0 };
+}
+
+export function shortSessionID(value) {
+  const sessionID = String(value || "").trim();
+  if (sessionID.length <= 26) return sessionID || "-";
+  return sessionID.slice(0, 15) + "…" + sessionID.slice(-8);
+}
+
 // --- Query building ---
 
 // Page-level data filters, applied to every usage-page request so charts,
@@ -38,6 +48,7 @@ export function usageFilterQueryStr(filters, excludeFacet) {
     ["provider", filters && filters.provider],
     ["label", filters && filters.label],
     ["user_path", filters && filters.user_path],
+    ["session_id", filters && filters.session_id],
   ];
   let qs = "";
   for (const [facet, value] of pairs) {
@@ -53,6 +64,10 @@ export function usageLogQueryParams({ limit, offset, hideCached, search }) {
   qs += "&cache_mode=" + (hideCached ? "uncached" : "all");
   if (search) qs += "&search=" + encodeURIComponent(search);
   return qs;
+}
+
+export function sessionUsageQueryParams({ limit, offset }) {
+  return "&limit=" + limit + "&offset=" + offset;
 }
 
 // Sorted, deduplicated choices for one facet dropdown. The active selection

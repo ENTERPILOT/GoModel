@@ -27,6 +27,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/usage/models", h.UsageByModel)
 	g.GET("/usage/user-paths", h.UsageByUserPath)
 	g.GET("/usage/labels", h.UsageByLabel)
+	g.GET("/usage/sessions", h.UsageBySession)
 	g.GET("/usage/log", h.UsageLog)
 	g.GET("/usage/throughput", h.TokenThroughput)
 	g.POST("/usage/recalculate-pricing", h.RecalculateUsagePricing)

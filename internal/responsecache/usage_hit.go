@@ -56,6 +56,7 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 		}
 		entry.ProviderName = providerName
 		entry.UserPath = core.UserPathFromContext(ctx)
+		entry.SessionID = core.SessionIDFromContext(ctx)
 		entry.Labels = core.RequestLabelsFromContext(ctx)
 		logger.Write(entry)
 	}

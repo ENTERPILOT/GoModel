@@ -15,6 +15,7 @@
     providerDisplayValue,
   } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
+  import SessionIDChip from "./SessionIDChip.svelte";
   import {
     cachedCostTitle,
     costSourceTooltip,
@@ -68,8 +69,8 @@
   <div class="usage-log-toolbar">
     <div class="usage-filter-row usage-filter-row-search">
       <FilterInput
-        placeholder="Search by request ID, model, provider..."
-        label="Search by request ID, model, provider"
+        placeholder="Search by request ID, session, model, provider..."
+        label="Search by request ID, session, model, provider"
         bind:value={usagePage.usageLogSearch}
         oninput={onSearchInput}
       />
@@ -94,6 +95,7 @@
             <th>Provider</th>
             <th>Model</th>
             <th>User Path</th>
+            <th>Session</th>
             {#if hasLabels}
               <th>Labels</th>
             {/if}
@@ -118,6 +120,18 @@
               </td>
               <td class="mono font-size-md">{entry.model}</td>
               <td class="mono font-size-md">{entry.user_path || "-"}</td>
+              <td>
+                {#if entry.session_id}
+                  <SessionIDChip
+                    sessionID={entry.session_id}
+                    active={usagePage.usageFilterSession === entry.session_id}
+                    compact
+                    onfilter={(sessionID) => usagePage.filterBySession(sessionID)}
+                  />
+                {:else}
+                  <span>-</span>
+                {/if}
+              </td>
               {#if hasLabels}
                 <td class="usage-log-labels-cell">
                   {@render labelChips(entry)}

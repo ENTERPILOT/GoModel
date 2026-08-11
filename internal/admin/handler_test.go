@@ -28,11 +28,13 @@ type mockUsageReader struct {
 	modelUsage           []usage.ModelUsage
 	userPathUsage        []usage.UserPathUsage
 	labelUsage           []usage.LabelUsage
+	sessionUsage         *usage.SessionUsageResult
 	usageLog             *usage.UsageLogResult
 	usageByRequestID     map[string][]usage.UsageLogEntry
 	cacheOverview        *usage.CacheOverview
 	throughput           *usage.TokenThroughput
 	lastUsageLog         usage.UsageLogParams
+	lastSessionUsage     usage.SessionUsageParams
 	lastRequestIDs       []string
 	lastCacheOverview    usage.UsageQueryParams
 	lastThroughputGran   usage.ThroughputGranularity
@@ -43,6 +45,7 @@ type mockUsageReader struct {
 	modelUsageErr        error
 	userPathUsageErr     error
 	labelUsageErr        error
+	sessionUsageErr      error
 	usageLogErr          error
 	usageByRequestErr    error
 	cacheErr             error
@@ -110,6 +113,14 @@ func (m *mockUsageReader) GetUsageByLabel(_ context.Context, _ usage.UsageQueryP
 		return nil, m.labelUsageErr
 	}
 	return m.labelUsage, nil
+}
+
+func (m *mockUsageReader) GetUsageBySession(_ context.Context, params usage.SessionUsageParams) (*usage.SessionUsageResult, error) {
+	m.lastSessionUsage = params
+	if m.sessionUsageErr != nil {
+		return nil, m.sessionUsageErr
+	}
+	return m.sessionUsage, nil
 }
 
 func (m *mockUsageReader) GetUsageLog(_ context.Context, params usage.UsageLogParams) (*usage.UsageLogResult, error) {
@@ -927,7 +938,7 @@ func TestUsageLog_WithFilters(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&label=team-alpha&search=test&limit=10&offset=5")
+	c, rec := newHandlerContext("/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&label=team-alpha&session_id=scoped-session&search=test&limit=10&offset=5")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -940,6 +951,54 @@ func TestUsageLog_WithFilters(t *testing.T) {
 	}
 	if reader.lastUsageLog.Label != "team-alpha" {
 		t.Errorf("expected label team-alpha, got %q", reader.lastUsageLog.Label)
+	}
+	if reader.lastUsageLog.SessionID != "scoped-session" {
+		t.Errorf("expected session_id scoped-session, got %q", reader.lastUsageLog.SessionID)
+	}
+}
+
+func TestUsageBySession_Success(t *testing.T) {
+	reader := &mockUsageReader{sessionUsage: &usage.SessionUsageResult{
+		Entries: []usage.SessionUsage{{
+			SessionID: "scoped-session", UserPath: "/team", Requests: 2, TotalTokens: 42,
+		}},
+		Total: 1, Limit: 25, Offset: 10,
+	}}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/usage/sessions?limit=25&offset=10&session_id=scoped-session")
+
+	if err := h.UsageBySession(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var result usage.SessionUsageResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if result.Total != 1 || result.Limit != 25 || result.Offset != 10 || len(result.Entries) != 1 || result.Entries[0].SessionID != "scoped-session" || result.Entries[0].Requests != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	if reader.lastSessionUsage.Limit != 25 || reader.lastSessionUsage.Offset != 10 || reader.lastSessionUsage.SessionID != "scoped-session" {
+		t.Fatalf("params = %+v", reader.lastSessionUsage)
+	}
+}
+
+func TestUsageBySessionRejectsInvalidPagination(t *testing.T) {
+	for _, path := range []string{
+		"/admin/usage/sessions?limit=0",
+		"/admin/usage/sessions?limit=201",
+		"/admin/usage/sessions?offset=-1",
+	} {
+		h := NewHandler(&mockUsageReader{}, nil)
+		c, rec := newHandlerContext(path)
+		if err := h.UsageBySession(c); err != nil {
+			t.Fatalf("%s: unexpected handler error: %v", path, err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400", path, rec.Code)
+		}
 	}
 }
 

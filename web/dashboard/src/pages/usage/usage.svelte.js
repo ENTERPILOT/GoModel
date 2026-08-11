@@ -1,5 +1,5 @@
 // Usage page state: page-level facet filters, filtered summaries backing the
-// stat cards, per-model / per-user-path / per-label breakdowns, and the
+// stat cards, per-model / per-user-path / per-label / per-session breakdowns, and the
 // request log. The shared window comes from the dateRange store and the
 // shared cache overview lives in usageData (this page passes its filter
 // query through fetchCacheOverview).
@@ -14,7 +14,9 @@ import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
 import {
   emptyUsageLog,
   emptyUsagePageSummary,
+  emptySessionUsage,
   facetOptionList,
+  sessionUsageQueryParams,
   usageFilterQueryStr,
   usageLogQueryParams,
 } from "./usage-helpers.js";
@@ -50,6 +52,12 @@ class UsagePageState {
   set usageFilterUserPath(value) {
     liveLogs.usageFilterUserPath = value;
   }
+  get usageFilterSession() {
+    return liveLogs.usageFilterSession;
+  }
+  set usageFilterSession(value) {
+    liveLogs.usageFilterSession = value;
+  }
   usageFacetOptions = $state({ models: [], providers: [], labels: [] });
 
   // Filtered summaries backing the stat cards, fetched in both cache modes:
@@ -62,6 +70,7 @@ class UsagePageState {
   modelUsage = $state([]);
   userPathUsage = $state([]);
   labelUsage = $state([]);
+  sessionUsage = $state(emptySessionUsage());
 
   // The request log is backed by liveLogs.usageLog — the live-merge source of
   // truth. Fetched pages are written into it and usage.* stream events merge
@@ -88,11 +97,13 @@ class UsagePageState {
   modelUsageView = $state("chart");
   userPathUsageView = $state("chart");
   labelUsageView = $state("chart");
+  sessionUsageView = $state("table");
 
   summaryLoading = $state(false);
   modelUsageLoading = $state(false);
   userPathUsageLoading = $state(false);
   labelUsageLoading = $state(false);
+  sessionUsageLoading = $state(false);
   usageLogLoading = $state(false);
 
   #controllers = {};
@@ -117,6 +128,7 @@ class UsagePageState {
         provider: this.usageFilterProvider,
         label: this.usageFilterLabel,
         user_path: this.usageFilterUserPath,
+        session_id: this.usageFilterSession,
       },
       excludeFacet,
     );
@@ -133,6 +145,22 @@ class UsagePageState {
     this.onUsageFilterChanged();
   }
 
+  filterBySession(sessionID) {
+    this.usageFilterModel = "";
+    this.usageFilterProvider = "";
+    this.usageFilterLabel = "";
+    this.usageFilterUserPath = "";
+    this.usageFilterSession = String(sessionID || "").trim();
+    this.usageLogSearch = "";
+    this.usageLog.offset = 0;
+    this.sessionUsage.offset = 0;
+    if (router.page === "usage") {
+      this.fetchUsagePage();
+      return;
+    }
+    router.navigate("usage");
+  }
+
   usageLabelChipTitle(label) {
     if (this.usageFilterLabel === label) return "Clear label filter";
     return 'Filter usage by "' + label + '"';
@@ -147,6 +175,7 @@ class UsagePageState {
     if (target === "model") this.modelUsageView = view;
     if (target === "userPath") this.userPathUsageView = view;
     if (target === "label") this.labelUsageView = view;
+    if (target === "session") this.sessionUsageView = view;
   }
 
   usageFilterModelOptions() {
@@ -170,6 +199,7 @@ class UsagePageState {
       this.fetchModelUsage(),
       this.fetchUserPathUsage(),
       this.fetchLabelUsage(),
+      this.fetchSessionUsage(true),
       this.fetchUsageLog(true),
     ];
     if (usageData.cacheAnalyticsEnabled()) {
@@ -320,6 +350,47 @@ class UsagePageState {
       (rows) => (this.labelUsage = rows),
       (v) => (this.labelUsageLoading = v),
     );
+  }
+
+  async fetchSessionUsage(resetOffset) {
+    const controller = this.#startRequest("sessionUsage");
+    this.sessionUsageLoading = true;
+    try {
+      if (resetOffset) this.sessionUsage.offset = 0;
+      let qs = dateRange.queryStr() + this.filterQueryStr();
+      qs += sessionUsageQueryParams(this.sessionUsage);
+      const result = await getJSON("/admin/usage/sessions?" + qs, {
+        label: "usage sessions",
+        signal: controller.signal,
+      });
+      if (result.stale || controller.signal.aborted) return;
+      if (!result.ok || !result.data || typeof result.data !== "object") {
+        this.sessionUsage = emptySessionUsage();
+        return;
+      }
+      const payload = result.data;
+      payload.entries = Array.isArray(payload.entries) ? payload.entries : [];
+      this.sessionUsage = payload;
+    } catch (e) {
+      if (isAbortError(e)) return;
+      console.error("Failed to fetch usage sessions:", e);
+      this.sessionUsage = emptySessionUsage();
+    } finally {
+      this.#clearRequest("sessionUsage", controller);
+      if (this.#controllers["sessionUsage"] === null) this.sessionUsageLoading = false;
+    }
+  }
+
+  sessionUsageNextPage() {
+    if (this.sessionUsage.offset + this.sessionUsage.limit >= this.sessionUsage.total) return;
+    this.sessionUsage.offset += this.sessionUsage.limit;
+    this.fetchSessionUsage(false);
+  }
+
+  sessionUsagePrevPage() {
+    if (this.sessionUsage.offset <= 0) return;
+    this.sessionUsage.offset = Math.max(0, this.sessionUsage.offset - this.sessionUsage.limit);
+    this.fetchSessionUsage(false);
   }
 
   async fetchUsageLog(resetOffset) {

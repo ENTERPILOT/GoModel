@@ -1,11 +1,55 @@
 package usage
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
+
+func TestMongoSessionUsagePipelineIsPagedAndExcludesCachedCost(t *testing.T) {
+	pipeline, limit, offset, err := mongoSessionUsagePipeline(SessionUsageParams{
+		UsageQueryParams: UsageQueryParams{SessionID: "scoped-session", CacheMode: CacheModeUncached},
+		Limit:            12,
+		Offset:           7,
+	})
+	if err != nil {
+		t.Fatalf("mongoSessionUsagePipeline: %v", err)
+	}
+	if limit != 12 || offset != 7 {
+		t.Fatalf("pagination = %d/%d, want 12/7", limit, offset)
+	}
+	if len(pipeline) != 4 {
+		t.Fatalf("pipeline stages = %d, want 4: %#v", len(pipeline), pipeline)
+	}
+	match := fmt.Sprint(pipeline[0])
+	if !strings.Contains(match, "scoped-session") || strings.Contains(match, "cache_type") {
+		t.Fatalf("match stage has unexpected scope: %s", match)
+	}
+	group := fmt.Sprint(pipeline[2])
+	for _, fragment := range []string{"provider_requests", CacheTypeExact, CacheTypeSemantic, "total_cost"} {
+		if !strings.Contains(group, fragment) {
+			t.Fatalf("group stage missing %q: %s", fragment, group)
+		}
+	}
+	facet := fmt.Sprint(pipeline[3])
+	for _, fragment := range []string{"$facet", `"$skip":{"$numberInt":"7"}`, `"$limit":{"$numberInt":"12"}`, `"$count":"count"`} {
+		if !strings.Contains(facet, fragment) {
+			t.Fatalf("facet stage missing %q: %s", fragment, facet)
+		}
+	}
+}
+
+func TestSessionCostPtrUsesZeroForCacheOnlySession(t *testing.T) {
+	if got := sessionCostPtr(0, 0, 123); got == nil || *got != 0 {
+		t.Fatalf("cache-only session cost = %v, want 0", got)
+	}
+	if got := sessionCostPtr(1, 0, 0); got != nil {
+		t.Fatalf("unpriced provider session cost = %v, want nil", got)
+	}
+}
 
 func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 	got, err := mongoUsageLogMatchFilters(UsageLogParams{
@@ -31,6 +75,7 @@ func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 			bson.D{{Key: "provider_name", Value: regex}},
 			bson.D{{Key: "request_id", Value: regex}},
 			bson.D{{Key: "provider_id", Value: regex}},
+			bson.D{{Key: "session_id", Value: regex}},
 		}}},
 	}}}
 
@@ -103,6 +148,7 @@ func TestMongoUsageLogMatchFiltersEscapesSearchRegex(t *testing.T) {
 		bson.D{{Key: "provider_name", Value: regex}},
 		bson.D{{Key: "request_id", Value: regex}},
 		bson.D{{Key: "provider_id", Value: regex}},
+		bson.D{{Key: "session_id", Value: regex}},
 	}}}
 
 	if !reflect.DeepEqual(got, want) {

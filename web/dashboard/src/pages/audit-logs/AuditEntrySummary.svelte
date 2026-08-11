@@ -11,10 +11,10 @@
     formatDurationNs,
     statusCodeClass,
   } from "./audit-logic.js";
-  import { ChevronDown, ChevronLeft, ChevronRight } from "lucide";
+  import { ChartNoAxesColumnIncreasing, ChevronDown, ChevronLeft, ChevronRight } from "lucide";
 
   // `thread` marks a session-thread head row (grouped mode):
-  // { count, expanded, ontoggle }. `expanded`/`onactivate` wire the
+  // { count, expanded, ontoggle, onusage }. `expanded`/`onactivate` wire the
   // Svelte-controlled row expansion: the click is intercepted (the parent
   // <details> stays open so the close can animate) and the state lives in
   // auditList.
@@ -47,6 +47,12 @@
     event.stopPropagation();
     event.preventDefault();
     thread.ontoggle();
+  }
+
+  function openThreadUsage(event) {
+    event.stopPropagation();
+    event.preventDefault();
+    thread.onusage?.();
   }
 
   function openConversation(event) {
@@ -87,6 +93,15 @@
           class="audit-thread-expander-svg"
         />
         <span class="audit-thread-count mono">{thread.count}</span>
+      </button>
+      <button
+        type="button"
+        class="audit-thread-usage"
+        title="View total usage for this session"
+        aria-label="View total usage for this session"
+        onclick={openThreadUsage}
+      >
+        <Icon icon={ChartNoAxesColumnIncreasing} class="audit-thread-usage-svg" />
       </button>
     {/if}
     <span
@@ -229,6 +244,31 @@
   .audit-thread-count {
     font-size: 11px;
     font-weight: 600;
+  }
+
+  .audit-thread-usage {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+    color: var(--accent-strong, var(--accent));
+    cursor: pointer;
+  }
+
+  .audit-thread-usage:hover {
+    background: color-mix(in srgb, var(--accent) 20%, var(--bg));
+    border-color: var(--accent);
+  }
+
+  .audit-thread-usage :global(.audit-thread-usage-svg) {
+    width: 14px;
+    height: 14px;
   }
 
   .audit-conversation-trigger {

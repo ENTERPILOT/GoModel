@@ -2,6 +2,7 @@
   // Metadata badge strip under an expanded audit entry.
   import { providerDisplayValue, qualifiedResolvedModelDisplay } from "$lib/utils/format.js";
   import { workflowFailoverTarget } from "./audit-logic.js";
+  import { usagePage } from "../usage/usage.svelte.js";
 
   let { entry } = $props();
 
@@ -12,6 +13,7 @@
       { key: "provider", text: providerDisplayValue(entry) || "-" },
       { key: "model", text: entry.requested_model || entry.model || "-", mono: true },
       { key: "user_path", text: entry.user_path, mono: true },
+      { key: "session_id", text: entry.session_id && "session: " + entry.session_id, mono: true },
       { key: "request_id", text: "request_id: " + (entry.request_id || "-"), mono: true },
       { key: "ip", text: entry.client_ip && "ip: " + entry.client_ip, mono: true },
       {
@@ -43,9 +45,18 @@
   <span class="audit-entry-metadata-label">Metadata:</span>
   <div class="audit-entry-context">
     {#each badges as badge (badge.key)}
-      <span class={["provider-badge", badge.class, { mono: badge.mono }]}
-        >{badge.text}</span
-      >
+      {#if badge.key === "session_id"}
+        <button
+          type="button"
+          class="provider-badge audit-session-usage-link mono"
+          title="View total usage for this session"
+          onclick={() => usagePage.filterBySession(entry.session_id)}
+        >{badge.text}</button>
+      {:else}
+        <span class={["provider-badge", badge.class, { mono: badge.mono }]}
+          >{badge.text}</span
+        >
+      {/if}
     {/each}
   </div>
 </div>
@@ -80,6 +91,18 @@
     background: color-mix(in srgb, var(--accent) 14%, var(--bg));
     border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
     color: var(--accent-strong, var(--accent));
+  }
+
+  .audit-session-usage-link {
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+    color: var(--accent-strong, var(--accent));
+    cursor: pointer;
+  }
+
+  .audit-session-usage-link:hover {
+    background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+    border-color: var(--accent);
   }
 
   @media (max-width: 768px) {

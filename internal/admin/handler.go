@@ -460,6 +460,7 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	params.Model = strings.TrimSpace(c.QueryParam("model"))
 	params.Provider = strings.TrimSpace(c.QueryParam("provider"))
 	params.Label = strings.TrimSpace(c.QueryParam("label"))
+	params.SessionID = strings.TrimSpace(c.QueryParam("session_id"))
 
 	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
 	if err != nil {

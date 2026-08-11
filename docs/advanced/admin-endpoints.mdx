@@ -208,6 +208,51 @@ The `date` field in the response changes format based on the interval: `YYYY-MM-
 
 Returns an empty array if usage tracking is disabled or no data exists for the period.
 
+### GET /admin/usage/sessions
+
+Returns a bounded page of usage grouped by detected, user-path-scoped session,
+ordered by latest session activity. Rows without a detected session are
+omitted.
+
+Request and token totals include local response-cache hits. Cost totals include
+provider-bound requests only, so avoided cache cost is not reported as spend.
+
+**Query parameters:**
+
+| Parameter    | Type   | Description                                      | Default |
+| ------------ | ------ | ------------------------------------------------ | ------- |
+| `days`       | int    | Number of days                                   | `30`    |
+| `start_date` | string | Start date (`YYYY-MM-DD`)                        | —       |
+| `end_date`   | string | End date (`YYYY-MM-DD`)                          | —       |
+| `session_id` | string | Exact detected session id                        | —       |
+| `user_path`  | string | Tracked user-path subtree                        | —       |
+| `model`      | string | Exact model name                                 | —       |
+| `provider`   | string | Provider name or type                            | —       |
+| `label`      | string | Exact request label                              | —       |
+| `limit`      | int    | Page size, capped at 200                          | `50`    |
+| `offset`     | int    | Pagination offset                                | `0`     |
+
+```json
+{
+  "entries": [
+    {
+      "session_id": "scoped-0123456789abcdef0123456789abcdef",
+      "user_path": "/team/alpha",
+      "requests": 8,
+      "input_tokens": 24000,
+      "output_tokens": 4100,
+      "total_tokens": 28100,
+      "input_cost": 0.42,
+      "output_cost": 0.16,
+      "total_cost": 0.58
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
 ### GET /admin/audit/stats
 
 Returns time-bucketed request counts grouped into `2xx`/`4xx`/`5xx` status

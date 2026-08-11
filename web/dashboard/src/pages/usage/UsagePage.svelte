@@ -65,6 +65,11 @@
     <UsageBreakdownChart kind="label" />
   </div>
 
+  <!-- Session cardinality and identifiers need the full page width. -->
+  <div class="usage-session-breakdown-wrap">
+    <UsageBreakdownChart kind="session" />
+  </div>
+
   <UsageLog />
 </div>
 
@@ -92,6 +97,15 @@
   .usage-charts-grid :global(.model-chart-section) {
     flex: 1 1 calc(50% - 24px);
     min-width: 420px;
+    margin-bottom: 0;
+  }
+
+  .usage-session-breakdown-wrap {
+    margin-bottom: 24px;
+  }
+
+  .usage-session-breakdown-wrap :global(.session-usage-breakdown) {
+    width: 100%;
     margin-bottom: 0;
   }
 

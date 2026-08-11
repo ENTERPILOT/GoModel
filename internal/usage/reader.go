@@ -11,7 +11,7 @@ import (
 )
 
 // UsageQueryParams specifies the query parameters for usage data retrieval.
-// The optional filters (UserPath, Model, Provider, Label) apply uniformly to
+// The optional filters (UserPath, SessionID, Model, Provider, Label) apply uniformly to
 // every reader method, so summaries, breakdowns, and the request log all
 // describe the same filtered slice of traffic.
 type UsageQueryParams struct {
@@ -20,6 +20,7 @@ type UsageQueryParams struct {
 	Interval  string    // "daily", "weekly", "monthly", "yearly"
 	TimeZone  string    // IANA timezone used for day-boundary interpretation and grouping
 	UserPath  string    // subtree filter on tracked user path
+	SessionID string    // filter by exact detected session id (optional)
 	Model     string    // filter by exact model name (optional)
 	Provider  string    // filter by provider name or provider type (optional)
 	Label     string    // filter by request label, exact match (optional)
@@ -141,6 +142,37 @@ type LabelUsage struct {
 	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
 	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
 	GroupCacheFields
+}
+
+// SessionUsage holds aggregates for one detected, user-path-scoped session.
+// Rows without a detected session are omitted from this breakdown.
+type SessionUsage struct {
+	SessionID    string   `json:"session_id"`
+	UserPath     string   `json:"user_path,omitempty"`
+	Requests     int      `json:"requests"`
+	InputTokens  int64    `json:"input_tokens"`
+	OutputTokens int64    `json:"output_tokens"`
+	TotalTokens  int64    `json:"total_tokens"`
+	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
+	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
+	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+}
+
+// SessionUsageParams specifies filters and pagination for per-session usage.
+// Session totals always include locally cached requests and tokens while cost
+// fields represent provider spend only; CacheMode is therefore ignored.
+type SessionUsageParams struct {
+	UsageQueryParams
+	Limit  int
+	Offset int
+}
+
+// SessionUsageResult is a bounded page of per-session usage aggregates.
+type SessionUsageResult struct {
+	Entries []SessionUsage `json:"entries"`
+	Total   int            `json:"total"`
+	Limit   int            `json:"limit"`
+	Offset  int            `json:"offset"`
 }
 
 // GroupCacheFields carries the cache-related figures shared by the chart
@@ -273,11 +305,11 @@ func applyDailyInputSplit(daily []DailyUsage, splits map[string]periodInputSplit
 }
 
 // UsageLogParams specifies query parameters for paginated usage log retrieval.
-// Data filters (model, provider, label, user path) live on the embedded
+// Data filters (model, provider, label, user path, session id) live on the embedded
 // UsageQueryParams; only the log-specific view options are declared here.
 type UsageLogParams struct {
 	UsageQueryParams        // embed date range and data filters
-	Search           string // free-text search on model/provider/request_id
+	Search           string // free-text search on model/provider/request/session ids
 	Limit            int    // page size (default 50, max 200)
 	Offset           int    // pagination offset
 }
@@ -297,6 +329,7 @@ type UsageLogEntry struct {
 	ProviderName           string         `json:"provider_name,omitempty"`
 	Endpoint               string         `json:"endpoint"`
 	UserPath               string         `json:"user_path,omitempty"`
+	SessionID              string         `json:"session_id,omitempty"`
 	CacheType              string         `json:"cache_type,omitempty"`
 	Labels                 []string       `json:"labels,omitempty"`
 	InputTokens            int            `json:"input_tokens"`
@@ -410,6 +443,11 @@ type UsageReader interface {
 	// date range. Unlabelled entries are omitted; entries with several labels
 	// count once per label.
 	GetUsageByLabel(ctx context.Context, params UsageQueryParams) ([]LabelUsage, error)
+
+	// GetUsageBySession returns a bounded page of per-session aggregates.
+	// Usage rows without a detected session are omitted. Request and token
+	// totals include local-cache hits; costs include provider-bound rows only.
+	GetUsageBySession(ctx context.Context, params SessionUsageParams) (*SessionUsageResult, error)
 
 	// GetUsageLog returns a paginated list of individual usage entries with optional filtering.
 	GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error)

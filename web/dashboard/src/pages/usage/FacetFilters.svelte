@@ -4,9 +4,14 @@
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import { usagePage } from "./usage.svelte.js";
+  import { shortSessionID } from "./usage-helpers.js";
 
   const onUserPathInput = debounced(() => usagePage.onUsageFilterChanged());
-  $effect(() => onUserPathInput.cancel);
+  const onSessionInput = debounced(() => usagePage.onUsageFilterChanged());
+  $effect(() => () => {
+    onUserPathInput.cancel();
+    onSessionInput.cancel();
+  });
 </script>
 
 <div class="usage-page-filters" role="group" aria-label="Usage data filters">
@@ -52,6 +57,24 @@
     bind:value={usagePage.usageFilterUserPath}
     oninput={onUserPathInput}
   />
+  <FilterInput
+    class="usage-page-filters-session"
+    placeholder="Session ID"
+    label="Filter by session ID"
+    bind:value={usagePage.usageFilterSession}
+    oninput={onSessionInput}
+  />
+  {#if usagePage.usageFilterSession}
+    <button
+      type="button"
+      class="active-session-filter mono"
+      title="Clear session filter {usagePage.usageFilterSession}"
+      onclick={() => {
+        usagePage.usageFilterSession = "";
+        usagePage.onUsageFilterChanged();
+      }}
+    >Session: {shortSessionID(usagePage.usageFilterSession)} ×</button>
+  {/if}
 </div>
 
 <style>
@@ -76,9 +99,32 @@
     max-width: 360px;
   }
 
+  .usage-page-filters :global(.usage-page-filters-session) {
+    flex: 1 1 220px;
+    min-width: 180px;
+    max-width: 360px;
+  }
+
+  .active-session-filter {
+    align-self: center;
+    padding: 6px 10px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+    color: var(--accent-strong, var(--accent));
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .active-session-filter:hover {
+    background: color-mix(in srgb, var(--accent) 25%, var(--bg));
+  }
+
   @media (max-width: 768px) {
     .usage-page-filters :global(.usage-log-select),
-    .usage-page-filters :global(.usage-page-filters-user-path) {
+    .usage-page-filters :global(.usage-page-filters-user-path),
+    .usage-page-filters :global(.usage-page-filters-session) {
         flex: 1 1 100%;
         max-width: none;
       }

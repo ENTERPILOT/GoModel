@@ -1,8 +1,9 @@
 <script>
-  // One usage breakdown section (by model, user path, or label): diverging /
+  // One usage breakdown section (by model, user path, label, or session): diverging /
   // stacked horizontal bar chart with a table view toggle.
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
+  import Pagination from "$lib/components/molecules/Pagination.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import { chartColors, resolveCssColor } from "$lib/utils/chartTheme.js";
   import {
@@ -12,6 +13,7 @@
     qualifiedModelDisplay,
   } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
+  import SessionIDChip from "./SessionIDChip.svelte";
   import {
     chartWrapHeight,
     divergingDataFrom,
@@ -23,7 +25,7 @@
   } from "./usage-helpers.js";
   import { horizontalUsageChartConfig } from "./usage-chart-config.js";
 
-  /** @type {{ kind: "model" | "userPath" | "label" }} */
+  /** @type {{ kind: "model" | "userPath" | "label" | "session" }} */
   let { kind } = $props();
 
   const META = {
@@ -45,6 +47,12 @@
       tokensTitle: "Usage by Label",
       costsTitle: "Cost by Label",
     },
+    session: {
+      group: "Session usage view",
+      noun: "session usage",
+      tokensTitle: "Usage by Recent Session",
+      costsTitle: "Cost by Recent Session",
+    },
   };
   const meta = $derived(META[kind]);
 
@@ -53,14 +61,17 @@
       ? (row) => qualifiedModelDisplay(row)
       : kind === "userPath"
         ? (row) => row.user_path || "/"
-        : (row) => row.label,
+        : kind === "label"
+          ? (row) => row.label
+          : (row) => row.session_id,
   );
 
   function rowKey(row) {
     if (kind === "model")
       return (row.provider_name || row.provider || "-") + "/" + row.model;
     if (kind === "userPath") return row.user_path || "/";
-    return row.label;
+    if (kind === "label") return row.label;
+    return row.session_id + "/" + (row.user_path || "/");
   }
 
   const rows = $derived(
@@ -68,21 +79,27 @@
       ? usagePage.modelUsage
       : kind === "userPath"
         ? usagePage.userPathUsage
-        : usagePage.labelUsage,
+        : kind === "label"
+          ? usagePage.labelUsage
+          : usagePage.sessionUsage.entries,
   );
   const view = $derived(
     kind === "model"
       ? usagePage.modelUsageView
       : kind === "userPath"
         ? usagePage.userPathUsageView
-        : usagePage.labelUsageView,
+        : kind === "label"
+          ? usagePage.labelUsageView
+          : usagePage.sessionUsageView,
   );
   const loading = $derived(
     kind === "model"
       ? usagePage.modelUsageLoading
       : kind === "userPath"
         ? usagePage.userPathUsageLoading
-        : usagePage.labelUsageLoading,
+        : kind === "label"
+          ? usagePage.labelUsageLoading
+          : usagePage.sessionUsageLoading,
   );
   const costs = $derived(usagePage.usageMode === "costs");
   const visible = $derived(
@@ -92,7 +109,9 @@
   // shadow it — inside that snippet, `title` refers to the snippet itself.
   const heading = $derived(costs ? meta.costsTitle : meta.tokensTitle);
   const series = $derived(divergingDataFrom(rows, labelFor, costs));
-  const tableRows = $derived(usageRowsBySelectedValue(rows, costs));
+  const tableRows = $derived(
+    kind === "session" ? rows : usageRowsBySelectedValue(rows, costs),
+  );
 
   function buildChart() {
     if (!isChartView(view)) return null;
@@ -103,10 +122,12 @@
     });
   }
 
-  // Label-usage inline help.
-  const helpCopyId = "label-usage-help-copy";
-  const helpText =
-    "One request can have multiple labels. Such a request counts once under each of its labels, so label rows can overlap and add up to more than the period totals.";
+  const helpCopyId = $derived(kind + "-usage-help-copy");
+  const helpText = $derived(
+    kind === "session"
+      ? "Sessions are ordered by latest activity. Request and token totals include local-cache hits; cost fields include provider spend only."
+      : "One request can have multiple labels. Such a request counts once under each of its labels, so label rows can overlap and add up to more than the period totals.",
+  );
 </script>
 
 {#snippet viewToggle()}
@@ -148,10 +169,10 @@
 {/snippet}
 
 {#if visible}
-  <div class="model-chart-section">
+  <div class="model-chart-section" class:session-usage-breakdown={kind === "session"}>
     <div class="model-chart-header">
-      {#if kind === "label"}
-        <InlineHelpSection copyId={helpCopyId} label="label usage help" text={helpText}>
+      {#if kind === "label" || kind === "session"}
+        <InlineHelpSection copyId={helpCopyId} label="{kind} usage help" text={helpText}>
           {#snippet title()}<h3>{heading}</h3>{/snippet}
           {#snippet extra()}
             {#if loading}<Spinner size={14} label="Loading {meta.noun}" />{/if}
@@ -177,14 +198,20 @@
                 <th>Provider</th>
               {:else if kind === "userPath"}
                 <th>User Path</th>
-              {:else}
+              {:else if kind === "label"}
                 <th>Label</th>
+                <th class="col-price">Requests</th>
+              {:else}
+                <th>Session ID</th>
+                <th>User Path</th>
                 <th class="col-price">Requests</th>
               {/if}
               <th class="col-price">Input Tokens</th>
               <th class="col-price">Output Tokens</th>
-              <th class="col-price" title="Provider prompt-cache reads included in the input tokens">Prompt Cached</th>
-              <th class="col-price" title="Tokens served from GoModel's local response cache (excluded from the other columns)">Local Cached</th>
+              {#if kind !== "session"}
+                <th class="col-price" title="Provider prompt-cache reads included in the input tokens">Prompt Cached</th>
+                <th class="col-price" title="Tokens served from GoModel's local response cache (excluded from the other columns)">Local Cached</th>
+              {/if}
               <th class="col-price">Total Tokens</th>
               <th class="col-price">Input Cost</th>
               <th class="col-price">Output Cost</th>
@@ -199,7 +226,7 @@
                   <td><span class="provider-badge">{providerDisplayValue(row) || "-"}</span></td>
                 {:else if kind === "userPath"}
                   <td class="mono font-size-md">{row.user_path || "/"}</td>
-                {:else}
+                {:else if kind === "label"}
                   <td>
                     <button
                       type="button"
@@ -211,24 +238,36 @@
                     >{row.label}</button>
                   </td>
                   <td class="col-price">{formatNumber(row.requests)}</td>
+                {:else}
+                  <td>
+                    <SessionIDChip
+                      sessionID={row.session_id}
+                      active={usagePage.usageFilterSession === row.session_id}
+                      onfilter={(sessionID) => usagePage.filterBySession(sessionID)}
+                    />
+                  </td>
+                  <td class="mono font-size-md">{row.user_path || "/"}</td>
+                  <td class="col-price">{formatNumber(row.requests)}</td>
                 {/if}
                 <td class="col-price">{formatNumber(row.input_tokens)}</td>
                 <td class="col-price">{formatNumber(row.output_tokens)}</td>
-                <td
-                  class="col-price"
-                  title={row.cached_input_cost != null
-                    ? "~" + formatCost(row.cached_input_cost) + " at current cached-input pricing"
-                    : ""}>{formatNumber(row.cached_input_tokens || 0)}</td
-                >
-                <td
-                  class="col-price"
-                  title="{formatNumber(row.local_cached_input_tokens || 0)} input + {formatNumber(
-                    row.local_cached_output_tokens || 0,
-                  )} output"
-                  >{formatNumber(
-                    (row.local_cached_input_tokens || 0) + (row.local_cached_output_tokens || 0),
-                  )}</td
-                >
+                {#if kind !== "session"}
+                  <td
+                    class="col-price"
+                    title={row.cached_input_cost != null
+                      ? "~" + formatCost(row.cached_input_cost) + " at current cached-input pricing"
+                      : ""}>{formatNumber(row.cached_input_tokens || 0)}</td
+                  >
+                  <td
+                    class="col-price"
+                    title="{formatNumber(row.local_cached_input_tokens || 0)} input + {formatNumber(
+                      row.local_cached_output_tokens || 0,
+                    )} output"
+                    >{formatNumber(
+                      (row.local_cached_input_tokens || 0) + (row.local_cached_output_tokens || 0),
+                    )}</td
+                  >
+                {/if}
                 <td class="col-price">{formatNumber(usageRowTotalTokens(row))}</td>
                 <td class="col-price">{formatCost(row.input_cost)}</td>
                 <td class="col-price">{formatCost(row.output_cost)}</td>
@@ -238,6 +277,15 @@
           </tbody>
         </table>
       </div>
+    {/if}
+    {#if kind === "session"}
+      <Pagination
+        total={usagePage.sessionUsage.total}
+        offset={usagePage.sessionUsage.offset}
+        limit={usagePage.sessionUsage.limit}
+        onprev={() => usagePage.sessionUsagePrevPage()}
+        onnext={() => usagePage.sessionUsageNextPage()}
+      />
     {/if}
   </div>
 {:else if loading}
@@ -309,4 +357,5 @@
 .usage-chart-data-table :global(th), .usage-chart-data-table :global(td) {
   white-space: nowrap;
 }
+
 </style>

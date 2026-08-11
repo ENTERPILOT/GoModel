@@ -26,6 +26,7 @@ type mongoUsageLogRow struct {
 	ProviderName           string         `bson:"provider_name"`
 	Endpoint               string         `bson:"endpoint"`
 	UserPath               string         `bson:"user_path"`
+	SessionID              string         `bson:"session_id"`
 	CacheType              string         `bson:"cache_type"`
 	Labels                 []string       `bson:"labels"`
 	InputTokens            int            `bson:"input_tokens"`
@@ -52,6 +53,7 @@ func (row mongoUsageLogRow) toUsageLogEntry() UsageLogEntry {
 		ProviderName:           displayUsageProviderName(row.ProviderName, row.Provider),
 		Endpoint:               row.Endpoint,
 		UserPath:               row.UserPath,
+		SessionID:              row.SessionID,
 		CacheType:              normalizeCacheType(row.CacheType),
 		Labels:                 row.Labels,
 		InputTokens:            row.InputTokens,
@@ -87,6 +89,36 @@ func costPtr(present int, value float64) *float64 {
 		return &value
 	}
 	return nil
+}
+
+func mongoProviderUsageCondition() bson.D {
+	return bson.D{{Key: "$and", Value: bson.A{
+		bson.D{{Key: "$ne", Value: bson.A{"$cache_type", CacheTypeExact}}},
+		bson.D{{Key: "$ne", Value: bson.A{"$cache_type", CacheTypeSemantic}}},
+	}}}
+}
+
+func mongoProviderCostSum(field string) bson.D {
+	return bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{
+		mongoProviderUsageCondition(),
+		bson.D{{Key: "$ifNull", Value: bson.A{field, 0}}},
+		0,
+	}}}}}
+}
+
+func mongoProviderCostPresenceCount(field string) bson.D {
+	presentProviderCost := bson.D{{Key: "$and", Value: bson.A{
+		mongoProviderUsageCondition(),
+		bson.D{{Key: "$gt", Value: bson.A{field, nil}}},
+	}}}
+	return bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{presentProviderCost, 1, 0}}}}}
+}
+
+func sessionCostPtr(providerRequests, present int, value float64) *float64 {
+	if providerRequests == 0 {
+		return new(float64)
+	}
+	return costPtr(present, value)
 }
 
 func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
@@ -587,6 +619,123 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 	return result, nil
 }
 
+// GetUsageBySession returns request, token, and cost totals grouped by the
+// detected session id and canonical tracked user path.
+func (r *MongoDBReader) GetUsageBySession(ctx context.Context, params SessionUsageParams) (*SessionUsageResult, error) {
+	pipeline, limit, offset, err := mongoSessionUsagePipeline(params)
+	if err != nil {
+		return nil, err
+	}
+
+	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate usage by session: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var facetResult struct {
+		Data []struct {
+			ID struct {
+				SessionID string `bson:"session_id"`
+				UserPath  string `bson:"user_path"`
+			} `bson:"_id"`
+			Requests         int     `bson:"requests"`
+			InputTokens      int64   `bson:"input_tokens"`
+			OutputTokens     int64   `bson:"output_tokens"`
+			TotalTokens      int64   `bson:"total_tokens"`
+			InputCost        float64 `bson:"input_cost"`
+			OutputCost       float64 `bson:"output_cost"`
+			TotalCost        float64 `bson:"total_cost"`
+			HasInputCost     int     `bson:"has_input_cost"`
+			HasOutputCost    int     `bson:"has_output_cost"`
+			HasTotalCost     int     `bson:"has_total_cost"`
+			ProviderRequests int     `bson:"provider_requests"`
+		} `bson:"data"`
+		Total []struct {
+			Count int `bson:"count"`
+		} `bson:"total"`
+	}
+	if cursor.Next(ctx) {
+		if err := cursor.Decode(&facetResult); err != nil {
+			return nil, fmt.Errorf("failed to decode usage by session result: %w", err)
+		}
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage by session cursor: %w", err)
+	}
+
+	result := make([]SessionUsage, 0, len(facetResult.Data))
+	for _, row := range facetResult.Data {
+		result = append(result, SessionUsage{
+			SessionID:    row.ID.SessionID,
+			UserPath:     row.ID.UserPath,
+			Requests:     row.Requests,
+			InputTokens:  row.InputTokens,
+			OutputTokens: row.OutputTokens,
+			TotalTokens:  row.TotalTokens,
+			InputCost:    sessionCostPtr(row.ProviderRequests, row.HasInputCost, row.InputCost),
+			OutputCost:   sessionCostPtr(row.ProviderRequests, row.HasOutputCost, row.OutputCost),
+			TotalCost:    sessionCostPtr(row.ProviderRequests, row.HasTotalCost, row.TotalCost),
+		})
+	}
+	total := 0
+	if len(facetResult.Total) > 0 {
+		total = facetResult.Total[0].Count
+	}
+	return &SessionUsageResult{Entries: result, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+func mongoSessionUsagePipeline(params SessionUsageParams) (bson.A, int, int, error) {
+	limit, offset := clampLimitOffset(params.Limit, params.Offset)
+	queryParams := params.UsageQueryParams
+	queryParams.CacheMode = CacheModeAll
+	matchFilters, err := mongoUsageMatchFilters(queryParams)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	nonBlankSession := bson.D{{Key: "session_id", Value: bson.D{
+		{Key: "$exists", Value: true},
+		{Key: "$type", Value: "string"},
+		{Key: "$ne", Value: ""},
+	}}}
+	matchFilters = mongoAndFilters(matchFilters, nonBlankSession)
+	pipeline := bson.A{}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	pipeline = append(pipeline,
+		mongoCanonicalUserPathAddFieldsStage(),
+		bson.D{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: bson.D{
+				{Key: "session_id", Value: "$session_id"},
+				{Key: "user_path", Value: "$" + mongoCanonicalUserPathField},
+			}},
+			{Key: "requests", Value: bson.D{{Key: "$sum", Value: 1}}},
+			{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
+			{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
+			{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},
+			{Key: "provider_requests", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{mongoProviderUsageCondition(), 1, 0}}}}}},
+			{Key: "input_cost", Value: mongoProviderCostSum("$input_cost")},
+			{Key: "output_cost", Value: mongoProviderCostSum("$output_cost")},
+			{Key: "total_cost", Value: mongoProviderCostSum("$total_cost")},
+			{Key: "has_input_cost", Value: mongoProviderCostPresenceCount("$input_cost")},
+			{Key: "has_output_cost", Value: mongoProviderCostPresenceCount("$output_cost")},
+			{Key: "has_total_cost", Value: mongoProviderCostPresenceCount("$total_cost")},
+			{Key: "latest", Value: bson.D{{Key: "$max", Value: "$timestamp"}}},
+		}}},
+		bson.D{{Key: "$facet", Value: bson.D{
+			{Key: "data", Value: bson.A{
+				bson.D{{Key: "$sort", Value: bson.D{{Key: "latest", Value: -1}}}},
+				bson.D{{Key: "$skip", Value: offset}},
+				bson.D{{Key: "$limit", Value: limit}},
+			}},
+			{Key: "total", Value: bson.A{bson.D{{Key: "$count", Value: "count"}}}},
+		}}},
+	)
+
+	return pipeline, limit, offset, nil
+}
+
 // mongoUsageGroupedProviderNameExpr builds the MongoDB expression used to derive a grouped provider name, preferring a trimmed provider name and falling back to the trimmed provider value.
 func mongoUsageGroupedProviderNameExpr() bson.D {
 	trimmedProviderName := bson.D{{Key: "$trim", Value: bson.D{
@@ -1043,6 +1192,9 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 	if params.Model != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "model", Value: params.Model})
 	}
+	if params.SessionID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "session_id", Value: params.SessionID})
+	}
 	if params.Label != "" {
 		// Matching a scalar against an array field matches documents whose
 		// labels array contains the value.
@@ -1074,6 +1226,7 @@ func mongoUsageLogMatchFilters(params UsageLogParams) (bson.D, error) {
 			bson.D{{Key: "provider_name", Value: regex}},
 			bson.D{{Key: "request_id", Value: regex}},
 			bson.D{{Key: "provider_id", Value: regex}},
+			bson.D{{Key: "session_id", Value: regex}},
 		}}}
 		matchFilters = mongoAndFilters(matchFilters, searchFilter)
 	}
