@@ -113,6 +113,40 @@ rate_limits:
 	})
 }
 
+func TestValidateRateLimitConfigRejectsPerChildOutsideUserPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  RateLimitsConfig
+		want string
+	}{
+		{
+			name: "provider",
+			cfg: RateLimitsConfig{Enabled: true, Providers: []RateLimitProviderConfig{{
+				Name:   "openai",
+				Limits: []RateLimitRuleConfig{{Period: "minute", MaxRequests: new(int64(1)), PerChild: true}},
+			}}},
+			want: "rate_limits.providers[0].limits[0].per_child is only valid for user_path rules",
+		},
+		{
+			name: "model",
+			cfg: RateLimitsConfig{Enabled: true, Models: []RateLimitModelConfig{{
+				Model:  "gpt-4o",
+				Limits: []RateLimitRuleConfig{{Period: "minute", MaxRequests: new(int64(1)), PerChild: true}},
+			}}},
+			want: "rate_limits.models[0].limits[0].per_child is only valid for user_path rules",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRateLimitConfig(&tt.cfg)
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("validateRateLimitConfig() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadRateLimitEnvReplacesMatchingYAMLUserPath(t *testing.T) {
 	clearAllConfigEnvVars(t)
 

@@ -29,6 +29,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -54,6 +55,7 @@ type Provider struct {
 	region    string
 	runtime   *bedrockruntime.Client
 	control   *bedrock.Client
+	hooks     llmclient.Hooks
 	configErr error
 }
 
@@ -62,8 +64,8 @@ type Provider struct {
 // BaseURL is interpreted as either an AWS region ("us-east-1") or a fully
 // qualified endpoint URL. When empty, the region is resolved from the
 // standard AWS environment variables / shared config.
-func New(providerCfg providers.ProviderConfig, _ providers.ProviderOptions) core.Provider {
-	p := &Provider{}
+func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
+	p := &Provider{hooks: opts.Hooks}
 
 	region, endpoint := parseBaseURL(providerCfg.BaseURL)
 	loadOpts := []func(*awsconfig.LoadOptions) error{}

@@ -113,15 +113,24 @@ type Config struct {
 
 // applyExtensions snapshots a registered extension set into the server
 // configuration. A nil registry leaves the config untouched.
-func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
+func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) error {
 	if extensions == nil {
-		return
+		return nil
+	}
+	serverCfg.MetricsEndpoint = config.ResolveMetricsEndpointWithPprof(serverCfg.MetricsEndpoint, serverCfg.PprofEnabled)
+	outerMiddleware, err := extensions.OuterMiddlewareFor(ext.HTTPServerConfig{
+		MetricsEndpoint: serverCfg.MetricsEndpoint,
+	})
+	if err != nil {
+		return err
 	}
 	serverCfg.RequestRewriters = extensions.Rewriters()
+	serverCfg.OuterMiddleware = outerMiddleware
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
 	serverCfg.RequestAuthenticators = extensions.Authenticators()
+	return nil
 }
 
 // routeSelectorHooks adapts upstream client lifecycle events into route
@@ -165,6 +174,100 @@ func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
 			})
 		},
 	}
+}
+
+// upstreamObserverHooks adapts the public extension observer contract to the
+// internal provider client hooks. Optional observer code is isolated from the
+// request path: a panic is logged with fixed metadata and the call continues.
+func upstreamObserverHooks(observer ext.UpstreamObserver) llmclient.Hooks {
+	name := upstreamObserverLabel(observer)
+	hooks := llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) (next context.Context) {
+			next = ctx
+			defer func() {
+				if recover() != nil {
+					next = ctx
+					slog.Error("upstream observer panicked during observation",
+						"observer", name, "event", "call_start")
+				}
+			}()
+			if derived := observer.Start(ctx, upstreamCallFromRequest(info)); derived != nil {
+				next = derived
+			}
+			return next
+		},
+		OnRequestEnd: func(ctx context.Context, info llmclient.ResponseInfo) {
+			defer func() {
+				if recover() != nil {
+					slog.Error("upstream observer panicked during observation",
+						"observer", name, "event", "call_end")
+				}
+			}()
+			observer.End(ctx, ext.UpstreamResult{
+				UpstreamCall: upstreamCallFromResponse(info),
+				StatusCode:   info.StatusCode,
+				Duration:     info.Duration,
+				Err:          info.Error,
+			})
+		},
+	}
+	streamObserver, ok := observer.(ext.UpstreamStreamObserver)
+	if !ok {
+		return hooks
+	}
+	hooks.OnStreamFirstChunk = func(ctx context.Context, info llmclient.ResponseInfo) {
+		defer func() {
+			if recover() != nil {
+				slog.Error("upstream observer panicked during observation",
+					"observer", name, "event", "first_response_chunk")
+			}
+		}()
+		streamObserver.FirstResponseChunk(ctx, ext.UpstreamResult{
+			UpstreamCall: upstreamCallFromResponse(info),
+			StatusCode:   info.StatusCode,
+			Duration:     info.Duration,
+			Err:          info.Error,
+		})
+	}
+	return hooks
+}
+
+func upstreamCallFromRequest(info llmclient.RequestInfo) ext.UpstreamCall {
+	return ext.UpstreamCall{
+		Provider:        info.Provider,
+		ProviderType:    info.ProviderType,
+		Model:           info.Model,
+		Operation:       info.Operation,
+		Endpoint:        info.Endpoint,
+		Method:          info.Method,
+		Stream:          info.Stream,
+		StreamUncertain: info.StreamUncertain,
+	}
+}
+
+func upstreamCallFromResponse(info llmclient.ResponseInfo) ext.UpstreamCall {
+	return ext.UpstreamCall{
+		Provider:        info.Provider,
+		ProviderType:    info.ProviderType,
+		Model:           info.Model,
+		Operation:       info.Operation,
+		Endpoint:        info.Endpoint,
+		Method:          info.Method,
+		Stream:          info.Stream,
+		StreamUncertain: info.StreamUncertain,
+	}
+}
+
+func upstreamObserverLabel(observer ext.UpstreamObserver) (name string) {
+	if observer == nil {
+		return "unknown"
+	}
+	defer func() {
+		if recover() != nil || name == "" {
+			name = "unknown"
+		}
+	}()
+	return observer.Name()
 }
 
 func routeAffinityContext(ctx context.Context) (source, sessionID string) {
@@ -290,6 +393,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	if routeSelector != nil {
 		cfg.Factory.AddHooks(routeSelectorHooks(routeSelector))
+	}
+	if cfg.Extensions != nil {
+		for _, observer := range cfg.Extensions.UpstreamObservers() {
+			if observer != nil {
+				cfg.Factory.AddHooks(upstreamObserverHooks(observer))
+			}
+		}
 	}
 
 	providerResult, err := providers.Init(ctx, cfg.AppConfig, cfg.Factory)
@@ -665,7 +775,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		serverCfg.UsageSummarizer = usageReader
 	}
 
-	applyExtensions(serverCfg, cfg.Extensions)
+	if err := applyExtensions(serverCfg, cfg.Extensions); err != nil {
+		return fail("failed to configure extensions", err)
+	}
 
 	// Wire the readiness storage probe. Storage is a required dependency, so a
 	// failed ping makes /health/ready report not_ready (503). When no storage
@@ -705,6 +817,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			app.providerCredentials,
 			app,
 			adminRuntimeConfig,
+			quotaTemplatesEnabled,
 			app.live,
 			requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
@@ -1110,6 +1223,7 @@ func initAdmin(
 	providerCredentialsResult *providers.CredentialsResult,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
+	quotaTemplatesEnabled bool,
 	liveBroker *live.Broker,
 	requestHealth admin.RequestHealthSource,
 	usagePricingRecalculationEnabled bool,
@@ -1166,7 +1280,7 @@ func initAdmin(
 		admin.WithGuardrailService(guardrailService),
 		admin.WithBudgets(budgetService),
 		admin.WithRateLimits(rateLimitService),
-		admin.WithQuotaTemplatesEnabled(runtimeConfig.QuotaTemplatesEnabled == "on"),
+		admin.WithQuotaTemplatesEnabled(quotaTemplatesEnabled),
 		admin.WithTagging(taggingService),
 		admin.WithRuntimeSettings(runtimeSettingsService),
 		mcpOption,

@@ -117,6 +117,37 @@ func TestMongoSubjectMatchNormalizesMissingUserPathToRoot(t *testing.T) {
 	}
 }
 
+func TestMongoDBStoreRoundTripsPerChild(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		if err != nil {
+			t.Fatalf("NewMongoDBStore() failed: %v", err)
+		}
+		budgets := []Budget{
+			{Scope: ScopeUserPath, Subject: "/shared", PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceManual},
+			{Scope: ScopeUserPath, Subject: "/customers", PerChild: true, PeriodSeconds: PeriodDailySeconds, Amount: 20, Source: SourceManual},
+		}
+		if err := store.UpsertBudgets(ctx, budgets); err != nil {
+			t.Fatalf("UpsertBudgets() failed: %v", err)
+		}
+
+		got, err := store.ListBudgets(ctx)
+		if err != nil {
+			t.Fatalf("ListBudgets() failed: %v", err)
+		}
+		bySubject := make(map[string]Budget, len(got))
+		for _, budget := range got {
+			bySubject[budget.Subject] = budget
+		}
+		for _, want := range budgets {
+			if persisted, ok := bySubject[want.Subject]; !ok || persisted.PerChild != want.PerChild {
+				t.Errorf("budget %q = %+v, want per_child=%v", want.Subject, persisted, want.PerChild)
+			}
+		}
+	})
+}
+
 func bsonField(document bson.D, key string) any {
 	for _, element := range document {
 		if element.Key == key {

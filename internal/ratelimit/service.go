@@ -57,6 +57,13 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 	return service, nil
 }
 
+// Close stops the in-memory expiry cleanup worker.
+func (s *Service) Close() {
+	if s != nil && s.limiter != nil {
+		s.limiter.close()
+	}
+}
+
 func (s *Service) Refresh(ctx context.Context) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable

@@ -78,7 +78,9 @@ providers:
 
 ## Call GPT-5.6
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -s http://localhost:8080/v1/responses \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -87,6 +89,42 @@ curl -s http://localhost:8080/v1/responses \
     "input": "Explain why idempotency matters in distributed systems."
   }'
 ```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+response = client.responses.create(
+    model="openai.gpt-5.6-sol",
+    input="Explain why idempotency matters in distributed systems.",
+)
+
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const response = await client.responses.create({
+  model: "openai.gpt-5.6-sol",
+  input: "Explain why idempotency matters in distributed systems.",
+});
+
+console.log(response.output_text);
+```
+
+</CodeGroup>
 
 Streaming uses the same gateway endpoint with `"stream": true`.
 `previous_response_id`, tools, reasoning controls, and unknown extension

@@ -13,24 +13,28 @@ func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
 		name          string
 		info          *core.PassthroughRouteInfo
 		wantOperation string
+		wantGenAI     string
 		wantAuditPath string
 	}{
 		{
 			name:          "responses",
 			info:          &core.PassthroughRouteInfo{Provider: "openai", RawEndpoint: "responses", NormalizedEndpoint: "responses"},
 			wantOperation: "openai.responses",
+			wantGenAI:     "chat",
 			wantAuditPath: "/v1/responses",
 		},
 		{
 			name:          "chat completions",
 			info:          &core.PassthroughRouteInfo{Provider: "openai", RawEndpoint: "v1/chat/completions", NormalizedEndpoint: "chat/completions"},
 			wantOperation: "openai.chat_completions",
+			wantGenAI:     "chat",
 			wantAuditPath: "/v1/chat/completions",
 		},
 		{
 			name:          "embeddings",
 			info:          &core.PassthroughRouteInfo{Provider: "openai", RawEndpoint: "embeddings", NormalizedEndpoint: "embeddings"},
 			wantOperation: "openai.embeddings",
+			wantGenAI:     "embeddings",
 			wantAuditPath: "/v1/embeddings",
 		},
 		{
@@ -50,6 +54,9 @@ func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
 			}
 			if got.SemanticOperation != tt.wantOperation {
 				t.Fatalf("SemanticOperation = %q, want %q", got.SemanticOperation, tt.wantOperation)
+			}
+			if got.GenAIOperation != tt.wantGenAI {
+				t.Fatalf("GenAIOperation = %q, want %q", got.GenAIOperation, tt.wantGenAI)
 			}
 			if got.AuditPath != tt.wantAuditPath {
 				t.Fatalf("AuditPath = %q, want %q", got.AuditPath, tt.wantAuditPath)

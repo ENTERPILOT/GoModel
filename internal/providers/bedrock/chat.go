@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"strings"
 	"time"
 
@@ -32,6 +33,8 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	observation := p.beginCallObservation(ctx, req.Model, false)
+	ctx = observation.ctx
 
 	out, err := p.runtime.Converse(ctx, converseInput(parts))
 	if err != nil && partsHaveCachePoints(parts) && isCachePointValidationError(err) {
@@ -39,8 +42,11 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 		out, err = p.runtime.Converse(ctx, converseInput(parts))
 	}
 	if err != nil {
-		return nil, mapAWSError(err)
+		mappedErr := mapAWSError(err)
+		observation.end(statusCodeFromError(mappedErr), mappedErr)
+		return nil, mappedErr
 	}
+	observation.end(http.StatusOK, nil)
 
 	return convertConverseOutput(req.Model, out), nil
 }

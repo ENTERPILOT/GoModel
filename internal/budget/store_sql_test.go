@@ -45,6 +45,44 @@ func TestSQLStoreRoundTripsPerChild(t *testing.T) {
 	})
 }
 
+func TestSQLStoreMigratesPrePerChildRows(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		legacySchema := `CREATE TABLE budgets (
+			scope TEXT NOT NULL DEFAULT 'user_path',
+			subject TEXT NOT NULL,
+			period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
+			amount ` + sqlx.TypeFloat + ` NOT NULL,
+			source TEXT NOT NULL DEFAULT '',
+			last_reset_at ` + sqlx.TypeInt64 + `,
+			created_at ` + sqlx.TypeInt64 + ` NOT NULL,
+			updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
+			PRIMARY KEY (scope, subject, period_seconds)
+		)`
+		if err := db.Schema(ctx, legacySchema); err != nil {
+			t.Fatalf("create legacy budgets table: %v", err)
+		}
+		if _, err := db.Exec(ctx, `
+			INSERT INTO budgets (scope, subject, period_seconds, amount, source, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, ScopeUserPath, "/legacy", PeriodDailySeconds, 10.0, SourceManual, int64(1), int64(1)); err != nil {
+			t.Fatalf("insert legacy budget: %v", err)
+		}
+
+		store, err := NewSQLStore(ctx, db)
+		if err != nil {
+			t.Fatalf("NewSQLStore() failed: %v", err)
+		}
+		budgets, err := store.ListBudgets(ctx)
+		if err != nil {
+			t.Fatalf("ListBudgets() failed: %v", err)
+		}
+		if len(budgets) != 1 || budgets[0].PerChild {
+			t.Fatalf("migrated budgets = %+v, want one shared legacy budget", budgets)
+		}
+	})
+}
+
 func TestSQLStoreReplaceConfigBudgetsRemovesStaleConfigRowsOnly(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()

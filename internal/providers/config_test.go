@@ -35,6 +35,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"deepseek": {
 		DefaultBaseURL: "https://api.deepseek.com",
 	},
+	"chutes": {
+		DefaultBaseURL: "https://llm.chutes.ai/v1",
+	},
 	"xai": {
 		DefaultBaseURL: "https://api.x.ai/v1",
 	},
@@ -335,6 +338,9 @@ func TestBuildProviderConfigs_MultipleProviders(t *testing.T) {
 	}
 	if got["anthropic"].Resilience.Retry.MaxRetries != globalRetry.MaxRetries {
 		t.Errorf("anthropic MaxRetries = %d, want %d (global)", got["anthropic"].Resilience.Retry.MaxRetries, globalRetry.MaxRetries)
+	}
+	if got["openai"].Name != "openai" || got["anthropic"].Name != "anthropic" {
+		t.Fatalf("provider names = %q/%q, want map keys", got["openai"].Name, got["anthropic"].Name)
 	}
 }
 
@@ -741,6 +747,26 @@ func TestApplyProviderEnvVars_DiscoversDeepSeekFromAPIKey(t *testing.T) {
 	}
 	if p.BaseURL != testDiscoveryConfigs["deepseek"].DefaultBaseURL {
 		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["deepseek"].DefaultBaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversChutesFromAPIKey(t *testing.T) {
+	t.Setenv("CHUTES_API_KEY", "cpk_test")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["chutes"]
+	if !exists {
+		t.Fatal("expected chutes to be discovered from env var")
+	}
+	if p.APIKey != "cpk_test" {
+		t.Errorf("APIKey = %q, want cpk_test", p.APIKey)
+	}
+	if p.Type != "chutes" {
+		t.Errorf("Type = %q, want chutes", p.Type)
+	}
+	if p.BaseURL != testDiscoveryConfigs["chutes"].DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["chutes"].DefaultBaseURL)
 	}
 }
 

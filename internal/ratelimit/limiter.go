@@ -82,11 +82,19 @@ func keyForRule(rule Rule) ruleKey {
 // rules own one counter per active direct child. Expired child partitions are
 // pruned below, and a single mutex keeps admission atomic across all matches.
 type limiter struct {
-	mu         sync.Mutex
-	requests   map[ruleKey]*windowCounter
-	tokens     map[ruleKey]*windowCounter
-	inFlight   map[ruleKey]int64
-	operations uint64
+	mu       sync.Mutex
+	requests map[ruleKey]*windowCounter
+	tokens   map[ruleKey]*windowCounter
+	inFlight map[ruleKey]int64
+
+	expiries        counterExpiryQueue
+	expiryByCounter map[counterExpiryKey]*counterExpiry
+	expiryWake      chan struct{}
+	expiryStop      chan struct{}
+	expiryDone      chan struct{}
+	expiryStarted   bool
+	expiryClosed    bool
+	expiryCloseOnce sync.Once
 }
 
 func newLimiter() *limiter {
@@ -114,7 +122,6 @@ func (l *limiter) counter(counters map[ruleKey]*windowCounter, key ruleKey) *win
 func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey, *ExceededError) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.pruneExpired(now)
 
 	var exceeded *ExceededError
 	for _, rule := range rules {
@@ -181,6 +188,7 @@ func (l *limiter) breach(rule Rule, now time.Time) *ExceededError {
 	if rule.MaxRequests != nil {
 		counter := l.counter(l.requests, key)
 		counter.advance(now, rule.PeriodSeconds)
+		l.trackCounterExpiry(requestCounter, key, counter)
 		if used := counter.estimate(now, rule.PeriodSeconds); used >= *rule.MaxRequests {
 			return &ExceededError{
 				Rule:       rule,
@@ -194,6 +202,7 @@ func (l *limiter) breach(rule Rule, now time.Time) *ExceededError {
 	if rule.MaxTokens != nil {
 		counter := l.counter(l.tokens, key)
 		counter.advance(now, rule.PeriodSeconds)
+		l.trackCounterExpiry(tokenCounter, key, counter)
 		if used := counter.estimate(now, rule.PeriodSeconds); used >= *rule.MaxTokens {
 			return &ExceededError{
 				Rule:       rule,
@@ -242,7 +251,6 @@ func (l *limiter) release(held []ruleKey) {
 func (l *limiter) recordTokens(rules []Rule, tokens int64, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.pruneExpired(now)
 	for _, rule := range rules {
 		if rule.PeriodSeconds == PeriodConcurrent || rule.MaxTokens == nil {
 			continue
@@ -250,6 +258,7 @@ func (l *limiter) recordTokens(rules []Rule, tokens int64, now time.Time) {
 		counter := l.counter(l.tokens, keyForRule(rule))
 		counter.advance(now, rule.PeriodSeconds)
 		counter.current += tokens
+		l.trackCounterExpiry(tokenCounter, keyForRule(rule), counter)
 	}
 }
 
@@ -257,7 +266,6 @@ func (l *limiter) recordTokens(rules []Rule, tokens int64, now time.Time) {
 func (l *limiter) status(rule Rule, now time.Time) Status {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.pruneExpired(now)
 
 	key := keyForRule(rule)
 	status := Status{Rule: rule}
@@ -276,6 +284,7 @@ func (l *limiter) status(rule Rule, now time.Time) Status {
 	if rule.MaxRequests != nil {
 		counter := l.counter(l.requests, key)
 		counter.advance(now, rule.PeriodSeconds)
+		l.trackCounterExpiry(requestCounter, key, counter)
 		status.RequestsUsed = counter.estimate(now, rule.PeriodSeconds)
 		remaining := max(*rule.MaxRequests-status.RequestsUsed, 0)
 		status.RequestsRemaining = &remaining
@@ -283,6 +292,7 @@ func (l *limiter) status(rule Rule, now time.Time) Status {
 	if rule.MaxTokens != nil {
 		counter := l.counter(l.tokens, key)
 		counter.advance(now, rule.PeriodSeconds)
+		l.trackCounterExpiry(tokenCounter, key, counter)
 		status.TokensUsed = counter.estimate(now, rule.PeriodSeconds)
 		remaining := max(*rule.MaxTokens-status.TokensUsed, 0)
 		status.TokensRemaining = &remaining
@@ -297,11 +307,13 @@ func (l *limiter) reset(key ruleKey) {
 	defer l.mu.Unlock()
 	for candidate := range l.requests {
 		if candidate.sameDefinition(key) {
+			l.removeCounterExpiry(requestCounter, candidate)
 			delete(l.requests, candidate)
 		}
 	}
 	for candidate := range l.tokens {
 		if candidate.sameDefinition(key) {
+			l.removeCounterExpiry(tokenCounter, candidate)
 			delete(l.tokens, candidate)
 		}
 	}
@@ -311,32 +323,11 @@ func (k ruleKey) sameDefinition(other ruleKey) bool {
 	return k.scope == other.scope && k.subject == other.subject && k.periodSeconds == other.periodSeconds
 }
 
-// pruneExpired periodically reclaims dynamic child counters after their
-// sliding-window history can no longer affect enforcement. Static rule
-// counters remain bounded by the configured rule count.
-func (l *limiter) pruneExpired(now time.Time) {
-	l.operations++
-	if l.operations%256 != 0 {
-		return
-	}
-	prune := func(counters map[ruleKey]*windowCounter) {
-		for key, counter := range counters {
-			if key.partition == "" || key.periodSeconds <= 0 || counter.windowStart == 0 {
-				continue
-			}
-			if now.Unix() >= counter.windowStart+2*key.periodSeconds {
-				delete(counters, key)
-			}
-		}
-	}
-	prune(l.requests)
-	prune(l.tokens)
-}
-
 // resetAll clears every window counter.
 func (l *limiter) resetAll() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.requests = make(map[ruleKey]*windowCounter)
 	l.tokens = make(map[ruleKey]*windowCounter)
+	l.resetCounterExpiries()
 }

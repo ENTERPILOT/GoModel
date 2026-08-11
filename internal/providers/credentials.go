@@ -325,6 +325,7 @@ func (s *CredentialsService) buildProvider(row ManagedProviderCredential) (core.
 	}
 
 	cfg := buildProviderConfig(rawCfg, s.resilience)
+	cfg.Name = name
 	provider, err := s.factory.Create(cfg)
 	if err != nil {
 		return nil, ProviderConfig{}, err

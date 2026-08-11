@@ -527,6 +527,20 @@ test("providerCredentialTypeOptions always includes the current selection", () =
   assert.deepEqual(providerCredentialTypeOptions(null, " "), []);
 });
 
+test("providerCredentialTypeOptions lists every server-supplied provider type", () => {
+  const recentProviderSchemas = ["chutes", "cohere", "llmd", "sglang"].map((type) => ({
+    type,
+    fields: [],
+  }));
+
+  assert.deepEqual(providerCredentialTypeOptions(recentProviderSchemas, ""), [
+    "chutes",
+    "cohere",
+    "llmd",
+    "sglang",
+  ]);
+});
+
 test("splitCommaList trims and drops empties", () => {
   assert.deepEqual(
     splitCommaList(" gpt-4o, gpt-4o-mini ,,"),

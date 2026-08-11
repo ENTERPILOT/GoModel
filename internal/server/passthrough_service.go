@@ -49,11 +49,15 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))
 	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
-		Method:       c.Request().Method,
-		Endpoint:     endpoint,
-		Body:         c.Request().Body,
-		Headers:      buildPassthroughHeaders(ctx, c.Request().Header),
-		ProviderName: providerName,
+		Method:          c.Request().Method,
+		Endpoint:        endpoint,
+		Operation:       info.GenAIOperation,
+		Model:           info.Model,
+		Stream:          info.Stream,
+		StreamUncertain: info.StreamUncertain,
+		Body:            c.Request().Body,
+		Headers:         buildPassthroughHeaders(ctx, c.Request().Header),
+		ProviderName:    providerName,
 	})
 	if err != nil {
 		return handleError(c, err)
@@ -65,5 +69,5 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	} else {
 		auditlog.EnrichEntry(c, info.Model, providerType)
 	}
-	return s.proxyPassthroughResponse(c, providerType, providerNameFromWorkflow(workflow), endpoint, info, resp)
+	return s.proxyPassthroughResponse(c, providerType, providerName, endpoint, info, resp)
 }

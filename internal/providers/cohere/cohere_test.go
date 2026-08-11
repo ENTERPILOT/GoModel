@@ -19,6 +19,7 @@ import (
 
 func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
 	var captured map[string]any
+	var operation string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v2/chat" {
 			t.Errorf("path = %q, want /v2/chat", r.URL.Path)
@@ -57,7 +58,12 @@ func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+			operation = info.Operation
+			return ctx
+		},
+	})
 	req := &core.ChatRequest{
 		Model: "command-a-03-2025",
 		Messages: []core.Message{
@@ -143,6 +149,9 @@ func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
 	}
 	if captured["k"] != float64(20) {
 		t.Fatalf("k = %#v", captured["k"])
+	}
+	if operation != llmclient.OperationChat {
+		t.Fatalf("operation = %q, want chat", operation)
 	}
 	responseFormat := captured["response_format"].(map[string]any)
 	if responseFormat["type"] != "json_object" {

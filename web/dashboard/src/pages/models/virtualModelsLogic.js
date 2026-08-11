@@ -214,6 +214,7 @@ export function mapRedirectView(view) {
     // Tri-state on the wire; only explicit false disables session affinity.
     session_affinity: view.session_affinity !== false,
     description: view.description || "",
+    slowdown: view.slowdown == null ? null : Number(view.slowdown),
     enabled: view.enabled !== false,
     managed: Boolean(view.managed),
     valid: Boolean(view.valid),
@@ -242,6 +243,7 @@ export function splitVirtualModelViews(views) {
         model: view.model || "",
         user_paths: Array.isArray(view.user_paths) ? view.user_paths : [],
         description: view.description || "",
+        slowdown: view.slowdown == null ? null : Number(view.slowdown),
         enabled: view.enabled !== false,
         managed: Boolean(view.managed),
         scope_kind: view.scope_kind || "",
@@ -731,6 +733,7 @@ export function defaultVirtualModelForm() {
     session_affinity: true,
     user_paths: "",
     description: "",
+    slowdown: "",
     enabled: true,
   };
 }
@@ -744,6 +747,14 @@ export function vmFormIsRedirect(form) {
     return true;
   }
   return collectExtraTargets(form && form.targets).length > 0;
+}
+
+export function vmFormSupportsSlowdown(form) {
+  if (vmFormIsRedirect(form)) {
+    return true;
+  }
+  const source = String((form && form.source) || "").trim();
+  return Boolean(source) && source !== GLOBAL_OVERRIDE_SELECTOR && !source.endsWith("/");
 }
 
 // vmFormShowStrategy: the primary row is always visible, so the presence of a
@@ -823,6 +834,13 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
     description: String((form && form.description) || "").trim(),
     enabled: Boolean(form && form.enabled),
   };
+  const slowdownInput = form && form.slowdown;
+  if (slowdownInput !== "" && slowdownInput != null) {
+    const slowdown = Number(slowdownInput);
+    if (Number.isFinite(slowdown)) {
+      payload.slowdown = slowdown;
+    }
+  }
   if (isRename) {
     // Carry the prior key so the backend moves the row instead of leaving an
     // orphan behind under the old source.
@@ -864,6 +882,12 @@ export function buildAliasTogglePayload(alias) {
     user_paths: Array.isArray(alias.user_paths) ? alias.user_paths : [],
     enabled: alias.enabled === false,
   };
+  if (alias.slowdown != null) {
+    const slowdown = Number(alias.slowdown);
+    if (Number.isFinite(slowdown)) {
+      payload.slowdown = slowdown;
+    }
+  }
   const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
   if (lbTargets.length > 1) {
     payload.strategy = alias.strategy || "round_robin";
@@ -892,19 +916,34 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
   const desired = !(safeAccess.effective_enabled !== false);
   const existingPaths =
     existingPolicy && Array.isArray(existingPolicy.user_paths) ? existingPolicy.user_paths : [];
+  const existingDescription = String((existingPolicy && existingPolicy.description) || "").trim();
+  const hasExistingSlowdown = Boolean(existingPolicy && existingPolicy.slowdown != null);
+  const existingSlowdown = Number(hasExistingSlowdown ? existingPolicy.slowdown : 0);
+
+  const preserved = {};
+  if (existingDescription) preserved.description = existingDescription;
+  if (hasExistingSlowdown && Number.isFinite(existingSlowdown)) {
+    preserved.slowdown = existingSlowdown;
+  }
 
   let method = "PUT";
   let payload;
   if (desired === false) {
-    payload = { source: selector, enabled: false, user_paths: existingPaths };
-  } else if (existingPolicy && existingPaths.length === 0 && safeAccess.default_enabled !== false) {
+    payload = { source: selector, enabled: false, user_paths: existingPaths, ...preserved };
+  } else if (
+    existingPolicy &&
+    existingPaths.length === 0 &&
+    !existingDescription &&
+    !hasExistingSlowdown &&
+    safeAccess.default_enabled !== false
+  ) {
     // Removing a path-less policy only enables the model when the default is
     // on; in a default-disabled deployment we must keep an explicit enabled
     // policy instead of falling back to the default.
     method = "DELETE";
     payload = { source: selector };
   } else {
-    payload = { source: selector, enabled: true, user_paths: existingPaths };
+    payload = { source: selector, enabled: true, user_paths: existingPaths, ...preserved };
   }
   return { method, payload, desired };
 }

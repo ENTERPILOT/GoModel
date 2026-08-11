@@ -371,6 +371,27 @@ function applyStringArrayPropertyBounds(schemaName, propertyName, maxItems, item
   property.items.maxLength = itemMaxLength;
 }
 
+function applySlowdownSchemaConstraints() {
+  const oneOf = [
+    { type: "number", enum: [0] },
+    { type: "number", minimum: 0.1, maximum: 10 },
+  ];
+  for (const name of [
+    "admin.upsertVirtualModelRequest",
+    "virtualmodels.View",
+    "virtualmodels.VirtualModel",
+  ]) {
+    const properties = schema(name).properties;
+    if (!properties?.slowdown) {
+      throw new Error(`missing slowdown property on schema: ${name}`);
+    }
+    properties.slowdown = {
+      description: properties.slowdown.description,
+      oneOf: clone(oneOf),
+    };
+  }
+}
+
 // applyPathSidebarTitles sets the API Reference sidebar entry of every
 // operation to its path so endpoints are listed by URL rather than by
 // natural-language summary. Mintlify renders the HTTP method as a colored
@@ -440,6 +461,7 @@ ensureRequiredProperty("admin.deleteModelPricingOverrideRequest", "selector");
 ensureRequiredProperty("core.ResponsesConversationRef", "id");
 applyBudgetKeySchemaConstraints();
 applyStringArrayPropertyBounds("admin.upsertVirtualModelRequest", "user_paths", 100, 1024);
+applySlowdownSchemaConstraints();
 applyPricingSchemaConstraints();
 applyPathSidebarTitles();
 

@@ -23,9 +23,11 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	}
 	var upstream chatResponse
 	if err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/v2/chat",
-		Body:     upstreamReq,
+		Method:    http.MethodPost,
+		Endpoint:  "/v2/chat",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      upstreamReq,
 	}, &upstream); err != nil {
 		return nil, err
 	}
@@ -42,9 +44,11 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 		return nil, err
 	}
 	body, err := p.client.DoStream(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/v2/chat",
-		Body:     upstreamReq,
+		Method:    http.MethodPost,
+		Endpoint:  "/v2/chat",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      upstreamReq,
 	})
 	if err != nil {
 		return nil, err

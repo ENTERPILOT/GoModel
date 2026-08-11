@@ -14,11 +14,12 @@ import (
 const requestSelectorPeekLimit int64 = 64 * 1024
 
 type requestBodySelectorHints struct {
-	model    string
-	provider string
-	stream   bool
-	parsed   bool
-	complete bool
+	model        string
+	provider     string
+	stream       bool
+	streamParsed bool
+	parsed       bool
+	complete     bool
 }
 
 func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) {
@@ -27,10 +28,12 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 	}
 
 	hints := peekRequestBodySelectorHints(req, requestSelectorPeekLimit)
-	if !hints.parsed || !hints.complete {
-		return
+	if hints.parsed || hints.streamParsed {
+		core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
 	}
-	core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
+	if !hints.streamParsed {
+		core.MarkPassthroughStreamUncertain(env)
+	}
 }
 
 func shouldPeekRequestBodySelectors(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) bool {
@@ -121,6 +124,7 @@ func decodeRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
 				return requestBodySelectorHints{}
 			}
 			hints.stream = stream
+			hints.streamParsed = true
 		default:
 			if err := skipJSONValue(dec); err != nil {
 				return requestBodySelectorHints{}

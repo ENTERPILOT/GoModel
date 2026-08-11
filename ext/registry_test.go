@@ -13,6 +13,14 @@ import (
 
 type namedRewriter struct{ name string }
 
+type namedObserver struct{ name string }
+
+func (o *namedObserver) Name() string { return o.name }
+func (o *namedObserver) Start(ctx context.Context, _ UpstreamCall) context.Context {
+	return ctx
+}
+func (o *namedObserver) End(context.Context, UpstreamResult) {}
+
 type namedAuthenticator struct{ name string }
 
 func (a *namedAuthenticator) Name() string { return a.name }
@@ -71,9 +79,11 @@ func TestRegistrySnapshotsAreIsolated(t *testing.T) {
 
 func TestRegistryCollectsMiddlewareAndRoutes(t *testing.T) {
 	reg := &Registry{}
+	reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
 
+	assert.Len(t, reg.OuterMiddleware(), 1)
 	assert.Len(t, reg.Middleware(), 1)
 	assert.Len(t, reg.Routes(), 1)
 }
@@ -86,6 +96,17 @@ func TestRegistryCollectsRequestAuthenticators(t *testing.T) {
 	require.Len(t, snapshot, 1)
 	assert.Equal(t, "oidc", snapshot[0].Name())
 	reg.RegisterAuthenticator(&namedAuthenticator{name: "other"})
+	assert.Len(t, snapshot, 1, "earlier snapshot must not grow")
+}
+
+func TestRegistryCollectsUpstreamObservers(t *testing.T) {
+	reg := &Registry{}
+	reg.RegisterUpstreamObserver(&namedObserver{name: "otel"})
+
+	snapshot := reg.UpstreamObservers()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, "otel", snapshot[0].Name())
+	reg.RegisterUpstreamObserver(&namedObserver{name: "other"})
 	assert.Len(t, snapshot, 1, "earlier snapshot must not grow")
 }
 
@@ -119,9 +140,11 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 	for range workers {
 		wg.Go(func() {
 			reg.RegisterRewriter(&namedRewriter{name: "w"})
+			reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 			reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 			reg.AddPublicPaths("/p")
 			reg.EnableCapability(CapabilityQuotaTemplates)
+			reg.RegisterUpstreamObserver(&namedObserver{name: "w"})
 			_ = reg.Rewriters()
 			_ = reg.HasCapability(CapabilityQuotaTemplates)
 		})
@@ -129,8 +152,11 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 	wg.Wait()
 
 	assert.Len(t, reg.Rewriters(), workers)
+	assert.Len(t, reg.OuterMiddleware(), workers)
 	assert.Len(t, reg.Middleware(), workers)
 	assert.Len(t, reg.PublicPaths(), workers)
+	assert.Len(t, reg.UpstreamObservers(), workers)
+	assert.True(t, reg.HasCapability(CapabilityQuotaTemplates))
 }
 
 type namedSelector struct{ name string }

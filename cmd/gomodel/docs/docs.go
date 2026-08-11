@@ -6843,6 +6843,9 @@ const docTemplate = `{
                 "MCP_ENABLED": {
                     "type": "string"
                 },
+                "PER_CHILD_QUOTAS_ENABLED": {
+                    "type": "string"
+                },
                 "RATE_LIMITS_ENABLED": {
                     "type": "string"
                 },
@@ -7869,6 +7872,10 @@ const docTemplate = `{
                 "session_affinity": {
                     "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
                     "type": "boolean"
+                },
+                "slowdown": {
+                    "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it.",
+                    "type": "number"
                 },
                 "source": {
                     "type": "string"
@@ -11187,6 +11194,10 @@ const docTemplate = `{
                 "session_affinity": {
                     "type": "boolean"
                 },
+                "slowdown": {
+                    "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it.",
+                    "type": "number"
+                },
                 "source": {
                     "type": "string"
                 },
@@ -11238,6 +11249,10 @@ const docTemplate = `{
                 "session_affinity": {
                     "description": "SessionAffinity keeps requests of one detected session on the target that\nserved it before, while that target stays available. Tri-state: nil means\nenabled (the default); explicit false restores stateless balancing.",
                     "type": "boolean"
+                },
+                "slowdown": {
+                    "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it. Nil\nleaves the setting unspecified so an alias can inherit its target model.",
+                    "type": "number"
                 },
                 "source": {
                     "type": "string"

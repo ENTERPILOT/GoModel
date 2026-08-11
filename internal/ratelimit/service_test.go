@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +81,7 @@ func newTestService(t *testing.T, rules ...Rule) *Service {
 	if err != nil {
 		t.Fatalf("NewService() failed: %v", err)
 	}
+	t.Cleanup(service.Close)
 	return service
 }
 
@@ -311,6 +313,41 @@ func TestPerChildRuleIsolatesDirectChildrenAndSharesDescendants(t *testing.T) {
 			t.Fatalf("%s status after template reset = %+v", child, got)
 		}
 	}
+}
+
+func TestPerChildExpiryCleanupIsBoundedAndPreservesStaticCounters(t *testing.T) {
+	service := newTestService(t,
+		Rule{Scope: ScopeUserPath, Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(1000))},
+		Rule{Scope: ScopeUserPath, Subject: "/users", PerChild: true, PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(1000))},
+	)
+	now := time.Now().UTC()
+	for i := range maxExpiryCleanupBatch + 6 {
+		path := "/users/child-" + strconv.Itoa(i)
+		if _, err := service.Acquire(onPath(path), now); err != nil {
+			t.Fatalf("Acquire(%q) failed: %v", path, err)
+		}
+	}
+
+	limiter := service.limiter
+	limiter.mu.Lock()
+	cleanupAt := now.Add(3 * time.Hour).Unix()
+	if more := limiter.pruneCounterExpiries(cleanupAt); !more {
+		limiter.mu.Unlock()
+		t.Fatal("first cleanup reported no remaining due batch")
+	}
+	if got, want := len(limiter.requests), 7; got != want {
+		limiter.mu.Unlock()
+		t.Fatalf("request counters after first cleanup = %d, want %d", got, want)
+	}
+	if more := limiter.pruneCounterExpiries(cleanupAt); more {
+		limiter.mu.Unlock()
+		t.Fatal("second cleanup still reports due entries")
+	}
+	if got := len(limiter.requests); got != 1 {
+		limiter.mu.Unlock()
+		t.Fatalf("request counters after cleanup = %d, want one static counter", got)
+	}
+	limiter.mu.Unlock()
 }
 
 func TestAcquireSlidingWindowWeighsPreviousWindow(t *testing.T) {

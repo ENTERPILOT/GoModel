@@ -254,16 +254,49 @@ the row-level Reset action to start a new period for one budget, or
 
 Budget management is also available through the admin API:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   http://localhost:8080/admin/budgets
 ```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+budgets = client.get("/admin/budgets", cast_to=httpx.Response)
+
+print(budgets.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const budgets = await client.get("/admin/budgets");
+console.log(budgets);
+```
+
+</CodeGroup>
 
 Create or update a budget. A budget is identified by its `scope`, `subject`,
 and period; `user_path` is accepted as a shorthand spelling of the subject for
 user-path budgets:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X PUT http://localhost:8080/admin/budgets \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -276,9 +309,57 @@ curl -X PUT http://localhost:8080/admin/budgets \
   }'
 ```
 
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+budget = client.put(
+    "/admin/budgets",
+    cast_to=httpx.Response,
+    body={
+        "scope": "user_path",
+        "subject": "/team/alpha",
+        "budget_key": {"period": "daily"},
+        "amount": 10.00,
+    },
+)
+
+print(budget.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const budget = await client.put("/admin/budgets", {
+  body: {
+    scope: "user_path",
+    subject: "/team/alpha",
+    budget_key: { period: "daily" },
+    amount: 10.0,
+  },
+});
+
+console.log(budget);
+```
+
+</CodeGroup>
+
 The same call for a label budget:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X PUT http://localhost:8080/admin/budgets \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -290,9 +371,57 @@ curl -X PUT http://localhost:8080/admin/budgets \
   }'
 ```
 
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+budget = client.put(
+    "/admin/budgets",
+    cast_to=httpx.Response,
+    body={
+        "scope": "label",
+        "subject": "Mobile-App-iOS",
+        "budget_key": {"period": "monthly"},
+        "amount": 500.00,
+    },
+)
+
+print(budget.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const budget = await client.put("/admin/budgets", {
+  body: {
+    scope: "label",
+    subject: "Mobile-App-iOS",
+    budget_key: { period: "monthly" },
+    amount: 500.0,
+  },
+});
+
+console.log(budget);
+```
+
+</CodeGroup>
+
 Delete a budget:
 
-```bash
+<CodeGroup>
+
+```bash curl
 curl -X DELETE http://localhost:8080/admin/budgets \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -302,5 +431,49 @@ curl -X DELETE http://localhost:8080/admin/budgets \
     "budget_key": { "period": "monthly" }
   }'
 ```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+deleted = client.delete(
+    "/admin/budgets",
+    cast_to=httpx.Response,
+    body={
+        "scope": "label",
+        "subject": "Mobile-App-iOS",
+        "budget_key": {"period": "monthly"},
+    },
+)
+
+print(deleted.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const deleted = await client.delete("/admin/budgets", {
+  body: {
+    scope: "label",
+    subject: "Mobile-App-iOS",
+    budget_key: { period: "monthly" },
+  },
+});
+
+console.log(deleted);
+```
+
+</CodeGroup>
 
 See [Admin Endpoints](/advanced/admin-endpoints) for the endpoint list.

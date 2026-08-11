@@ -8,6 +8,9 @@ type RequestModelResolution struct {
 	ProviderType     string
 	ProviderName     string
 	AliasApplied     bool
+	// Slowdown is the extra-time factor selected for this request. A value of
+	// 0.5 adds 50% of measured inference time; zero disables slowdown.
+	Slowdown float64
 }
 
 // RequestedQualifiedModel returns the canonical requested selector.

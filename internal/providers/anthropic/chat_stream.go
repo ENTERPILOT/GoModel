@@ -23,9 +23,11 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	anthropicReq.Stream = true
 
 	stream, err := p.client.DoStream(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/messages",
-		Body:     anthropicReq,
+		Method:    http.MethodPost,
+		Endpoint:  "/messages",
+		Operation: llmclient.OperationChat,
+		Model:     req.Model,
+		Body:      anthropicReq,
 	})
 	if err != nil {
 		return nil, err

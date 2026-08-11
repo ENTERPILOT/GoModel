@@ -3,6 +3,7 @@ package bedrock
 import (
 	"context"
 	"io"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -28,6 +29,8 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	if err != nil {
 		return nil, err
 	}
+	observation := p.beginCallObservation(ctx, req.Model, true)
+	ctx = observation.ctx
 
 	out, err := p.runtime.ConverseStream(ctx, converseStreamInput(parts))
 	if err != nil && partsHaveCachePoints(parts) && isCachePointValidationError(err) {
@@ -35,10 +38,13 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 		out, err = p.runtime.ConverseStream(ctx, converseStreamInput(parts))
 	}
 	if err != nil {
-		return nil, mapAWSError(err)
+		mappedErr := mapAWSError(err)
+		observation.end(statusCodeFromError(mappedErr), mappedErr)
+		return nil, mappedErr
 	}
+	observation.end(http.StatusOK, nil)
 
-	return newOpenAIStream(out, req.Model), nil
+	return observedStream(newOpenAIStream(out, req.Model), observation), nil
 }
 
 func converseStreamInput(parts converseParts) *bedrockruntime.ConverseStreamInput {

@@ -166,9 +166,11 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 
 	var ollamaResp ollamaEmbedResponse
 	err := p.nativeClient.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/api/embed",
-		Body:     ollamaReq,
+		Method:    http.MethodPost,
+		Endpoint:  "/api/embed",
+		Operation: llmclient.OperationEmbeddings,
+		Model:     req.Model,
+		Body:      ollamaReq,
 	}, &ollamaResp)
 	if err != nil {
 		return nil, err

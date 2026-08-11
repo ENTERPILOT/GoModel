@@ -1,8 +1,11 @@
 package bedrock
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -11,8 +14,46 @@ import (
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
+
+func TestCallObservationCoversBedrockSDKAndFirstChunk(t *testing.T) {
+	var starts []llmclient.RequestInfo
+	var ends, chunks []llmclient.ResponseInfo
+	type contextKey struct{}
+	p := &Provider{hooks: llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+			starts = append(starts, info)
+			return context.WithValue(ctx, contextKey{}, true)
+		},
+		OnRequestEnd: func(_ context.Context, info llmclient.ResponseInfo) {
+			ends = append(ends, info)
+		},
+		OnStreamFirstChunk: func(ctx context.Context, info llmclient.ResponseInfo) {
+			if ctx.Value(contextKey{}) != true {
+				t.Error("first chunk hook did not receive derived context")
+			}
+			chunks = append(chunks, info)
+		},
+	}}
+
+	observation := p.beginCallObservation(t.Context(), "anthropic.claude", true)
+	observation.end(http.StatusOK, nil)
+	stream := observedStream(io.NopCloser(strings.NewReader("data: first\n\n")), observation)
+	if len(chunks) != 0 {
+		t.Fatal("first chunk hook fired before stream read")
+	}
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatal(err)
+	}
+	if len(starts) != 1 || len(ends) != 1 || len(chunks) != 1 {
+		t.Fatalf("hook counts = start:%d end:%d chunk:%d, want 1/1/1", len(starts), len(ends), len(chunks))
+	}
+	if starts[0].Operation != llmclient.OperationChat || starts[0].Endpoint != converseEndpoint || !starts[0].Stream {
+		t.Fatalf("start info = %+v, want streaming Bedrock chat", starts[0])
+	}
+}
 
 func TestParseBaseURL(t *testing.T) {
 	cases := []struct {

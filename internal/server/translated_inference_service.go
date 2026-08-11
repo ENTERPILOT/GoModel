@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/observability"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
@@ -134,7 +135,9 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 			result.Meta.ProviderName,
 			result.Meta.FailoverModel,
 			result.Stream,
-			nil,
+			func(stream io.ReadCloser) io.ReadCloser {
+				return result.WrapDeliveryStream(ctx, stream)
+			},
 		)
 	}
 
@@ -312,7 +315,9 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			result.Meta.ProviderName,
 			result.Meta.FailoverModel,
 			stream,
-			nil,
+			func(stream io.ReadCloser) io.ReadCloser {
+				return result.WrapDeliveryStream(ctx, stream)
+			},
 		)
 	}
 
@@ -449,10 +454,14 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 	const endpoint = "/chat/completions"
 	providerType := strings.TrimSpace(workflow.ProviderType)
 	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
-		Method:   c.Request().Method,
-		Endpoint: endpoint,
-		Body:     c.Request().Body,
-		Headers:  buildPassthroughHeaders(ctx, c.Request().Header),
+		Method:       c.Request().Method,
+		Endpoint:     endpoint,
+		Operation:    llmclient.OperationChat,
+		Model:        resolvedModelFromWorkflow(workflow, req.Model),
+		Stream:       req.Stream,
+		Body:         c.Request().Body,
+		Headers:      buildPassthroughHeaders(ctx, c.Request().Header),
+		ProviderName: providerNameFromWorkflow(workflow),
 	})
 	if err != nil {
 		return true, handleError(c, err)

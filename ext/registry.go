@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"fmt"
 	"slices"
 	"sync"
 
@@ -18,19 +19,32 @@ const (
 	CapabilityQuotaTemplates Capability = "quota_templates"
 )
 
+// HTTPServerConfig exposes generation-specific HTTP settings needed when an
+// extension constructs outer middleware. A new value is supplied on reload.
+type HTTPServerConfig struct {
+	MetricsEndpoint string
+}
+
+// OuterMiddlewareFactory constructs middleware for one server generation.
+// It is intended for middleware whose configuration can change on reload.
+type OuterMiddlewareFactory func(HTTPServerConfig) (echo.MiddlewareFunc, error)
+
 // Registry collects extensions to be consumed by the gateway at startup.
 // Register everything before the server is constructed (before run.Run or
 // app.New); core snapshots each registration list during initialization.
 type Registry struct {
-	mu             sync.Mutex
-	rewriters      []RequestRewriter
-	middleware     []echo.MiddlewareFunc
-	routes         []func(*echo.Echo)
-	publicPaths    []string
-	routeSelector  RouteSelector
-	settings       []RuntimeSetting
-	authenticators []RequestAuthenticator
-	capabilities   map[Capability]struct{}
+	mu              sync.Mutex
+	rewriters       []RequestRewriter
+	outerMiddleware []echo.MiddlewareFunc
+	outerFactories  []OuterMiddlewareFactory
+	middleware      []echo.MiddlewareFunc
+	routes          []func(*echo.Echo)
+	publicPaths     []string
+	routeSelector   RouteSelector
+	settings        []RuntimeSetting
+	authenticators  []RequestAuthenticator
+	observers       []UpstreamObserver
+	capabilities    map[Capability]struct{}
 }
 
 // EnableCapability unlocks an optional core behavior for this registry.
@@ -52,6 +66,34 @@ func (r *Registry) HasCapability(capability Capability) bool {
 	defer r.mu.Unlock()
 	_, ok := r.capabilities[capability]
 	return ok
+}
+
+// UseOuterMiddleware adds middleware at the outer HTTP boundary, after
+// credential-like request URI values are redacted and before request logging,
+// recovery, limits, audit capture, and authentication. It is intended for
+// observability and correlation middleware that must cover the whole request.
+// It must not depend on an authenticated identity.
+func (r *Registry) UseOuterMiddleware(m echo.MiddlewareFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.outerMiddleware = append(r.outerMiddleware, m)
+}
+
+// UseOuterMiddlewareFactory registers generation-specific outer middleware.
+// Core invokes the factory whenever it constructs or reloads the HTTP server.
+func (r *Registry) UseOuterMiddlewareFactory(factory OuterMiddlewareFactory) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.outerFactories = append(r.outerFactories, factory)
+}
+
+// RegisterUpstreamObserver adds an observer for logical provider calls.
+// Observers run in registration order and may derive the context passed to
+// later observers and to the provider request.
+func (r *Registry) RegisterUpstreamObserver(observer UpstreamObserver) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.observers = append(r.observers, observer)
 }
 
 // RegisterAuthenticator adds a request authentication mechanism. Core bearer
@@ -126,6 +168,36 @@ func (r *Registry) Middleware() []echo.MiddlewareFunc {
 	return slices.Clone(r.middleware)
 }
 
+// OuterMiddleware returns a defensive copy of registered outer middleware.
+func (r *Registry) OuterMiddleware() []echo.MiddlewareFunc {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.outerMiddleware)
+}
+
+// OuterMiddlewareFor returns static outer middleware followed by middleware
+// constructed for the supplied server generation.
+func (r *Registry) OuterMiddlewareFor(cfg HTTPServerConfig) ([]echo.MiddlewareFunc, error) {
+	r.mu.Lock()
+	middleware := slices.Clone(r.outerMiddleware)
+	factories := slices.Clone(r.outerFactories)
+	r.mu.Unlock()
+
+	for i, factory := range factories {
+		if factory == nil {
+			continue
+		}
+		m, err := factory(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("construct outer middleware %d: %w", i, err)
+		}
+		if m != nil {
+			middleware = append(middleware, m)
+		}
+	}
+	return middleware, nil
+}
+
 // Routes returns a defensive copy of the registered route callbacks.
 func (r *Registry) Routes() []func(*echo.Echo) {
 	r.mu.Lock()
@@ -161,6 +233,13 @@ func (r *Registry) Authenticators() []RequestAuthenticator {
 	return slices.Clone(r.authenticators)
 }
 
+// UpstreamObservers returns a defensive copy of registered observers.
+func (r *Registry) UpstreamObservers() []UpstreamObserver {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.observers)
+}
+
 // Default is the process-wide registry used by package-level helpers and, by
 // default, by run.Run.
 var Default = &Registry{}
@@ -170,6 +249,14 @@ func RegisterRewriter(rw RequestRewriter) { Default.RegisterRewriter(rw) }
 
 // UseMiddleware registers middleware on the Default registry.
 func UseMiddleware(m echo.MiddlewareFunc) { Default.UseMiddleware(m) }
+
+// UseOuterMiddleware registers outer HTTP middleware on the Default registry.
+func UseOuterMiddleware(m echo.MiddlewareFunc) { Default.UseOuterMiddleware(m) }
+
+// UseOuterMiddlewareFactory registers generation-specific outer HTTP middleware.
+func UseOuterMiddlewareFactory(factory OuterMiddlewareFactory) {
+	Default.UseOuterMiddlewareFactory(factory)
+}
 
 // RegisterRoutes registers a route callback on the Default registry.
 func RegisterRoutes(fn func(e *echo.Echo)) { Default.RegisterRoutes(fn) }
@@ -190,3 +277,8 @@ func RegisterAuthenticator(authenticator RequestAuthenticator) {
 
 // EnableCapability unlocks an optional core behavior on the Default registry.
 func EnableCapability(capability Capability) { Default.EnableCapability(capability) }
+
+// RegisterUpstreamObserver registers an observer on the Default registry.
+func RegisterUpstreamObserver(observer UpstreamObserver) {
+	Default.RegisterUpstreamObserver(observer)
+}

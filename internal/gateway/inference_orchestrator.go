@@ -3,8 +3,10 @@ package gateway
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -116,7 +118,21 @@ type EmbeddingResult struct {
 }
 
 // StreamResult is a provider SSE stream plus route metadata for observers.
+// Stream is intentionally unbuffered so accounting observers can consume the
+// provider events before WrapDeliveryStream applies any client-facing delay.
 type StreamResult struct {
 	Stream io.ReadCloser
 	Meta   ExecutionMeta
+
+	slowdownFactor   float64
+	inferenceStarted time.Time
+}
+
+// WrapDeliveryStream applies this result's client-facing slowdown after any
+// accounting or persistence wrappers have been attached to stream.
+func (r *StreamResult) WrapDeliveryStream(ctx context.Context, stream io.ReadCloser) io.ReadCloser {
+	if r == nil {
+		return stream
+	}
+	return streaming.NewSlowdownStream(ctx, stream, r.slowdownFactor, r.inferenceStarted)
 }

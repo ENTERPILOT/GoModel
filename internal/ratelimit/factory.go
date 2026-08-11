@@ -27,6 +27,9 @@ func (r *Result) Close() error {
 	}
 	r.closeOnce.Do(func() {
 		var errs []error
+		if r.Service != nil {
+			r.Service.Close()
+		}
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
 				errs = append(errs, fmt.Errorf("store close: %w", err))
