@@ -40,14 +40,16 @@ func (t Target) selector() (core.ModelSelector, error) {
 
 // VirtualModel is one operator-defined model entry.
 type VirtualModel struct {
-	Source       string    `json:"source" bson:"_id"`
-	Targets      []Target  `json:"targets,omitempty" bson:"targets,omitempty"`
-	Strategy     string    `json:"strategy,omitempty" bson:"strategy,omitempty"`
-	ProviderName string    `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
-	Model        string    `json:"model,omitempty" bson:"model,omitempty"`
-	UserPaths    []string  `json:"user_paths,omitempty" bson:"user_paths,omitempty"`
-	Description  string    `json:"description,omitempty" bson:"description,omitempty"`
-	Enabled      bool      `json:"enabled" bson:"enabled"`
+	Source       string   `json:"source" bson:"_id"`
+	Targets      []Target `json:"targets,omitempty" bson:"targets,omitempty"`
+	Strategy     string   `json:"strategy,omitempty" bson:"strategy,omitempty"`
+	ProviderName string   `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
+	Model        string   `json:"model,omitempty" bson:"model,omitempty"`
+	UserPaths    []string `json:"user_paths,omitempty" bson:"user_paths,omitempty"`
+	Description  string   `json:"description,omitempty" bson:"description,omitempty"`
+	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
+	Slowdown float64 `json:"slowdown,omitempty" bson:"slowdown,omitempty"`
+	Enabled  bool    `json:"enabled" bson:"enabled"`
 
 	// SessionAffinity keeps requests of one detected session on the target that
 	// served it before, while that target stays available. Tri-state: nil means
@@ -134,15 +136,17 @@ const (
 
 // View is the admin-facing representation of one virtual model.
 type View struct {
-	Source        string    `json:"source"`
-	Kind          string    `json:"kind"`
+	Source          string   `json:"source"`
+	Kind            string   `json:"kind"`
 	Targets         []Target `json:"targets,omitempty"`
 	Strategy        string   `json:"strategy,omitempty"`
 	SessionAffinity *bool    `json:"session_affinity,omitempty"`
-	ProviderName  string    `json:"provider_name,omitempty"`
-	Model         string    `json:"model,omitempty"`
-	UserPaths     []string  `json:"user_paths,omitempty"`
-	Description   string    `json:"description,omitempty"`
+	ProviderName    string   `json:"provider_name,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	UserPaths       []string `json:"user_paths,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
+	Slowdown      float64   `json:"slowdown,omitempty"`
 	Enabled       bool      `json:"enabled"`
 	Managed       bool      `json:"managed,omitempty"`
 	ResolvedModel string    `json:"resolved_model,omitempty"`

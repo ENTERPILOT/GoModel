@@ -32,6 +32,7 @@ import {
   vmFormHasPrimaryTarget,
   vmFormShowStrategy,
   vmFormShowWeights,
+  vmFormSupportsSlowdown,
   modelAccessUserPathsRestrict,
   removePrimaryTarget as removePrimaryTargetPure,
 } from "./virtualModelsLogic.js";
@@ -428,6 +429,9 @@ class VirtualModelsStore {
         user_paths: Array.isArray(alias.user_paths) ? alias.user_paths : [],
         description: String(alias.description || "").trim(),
         enabled: alias.enabled !== false,
+        ...(Number(alias.slowdown || 0) > 0
+          ? { slowdown: Number(alias.slowdown) }
+          : {}),
       },
       operation: "virtual model redirect",
       failureMessage: "Failed to remove redirect.",
@@ -518,6 +522,10 @@ class VirtualModelsStore {
     return vmFormShowWeights(this.vmForm);
   }
 
+  vmFormSupportsSlowdown() {
+    return vmFormSupportsSlowdown(this.vmForm);
+  }
+
   // The edit-modal status switch reuses the same .alias-toggle component and
   // three states, derived from the form's own fields: it is Restricted when
   // enabled and scoped to non-global user paths.
@@ -599,6 +607,7 @@ class VirtualModelsStore {
       session_affinity: alias.session_affinity !== false,
       user_paths: (Array.isArray(alias.user_paths) ? alias.user_paths : []).join("\n"),
       description: alias.description || "",
+      slowdown: alias.slowdown || "",
       enabled: alias.enabled !== false,
     };
   }
@@ -643,6 +652,7 @@ class VirtualModelsStore {
       strategy: "round_robin",
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
+      slowdown: override && override.slowdown ? override.slowdown : "",
       enabled: overrideEnabled,
     };
   }
@@ -671,6 +681,7 @@ class VirtualModelsStore {
       strategy: "round_robin",
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
+      slowdown: override && override.slowdown ? override.slowdown : "",
       enabled: override ? override.enabled !== false : defaultEnabled,
     };
   }

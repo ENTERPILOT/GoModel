@@ -99,6 +99,46 @@ func (r requestAliasResolver) ResolveModel(requested core.RequestedModelSelector
 	return selector, false, err
 }
 
+type requestSlowdownResolver struct {
+	requestAliasResolver
+	factor    float64
+	requested string
+	resolved  string
+}
+
+func (r *requestSlowdownResolver) ResolveSlowdown(_ context.Context, requested core.RequestedModelSelector, resolved core.ModelSelector) float64 {
+	r.requested = requested.RequestedQualifiedModel()
+	r.resolved = resolved.QualifiedModel()
+	return r.factor
+}
+
+func TestResolveRequestModelCarriesResolvedSlowdownFactor(t *testing.T) {
+	provider := newRequestRefreshProvider(1)
+	resolver := &requestSlowdownResolver{
+		requestAliasResolver: requestAliasResolver{
+			"smart": {Provider: "openai", Model: "gpt-4o"},
+		},
+		factor: 0.5,
+	}
+
+	resolution, err := ResolveRequestModelWithAuthorizer(
+		context.Background(),
+		provider,
+		resolver,
+		nil,
+		core.NewRequestedModelSelector("smart", ""),
+	)
+	if err != nil {
+		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v", err)
+	}
+	if resolution.Slowdown != 0.5 {
+		t.Fatalf("resolution.Slowdown = %v, want 0.5", resolution.Slowdown)
+	}
+	if resolver.requested != "smart" || resolver.resolved != "openai/gpt-4o" {
+		t.Fatalf("slowdown resolver inputs = (%q, %q), want (smart, openai/gpt-4o)", resolver.requested, resolver.resolved)
+	}
+}
+
 type requestRefreshTargetResolver struct {
 	provider *requestRefreshProvider
 	target   core.ModelSelector

@@ -263,14 +263,15 @@ func (s *Service) ListViews() []View {
 			Targets:         vm.Targets,
 			Strategy:        vm.Strategy,
 			SessionAffinity: vm.SessionAffinity,
-			ProviderName: vm.ProviderName,
-			Model:        vm.Model,
-			UserPaths:    vm.UserPaths,
-			Description:  vm.Description,
-			Enabled:      vm.Enabled,
-			Managed:      vm.Managed,
-			CreatedAt:    vm.CreatedAt,
-			UpdatedAt:    vm.UpdatedAt,
+			ProviderName:    vm.ProviderName,
+			Model:           vm.Model,
+			UserPaths:       vm.UserPaths,
+			Description:     vm.Description,
+			Slowdown:        vm.Slowdown,
+			Enabled:         vm.Enabled,
+			Managed:         vm.Managed,
+			CreatedAt:       vm.CreatedAt,
+			UpdatedAt:       vm.UpdatedAt,
 		}
 		if vm.IsRedirect() {
 			view.ResolvedModel, view.ProviderType, view.Valid = s.redirectViewResolution(vm)
@@ -498,7 +499,7 @@ func (s *Service) policyIsRedundant(policy VirtualModel, fallbackRows []VirtualM
 // policyIsNoop reports whether an otherwise empty policy changes effective
 // access compared with the snapshot that would remain without that policy.
 func policyIsNoop(policy VirtualModel, fallback snapshot) bool {
-	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" {
+	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown > 0 {
 		return false
 	}
 

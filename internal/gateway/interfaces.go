@@ -22,6 +22,12 @@ type UserPathModelResolver interface {
 	ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
+// ModelSlowdownResolver optionally resolves an extra-time factor for a
+// requested/resolved model pair. The context carries the effective user path.
+type ModelSlowdownResolver interface {
+	ResolveSlowdown(context.Context, core.RequestedModelSelector, core.ModelSelector) float64
+}
+
 // FailoverResolver resolves alternate concrete model selectors for a translated
 // request after the primary selector has already been resolved.
 type FailoverResolver interface {

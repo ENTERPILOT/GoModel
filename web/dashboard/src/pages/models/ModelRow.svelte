@@ -25,6 +25,15 @@
   let { row, columns } = $props();
 
   const pricing = $derived(pricingOverrides.modelRowPricing(row));
+  const slowdown = $derived(
+    Number(
+      row.is_alias
+        ? row.alias && row.alias.slowdown
+        : (row.masking_alias && row.masking_alias.slowdown) ||
+            (row.access && row.access.override && row.access.override.slowdown) ||
+            0,
+    ),
+  );
 </script>
 
 <tr id={rowAnchorID(row) || undefined} class={displayRowClass(row)}>
@@ -74,6 +83,11 @@
               onclick={() => virtualModels.removeRedirectRow(row)}
             >[remove]</button>
           {/if}
+        </div>
+      {/if}
+      {#if slowdown > 0}
+        <div class="model-name-secondary">
+          Slowdown <span class="mono font-size-md">+{slowdown}× inference time</span>
         </div>
       {/if}
     </div>
@@ -146,7 +160,7 @@
         {/if}
         {#if virtualModels.virtualModelsAvailable && !row.masking_alias}
           <TableActionButton
-            label={modelOverrideEditButtonLabel("model access for " + row.display_name, hasAccessOverride(row.access))}
+            label={modelOverrideEditButtonLabel("model settings for " + row.display_name, hasAccessOverride(row.access))}
             class="table-icon-btn {modelOverrideEditButtonClass(hasAccessOverride(row.access))}"
             onclick={() => virtualModels.openVirtualModelEditModel(row)}
           >

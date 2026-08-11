@@ -30,10 +30,29 @@ policy on the **Source** selector.
 
 GoModel does not persist empty, ineffective access policies, whether saved from
 the dashboard or through the admin API. If a saved policy has no target, user
-paths, or description and its enabled state matches the inherited/default
+paths, description, or slowdown and its enabled state matches the inherited/default
 access state, GoModel removes the stored row. It retains an otherwise empty
 policy when that row still overrides a disabled default or an inherited
 user-path restriction.
+
+## Add artificial model latency
+
+Set **Slowdown** on a concrete model or redirect to add a fraction of measured
+inference time. The accepted range is `0.1` to `10`; for example, `0.5` adds
+50%, so a response that takes 2 seconds upstream is returned after about 3
+seconds. Leaving the field empty disables slowdown. Delays honor request
+cancellation.
+
+For Chat Completions and Responses API SSE streams, GoModel drains the upstream
+in the background and releases each read chunk on the scaled timeline. This
+preserves the provider's relative chunk timing while delayed chunks accumulate
+in memory. A large factor on a long or high-volume stream can therefore use
+substantial memory. Realtime WebSocket sessions are not slowed.
+
+When an alias and its concrete target both have a slowdown, the alias value
+wins. An alias without its own value inherits the selected target model's
+slowdown. This also applies to load-balanced virtual models after a target is
+selected.
 
 The rest of this page covers redirects.
 
@@ -117,6 +136,7 @@ virtual_models:
   # A plain alias.
   - source: regular
     target: anthropic/claude-sonnet-4-6
+    slowdown: 0.5
 
   # A weighted round-robin load balancer.
   - source: smart
@@ -143,8 +163,8 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 
 Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 `strategy` (`round_robin` or `cost`), `session_affinity` (default `true`; see
-[Session Keeping](/features/session-keeping)), `user_paths`, `description`, and
-`enabled`.
+[Session Keeping](/features/session-keeping)), `user_paths`, `description`,
+`slowdown` (an extra-time factor from `0.1` to `10`), and `enabled`.
 Leave the targets empty to declare an access policy on the `source` selector. An
 invalid declaration (unknown strategy, missing or self-referential target, or a
 target `provider` that matches no configured provider — a typo) fails startup

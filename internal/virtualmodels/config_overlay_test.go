@@ -13,7 +13,7 @@ func TestConfigModels_Conversion(t *testing.T) {
 	t.Parallel()
 	enabled := false
 	got := ConfigModels([]config.VirtualModelConfig{
-		{Source: "alias", Target: "openai/gpt-4o"},
+		{Source: "alias", Target: "openai/gpt-4o", Slowdown: 0.5},
 		{
 			Source:   "smart",
 			Strategy: StrategyCost,
@@ -28,7 +28,7 @@ func TestConfigModels_Conversion(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("ConfigModels len = %d, want 3", len(got))
 	}
-	if got[0].Targets[0].Model != "openai/gpt-4o" || !got[0].Enabled || !got[0].Managed {
+	if got[0].Targets[0].Model != "openai/gpt-4o" || got[0].Slowdown != 0.5 || !got[0].Enabled || !got[0].Managed {
 		t.Fatalf("shorthand target conversion = %#v", got[0])
 	}
 	if len(got[1].Targets) != 2 || got[1].Strategy != StrategyCost || got[1].Targets[0].Weight != 2 {

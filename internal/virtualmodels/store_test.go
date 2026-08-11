@@ -15,6 +15,7 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 			Source:      "fast",
 			Targets:     []Target{{Provider: "openai", Model: "gpt-4o"}},
 			Description: "primary",
+			Slowdown:    0.4,
 			Enabled:     true,
 		}
 		policy := VirtualModel{
@@ -22,6 +23,7 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 			ProviderName: "openai",
 			Model:        "gpt-4o",
 			UserPaths:    []string{"/team"},
+			Slowdown:     0.2,
 			Enabled:      true,
 		}
 		if err := store.Upsert(ctx, redirect); err != nil {
@@ -49,6 +51,9 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		if len(gotRedirect.Targets) != 1 || gotRedirect.Targets[0].Model != "gpt-4o" || gotRedirect.Targets[0].Provider != "openai" {
 			t.Fatalf("Get(fast).Targets = %#v, want [{openai gpt-4o 0}]", gotRedirect.Targets)
 		}
+		if gotRedirect.Slowdown != 0.4 {
+			t.Fatalf("Get(fast).Slowdown = %v, want 0.4", gotRedirect.Slowdown)
+		}
 
 		gotPolicy, err := store.Get(ctx, "openai/gpt-4o")
 		if err != nil {
@@ -59,6 +64,9 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		}
 		if len(gotPolicy.UserPaths) != 1 || gotPolicy.UserPaths[0] != "/team" {
 			t.Fatalf("Get(policy).UserPaths = %#v, want [/team]", gotPolicy.UserPaths)
+		}
+		if gotPolicy.Slowdown != 0.2 {
+			t.Fatalf("Get(policy).Slowdown = %v, want 0.2", gotPolicy.Slowdown)
 		}
 	})
 }
