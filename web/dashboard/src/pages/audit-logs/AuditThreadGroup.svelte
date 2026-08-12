@@ -11,6 +11,7 @@
   import {
     auditIsThreadHead,
     auditSessionCount,
+    auditSessionMatchingCount,
     auditSessionId,
   } from "./audit-logic.js";
 
@@ -34,6 +35,7 @@
       {entry}
       thread={{
         count: auditSessionCount(entry),
+        matchingCount: auditSessionMatchingCount(entry),
         expanded,
         ontoggle: () => auditList.toggleThread(entry),
       }}

@@ -171,6 +171,8 @@ type auditConversationResponse struct {
 type auditSessionResponse struct {
 	SessionID      string                `json:"session_id,omitempty"`
 	Count          int                   `json:"count"`
+	MatchingCount  int                   `json:"matching_count"`
+	TotalCount     int                   `json:"total_count"`
 	FirstTimestamp time.Time             `json:"first_timestamp"`
 	LastTimestamp  time.Time             `json:"last_timestamp"`
 	Latest         auditLogEntryResponse `json:"latest"`

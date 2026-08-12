@@ -70,6 +70,21 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 					{Key: "as", Value: "latest"},
 				}}},
 				bson.D{{Key: "$unwind", Value: "$latest"}},
+				// Count the complete session after the filtered page winners are
+				// known. Sessionless rows remain singleton threads and skip this
+				// lookup's match through the non-empty sid guard.
+				bson.D{{Key: "$lookup", Value: bson.D{
+					{Key: "from", Value: r.collection.Name()},
+					{Key: "let", Value: bson.D{{Key: "sid", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$latest.session_id", ""}}}}}},
+					{Key: "pipeline", Value: bson.A{
+						bson.D{{Key: "$match", Value: bson.D{{Key: "$expr", Value: bson.D{{Key: "$and", Value: bson.A{
+							bson.D{{Key: "$ne", Value: bson.A{"$$sid", ""}}},
+							bson.D{{Key: "$eq", Value: bson.A{"$session_id", "$$sid"}}},
+						}}}}}}},
+						bson.D{{Key: "$count", Value: "count"}},
+					}},
+					{Key: "as", Value: "session_total"},
+				}}},
 			}},
 			{Key: "total", Value: bson.A{
 				bson.D{{Key: "$count", Value: "count"}},
@@ -85,10 +100,13 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 
 	var facetResult struct {
 		Data []struct {
-			Latest  mongoLogRow `bson:"latest"`
-			Count   int         `bson:"count"`
-			FirstTS time.Time   `bson:"first_ts"`
-			LastTS  time.Time   `bson:"last_ts"`
+			Latest       mongoLogRow `bson:"latest"`
+			Count        int         `bson:"count"`
+			SessionTotal []struct {
+				Count int `bson:"count"`
+			} `bson:"session_total"`
+			FirstTS time.Time `bson:"first_ts"`
+			LastTS  time.Time `bson:"last_ts"`
 		} `bson:"data"`
 		Total []struct {
 			Count int `bson:"count"`
@@ -114,9 +132,17 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		if entry == nil {
 			continue
 		}
+		totalCount := 1
+		if entry.SessionID != "" {
+			totalCount = row.Count
+			if len(row.SessionTotal) > 0 && row.SessionTotal[0].Count > totalCount {
+				totalCount = row.SessionTotal[0].Count
+			}
+		}
 		sessions = append(sessions, SessionSummary{
 			SessionID:      entry.SessionID,
 			Count:          row.Count,
+			TotalCount:     totalCount,
 			FirstTimestamp: row.FirstTS,
 			LastTimestamp:  row.LastTS,
 			Latest:         *entry,

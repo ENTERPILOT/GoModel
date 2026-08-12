@@ -13,6 +13,10 @@ semantic_cache_pct="${DEMO_SEMANTIC_CACHE_PCT:-7}"
 prompt_cache_pct="${DEMO_PROMPT_CACHE_PCT:-28}"
 rewrite_pct="${DEMO_REWRITE_PCT:-18}"
 prefix="${DEMO_SEED_PREFIX:-demo-generated}"
+utc_hour="$(date -u +%H)"
+utc_minute="$(date -u +%M)"
+utc_second="$(date -u +%S)"
+current_utc_second=$((10#$utc_hour * 3600 + 10#$utc_minute * 60 + 10#$utc_second))
 
 usage() {
   cat <<EOF
@@ -385,7 +389,13 @@ daily_random AS (
 SELECT
   day_idx,
   day,
-  CAST(max(25, min(${max_requests}, round(${avg_requests} * weekday_factor * trend_factor * seasonal_factor * noise_factor))) AS INTEGER) AS request_count
+  CAST(max(25, min(${max_requests}, round(
+    ${avg_requests} * weekday_factor * trend_factor * seasonal_factor * noise_factor *
+    CASE WHEN day = date('now')
+      THEN max(0.02, (${current_utc_second} + 1) / 86400.0)
+      ELSE 1.0
+    END
+  ))) AS INTEGER) AS request_count
 FROM daily_random;
 
 DROP TABLE IF EXISTS temp.demo_slots;
@@ -453,7 +463,10 @@ SELECT
   abs(random()) % 10000 AS rewrite_bucket,
   abs(random()) % 10000 AS label_bucket,
   abs(random()) % 10000 AS session_bucket,
-  abs(random()) % 86400 AS second_of_day,
+  abs(random()) % CASE WHEN d.day = date('now')
+    THEN ${current_utc_second} + 1
+    ELSE 86400
+  END AS second_of_day,
   abs(random()) AS token_noise
 FROM demo_days d
 JOIN demo_slots s ON s.slot_idx < d.request_count;

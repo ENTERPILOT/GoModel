@@ -30,6 +30,7 @@ import {
   auditIsThreadHead,
   auditLogFromSessions,
   auditSessionCount,
+  auditSessionMatchingCount,
   auditSessionId,
   auditTabKeydownTarget,
   buildAuditLogQuery,
@@ -717,6 +718,11 @@ test("session head helpers handle missing ids and counts", () => {
   assert.equal(auditSessionCount({ session_count: 5 }), 5);
   assert.equal(auditSessionCount({ session_count: 0 }), 1);
   assert.equal(auditSessionCount({}), 1);
+  assert.equal(
+    auditSessionMatchingCount({ session_count: 6, session_matching_count: 3 }),
+    3,
+  );
+  assert.equal(auditSessionMatchingCount({ session_count: 6 }), 6);
   assert.equal(auditIsThreadHead({ session_id: "s-1", session_count: 2 }), true);
   assert.equal(auditIsThreadHead({ session_id: "s-1", session_count: 1 }), false);
   assert.equal(auditIsThreadHead({ session_count: 3 }), false);
@@ -728,6 +734,8 @@ test("auditLogFromSessions maps thread summaries into head entries", () => {
       {
         session_id: "s-1",
         count: 3,
+        matching_count: 3,
+        total_count: 6,
         latest: { id: "log-3", session_id: "s-1", status_code: 200 },
       },
       { count: 1, latest: { id: "solo", status_code: 200 } },
@@ -740,7 +748,8 @@ test("auditLogFromSessions maps thread summaries into head entries", () => {
   const mapped = auditLogFromSessions(payload);
   assert.equal(mapped.entries.length, 2);
   assert.equal(mapped.entries[0].id, "log-3");
-  assert.equal(mapped.entries[0].session_count, 3);
+  assert.equal(mapped.entries[0].session_count, 6);
+  assert.equal(mapped.entries[0].session_matching_count, 3);
   assert.equal(mapped.entries[1].id, "solo");
   assert.equal(mapped.entries[1].session_count, 1);
   assert.equal(mapped.total, 12);

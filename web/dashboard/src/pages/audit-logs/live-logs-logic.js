@@ -262,7 +262,10 @@ export function liveLogsMethods() {
                 ...head,
                 session_count:
                     Math.max(1, Number(other.session_count || 1)) +
-                    Math.max(1, Number(entry.session_count || 1))
+                    Math.max(1, Number(entry.session_count || 1)),
+                session_matching_count:
+                    Math.max(1, Number(other.session_matching_count || other.session_count || 1)) +
+                    Math.max(1, Number(entry.session_matching_count || entry.session_count || 1))
             };
             const next = entries.filter((_, index) => index !== myIndex && index !== otherIndex);
             next.unshift(merged);
@@ -284,9 +287,16 @@ export function liveLogsMethods() {
             if (headIndex < 0) return null;
             const oldHead = entries[headIndex];
             const oldCount = Number(oldHead.session_count);
+            const oldMatchingCount = Number(oldHead.session_matching_count);
             const newHead = this.mergeLiveAuditUsagePatch({
                 ...patch,
-                session_count: (Number.isFinite(oldCount) && oldCount > 0 ? oldCount : 1) + 1
+                session_count: (Number.isFinite(oldCount) && oldCount > 0 ? oldCount : 1) + 1,
+                session_matching_count:
+                    (Number.isFinite(oldMatchingCount) && oldMatchingCount > 0
+                        ? oldMatchingCount
+                        : Number.isFinite(oldCount) && oldCount > 0
+                          ? oldCount
+                          : 1) + 1
             });
             const next = [...entries];
             next.splice(headIndex, 1);
@@ -339,8 +349,18 @@ export function liveLogsMethods() {
             const index = entries.findIndex((entry) => String(entry.session_id || '').trim() === sessionId);
             if (index < 0) return;
             const head = entries[index];
+            const matchingCount = Number(head.session_matching_count);
             const next = [...entries];
-            next.splice(index, 1, { ...head, session_count: Math.max(1, Number(head.session_count || 1) - count) });
+            next.splice(index, 1, {
+                ...head,
+                session_count: Math.max(1, Number(head.session_count || 1) - count),
+                session_matching_count: Math.max(
+                    1,
+                    (Number.isFinite(matchingCount) && matchingCount > 0
+                        ? matchingCount
+                        : Number(head.session_count || 1)) - count
+                )
+            });
             this.auditLog.entries = next;
         },
 
@@ -459,7 +479,16 @@ export function liveLogsMethods() {
                     reloadGroupedList = true;
                     return;
                 }
-                const promoted = { ...children[0], session_id: sessionId, session_count: sessionCount - 1 };
+                const matchingCount = Math.max(
+                    1,
+                    Number(entry.session_matching_count || sessionCount)
+                );
+                const promoted = {
+                    ...children[0],
+                    session_id: sessionId,
+                    session_count: sessionCount - 1,
+                    session_matching_count: Math.max(1, matchingCount - 1)
+                };
                 next.push(promoted);
                 this.auditThreadChildren = {
                     ...this.auditThreadChildren,

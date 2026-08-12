@@ -14,7 +14,7 @@
   import { ChevronDown, ChevronLeft, ChevronRight } from "lucide";
 
   // `thread` marks a session-thread head row (grouped mode):
-  // { count, expanded, ontoggle }. `expanded`/`onactivate` wire the
+  // { count, matchingCount, expanded, ontoggle }. `expanded`/`onactivate` wire the
   // Svelte-controlled row expansion: the click is intercepted (the parent
   // <details> stays open so the close can animate) and the state lives in
   // auditList.
@@ -49,6 +49,21 @@
     thread.ontoggle();
   }
 
+  function threadDescription() {
+    const total = Number(thread.count || 1);
+    const matching = Number(thread.matchingCount || total);
+    if (matching < total) {
+      return (
+        "Session with " +
+        total +
+        " requests; " +
+        matching +
+        " match selected filters"
+      );
+    }
+    return "Session with " + total + " requests";
+  }
+
   function openConversation(event) {
     event.stopPropagation();
     event.preventDefault();
@@ -75,10 +90,9 @@
         type="button"
         class="audit-thread-expander"
         aria-expanded={thread.expanded}
-        title={"Session with " + thread.count + " requests"}
-        aria-label={"Session with " +
-          thread.count +
-          " requests, " +
+        title={threadDescription()}
+        aria-label={threadDescription() +
+          ", " +
           (thread.expanded ? "collapse" : "expand")}
         onclick={toggleThread}
       >

@@ -100,7 +100,9 @@ checkbox. Requests with no detected session remain round robin.
 Audit entries record the session id (`session_id`), and the Audit Logs page
 groups them by default ("Group by session" toggle). Each thread shows its
 latest request with a count badge; the expander on the left unfolds the older
-requests. `GET /admin/audit/sessions` serves the thread list;
+requests. The badge counts the complete session; when filters match only part
+of it, its tooltip also reports the matching count. `GET /admin/audit/sessions`
+serves the thread list with `matching_count` and `total_count`;
 `GET /admin/audit/log?session_id=…` returns one session's entries.
 
 ## Configuration

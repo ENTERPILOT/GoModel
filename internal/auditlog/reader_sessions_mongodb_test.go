@@ -43,10 +43,10 @@ func TestMongoDBReader_GetSessions(t *testing.T) {
 			t.Fatalf("sessions[0].Latest.ID = %q, want solo", got)
 		}
 		threadA := result.Sessions[1]
-		if threadA.SessionID != "sess-a" || threadA.Count != 2 || threadA.Latest.ID != "a-2" {
+		if threadA.SessionID != "sess-a" || threadA.Count != 2 || threadA.TotalCount != 2 || threadA.Latest.ID != "a-2" {
 			t.Fatalf("sess-a summary = %+v", threadA)
 		}
-		if !threadA.FirstTimestamp.Equal(base) || !threadA.LastTimestamp.Equal(base.Add(2*time.Minute)) {
+		if !threadA.FirstTimestamp.Equal(base.Add(-24*time.Hour)) || !threadA.LastTimestamp.Equal(base.Add(2*time.Minute)) {
 			t.Fatalf("sess-a span = %v..%v", threadA.FirstTimestamp, threadA.LastTimestamp)
 		}
 		if result.Sessions[2].SessionID != "sess-b" {

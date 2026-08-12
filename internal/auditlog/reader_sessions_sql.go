@@ -63,7 +63,12 @@ func (r *SQLReader) GetSessions(ctx context.Context, params LogQueryParams) (*Se
 		FROM ranked WHERE rn = 1
 		ORDER BY last_ts DESC, id DESC LIMIT ? OFFSET ?
 	)
-	SELECT ` + qualifiedLogColumns("l") + `, h.entry_count, h.first_ts, h.last_ts
+	SELECT ` + qualifiedLogColumns("l") + `, h.entry_count,
+		CASE WHEN NULLIF(l.session_id, '') IS NULL THEN 1 ELSE (
+			SELECT COUNT(*) FROM audit_logs session_entries
+			WHERE session_entries.session_id = l.session_id
+		) END AS total_count,
+		h.first_ts, h.last_ts
 	FROM heads h JOIN audit_logs l ON l.id = h.id
 	ORDER BY h.last_ts DESC, h.id DESC`
 
@@ -92,12 +97,13 @@ func (r *SQLReader) GetSessions(ctx context.Context, params LogQueryParams) (*Se
 type sessionSummaryScanner struct {
 	row     sqlx.Row
 	count   *int
+	total   *int
 	firstTS *sqlx.Timestamp
 	lastTS  *sqlx.Timestamp
 }
 
 func (s sessionSummaryScanner) Scan(dest ...any) error {
-	return s.row.Scan(append(dest, s.count, s.firstTS, s.lastTS)...)
+	return s.row.Scan(append(dest, s.count, s.total, s.firstTS, s.lastTS)...)
 }
 
 func scanSQLSessionSummary(row sqlx.Row) (*SessionSummary, error) {
@@ -106,6 +112,7 @@ func scanSQLSessionSummary(row sqlx.Row) (*SessionSummary, error) {
 	entry, err := scanSQLLogEntry(sessionSummaryScanner{
 		row:     row,
 		count:   &summary.Count,
+		total:   &summary.TotalCount,
 		firstTS: &firstTS,
 		lastTS:  &lastTS,
 	})

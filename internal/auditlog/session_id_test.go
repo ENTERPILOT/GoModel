@@ -271,18 +271,18 @@ func TestSQLReader_GetSessions(t *testing.T) {
 		if got := result.Sessions[0].Latest.ID; got != "solo" {
 			t.Fatalf("sessions[0].Latest.ID = %q, want solo", got)
 		}
-		if result.Sessions[0].SessionID != "" || result.Sessions[0].Count != 1 {
+		if result.Sessions[0].SessionID != "" || result.Sessions[0].Count != 1 || result.Sessions[0].TotalCount != 1 {
 			t.Fatalf("singleton thread = %+v", result.Sessions[0])
 		}
 
 		threadA := result.Sessions[1]
-		if threadA.SessionID != "sess-a" || threadA.Count != 2 {
+		if threadA.SessionID != "sess-a" || threadA.Count != 2 || threadA.TotalCount != 2 {
 			t.Fatalf("sess-a summary = %+v", threadA)
 		}
 		if threadA.Latest.ID != "a-2" {
 			t.Fatalf("sess-a latest = %q, want a-2", threadA.Latest.ID)
 		}
-		if !threadA.FirstTimestamp.Equal(base) || !threadA.LastTimestamp.Equal(base.Add(2*time.Minute)) {
+		if !threadA.FirstTimestamp.Equal(base.Add(-24*time.Hour)) || !threadA.LastTimestamp.Equal(base.Add(2*time.Minute)) {
 			t.Fatalf("sess-a span = %v..%v", threadA.FirstTimestamp, threadA.LastTimestamp)
 		}
 
@@ -405,12 +405,13 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 	})
 }
 
-// sessionThreadFixture is the shared grouped-view corpus: a two-entry session,
-// a one-entry session and a sessionless request. The thread head (a-2) carries
-// list columns and a data payload so the readers' head re-read is checked.
+// sessionThreadFixture is the shared grouped-view corpus: a two-entry session
+// crossing a UTC day boundary, a one-entry session and a sessionless request.
+// The thread head (a-2) carries list columns and a data payload so the readers'
+// head re-read is checked.
 func sessionThreadFixture(base time.Time) []*LogEntry {
 	return []*LogEntry{
-		{ID: "a-1", Timestamp: base, Provider: "openai", SessionID: "sess-a", StatusCode: 200},
+		{ID: "a-1", Timestamp: base.Add(-24 * time.Hour), Provider: "openai", SessionID: "sess-a", StatusCode: 200},
 		{
 			ID: "a-2", Timestamp: base.Add(2 * time.Minute), Provider: "openai",
 			SessionID: "sess-a", StatusCode: 200, Path: "/v1/chat/completions",
@@ -477,6 +478,7 @@ func assertGetSessionsFilters(t *testing.T, reader Reader) {
 		params        LogQueryParams
 		wantSessionID string
 		wantCount     int
+		wantTotal     int
 		wantLatestID  string
 	}{
 		{
@@ -484,6 +486,7 @@ func assertGetSessionsFilters(t *testing.T, reader Reader) {
 			params:        LogQueryParams{StatusCode: &status, Limit: 10},
 			wantSessionID: "sess-b",
 			wantCount:     1,
+			wantTotal:     1,
 			wantLatestID:  "b-1",
 		},
 		{
@@ -491,6 +494,19 @@ func assertGetSessionsFilters(t *testing.T, reader Reader) {
 			params:        LogQueryParams{SessionID: "sess-a", Limit: 10},
 			wantSessionID: "sess-a",
 			wantCount:     2,
+			wantTotal:     2,
+			wantLatestID:  "a-2",
+		},
+		{
+			name: "date filter reports matching and complete session counts",
+			params: LogQueryParams{
+				QueryParams: QueryParams{StartDate: time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC), EndDate: time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC)},
+				SessionID:   "sess-a",
+				Limit:       10,
+			},
+			wantSessionID: "sess-a",
+			wantCount:     1,
+			wantTotal:     2,
 			wantLatestID:  "a-2",
 		},
 	}
@@ -504,9 +520,9 @@ func assertGetSessionsFilters(t *testing.T, reader Reader) {
 				t.Fatalf("result = %+v, want exactly one thread", result)
 			}
 			got := result.Sessions[0]
-			if got.SessionID != tt.wantSessionID || got.Count != tt.wantCount || got.Latest.ID != tt.wantLatestID {
-				t.Fatalf("thread = %+v, want session %q count %d latest %q",
-					got, tt.wantSessionID, tt.wantCount, tt.wantLatestID)
+			if got.SessionID != tt.wantSessionID || got.Count != tt.wantCount || got.TotalCount != tt.wantTotal || got.Latest.ID != tt.wantLatestID {
+				t.Fatalf("thread = %+v, want session %q count %d total %d latest %q",
+					got, tt.wantSessionID, tt.wantCount, tt.wantTotal, tt.wantLatestID)
 			}
 		})
 	}

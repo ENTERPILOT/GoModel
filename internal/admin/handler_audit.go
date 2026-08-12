@@ -263,9 +263,12 @@ func (h *Handler) AuditSessions(c *echo.Context) error {
 		// Session heads are list rows too. Keep the default grouped view on the
 		// same slim payload contract as /admin/audit/log.
 		slimAuditListEntry(&enriched.Entries[i])
+		totalCount := max(session.Count, session.TotalCount)
 		response.Sessions[i] = auditSessionResponse{
 			SessionID:      session.SessionID,
 			Count:          session.Count,
+			MatchingCount:  session.Count,
+			TotalCount:     totalCount,
 			FirstTimestamp: session.FirstTimestamp,
 			LastTimestamp:  session.LastTimestamp,
 			Latest:         enriched.Entries[i],
