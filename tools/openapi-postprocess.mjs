@@ -47,6 +47,19 @@ function schema(name) {
   return result;
 }
 
+// Swagger 2 has no standard property-level deprecation keyword. Response
+// structs mark compatibility fields with x-deprecated, which survives the
+// Swagger-to-OpenAPI conversion; normalize it for OpenAPI SDK generators.
+function normalizeDeprecatedProperties() {
+  for (const target of Object.values(spec.components?.schemas || {})) {
+    for (const property of Object.values(target?.properties || {})) {
+      if (property?.["x-deprecated"] !== true) continue;
+      property.deprecated = true;
+      delete property["x-deprecated"];
+    }
+  }
+}
+
 function applyResponseInputOneOf(name) {
   const properties = schema(name).properties;
   if (!properties?.input) {
@@ -464,6 +477,7 @@ applyStringArrayPropertyBounds("admin.upsertVirtualModelRequest", "user_paths", 
 applySlowdownSchemaConstraints();
 applyPricingSchemaConstraints();
 applyPathSidebarTitles();
+normalizeDeprecatedProperties();
 
 // Bound the registry-backed admin model listing so OpenAPI consumers (and
 // security scanners like CKV_OPENAPI_21) see an explicit upper limit. The

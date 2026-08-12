@@ -49,7 +49,9 @@ type LogListResult struct {
 // active filters; TotalCount covers the complete session. Entries without a
 // session id form singleton threads whose SessionID is empty.
 type SessionSummary struct {
-	SessionID      string    `json:"session_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	// Count is retained as the internal matching count for compatibility.
+	// Public API consumers should use the explicitly named matching_count field.
 	Count          int       `json:"count"`
 	TotalCount     int       `json:"total_count"`
 	FirstTimestamp time.Time `json:"first_timestamp"`

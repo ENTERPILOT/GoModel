@@ -169,9 +169,13 @@ type auditConversationResponse struct {
 }
 
 type auditSessionResponse struct {
-	SessionID      string                `json:"session_id,omitempty"`
-	Count          int                   `json:"count"`
-	MatchingCount  int                   `json:"matching_count"`
+	SessionID string `json:"session_id,omitempty"`
+	// Count is the number of requests matching the active filters.
+	// Deprecated: use MatchingCount.
+	Count int `json:"count" extensions:"x-deprecated"`
+	// MatchingCount is the number of requests matching the active filters.
+	MatchingCount int `json:"matching_count"`
+	// TotalCount is the number of requests in the complete session.
 	TotalCount     int                   `json:"total_count"`
 	FirstTimestamp time.Time             `json:"first_timestamp"`
 	LastTimestamp  time.Time             `json:"last_timestamp"`

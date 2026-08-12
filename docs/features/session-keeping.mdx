@@ -103,6 +103,7 @@ latest request with a count badge; the expander on the left unfolds the older
 requests. The badge counts the complete session; when filters match only part
 of it, its tooltip also reports the matching count. `GET /admin/audit/sessions`
 serves the thread list with `matching_count` and `total_count`;
+the deprecated `count` remains an alias of `matching_count` for compatibility.
 `GET /admin/audit/log?session_id=…` returns one session's entries.
 
 ## Configuration

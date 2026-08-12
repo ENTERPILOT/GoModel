@@ -6857,6 +6857,10 @@ const docTemplate = `{
                 },
                 "USAGE_PRICING_RECALCULATION_ENABLED": {
                     "type": "string"
+                },
+                "VIRTUAL_MODEL_STRATEGIES": {
+                    "description": "VirtualModelStrategies is the comma-separated list of load-balancing\nstrategies this deployment supports. \"adaptive\" appears only when a\nroute-selector extension is registered, so the dashboard never offers\na strategy that would silently fall back to round robin.",
+                    "type": "string"
                 }
             }
         },
@@ -6929,6 +6933,9 @@ const docTemplate = `{
                 "path": {
                     "type": "string"
                 },
+                "principal_id": {
+                    "type": "string"
+                },
                 "provider": {
                     "description": "canonical provider type used for routing and filters",
                     "type": "string"
@@ -6995,7 +7002,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "count": {
-                    "type": "integer"
+                    "description": "Count is the number of requests matching the active filters.\nDeprecated: use MatchingCount.",
+                    "type": "integer",
+                    "x-deprecated": true
                 },
                 "first_timestamp": {
                     "type": "string"
@@ -7006,8 +7015,16 @@ const docTemplate = `{
                 "latest": {
                     "$ref": "#/definitions/admin.auditLogEntryResponse"
                 },
+                "matching_count": {
+                    "description": "MatchingCount is the number of requests matching the active filters.",
+                    "type": "integer"
+                },
                 "session_id": {
                     "type": "string"
+                },
+                "total_count": {
+                    "description": "TotalCount is the number of requests in the complete session.",
+                    "type": "integer"
                 }
             }
         },
@@ -7390,6 +7407,9 @@ const docTemplate = `{
                 },
                 "service_account_json_base64": {
                     "type": "string"
+                },
+                "session_sticky_keys": {
+                    "type": "boolean"
                 },
                 "type": {
                     "type": "string"
@@ -7789,6 +7809,9 @@ const docTemplate = `{
                 "service_account_json_base64": {
                     "type": "string"
                 },
+                "session_sticky_keys": {
+                    "type": "boolean"
+                },
                 "type": {
                     "type": "string"
                 },
@@ -7838,6 +7861,10 @@ const docTemplate = `{
                 "session_affinity": {
                     "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
                     "type": "boolean"
+                },
+                "slowdown": {
+                    "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it.",
+                    "type": "number"
                 },
                 "source": {
                     "type": "string"
@@ -8043,6 +8070,9 @@ const docTemplate = `{
         "anthropicapi.MessagesRequest": {
             "type": "object",
             "properties": {
+                "cache_control": {
+                    "type": "object"
+                },
                 "max_tokens": {
                     "type": "integer"
                 },
@@ -8181,6 +8211,9 @@ const docTemplate = `{
         "anthropicapi.Tool": {
             "type": "object",
             "properties": {
+                "cache_control": {
+                    "type": "object"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -8303,6 +8336,10 @@ const docTemplate = `{
                 },
                 "error_message": {
                     "description": "Error details (message can be long, so kept in JSON)",
+                    "type": "string"
+                },
+                "event_type": {
+                    "description": "EventType identifies non-request security lifecycle entries written\nthrough the extension authentication event recorder.",
                     "type": "string"
                 },
                 "failover": {
@@ -11137,6 +11174,10 @@ const docTemplate = `{
                 "session_affinity": {
                     "type": "boolean"
                 },
+                "slowdown": {
+                    "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it.",
+                    "type": "number"
+                },
                 "source": {
                     "type": "string"
                 },
@@ -11188,6 +11229,10 @@ const docTemplate = `{
                 "session_affinity": {
                     "description": "SessionAffinity keeps requests of one detected session on the target that\nserved it before, while that target stays available. Tri-state: nil means\nenabled (the default); explicit false restores stateless balancing.",
                     "type": "boolean"
+                },
+                "slowdown": {
+                    "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it. Nil\nleaves the setting unspecified so an alias can inherit its target model.",
+                    "type": "number"
                 },
                 "source": {
                     "type": "string"
