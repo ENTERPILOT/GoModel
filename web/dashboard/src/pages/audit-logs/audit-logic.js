@@ -368,9 +368,9 @@ export function auditLogWithLiveEntries(payload, currentEntries, filters) {
 }
 
 // auditGroupedLogWithLiveEntries is auditLogWithLiveEntries for grouped mode:
-// a still-pending live preview folds into its session's fetched head (keeping
-// the larger count) instead of duplicating the thread; previews without an
-// on-screen thread prepend as singleton heads.
+// a still-pending live preview folds into its session's fetched head instead
+// of duplicating the thread; previews without an on-screen thread prepend as
+// singleton heads.
 export function auditGroupedLogWithLiveEntries(payload, currentEntries, filters) {
   const next =
     payload && typeof payload === "object"
@@ -404,19 +404,37 @@ export function auditGroupedLogWithLiveEntries(payload, currentEntries, filters)
     const sid = auditSessionId(entry);
     if (sid && headBySession.has(sid)) {
       // Fold into the fetched thread: the pending preview is newer than the
-      // persisted head, so it becomes the head and keeps the thread's count.
+      // persisted head, so it becomes the head. Counts already accumulated by
+      // the live grouping path are authoritative; otherwise this distinct
+      // request increments the fetched counts.
       const index = headBySession.get(sid);
       if (merged === entries) merged = [...entries];
+      const previousTotal = auditSessionCount(merged[index]);
+      const previousMatching = auditSessionMatchingCount(merged[index]);
+      const incomingTotalValue = Number(entry && entry.session_count);
+      const incomingTotal =
+        Number.isFinite(incomingTotalValue) && incomingTotalValue > 1
+          ? incomingTotalValue
+          : null;
+      const incomingMatchingValue = Number(
+        entry && entry.session_matching_count,
+      );
+      const incomingMatching =
+        incomingTotal !== null &&
+        Number.isFinite(incomingMatchingValue) &&
+        incomingMatchingValue > 0
+          ? incomingMatchingValue
+          : incomingTotal;
       merged[index] = {
         ...entry,
-        session_count: Math.max(
-          auditSessionCount(merged[index]),
-          auditSessionCount(entry),
-        ),
-        session_matching_count: Math.max(
-          auditSessionMatchingCount(merged[index]),
-          auditSessionMatchingCount(entry),
-        ),
+        session_count:
+          incomingTotal === null
+            ? previousTotal + 1
+            : Math.max(previousTotal, incomingTotal),
+        session_matching_count:
+          incomingMatching === null
+            ? previousMatching + 1
+            : Math.max(previousMatching, incomingMatching),
       };
       keys.forEach((key) => persistedKeys.add(key));
       return;
