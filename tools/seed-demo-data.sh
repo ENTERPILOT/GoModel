@@ -13,10 +13,8 @@ semantic_cache_pct="${DEMO_SEMANTIC_CACHE_PCT:-7}"
 prompt_cache_pct="${DEMO_PROMPT_CACHE_PCT:-28}"
 rewrite_pct="${DEMO_REWRITE_PCT:-18}"
 prefix="${DEMO_SEED_PREFIX:-demo-generated}"
-utc_hour="$(date -u +%H)"
-utc_minute="$(date -u +%M)"
-utc_second="$(date -u +%S)"
-current_utc_second=$((10#$utc_hour * 3600 + 10#$utc_minute * 60 + 10#$utc_second))
+seed_utc_epoch="$(date -u +%s)"
+current_utc_second=$((seed_utc_epoch % 86400))
 
 usage() {
   cat <<EOF
@@ -372,7 +370,10 @@ DELETE FROM failover_rules WHERE managed_source = '${prefix}';
 DROP TABLE IF EXISTS temp.demo_days;
 CREATE TEMP TABLE demo_days AS
 WITH RECURSIVE days(day_idx, day) AS (
-  SELECT 0, date(CASE WHEN '${end_date}' = '' THEN 'now' ELSE '${end_date}' END, '-' || (${days} - 1) || ' days')
+  SELECT 0, date(
+    CASE WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch') ELSE '${end_date}' END,
+    '-' || (${days} - 1) || ' days'
+  )
   UNION ALL
   SELECT day_idx + 1, date(day, '+1 day') FROM days WHERE day_idx < ${days} - 1
 ),
@@ -391,7 +392,7 @@ SELECT
   day,
   CAST(max(25, min(${max_requests}, round(
     ${avg_requests} * weekday_factor * trend_factor * seasonal_factor * noise_factor *
-    CASE WHEN day = date('now')
+    CASE WHEN day = date(${seed_utc_epoch}, 'unixepoch')
       THEN max(0.02, (${current_utc_second} + 1) / 86400.0)
       ELSE 1.0
     END
@@ -463,7 +464,7 @@ SELECT
   abs(random()) % 10000 AS rewrite_bucket,
   abs(random()) % 10000 AS label_bucket,
   abs(random()) % 10000 AS session_bucket,
-  abs(random()) % CASE WHEN d.day = date('now')
+  abs(random()) % CASE WHEN d.day = date(${seed_utc_epoch}, 'unixepoch')
     THEN ${current_utc_second} + 1
     ELSE 86400
   END AS second_of_day,

@@ -411,10 +411,10 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 // head re-read is checked.
 func sessionThreadFixture(base time.Time) []*LogEntry {
 	return []*LogEntry{
-		{ID: "a-1", Timestamp: base.Add(-24 * time.Hour), Provider: "openai", SessionID: "sess-a", StatusCode: 200},
+		{ID: "a-1", Timestamp: base.Add(-24 * time.Hour), Provider: "openai", SessionID: "sess-a", UserPath: "/tenants/a", StatusCode: 200},
 		{
 			ID: "a-2", Timestamp: base.Add(2 * time.Minute), Provider: "openai",
-			SessionID: "sess-a", StatusCode: 200, Path: "/v1/chat/completions",
+			SessionID: "sess-a", UserPath: "/tenants/b", StatusCode: 200, Path: "/v1/chat/completions",
 			Data: &LogData{UserAgent: "probe/1.0"},
 		},
 		{ID: "b-1", Timestamp: base.Add(time.Minute), Provider: "anthropic", SessionID: "sess-b", StatusCode: 500},
@@ -494,6 +494,16 @@ func assertGetSessionsFilters(t *testing.T, reader Reader) {
 			params:        LogQueryParams{SessionID: "sess-a", Limit: 10},
 			wantSessionID: "sess-a",
 			wantCount:     2,
+			wantTotal:     2,
+			wantLatestID:  "a-2",
+		},
+		{
+			name: "user path filter reports matching and complete session counts",
+			params: LogQueryParams{
+				UserPath: "/tenants/b", ExactUserPath: true, SessionID: "sess-a", Limit: 10,
+			},
+			wantSessionID: "sess-a",
+			wantCount:     1,
 			wantTotal:     2,
 			wantLatestID:  "a-2",
 		},

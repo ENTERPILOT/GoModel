@@ -707,7 +707,7 @@ test("formatJSON pretty-prints JSON strings and objects, passing other text thro
 
 // --- Session grouping helpers ------------------------------------------------
 
-test("buildAuditSessionQuery encodes the session id and omits the date window", () => {
+test("buildAuditSessionQuery encodes the session id and omits active list filters", () => {
   const qs = buildAuditSessionQuery({ sessionId: "team/app|s 1", limit: 100 });
   assert.equal(qs, "session_id=team%2Fapp%7Cs%201&limit=100&offset=0");
 });

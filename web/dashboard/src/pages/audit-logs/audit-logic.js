@@ -135,9 +135,9 @@ export function buildAuditLogQuery({
 }
 
 // buildAuditSessionQuery renders the thread-children fetch for one session:
-// GET /admin/audit/log?session_id=…  Deliberately no date window, so an
-// expanded thread shows the whole session even when older requests fall
-// outside the date picker's range.
+// GET /admin/audit/log?session_id=…  Deliberately no active list filters, so
+// an expanded thread shows the whole session even when requests fall outside
+// the date, user-path, or other filters used to find the thread.
 export function buildAuditSessionQuery({ sessionId, limit }) {
   return (
     "session_id=" +

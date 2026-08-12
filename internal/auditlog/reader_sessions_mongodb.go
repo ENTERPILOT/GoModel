@@ -71,8 +71,9 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 				}}},
 				bson.D{{Key: "$unwind", Value: "$latest"}},
 				// Count the complete session after the filtered page winners are
-				// known. Sessionless rows remain singleton threads and skip this
-				// lookup's match through the non-empty sid guard.
+				// known. Deliberately omit the active filters to mirror the
+				// dashboard's unfiltered session_id expansion. Sessionless rows
+				// remain singletons and skip this match via the non-empty sid guard.
 				bson.D{{Key: "$lookup", Value: bson.D{
 					{Key: "from", Value: r.collection.Name()},
 					{Key: "let", Value: bson.D{{Key: "sid", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$latest.session_id", ""}}}}}},

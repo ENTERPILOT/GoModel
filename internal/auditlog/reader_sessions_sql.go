@@ -47,6 +47,9 @@ func (r *SQLReader) GetSessions(ctx context.Context, params LogQueryParams) (*Se
 		return nil, fmt.Errorf("failed to count audit sessions: %w", err)
 	}
 
+	// The correlated count deliberately applies no active list filters: the
+	// dashboard expands a head with an unfiltered session_id query, so both
+	// operations describe the same complete session.
 	query := `WITH ranked AS (
 		SELECT id, timestamp AS last_ts,
 			ROW_NUMBER() OVER thread AS rn,
