@@ -2,13 +2,35 @@ package auditlog
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 )
+
+func TestMongoSessionTotalLookup(t *testing.T) {
+	stage, err := bson.MarshalExtJSON(mongoSessionTotalLookup("custom_audit_logs"), false, false)
+	if err != nil {
+		t.Fatalf("marshal session total lookup: %v", err)
+	}
+	encoded := string(stage)
+	for _, want := range []string{
+		`"from":"custom_audit_logs"`,
+		`"$ifNull":["$latest.session_id",""]`,
+		`"$ne":["$$sid",""]`,
+		`"$eq":["$session_id","$$sid"]`,
+		`"$count":"count"`,
+		`"as":"session_total"`,
+	} {
+		if !strings.Contains(encoded, want) {
+			t.Fatalf("session total lookup = %s, want fragment %s", encoded, want)
+		}
+	}
+}
 
 // Mirrors TestSQLReader_GetSessions so the hand-written MongoDB aggregation
 // cannot drift from the SQL behaviour. Skips without MONGO_TEST_DSN.

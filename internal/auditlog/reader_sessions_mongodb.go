@@ -74,18 +74,7 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 				// known. Deliberately omit the active filters to mirror the
 				// dashboard's unfiltered session_id expansion. Sessionless rows
 				// remain singletons and skip this match via the non-empty sid guard.
-				bson.D{{Key: "$lookup", Value: bson.D{
-					{Key: "from", Value: r.collection.Name()},
-					{Key: "let", Value: bson.D{{Key: "sid", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$latest.session_id", ""}}}}}},
-					{Key: "pipeline", Value: bson.A{
-						bson.D{{Key: "$match", Value: bson.D{{Key: "$expr", Value: bson.D{{Key: "$and", Value: bson.A{
-							bson.D{{Key: "$ne", Value: bson.A{"$$sid", ""}}},
-							bson.D{{Key: "$eq", Value: bson.A{"$session_id", "$$sid"}}},
-						}}}}}}},
-						bson.D{{Key: "$count", Value: "count"}},
-					}},
-					{Key: "as", Value: "session_total"},
-				}}},
+				mongoSessionTotalLookup(r.collection.Name()),
 			}},
 			{Key: "total", Value: bson.A{
 				bson.D{{Key: "$count", Value: "count"}},
@@ -150,4 +139,22 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		})
 	}
 	return &SessionListResult{Sessions: sessions, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+// mongoSessionTotalLookup builds the filter-independent count used by session
+// summaries. Keeping it separate makes the aggregation contract testable
+// without a running MongoDB service.
+func mongoSessionTotalLookup(collectionName string) bson.D {
+	return bson.D{{Key: "$lookup", Value: bson.D{
+		{Key: "from", Value: collectionName},
+		{Key: "let", Value: bson.D{{Key: "sid", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$latest.session_id", ""}}}}}},
+		{Key: "pipeline", Value: bson.A{
+			bson.D{{Key: "$match", Value: bson.D{{Key: "$expr", Value: bson.D{{Key: "$and", Value: bson.A{
+				bson.D{{Key: "$ne", Value: bson.A{"$$sid", ""}}},
+				bson.D{{Key: "$eq", Value: bson.A{"$session_id", "$$sid"}}},
+			}}}}}}},
+			bson.D{{Key: "$count", Value: "count"}},
+		}},
+		{Key: "as", Value: "session_total"},
+	}}}
 }
