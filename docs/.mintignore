@@ -6,7 +6,6 @@
 2026-07-21_bifrost_reproducible_benchmark/
 DEVELOPMENT.md
 TESTING_STRATEGY.md
-adr/
 dev/
 examples/
 install/
