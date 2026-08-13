@@ -23,13 +23,14 @@
         "url": "full"
     },
     "seo": {
+        "indexing": "all",
         "metatags": {
-            "canonical": "https://gomodel.enterpilot.io/docs",
-            "google-site-verification": "EhaMJtqC22YnPJetcCW5SCi3fdJF2BOai2WHjae8ymY"
+            "google-site-verification": "EhaMJtqC22YnPJetcCW5SCi3fdJF2BOai2WHjae8ymY",
+            "robots": "index, follow, max-image-preview:large"
         },
         "organization": {
             "id": "https://enterpilot.io/#organization",
-            "name": "Enterpilot",
+            "name": "enterpilot, Inc.",
             "legalName": "enterpilot, Inc.",
             "url": "https://enterpilot.io",
             "logo": "https://gomodel.enterpilot.io/docs/logo.svg",

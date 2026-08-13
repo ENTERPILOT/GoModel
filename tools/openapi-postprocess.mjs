@@ -420,6 +420,52 @@ function applyPathSidebarTitles() {
   }
 }
 
+// applyMintlifyOperationMetadata gives every generated API page a concise,
+// unique search title and description without replacing the full operation
+// description rendered in the reference body. Several routes intentionally
+// share a summary (for example GET, POST, and DELETE on an MCP endpoint), so
+// the HTTP method is included in the page title only when disambiguation is
+// needed.
+function applyMintlifyOperationMetadata() {
+  const httpMethods = new Set([
+    "get",
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "head",
+    "options",
+    "trace",
+  ]);
+  const operations = [];
+  const summaryCounts = new Map();
+
+  for (const [path, pathItem] of Object.entries(spec.paths || {})) {
+    if (!pathItem || typeof pathItem !== "object") continue;
+    for (const [method, operation] of Object.entries(pathItem)) {
+      if (!httpMethods.has(method)) continue;
+      if (!operation || typeof operation !== "object") continue;
+      const summary = String(operation.summary || `${method.toUpperCase()} ${path}`).trim();
+      operations.push({ path, method, operation, summary });
+      summaryCounts.set(summary, (summaryCounts.get(summary) || 0) + 1);
+    }
+  }
+
+  for (const { path, method, operation, summary } of operations) {
+    const endpoint = `${method.toUpperCase()} ${path}`;
+    const description = `GoModel API reference for ${endpoint}: ${summary.replace(/\.$/, "")}.`;
+
+    operation["x-mint"] ??= {};
+    operation["x-mint"].metadata ??= {};
+    operation["x-mint"].metadata.title = summaryCounts.get(summary) > 1
+      ? `${method.toUpperCase()} ${summary}`
+      : summary;
+    operation["x-mint"].metadata.description = description.length <= 160
+      ? description
+      : `${description.slice(0, 157).replace(/\s+\S*$/, "").replace(/[,:;\s]+$/, "")}...`;
+  }
+}
+
 function applyPricingSchemaConstraints() {
   schema("pricingoverrides.Pricing").minProperties = 1;
   for (const name of ["core.ModelPricingTier", "pricingoverrides.PricingTier"]) {
@@ -464,6 +510,7 @@ applyStringArrayPropertyBounds("admin.upsertVirtualModelRequest", "user_paths", 
 applySlowdownSchemaConstraints();
 applyPricingSchemaConstraints();
 applyPathSidebarTitles();
+applyMintlifyOperationMetadata();
 
 // Bound the registry-backed admin model listing so OpenAPI consumers (and
 // security scanners like CKV_OPENAPI_21) see an explicit upper limit. The
