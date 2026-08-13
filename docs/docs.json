@@ -25,6 +25,7 @@
     "seo": {
         "indexing": "all",
         "metatags": {
+            "generator": "GoModel",
             "google-site-verification": "EhaMJtqC22YnPJetcCW5SCi3fdJF2BOai2WHjae8ymY",
             "robots": "index, follow, max-image-preview:large"
         },
