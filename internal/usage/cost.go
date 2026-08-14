@@ -83,6 +83,7 @@ var openAICompatibleTokenCostMappings = []tokenCostMapping{
 var providerMappings = map[string][]tokenCostMapping{
 	"openai":     openAICompatibleTokenCostMappings,
 	"openrouter": openAICompatibleTokenCostMappings,
+	"orcarouter": openAICompatibleTokenCostMappings,
 	"anthropic": {
 		{rawDataKey: "cache_read_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
 		{rawDataKey: "cache_creation_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok},

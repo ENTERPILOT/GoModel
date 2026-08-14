@@ -26,6 +26,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/opencodego"
 	"github.com/enterpilot/gomodel/internal/providers/openrouter"
 	"github.com/enterpilot/gomodel/internal/providers/oracle"
+	"github.com/enterpilot/gomodel/internal/providers/orcarouter"
 	"github.com/enterpilot/gomodel/internal/providers/sglang"
 	"github.com/enterpilot/gomodel/internal/providers/vertex"
 	"github.com/enterpilot/gomodel/internal/providers/vllm"
@@ -45,6 +46,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 
 	factory.Add(openai.Registration)
 	factory.Add(openrouter.Registration)
+	factory.Add(orcarouter.Registration)
 	factory.Add(azure.Registration)
 	factory.Add(bailian.Registration)
 	factory.Add(oracle.Registration)

@@ -7212,7 +7212,7 @@ func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `provider passthrough for \"groq\" is not enabled`) {
 		t.Fatalf("unexpected error body: %s", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "anthropic, deepseek, kilo, llmd, openai, openrouter, sglang, vllm, zai") {
+	if !strings.Contains(rec.Body.String(), "anthropic, deepseek, kilo, llmd, openai, openrouter, orcarouter, sglang, vllm, zai") {
 		t.Fatalf("unexpected error body: %s", rec.Body.String())
 	}
 }

@@ -98,6 +98,7 @@ func buildDefaultConfig() *Config {
 				"openai",
 				"anthropic",
 				"openrouter",
+				"orcarouter",
 				"kilo",
 				"zai",
 				"sglang",

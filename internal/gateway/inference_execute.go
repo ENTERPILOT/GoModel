@@ -201,7 +201,7 @@ func (o *InferenceOrchestrator) CanFastPathStreamingChatPassthrough(workflow *co
 
 	providerType := strings.ToLower(strings.TrimSpace(workflow.ProviderType))
 	switch providerType {
-	case "openai", "azure", "openrouter":
+	case "openai", "azure", "openrouter", "orcarouter":
 	default:
 		return false
 	}

@@ -51,6 +51,13 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			required:     []string{"api_keys"},
 		},
 		{
+			// OpenAI-compatible gateway; plain API-key shape.
+			providerType: "orcarouter",
+			defaultURL:   "https://api.orcarouter.ai/v1",
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			required:     []string{"api_keys"},
+		},
+		{
 			// A deployment URL is the provider, so it is required, and Azure
 			// is the one type that takes an API version.
 			providerType: "azure",
@@ -177,7 +184,7 @@ func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
 		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "chutes", "cohere", "deepseek", "elevenlabs",
 		"fireworks", "gemini", "groq", "kilo", "kimicode", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
-		"openrouter", "oracle", "sglang", "vertex", "vllm", "xai", "xiaomi", "zai",
+		"openrouter", "oracle", "orcarouter", "sglang", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}
 
 	for _, metricsEnabled := range []bool{false, true} {

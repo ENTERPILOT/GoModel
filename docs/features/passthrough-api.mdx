@@ -131,7 +131,7 @@ from passthrough requests before forwarding them upstream.
 
 Passthrough is intentionally narrow while the API is in beta.
 
-- `openai`, `anthropic`, `openrouter`, `kilo`, `zai`, `sglang`, `vllm`, `llmd`, and `deepseek` are enabled by
+- `openai`, `anthropic`, `openrouter`, `orcarouter`, `kilo`, `zai`, `sglang`, `vllm`, `llmd`, and `deepseek` are enabled by
   default.
 - Chutes supports passthrough but requires explicit operator opt-in because
   passthrough can forward provider-native routes that do not identify a model.
@@ -150,7 +150,7 @@ Passthrough routes are enabled by default:
 ```env
 ENABLE_PASSTHROUGH_ROUTES=true
 ALLOW_PASSTHROUGH_V1_ALIAS=true
-ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llmd,deepseek
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,orcarouter,kilo,zai,sglang,vllm,llmd,deepseek
 ```
 
 Set `ENABLED_PASSTHROUGH_PROVIDERS` to the provider types you want to expose.
