@@ -4,7 +4,8 @@
   import { dateRange } from "$lib/stores/dateRange.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { calendarDays, isSameMonth } from "./datePickerLogic.js";
-  import { i18n } from "$lib/i18n/i18n.svelte.js";
+  import { formatDate } from "$lib/i18n/locale.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { calendarMonth, offset = 0, onprev, onnext, onselect } = $props();
 
@@ -14,7 +15,7 @@
   // The right pane is the anchor month, so "next" is capped at the real month.
   const atCurrentMonth = $derived(isSameMonth(calendarMonth, timezone.todayDate()));
   const title = $derived(
-    i18n.formatDate(
+    formatDate(
       new Date(
         Date.UTC(
           calendarMonth.getUTCFullYear(),
@@ -52,7 +53,7 @@
       class="dp-nav-btn"
       class:dp-nav-prev-mobile={offset !== -1}
       onclick={onprev}
-      aria-label={i18n.t("datePicker.previousMonth")}
+      aria-label={m.date_picker_previous_month()}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M8.5 3.5L5 7l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
@@ -64,20 +65,20 @@
         class="dp-nav-btn"
         onclick={onnext}
         disabled={atCurrentMonth}
-        aria-label={i18n.t("datePicker.nextMonth")}
+        aria-label={m.date_picker_next_month()}
       >
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5.5 3.5L9 7l-3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     {/if}
   </div>
   <div class="dp-weekdays">
-    <span>{i18n.t("datePicker.weekdays.mondayShort")}</span>
-    <span>{i18n.t("datePicker.weekdays.tuesdayShort")}</span>
-    <span>{i18n.t("datePicker.weekdays.wednesdayShort")}</span>
-    <span>{i18n.t("datePicker.weekdays.thursdayShort")}</span>
-    <span>{i18n.t("datePicker.weekdays.fridayShort")}</span>
-    <span>{i18n.t("datePicker.weekdays.saturdayShort")}</span>
-    <span>{i18n.t("datePicker.weekdays.sundayShort")}</span>
+    <span>{m.date_picker_weekday_monday_short()}</span>
+    <span>{m.date_picker_weekday_tuesday_short()}</span>
+    <span>{m.date_picker_weekday_wednesday_short()}</span>
+    <span>{m.date_picker_weekday_thursday_short()}</span>
+    <span>{m.date_picker_weekday_friday_short()}</span>
+    <span>{m.date_picker_weekday_saturday_short()}</span>
+    <span>{m.date_picker_weekday_sunday_short()}</span>
   </div>
   <div class="dp-days">
     {#each days as day (day.key)}

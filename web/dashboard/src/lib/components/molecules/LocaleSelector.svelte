@@ -1,21 +1,27 @@
 <script>
   // Locale picker. It deliberately renders nothing until a second locale is
-  // registered, so adding a translation is the only step needed to expose it.
-  import { i18n } from "$lib/i18n/i18n.svelte.js";
+  // configured, so adding a translation is the only step needed to expose it.
+  import { localeDisplayName } from "$lib/i18n/locale.js";
+  import * as m from "$lib/paraglide/messages.js";
+  import { getLocale, locales, setLocale } from "$lib/paraglide/runtime.js";
 
   let { compact = false } = $props();
+
+  const availableLocales = locales.map((value) => ({
+    value,
+    label: localeDisplayName(value),
+  }));
 </script>
 
-{#if i18n.availableLocales.length > 1}
+{#if availableLocales.length > 1}
   <label class="locale-selector" class:is-compact={compact}>
-    <span>{i18n.t("language.label")}</span>
+    <span>{m.language_label()}</span>
     <select
-      value={i18n.locale}
-      aria-label={i18n.t("language.label")}
-      disabled={i18n.loading}
-      onchange={(event) => i18n.setLocale(event.currentTarget.value)}
+      value={getLocale()}
+      aria-label={m.language_label()}
+      onchange={(event) => setLocale(event.currentTarget.value)}
     >
-      {#each i18n.availableLocales as locale (locale.value)}
+      {#each availableLocales as locale (locale.value)}
         <option value={locale.value}>{locale.label}</option>
       {/each}
     </select>

@@ -3,7 +3,7 @@
   import Modal from "$lib/components/atoms/Modal.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { confirmDialog } from "$lib/stores/confirm.svelte.js";
-  import { i18n } from "$lib/i18n/i18n.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   const dialog = $derived(confirmDialog.state);
 </script>
@@ -18,7 +18,7 @@
     <div class="auth-dialog-header">
       <h2 id={dialog.titleId}>{dialog.title}</h2>
       <DialogCloseButton
-        label={i18n.t("confirmation.close")}
+        label={m.confirmation_close()}
         onclick={() => confirmDialog.close()}
         class="auth-dialog-close"
         iconClass=""
@@ -54,7 +54,7 @@
         <button
           type="button"
           class="btn"
-          onclick={() => confirmDialog.close()}>{i18n.t("common.actions.cancel")}</button
+          onclick={() => confirmDialog.close()}>{m.common_action_cancel()}</button
         >
         <button
           type="submit"

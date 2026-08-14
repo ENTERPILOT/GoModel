@@ -5,7 +5,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { authenticationLoginURL } from "$lib/stores/external-auth.js";
   import { gomodelPath } from "$lib/api/paths.js";
-  import { i18n } from "$lib/i18n/i18n.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
   import { Check, KeyRound, LockKeyhole } from "lucide";
 </script>
 
@@ -24,12 +24,12 @@
       <div>
         <h2 id="authDialogTitle">
           {auth.needsAuth
-            ? i18n.t("auth.dialog.lockedTitle")
-            : i18n.t("auth.dialog.changeKeyTitle")}
+            ? m.auth_dialog_locked_title()
+            : m.auth_dialog_change_key_title()}
         </h2>
       </div>
       <DialogCloseButton
-        label={i18n.t("auth.dialog.close")}
+        label={m.auth_dialog_close()}
         onclick={() => auth.closeDialog()}
         class="auth-dialog-close"
         iconClass=""
@@ -49,9 +49,9 @@
           onclick={() => auth.selectExternalAuthentication()}
         >
           <Icon icon={KeyRound} />
-          <span>{i18n.t("auth.dialog.signInWithSso")}</span>
+          <span>{m.auth_dialog_sign_in_with_sso()}</span>
         </a>
-        <div class="auth-dialog-separator"><span>{i18n.t("auth.dialog.orUseApiKey")}</span></div>
+        <div class="auth-dialog-separator"><span>{m.auth_dialog_or_use_api_key()}</span></div>
       {/if}
       <div class="auth-dialog-input-shell">
         <Icon icon={LockKeyhole} class="auth-dialog-input-icon" />
@@ -59,8 +59,8 @@
           id="authDialogApiKey"
           class="auth-dialog-input"
           type="password"
-          placeholder={i18n.t("auth.apiKey.placeholder")}
-          aria-label={i18n.t("auth.apiKey.label")}
+          placeholder={m.auth_api_key_placeholder()}
+          aria-label={m.auth_api_key_label()}
           autocomplete="current-password"
           data-modal-autofocus
           bind:value={auth.apiKey}
@@ -68,11 +68,11 @@
       </div>
       {#if auth.authError}
         <p class="auth-dialog-error" role="alert">
-          {auth.authErrorMessage || i18n.t("auth.apiKey.invalid")}
+          {auth.authErrorMessage || m.auth_api_key_invalid()}
         </p>
       {/if}
       <p class="auth-dialog-hint">
-        {i18n.t("auth.apiKey.storageHint")}
+        {m.auth_api_key_storage_hint()}
       </p>
       <div class="auth-dialog-actions">
         <button
@@ -81,8 +81,8 @@
         >
           <Icon icon={Check} class="auth-dialog-submit-icon" />
           <span>{auth.needsAuth
-              ? i18n.t("auth.actions.unlockDashboard")
-              : i18n.t("auth.actions.saveApiKey")}</span>
+              ? m.auth_action_unlock_dashboard()
+              : m.auth_action_save_api_key()}</span>
         </button>
       </div>
     </form>

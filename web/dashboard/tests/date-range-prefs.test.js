@@ -14,8 +14,7 @@ import {
   localizedRangeLabel,
   localizedRangeSpanLabel,
 } from "../src/lib/stores/dateRangeText.js";
-import { pluralKey, translate } from "../src/lib/i18n/catalog.js";
-import en from "../src/lib/i18n/locales/en.js";
+import * as m from "../src/lib/paraglide/messages.js";
 import {
   addDaysToDateKey,
   daysBetweenDateKeys,
@@ -23,9 +22,17 @@ import {
 } from "../src/lib/utils/dateKeys.js";
 
 const englishText = {
-  t: (key, values) => translate(en, en, key, values),
-  plural: (key, count) =>
-    translate(en, en, pluralKey("en", key, count, en, en), { count }),
+  lastDays: (count) => m.date_picker_last_days({ count }),
+  days: (count) => m.date_picker_days({ count }),
+  today: m.date_picker_today,
+  range: m.date_picker_range,
+  openRange: m.date_picker_open_range,
+  chartTitle: {
+    daily: m.date_range_chart_title_daily,
+    weekly: m.date_range_chart_title_weekly,
+    monthly: m.date_range_chart_title_monthly,
+    yearly: m.date_range_chart_title_yearly,
+  },
   date: (key) =>
     new Intl.DateTimeFormat("en", {
       day: "numeric",

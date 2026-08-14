@@ -7,7 +7,8 @@
 // one that ended in the past stays put. See dateRangePrefs.js.
 
 import { timezone } from "./timezone.svelte.js";
-import { i18n } from "$lib/i18n/i18n.svelte.js";
+import { formatDate } from "$lib/i18n/locale.js";
+import * as m from "$lib/paraglide/messages.js";
 import { formatDateParam } from "$lib/utils/format.js";
 import { readStored, writeStored } from "$lib/utils/storage.js";
 import {
@@ -27,10 +28,19 @@ import {
 const DAY_SYNC_INTERVAL_MS = 60_000;
 
 const localizedText = {
-  t: (key, values) => i18n.t(key, values),
-  plural: (key, count) => i18n.plural(key, count),
+  lastDays: (count) => m.date_picker_last_days({ count }),
+  days: (count) => m.date_picker_days({ count }),
+  today: m.date_picker_today,
+  range: m.date_picker_range,
+  openRange: m.date_picker_open_range,
+  chartTitle: {
+    daily: m.date_range_chart_title_daily,
+    weekly: m.date_range_chart_title_weekly,
+    monthly: m.date_range_chart_title_monthly,
+    yearly: m.date_range_chart_title_yearly,
+  },
   date: (key) =>
-    i18n.formatDate(new Date(key + "T00:00:00Z"), {
+    formatDate(new Date(key + "T00:00:00Z"), {
       day: "numeric",
       month: "short",
       year: "numeric",

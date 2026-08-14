@@ -6,7 +6,7 @@ import { daysBetweenDateKeys, isDateKey } from "../utils/dateKeys.js";
 import { DEFAULT_PRESET_DAYS } from "./dateRangePrefs.js";
 
 function dateEdgeLabel(key, todayKey, text) {
-  return key === todayKey ? text.t("datePicker.today") : text.date(key);
+  return key === todayKey ? text.today() : text.date(key);
 }
 
 export function localizedRangeLabel(
@@ -14,23 +14,23 @@ export function localizedRangeLabel(
   text,
 ) {
   if (selectedPreset) {
-    return text.plural("datePicker.lastDays", Number(selectedPreset));
+    return text.lastDays(Number(selectedPreset));
   }
 
   if (isDateKey(startKey) && isDateKey(endKey)) {
     const start = dateEdgeLabel(startKey, todayKey, text);
     if (startKey === endKey) return start;
-    return text.t("datePicker.range", {
+    return text.range({
       start,
       end: dateEdgeLabel(endKey, todayKey, text),
     });
   }
   if (isDateKey(startKey)) {
-    return text.t("datePicker.openRange", {
+    return text.openRange({
       start: dateEdgeLabel(startKey, todayKey, text),
     });
   }
-  return text.plural("datePicker.lastDays", Number(DEFAULT_PRESET_DAYS));
+  return text.lastDays(Number(DEFAULT_PRESET_DAYS));
 }
 
 export function localizedRangeSpanLabel(
@@ -38,26 +38,19 @@ export function localizedRangeSpanLabel(
   text,
 ) {
   if (selectedPreset) {
-    return text.plural("datePicker.lastDays", Number(selectedPreset));
+    return text.lastDays(Number(selectedPreset));
   }
   if (!isDateKey(startKey) || !isDateKey(endKey)) return "";
 
   const days = daysBetweenDateKeys(startKey, endKey);
   if (followsToday || endKey === todayKey) {
     return days === 1
-      ? text.t("datePicker.today")
-      : text.plural("datePicker.lastDays", days);
+      ? text.today()
+      : text.lastDays(days);
   }
-  return text.plural("datePicker.days", days);
+  return text.days(days);
 }
 
 export function localizedRangeChartTitle(interval, text) {
-  return text.t(CHART_TITLE_KEYS[interval] || CHART_TITLE_KEYS.daily);
+  return (text.chartTitle[interval] || text.chartTitle.daily)();
 }
-
-const CHART_TITLE_KEYS = {
-  daily: "dateRange.chartTitle.daily",
-  weekly: "dateRange.chartTitle.weekly",
-  monthly: "dateRange.chartTitle.monthly",
-  yearly: "dateRange.chartTitle.yearly",
-};

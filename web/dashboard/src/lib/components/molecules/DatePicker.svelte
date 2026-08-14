@@ -6,7 +6,7 @@
   import DatePickerCalendar from "./DatePickerCalendar.svelte";
   import { shiftMonth } from "./datePickerLogic.js";
   import { dismissOnOutside } from "$lib/utils/attachments.js";
-  import { i18n } from "$lib/i18n/i18n.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { onchange } = $props();
 
@@ -97,7 +97,7 @@
           <button
             class="preset-btn"
             class:active={dateRange.selectedPreset === preset}
-            onclick={() => selectPreset(preset)}>{i18n.plural("datePicker.lastDays", Number(preset))}</button
+            onclick={() => selectPreset(preset)}>{m.date_picker_last_days({ count: Number(preset) })}</button
           >
         {/each}
       </div>
@@ -127,8 +127,8 @@
         <svg viewBox="0 0 12 12" fill="none"><path d="M10 2v8M3 6h7M5.5 3.5L3 6l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       {/if}
       <span>{selectingDate === "end"
-          ? i18n.t("datePicker.selectEnd")
-          : i18n.t("datePicker.selectStart")}</span>
+          ? m.date_picker_select_end()
+          : m.date_picker_select_start()}</span>
     </div>
   {/if}
 </div>

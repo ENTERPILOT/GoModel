@@ -2,18 +2,18 @@
   // "Authentication required" page banner with the Enter-API-key button.
   // Owns its own visibility (auth.authError), so pages just drop it in.
   import { auth } from "$lib/stores/auth.svelte.js";
-  import { i18n } from "$lib/i18n/i18n.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 {#if auth.authError}
   <div class="alert alert-warning auth-banner" role="alert">
-    <span>{i18n.t("auth.banner.required")}</span>
+    <span>{m.auth_banner_required()}</span>
     <button
       type="button"
       class="btn btn-primary"
       onclick={() => auth.openDialog()}
     >
-      {i18n.t("sidebar.actions.enterApiKey")}
+      {m.sidebar_action_enter_api_key()}
     </button>
   </div>
 {/if}

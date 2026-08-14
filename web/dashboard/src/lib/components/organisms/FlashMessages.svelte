@@ -5,7 +5,7 @@
   import { fly, fade } from "svelte/transition";
   import { backOut } from "svelte/easing";
   import { flash } from "$lib/stores/flash.svelte.js";
-  import { i18n } from "$lib/i18n/i18n.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <div class="flash-region">
@@ -23,7 +23,7 @@
       <button
         type="button"
         class="flash-toast-dismiss"
-        aria-label={i18n.t("notifications.dismiss")}
+        aria-label={m.notification_dismiss()}
         onclick={() => flash.dismiss(toast.id)}
       >
         &times;
