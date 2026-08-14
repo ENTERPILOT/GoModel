@@ -72,6 +72,45 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
     m.date_picker_days({ count: 5 }, { locale: "pl" }),
     "5 dni",
   );
+  assert.equal(
+    m.audit_provider_attempts({ count: 1 }, { locale: "pl" }),
+    "1 próba dostawcy",
+  );
+  assert.equal(
+    m.audit_provider_attempts({ count: 2 }, { locale: "pl" }),
+    "2 próby dostawców",
+  );
+  assert.equal(
+    m.audit_provider_attempts({ count: 5 }, { locale: "pl" }),
+    "5 prób dostawców",
+  );
+  assert.equal(
+    m.settings_pricing_summary(
+      { matched: 1, recalculated: 1 },
+      { locale: "pl" },
+    ),
+    "Przeliczono ceny dla 1 z 1 rekordu zużycia.",
+  );
+  assert.equal(
+    m.settings_pricing_missing({ count: 2 }, { locale: "pl" }),
+    "2 rekordy zużycia nadal nie mają metadanych cen.",
+  );
+  assert.equal(
+    m.settings_pricing_missing({ count: 5 }, { locale: "pl" }),
+    "5 rekordów zużycia nadal nie ma metadanych cen.",
+  );
+  assert.equal(
+    m.settings_runtime_refresh_models({ count: 2 }, { locale: "pl" }),
+    "2 modele",
+  );
+  assert.equal(
+    m.settings_runtime_refresh_providers({ count: 5 }, { locale: "pl" }),
+    "5 dostawców",
+  );
+  assert.equal(
+    m.settings_pricing_confirmation({}, { locale: "pl" }),
+    "przelicz",
+  );
 });
 
 test("the browser locale strategy persists overrides without changing routes", () => {

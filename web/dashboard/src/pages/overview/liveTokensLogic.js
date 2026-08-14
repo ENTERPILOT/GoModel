@@ -10,18 +10,20 @@ import * as m from "../../lib/paraglide/messages.js";
 // apiName: backend granularity; refreshMs: how often to refetch to scroll the
 // window (matched to the bucket width, capped for coarse views).
 export const GRANULARITIES = {
-  seconds: { apiName: "second", windowLabel: m.overview_last_60_seconds(), refreshMs: 2000 },
-  minutes: { apiName: "minute", windowLabel: m.overview_last_60_minutes(), refreshMs: 5000 },
-  hours: { apiName: "hour", windowLabel: m.overview_last_24_hours(), refreshMs: 20000 },
-  days: { apiName: "day", windowLabel: m.overview_last_30_days(), refreshMs: 60000 },
+  seconds: { apiName: "second", windowLabel: m.overview_last_60_seconds, refreshMs: 2000 },
+  minutes: { apiName: "minute", windowLabel: m.overview_last_60_minutes, refreshMs: 5000 },
+  hours: { apiName: "hour", windowLabel: m.overview_last_24_hours, refreshMs: 20000 },
+  days: { apiName: "day", windowLabel: m.overview_last_30_days, refreshMs: 60000 },
 };
 
-export const GRANULARITY_OPTIONS = [
-  { value: "seconds", label: m.overview_seconds() },
-  { value: "minutes", label: m.overview_minutes() },
-  { value: "hours", label: m.overview_hours() },
-  { value: "days", label: m.overview_days() },
-];
+export function granularityOptions() {
+  return [
+    { value: "seconds", label: m.overview_seconds() },
+    { value: "minutes", label: m.overview_minutes() },
+    { value: "hours", label: m.overview_hours() },
+    { value: "days", label: m.overview_days() },
+  ];
+}
 
 function zeroMetrics() {
   return { input: 0, output: 0, prompt: 0, local: 0 };
@@ -96,7 +98,7 @@ export function liveTokensLegendValue(totals, metric) {
 }
 
 export function liveTokensWindowLabel(granularity) {
-  return (GRANULARITIES[granularity] || GRANULARITIES.minutes).windowLabel;
+  return (GRANULARITIES[granularity] || GRANULARITIES.minutes).windowLabel();
 }
 
 // Text equivalent of the chart for screen readers (the canvas itself is

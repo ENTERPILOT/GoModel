@@ -7,7 +7,7 @@
   import { chartColors, resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
   import { liveTokensState } from "./liveTokensState.svelte.js";
   import {
-    GRANULARITY_OPTIONS,
+    granularityOptions,
     bucketsToSeries,
     liveTokensHasData,
     liveTokensLegendValue,
@@ -54,7 +54,7 @@
     </div>
     <SegmentedControl
       ariaLabel={m.overview_live_granularity()}
-      options={GRANULARITY_OPTIONS}
+      options={granularityOptions()}
       value={liveTokensState.granularity}
       onchange={(granularity) => liveTokensState.setGranularity(granularity)}
     />

@@ -2,6 +2,7 @@
 // Pure functions so the chart math is testable with node.
 
 import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
+import { formatNumber } from "../../lib/i18n/locale.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { tokenAxisTicks } from "./chartStyle.js";
 
@@ -170,13 +171,13 @@ export function overviewChartConfig(colors, series, options = {}) {
           labels: { color: colors.text, font: { size: 12 } },
         },
         tooltip: chartTooltip(colors, {
-          label: (c) => c.dataset.label + ": " + c.parsed.y.toLocaleString(),
+          label: (c) => c.dataset.label + ": " + formatNumber(c.parsed.y),
           footer: (items) => {
             let total = 0;
             items.forEach((it) => {
               total += Number(it.parsed.y) || 0;
             });
-            return m.overview_total_label({ total: total.toLocaleString() });
+            return m.overview_total_label({ total: formatNumber(total) });
           },
         }),
       },

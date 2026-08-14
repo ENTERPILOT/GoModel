@@ -1,7 +1,7 @@
 // Summary-card totals + cache meter math. Pure functions taking the usage
 // summary / cache overview payloads.
 
-import { formatNumber } from "../../lib/utils/format.js";
+import { formatNumber } from "../../lib/i18n/locale.js";
 import * as m from "../../lib/paraglide/messages.js";
 
 export function summaryTotalTokens(summary) {

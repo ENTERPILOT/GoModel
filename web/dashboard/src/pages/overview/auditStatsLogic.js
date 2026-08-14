@@ -4,6 +4,7 @@
 import { barColors, chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { getLocale } from "../../lib/paraglide/runtime.js";
+import { formatNumber } from "../../lib/i18n/locale.js";
 import { formatTokensShort } from "../../lib/utils/format.js";
 
 export function emptyAuditStats() {
@@ -198,13 +199,13 @@ export function auditStatusChartConfig(colors, buckets, options = {}) {
                   formatTimestamp,
                 )
               : "",
-          label: (c) => c.dataset.label + ": " + c.parsed.y.toLocaleString(),
+          label: (c) => c.dataset.label + ": " + formatNumber(c.parsed.y),
           footer: (items) => {
             let total = 0;
             items.forEach((it) => {
               total += Number(it.parsed.y) || 0;
             });
-            return m.overview_total_label({ total: total.toLocaleString() });
+            return m.overview_total_label({ total: formatNumber(total) });
           },
         }),
       },

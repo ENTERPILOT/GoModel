@@ -808,6 +808,27 @@
   "settings_runtime_refreshed": "Runtime refreshed.",
   "settings_runtime_refresh_warnings": "Runtime refresh completed with warnings.",
   "settings_runtime_refresh_failed": "Runtime refresh failed.",
+  "settings_runtime_refresh_summary": "{status} {models} · {providers}.",
+  "settings_runtime_refresh_models": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=*": "{count} models"
+      }
+    }
+  ],
+  "settings_runtime_refresh_providers": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} provider",
+        "count_plural=*": "{count} providers"
+      }
+    }
+  ],
   "settings_runtime_processing_title": "AI Processing",
   "settings_runtime_load_failed": "Unable to load runtime settings.",
   "settings_runtime_save_failed": "Unable to save {setting}.",

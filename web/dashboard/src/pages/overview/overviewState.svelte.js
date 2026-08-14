@@ -60,8 +60,8 @@ class ProviderStatusState {
 
   detailsToggleLabel() {
     return this.detailsExpanded
-      ? m.overview_show_details()
-      : m.overview_hide_details();
+      ? m.overview_hide_details()
+      : m.overview_show_details();
   }
 
   async fetch() {

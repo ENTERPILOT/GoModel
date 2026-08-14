@@ -19,18 +19,11 @@ export function runtimeRefreshSummary(report) {
       : status === "partial"
         ? m.settings_runtime_refresh_warnings()
         : m.settings_runtime_refresh_failed();
-  return (
-    prefix +
-    " " +
-    modelCount +
-    " model" +
-    (modelCount === 1 ? "" : "s") +
-    " across " +
-    providerCount +
-    " provider" +
-    (providerCount === 1 ? "" : "s") +
-    "."
-  );
+  return m.settings_runtime_refresh_summary({
+    status: prefix,
+    models: m.settings_runtime_refresh_models({ count: modelCount }),
+    providers: m.settings_runtime_refresh_providers({ count: providerCount }),
+  });
 }
 
 export function runtimeRefreshSucceeded(report) {

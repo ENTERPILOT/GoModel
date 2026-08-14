@@ -9,6 +9,7 @@ import {
 } from "../../lib/utils/dateKeys.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { getLocale } from "../../lib/paraglide/runtime.js";
+import { formatNumber } from "../../lib/i18n/locale.js";
 
 // Re-exported so calendar callers keep one import for the whole grid API.
 export { addDaysToDateKey, dateKeyToDate, dateToDateKey };
@@ -194,7 +195,7 @@ export function calendarSummaryText(calendarData, mode) {
   if (mode === "costs") {
     return m.overview_calendar_cost_year({ total: total.toFixed(2) });
   }
-  return m.overview_calendar_tokens_year({ total: total.toLocaleString() });
+  return m.overview_calendar_tokens_year({ total: formatNumber(total) });
 }
 
 export function calendarTooltipText(day, mode) {
@@ -206,7 +207,7 @@ export function calendarTooltipText(day, mode) {
     });
   }
   return m.overview_calendar_tokens_on_date({
-    total: (day.value || 0).toLocaleString(),
+    total: formatNumber(day.value || 0),
     date: day.dateStr,
   });
 }
