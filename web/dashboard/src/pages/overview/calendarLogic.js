@@ -9,7 +9,7 @@ import {
 } from "../../lib/utils/dateKeys.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { getLocale } from "../../lib/paraglide/runtime.js";
-import { formatNumber } from "../../lib/i18n/locale.js";
+import { formatDate, formatNumber } from "../../lib/i18n/locale.js";
 
 // Re-exported so calendar callers keep one import for the whole grid API.
 export { addDaysToDateKey, dateKeyToDate, dateToDateKey };
@@ -193,21 +193,41 @@ export function calendarSummaryText(calendarData, mode) {
     }
   }
   if (mode === "costs") {
-    return m.overview_calendar_cost_year({ total: total.toFixed(2) });
+    return m.overview_calendar_cost_year({
+      total: formatNumber(total, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+    });
   }
   return m.overview_calendar_tokens_year({ total: formatNumber(total) });
 }
 
+function calendarDateLabel(dateKey) {
+  const date = new Date(String(dateKey || "") + "T00:00:00Z");
+  if (Number.isNaN(date.getTime())) return String(dateKey || "");
+  return formatDate(date, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 export function calendarTooltipText(day, mode) {
   if (!day || day.empty) return "";
+  const date = calendarDateLabel(day.dateStr);
   if (mode === "costs") {
     return m.overview_calendar_cost_on_date({
-      total: (day.value || 0).toFixed(4),
-      date: day.dateStr,
+      total: formatNumber(day.value || 0, {
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4,
+      }),
+      date,
     });
   }
   return m.overview_calendar_tokens_on_date({
     total: formatNumber(day.value || 0),
-    date: day.dateStr,
+    date,
   });
 }

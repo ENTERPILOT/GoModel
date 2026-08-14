@@ -226,7 +226,7 @@ class FailoverStore {
         this.failoverError = m.models_failover_save_failed();
         return;
       }
-      flash.success(m.models_failover_saved());
+      flash.success(m.models_failover_mapping_saved());
       this.closeFailoverForm();
       void this.fetchFailoverRules();
     } catch (e) {
@@ -308,9 +308,7 @@ class FailoverStore {
         return;
       }
       this.setFailoverFormTargets(targets);
-      flash.success(targets.length === 1
-        ? m.models_failover_generated_one({ count: targets.length })
-        : m.models_failover_generated_many({ count: targets.length }));
+      flash.success(m.models_failover_generated({ count: targets.length }));
       this.focusFailoverEditor();
     } catch (e) {
       console.error("Failed to generate failover mapping:", e);
@@ -501,9 +499,7 @@ class FailoverStore {
           return;
         }
       }
-      flash.success(drafts.length === 1
-        ? m.models_failover_saved_one({ count: drafts.length })
-        : m.models_failover_saved_many({ count: drafts.length }));
+      flash.success(m.models_failover_saved({ count: drafts.length }));
       this.failoverDraftsOpen = false;
       this.failoverGeneratedRules = [];
       this.failoverDraftSelections = {};

@@ -111,6 +111,55 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
     m.settings_pricing_confirmation({}, { locale: "pl" }),
     "przelicz",
   );
+  assert.equal(
+    m.providers_keys_count({ count: 1 }, { locale: "pl" }),
+    "1 klucz",
+  );
+  assert.equal(
+    m.providers_keys_count({ count: 2 }, { locale: "pl" }),
+    "2 klucze",
+  );
+  assert.equal(
+    m.providers_keys_count({ count: 5 }, { locale: "pl" }),
+    "5 kluczy",
+  );
+  assert.equal(
+    m.providers_models_count({ count: 5 }, { locale: "pl" }),
+    "5 modeli",
+  );
+  assert.equal(
+    m.models_count({ count: 5 }, { locale: "pl" }),
+    "5 modeli",
+  );
+  assert.equal(
+    m.models_alias_count({ count: 5 }, { locale: "pl" }),
+    "5 aliasów",
+  );
+  assert.equal(
+    m.models_failover_generated({ count: 5 }, { locale: "pl" }),
+    "Wygenerowano 5 modeli Fallback.",
+  );
+  assert.equal(
+    m.models_failover_saved({ count: 5 }, { locale: "pl" }),
+    "Zapisano 5 mapowań Failover.",
+  );
+  assert.equal(
+    m.overview_total_requests({}, { locale: "pl" }),
+    "Łączna liczba Request'ów",
+  );
+  assert.equal(
+    m.overview_live_token_throughput({}, { locale: "pl" }),
+    "Przepływ tokenów",
+  );
+  assert.equal(
+    m.overview_provider_status({}, { locale: "pl" }),
+    "Status provider'ów",
+  );
+  assert.equal(
+    m.overview_input_tokens({}, { locale: "pl" }),
+    "Input Tokens",
+  );
+  assert.equal(m.rate_limits_title({}, { locale: "pl" }), "Rate Limits");
 });
 
 test("the browser locale strategy persists overrides without changing routes", () => {

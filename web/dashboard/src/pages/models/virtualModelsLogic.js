@@ -470,14 +470,10 @@ function providerGroupItemCountLabel(rows) {
   const aliasCount = safeRows.filter((row) => row && row.is_alias).length;
   const parts = [];
   if (modelCount > 0) {
-    parts.push(modelCount === 1
-      ? m.models_count_one({ count: modelCount })
-      : m.models_count_many({ count: modelCount }));
+    parts.push(m.models_count({ count: modelCount }));
   }
   if (aliasCount > 0) {
-    parts.push(aliasCount === 1
-      ? m.models_alias_count_one({ count: aliasCount })
-      : m.models_alias_count_many({ count: aliasCount }));
+    parts.push(m.models_alias_count({ count: aliasCount }));
   }
   return parts.join(" · ");
 }

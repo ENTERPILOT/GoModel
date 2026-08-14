@@ -35,7 +35,7 @@ export function failoverTargetLabel(rule) {
 export function failoverRuleStatus(rule) {
   if (rule && rule.enabled === false) return m.models_off();
   if (rule && rule.managed) return m.models_config();
-  return "On";
+  return m.models_on();
 }
 
 export function findFailoverMapping(rules, source) {

@@ -72,7 +72,7 @@
     <h2>{m.models_title()}</h2>
     {#if virtualModels.displayModels.length > 0}
       <div class="model-count">
-        {m.models_count({
+        {m.models_total_count({
           count: modelsStore.filter
             ? virtualModels.filteredDisplayModels.length + " / " + virtualModels.displayModels.length
             : virtualModels.displayModels.length,

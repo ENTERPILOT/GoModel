@@ -60,7 +60,7 @@
       <option value="http">Streamable HTTP</option>
       <option value="sse">SSE (legacy)</option>
     </select>
-    <small class="form-hint">{m.mcp_stdio_help()}</small>
+    <small class="form-hint">{m.mcp_transport_help()}</small>
   </FormField>
 
   <FormField id="mcp-server-url" label="URL">

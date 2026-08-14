@@ -3,6 +3,7 @@
 // tests/rate-limits.test.js under plain node.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { formatNumber } from "../../lib/i18n/locale.js";
 
 export function defaultRateLimitForm() {
   return {
@@ -170,7 +171,7 @@ export function formatRateLimitNumber(value) {
   if (!Number.isFinite(numeric)) {
     return "0";
   }
-  return numeric.toLocaleString();
+  return formatNumber(numeric);
 }
 
 export function rateLimitUsagePercent(used, limit) {

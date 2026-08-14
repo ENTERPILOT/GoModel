@@ -465,7 +465,7 @@
   "budgets_reset_all_failed": "Unable to reset budgets.",
   "budgets_reset_all_done": "Budgets reset.",
   "models_title": "Models",
-  "models_count": "{count} models",
+  "models_total_count": "{count} models",
   "models_unavailable": "Virtual models feature is unavailable.",
   "models_filter_placeholder": "Filter by provider, provider/model, alias, or owner...",
   "models_filter_label": "Filter models by provider, provider/model, alias, or owner",
@@ -489,6 +489,7 @@
   "models_redirect": "Redirect",
   "models_managed_config": "Managed by config.yaml / VIRTUAL_MODELS",
   "models_config": "Config",
+  "models_on": "On",
   "models_targets": "Targets",
   "models_redirects_to": "Redirects to",
   "models_remove": "remove",
@@ -633,7 +634,7 @@
   "mcp_slug_create_help": "Derived from the name. You may edit it before saving.",
   "mcp_slug_edit_help": "Immutable because it is used in URLs, scope headers, and aggregated tool names.",
   "mcp_transport": "Transport",
-  "mcp_stdio_help": "stdio servers are config-only: declare them in config.yaml under mcp.servers.",
+  "mcp_transport_help": "Connect to a remote MCP server over Streamable HTTP or legacy SSE.",
   "mcp_headers": "Headers",
   "mcp_header_name": "Header name",
   "mcp_header_value": "Header value",
@@ -1039,13 +1040,29 @@
   "providers_service_account_json_base64_hint": "Saved values are masked; leave the asterisks unchanged to keep the stored value.",
   "providers_models_hint": "Leave empty to auto-discover models from the provider's /models endpoint where supported.",
   "providers_default_value": "Defaults to {value}",
-  "providers_keys_count": "{count} key",
-  "providers_keys_count_plural": "{count} keys",
+  "providers_keys_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} key",
+        "count_plural=*": "{count} keys"
+      }
+    }
+  ],
   "providers_service_account": "service account",
   "providers_keyless": "keyless",
   "providers_auto_discovered": "auto-discovered",
-  "providers_models_count": "{count} model",
-  "providers_models_count_plural": "{count} models",
+  "providers_models_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=*": "{count} models"
+      }
+    }
+  ],
   "models_enable_action": "Enable {subject}",
   "models_disable_action": "Disable {subject}",
   "models_alias_subject": "alias {name}",
@@ -1076,10 +1093,26 @@
   "models_global_scope_subject": "all providers and models",
   "models_disabled_default": "Disabled by default",
   "models_allowed_for": "Allowed for {paths}",
-  "models_count_one": "{count} model",
-  "models_count_many": "{count} models",
-  "models_alias_count_one": "{count} alias",
-  "models_alias_count_many": "{count} aliases",
+  "models_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=*": "{count} models"
+      }
+    }
+  ],
+  "models_alias_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} alias",
+        "count_plural=*": "{count} aliases"
+      }
+    }
+  ],
   "models_column_modes": "Modes",
   "models_column_input_output": "Input / Output ($/MTok)",
   "models_column_cached": "Cached $/MTok",
@@ -1267,14 +1300,22 @@
   "models_failover_primary_required": "Primary model is required.",
   "models_failover_target_required": "Add at least one Failover target.",
   "models_failover_save_failed": "Failed to save Failover mapping.",
-  "models_failover_saved": "Failover mapping saved.",
+  "models_failover_mapping_saved": "Failover mapping saved.",
   "models_failover_remove_confirm": "Remove Failover mapping for \"{source}\"?",
   "models_failover_remove_failed": "Failed to remove Failover mapping.",
   "models_failover_removed": "Failover mapping removed.",
   "models_failover_generate_failed": "Failed to generate Failover mapping.",
   "models_failover_no_suggestions": "No Failover suggestions were generated for this model.",
-  "models_failover_generated_one": "Generated {count} Fallback model.",
-  "models_failover_generated_many": "Generated {count} Fallback models.",
+  "models_failover_generated": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Generated {count} Fallback model.",
+        "count_plural=*": "Generated {count} Fallback models."
+      }
+    }
+  ],
   "models_failover_reset_title": "Remove Failover models",
   "models_failover_reset_message": "Remove every dashboard-managed Failover mapping. Configuration-managed mappings remain active.",
   "models_failover_reset_confirm": "Remove Failover",
@@ -1284,8 +1325,16 @@
   "models_failover_selected_count": "{selected} / {total} selected",
   "models_failover_select_required": "Select at least one Failover draft.",
   "models_failover_draft_invalid": "Generated Failover draft is missing model data.",
-  "models_failover_saved_one": "Saved {count} Failover mapping.",
-  "models_failover_saved_many": "Saved {count} Failover mappings.",
+  "models_failover_saved": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Saved {count} Failover mapping.",
+        "count_plural=*": "Saved {count} Failover mappings."
+      }
+    }
+  ],
   "models_failover_save_all_failed": "Failed to save Failover mappings.",
   "models_failover_edit_for": "Edit failover for {model}",
   "models_failover_edit_active": "Edit failover for {model} (active)",

@@ -20,91 +20,111 @@ export const FIELD_BASE_URL = "base_url";
 export const FIELD_SERVICE_ACCOUNT_JSON = "service_account_json";
 export const FIELD_MODELS = "models";
 
-// PROVIDER_CREDENTIAL_FIELDS is the presentation of each credential field:
+// Resolve translated metadata on access so locale changes cannot leave stale
+// labels, hints, or placeholders. The metadata describes each credential field:
 // what to call it, which control to render, and what to say about it. The
 // gateway decides *whether* a field applies to a type; this decides how it
 // looks. A field the gateway grows before this map knows about it still
 // renders, as a labelled text input (see providerCredentialFieldMeta).
-export const PROVIDER_CREDENTIAL_FIELDS = {
-  [FIELD_API_KEYS]: {
-    label: m.providers_api_keys(),
-    control: "keys",
-    hint: m.providers_api_keys_hint(),
-  },
-  [FIELD_SESSION_STICKY_KEYS]: {
-    label: m.providers_session_sticky_keys(),
-    control: "checkbox",
-    hint: m.providers_session_sticky_hint(),
-  },
-  [FIELD_BASE_URL]: {
-    label: m.providers_base_url(),
-    control: "text",
-  },
-  api_version: {
-    label: m.providers_api_version(),
-    control: "text",
-    placeholder: "e.g. 2024-10-01-preview",
-    hint: m.providers_api_version_hint(),
-  },
-  backend: {
-    label: m.providers_backend(),
-    control: "select",
-    hint: m.providers_backend_hint(),
-  },
-  auth_type: {
-    label: m.providers_auth_type(),
-    control: "select",
-    hint: m.providers_auth_type_hint(),
-  },
-  api_mode: {
-    label: m.providers_api_mode(),
-    control: "select",
-    hint: m.providers_api_mode_hint(),
-  },
-  vertex_project: {
-    label: m.providers_vertex_project(),
-    control: "text",
-    placeholder: "my-gcp-project",
-  },
-  vertex_location: {
-    label: m.providers_vertex_location(),
-    control: "text",
-    placeholder: "us-central1",
-  },
-  service_account_file: {
-    label: m.providers_service_account_file(),
-    control: "text",
-    placeholder: "/path/to/service-account.json",
-    hint: m.providers_service_account_file_hint(),
-  },
-  [FIELD_SERVICE_ACCOUNT_JSON]: {
-    label: m.providers_service_account_json(),
-    control: "textarea",
-    placeholder: m.providers_paste_service_account(),
-    hint: m.providers_service_account_json_hint(),
-  },
-  service_account_json_base64: {
-    label: m.providers_service_account_json_base64(),
-    control: "text",
-    hint: m.providers_service_account_json_base64_hint(),
-  },
-  gcp_scope: {
-    label: m.providers_gcp_scope(),
-    control: "text",
-    placeholder: "https://www.googleapis.com/auth/cloud-platform",
-  },
-  [FIELD_MODELS]: {
-    label: m.providers_models_field(),
-    control: "text",
-    placeholder: "gpt-4o, gpt-4o-mini",
-    hint: m.providers_models_hint(),
-  },
-};
+const PROVIDER_CREDENTIAL_FIELD_NAMES = [
+  FIELD_API_KEYS,
+  FIELD_SESSION_STICKY_KEYS,
+  FIELD_BASE_URL,
+  "api_version",
+  "backend",
+  "auth_type",
+  "api_mode",
+  "vertex_project",
+  "vertex_location",
+  "service_account_file",
+  FIELD_SERVICE_ACCOUNT_JSON,
+  "service_account_json_base64",
+  "gcp_scope",
+  FIELD_MODELS,
+];
+
+function providerCredentialFields() {
+  return {
+    [FIELD_API_KEYS]: {
+      label: m.providers_api_keys(),
+      control: "keys",
+      hint: m.providers_api_keys_hint(),
+    },
+    [FIELD_SESSION_STICKY_KEYS]: {
+      label: m.providers_session_sticky_keys(),
+      control: "checkbox",
+      hint: m.providers_session_sticky_hint(),
+    },
+    [FIELD_BASE_URL]: {
+      label: m.providers_base_url(),
+      control: "text",
+    },
+    api_version: {
+      label: m.providers_api_version(),
+      control: "text",
+      placeholder: "e.g. 2024-10-01-preview",
+      hint: m.providers_api_version_hint(),
+    },
+    backend: {
+      label: m.providers_backend(),
+      control: "select",
+      hint: m.providers_backend_hint(),
+    },
+    auth_type: {
+      label: m.providers_auth_type(),
+      control: "select",
+      hint: m.providers_auth_type_hint(),
+    },
+    api_mode: {
+      label: m.providers_api_mode(),
+      control: "select",
+      hint: m.providers_api_mode_hint(),
+    },
+    vertex_project: {
+      label: m.providers_vertex_project(),
+      control: "text",
+      placeholder: "my-gcp-project",
+    },
+    vertex_location: {
+      label: m.providers_vertex_location(),
+      control: "text",
+      placeholder: "us-central1",
+    },
+    service_account_file: {
+      label: m.providers_service_account_file(),
+      control: "text",
+      placeholder: "/path/to/service-account.json",
+      hint: m.providers_service_account_file_hint(),
+    },
+    [FIELD_SERVICE_ACCOUNT_JSON]: {
+      label: m.providers_service_account_json(),
+      control: "textarea",
+      placeholder: m.providers_paste_service_account(),
+      hint: m.providers_service_account_json_hint(),
+    },
+    service_account_json_base64: {
+      label: m.providers_service_account_json_base64(),
+      control: "text",
+      hint: m.providers_service_account_json_base64_hint(),
+    },
+    gcp_scope: {
+      label: m.providers_gcp_scope(),
+      control: "text",
+      placeholder: "https://www.googleapis.com/auth/cloud-platform",
+    },
+    [FIELD_MODELS]: {
+      label: m.providers_models_field(),
+      control: "text",
+      placeholder: "gpt-4o, gpt-4o-mini",
+      hint: m.providers_models_hint(),
+    },
+  };
+}
 
 // providerCredentialFieldMeta describes one field, falling back to a
 // humanized label so an unknown field is still usable rather than invisible.
 export function providerCredentialFieldMeta(name) {
-  const known = PROVIDER_CREDENTIAL_FIELDS[name];
+  const known = providerCredentialFields()[name];
   if (known) {
     return known;
   }
@@ -197,7 +217,7 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
   const entries =
     schema && Array.isArray(schema.fields) && schema.fields.length > 0
       ? schema.fields
-      : Object.keys(PROVIDER_CREDENTIAL_FIELDS).map((name) => ({
+      : PROVIDER_CREDENTIAL_FIELD_NAMES.map((name) => ({
           name,
           advanced: name !== FIELD_API_KEYS,
         }));
@@ -260,9 +280,7 @@ export function resetProviderCredentialFields(form, fields) {
 export function providerCredentialAuthLabel(row) {
   const keyCount = Array.isArray(row && row.api_keys) ? row.api_keys.length : 0;
   if (keyCount > 0) {
-    return keyCount === 1
-      ? m.providers_keys_count({ count: keyCount })
-      : m.providers_keys_count_plural({ count: keyCount });
+    return m.providers_keys_count({ count: keyCount });
   }
   if (
     String((row && row.service_account_json) || "").trim() ||
@@ -284,9 +302,7 @@ export function providerCredentialModelsLabel(row) {
   if (models.length === 0) {
     return m.providers_auto_discovered();
   }
-  return models.length === 1
-    ? m.providers_models_count({ count: models.length })
-    : m.providers_models_count_plural({ count: models.length });
+  return m.providers_models_count({ count: models.length });
 }
 
 // providerCredentialKeysToRows converts a stored api_keys array (usually all
@@ -467,7 +483,7 @@ export function buildProviderCredentialPayload(form, schema) {
     rendered.add(field.name);
     payload[field.name] = providerCredentialPayloadValue(form, field.name);
   }
-  for (const name of Object.keys(PROVIDER_CREDENTIAL_FIELDS)) {
+  for (const name of PROVIDER_CREDENTIAL_FIELD_NAMES) {
     if (rendered.has(name)) {
       continue;
     }
