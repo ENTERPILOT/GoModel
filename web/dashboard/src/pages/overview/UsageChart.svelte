@@ -8,6 +8,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { dateRange } from "$lib/stores/dateRange.svelte.js";
   import { usageData } from "$lib/stores/usageData.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
   import {
     fillMissingDays,
     buildOverviewSeries,
@@ -17,7 +18,12 @@
   // onintervalchange: refetch hook fired after the interval switches.
   let { onintervalchange } = $props();
 
-  const INTERVALS = ["daily", "weekly", "monthly", "yearly"];
+  const INTERVALS = [
+    { value: "daily", label: m.usage_interval_daily },
+    { value: "weekly", label: m.usage_interval_weekly },
+    { value: "monthly", label: m.usage_interval_monthly },
+    { value: "yearly", label: m.usage_interval_yearly },
+  ];
 
   function setInterval(val) {
     dateRange.interval = val;
@@ -50,10 +56,10 @@
   <div class="chart-container-header">
     <h3>{dateRange.chartTitle()}</h3>
     <SegmentedControl
-      ariaLabel="Usage chart interval"
-      options={INTERVALS.map((val) => ({
-        value: val,
-        label: val.charAt(0).toUpperCase() + val.slice(1),
+      ariaLabel={m.usage_interval_label()}
+      options={INTERVALS.map((interval) => ({
+        value: interval.value,
+        label: interval.label(),
       }))}
       value={dateRange.interval}
       onchange={setInterval}
@@ -63,7 +69,7 @@
     <ChartCanvas build={buildChart} />
     {#if usageData.daily.length === 0 && usageData.loading}
       <div class="chart-empty-overlay">
-        <Spinner size={24} label="Loading usage" />
+        <Spinner size={24} label={m.usage_loading()} />
       </div>
     {:else if usageData.daily.length === 0 && !auth.authError}
       <div class="chart-empty-overlay">

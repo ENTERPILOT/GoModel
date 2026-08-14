@@ -1,4 +1,5 @@
 <script>
+  import * as m from "$lib/paraglide/messages.js";
   // A single workflow card: head, description, pipeline chart, guardrails and
   // (list mode only) the deactivate/edit footer. `preview` renders the
   // footer-less live preview card used inside the editor.
@@ -46,7 +47,7 @@
     <p class="workflow-card-description">{workflow.description}</p>
   {/if}
   {#if wf.failoverVisible()}
-    <p class="form-hint">Failover: {workflowFailoverLabel(workflow, caps)}</p>
+    <p class="form-hint">{m.workflows_failover()}: {workflowFailoverLabel(workflow, caps)}</p>
   {/if}
 
   <WorkflowChart {chart} />
@@ -54,9 +55,11 @@
   {#if runtimeConfig.guardrailsVisible()}
     <div class="workflow-guardrails">
       <div class="workflow-section-head">
-        <h4>Guardrails</h4>
+        <h4>{m.workflows_guardrails()}</h4>
         <span class="provider-badge">
-          {guardrails.length ? guardrails.length + " steps" : "None"}
+          {guardrails.length
+            ? m.workflows_steps_count({ count: guardrails.length })
+            : m.workflows_none()}
         </span>
       </div>
       {#if guardrails.length > 0}
@@ -64,12 +67,12 @@
           {#each guardrails as step, stepIndex (guardrailKeyPrefix + stepIndex)}
             <div class="workflow-guardrail-item">
               <span class="mono font-size-md">{step.ref}</span>
-              <span class="provider-badge">step {step.step}</span>
+              <span class="provider-badge">{m.workflows_step_number({ number: step.step })}</span>
             </div>
           {/each}
         </div>
       {:else}
-        <p class="form-hint">No guardrails configured for this workflow.</p>
+        <p class="form-hint">{m.workflows_no_guardrails()}</p>
       {/if}
     </div>
   {/if}
@@ -81,16 +84,16 @@
           type="button"
           class="table-action-btn table-action-btn-danger"
           disabled={wf.deactivatingID === workflow.id || !canDeactivateWorkflow(workflow)}
-          aria-label={"Deactivate workflow " + displayName}
+          aria-label={m.workflows_deactivate_action({ name: displayName })}
           title={canDeactivateWorkflow(workflow)
-            ? "Deactivate active workflow"
-            : "The global workflow cannot be deactivated."}
+            ? m.workflows_deactivate_active()
+            : m.workflows_global_no_deactivate()}
           onclick={() => wf.deactivate(workflow)}
         >
-          {wf.deactivatingID === workflow.id ? "Deactivating..." : "Deactivate"}
+          {wf.deactivatingID === workflow.id ? m.workflows_deactivating() : m.workflows_deactivate()}
         </button>
         <TableActionButton
-          label={"Edit workflow " + displayName}
+          label={m.workflows_edit_action({ name: displayName })}
           class="table-icon-btn"
           onclick={() => wf.openCreate(workflow)}
         >
@@ -98,11 +101,11 @@
         </TableActionButton>
       </div>
       <div class="workflow-card-meta workflow-card-meta-footer">
-        <span class="provider-badge mono">version: v{workflow.version}</span>
+        <span class="provider-badge mono">{m.workflows_version({ version: workflow.version })}</span>
         <span class="provider-badge mono">
-          created: {timezone.formatTimestamp(workflow.created_at)}
+          {m.workflows_created_at({ date: timezone.formatTimestamp(workflow.created_at) })}
         </span>
-        <span class="provider-badge mono">hash: {shortHash(workflow.workflow_hash)}</span>
+        <span class="provider-badge mono">{m.workflows_hash({ hash: shortHash(workflow.workflow_hash) })}</span>
       </div>
     </div>
   {/if}

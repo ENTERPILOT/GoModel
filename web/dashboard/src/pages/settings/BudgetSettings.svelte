@@ -15,6 +15,7 @@
     budgetWeekdays,
   } from "./budget-settings-logic.js";
   import { Save } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let settings = $state(defaultBudgetSettings());
   let loading = $state(false);
@@ -41,13 +42,13 @@
         return;
       }
       if (!result.ok) {
-        error = "Unable to load budget settings.";
+        error = m.settings_budget_load_failed();
         return;
       }
       settings = normalizeBudgetSettings(result.data, settings);
     } catch (e) {
       console.error("Failed to fetch budget settings:", e);
-      error = "Unable to load budget settings.";
+      error = m.settings_budget_load_failed();
     } finally {
       loading = false;
     }
@@ -69,17 +70,17 @@
         return;
       }
       if (!result.ok) {
-        flash.error("Unable to save budget settings.");
+        flash.error(m.settings_budget_save_failed());
         return;
       }
       settings = normalizeBudgetSettings(result.data, settings);
       // A successful save proves the endpoint works and delivered fresh
       // data, so a load error from a failed earlier fetch is obsolete.
       error = "";
-      flash.success("Budget settings saved.");
+      flash.success(m.settings_budget_saved());
     } catch (e) {
       console.error("Failed to save budget settings:", e);
-      flash.error("Unable to save budget settings.");
+      flash.error(m.settings_budget_save_failed());
     } finally {
       saving = false;
     }
@@ -95,26 +96,26 @@
   <div class="settings-refresh-section budget-settings-section">
     <InlineHelpSection
       copyId="budget-settings-help-copy"
-      label="budget help"
-      text="Budget reset anchors are stored in the database and evaluated in UTC. Hourly budgets reset at the top of each hour."
+      label={m.settings_budget_help_label()}
+      text={m.settings_budget_help()}
     >
-      {#snippet title()}<h3>Budget Resets</h3>{/snippet}
+      {#snippet title()}<h3>{m.settings_budget_resets_title()}</h3>{/snippet}
     </InlineHelpSection>
     <div class="budget-settings-grid">
       <div class="budget-settings-row">
-        <div class="budget-settings-period">Monthly</div>
+        <div class="budget-settings-period">{m.settings_budget_monthly()}</div>
         <div class="form-field">
           <!-- external: the copy renders in the budget-settings-help-cell
                grid cell below, keyed off the same bound open state. -->
           <InlineHelpSection
             copyId="budget-monthly-day-help-copy"
-            label="day of month help"
+            label={m.settings_budget_day_of_month_help_label()}
             external
             bind:open={monthlyDayHelpOpen}
           >
             {#snippet title()}
               <label class="form-field-label" for="budget-monthly-day"
-                >Day of Month</label
+                >{m.settings_budget_day_of_month()}</label
               >
             {/snippet}
           </InlineHelpSection>
@@ -130,7 +131,9 @@
           />
         </div>
         <div class="form-field">
-          <label class="form-field-label" for="budget-monthly-hour">Hour</label>
+          <label class="form-field-label" for="budget-monthly-hour"
+            >{m.settings_budget_hour()}</label
+          >
           <input
             id="budget-monthly-hour"
             class="form-input"
@@ -143,7 +146,7 @@
         </div>
         <div class="form-field">
           <label class="form-field-label" for="budget-monthly-minute"
-            >Minute</label
+            >{m.settings_budget_minute()}</label
           >
           <input
             id="budget-monthly-minute"
@@ -158,17 +161,16 @@
         <div class="budget-settings-help-cell">
           {#if monthlyDayHelpOpen}
             <p id="budget-monthly-day-help-copy" class="inline-help-copy">
-              If the selected day does not exist in a month, the reset runs on
-              the last day of that month.
+              {m.settings_budget_day_of_month_help()}
             </p>
           {/if}
         </div>
       </div>
       <div class="budget-settings-row">
-        <div class="budget-settings-period">Weekly</div>
+        <div class="budget-settings-period">{m.settings_budget_weekly()}</div>
         <div class="form-field">
           <label class="form-field-label" for="budget-weekly-day"
-            >Day of Week</label
+            >{m.settings_budget_day_of_week()}</label
           >
           <select
             id="budget-weekly-day"
@@ -181,7 +183,9 @@
           </select>
         </div>
         <div class="form-field">
-          <label class="form-field-label" for="budget-weekly-hour">Hour</label>
+          <label class="form-field-label" for="budget-weekly-hour"
+            >{m.settings_budget_hour()}</label
+          >
           <input
             id="budget-weekly-hour"
             class="form-input"
@@ -194,7 +198,7 @@
         </div>
         <div class="form-field">
           <label class="form-field-label" for="budget-weekly-minute"
-            >Minute</label
+            >{m.settings_budget_minute()}</label
           >
           <input
             id="budget-weekly-minute"
@@ -209,10 +213,12 @@
         <div class="budget-settings-help-cell" aria-hidden="true"></div>
       </div>
       <div class="budget-settings-row">
-        <div class="budget-settings-period">Daily</div>
+        <div class="budget-settings-period">{m.settings_budget_daily()}</div>
         <div class="budget-settings-spacer" aria-hidden="true"></div>
         <div class="form-field">
-          <label class="form-field-label" for="budget-daily-hour">Hour</label>
+          <label class="form-field-label" for="budget-daily-hour"
+            >{m.settings_budget_hour()}</label
+          >
           <input
             id="budget-daily-hour"
             class="form-input"
@@ -225,7 +231,7 @@
         </div>
         <div class="form-field">
           <label class="form-field-label" for="budget-daily-minute"
-            >Minute</label
+            >{m.settings_budget_minute()}</label
           >
           <input
             id="budget-daily-minute"
@@ -250,10 +256,10 @@
         onclick={save}
       >
         <Icon icon={Save} class="form-action-icon" />
-        <span>Save Budget Settings</span>
+        <span>{m.settings_budget_save()}</span>
       </button>
       {#if loading}
-        <Spinner size={16} label="Loading budget settings" />
+        <Spinner size={16} label={m.settings_budget_loading()} />
       {/if}
     </div>
   </div>

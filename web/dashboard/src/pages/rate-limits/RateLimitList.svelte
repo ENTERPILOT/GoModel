@@ -1,4 +1,5 @@
 <script>
+  import * as m from "$lib/paraglide/messages.js";
   // Rate limit rule rows (scope badge, window chips, source, actions) —
   // shares the budget-row look, like the Budgets page list.
   import Icon from "$lib/components/atoms/Icon.svelte";
@@ -27,7 +28,7 @@
                 {#if rateLimits.rateLimitScope(item) !== "user_path"}
                   <span
                     class="budget-period-label"
-                    title={"Rule scope: " + rateLimits.rateLimitScopeLabel(item)}
+                    title={m.rate_limits_rule_scope({ scope: rateLimits.rateLimitScopeLabel(item) })}
                   >
                     <Icon
                       icon={rateLimits.rateLimitScope(item) === "provider"
@@ -53,8 +54,8 @@
                   <span
                     class="budget-source"
                     title={rateLimits.rateLimitIsReadOnly(item)
-                      ? "Declared in configuration; read-only in the dashboard"
-                      : "Managed via dashboard or admin API"}
+                      ? m.rate_limits_config_read_only()
+                      : m.rate_limits_managed()}
                   >
                     {rateLimits.rateLimitSourceLabel(item)}
                   </span>
@@ -62,16 +63,18 @@
                 <div class="budget-row-actions">
                   {#if !rateLimits.rateLimitIsReadOnly(item)}
                     <TableActionButton
-                      label="Edit rate limit"
+                      label={m.rate_limits_edit_action()}
                       class="budget-action-btn"
                       onclick={() => rateLimits.openRateLimitForm(item)}
                     >
                       <Icon icon={Pencil} class="budget-action-icon" />
-                      <span class="budget-action-label">Edit</span>
+                      <span class="budget-action-label">{m.rate_limits_edit()}</span>
                     </TableActionButton>
                   {/if}
                   <TableActionButton
-                    label={rateLimits.rateLimitResettingKey === rateLimits.rateLimitKey(item) ? "Resetting counters" : "Reset counters"}
+                    label={rateLimits.rateLimitResettingKey === rateLimits.rateLimitKey(item)
+                      ? m.rate_limits_resetting_counters()
+                      : m.rate_limits_reset_counters()}
                     class="budget-action-btn budget-action-btn-warning"
                     onclick={() => rateLimits.resetRateLimit(item)}
                     disabled={rateLimits.rateLimitResettingKey === rateLimits.rateLimitKey(item)}
@@ -80,13 +83,15 @@
                     <span class="budget-action-label">
                       {rateLimits.rateLimitResettingKey ===
                       rateLimits.rateLimitKey(item)
-                        ? "Resetting"
-                        : "Reset"}
+                        ? m.rate_limits_resetting()
+                        : m.rate_limits_reset()}
                     </span>
                   </TableActionButton>
                   {#if !rateLimits.rateLimitIsReadOnly(item)}
                     <TableActionButton
-                      label={rateLimits.rateLimitDeletingKey === rateLimits.rateLimitKey(item) ? "Deleting rate limit" : "Delete rate limit"}
+                      label={rateLimits.rateLimitDeletingKey === rateLimits.rateLimitKey(item)
+                        ? m.rate_limits_deleting_action()
+                        : m.rate_limits_delete_action()}
                       class="table-action-btn-danger budget-action-btn"
                       onclick={() => rateLimits.deleteRateLimit(item)}
                       disabled={rateLimits.rateLimitDeletingKey === rateLimits.rateLimitKey(item)}
@@ -95,8 +100,8 @@
                       <span class="budget-action-label">
                         {rateLimits.rateLimitDeletingKey ===
                         rateLimits.rateLimitKey(item)
-                          ? "Deleting"
-                          : "Delete"}
+                          ? m.rate_limits_deleting()
+                          : m.rate_limits_delete()}
                       </span>
                     </TableActionButton>
                   {/if}
@@ -107,7 +112,7 @@
               {#if rateLimits.rateLimitIsConcurrent(item)}
                 <div class="budget-bar-line">
                   <div class="budget-bar-label">
-                    <span>In-flight</span>
+                    <span>{m.rate_limits_in_flight()}</span>
                     <span class="budget-bar-percent">
                       {rateLimits.rateLimitUsagePercent(
                         item.in_flight,
@@ -124,10 +129,10 @@
                       item.in_flight,
                       item.max_requests,
                     )}
-                    aria-label={"In-flight requests: " +
-                      rateLimits.formatRateLimitNumber(item.in_flight) +
-                      " of " +
-                      rateLimits.formatRateLimitNumber(item.max_requests)}
+                    aria-label={m.rate_limits_in_flight_progress({
+                      used: rateLimits.formatRateLimitNumber(item.in_flight),
+                      limit: rateLimits.formatRateLimitNumber(item.max_requests),
+                    })}
                     style={"--budget-progress: " +
                       rateLimits.rateLimitUsagePercent(
                         item.in_flight,
@@ -145,10 +150,10 @@
                     ></div>
                     <span class="budget-bar-text-row">
                       <span class="budget-bar-text budget-bar-text-center">
-                        {rateLimits.formatRateLimitNumber(item.in_flight) +
-                          " of " +
-                          rateLimits.formatRateLimitNumber(item.max_requests) +
-                          " in flight"}
+                        {m.rate_limits_in_flight_progress({
+                          used: rateLimits.formatRateLimitNumber(item.in_flight),
+                          limit: rateLimits.formatRateLimitNumber(item.max_requests),
+                        })}
                       </span>
                     </span>
                   </div>
@@ -157,7 +162,7 @@
               {#if !rateLimits.rateLimitIsConcurrent(item) && item.max_requests}
                 <div class="budget-bar-line">
                   <div class="budget-bar-label">
-                    <span>Requests</span>
+                    <span>{m.rate_limits_requests()}</span>
                     <span class="budget-bar-percent">
                       {rateLimits.rateLimitUsagePercent(
                         item.requests_used,
@@ -174,10 +179,10 @@
                       item.requests_used,
                       item.max_requests,
                     )}
-                    aria-label={"Requests used: " +
-                      rateLimits.formatRateLimitNumber(item.requests_used) +
-                      " of " +
-                      rateLimits.formatRateLimitNumber(item.max_requests)}
+                    aria-label={m.rate_limits_requests_progress({
+                      used: rateLimits.formatRateLimitNumber(item.requests_used),
+                      limit: rateLimits.formatRateLimitNumber(item.max_requests),
+                    })}
                     style={"--budget-progress: " +
                       rateLimits.rateLimitUsagePercent(
                         item.requests_used,
@@ -195,15 +200,13 @@
                     ></div>
                     <span class="budget-bar-text-row">
                       <span class="budget-bar-text budget-bar-text-center">
-                        {rateLimits.formatRateLimitNumber(item.requests_used) +
-                          " of " +
-                          rateLimits.formatRateLimitNumber(item.max_requests) +
-                          " requests"}
+                        {m.rate_limits_requests_progress({
+                          used: rateLimits.formatRateLimitNumber(item.requests_used),
+                          limit: rateLimits.formatRateLimitNumber(item.max_requests),
+                        })}
                       </span>
                       <span class="budget-bar-text budget-bar-text-end">
-                        {rateLimits.formatRateLimitNumber(
-                          item.requests_remaining,
-                        ) + " left"}
+                        {m.rate_limits_left({ count: rateLimits.formatRateLimitNumber(item.requests_remaining) })}
                       </span>
                     </span>
                   </div>
@@ -212,7 +215,7 @@
               {#if !rateLimits.rateLimitIsConcurrent(item) && item.max_tokens}
                 <div class="budget-bar-line">
                   <div class="budget-bar-label">
-                    <span>Tokens</span>
+                    <span>{m.rate_limits_tokens()}</span>
                     <span class="budget-bar-percent">
                       {rateLimits.rateLimitUsagePercent(
                         item.tokens_used,
@@ -229,10 +232,10 @@
                       item.tokens_used,
                       item.max_tokens,
                     )}
-                    aria-label={"Tokens used: " +
-                      rateLimits.formatRateLimitNumber(item.tokens_used) +
-                      " of " +
-                      rateLimits.formatRateLimitNumber(item.max_tokens)}
+                    aria-label={m.rate_limits_tokens_progress({
+                      used: rateLimits.formatRateLimitNumber(item.tokens_used),
+                      limit: rateLimits.formatRateLimitNumber(item.max_tokens),
+                    })}
                     style={"--budget-progress: " +
                       rateLimits.rateLimitUsagePercent(
                         item.tokens_used,
@@ -250,14 +253,13 @@
                     ></div>
                     <span class="budget-bar-text-row">
                       <span class="budget-bar-text budget-bar-text-center">
-                        {rateLimits.formatRateLimitNumber(item.tokens_used) +
-                          " of " +
-                          rateLimits.formatRateLimitNumber(item.max_tokens) +
-                          " tokens"}
+                        {m.rate_limits_tokens_progress({
+                          used: rateLimits.formatRateLimitNumber(item.tokens_used),
+                          limit: rateLimits.formatRateLimitNumber(item.max_tokens),
+                        })}
                       </span>
                       <span class="budget-bar-text budget-bar-text-end">
-                        {rateLimits.formatRateLimitNumber(item.tokens_remaining) +
-                          " left"}
+                        {m.rate_limits_left({ count: rateLimits.formatRateLimitNumber(item.tokens_remaining) })}
                       </span>
                     </span>
                   </div>

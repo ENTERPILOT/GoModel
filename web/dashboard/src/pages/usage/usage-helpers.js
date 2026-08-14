@@ -2,6 +2,7 @@
 // Kept free of Svelte/DOM dependencies so node:test can exercise it.
 
 import { formatCost, formatNumber, formatTokensShort } from "../../lib/utils/format.js";
+import * as m from "../../lib/paraglide/messages.js";
 
 // emptyUsagePageSummary: the filtered usage-page summaries carry the cache
 // split and rewrite-savings fields on top of the shared totals.
@@ -88,16 +89,22 @@ export function usagePageRequestsTitle(uncachedSummary, allSummary, hideCached) 
   const hits = usagePageCacheHits(uncachedSummary, allSummary);
   if (hits <= 0) return "";
   if (hideCached) {
-    return formatNumber(hits) + " cached requests hidden";
+    return m.usage_cached_hidden({ count: formatNumber(hits) });
   }
   const provider = Number((uncachedSummary && uncachedSummary.total_requests) || 0);
-  return formatNumber(provider) + " to providers + " + formatNumber(hits) + " from cache";
+  return m.usage_requests_sources({
+    provider: formatNumber(provider),
+    cache: formatNumber(hits),
+  });
 }
 
 export function usagePageCostTitle(summary) {
   const s = summary || {};
   if (s.total_input_cost === null || s.total_input_cost === undefined) return "";
-  return formatCost(s.total_input_cost) + " input + " + formatCost(s.total_output_cost) + " output";
+  return m.usage_cost_split({
+    input: formatCost(s.total_input_cost),
+    output: formatCost(s.total_output_cost),
+  });
 }
 
 // --- Rewrite savings ("Pro Saved" card) ---
@@ -123,7 +130,7 @@ export function rewriteCostSaved(summary) {
 // Keep the estimator disclosure in one helper so every future surface uses
 // the same wording as the Pro compressor's net-characters / 4 calculation.
 export function rewriteTokenEstimateMethodText() {
-  return "Estimated at 4 net characters removed per token";
+  return m.usage_rewrite_estimate();
 }
 
 // Card value: priced savings in costs mode, removed prompt tokens otherwise.
@@ -158,26 +165,29 @@ export function proSavedPercent(summary, mode) {
 export function proSavedPercentText(summary, mode) {
   const pct = proSavedPercent(summary, mode);
   if (pct === null) return "";
-  return (pct < 0.1 ? "<0.1" : pct.toFixed(1)) + "% less";
+  return m.usage_less({ percent: pct < 0.1 ? "<0.1" : pct.toFixed(1) });
 }
 
 export function proSavedTitle(summary, mode) {
   const tokens = rewriteTokensSaved(summary);
   if (tokens <= 0) return "";
   const lines = [
-    formatNumber(tokens) + " estimated prompt token-transmissions removed across provider requests",
+    m.usage_rewrite_tokens_removed({ count: formatNumber(tokens) }),
     rewriteTokenEstimateMethodText(),
-    "Savings are summed per provider request; resent conversation history is counted again",
+    m.usage_rewrite_summed(),
   ];
   const cost = rewriteCostSaved(summary);
   if (cost !== null && cost !== undefined) {
-    lines.push(formatCost(cost) + " estimated gross input cost avoided");
-    lines.push("Prompt-cache changes caused by rewriting are not included");
+    lines.push(m.usage_rewrite_cost_avoided({ cost: formatCost(cost) }));
+    lines.push(m.usage_rewrite_cache_excluded());
   }
   const pct = proSavedPercentText(summary, mode);
   if (pct) {
     lines.push(
-      pct + " than the same traffic without rewriting (" + (mode === "costs" ? "cost" : "tokens") + ")",
+      m.usage_rewrite_comparison({
+        percent: pct,
+        mode: mode === "costs" ? m.usage_mode_cost() : m.usage_mode_tokens(),
+      }),
     );
   }
   return lines.join("\n");
@@ -197,9 +207,9 @@ export function usesResponseCostPricing(entry) {
 export function costSourceTooltip(entry) {
   switch (costSource(entry)) {
     case "openrouter_credits":
-      return "Costs from OpenRouter USD-based credits.";
+      return m.usage_openrouter_cost_source();
     case "xai_cost_in_usd_ticks":
-      return "Costs from xAI usage.cost_in_usd_ticks.";
+      return m.usage_xai_cost_source();
     default:
       return "";
   }
@@ -218,15 +228,15 @@ export function usageEntryCached(entry) {
 
 export function usageEntryCacheLabel(entry) {
   const type = usageEntryCacheType(entry);
-  if (type === "exact") return "Exact";
-  if (type === "semantic") return "Semantic";
+  if (type === "exact") return m.usage_cache_exact();
+  if (type === "semantic") return m.usage_cache_semantic();
   return "-";
 }
 
 export function cachedCostTitle(entry, baseTitle) {
   const base = baseTitle ? String(baseTitle) : "";
   if (!usageEntryCached(entry)) return base;
-  const prefix = "Saved by cache — not charged";
+  const prefix = m.usage_cache_not_charged();
   return base ? prefix + "\n" + base : prefix;
 }
 
@@ -252,9 +262,14 @@ export function providerCacheTitle(entry) {
   const uncached = Number(entry.uncached_input_tokens || 0);
   const write = Number(entry.cache_write_input_tokens || 0);
   const total = cached + uncached + write;
-  const parts = [formatNumber(cached) + " cached / " + formatNumber(total) + " input tokens"];
+  const parts = [
+    m.usage_provider_cache_title({
+      cached: formatNumber(cached),
+      total: formatNumber(total),
+    }),
+  ];
   if (write > 0) {
-    parts.push(formatNumber(write) + " cache write");
+    parts.push(m.usage_cache_write({ count: formatNumber(write) }));
   }
   return parts.join("\n");
 }
@@ -265,8 +280,8 @@ export function formatCostTooltip(entry) {
     lines.push(costSourceTooltip(entry));
     lines.push("");
   }
-  lines.push("Input: " + formatCost(entry.input_cost));
-  lines.push("Output: " + formatCost(entry.output_cost));
+  lines.push(m.usage_cost_input_line({ cost: formatCost(entry.input_cost) }));
+  lines.push(m.usage_cost_output_line({ cost: formatCost(entry.output_cost) }));
   if (entry.raw_data) {
     lines.push("");
     for (const [key, value] of Object.entries(entry.raw_data)) {
@@ -373,7 +388,7 @@ export function divergingDataFrom(items, labelFor, costs) {
   const localOuts = top.map(localOutputOf);
 
   if (rest.length > 0) {
-    labels.push("Other");
+    labels.push(m.overview_other());
     const sum = (of) => rest.reduce((total, row) => total + of(row), 0);
     inputs.push(sum(inputOf));
     outputs.push(sum(outputOf));

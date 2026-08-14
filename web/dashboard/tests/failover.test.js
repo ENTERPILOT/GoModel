@@ -12,6 +12,7 @@ import {
   failoverTargets,
   normalizeFailoverRules,
   failoverTargetLabel,
+  failoverRuleStatus,
   hasActiveFailoverMapping,
   failoverButtonClass,
   failoverButtonLabel,
@@ -25,6 +26,12 @@ import {
   filterFailoverDrafts,
   failoverDraftPayload,
 } from "../src/pages/models/failover-logic.js";
+
+test("failover rule status uses localized messages", () => {
+  assert.equal(failoverRuleStatus({ enabled: true }), "On");
+  assert.equal(failoverRuleStatus({ enabled: false }), "Off");
+  assert.equal(failoverRuleStatus({ enabled: true, managed: true }), "Config");
+});
 
 test("failover action button marks rows with enabled fallback mappings active", () => {
   const row = {

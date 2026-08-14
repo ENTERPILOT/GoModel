@@ -7,6 +7,9 @@ import {
   dateKeyToDate,
   dateToDateKey,
 } from "../../lib/utils/dateKeys.js";
+import * as m from "../../lib/paraglide/messages.js";
+import { getLocale } from "../../lib/paraglide/runtime.js";
+import { formatDate, formatNumber } from "../../lib/i18n/locale.js";
 
 // Re-exported so calendar callers keep one import for the whole grid API.
 export { addDaysToDateKey, dateKeyToDate, dateToDateKey };
@@ -115,10 +118,10 @@ export function calendarMonthLabels(todayKey) {
   const dayOfWeek = start.getUTCDay(); // 0 = Sunday
   start.setUTCDate(start.getUTCDate() - dayOfWeek);
 
-  const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ];
+  const monthFormatter = new Intl.DateTimeFormat(getLocale(), {
+    month: "short",
+    timeZone: "UTC",
+  });
   const labels = [];
   const seenMonths = {};
   let totalWeeks = 0;
@@ -156,7 +159,7 @@ export function calendarMonthLabels(todayKey) {
     }
 
     labels.push({
-      label: months[labelDay.getUTCMonth()],
+      label: monthFormatter.format(labelDay),
       col: totalWeeks,
       key: monthKey,
     });
@@ -190,15 +193,41 @@ export function calendarSummaryText(calendarData, mode) {
     }
   }
   if (mode === "costs") {
-    return "$" + total.toFixed(2) + " in the last year";
+    return m.overview_calendar_cost_year({
+      total: formatNumber(total, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+    });
   }
-  return total.toLocaleString() + " tokens in the last year";
+  return m.overview_calendar_tokens_year({ total: formatNumber(total) });
+}
+
+function calendarDateLabel(dateKey) {
+  const date = new Date(String(dateKey || "") + "T00:00:00Z");
+  if (Number.isNaN(date.getTime())) return String(dateKey || "");
+  return formatDate(date, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 export function calendarTooltipText(day, mode) {
   if (!day || day.empty) return "";
+  const date = calendarDateLabel(day.dateStr);
   if (mode === "costs") {
-    return "$" + (day.value || 0).toFixed(4) + " on " + day.dateStr;
+    return m.overview_calendar_cost_on_date({
+      total: formatNumber(day.value || 0, {
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4,
+      }),
+      date,
+    });
   }
-  return (day.value || 0).toLocaleString() + " tokens on " + day.dateStr;
+  return m.overview_calendar_tokens_on_date({
+    total: formatNumber(day.value || 0),
+    date,
+  });
 }

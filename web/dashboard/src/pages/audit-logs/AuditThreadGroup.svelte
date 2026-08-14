@@ -13,6 +13,7 @@
     auditSessionCount,
     auditSessionId,
   } from "./audit-logic.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { entry } = $props();
 
@@ -45,7 +46,7 @@
       >
         {#if children && children.loading}
           <div class="audit-thread-loading">
-            <Spinner size={14} label="Loading session requests" />
+            <Spinner size={14} label={m.audit_loading_session_requests()} />
           </div>
         {/if}
         {#each (children && children.entries) || [] as child (child.id)}
@@ -55,8 +56,10 @@
         {/each}
         {#if truncated}
           <p class="audit-thread-more">
-            Showing the latest {children.entries.length + 1} of {children.total}
-            requests in this session.
+            {m.audit_thread_summary({
+              shown: children.entries.length + 1,
+              total: children.total,
+            })}
           </p>
         {/if}
       </div>

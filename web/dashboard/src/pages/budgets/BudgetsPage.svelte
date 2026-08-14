@@ -11,6 +11,7 @@
   import BudgetEditor from "./BudgetEditor.svelte";
   import { budgetsStore as store } from "./budgets.svelte.js";
   import { Plus } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "budgets";
 
@@ -26,12 +27,10 @@
 <div>
   <div class="page-header">
     <div>
-      <InlineHelpSection copyId="budgets-help-copy" label="budgets help">
-        {#snippet title()}<h2>Budgets</h2>{/snippet}
+      <InlineHelpSection copyId="budgets-help-copy" label={m.budgets_help_label()}>
+        {#snippet title()}<h2>{m.budgets_title()}</h2>{/snippet}
         {#snippet help()}
-          Budgets are evaluated from tracked usage cost records for each user
-          path subtree. Enforcement runs only when Budget is enabled for the
-          active workflow.
+          {m.budgets_help()}
         {/snippet}
       </InlineHelpSection>
     </div>
@@ -44,7 +43,7 @@
           onclick={() => store.openForm()}
         >
           <Icon icon={Plus} class="form-action-icon" />
-          <span>Create Budget</span>
+          <span>{m.budgets_create()}</span>
         </button>
       {/if}
     </div>
@@ -53,13 +52,13 @@
   <AuthBanner />
 
   {#if (!store.managementEnabled() || !store.budgetsAvailable) && !auth.authError}
-    <div class="alert alert-warning">Budget management is unavailable.</div>
+    <div class="alert alert-warning">{m.budgets_unavailable()}</div>
   {/if}
   {#if store.error && !auth.authError}
     <p class="form-error" role="alert" aria-live="assertive">{store.error}</p>
   {/if}
   {#if store.loading && !auth.authError}
-    <LoadingState label="Loading budgets..." />
+    <LoadingState label={m.budgets_loading()} />
   {/if}
 
   {#if (store.budgets.length > 0 || store.filter) && store.budgetsAvailable && !auth.authError && !store.formOpen}
@@ -67,21 +66,21 @@
       <div class="table-toolbar-main">
         <FilterInput
           id="budget-filter"
-          placeholder="Filter by user path, label, or period..."
-          label="Filter budgets by user path or period"
+          placeholder={m.budgets_filter_placeholder()}
+          label={m.budgets_filter_label()}
           bind:value={store.filter}
         />
       </div>
       <div class="table-toolbar-actions budget-sort-control">
-        <label for="budget-sort-by">Sort by</label>
+        <label for="budget-sort-by">{m.budgets_sort_by()}</label>
         <select
           id="budget-sort-by"
           class="usage-log-select budget-sort-select"
-          aria-label="Sort budgets by"
+          aria-label={m.budgets_sort_label()}
           bind:value={store.sortBy}
         >
-          <option value="subject">Scope &amp; Subject</option>
-          <option value="period">Period</option>
+          <option value="subject">{m.budgets_sort_subject()}</option>
+          <option value="period">{m.budgets_period()}</option>
         </select>
       </div>
     </div>
@@ -94,10 +93,10 @@
   {/if}
 
   {#if store.budgets.length === 0 && !store.filter && !store.loading && !auth.authError && !store.error && store.budgetsAvailable && store.managementEnabled()}
-    <p class="empty-state">No budgets configured yet.</p>
+    <p class="empty-state">{m.budgets_empty()}</p>
   {/if}
   {#if store.budgets.length > 0 && filtered.length === 0 && store.filter && !store.loading && !auth.authError && !store.error && store.budgetsAvailable && store.managementEnabled()}
-    <p class="empty-state">No budgets match your filter.</p>
+    <p class="empty-state">{m.budgets_no_match()}</p>
   {/if}
 </div>
 

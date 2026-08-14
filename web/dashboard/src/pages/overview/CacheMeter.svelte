@@ -10,6 +10,7 @@
     cacheMeterSegmentTitle,
     cacheMeterAriaLabel,
   } from "./cacheMeterLogic.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   const cacheEnabled = $derived(usageData.cacheAnalyticsEnabled());
   const categories = $derived(
@@ -25,8 +26,8 @@
 
 <div class="cache-meter">
   <div class="cache-meter-header">
-    <h3>Tokens</h3>
-    <span class="cache-meter-subtitle">Share of input tokens over the selected period</span>
+    <h3>{m.overview_tokens()}</h3>
+    <span class="cache-meter-subtitle">{m.overview_cache_share()}</span>
   </div>
   <div
     class="cache-meter-bar"
@@ -46,7 +47,7 @@
       </div>
     {/each}
     {#if !visible}
-      <span class="cache-meter-empty">No usage in the selected period yet</span>
+      <span class="cache-meter-empty">{m.overview_no_usage()}</span>
     {/if}
   </div>
   <div class="cache-meter-legend">

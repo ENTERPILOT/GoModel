@@ -1,6 +1,8 @@
 // Pure budget-settings logic.
 // (The budgets page itself lives in src/pages/budgets/.)
 
+import * as m from "../../lib/paraglide/messages.js";
+
 export function defaultBudgetSettings() {
   return {
     daily_reset_hour: 0,
@@ -73,12 +75,12 @@ export function normalizeBudgetSettings(payload, current) {
 
 export function budgetWeekdays() {
   return [
-    { value: 0, label: "Sunday" },
-    { value: 1, label: "Monday" },
-    { value: 2, label: "Tuesday" },
-    { value: 3, label: "Wednesday" },
-    { value: 4, label: "Thursday" },
-    { value: 5, label: "Friday" },
-    { value: 6, label: "Saturday" },
+    { value: 0, label: m.settings_weekday_sunday() },
+    { value: 1, label: m.settings_weekday_monday() },
+    { value: 2, label: m.settings_weekday_tuesday() },
+    { value: 3, label: m.settings_weekday_wednesday() },
+    { value: 4, label: m.settings_weekday_thursday() },
+    { value: 5, label: m.settings_weekday_friday() },
+    { value: 6, label: m.settings_weekday_saturday() },
   ];
 }

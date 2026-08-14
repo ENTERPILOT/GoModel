@@ -1,4 +1,5 @@
 <script>
+  import * as m from "$lib/paraglide/messages.js";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   // Effective rate limits for one model or provider: the subject's own rules
   // plus the provider and global rules that also throttle its traffic.
@@ -26,11 +27,11 @@
     class="model-editor budget-editor"
     role="dialog"
     aria-modal="true"
-    aria-label="Effective rate limits"
+    aria-label={m.rate_limits_effective()}
   >
     <div class="editor-header">
       <div>
-        <h3>Rate Limits</h3>
+        <h3>{m.rate_limits_title()}</h3>
         <p class="form-hint">
           <code class="mono">{rateLimits.rateLimitInspector.title}</code>
         </p>
@@ -44,7 +45,7 @@
     {#if rateLimits.rateLimitsLoading}
       <LoadingState label="Loading rate limits..." />
     {:else if !rateLimits.rateLimitsAvailable}
-      <div class="alert alert-warning">Rate limit management is unavailable.</div>
+      <div class="alert alert-warning">{m.rate_limits_unavailable()}</div>
     {:else}
       {#each rateLimits.rateLimitInspectorSections() as section (section.key)}
         <section class="form-section">
@@ -60,14 +61,14 @@
                 )}
             >
               <Icon icon={Plus} class="table-icon-svg" />
-              <span class="budget-action-label">Add</span>
+              <span class="budget-action-label">{m.rate_limits_add()}</span>
             </TableActionButton>
           </div>
           {#if section.hint}
             <p class="form-hint">{section.hint}</p>
           {/if}
           {#if section.items.length === 0}
-            <p class="empty-state">No rules.</p>
+            <p class="empty-state">{m.rate_limits_no_rules()}</p>
           {:else}
             <div class="budget-list">
               {#each section.items as item (rateLimits.rateLimitKey(item))}
@@ -120,7 +121,7 @@
                                 )}
                             >
                               <Icon icon={Pencil} class="budget-action-icon" />
-                              <span class="budget-action-label">Edit</span>
+                              <span class="budget-action-label">{m.rate_limits_edit()}</span>
                             </TableActionButton>
                           {/if}
                         </div>

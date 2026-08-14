@@ -5,6 +5,7 @@
 
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
+import * as m from "$lib/paraglide/messages.js";
 import {
   buildGuardrailPayload,
   defaultGuardrailConfig,
@@ -205,11 +206,11 @@ class GuardrailsStore {
     const name = String(this.form.name || "").trim();
     const type = String(this.form.type || "").trim();
     if (!name) {
-      this.error = "Name is required.";
+      this.error = m.guardrails_name_required();
       return;
     }
     if (!type) {
-      this.error = "Type is required.";
+      this.error = m.guardrails_type_required();
       return;
     }
 
@@ -221,8 +222,8 @@ class GuardrailsStore {
     try {
       const outcome = await sendAdminMutation("/admin/guardrails", "PUT", payload, {
         label: "save guardrail",
-        errorFallback: "Failed to save guardrail.",
-        unavailableMessage: "Guardrails feature is unavailable.",
+        errorFallback: m.guardrails_save_failed(),
+        unavailableMessage: m.guardrails_unavailable(),
       });
       if (outcome.status === "stale") return;
       if (outcome.status === "unavailable") {
@@ -235,7 +236,7 @@ class GuardrailsStore {
         return;
       }
 
-      flash.success('Guardrail "' + name + '" saved.');
+      flash.success(m.guardrails_saved({ name }));
       this.closeForm();
       void this.fetchGuardrails();
     } finally {
@@ -250,9 +251,7 @@ class GuardrailsStore {
     }
     if (
       !window.confirm(
-        'Delete guardrail "' +
-          name +
-          '"? Workflows that still reference it must be updated first.',
+        m.guardrails_delete_confirm({ name }),
       )
     ) {
       return;
@@ -267,8 +266,8 @@ class GuardrailsStore {
         { name },
         {
           label: "delete guardrail",
-          errorFallback: "Failed to delete guardrail.",
-          unavailableMessage: "Guardrails feature is unavailable.",
+          errorFallback: m.guardrails_delete_failed(),
+          unavailableMessage: m.guardrails_unavailable(),
         },
       );
       if (outcome.status === "stale") return;
@@ -282,7 +281,7 @@ class GuardrailsStore {
         return;
       }
 
-      flash.success('Guardrail "' + name + '" deleted.');
+      flash.success(m.guardrails_deleted({ name }));
       if (this.formOpen && this.formOriginalName === name) {
         this.closeForm();
       }

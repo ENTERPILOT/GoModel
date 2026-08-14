@@ -8,8 +8,11 @@ import {
   calendarLevel,
   calendarLegendLevels,
   buildCalendarGrid,
+  calendarSummaryText,
+  calendarTooltipText,
   addDaysToDateKey,
 } from "../src/pages/overview/calendarLogic.js";
+import { overwriteGetLocale } from "../src/lib/paraglide/runtime.js";
 
 function flattenDays(weeks) {
   return weeks.flat().filter((d) => !d.empty);
@@ -122,4 +125,23 @@ test("buildCalendarGrid applies the same power scaling to the costs view", () =>
 
   assert.equal(busiest.level, 10, "highest-cost day is darkest");
   assert.equal(quiet.level, 1, "a tiny-cost day stays lightest even with a huge token count");
+});
+
+test("calendar summaries and tooltips follow the selected locale", () => {
+  overwriteGetLocale(() => "pl");
+  try {
+    assert.equal(
+      calendarSummaryText([{ total_cost: 1234.5 }], "costs"),
+      "$1234,50 w ostatnim roku",
+    );
+    assert.equal(
+      calendarTooltipText(
+        { value: 1234567, dateStr: "2026-06-23" },
+        "tokens",
+      ),
+      "1 234 567 tokenów dnia 23 cze 2026",
+    );
+  } finally {
+    overwriteGetLocale(() => "en");
+  }
 });

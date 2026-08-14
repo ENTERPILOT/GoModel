@@ -12,6 +12,7 @@
   import { qualifiedModelName } from "./virtualModelsLogic.js";
   import VmTargetRow from "./VmTargetRow.svelte";
   import { Plus, Save } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   const vm = virtualModels;
 
@@ -26,11 +27,11 @@
 
 <EditorDialog
   open={vm.vmFormOpen}
-  ariaLabel="Virtual model editor"
+  ariaLabel={m.models_editor_label()}
   error={vm.vmFormError}
   submitting={vm.vmSubmitting}
   submitDisabled={vm.vmDeleting || vm.vmFormManaged}
-  submitLabel={vm.vmFormMode === "edit" ? "Save" : "Create"}
+  submitLabel={vm.vmFormMode === "edit" ? m.models_save() : m.models_create()}
   submitIcon={vm.vmFormMode !== "edit" ? Plus : Save}
   onclose={() => vm.closeVirtualModelForm()}
   onsubmit={() => vm.submitVirtualModelForm()}
@@ -38,36 +39,25 @@
   {#snippet header()}
     <InlineHelpSection
       copyId="virtual-model-help-copy"
-      label="virtual model help"
+      label={m.models_help_label()}
       bind:open={vm.vmFormHelpOpen}
     >
       {#snippet title()}
-        <h3>{vm.vmFormDisplayName || vm.vmForm.source || "Virtual model"}</h3>
+        <h3>{vm.vmFormDisplayName || vm.vmForm.source || m.models_virtual_model()}</h3>
       {/snippet}
       {#snippet help()}
-        Add one <strong>target</strong> to make this a redirect/alias, or two or more to load
-        balance across them, then pick a strategy: <code>round_robin</code> rotates across targets
-        (weight biases the share) and <code>cost</code> always routes to the cheapest available
-        target.{#if runtimeConfig.virtualModelStrategies().includes("adaptive")}
-          <code>adaptive</code> lets the registered routing extension pick the target per
-          request.{/if} Leave <strong>Targets</strong> empty to make it only an access policy on the
-        <code>Source</code> selector. The selector uses <code>/</code> for all providers and
-        models, <code>{"{provider_name}"}/</code> for one provider, or
-        <code>{"{provider_name}"}/{"{model}"}</code> for one model. <code>user_paths</code> is
-        matched against the effective request <code>user_path</code>: the managed API key
-        <code>user_path</code> when present, otherwise the configured user path request header.
+        {m.models_help()}
       {/snippet}
     </InlineHelpSection>
   {/snippet}
 
   {#if vm.vmFormManaged}
     <p class="form-hint" role="status">
-      This virtual model is defined in configuration (<code>config.yaml</code> /
-      <code>VIRTUAL_MODELS</code>) and is read-only here. Edit your configuration to change it.
+      {m.models_managed_help()}
     </p>
   {/if}
 
-  <FormField id="virtual-model-source" label="Source">
+  <FormField id="virtual-model-source" label={m.models_source()}>
     <input
       id="virtual-model-source"
       type="text"
@@ -87,7 +77,7 @@
 
   <!-- Every target renders the same; two or more turn the redirect into a load balancer. -->
   <div class="form-field">
-    <span class="form-field-label">Targets</span>
+    <span class="form-field-label">{m.models_targets()}</span>
     <VmTargetRow
       id="virtual-model-target"
       bind:model={vm.vmForm.target_model}
@@ -111,13 +101,13 @@
         onclick={() => vm.addVmTarget()}
       >
         <Icon icon={Plus} class="form-action-icon" />
-        <span>Add target (load balancing)</span>
+        <span>{m.models_add_target()}</span>
       </button>
     </div>
   </div>
 
   {#if vm.vmFormShowStrategy()}
-    <FormField id="virtual-model-strategy" label="Load-balancing strategy">
+    <FormField id="virtual-model-strategy" label={m.models_strategy()}>
       <select
         id="virtual-model-strategy"
         class="form-select"
@@ -136,7 +126,7 @@
           bind:checked={vm.vmForm.session_affinity}
           disabled={vm.vmFormManaged}
         />
-        <span>Session keeping (route a detected client session to the target that served it)</span>
+        <span>{m.models_session_keeping()}</span>
       </label>
     </div>
   {/if}
@@ -144,15 +134,14 @@
   <div class="form-field">
     <InlineHelpSection
       copyId="virtual-model-user-paths-help"
-      label="user paths help"
+      label={m.models_user_paths_help_label()}
       bind:open={vm.vmFormUserPathsHelpOpen}
     >
       {#snippet title()}
-        <label class="form-field-label" for="virtual-model-user-paths">User Paths</label>
+        <label class="form-field-label" for="virtual-model-user-paths">{m.models_user_paths()}</label>
       {/snippet}
       {#snippet help()}
-        Use <code>/</code> to allow every user path. Use a team path to restrict to that
-        subtree, or an unused path to make the selector unavailable.
+        {m.models_user_paths_help()}
       {/snippet}
     </InlineHelpSection>
     <textarea
@@ -165,32 +154,30 @@
     ></textarea>
   </div>
 
-  <FormField id="virtual-model-description" label="Description">
+  <FormField id="virtual-model-description" label={m.models_description()}>
     <textarea
       id="virtual-model-description"
       rows="3"
-      placeholder="Optional description"
+      placeholder={m.models_description_placeholder()}
       bind:value={vm.vmForm.description}
       disabled={vm.vmFormManaged}
     ></textarea>
   </FormField>
 
   {#if vm.vmFormSupportsSlowdown()}
-    <FormField id="virtual-model-slowdown" label="Slowdown (extra inference time)">
+    <FormField id="virtual-model-slowdown" label={m.models_slowdown_field()}>
       <input
         id="virtual-model-slowdown"
         type="number"
         min="0"
         max="10"
         step="0.1"
-        placeholder="Off"
+        placeholder={m.models_off()}
         bind:value={vm.vmForm.slowdown}
         disabled={vm.vmFormManaged}
       />
       <span class="form-hint">
-        Adds a fraction of measured inference time: 0.5 adds 50%. Streaming chunks are buffered
-        and released on the slowed timeline. Use 0 to override inherited slowdown, or leave empty
-        to inherit it; active values are 0.1–10.
+        {m.models_slowdown_help()}
       </span>
     </FormField>
   {/if}
@@ -198,17 +185,17 @@
   <div class="vm-status-row">
     {#if vm.vmFormMode === "edit"}
       <span class="form-hint vm-status-summary">
-        {"Default enabled: " +
-          (vm.vmFormDefaultEnabled ? "yes" : "no") +
-          " · Effective now: " +
-          (vm.vmFormEffectiveEnabled ? "yes" : "no")}
+        {m.models_status_summary({
+          default: vm.vmFormDefaultEnabled ? m.models_yes() : m.models_no(),
+          effective: vm.vmFormEffectiveEnabled ? m.models_yes() : m.models_no(),
+        })}
       </span>
     {/if}
     <div class="vm-status-toggle">
       <EnabledToggle
         enabled={vm.vmForm.enabled}
         restricted={vm.vmFormToggleRestricted()}
-        label="virtual model"
+        label={m.models_virtual_model_toggle()}
         disabled={vm.vmFormManaged}
         text={vm.vmFormToggleLabel()}
         onclick={() => {

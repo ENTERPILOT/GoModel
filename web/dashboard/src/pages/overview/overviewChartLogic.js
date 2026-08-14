@@ -2,6 +2,8 @@
 // Pure functions so the chart math is testable with node.
 
 import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
+import { formatNumber } from "../../lib/i18n/locale.js";
+import * as m from "../../lib/paraglide/messages.js";
 import { tokenAxisTicks } from "./chartStyle.js";
 
 function dateToKey(date) {
@@ -132,14 +134,14 @@ export function overviewChartConfig(colors, series, options = {}) {
       opts || {},
     );
   const datasets = [
-    line("Input Tokens", series.inputPaid, resolve("var(--token-input)"), {
+    line(m.overview_input_tokens_series(), series.inputPaid, resolve("var(--token-input)"), {
       fill: "origin",
     }),
-    line("Output Tokens", series.output, resolve("var(--token-output)"), {
+    line(m.overview_output_tokens_series(), series.output, resolve("var(--token-output)"), {
       fill: "-1",
     }),
     line(
-      "Prompt (Input) Cached",
+      m.overview_prompt_input_cached(),
       series.prompt,
       resolve("var(--token-prompt)"),
       { fill: "-1", borderDash: [6, 4] },
@@ -147,7 +149,7 @@ export function overviewChartConfig(colors, series, options = {}) {
   ];
   if (cacheEnabled) {
     datasets.push(
-      line("Locally Cached", series.local, fade("var(--info)", 35), {
+      line(m.overview_locally_cached(), series.local, fade("var(--info)", 35), {
         fill: "-1",
         borderDash: [2, 3],
       }),
@@ -169,13 +171,13 @@ export function overviewChartConfig(colors, series, options = {}) {
           labels: { color: colors.text, font: { size: 12 } },
         },
         tooltip: chartTooltip(colors, {
-          label: (c) => c.dataset.label + ": " + c.parsed.y.toLocaleString(),
+          label: (c) => c.dataset.label + ": " + formatNumber(c.parsed.y),
           footer: (items) => {
             let total = 0;
             items.forEach((it) => {
               total += Number(it.parsed.y) || 0;
             });
-            return "Total: " + total.toLocaleString();
+            return m.overview_total_label({ total: formatNumber(total) });
           },
         }),
       },

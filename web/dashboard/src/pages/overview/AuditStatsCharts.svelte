@@ -16,6 +16,7 @@
     auditLatencyChartConfig,
     createProviderColorPicker,
   } from "./auditStatsLogic.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   // Colors are handed out in first-seen order and kept while the dashboard
   // stays open, so a provider's line color is stable across refetches.
@@ -23,9 +24,6 @@
 
   const stats = $derived(auditStatsState.stats);
   let latencyHelpOpen = $state(false);
-
-  const LATENCY_HELP_TEXT =
-    "Average duration of successful requests as measured at the gateway, per provider. Local cache hits and failed requests are excluded; streamed responses count until the stream completes.";
 
   function chartOptions() {
     return {
@@ -40,13 +38,17 @@
 {#if auditStatsHasData(stats)}
   <div class="model-chart-section audit-stats-section">
     <div class="model-chart-header audit-stats-header">
-      <h3>Requests by Status</h3>
-      <div class="audit-stats-kpis" role="group" aria-label="Request status summary">
+      <h3>{m.overview_requests_by_status()}</h3>
+      <div
+        class="audit-stats-kpis"
+        role="group"
+        aria-label={m.overview_request_status_summary()}
+      >
         <span
           class="audit-stats-kpi"
-          title="Share of requests answered with a 2xx status"
+          title={m.overview_success_rate_help()}
         >
-          <span class="audit-stats-kpi-label">Success</span>
+          <span class="audit-stats-kpi-label">{m.overview_success()}</span>
           <span class="audit-stats-kpi-value mono"
           >{auditStatsSuccessRateText(stats)}</span>
         </span>
@@ -86,17 +88,17 @@
       <div class="model-chart-header audit-stats-header">
         <InlineHelpSection
           copyId="audit-latency-help-copy"
-          label="provider latency help"
-          text={LATENCY_HELP_TEXT}
+          label={m.overview_provider_latency_help_label()}
+          text={m.overview_provider_latency_help()}
         >
-          {#snippet title()}<h3>Provider Latency</h3>{/snippet}
+          {#snippet title()}<h3>{m.overview_provider_latency()}</h3>{/snippet}
         </InlineHelpSection>
         <div class="audit-stats-kpis">
           <span
             class="audit-stats-kpi"
-            title="Average duration of successful, uncached requests across all providers"
+            title={m.overview_provider_latency_average_help()}
           >
-            <span class="audit-stats-kpi-label">Avg</span>
+            <span class="audit-stats-kpi-label">{m.overview_average_short()}</span>
             <span class="audit-stats-kpi-value mono"
             >{auditStatsAvgLatencyText(stats)}</span>
           </span>

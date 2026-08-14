@@ -6,6 +6,7 @@
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModels as vm } from "./virtualModels.svelte.js";
   import { Trash2 } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let {
     model = $bindable(""),
@@ -26,7 +27,7 @@
     {placeholder}
     bind:value={model}
     disabled={vm.vmFormManaged}
-    aria-label="Target model"
+    aria-label={m.models_target_model()}
   />
   {#if vm.vmFormShowWeights()}
     <input
@@ -34,16 +35,16 @@
       min="1"
       step="1"
       class="mono vm-target-weight"
-      placeholder="weight"
+      placeholder={m.models_weight()}
       bind:value={weight}
       disabled={vm.vmFormManaged}
       required
-      aria-label="Target weight"
+      aria-label={m.models_target_weight()}
     />
   {/if}
   {#if showRemove}
     <TableActionButton
-      label="Remove target"
+      label={m.models_remove_target()}
       class="table-action-btn-danger table-icon-btn vm-target-remove"
       onclick={onremove}
       disabled={vm.vmFormManaged}

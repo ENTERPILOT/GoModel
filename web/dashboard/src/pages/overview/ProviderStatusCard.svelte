@@ -20,6 +20,7 @@
     providerStatusPillTitle,
   } from "./providersLogic.js";
   import { ChevronDown } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { provider } = $props();
 
@@ -41,12 +42,12 @@
             href={providerDocUrl(provider)}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label={"View " +
-              (providerTypeLabel(provider) || provider.name) +
-              " provider docs"}
-            title={"View " +
-              (providerTypeLabel(provider) || provider.name) +
-              " provider docs"}
+            aria-label={m.overview_view_provider_docs({
+              provider: providerTypeLabel(provider) || provider.name,
+            })}
+            title={m.overview_view_provider_docs({
+              provider: providerTypeLabel(provider) || provider.name,
+            })}
           >
             <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
           </a>
@@ -61,12 +62,12 @@
 
   <div class="provider-status-meta">
     <div class="provider-status-meta-item">
-      <span class="provider-status-meta-label">Models Available</span>
+      <span class="provider-status-meta-label">{m.overview_models_available()}</span>
       <span class="provider-status-meta-value mono"
       >{formatNumber(provider.runtime?.discovered_model_count)}</span>
     </div>
     <div class="provider-status-meta-item">
-      <span class="provider-status-meta-label">Last Checked</span>
+      <span class="provider-status-meta-label">{m.overview_last_checked()}</span>
       <span
         class="provider-status-meta-value mono"
         title={providerLastCheckedTitle(provider, formatTimestamp)}
@@ -81,8 +82,12 @@
     class="provider-status-card-toggle"
     class:is-expanded={expanded}
     aria-expanded={expanded}
-    aria-label={(expanded ? "Collapse " : "Expand ") + provider.name + " details"}
-    title={expanded ? "Collapse details" : "Expand details"}
+    aria-label={expanded
+      ? m.overview_collapse_provider_details({ provider: provider.name })
+      : m.overview_expand_provider_details({ provider: provider.name })}
+    title={expanded
+      ? m.overview_collapse_details()
+      : m.overview_expand_details()}
     onclick={() => providerStatusState.toggleCard(provider)}
   >
     <Icon icon={ChevronDown} class="provider-status-card-toggle-icon" />

@@ -7,7 +7,7 @@
   import { chartColors, resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
   import { liveTokensState } from "./liveTokensState.svelte.js";
   import {
-    GRANULARITY_OPTIONS,
+    granularityOptions,
     bucketsToSeries,
     liveTokensHasData,
     liveTokensLegendValue,
@@ -15,6 +15,7 @@
     liveTokensChartAriaLabel,
     liveTokensChartConfig,
   } from "./liveTokensLogic.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   const series = $derived(
     bucketsToSeries(liveTokensState.buckets, liveTokensState.granularity),
@@ -31,17 +32,17 @@
   }
 
   const legendItems = [
-    { metric: "input", label: "Input Tokens", colorVar: "--token-input" },
-    { metric: "output", label: "Output Tokens", colorVar: "--token-output" },
-    { metric: "prompt", label: "Prompt (Input) Cached", colorVar: "--token-prompt" },
-    { metric: "local", label: "Locally Cached", colorVar: "--token-local" },
+    { metric: "input", label: m.overview_input_tokens_series, colorVar: "--token-input" },
+    { metric: "output", label: m.overview_output_tokens_series, colorVar: "--token-output" },
+    { metric: "prompt", label: m.overview_prompt_input_cached, colorVar: "--token-prompt" },
+    { metric: "local", label: m.overview_locally_cached, colorVar: "--token-local" },
   ];
 </script>
 
 <div class="chart-container live-tokens">
   <div class="chart-container-header">
     <div class="live-tokens-heading">
-      <h3>Live Token Throughput</h3>
+      <h3>{m.overview_live_token_throughput()}</h3>
       <span class="live-tokens-subtitle">
         <span
           class="live-dot"
@@ -52,8 +53,8 @@
       </span>
     </div>
     <SegmentedControl
-      ariaLabel="Live token throughput granularity"
-      options={GRANULARITY_OPTIONS}
+      ariaLabel={m.overview_live_granularity()}
+      options={granularityOptions()}
       value={liveTokensState.granularity}
       onchange={(granularity) => liveTokensState.setGranularity(granularity)}
     />
@@ -63,7 +64,7 @@
       <div class="live-tokens-legend-item">
         <span class="live-tokens-swatch" style="background: var({item.colorVar})"
         ></span>
-        <span class="live-tokens-legend-label">{item.label}</span>
+        <span class="live-tokens-legend-label">{item.label()}</span>
         <span class="live-tokens-legend-value mono"
         >{liveTokensLegendValue(totals, item.metric)}</span>
       </div>
@@ -82,7 +83,7 @@
     />
     {#if !liveTokensHasData(totals)}
       <div class="chart-empty-overlay live-tokens-empty">
-        <span class="live-tokens-empty-text">Waiting for live requests…</span>
+        <span class="live-tokens-empty-text">{m.overview_waiting_live_requests()}</span>
       </div>
     {/if}
   </div>

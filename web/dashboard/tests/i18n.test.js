@@ -41,11 +41,130 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
   assert.equal(m.date_picker_last_days({ count: 1 }), "Last 1 day");
   assert.equal(m.date_picker_last_days({ count: 14 }), "Last 14 days");
   assert.equal(m.date_picker_days({ count: 1 }), "1 day");
+  assert.equal(
+    m.pagination_summary(
+      { start: 1, end: 25, total: 80 },
+      { locale: "pl" },
+    ),
+    "Wyświetlanie 1–25 z 80",
+  );
+  assert.equal(
+    m.date_picker_last_days({ count: 1 }, { locale: "pl" }),
+    "Ostatni 1 dzień",
+  );
+  assert.equal(
+    m.date_picker_last_days({ count: 2 }, { locale: "pl" }),
+    "Ostatnie 2 dni",
+  );
+  assert.equal(
+    m.date_picker_last_days({ count: 5 }, { locale: "pl" }),
+    "Ostatnie 5 dni",
+  );
+  assert.equal(
+    m.date_picker_days({ count: 1 }, { locale: "pl" }),
+    "1 dzień",
+  );
+  assert.equal(
+    m.date_picker_days({ count: 2 }, { locale: "pl" }),
+    "2 dni",
+  );
+  assert.equal(
+    m.date_picker_days({ count: 5 }, { locale: "pl" }),
+    "5 dni",
+  );
+  assert.equal(
+    m.audit_provider_attempts({ count: 1 }, { locale: "pl" }),
+    "1 próba dostawcy",
+  );
+  assert.equal(
+    m.audit_provider_attempts({ count: 2 }, { locale: "pl" }),
+    "2 próby dostawców",
+  );
+  assert.equal(
+    m.audit_provider_attempts({ count: 5 }, { locale: "pl" }),
+    "5 prób dostawców",
+  );
+  assert.equal(
+    m.settings_pricing_summary(
+      { matched: 1, recalculated: 1 },
+      { locale: "pl" },
+    ),
+    "Przeliczono ceny dla 1 z 1 rekordu zużycia.",
+  );
+  assert.equal(
+    m.settings_pricing_missing({ count: 2 }, { locale: "pl" }),
+    "2 rekordy zużycia nadal nie mają metadanych cen.",
+  );
+  assert.equal(
+    m.settings_pricing_missing({ count: 5 }, { locale: "pl" }),
+    "5 rekordów zużycia nadal nie ma metadanych cen.",
+  );
+  assert.equal(
+    m.settings_runtime_refresh_models({ count: 2 }, { locale: "pl" }),
+    "2 modele",
+  );
+  assert.equal(
+    m.settings_runtime_refresh_providers({ count: 5 }, { locale: "pl" }),
+    "5 dostawców",
+  );
+  assert.equal(
+    m.settings_pricing_confirmation({}, { locale: "pl" }),
+    "przelicz",
+  );
+  assert.equal(
+    m.providers_keys_count({ count: 1 }, { locale: "pl" }),
+    "1 klucz",
+  );
+  assert.equal(
+    m.providers_keys_count({ count: 2 }, { locale: "pl" }),
+    "2 klucze",
+  );
+  assert.equal(
+    m.providers_keys_count({ count: 5 }, { locale: "pl" }),
+    "5 kluczy",
+  );
+  assert.equal(
+    m.providers_models_count({ count: 5 }, { locale: "pl" }),
+    "5 modeli",
+  );
+  assert.equal(
+    m.models_count({ count: 5 }, { locale: "pl" }),
+    "5 modeli",
+  );
+  assert.equal(
+    m.models_alias_count({ count: 5 }, { locale: "pl" }),
+    "5 aliasów",
+  );
+  assert.equal(
+    m.models_failover_generated({ count: 5 }, { locale: "pl" }),
+    "Wygenerowano 5 modeli Fallback.",
+  );
+  assert.equal(
+    m.models_failover_saved({ count: 5 }, { locale: "pl" }),
+    "Zapisano 5 mapowań Failover.",
+  );
+  assert.equal(
+    m.overview_total_requests({}, { locale: "pl" }),
+    "Łączna liczba Request'ów",
+  );
+  assert.equal(
+    m.overview_live_token_throughput({}, { locale: "pl" }),
+    "Przepływ tokenów",
+  );
+  assert.equal(
+    m.overview_provider_status({}, { locale: "pl" }),
+    "Status provider'ów",
+  );
+  assert.equal(
+    m.overview_input_tokens({}, { locale: "pl" }),
+    "Input Tokens",
+  );
+  assert.equal(m.rate_limits_title({}, { locale: "pl" }), "Rate Limits");
 });
 
 test("the browser locale strategy persists overrides without changing routes", () => {
   assert.equal(baseLocale, "en");
-  assert.deepEqual(locales, ["en"]);
+  assert.deepEqual(locales, ["en", "pl"]);
   assert.deepEqual(strategy, [
     "custom-dashboard",
     "preferredLanguage",

@@ -3,6 +3,7 @@
 // exercise it directly; the failover store delegates here.
 
 import { qualifiedModelName } from "./virtualModelsLogic.js";
+import * as m from "../../lib/paraglide/messages.js";
 
 export { qualifiedModelName };
 
@@ -32,9 +33,9 @@ export function failoverTargetLabel(rule) {
 }
 
 export function failoverRuleStatus(rule) {
-  if (rule && rule.enabled === false) return "Off";
-  if (rule && rule.managed) return "Config";
-  return "On";
+  if (rule && rule.enabled === false) return m.models_off();
+  if (rule && rule.managed) return m.models_config();
+  return m.models_on();
 }
 
 export function findFailoverMapping(rules, source) {
@@ -64,9 +65,10 @@ export function failoverButtonClass(rules, row) {
 }
 
 export function failoverButtonLabel(rules, row) {
-  const label = row && row.display_name ? row.display_name : "model";
-  const base = "Edit failover for " + label;
-  return hasActiveFailoverMapping(rules, row) ? base + " (active)" : base;
+  const label = row && row.display_name ? row.display_name : m.models_model_subject();
+  return hasActiveFailoverMapping(rules, row)
+    ? m.models_failover_edit_active({ model: label })
+    : m.models_failover_edit_for({ model: label });
 }
 
 // --- Editor form helpers -------------------------------------------------

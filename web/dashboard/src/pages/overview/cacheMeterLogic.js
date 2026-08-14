@@ -1,7 +1,8 @@
 // Summary-card totals + cache meter math. Pure functions taking the usage
 // summary / cache overview payloads.
 
-import { formatNumber } from "../../lib/utils/format.js";
+import { formatNumber } from "../../lib/i18n/locale.js";
+import * as m from "../../lib/paraglide/messages.js";
 
 export function summaryTotalTokens(summary) {
   const s = summary || {};
@@ -41,7 +42,10 @@ export function summaryTotalRequestsTitle(summary, cacheOverview, cacheEnabled) 
   if (hits <= 0) return "";
   const provider = summaryTotalRequests(summary, cacheOverview, cacheEnabled) - hits;
   return (
-    formatNumber(provider) + " to providers + " + formatNumber(hits) + " from cache"
+    m.overview_total_requests_help({
+      provider: formatNumber(provider),
+      cache: formatNumber(hits),
+    })
   );
 }
 
@@ -75,27 +79,27 @@ function cacheMeterRawSegments(summary, cacheOverview, cacheEnabled) {
   return [
     {
       key: "uncached",
-      label: "Regular",
+      label: m.overview_cache_regular(),
       tokens: uncached + cacheWrite,
       colorVar: "--cache-meter-uncached",
       note:
         cacheWrite > 0
-          ? "Includes " + formatNumber(cacheWrite) + " cache-write tokens"
+          ? m.overview_cache_regular_note({ count: formatNumber(cacheWrite) })
           : "",
     },
     {
       key: "prompt",
-      label: "Prompt cached",
+      label: m.overview_cache_prompt(),
       tokens: promptCached,
       colorVar: "--cache-meter-prompt",
-      note: "Provider prompt-cache reads",
+      note: m.overview_cache_prompt_note(),
     },
     {
       key: "local",
-      label: "Locally cached",
+      label: m.overview_cache_local(),
       tokens: locallyCached,
       colorVar: "--cache-meter-local",
-      note: "Served from GoModel response cache",
+      note: m.overview_cache_local_note(),
     },
   ];
 }
@@ -151,12 +155,11 @@ export function cacheMeterSegments(summary, cacheOverview, cacheEnabled) {
 
 export function cacheMeterSegmentTitle(segment) {
   const parts = [
-    segment.label +
-      ": " +
-      formatNumber(segment.tokens) +
-      " input tokens (" +
-      segment.pct +
-      "%)",
+    m.overview_cache_segment_title({
+      label: segment.label,
+      tokens: formatNumber(segment.tokens),
+      percent: segment.pct,
+    }),
   ];
   if (segment.note) parts.push(segment.note);
   return parts.join("\n");
@@ -165,7 +168,8 @@ export function cacheMeterSegmentTitle(segment) {
 export function cacheMeterAriaLabel(segments) {
   const parts = (segments || []).map((seg) => seg.label + " " + seg.pct + "%");
   return (
-    "Cache breakdown of input tokens — " +
-    (parts.length ? parts.join(", ") : "no data")
+    m.overview_cache_breakdown_label({
+      details: parts.length ? parts.join(", ") : m.overview_no_data(),
+    })
   );
 }

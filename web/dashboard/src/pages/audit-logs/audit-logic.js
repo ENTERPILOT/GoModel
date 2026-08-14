@@ -4,6 +4,7 @@
 // directly.
 
 import { formatJSON, formatNumber } from "../../lib/utils/format.js";
+import * as m from "../../lib/paraglide/messages.js";
 import {
   findNestedErrorMessage,
   normalizeErrorText,
@@ -91,24 +92,24 @@ function auditRetentionDays(raw) {
 export function auditRetentionText(raw) {
   const days = auditRetentionDays(raw);
   if (days === null) return "";
-  if (days === 0) return "Audit logs are retained indefinitely.";
-  if (days === 1) return "Audit logs are retained for 1 day.";
-  return "Audit logs are retained for " + days + " days.";
+  return (
+    auditRetentionPrefix(raw) + auditRetentionHighlight(raw) + "."
+  );
 }
 
 export function auditRetentionPrefix(raw) {
   const days = auditRetentionDays(raw);
   if (days === null) return "";
   return days === 0
-    ? "Audit logs are retained "
-    : "Audit logs are retained for ";
+    ? m.audit_retention_prefix_indefinite()
+    : m.audit_retention_prefix_days();
 }
 
 export function auditRetentionHighlight(raw) {
   const days = auditRetentionDays(raw);
   if (days === null) return "";
-  if (days === 0) return "indefinitely";
-  return days === 1 ? "1 day" : days + " days";
+  if (days === 0) return m.audit_retention_indefinitely();
+  return m.audit_retention_days({ count: days });
 }
 
 // --- Query building ---------------------------------------------------------
@@ -568,9 +569,9 @@ export function auditAttemptTrackCount(entry) {
 export function auditAttemptTrackTitle(entry) {
   const attempts = auditAttempts(entry);
   const failed = attempts.filter((attempt) => !(attempt && attempt.success)).length;
-  const noun = attempts.length === 1 ? "attempt" : "attempts";
-  const base = attempts.length + " provider " + noun;
-  return failed > 0 ? base + " · " + failed + " failed" : base;
+  return failed > 0
+    ? m.audit_provider_attempts_failed({ count: attempts.length, failed })
+    : m.audit_provider_attempts({ count: attempts.length });
 }
 
 export function auditAttemptSegmentTitle(attempt) {
@@ -583,7 +584,9 @@ export function auditAttemptSegmentTitle(attempt) {
   if (provider && provider !== "-") parts.push(provider);
   const model = auditAttemptModel(attempt);
   if (model && model !== "-") parts.push(model);
-  parts.push(attempt.success ? "succeeded" : "failed");
+  parts.push(
+    attempt.success ? m.audit_attempt_succeeded() : m.audit_attempt_failed_status(),
+  );
   return parts.join(" · ");
 }
 
@@ -607,7 +610,7 @@ function auditAttemptErrorMessage(attempt) {
   const code = String(attempt.error_code || "").trim();
   const type = String(attempt.error_type || "").trim();
   if (message && code) return code + ": " + message;
-  return message || code || type || "Provider attempt failed";
+  return message || code || type || m.audit_attempt_failed();
 }
 
 function auditAttemptHeaders(entry, attempt) {
@@ -637,7 +640,7 @@ function auditAttemptResponsePane(entry, attempt) {
   const single = auditAttempts(entry).length <= 1;
 
   return {
-    title: "Response",
+    title: m.audit_response_title(),
     direction: "response",
     seq: single ? 0 : Number((attempt && attempt.seq) || 0),
     kind: single ? "" : kind === "attempt" ? "" : kind,
@@ -653,9 +656,9 @@ function auditAttemptResponsePane(entry, attempt) {
     showBody: hasBody,
     body,
     showEmpty: !errorMessage && !hasBody && !headers,
-    emptyMessage: "No response was captured for this attempt.",
+    emptyMessage: m.audit_attempt_not_captured(),
     showTooLarge: !!(success && data && data.response_body_too_big_to_handle),
-    tooLargeMessage: "Response body was too large to capture.",
+    tooLargeMessage: m.audit_response_body_too_large(),
   };
 }
 
@@ -687,8 +690,8 @@ export function auditNoChangeSteps(entry) {
       return {
         id: "step-" + Number(revision.seq || 0),
         rewriter,
-        label: rewriter + ": no change",
-        title: rewriter + " ran and forwarded the request unchanged",
+        label: m.audit_rewriter_no_change({ rewriter }),
+        title: m.audit_rewriter_unchanged_help({ rewriter }),
       };
     });
 }
@@ -728,7 +731,7 @@ export function auditRequestRevisionPane(entry, revision) {
   }
 
   return {
-    title: "Rewritten",
+    title: m.audit_rewritten_title(),
     direction: "request",
     seq: single ? 0 : Number((revision && revision.seq) || 0),
     kind: revision && revision.rewriter ? String(revision.rewriter) : "",
@@ -741,14 +744,13 @@ export function auditRequestRevisionPane(entry, revision) {
     errorMessage: null,
     showHeaders: true,
     headers: summary,
-    headersTitle: "What changed",
+    headersTitle: m.audit_what_changed_title(),
     showBody: hasBody,
     body,
     showEmpty: false,
     emptyMessage: "",
     showTooLarge: !hasBody,
-    tooLargeMessage:
-      "Rewritten body not captured (body logging disabled or body too large).",
+    tooLargeMessage: m.audit_rewritten_body_not_captured(),
   };
 }
 
@@ -787,9 +789,11 @@ export function auditCacheRatioLabel(entry) {
   const inputTokens = Number(usage.input_tokens || 0);
   const cachedTokens = Number(usage.cached_input_tokens || 0);
   if (inputTokens <= 0) {
-    return formatNumber(cachedTokens) + " cached";
+    return m.audit_cached_count({ count: formatNumber(cachedTokens) });
   }
-  return auditCacheSharePercent(entry).toFixed(1) + "% cached";
+  return m.audit_cached_percent({
+    percent: auditCacheSharePercent(entry).toFixed(1),
+  });
 }
 
 export function auditCacheRatioPillLabel(entry) {
@@ -832,7 +836,7 @@ export function auditRequestPane(entry, extractSegments) {
   const pending = empty && auditEntryLiveInProgress(entry);
 
   return {
-    title: "Request",
+    title: m.audit_request_title(),
     direction: "request",
     layout: "split",
     entry,
@@ -850,11 +854,11 @@ export function auditRequestPane(entry, extractSegments) {
     // pills on the tab so the step is visible but costs no tab.
     noChangeSteps: auditNoChangeSteps(entry),
     showEmpty: empty && !pending,
-    emptyMessage: "Request details were not captured.",
+    emptyMessage: m.audit_request_not_captured(),
     showPending: pending,
-    pendingMessage: "Waiting for request data…",
+    pendingMessage: m.audit_waiting_request_data(),
     showTooLarge: !!(data && data.request_body_too_big_to_handle),
-    tooLargeMessage: "Request body was too large to capture.",
+    tooLargeMessage: m.audit_request_body_too_large(),
   };
 }
 
@@ -866,7 +870,7 @@ export function auditResponsePane(entry) {
   const pending = empty && auditEntryLiveInProgress(entry);
 
   return {
-    title: "Response",
+    title: m.audit_response_title(),
     direction: "response",
     layout: "split",
     entry,
@@ -882,11 +886,11 @@ export function auditResponsePane(entry) {
       !!(entry && entry._response_partial && data && data.response_body) &&
       auditEntryLiveInProgress(entry),
     showEmpty: empty && !pending,
-    emptyMessage: "Response details were not captured.",
+    emptyMessage: m.audit_response_not_captured(),
     showPending: pending,
-    pendingMessage: "Response in progress…",
+    pendingMessage: m.audit_response_in_progress(),
     showTooLarge: !!(data && data.response_body_too_big_to_handle),
-    tooLargeMessage: "Response body was too large to capture.",
+    tooLargeMessage: m.audit_response_body_too_large(),
   };
 }
 

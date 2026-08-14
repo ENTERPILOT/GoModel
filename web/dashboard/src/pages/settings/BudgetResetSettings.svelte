@@ -5,16 +5,14 @@
   import { budgetsStore } from "$pages/budgets/budgets.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { RotateCcw } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 {#if runtimeConfig.budgetsVisible()}
   <div class="settings-refresh-section budget-reset-all-section">
     <div>
-      <h3>Reset All Budgets</h3>
-      <p>
-        Start new budget periods for every configured budget without changing
-        the limits.
-      </p>
+      <h3>{m.settings_budget_reset_all_title()}</h3>
+      <p>{m.settings_budget_reset_all_help()}</p>
     </div>
     <div class="settings-refresh-actions budget-settings-actions">
       <button
@@ -24,7 +22,7 @@
         onclick={() => budgetsStore.openResetDialog()}
       >
         <Icon icon={RotateCcw} class="form-action-icon" />
-        <span>Reset Budgets</span>
+        <span>{m.settings_budget_reset_all_action()}</span>
       </button>
     </div>
   </div>
