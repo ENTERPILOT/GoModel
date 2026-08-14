@@ -41,11 +41,30 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
   assert.equal(m.date_picker_last_days({ count: 1 }), "Last 1 day");
   assert.equal(m.date_picker_last_days({ count: 14 }), "Last 14 days");
   assert.equal(m.date_picker_days({ count: 1 }), "1 day");
+  assert.equal(
+    m.pagination_summary(
+      { start: 1, end: 25, total: 80 },
+      { locale: "pl" },
+    ),
+    "Wyświetlanie 1–25 z 80",
+  );
+  assert.equal(
+    m.date_picker_last_days({ count: 1 }, { locale: "pl" }),
+    "Ostatni 1 dzień",
+  );
+  assert.equal(
+    m.date_picker_last_days({ count: 2 }, { locale: "pl" }),
+    "Ostatnie 2 dni",
+  );
+  assert.equal(
+    m.date_picker_last_days({ count: 5 }, { locale: "pl" }),
+    "Ostatnie 5 dni",
+  );
 });
 
 test("the browser locale strategy persists overrides without changing routes", () => {
   assert.equal(baseLocale, "en");
-  assert.deepEqual(locales, ["en"]);
+  assert.deepEqual(locales, ["en", "pl"]);
   assert.deepEqual(strategy, [
     "custom-dashboard",
     "preferredLanguage",
