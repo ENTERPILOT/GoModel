@@ -3,6 +3,7 @@
 // activity-calendar data.
 
 import { getJSON, isAbortError } from "$lib/api/client.js";
+import * as m from "$lib/paraglide/messages.js";
 import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
@@ -58,7 +59,9 @@ class ProviderStatusState {
   }
 
   detailsToggleLabel() {
-    return this.detailsExpanded ? "Show Details" : "Hide Details";
+    return this.detailsExpanded
+      ? m.overview_show_details()
+      : m.overview_hide_details();
   }
 
   async fetch() {

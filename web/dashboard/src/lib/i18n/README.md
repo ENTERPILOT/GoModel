@@ -26,5 +26,5 @@ and prefer complete phrases with named inputs so translators can reorder text.
 3. Add the locale tag to `locales` in `project.inlang/settings.json`.
 4. Run `npm test`, `npm run check`, and `npm run build`.
 
-The locale selector reads this list automatically. Tests reject unused English
-messages.
+The locale selector in Settings reads this list automatically. Tests reject
+unused English messages.

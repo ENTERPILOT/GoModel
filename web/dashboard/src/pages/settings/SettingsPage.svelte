@@ -8,6 +8,8 @@
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { appVersion } from "$lib/api/paths.js";
+  import LocaleSelector from "$lib/components/molecules/LocaleSelector.svelte";
+  import * as m from "$lib/paraglide/messages.js";
   import TimezoneSettings from "./TimezoneSettings.svelte";
   import FailoverSettings from "./FailoverSettings.svelte";
   import BudgetSettings from "./BudgetSettings.svelte";
@@ -31,12 +33,13 @@
 <div>
   <div class="page-header">
     <div>
-      <h2>Settings</h2>
+      <h2>{m.settings_title()}</h2>
     </div>
   </div>
 
   <div class="settings-panel">
     <TimezoneSettings />
+    <LocaleSelector />
     <FailoverSettings />
     <BudgetSettings />
     <BudgetResetSettings />

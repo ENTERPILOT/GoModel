@@ -6,6 +6,7 @@
   import AuditPane from "./AuditPane.svelte";
   import { auditEffectiveTab, auditTabKeydownTarget, statusCodeClass } from "./audit-logic.js";
   import { ArrowLeft, ArrowRight } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { entry, panes = [] } = $props();
 
@@ -29,7 +30,7 @@
 </script>
 
 <div class="audit-request-response">
-  <div class="audit-pane-tablist" role="tablist" aria-label="Request and response">
+  <div class="audit-pane-tablist" role="tablist" aria-label={m.audit_request_response_label()}>
     {#each panes as p (p.id)}
       <button
         type="button"
@@ -68,7 +69,7 @@
         {#if p.pane.savingsLabel}
           <span
             class="audit-savings-pill mono"
-            title="Share of the request body removed by this rewrite"
+            title={m.audit_rewrite_savings_help()}
             >{p.pane.savingsLabel}</span
           >
         {/if}

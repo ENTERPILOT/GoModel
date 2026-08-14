@@ -1,7 +1,6 @@
 <script>
   import Icon from "$lib/components/atoms/Icon.svelte";
   import GoModelLogo from "$lib/components/atoms/GoModelLogo.svelte";
-  import LocaleSelector from "$lib/components/molecules/LocaleSelector.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { sidebar } from "$lib/stores/ui.svelte.js";
@@ -109,7 +108,6 @@
     {/each}
   </nav>
   <div class="sidebar-footer">
-    <LocaleSelector compact={sidebar.collapsed} />
     <ThemeToggle compact={sidebar.collapsed} />
     {#if auth.externalLogoutURL}
       <div class="external-auth-section">

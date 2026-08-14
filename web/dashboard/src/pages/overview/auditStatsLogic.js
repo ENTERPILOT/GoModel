@@ -2,6 +2,8 @@
 // so bucketing, labels, and chart configs are testable with node.
 
 import { barColors, chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
+import * as m from "../../lib/paraglide/messages.js";
+import { getLocale } from "../../lib/paraglide/runtime.js";
 import { formatTokensShort } from "../../lib/utils/format.js";
 
 export function emptyAuditStats() {
@@ -71,7 +73,8 @@ export function auditStatsAvgLatencyText(stats) {
 function auditStatsDateParts(d, zone) {
   try {
     const byType = {};
-    new Intl.DateTimeFormat("en-US", {
+    const locale = getLocale();
+    new Intl.DateTimeFormat(locale, {
       timeZone: zone,
       year: "numeric",
       month: "short",
@@ -88,17 +91,27 @@ function auditStatsDateParts(d, zone) {
       month: byType.month,
       day: byType.day,
       hour: Number(byType.hour),
+      shortDate: new Intl.DateTimeFormat(locale, {
+        timeZone: zone,
+        month: "short",
+        day: "numeric",
+      }).format(d),
+      fullDate: new Intl.DateTimeFormat(locale, {
+        timeZone: zone,
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }).format(d),
     };
   } catch {
-    const months = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
+    const month = new Intl.DateTimeFormat(getLocale(), { month: "short" }).format(d);
     return {
       year: String(d.getFullYear()),
-      month: months[d.getMonth()],
+      month,
       day: String(d.getDate()),
       hour: d.getHours(),
+      shortDate: month + " " + d.getDate(),
+      fullDate: month + " " + d.getDate() + ", " + d.getFullYear(),
     };
   }
 }
@@ -109,7 +122,7 @@ export function auditStatsBucketLabel(bucket, interval, zone) {
   const d = new Date(bucket.start);
   if (Number.isNaN(d.getTime())) return String(bucket.start || "");
   const parts = auditStatsDateParts(d, zone);
-  const day = parts.month + " " + parts.day;
+  const day = parts.shortDate;
   if (interval !== "hour") return day;
   if (parts.hour === 0) return day;
   return String(parts.hour).padStart(2, "0") + ":00";
@@ -120,7 +133,7 @@ export function auditStatsTooltipTitle(bucket, interval, zone, formatTimestamp) 
   if (Number.isNaN(d.getTime())) return String(bucket.start || "");
   if (interval === "hour") return formatTimestamp(bucket.start);
   const parts = auditStatsDateParts(d, zone);
-  return parts.month + " " + parts.day + ", " + parts.year;
+  return parts.fullDate;
 }
 
 // Charts resolve the dashboard's status tokens (success/warning/danger) so
@@ -162,7 +175,7 @@ export function auditStatusChartConfig(colors, buckets, options = {}) {
   ];
   if (buckets.some((b) => num(b.status_other) > 0)) {
     datasets.push(
-      bar("Other", buckets.map((b) => num(b.status_other)), statusColors.other),
+      bar(m.overview_other(), buckets.map((b) => num(b.status_other)), statusColors.other),
     );
   }
   return {
@@ -191,7 +204,7 @@ export function auditStatusChartConfig(colors, buckets, options = {}) {
             items.forEach((it) => {
               total += Number(it.parsed.y) || 0;
             });
-            return "Total: " + total.toLocaleString();
+            return m.overview_total_label({ total: total.toLocaleString() });
           },
         }),
       },

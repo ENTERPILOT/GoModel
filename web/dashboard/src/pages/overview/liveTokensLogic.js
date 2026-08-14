@@ -5,21 +5,22 @@
 import { formatTokensShort } from "../../lib/utils/format.js";
 import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 import { tokenAxisTicks } from "./chartStyle.js";
+import * as m from "../../lib/paraglide/messages.js";
 
 // apiName: backend granularity; refreshMs: how often to refetch to scroll the
 // window (matched to the bucket width, capped for coarse views).
 export const GRANULARITIES = {
-  seconds: { apiName: "second", windowLabel: "Last 60 seconds", refreshMs: 2000 },
-  minutes: { apiName: "minute", windowLabel: "Last 60 minutes", refreshMs: 5000 },
-  hours: { apiName: "hour", windowLabel: "Last 24 hours", refreshMs: 20000 },
-  days: { apiName: "day", windowLabel: "Last 30 days", refreshMs: 60000 },
+  seconds: { apiName: "second", windowLabel: m.overview_last_60_seconds(), refreshMs: 2000 },
+  minutes: { apiName: "minute", windowLabel: m.overview_last_60_minutes(), refreshMs: 5000 },
+  hours: { apiName: "hour", windowLabel: m.overview_last_24_hours(), refreshMs: 20000 },
+  days: { apiName: "day", windowLabel: m.overview_last_30_days(), refreshMs: 60000 },
 };
 
 export const GRANULARITY_OPTIONS = [
-  { value: "seconds", label: "Seconds" },
-  { value: "minutes", label: "Minutes" },
-  { value: "hours", label: "Hours" },
-  { value: "days", label: "Days" },
+  { value: "seconds", label: m.overview_seconds() },
+  { value: "minutes", label: m.overview_minutes() },
+  { value: "hours", label: m.overview_hours() },
+  { value: "days", label: m.overview_days() },
 ];
 
 function zeroMetrics() {
@@ -101,23 +102,13 @@ export function liveTokensWindowLabel(granularity) {
 // Text equivalent of the chart for screen readers (the canvas itself is
 // opaque to assistive tech).
 export function liveTokensChartAriaLabel(totals, granularity) {
-  return (
-    "Live token throughput, " +
-    liveTokensWindowLabel(granularity).toLowerCase() +
-    ". " +
-    "Input " +
-    liveTokensLegendValue(totals, "input") +
-    ", " +
-    "output " +
-    liveTokensLegendValue(totals, "output") +
-    ", " +
-    "prompt cached " +
-    liveTokensLegendValue(totals, "prompt") +
-    ", " +
-    "locally cached " +
-    liveTokensLegendValue(totals, "local") +
-    " tokens."
-  );
+  return m.overview_live_chart_label({
+    window: liveTokensWindowLabel(granularity).toLowerCase(),
+    input: liveTokensLegendValue(totals, "input"),
+    output: liveTokensLegendValue(totals, "output"),
+    prompt: liveTokensLegendValue(totals, "prompt"),
+    local: liveTokensLegendValue(totals, "local"),
+  });
 }
 
 export function liveTokensChartConfig(colors, seriesColors, series, granularity) {
@@ -191,10 +182,10 @@ export function liveTokensChartConfig(colors, seriesColors, series, granularity)
     data: {
       labels: series.labels,
       datasets: [
-        bar("Input Tokens", series.cols.input, seriesColors.input),
-        bar("Output Tokens", series.cols.output, seriesColors.output),
-        bar("Prompt (Input) Cached", series.cols.prompt, seriesColors.prompt),
-        bar("Locally Cached", series.cols.local, seriesColors.local),
+        bar(m.overview_input_tokens_series(), series.cols.input, seriesColors.input),
+        bar(m.overview_output_tokens_series(), series.cols.output, seriesColors.output),
+        bar(m.overview_prompt_input_cached(), series.cols.prompt, seriesColors.prompt),
+        bar(m.overview_locally_cached(), series.cols.local, seriesColors.local),
       ],
     },
     options: {
@@ -247,7 +238,7 @@ export function liveTokensChartConfig(colors, seriesColors, series, granularity)
             items.forEach((it) => {
               total += Number(it.parsed.y) || 0;
             });
-            return "Total: " + formatValue(total);
+            return m.overview_total_label({ total: formatValue(total) });
           },
         }),
       },

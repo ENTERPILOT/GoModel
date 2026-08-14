@@ -8,6 +8,7 @@
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { createCopyState } from "$lib/utils/clipboard.svelte.js";
   import { CircleCheck, Copy } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
   import {
     conversationMessageCopyText,
     formatFunctionArguments,
@@ -27,7 +28,7 @@
   function cacheTitle(ratio) {
     const value = Math.max(0, Math.min(1, Number(ratio || 0)));
     return value > 0
-      ? Math.round(value * 100) + "% of this visible prompt item is estimated provider-cached"
+      ? m.interaction_prompt_cache_estimate({ percent: Math.round(value * 100) })
       : undefined;
   }
 
@@ -65,12 +66,14 @@
         <span class="mono chat-time">{timezone.formatTimestamp(msg.timestamp)}</span>
       </summary>
       {#if msg.functionCallID}
-        <div class="chat-function-call-id mono">Call ID: {msg.functionCallID}</div>
+        <div class="chat-function-call-id mono">{m.interaction_call_id()}: {msg.functionCallID}</div>
       {/if}
       {#if msg.role === "function_call" && msg.toolCalls}
         {#each msg.toolCalls as tc}
           {#if tc.id}
-            <div class="chat-function-call-id mono">Call ID{msg.toolCalls.length > 1 ? " (" + tc.name + ")" : ""}: {tc.id}</div>
+            <div class="chat-function-call-id mono">{msg.toolCalls.length > 1
+                ? m.interaction_call_id_named({ name: tc.name })
+                : m.interaction_call_id()}: {tc.id}</div>
           {/if}
         {/each}
       {/if}
@@ -96,12 +99,12 @@
           <details class="chat-tool-call">
             <summary class="chat-tool-call-summary">
               <span class="chat-tool-call-name">{tc.name + "()"}</span>
-              <span class="chat-tool-call-preview">{formatFunctionArguments(tc) || "No arguments"}</span>
+              <span class="chat-tool-call-preview">{formatFunctionArguments(tc) || m.interaction_no_arguments()}</span>
             </summary>
             {#if tc.id}
-              <div class="chat-function-call-id mono">Call ID: {tc.id}</div>
+              <div class="chat-function-call-id mono">{m.interaction_call_id()}: {tc.id}</div>
             {/if}
-            <pre class="chat-tool-call-arguments">{formatFunctionArguments(tc) || "No arguments"}</pre>
+            <pre class="chat-tool-call-arguments">{formatFunctionArguments(tc) || m.interaction_no_arguments()}</pre>
           </details>
         {/each}
       </footer>
@@ -111,8 +114,10 @@
     type="button"
     class="chat-message-copy"
     class:is-copied={copyState.copied}
-    aria-label={copyState.copied ? "Message copied" : "Copy message"}
-    title={copyState.copied ? "Copied" : "Copy message"}
+    aria-label={copyState.copied
+      ? m.interaction_message_copied()
+      : m.interaction_copy_message()}
+    title={copyState.copied ? m.common_copied() : m.interaction_copy_message()}
     onclick={(event) => {
       event.stopPropagation();
       copyState.copy(conversationMessageCopyText(msg));

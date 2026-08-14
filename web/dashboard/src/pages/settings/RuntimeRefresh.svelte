@@ -15,6 +15,7 @@
     runtimeRefreshStepLabel,
   } from "./runtime-refresh-logic.js";
   import { RefreshCw } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let loading = $state(false);
   let report = $state(null);
@@ -33,7 +34,7 @@
         return;
       }
       if (!result.ok) {
-        flash.error("Runtime refresh failed.");
+        flash.error(m.settings_runtime_refresh_failed());
         return;
       }
       report =
@@ -47,7 +48,7 @@
       auth.refresh();
     } catch (e) {
       console.error("Failed to refresh runtime:", e);
-      flash.error("Runtime refresh failed.");
+      flash.error(m.settings_runtime_refresh_failed());
     } finally {
       loading = false;
     }
@@ -57,10 +58,10 @@
 <div class="settings-refresh-section">
   <InlineHelpSection
     copyId="runtime-refresh-help-copy"
-    label="runtime refresh help"
-    text="Pull the latest model metadata, provider inventory, API keys, aliases, model access rules, guardrails, and workflows."
+    label={m.settings_runtime_refresh_help_label()}
+    text={m.settings_runtime_refresh_help()}
   >
-    {#snippet title()}<h3>Runtime Refresh</h3>{/snippet}
+    {#snippet title()}<h3>{m.settings_runtime_refresh_title()}</h3>{/snippet}
   </InlineHelpSection>
   <div class="settings-refresh-actions">
     <button
@@ -73,7 +74,7 @@
       onclick={refreshRuntime}
     >
       <Icon icon={RefreshCw} class="settings-refresh-icon" />
-      <span>Refresh</span>
+      <span>{m.settings_runtime_refresh_action()}</span>
     </button>
   </div>
 </div>

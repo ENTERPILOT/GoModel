@@ -5,6 +5,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { flash } from "$lib/stores/flash.svelte.js";
   import { getJSON, sendJSON } from "$lib/api/client.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   let settings = $state([]);
   let loading = $state(false);
@@ -20,7 +21,7 @@
       });
       if (result.stale) return;
       if (!result.ok) {
-        error = "Unable to load runtime settings.";
+        error = m.settings_runtime_load_failed();
         return;
       }
       settings = Array.isArray(result.data?.settings)
@@ -28,7 +29,7 @@
         : [];
     } catch (e) {
       console.error("Failed to load runtime settings:", e);
-      error = "Unable to load runtime settings.";
+      error = m.settings_runtime_load_failed();
     } finally {
       loading = false;
     }
@@ -50,17 +51,17 @@
       }
       if (!result.ok) {
         select.value = setting.value;
-        flash.error(`Unable to save ${setting.label}.`);
+        flash.error(m.settings_runtime_save_failed({ setting: setting.label }));
         return;
       }
       settings = settings.map((item) =>
         item.key === setting.key ? result.data : item,
       );
-      flash.success(`${setting.label} saved.`);
+      flash.success(m.settings_runtime_saved({ setting: setting.label }));
     } catch (e) {
       select.value = setting.value;
       console.error("Failed to save runtime setting:", e);
-      flash.error(`Unable to save ${setting.label}.`);
+      flash.error(m.settings_runtime_save_failed({ setting: setting.label }));
     } finally {
       savingKey = "";
     }
@@ -75,7 +76,7 @@
 {#if settings.length > 0 || error}
   <div class="settings-refresh-section runtime-settings-section">
     <div class="runtime-settings-copy">
-      <h3>AI Processing</h3>
+      <h3>{m.settings_runtime_processing_title()}</h3>
       {#if error}
         <p class="form-field-error" role="alert">{error}</p>
       {/if}
@@ -92,7 +93,9 @@
             {/if}
             {#if setting.locked}
               <p class="runtime-setting-managed">
-                Managed by {setting.managed_by || "environment"}
+                {m.settings_runtime_managed_by({
+                  source: setting.managed_by || m.settings_runtime_environment(),
+                })}
               </p>
             {/if}
           </div>

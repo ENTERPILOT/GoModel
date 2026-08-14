@@ -12,6 +12,7 @@
     calendarSummaryText,
     calendarTooltipText,
   } from "./calendarLogic.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   let tooltip = $state({ show: false, x: 0, y: 0, text: "" });
 
@@ -38,15 +39,15 @@
 
 <div class="contribution-calendar-section">
   <div class="contribution-calendar-header">
-    <h3>Activity</h3>
+    <h3>{m.overview_activity()}</h3>
     {#if calendarState.loading && calendarState.data.length === 0}
-      <Spinner size={14} label="Loading activity" />
+      <Spinner size={14} label={m.overview_loading_activity()} />
     {/if}
     <SegmentedControl
-      ariaLabel="Activity calendar mode"
+      ariaLabel={m.overview_activity_mode()}
       options={[
-        { value: "tokens", label: "Tokens" },
-        { value: "costs", label: "Costs" },
+        { value: "tokens", label: m.overview_tokens() },
+        { value: "costs", label: m.overview_costs() },
       ]}
       value={calendarState.mode}
       onchange={(mode) => (calendarState.mode = mode)}
@@ -55,11 +56,11 @@
   <div class="contribution-calendar-grid-wrapper">
     <div class="contribution-calendar-day-labels">
       <span></span>
-      <span>Mon</span>
+      <span>{m.overview_weekday_mon()}</span>
       <span></span>
-      <span>Wed</span>
+      <span>{m.overview_weekday_wed()}</span>
       <span></span>
-      <span>Fri</span>
+      <span>{m.overview_weekday_fri()}</span>
       <span></span>
     </div>
     <div class="contribution-calendar-scroll">
@@ -93,11 +94,11 @@
       >{calendarSummaryText(calendarState.data, calendarState.mode)}</span>
     </div>
     <div class="contribution-calendar-legend">
-      <span>Less</span>
+      <span>{m.overview_less()}</span>
       {#each calendarLegendLevels() as lvl (lvl)}
         <div class="contribution-calendar-cell level-{lvl}"></div>
       {/each}
-      <span>More</span>
+      <span>{m.overview_more()}</span>
     </div>
   </div>
 </div>

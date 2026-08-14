@@ -60,6 +60,18 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
     m.date_picker_last_days({ count: 5 }, { locale: "pl" }),
     "Ostatnie 5 dni",
   );
+  assert.equal(
+    m.date_picker_days({ count: 1 }, { locale: "pl" }),
+    "1 dzień",
+  );
+  assert.equal(
+    m.date_picker_days({ count: 2 }, { locale: "pl" }),
+    "2 dni",
+  );
+  assert.equal(
+    m.date_picker_days({ count: 5 }, { locale: "pl" }),
+    "5 dni",
+  );
 });
 
 test("the browser locale strategy persists overrides without changing routes", () => {

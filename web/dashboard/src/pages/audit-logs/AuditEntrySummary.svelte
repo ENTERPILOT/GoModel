@@ -12,6 +12,7 @@
     statusCodeClass,
   } from "./audit-logic.js";
   import { ChevronDown, ChevronLeft, ChevronRight } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   // `thread` marks a session-thread head row (grouped mode):
   // { count, expanded, ontoggle }. `expanded`/`onactivate` wire the
@@ -50,7 +51,7 @@
   }
 
   function threadDescription() {
-    return "Session with " + Number(thread.count || 1) + " requests";
+    return m.audit_session_description({ count: Number(thread.count || 1) });
   }
 
   function openConversation(event) {
@@ -82,7 +83,9 @@
         title={threadDescription()}
         aria-label={threadDescription() +
           ", " +
-          (thread.expanded ? "collapse" : "expand")}
+          (thread.expanded
+            ? m.common_action_collapse()
+            : m.common_action_expand())}
         onclick={toggleThread}
       >
         <Icon
@@ -96,7 +99,10 @@
       class="audit-status-badge audit-request-badge {statusCodeClass(
         entry.status_code,
       )}"
-      title={"Status " + (entry.status_code || "-") + " · " + (entry.method || "-")}
+      title={m.audit_status({
+        status: entry.status_code || "-",
+        method: entry.method || "-",
+      })}
       aria-label={(entry.status_code || "-") + " " + (entry.method || "-")}
     >
       <span class="audit-request-status" aria-hidden="true"
@@ -127,8 +133,12 @@
         type="button"
         class="audit-conversation-trigger"
         class:audit-conversation-trigger-active={interactionsOpen}
-        title={interactionsOpen ? "Close interactions" : "Open interactions"}
-        aria-label={interactionsOpen ? "Close interactions" : "Open interactions"}
+        title={interactionsOpen
+          ? m.audit_close_interactions()
+          : m.audit_open_interactions()}
+        aria-label={interactionsOpen
+          ? m.audit_close_interactions()
+          : m.audit_open_interactions()}
         aria-pressed={interactionsOpen}
         onclick={openConversation}
       >

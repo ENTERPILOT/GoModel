@@ -22,6 +22,7 @@
     calendarState,
   } from "./overviewState.svelte.js";
   import { liveTokensState } from "./liveTokensState.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "overview";
 
@@ -68,7 +69,7 @@
   <LiveTokens />
 
   <div class="page-header date-range-page-header">
-    <h2>Usage Overview</h2>
+    <h2>{m.overview_usage_title()}</h2>
   </div>
   <div class="sticky-date-range">
     <DatePicker onchange={onDateRangeChange} />

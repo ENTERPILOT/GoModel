@@ -3,6 +3,7 @@
 // servers are configured.
 
 import { mcpServerStatus } from "../mcp-servers/mcp-servers.js";
+import * as m from "../../lib/paraglide/messages.js";
 
 export { mcpServerStatus };
 
@@ -43,26 +44,12 @@ export function mcpOverviewSummaryClass(servers) {
 export function mcpOverviewSummaryText(servers) {
   const degraded = mcpOverviewDegradedCount(servers);
   if (degraded > 0) {
-    return (
-      String(degraded) +
-      " server" +
-      (degraded === 1 ? "" : "s") +
-      " need" +
-      (degraded === 1 ? "s" : "") +
-      " attention"
-    );
+    return m.overview_mcp_attention({ count: degraded });
   }
   const total = mcpOverviewTotal(servers);
   const connected = mcpOverviewConnectedCount(servers);
   if (total > 0 && connected === total) {
-    return "All MCP servers connected";
+    return m.overview_all_mcp_connected();
   }
-  return (
-    String(connected) +
-    " of " +
-    String(total) +
-    " server" +
-    (total === 1 ? "" : "s") +
-    " connected"
-  );
+  return m.overview_mcp_connected({ connected, total });
 }
