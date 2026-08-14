@@ -83,7 +83,7 @@ frontend:
 
 # Run dashboard JavaScript unit tests
 test-dashboard:
-	cd web/dashboard && node --test "tests/*.test.js"
+	cd web/dashboard && npm test
 
 # Run e2e tests (uses an in-process mock LLM server; no Docker required)
 test-e2e:

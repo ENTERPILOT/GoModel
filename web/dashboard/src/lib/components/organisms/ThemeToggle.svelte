@@ -5,24 +5,25 @@
   // sidebar); below 768px it is used regardless.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { themeStore } from "$lib/stores/ui.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
   import { Monitor, Moon, Sun } from "lucide";
 
   let { compact = false } = $props();
 
   const themes = [
-    { value: "light", icon: Sun, label: "Light theme" },
-    { value: "system", icon: Monitor, label: "System theme" },
-    { value: "dark", icon: Moon, label: "Dark theme" },
+    { value: "light", icon: Sun, label: m.theme_light() },
+    { value: "system", icon: Monitor, label: m.theme_system() },
+    { value: "dark", icon: Moon, label: m.theme_dark() },
   ];
   const activeTheme = $derived(
     themes.find((t) => t.value === themeStore.theme) || themes[1],
   );
   // The narrow button cycles rather than selects, so it is named for the
   // action it performs and carries the current theme as context.
-  const cycleLabel = $derived("Change theme (currently " + activeTheme.label + ")");
+  const cycleLabel = $derived(m.theme_change({ theme: activeTheme.label }));
 </script>
 
-<div class="theme-toggle" class:is-compact={compact} role="group" aria-label="Theme">
+<div class="theme-toggle" class:is-compact={compact} role="group" aria-label={m.theme_label()}>
   {#each themes as theme (theme.value)}
     <button
       class="theme-btn"

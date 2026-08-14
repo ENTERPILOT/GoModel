@@ -1,16 +1,19 @@
 // Pure-logic tests for the remembered reporting window: what gets persisted,
-// how a stored window is restored, and the picker trigger label.
+// how a stored window is restored, and localized picker presentation.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
   parseDateRange,
-  rangeLabel,
-  rangeSpanLabel,
   serializeDateRange,
   windowEndingToday,
 } from "../src/lib/stores/dateRangePrefs.js";
+import {
+  rangeChartTitle,
+  rangeLabel,
+  rangeSpanLabel,
+} from "../src/lib/stores/dateRangeText.js";
 import {
   addDaysToDateKey,
   daysBetweenDateKeys,
@@ -140,7 +143,10 @@ test("rangeLabel names today instead of dating it", () => {
     rangeLabel({ startKey: "2026-07-01", endKey: todayKey, todayKey }),
     "Jul 1, 2026 – Today",
   );
-  assert.equal(rangeLabel({ startKey: todayKey, todayKey }), "Today – ...");
+  assert.equal(
+    rangeLabel({ startKey: todayKey, todayKey }),
+    "Today – ...",
+  );
 });
 
 test("rangeLabel shows both edges of a multi-day window", () => {
@@ -150,9 +156,16 @@ test("rangeLabel shows both edges of a multi-day window", () => {
   );
 });
 
-test("rangeLabel falls back while only the start is picked", () => {
-  assert.equal(rangeLabel({ startKey: "2026-07-01" }), "Jul 1, 2026 – ...");
+test("rangeLabel handles incomplete and reversed windows", () => {
+  assert.equal(
+    rangeLabel({ startKey: "2026-07-01" }),
+    "Jul 1, 2026 – ...",
+  );
   assert.equal(rangeLabel({}), "Last 30 days");
+  assert.equal(
+    rangeLabel({ startKey: "2026-07-30", endKey: "2026-07-01" }),
+    "Last 30 days",
+  );
 });
 
 test("rangeSpanLabel counts the last N days for a window tracking today", () => {
@@ -181,14 +194,41 @@ test("rangeSpanLabel counts the last N days for a window tracking today", () => 
 test("rangeSpanLabel states the plain length of a frozen window", () => {
   const todayKey = "2026-07-30";
   assert.equal(
-    rangeSpanLabel({ startKey: "2026-06-01", endKey: "2026-06-30", todayKey }),
+    rangeSpanLabel({
+      startKey: "2026-06-01",
+      endKey: "2026-06-30",
+      todayKey,
+    }),
     "30 days",
   );
   assert.equal(
-    rangeSpanLabel({ startKey: "2026-06-09", endKey: "2026-06-09", todayKey }),
+    rangeSpanLabel({
+      startKey: "2026-06-09",
+      endKey: "2026-06-09",
+      todayKey,
+    }),
     "1 day",
   );
-  assert.equal(rangeSpanLabel({ startKey: "2026-06-09", todayKey }), "");
+  assert.equal(
+    rangeSpanLabel({ startKey: "2026-06-09", todayKey }),
+    "",
+  );
+  assert.equal(
+    rangeSpanLabel({
+      startKey: "2026-06-30",
+      endKey: "2026-06-01",
+      todayKey,
+    }),
+    "",
+  );
+});
+
+test("rangeChartTitle translates complete interval phrases", () => {
+  assert.equal(rangeChartTitle("daily"), "Daily Token Usage");
+  assert.equal(rangeChartTitle("monthly"), "Monthly Token Usage");
+  assert.equal(rangeChartTitle("unknown"), "Daily Token Usage");
+  assert.equal(rangeChartTitle("toString"), "Daily Token Usage");
+  assert.equal(rangeChartTitle("__proto__"), "Daily Token Usage");
 });
 
 test("parseDateRange rejects keys that are not real calendar days", () => {
