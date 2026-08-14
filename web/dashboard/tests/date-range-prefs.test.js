@@ -193,12 +193,19 @@ test("rangeLabel shows both edges of a multi-day window", () => {
   );
 });
 
-test("rangeLabel falls back while only the start is picked", () => {
+test("rangeLabel handles incomplete and reversed windows", () => {
   assert.equal(
     localizedRangeLabel({ startKey: "2026-07-01" }, englishText),
     "Jul 1, 2026 – ...",
   );
   assert.equal(localizedRangeLabel({}, englishText), "Last 30 days");
+  assert.equal(
+    localizedRangeLabel(
+      { startKey: "2026-07-30", endKey: "2026-07-01" },
+      englishText,
+    ),
+    "Last 30 days",
+  );
 });
 
 test("rangeSpanLabel counts the last N days for a window tracking today", () => {
@@ -253,6 +260,13 @@ test("rangeSpanLabel states the plain length of a frozen window", () => {
     localizedRangeSpanLabel({ startKey: "2026-06-09", todayKey }, englishText),
     "",
   );
+  assert.equal(
+    localizedRangeSpanLabel(
+      { startKey: "2026-06-30", endKey: "2026-06-01", todayKey },
+      englishText,
+    ),
+    "",
+  );
 });
 
 test("localizedRangeChartTitle translates complete interval phrases", () => {
@@ -266,6 +280,14 @@ test("localizedRangeChartTitle translates complete interval phrases", () => {
   );
   assert.equal(
     localizedRangeChartTitle("unknown", englishText),
+    "Daily Token Usage",
+  );
+  assert.equal(
+    localizedRangeChartTitle("toString", englishText),
+    "Daily Token Usage",
+  );
+  assert.equal(
+    localizedRangeChartTitle("__proto__", englishText),
     "Daily Token Usage",
   );
 });

@@ -18,6 +18,9 @@ export function localizedRangeLabel(
   }
 
   if (isDateKey(startKey) && isDateKey(endKey)) {
+    if (startKey > endKey) {
+      return text.lastDays(Number(DEFAULT_PRESET_DAYS));
+    }
     const start = dateEdgeLabel(startKey, todayKey, text);
     if (startKey === endKey) return start;
     return text.range({
@@ -41,6 +44,7 @@ export function localizedRangeSpanLabel(
     return text.lastDays(Number(selectedPreset));
   }
   if (!isDateKey(startKey) || !isDateKey(endKey)) return "";
+  if (startKey > endKey) return "";
 
   const days = daysBetweenDateKeys(startKey, endKey);
   if (followsToday || endKey === todayKey) {
@@ -52,5 +56,8 @@ export function localizedRangeSpanLabel(
 }
 
 export function localizedRangeChartTitle(interval, text) {
-  return (text.chartTitle[interval] || text.chartTitle.daily)();
+  const title = Object.hasOwn(text.chartTitle, interval)
+    ? text.chartTitle[interval]
+    : text.chartTitle.daily;
+  return title();
 }
