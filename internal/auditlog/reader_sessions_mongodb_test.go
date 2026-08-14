@@ -12,10 +12,10 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 )
 
-func TestMongoSessionTotalLookup(t *testing.T) {
-	stage, err := bson.MarshalExtJSON(mongoSessionTotalLookup("custom_audit_logs"), false, false)
+func TestMongoRequestCountLookup(t *testing.T) {
+	stage, err := bson.MarshalExtJSON(mongoRequestCountLookup("custom_audit_logs"), false, false)
 	if err != nil {
-		t.Fatalf("marshal session total lookup: %v", err)
+		t.Fatalf("marshal request count lookup: %v", err)
 	}
 	encoded := string(stage)
 	for _, want := range []string{
@@ -24,10 +24,10 @@ func TestMongoSessionTotalLookup(t *testing.T) {
 		`"$ne":["$$sid",""]`,
 		`"$eq":["$session_id","$$sid"]`,
 		`"$count":"count"`,
-		`"as":"session_total"`,
+		`"as":"request_count"`,
 	} {
 		if !strings.Contains(encoded, want) {
-			t.Fatalf("session total lookup = %s, want fragment %s", encoded, want)
+			t.Fatalf("request count lookup = %s, want fragment %s", encoded, want)
 		}
 	}
 }
@@ -65,11 +65,8 @@ func TestMongoDBReader_GetSessions(t *testing.T) {
 			t.Fatalf("sessions[0].Latest.ID = %q, want solo", got)
 		}
 		threadA := result.Sessions[1]
-		if threadA.SessionID != "sess-a" || threadA.Count != 2 || threadA.TotalCount != 2 || threadA.Latest.ID != "a-2" {
+		if threadA.SessionID != "sess-a" || threadA.RequestCount != 2 || threadA.Latest.ID != "a-2" {
 			t.Fatalf("sess-a summary = %+v", threadA)
-		}
-		if !threadA.FirstTimestamp.Equal(base.Add(-24*time.Hour)) || !threadA.LastTimestamp.Equal(base.Add(2*time.Minute)) {
-			t.Fatalf("sess-a span = %v..%v", threadA.FirstTimestamp, threadA.LastTimestamp)
 		}
 		if result.Sessions[2].SessionID != "sess-b" {
 			t.Fatalf("sessions[2] = %+v", result.Sessions[2])

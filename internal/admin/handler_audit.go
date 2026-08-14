@@ -192,8 +192,8 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 //
 // @Summary      Get paginated audit sessions (threads)
 // @Description  Groups audit log entries by session id into threads and returns
-// @Description  one summary per thread — its latest entry, entry count, and time
-// @Description  span — ordered by latest activity. Entries without a session id
+// @Description  one summary per thread — its latest matching entry and complete
+// @Description  request count — ordered by latest activity. Entries without a session id
 // @Description  appear as single-entry threads. Filters apply to entries before
 // @Description  grouping.
 // @Tags         admin
@@ -263,15 +263,9 @@ func (h *Handler) AuditSessions(c *echo.Context) error {
 		// Session heads are list rows too. Keep the default grouped view on the
 		// same slim payload contract as /admin/audit/log.
 		slimAuditListEntry(&enriched.Entries[i])
-		totalCount := max(session.Count, session.TotalCount)
 		response.Sessions[i] = auditSessionResponse{
-			SessionID:      session.SessionID,
-			Count:          session.Count,
-			MatchingCount:  session.Count,
-			TotalCount:     totalCount,
-			FirstTimestamp: session.FirstTimestamp,
-			LastTimestamp:  session.LastTimestamp,
-			Latest:         enriched.Entries[i],
+			RequestCount: session.RequestCount,
+			Latest:       enriched.Entries[i],
 		}
 	}
 	return c.JSON(http.StatusOK, response)

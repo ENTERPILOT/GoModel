@@ -982,7 +982,8 @@ SELECT
   strftime('%Y-%m-%dT%H:%M:%fZ', day || ' 00:00:00', '+' || (second_of_day + 1) || ' seconds'),
   80000000 + (token_noise % 110000000)
 FROM demo_generated
-WHERE abs(token_noise / 131) % 1000 >= 994;
+WHERE abs(token_noise / 131) % 1000 >= 994
+  AND (day != date(${seed_utc_epoch}, 'unixepoch') OR second_of_day < ${current_utc_second});
 
 INSERT INTO audit_log_attempts (
   audit_log_id, seq, kind, provider_type, provider_name, model,
@@ -1003,7 +1004,10 @@ SELECT
   strftime('%Y-%m-%dT%H:%M:%fZ', day || ' 00:00:00', '+' || (second_of_day + 1) || ' seconds'),
   90000000 + (token_noise % 200000000)
 FROM demo_generated
-WHERE abs(token_noise / 131) % 1000 < 985 AND cache_type IS NULL AND token_noise % 37 = 0;
+WHERE abs(token_noise / 131) % 1000 < 985
+  AND cache_type IS NULL
+  AND token_noise % 37 = 0
+  AND (day != date(${seed_utc_epoch}, 'unixepoch') OR second_of_day < ${current_utc_second});
 
 DROP TABLE IF EXISTS temp.demo_budget_paths;
 CREATE TEMP TABLE demo_budget_paths(user_path TEXT, daily_amount REAL, weekly_amount REAL, monthly_amount REAL);
@@ -1036,9 +1040,12 @@ SELECT
   period_seconds,
   amount,
   '${prefix}',
-  strftime('%s', date(CASE WHEN '${end_date}' = '' THEN 'now' ELSE '${end_date}' END)),
-  strftime('%s', 'now'),
-  strftime('%s', 'now')
+  strftime('%s', CASE
+    WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch')
+    ELSE date('${end_date}')
+  END),
+  ${seed_utc_epoch},
+  ${seed_utc_epoch}
 FROM budget_rows
 WHERE true
 ON CONFLICT(user_path, period_seconds) DO UPDATE SET

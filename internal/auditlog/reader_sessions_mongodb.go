@@ -3,7 +3,6 @@ package auditlog
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -54,9 +53,7 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		bson.D{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: mongoThreadKeyExpr},
 			{Key: "latest_id", Value: bson.D{{Key: "$first", Value: "$_id"}}},
-			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
-			{Key: "first_ts", Value: bson.D{{Key: "$min", Value: "$timestamp"}}},
-			{Key: "last_ts", Value: bson.D{{Key: "$max", Value: "$timestamp"}}},
+			{Key: "last_ts", Value: bson.D{{Key: "$first", Value: "$timestamp"}}},
 		}}},
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "last_ts", Value: -1}, {Key: "_id", Value: -1}}}},
 		bson.D{{Key: "$facet", Value: bson.D{
@@ -74,7 +71,7 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 				// known. Deliberately omit the active filters to mirror the
 				// dashboard's unfiltered session_id expansion. Sessionless rows
 				// remain singletons and skip this match via the non-empty sid guard.
-				mongoSessionTotalLookup(r.collection.Name()),
+				mongoRequestCountLookup(r.collection.Name()),
 			}},
 			{Key: "total", Value: bson.A{
 				bson.D{{Key: "$count", Value: "count"}},
@@ -91,12 +88,9 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 	var facetResult struct {
 		Data []struct {
 			Latest       mongoLogRow `bson:"latest"`
-			Count        int         `bson:"count"`
-			SessionTotal []struct {
+			RequestCount []struct {
 				Count int `bson:"count"`
-			} `bson:"session_total"`
-			FirstTS time.Time `bson:"first_ts"`
-			LastTS  time.Time `bson:"last_ts"`
+			} `bson:"request_count"`
 		} `bson:"data"`
 		Total []struct {
 			Count int `bson:"count"`
@@ -122,29 +116,23 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		if entry == nil {
 			continue
 		}
-		totalCount := 1
-		if entry.SessionID != "" {
-			totalCount = row.Count
-			if len(row.SessionTotal) > 0 && row.SessionTotal[0].Count > totalCount {
-				totalCount = row.SessionTotal[0].Count
-			}
+		requestCount := 1
+		if entry.SessionID != "" && len(row.RequestCount) > 0 {
+			requestCount = max(1, row.RequestCount[0].Count)
 		}
 		sessions = append(sessions, SessionSummary{
-			SessionID:      entry.SessionID,
-			Count:          row.Count,
-			TotalCount:     totalCount,
-			FirstTimestamp: row.FirstTS,
-			LastTimestamp:  row.LastTS,
-			Latest:         *entry,
+			SessionID:    entry.SessionID,
+			RequestCount: requestCount,
+			Latest:       *entry,
 		})
 	}
 	return &SessionListResult{Sessions: sessions, Total: total, Limit: limit, Offset: offset}, nil
 }
 
-// mongoSessionTotalLookup builds the filter-independent count used by session
+// mongoRequestCountLookup builds the filter-independent count used by session
 // summaries. Keeping it separate makes the aggregation contract testable
 // without a running MongoDB service.
-func mongoSessionTotalLookup(collectionName string) bson.D {
+func mongoRequestCountLookup(collectionName string) bson.D {
 	return bson.D{{Key: "$lookup", Value: bson.D{
 		{Key: "from", Value: collectionName},
 		{Key: "let", Value: bson.D{{Key: "sid", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$latest.session_id", ""}}}}}},
@@ -155,6 +143,6 @@ func mongoSessionTotalLookup(collectionName string) bson.D {
 			}}}}}}},
 			bson.D{{Key: "$count", Value: "count"}},
 		}},
-		{Key: "as", Value: "session_total"},
+		{Key: "as", Value: "request_count"},
 	}}}
 }

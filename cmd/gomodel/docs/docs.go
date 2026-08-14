@@ -257,7 +257,7 @@ const docTemplate = `{
         },
         "/admin/audit/sessions": {
             "get": {
-                "description": "Groups audit log entries by session id into threads and returns\none summary per thread — its latest entry, entry count, and time\nspan — ordered by latest activity. Entries without a session id\nappear as single-entry threads. Filters apply to entries before\ngrouping.",
+                "description": "Groups audit log entries by session id into threads and returns\none summary per thread — its latest matching entry and complete\nrequest count — ordered by latest activity. Entries without a session id\nappear as single-entry threads. Filters apply to entries before\ngrouping.",
                 "produces": [
                     "application/json"
                 ],
@@ -7001,29 +7001,10 @@ const docTemplate = `{
         "admin.auditSessionResponse": {
             "type": "object",
             "properties": {
-                "count": {
-                    "description": "Count is the number of requests matching the active filters.\nDeprecated: use MatchingCount.",
-                    "type": "integer",
-                    "x-deprecated": true
-                },
-                "first_timestamp": {
-                    "type": "string"
-                },
-                "last_timestamp": {
-                    "type": "string"
-                },
                 "latest": {
                     "$ref": "#/definitions/admin.auditLogEntryResponse"
                 },
-                "matching_count": {
-                    "description": "MatchingCount is the number of requests matching the active filters.",
-                    "type": "integer"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "total_count": {
-                    "description": "TotalCount is the number of requests in the complete session.",
+                "request_count": {
                     "type": "integer"
                 }
             }

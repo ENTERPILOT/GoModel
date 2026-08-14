@@ -44,19 +44,13 @@ type LogListResult struct {
 	Offset  int        `json:"offset"`
 }
 
-// SessionSummary describes one session (thread) of audit log entries: its
-// latest matching entry plus aggregate span and counts. Count reflects the
-// active filters; TotalCount covers the complete session. Entries without a
-// session id form singleton threads whose SessionID is empty.
+// SessionSummary describes one session (thread) of audit log entries. Filters
+// choose the latest matching entry; RequestCount covers the complete session.
+// Entries without a session id form singleton threads.
 type SessionSummary struct {
-	SessionID string `json:"session_id,omitempty"`
-	// Count is retained as the internal matching count for compatibility.
-	// Public API consumers should use the explicitly named matching_count field.
-	Count          int       `json:"count"`
-	TotalCount     int       `json:"total_count"`
-	FirstTimestamp time.Time `json:"first_timestamp"`
-	LastTimestamp  time.Time `json:"last_timestamp"`
-	Latest         LogEntry  `json:"latest"`
+	SessionID    string   `json:"session_id,omitempty"`
+	RequestCount int      `json:"request_count"`
+	Latest       LogEntry `json:"latest"`
 }
 
 // SessionListResult holds a paginated list of session summaries ordered by
@@ -93,8 +87,7 @@ type Reader interface {
 	// GetSessions returns a paginated list of audit sessions (threads): one
 	// summary per distinct session id, plus singleton threads for entries
 	// without one, ordered by latest activity. Filters apply to entries before
-	// grouping, so a thread's Latest, Count and span reflect the matching
-	// entries. TotalCount reflects the complete session.
+	// grouping. RequestCount reflects the complete session.
 	GetSessions(ctx context.Context, params LogQueryParams) (*SessionListResult, error)
 
 	// GetLogByID returns a single audit log entry by ID.

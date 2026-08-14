@@ -14,7 +14,7 @@
   import { ChevronDown, ChevronLeft, ChevronRight } from "lucide";
 
   // `thread` marks a session-thread head row (grouped mode):
-  // { count, matchingCount, expanded, ontoggle }. `expanded`/`onactivate` wire the
+  // { count, expanded, ontoggle }. `expanded`/`onactivate` wire the
   // Svelte-controlled row expansion: the click is intercepted (the parent
   // <details> stays open so the close can animate) and the state lives in
   // auditList.
@@ -50,18 +50,7 @@
   }
 
   function threadDescription() {
-    const total = Number(thread.count || 1);
-    const matching = Number(thread.matchingCount || total);
-    if (matching < total) {
-      return (
-        "Session with " +
-        total +
-        " requests; " +
-        matching +
-        " match selected filters"
-      );
-    }
-    return "Session with " + total + " requests";
+    return "Session with " + Number(thread.count || 1) + " requests";
   }
 
   function openConversation(event) {

@@ -18,19 +18,11 @@ const auditThreadKey = `COALESCE(NULLIF(session_id, ''), CAST(id AS TEXT))`
 // GetSessions returns a paginated list of audit sessions ordered by latest
 // activity. Works identically on SQLite and PostgreSQL.
 //
-// The window pass ranks and aggregates threads over ID AND TIMESTAMP ONLY —
+// The window pass ranks threads over ID AND TIMESTAMP ONLY —
 // carrying the full entry (its `data` blob above all) through the partition
 // sort meant every audit body in the window got materialized and sorted just
 // to discard all but one row per thread. The outer join re-reads the complete
 // rows for the page's 25 winners, by primary key.
-//
-// All four window functions share one named window so the partition is sorted
-// once rather than per aggregate. The explicit full frame is what lets the
-// aggregates share the ranking window's ORDER BY: without it they would be
-// running totals over the frame ending at the current row. ROW_NUMBER ignores
-// the frame, as specified. And since the partition is ordered by timestamp
-// DESC, the ranked row IS its thread's newest entry, so its own timestamp is
-// the thread's last_ts and no MAX() window is needed.
 func (r *SQLReader) GetSessions(ctx context.Context, params LogQueryParams) (*SessionListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
@@ -52,26 +44,21 @@ func (r *SQLReader) GetSessions(ctx context.Context, params LogQueryParams) (*Se
 	// operations describe the same complete session.
 	query := `WITH ranked AS (
 		SELECT id, timestamp AS last_ts,
-			ROW_NUMBER() OVER thread AS rn,
-			COUNT(*) OVER thread AS entry_count,
-			MIN(timestamp) OVER thread AS first_ts
+			ROW_NUMBER() OVER (
+				PARTITION BY ` + auditThreadKey + `
+				ORDER BY timestamp DESC, id DESC
+			) AS rn
 		FROM audit_logs` + where + `
-		WINDOW thread AS (
-			PARTITION BY ` + auditThreadKey + `
-			ORDER BY timestamp DESC, id DESC
-			ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-		)
 	), heads AS (
-		SELECT id, entry_count, first_ts, last_ts
+		SELECT id, last_ts
 		FROM ranked WHERE rn = 1
 		ORDER BY last_ts DESC, id DESC LIMIT ? OFFSET ?
 	)
-	SELECT ` + qualifiedLogColumns("l") + `, h.entry_count,
+	SELECT ` + qualifiedLogColumns("l") + `,
 		CASE WHEN NULLIF(l.session_id, '') IS NULL THEN 1 ELSE (
 			SELECT COUNT(*) FROM audit_logs session_entries
 			WHERE session_entries.session_id = l.session_id
-		) END AS total_count,
-		h.first_ts, h.last_ts
+		) END AS request_count
 	FROM heads h JOIN audit_logs l ON l.id = h.id
 	ORDER BY h.last_ts DESC, h.id DESC`
 
@@ -96,35 +83,26 @@ func (r *SQLReader) GetSessions(ctx context.Context, params LogQueryParams) (*Se
 }
 
 // sessionSummaryScanner adapts a session row to the log-entry scanner: the
-// leading columns are exactly a log entry, followed by the three aggregates.
+// leading columns are exactly a log entry, followed by the request count.
 type sessionSummaryScanner struct {
-	row     sqlx.Row
-	count   *int
-	total   *int
-	firstTS *sqlx.Timestamp
-	lastTS  *sqlx.Timestamp
+	row          sqlx.Row
+	requestCount *int
 }
 
 func (s sessionSummaryScanner) Scan(dest ...any) error {
-	return s.row.Scan(append(dest, s.count, s.total, s.firstTS, s.lastTS)...)
+	return s.row.Scan(append(dest, s.requestCount)...)
 }
 
 func scanSQLSessionSummary(row sqlx.Row) (*SessionSummary, error) {
 	var summary SessionSummary
-	var firstTS, lastTS sqlx.Timestamp
 	entry, err := scanSQLLogEntry(sessionSummaryScanner{
-		row:     row,
-		count:   &summary.Count,
-		total:   &summary.TotalCount,
-		firstTS: &firstTS,
-		lastTS:  &lastTS,
+		row:          row,
+		requestCount: &summary.RequestCount,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan audit session row: %w", err)
 	}
 	summary.SessionID = entry.SessionID
-	summary.FirstTimestamp = firstTS.Time
-	summary.LastTimestamp = lastTS.Time
 	summary.Latest = *entry
 	return &summary, nil
 }

@@ -38,11 +38,8 @@ func TestAuditSessions_Success(t *testing.T) {
 		sessionsResult: &auditlog.SessionListResult{
 			Sessions: []auditlog.SessionSummary{
 				{
-					SessionID:      "sess-a",
-					Count:          3,
-					TotalCount:     6,
-					FirstTimestamp: now.Add(-time.Minute),
-					LastTimestamp:  now,
+					SessionID:    "sess-a",
+					RequestCount: 6,
 					Latest: auditlog.LogEntry{
 						ID:        "log-3",
 						Timestamp: now,
@@ -52,9 +49,7 @@ func TestAuditSessions_Success(t *testing.T) {
 					},
 				},
 				{
-					Count:          1,
-					FirstTimestamp: now.Add(-time.Hour),
-					LastTimestamp:  now.Add(-time.Hour),
+					RequestCount: 1,
 					Latest: auditlog.LogEntry{
 						ID:        "log-1",
 						Timestamp: now.Add(-time.Hour),
@@ -84,11 +79,8 @@ func TestAuditSessions_Success(t *testing.T) {
 
 	var result struct {
 		Sessions []struct {
-			SessionID     string             `json:"session_id"`
-			Count         int                `json:"count"`
-			MatchingCount int                `json:"matching_count"`
-			TotalCount    int                `json:"total_count"`
-			Latest        *auditlog.LogEntry `json:"latest"`
+			RequestCount int                `json:"request_count"`
+			Latest       *auditlog.LogEntry `json:"latest"`
 		} `json:"sessions"`
 		Total int `json:"total"`
 	}
@@ -98,13 +90,13 @@ func TestAuditSessions_Success(t *testing.T) {
 	if result.Total != 2 || len(result.Sessions) != 2 {
 		t.Fatalf("total=%d sessions=%d, want 2/2", result.Total, len(result.Sessions))
 	}
-	if result.Sessions[0].SessionID != "sess-a" || result.Sessions[0].Count != 3 || result.Sessions[0].MatchingCount != 3 || result.Sessions[0].TotalCount != 6 {
+	if result.Sessions[0].RequestCount != 6 {
 		t.Errorf("first session = %+v", result.Sessions[0])
 	}
 	if result.Sessions[0].Latest == nil || result.Sessions[0].Latest.ID != "log-3" {
 		t.Errorf("latest entry not embedded: %+v", result.Sessions[0].Latest)
 	}
-	if result.Sessions[1].SessionID != "" || result.Sessions[1].Count != 1 || result.Sessions[1].MatchingCount != 1 || result.Sessions[1].TotalCount != 1 {
+	if result.Sessions[1].RequestCount != 1 {
 		t.Errorf("singleton thread = %+v", result.Sessions[1])
 	}
 }
@@ -115,11 +107,9 @@ func TestAuditSessions_SlimsLatestEntries(t *testing.T) {
 	reader := &mockAuditReader{
 		sessionsResult: &auditlog.SessionListResult{
 			Sessions: []auditlog.SessionSummary{{
-				SessionID:      "sess-a",
-				Count:          2,
-				FirstTimestamp: entry.Timestamp.Add(-time.Minute),
-				LastTimestamp:  entry.Timestamp,
-				Latest:         entry,
+				SessionID:    "sess-a",
+				RequestCount: 2,
+				Latest:       entry,
 			}},
 			Total: 1,
 			Limit: 25,

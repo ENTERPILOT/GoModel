@@ -161,14 +161,6 @@ export function auditSessionCount(entry) {
   return Number.isFinite(count) && count > 1 ? count : 1;
 }
 
-// The matching count is the part of a complete session that satisfied the
-// active date/search filters. Older servers only provide one count, so use the
-// complete count as a backwards-compatible fallback.
-export function auditSessionMatchingCount(entry) {
-  const count = Number(entry && entry.session_matching_count);
-  return Number.isFinite(count) && count > 0 ? count : auditSessionCount(entry);
-}
-
 // auditIsThreadHead reports whether a row gets the expander: it belongs to a
 // session with more entries than itself.
 export function auditIsThreadHead(entry) {
@@ -184,28 +176,10 @@ export function auditLogFromSessions(payload) {
   return {
     entries: sessions
       .filter((session) => session && session.latest)
-      .map((session) => {
-        const matchingValue = Number(
-          session.matching_count || session.count || 1,
-        );
-        const matchingCount =
-          Number.isFinite(matchingValue) && matchingValue > 0
-            ? matchingValue
-            : 1;
-        const totalValue = Number(session.total_count || matchingCount);
-        const totalCount =
-          Number.isFinite(totalValue) && totalValue > matchingCount
-            ? totalValue
-            : matchingCount;
-        return {
-          ...session.latest,
-          session_id:
-            auditSessionId(session.latest) ||
-            String(session.session_id || "").trim(),
-          session_count: totalCount,
-          session_matching_count: matchingCount,
-        };
-      }),
+      .map((session) => ({
+        ...session.latest,
+        session_count: Math.max(1, Number(session.request_count) || 1),
+      })),
     total: Number((payload && payload.total) || 0),
     limit: Number((payload && payload.limit) || 25),
     offset: Number((payload && payload.offset) || 0),
@@ -406,35 +380,21 @@ export function auditGroupedLogWithLiveEntries(payload, currentEntries, filters)
       // Fold into the fetched thread: the pending preview is newer than the
       // persisted head, so it becomes the head. Counts already accumulated by
       // the live grouping path are authoritative; otherwise this distinct
-      // request increments the fetched counts.
+      // request increments the fetched count.
       const index = headBySession.get(sid);
       if (merged === entries) merged = [...entries];
-      const previousTotal = auditSessionCount(merged[index]);
-      const previousMatching = auditSessionMatchingCount(merged[index]);
-      const incomingTotalValue = Number(entry && entry.session_count);
-      const incomingTotal =
-        Number.isFinite(incomingTotalValue) && incomingTotalValue > 1
-          ? incomingTotalValue
+      const previousCount = auditSessionCount(merged[index]);
+      const incomingValue = Number(entry && entry.session_count);
+      const incomingCount =
+        Number.isFinite(incomingValue) && incomingValue > 1
+          ? incomingValue
           : null;
-      const incomingMatchingValue = Number(
-        entry && entry.session_matching_count,
-      );
-      const incomingMatching =
-        incomingTotal !== null &&
-        Number.isFinite(incomingMatchingValue) &&
-        incomingMatchingValue > 0
-          ? incomingMatchingValue
-          : incomingTotal;
       merged[index] = {
         ...entry,
         session_count:
-          incomingTotal === null
-            ? previousTotal + 1
-            : Math.max(previousTotal, incomingTotal),
-        session_matching_count:
-          incomingMatching === null
-            ? previousMatching + 1
-            : Math.max(previousMatching, incomingMatching),
+          incomingCount === null
+            ? previousCount + 1
+            : Math.max(previousCount, incomingCount),
       };
       keys.forEach((key) => persistedKeys.add(key));
       return;
