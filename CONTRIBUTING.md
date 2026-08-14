@@ -28,6 +28,9 @@ The admin dashboard is a Svelte 5 single-page app in `web/dashboard/`. The
 built assets are committed under `internal/admin/dashboard/static/dist/` and
 embedded into the Go binary, so plain `go build` works without Node.
 
+Dashboard translations are welcome; see the
+[translation guide](web/dashboard/src/lib/i18n/README.md).
+
 When you change dashboard sources:
 
 ```sh

@@ -49,6 +49,10 @@
     thread.ontoggle();
   }
 
+  function threadDescription() {
+    return "Session with " + Number(thread.count || 1) + " requests";
+  }
+
   function openConversation(event) {
     event.stopPropagation();
     event.preventDefault();
@@ -75,10 +79,9 @@
         type="button"
         class="audit-thread-expander"
         aria-expanded={thread.expanded}
-        title={"Session with " + thread.count + " requests"}
-        aria-label={"Session with " +
-          thread.count +
-          " requests, " +
+        title={threadDescription()}
+        aria-label={threadDescription() +
+          ", " +
           (thread.expanded ? "collapse" : "expand")}
         onclick={toggleThread}
       >
