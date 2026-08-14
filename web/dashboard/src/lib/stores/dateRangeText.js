@@ -1,63 +1,74 @@
-// Exports pure localized labels, span tooltips, and chart titles for the shared
-// reporting window. Callers supply i18n operations so this module remains
-// rune-free and directly testable.
+// Pure localized labels, span tooltips, and chart titles for the shared
+// reporting window. This module stays rune-free for node:test.
 
 import { daysBetweenDateKeys, isDateKey } from "../utils/dateKeys.js";
+import { formatDate } from "../i18n/locale.js";
+import * as m from "../paraglide/messages.js";
 import { DEFAULT_PRESET_DAYS } from "./dateRangePrefs.js";
 
-function dateEdgeLabel(key, todayKey, text) {
-  return key === todayKey ? text.today() : text.date(key);
+function lastDays(count) {
+  return m.date_picker_last_days({ count: Number(count) });
 }
 
-export function localizedRangeLabel(
-  { selectedPreset, startKey, endKey, todayKey },
-  text,
-) {
-  if (selectedPreset) {
-    return text.lastDays(Number(selectedPreset));
-  }
+function dateEdgeLabel(key, todayKey) {
+  if (key === todayKey) return m.date_picker_today();
+  return formatDate(new Date(key + "T00:00:00Z"), {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+export function rangeLabel({ selectedPreset, startKey, endKey, todayKey }) {
+  if (selectedPreset) return lastDays(selectedPreset);
 
   if (isDateKey(startKey) && isDateKey(endKey)) {
-    if (startKey > endKey) {
-      return text.lastDays(Number(DEFAULT_PRESET_DAYS));
-    }
-    const start = dateEdgeLabel(startKey, todayKey, text);
+    if (startKey > endKey) return lastDays(DEFAULT_PRESET_DAYS);
+    const start = dateEdgeLabel(startKey, todayKey);
     if (startKey === endKey) return start;
-    return text.range({
+    return m.date_picker_range({
       start,
-      end: dateEdgeLabel(endKey, todayKey, text),
+      end: dateEdgeLabel(endKey, todayKey),
     });
   }
   if (isDateKey(startKey)) {
-    return text.openRange({
-      start: dateEdgeLabel(startKey, todayKey, text),
+    return m.date_picker_open_range({
+      start: dateEdgeLabel(startKey, todayKey),
     });
   }
-  return text.lastDays(Number(DEFAULT_PRESET_DAYS));
+  return lastDays(DEFAULT_PRESET_DAYS);
 }
 
-export function localizedRangeSpanLabel(
-  { selectedPreset, startKey, endKey, followsToday, todayKey },
-  text,
-) {
-  if (selectedPreset) {
-    return text.lastDays(Number(selectedPreset));
-  }
+export function rangeSpanLabel({
+  selectedPreset,
+  startKey,
+  endKey,
+  followsToday,
+  todayKey,
+}) {
+  if (selectedPreset) return lastDays(selectedPreset);
   if (!isDateKey(startKey) || !isDateKey(endKey)) return "";
   if (startKey > endKey) return "";
 
   const days = daysBetweenDateKeys(startKey, endKey);
   if (followsToday || endKey === todayKey) {
     return days === 1
-      ? text.today()
-      : text.lastDays(days);
+      ? m.date_picker_today()
+      : lastDays(days);
   }
-  return text.days(days);
+  return m.date_picker_days({ count: days });
 }
 
-export function localizedRangeChartTitle(interval, text) {
-  const title = Object.hasOwn(text.chartTitle, interval)
-    ? text.chartTitle[interval]
-    : text.chartTitle.daily;
-  return title();
+export function rangeChartTitle(interval) {
+  switch (interval) {
+    case "weekly":
+      return m.date_range_chart_title_weekly();
+    case "monthly":
+      return m.date_range_chart_title_monthly();
+    case "yearly":
+      return m.date_range_chart_title_yearly();
+    default:
+      return m.date_range_chart_title_daily();
+  }
 }

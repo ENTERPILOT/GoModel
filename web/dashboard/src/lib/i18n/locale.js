@@ -5,8 +5,8 @@ import {
   defineCustomClientStrategy,
   getLocale,
   getTextDirection,
-} from "$lib/paraglide/runtime.js";
-import { readStored, writeStored } from "$lib/utils/storage.js";
+} from "../paraglide/runtime.js";
+import { readStored, writeStored } from "../utils/storage.js";
 
 const LOCALE_STORAGE_KEY = "gomodel_locale";
 

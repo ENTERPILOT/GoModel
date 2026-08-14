@@ -26,6 +26,12 @@
       { month: "long", year: "numeric", timeZone: "UTC" },
     ),
   );
+  const weekdayLabels = Array.from({ length: 7 }, (_, day) =>
+    formatDate(new Date(Date.UTC(2024, 0, 1 + day)), {
+      weekday: "short",
+      timeZone: "UTC",
+    }),
+  );
 
   const key = (day) => timezone.dateToDateKey(day.date);
   const isFuture = (day) => key(day) > timezone.currentDateKey();
@@ -72,13 +78,9 @@
     {/if}
   </div>
   <div class="dp-weekdays">
-    <span>{m.date_picker_weekday_monday_short()}</span>
-    <span>{m.date_picker_weekday_tuesday_short()}</span>
-    <span>{m.date_picker_weekday_wednesday_short()}</span>
-    <span>{m.date_picker_weekday_thursday_short()}</span>
-    <span>{m.date_picker_weekday_friday_short()}</span>
-    <span>{m.date_picker_weekday_saturday_short()}</span>
-    <span>{m.date_picker_weekday_sunday_short()}</span>
+    {#each weekdayLabels as weekday}
+      <span>{weekday}</span>
+    {/each}
   </div>
   <div class="dp-days">
     {#each days as day (day.key)}

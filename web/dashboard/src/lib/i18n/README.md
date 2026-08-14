@@ -19,9 +19,10 @@ Import generated messages as a namespace and call the message directly:
 <span>{m.date_picker_last_days({ count: days })}</span>
 ```
 
-Use flat semantic keys such as `auth_api_key_invalid`. Reuse a message only
-when its meaning is identical. Prefer complete phrases with named inputs over
-concatenating translated fragments, so translators can change word order.
+Use flat, lowercase snake-case keys such as `auth_api_key_invalid`; Paraglide
+exports message IDs as JavaScript function names and normalizes punctuation to
+underscores. Reuse a message only when its meaning is identical. Prefer complete
+phrases with named inputs so translators can change word order.
 
 ## Adding a locale
 

@@ -10,11 +10,11 @@
 
   let { compact = false } = $props();
 
-  const themes = $derived([
+  const themes = [
     { value: "light", icon: Sun, label: m.theme_light() },
     { value: "system", icon: Monitor, label: m.theme_system() },
     { value: "dark", icon: Moon, label: m.theme_dark() },
-  ]);
+  ];
   const activeTheme = $derived(
     themes.find((t) => t.value === themeStore.theme) || themes[1],
   );
