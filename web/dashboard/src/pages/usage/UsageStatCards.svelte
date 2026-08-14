@@ -16,6 +16,7 @@
     usagePageTotalRequests,
   } from "./usage-helpers.js";
   import CacheOverviewCards from "./CacheOverviewCards.svelte";
+  import * as m from "$lib/paraglide/messages.js";
 
   const savingsVisible = $derived(rewriteSavingsVisible(usagePage.usageSummary));
   // One savings number, in whatever unit the page's Tokens/Costs toggle is on.
@@ -29,7 +30,7 @@
 
 <div class="cards">
   <div class="card">
-    <div class="card-label">Total Requests</div>
+    <div class="card-label">{m.overview_total_requests()}</div>
     <div
       class="card-value"
       title={usagePageRequestsTitle(
@@ -39,7 +40,7 @@
       )}
     >
       {#if usagePage.summaryLoading}
-        <Spinner size={18} label="Loading usage summary" />
+        <Spinner size={18} label={m.usage_loading_summary()} />
       {:else}
         {formatNumber(
           usagePageTotalRequests(
@@ -52,10 +53,10 @@
     </div>
   </div>
   <div class="card">
-    <div class="card-label">Estimated Cost</div>
+    <div class="card-label">{m.overview_estimated_cost()}</div>
     <div class="card-value" title={usagePageCostTitle(usagePage.usageSummary)}>
       {#if usagePage.summaryLoading}
-        <Spinner size={18} label="Loading usage summary" />
+        <Spinner size={18} label={m.usage_loading_summary()} />
       {:else}
         {formatCost(usagePage.usageSummary.total_cost)}
       {/if}
@@ -63,7 +64,7 @@
   </div>
   {#if savingsVisible}
     <div class="card">
-      <div class="card-label">Pro Saved</div>
+      <div class="card-label">{m.usage_pro_saved()}</div>
       <div
         class="card-value pro-saved-value"
         title={proSavedTitle(usagePage.usageSummary, usagePage.usageMode)}

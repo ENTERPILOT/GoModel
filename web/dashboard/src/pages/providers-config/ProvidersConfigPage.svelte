@@ -1,4 +1,5 @@
 <script>
+  import * as m from "$lib/paraglide/messages.js";
   // Providers page: dashboard-managed provider credentials
   // (/admin/provider-credentials).
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
@@ -25,7 +26,7 @@
   <div class="page-header">
     <div>
       <InlineHelpSection copyId="providers-config-help-copy" label="model providers help">
-        {#snippet title()}<h2>Providers</h2>{/snippet}
+        {#snippet title()}<h2>{m.providers_title()}</h2>{/snippet}
         {#snippet help()}
           Configure LLM provider credentials here instead of setting API keys as
           environment variables. Providers declared in config.yaml or env vars
@@ -43,14 +44,14 @@
           onclick={() => providersConfig.openCreate()}
         >
           <Icon icon={Plus} class="form-action-icon" />
-          <span>Add Provider</span>
+          <span>{m.providers_add()}</span>
         </button>
       {/if}
     </div>
   </div>
 
   {#if !providersConfig.available && !auth.needsAuth}
-    <div class="alert alert-warning">Provider credential management is unavailable.</div>
+    <div class="alert alert-warning">{m.providers_unavailable()}</div>
   {/if}
   {#if providersConfig.error && !auth.needsAuth && !providersConfig.formOpen}
     <p class="form-error" role="alert" aria-live="assertive">{providersConfig.error}</p>
@@ -64,8 +65,8 @@
       <div class="table-toolbar-main">
         <FilterInput
           id="provider-credential-filter"
-          placeholder="Filter by name, type, or base URL..."
-          label="Filter providers by name, type, or base URL"
+          placeholder={m.providers_filter_placeholder()}
+          label={m.providers_filter_label()}
           bind:value={providersConfig.filter}
         />
       </div>
@@ -80,10 +81,10 @@
 
   {#if providersConfig.rows.length === 0 && !providersConfig.filter && !providersConfig.loading && !auth.needsAuth && !providersConfig.error && providersConfig.available}
     <p class="empty-state">
-      No dashboard-managed providers yet. Add one here, or declare providers in <code>config.yaml</code> / environment variables.
+      {m.providers_empty()}
     </p>
   {/if}
   {#if providersConfig.rows.length > 0 && providersConfig.filteredRows.length === 0 && providersConfig.filter && !providersConfig.loading && !auth.needsAuth && providersConfig.available}
-    <p class="empty-state">No providers match your filter.</p>
+    <p class="empty-state">{m.providers_no_match()}</p>
   {/if}
 </div>

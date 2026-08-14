@@ -10,11 +10,12 @@
   import { workflowsStore as wf } from "./workflows.svelte.js";
   import WorkflowCard from "./WorkflowCard.svelte";
   import { Plus, Save } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <EditorDialog
   open={wf.formOpen}
-  ariaLabel="Workflow editor"
+  ariaLabel={m.workflows_editor()}
   error={wf.formError}
   submitting={wf.submitting}
   submitLabel={wf.submitLabel()}
@@ -27,17 +28,17 @@
   {#snippet header()}
     <InlineHelpSection
       copyId="workflow-help-copy"
-      label="workflow help"
-      text="Create immutable version. Submitting activates it for the selected scope."
+      label={m.workflows_help_label()}
+      text={m.workflows_help()}
     >
       {#snippet title()}
-        <h3>{wf.submitMode() === "save" ? "Edit Workflow" : "Create Workflow"}</h3>
+        <h3>{wf.submitMode() === "save" ? m.workflows_edit() : m.workflows_create()}</h3>
       {/snippet}
     </InlineHelpSection>
   {/snippet}
 
   <div class="form-grid">
-    <FormField id="workflow-scope-provider" label="Provider Name">
+    <FormField id="workflow-scope-provider" label={m.workflows_provider_name()}>
       <select
         id="workflow-scope-provider"
         class="form-select workflow-input"
@@ -45,7 +46,7 @@
         onchange={(event) => wf.setProvider(event.currentTarget.value)}
         data-modal-autofocus
       >
-        <option value="">All providers and models</option>
+        <option value="">{m.workflows_all_scope()}</option>
         {#each wf.providerOptions() as providerName (providerName)}
           <option value={providerName}>{providerName}</option>
         {/each}
@@ -53,13 +54,13 @@
     </FormField>
 
     {#if wf.form.scope_provider}
-      <FormField id="workflow-scope-model" label="Model">
+      <FormField id="workflow-scope-model" label={m.workflows_model()}>
         <select
           id="workflow-scope-model"
           class="form-select workflow-input"
           bind:value={wf.form.scope_model}
         >
-          <option value="">All models for provider</option>
+          <option value="">{m.workflows_all_provider_models()}</option>
           {#each wf.modelOptions(wf.form.scope_provider) as modelID (wf.form.scope_provider + "-" + modelID)}
             <option value={modelID}>{modelID}</option>
           {/each}
@@ -67,17 +68,17 @@
       </FormField>
     {/if}
 
-    <FormField id="workflow-name" label="Name">
+    <FormField id="workflow-name" label={m.workflows_name()}>
       <input
         id="workflow-name"
         type="text"
         class="workflow-input"
-        placeholder="Optional. Defaults to scope label."
+        placeholder={m.workflows_name_placeholder()}
         bind:value={wf.form.name}
       />
     </FormField>
 
-    <FormField id="workflow-user-path" label="User Path">
+    <FormField id="workflow-user-path" label={m.workflows_user_path()}>
       <input
         id="workflow-user-path"
         type="text"
@@ -88,14 +89,14 @@
     </FormField>
   </div>
 
-  <p class="form-hint">Leave provider name empty to target all providers and models. Select a provider name without a model to target all models for that configured provider.</p>
-  <p class="form-hint">Add a path to scope the workflow to that subtree. Leading slashes are optional and will be normalized; you can enter "team/alpha" or "/team/alpha". Matching checks the deepest user path first, then falls back toward the root.</p>
-  <p class="form-hint">If you leave the name empty, the workflow will display as the matched provider/model scope or “All models”.</p>
+  <p class="form-hint">{m.workflows_scope_help()}</p>
+  <p class="form-hint">{m.workflows_path_help()}</p>
+  <p class="form-hint">{m.workflows_name_help()}</p>
 
-  <FormField id="workflow-description" label="Description">
+  <FormField id="workflow-description" label={m.workflows_description()}>
     <textarea
       id="workflow-description"
-      placeholder="Optional operator note for why this version exists."
+      placeholder={m.workflows_description_placeholder()}
       bind:value={wf.form.description}
     ></textarea>
   </FormField>
@@ -104,45 +105,45 @@
     {#if runtimeConfig.cacheVisible()}
       <label class="workflow-feature-toggle">
         <input type="checkbox" bind:checked={wf.form.features.cache} />
-        <span>Cache</span>
+        <span>{m.workflows_cache()}</span>
       </label>
     {/if}
     {#if runtimeConfig.auditVisible()}
       <label class="workflow-feature-toggle">
         <input type="checkbox" bind:checked={wf.form.features.audit} />
-        <span>Audit Logs</span>
+        <span>{m.workflows_audit()}</span>
       </label>
     {/if}
     {#if runtimeConfig.usageVisible()}
       <label class="workflow-feature-toggle">
         <input type="checkbox" bind:checked={wf.form.features.usage} />
-        <span>Usage</span>
+        <span>{m.workflows_usage()}</span>
       </label>
     {/if}
     {#if runtimeConfig.budgetsVisible()}
       <label class="workflow-feature-toggle">
         <input type="checkbox" bind:checked={wf.form.features.budget} />
-        <span>Budget</span>
+        <span>{m.workflows_budget()}</span>
       </label>
     {/if}
     {#if runtimeConfig.guardrailsVisible()}
       <label class="workflow-feature-toggle">
         <input type="checkbox" bind:checked={wf.form.features.guardrails} />
-        <span>Guardrails</span>
+        <span>{m.workflows_guardrails()}</span>
       </label>
     {/if}
     {#if wf.failoverVisible()}
       <label class="workflow-feature-toggle">
         <input type="checkbox" bind:checked={wf.form.features.failover} />
-        <span>Failover</span>
+        <span>{m.workflows_failover()}</span>
       </label>
     {/if}
   </div>
 
   <div class="workflow-preview">
     <div class="workflow-section-head">
-      <h4>Preview</h4>
-      <span class="provider-badge">Live</span>
+      <h4>{m.workflows_preview()}</h4>
+      <span class="provider-badge">{m.workflows_live()}</span>
     </div>
     <WorkflowCard workflow={wf.preview()} preview />
   </div>
@@ -151,16 +152,16 @@
     <div class="workflow-guardrail-editor">
       <div class="workflow-section-head">
         <div>
-          <h4>Guardrail Steps</h4>
-          <p class="form-hint">Guardrails in the same numeric step run together. Later steps wait for earlier ones to finish.</p>
+          <h4>{m.workflows_guardrail_steps()}</h4>
+          <p class="form-hint">{m.workflows_steps_help()}</p>
         </div>
-        <button type="button" class="table-action-btn" onclick={() => wf.addGuardrailStep()}>Add Step</button>
+        <button type="button" class="table-action-btn" onclick={() => wf.addGuardrailStep()}>{m.workflows_add_step()}</button>
       </div>
 
       {#if wf.guardrailRefs.length === 0}
         <div class="alert alert-warning alert-inline-actions">
-          <span>No named guardrails are currently registered on this deployment. You can still draft a workflow, but guardrail-backed creation may be rejected.</span>
-          <button type="button" class="table-action-btn" onclick={() => router.navigate("guardrails")}>Open Guardrails</button>
+          <span>{m.workflows_no_registered_guardrails()}</span>
+          <button type="button" class="table-action-btn" onclick={() => router.navigate("guardrails")}>{m.workflows_open_guardrails()}</button>
         </div>
       {/if}
 
@@ -169,36 +170,36 @@
           {#each wf.form.guardrails as step, index (index)}
             <div class="workflow-guardrail-row">
               <div class="form-field workflow-guardrail-field">
-                <label class="form-field-label" for={"workflow-guardrail-ref-" + index}>Guardrail reference</label>
+                <label class="form-field-label" for={"workflow-guardrail-ref-" + index}>{m.workflows_guardrail_reference()}</label>
                 <input
                   type="text"
                   class="workflow-input"
                   id={"workflow-guardrail-ref-" + index}
                   list="workflow-guardrail-options"
-                  placeholder="Guardrail ref"
+                  placeholder={m.workflows_guardrail_reference()}
                   bind:value={step.ref}
-                  aria-label={"Guardrail reference " + (index + 1)}
+                  aria-label={`${m.workflows_guardrail_reference()} ${index + 1}`}
                 />
               </div>
               <div class="form-field workflow-guardrail-step-field">
-                <label class="form-field-label" for={"workflow-guardrail-step-" + index}>Step</label>
+                <label class="form-field-label" for={"workflow-guardrail-step-" + index}>{m.workflows_step()}</label>
                 <input
                   type="number"
                   class="workflow-step-input"
                   id={"workflow-guardrail-step-" + index}
                   min="0"
                   step="1"
-                  placeholder="Step"
+                  placeholder={m.workflows_step()}
                   bind:value={step.step}
-                  aria-label={"Guardrail step " + (index + 1)}
+                  aria-label={`${m.workflows_guardrail_steps()} ${index + 1}`}
                 />
               </div>
-              <button type="button" class="table-action-btn table-action-btn-danger" onclick={() => wf.removeGuardrailStep(index)}>Remove</button>
+              <button type="button" class="table-action-btn table-action-btn-danger" onclick={() => wf.removeGuardrailStep(index)}>{m.workflows_remove()}</button>
             </div>
           {/each}
         </div>
       {:else}
-        <p class="form-hint">No guardrail steps configured yet.</p>
+        <p class="form-hint">{m.workflows_no_steps()}</p>
       {/if}
     </div>
   {/if}

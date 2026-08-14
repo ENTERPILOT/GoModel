@@ -12,27 +12,28 @@
   import { failover } from "./failover.svelte.js";
   import { qualifiedModelName } from "./failover-logic.js";
   import { Plus, Trash2, WandSparkles } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <EditorDialog
   open={failover.failoverFormOpen}
-  ariaLabel="Failover editor"
+  ariaLabel={m.models_failover_editor()}
   error={failover.failoverError}
   submitting={failover.failoverSaving}
   submitDisabled={failover.failoverGenerating || failover.failoverFormManaged}
-  submitLabel="Save"
+  submitLabel={m.models_save()}
   onclose={() => failover.closeFailoverForm()}
   onsubmit={() => failover.submitFailoverForm()}
 >
   {#snippet header()}
-    <p class="form-kicker">Failover mapping</p>
+    <p class="form-kicker">{m.models_failover_mapping()}</p>
     <h3>{failover.failoverForm.source || "Failover"}</h3>
   {/snippet}
 
   <div data-failover-editor style="display: contents">
     {#if failover.failoverFormManaged}
       <p class="form-hint" role="status">
-        This failover mapping is defined in configuration and is read-only here.
+        {m.models_failover_managed()}
       </p>
     {/if}
 
@@ -42,7 +43,7 @@
       {/each}
     </datalist>
 
-    <FormField id="failover-target" label="Fallback models">
+    <FormField id="failover-target" label={m.models_fallback_models()}>
       <div class="vm-target-list">
         <div class="vm-target-row">
           <input
@@ -53,12 +54,12 @@
             placeholder="azure/gpt-4o"
             bind:value={failover.failoverForm.target_model}
             disabled={failover.failoverFormManaged}
-            aria-label="Fallback model"
+            aria-label={m.models_fallback_model()}
             data-modal-autofocus
           />
           {#if failover.failoverForm.target_model}
             <TableActionButton
-              label="Remove fallback model"
+              label={m.models_remove_fallback()}
               class="table-action-btn-danger table-icon-btn vm-target-remove"
               onclick={() => failover.removePrimaryFailoverTarget()}
               disabled={failover.failoverFormManaged}
@@ -76,10 +77,10 @@
               placeholder="gemini/gemini-2.5-pro"
               bind:value={target.model}
               disabled={failover.failoverFormManaged}
-              aria-label="Fallback model"
+              aria-label={m.models_fallback_model()}
             />
             <TableActionButton
-              label="Remove fallback model"
+              label={m.models_remove_fallback()}
               class="table-action-btn-danger table-icon-btn vm-target-remove"
               onclick={() => failover.removeFailoverTarget(index)}
               disabled={failover.failoverFormManaged}
@@ -99,7 +100,7 @@
           onclick={() => failover.addFailoverTarget()}
         >
           <Icon icon={Plus} class="form-action-icon" />
-          <span>Add fallback model</span>
+          <span>{m.models_add_fallback()}</span>
         </button>
         <button
           type="button"
@@ -113,8 +114,8 @@
           <Icon icon={WandSparkles} class="form-action-icon" />
           <span>
             {failover.failoverGenerating
-              ? "Generating..."
-              : "Generate automatically"}
+              ? m.models_generating()
+              : m.models_generate_automatically()}
           </span>
         </button>
       </div>
@@ -144,7 +145,7 @@
         disabled={failover.failoverSaving || failover.failoverGenerating}
         onclick={() => failover.deleteFailoverRule()}
       >
-        Remove
+        {m.models_remove_mapping()}
       </button>
     {/if}
   {/snippet}

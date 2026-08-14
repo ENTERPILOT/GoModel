@@ -22,6 +22,7 @@
   import RateLimitInspector from "$pages/rate-limits/RateLimitInspector.svelte";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
   import { Plus } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "models";
 
@@ -50,25 +51,39 @@
   });
 
   const authError = $derived(auth.needsAuth);
+
+  const categoryLabels = {
+    all: m.models_category_all,
+    text_generation: m.models_category_text_generation,
+    embedding: m.models_category_embedding,
+    image: m.models_category_image,
+    audio: m.models_category_audio,
+    video: m.models_category_video,
+    utility: m.models_category_utility,
+  };
+
+  function categoryLabel(category) {
+    return categoryLabels[category.category]?.() || category.display_name;
+  }
 </script>
 
 <div>
   <div class="page-header">
-    <h2>Models</h2>
+    <h2>{m.models_title()}</h2>
     {#if virtualModels.displayModels.length > 0}
       <div class="model-count">
-        <span>
-          {modelsStore.filter
+        {m.models_count({
+          count: modelsStore.filter
             ? virtualModels.filteredDisplayModels.length + " / " + virtualModels.displayModels.length
-            : virtualModels.displayModels.length}
-        </span> models
+            : virtualModels.displayModels.length,
+        })}
       </div>
     {/if}
   </div>
 
   <AuthBanner />
   {#if !virtualModels.virtualModelsAvailable && !authError}
-    <div class="alert alert-warning">Virtual models feature is unavailable.</div>
+    <div class="alert alert-warning">{m.models_unavailable()}</div>
   {/if}
   {#if virtualModels.aliasError && !authError}
     <div class="alert alert-warning">{virtualModels.aliasError}</div>
@@ -86,7 +101,7 @@
           class:active={modelsStore.activeCategory === cat.category}
           onclick={() => modelsStore.selectCategory(cat.category)}
         >
-          <span>{cat.display_name}</span>
+          <span>{categoryLabel(cat)}</span>
           <span class="tab-count">{cat.count}</span>
         </button>
       {/each}
@@ -97,8 +112,8 @@
     <div class="table-toolbar">
       <div class="table-toolbar-main">
         <FilterInput
-          placeholder="Filter by provider, provider/model, alias, or owner..."
-          label="Filter models by provider, provider/model, alias, or owner"
+          placeholder={m.models_filter_placeholder()}
+          label={m.models_filter_label()}
           bind:value={modelsStore.filter}
         />
       </div>
@@ -107,12 +122,12 @@
           <button
             type="button"
             class="btn btn-primary btn-with-icon alias-create-btn"
-            aria-label="New virtual model alias"
-            title="Alias"
+            aria-label={m.models_new_virtual_label()}
+            title={m.models_alias()}
             onclick={() => virtualModels.openVirtualModelCreate()}
           >
             <Icon icon={Plus} class="alias-create-icon" />
-            <span>New&nbsp;virtual&nbsp;model</span>
+            <span>{m.models_new_virtual()}</span>
           </button>
         {/if}
       </div>
@@ -131,13 +146,13 @@
   {/if}
 
   {#if virtualModels.displayModels.length === 0 && !modelsStore.loading && !authError && !modelsStore.filter && (modelsStore.activeCategory === "all" || !modelsStore.activeCategory)}
-    <p class="empty-state">No models registered.</p>
+    <p class="empty-state">{m.models_empty()}</p>
   {/if}
   {#if virtualModels.displayModels.length === 0 && !modelsStore.loading && !authError && !modelsStore.filter && modelsStore.activeCategory && modelsStore.activeCategory !== "all"}
-    <p class="empty-state">No models in this category.</p>
+    <p class="empty-state">{m.models_empty_category()}</p>
   {/if}
   {#if virtualModels.displayModels.length > 0 && virtualModels.filteredDisplayModels.length === 0 && modelsStore.filter}
-    <p class="empty-state">No models match your filter.</p>
+    <p class="empty-state">{m.models_no_match()}</p>
   {/if}
 
   <RateLimitInspector />

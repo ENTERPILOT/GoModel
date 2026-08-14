@@ -5,6 +5,7 @@
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import { rateLimits } from "./rateLimits.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <!-- novalidate: validation lives in rateLimitFormPayload(), which surfaces
@@ -12,18 +13,18 @@
      min=1 number field) would block the submit before it runs. -->
 <EditorDialog
   open={rateLimits.rateLimitFormOpen}
-  title={rateLimits.rateLimitEditing ? "Edit Rate Limit" : "Create Rate Limit"}
-  ariaLabel="Rate limit editor"
+  title={rateLimits.rateLimitEditing ? m.rate_limits_edit_title() : m.rate_limits_create()}
+  ariaLabel={m.rate_limits_editor()}
   error={rateLimits.rateLimitFormError}
   submitting={rateLimits.rateLimitFormSubmitting}
-  submitLabel="Save Rate Limit"
+  submitLabel={m.rate_limits_save()}
   dialogClass="budget-editor"
   novalidate
   onclose={() => rateLimits.closeRateLimitForm()}
   onsubmit={() => rateLimits.submitRateLimitForm()}
 >
   <div class="form-grid">
-    <FormField id="rate-limit-scope" label="Scope">
+    <FormField id="rate-limit-scope" label={m.rate_limits_scope()}>
       <select
         id="rate-limit-scope"
         class="form-select settings-select"
@@ -50,7 +51,7 @@
           rateLimits.setRateLimitFormSubject(event.currentTarget.value)}
       />
     </FormField>
-    <FormField id="rate-limit-period" label="Period">
+    <FormField id="rate-limit-period" label={m.rate_limits_period()}>
       <select
         id="rate-limit-period"
         class="form-select settings-select"
@@ -63,7 +64,7 @@
       </select>
     </FormField>
     {#if rateLimits.rateLimitForm.period === "custom"}
-      <FormField id="rate-limit-period-seconds" label="Period Seconds">
+      <FormField id="rate-limit-period-seconds" label={m.rate_limits_period_seconds()}>
         <input
           id="rate-limit-period-seconds"
           class="form-input"
@@ -77,8 +78,8 @@
     <FormField
       id="rate-limit-max-requests"
       label={rateLimits.rateLimitForm.period === "concurrent"
-        ? "Max In-Flight Requests"
-        : "Max Requests"}
+        ? m.rate_limits_max_in_flight()
+        : m.rate_limits_max_requests()}
     >
       <input
         id="rate-limit-max-requests"
@@ -92,7 +93,7 @@
       />
     </FormField>
     {#if rateLimits.rateLimitForm.period !== "concurrent"}
-      <FormField id="rate-limit-max-tokens" label="Max Tokens">
+      <FormField id="rate-limit-max-tokens" label={m.rate_limits_max_tokens()}>
         <input
           id="rate-limit-max-tokens"
           class="form-input"
@@ -106,15 +107,11 @@
     {/if}
   </div>
   <p class="form-hint">
-    A user path rule limits the whole subtree; provider and model rules cap
-    all traffic routed there and make load balancing skip the target while
-    it is saturated. One shared counter per rule. Leave a field empty to
-    skip that limit. Token limits require usage tracking.
+    {m.rate_limits_editor_help()}
   </p>
   {#if rateLimits.rateLimitEditing}
     <p class="form-hint">
-      Scope, subject, and period identify the rule: changing any of them
-      moves the rule to a new key and restarts its live counters.
+      {m.rate_limits_edit_help()}
     </p>
   {/if}
 </EditorDialog>

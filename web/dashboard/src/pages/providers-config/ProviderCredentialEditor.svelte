@@ -14,6 +14,7 @@
     providerCredentialTypeOptions,
     suggestProviderCredentialName,
   } from "./providersConfigLogic.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   const typeOptions = $derived(
     providerCredentialTypeOptions(providersConfig.types, providersConfig.form.type),
@@ -56,8 +57,8 @@
 
 <EditorDialog
   open={providersConfig.formOpen}
-  title={providersConfig.formMode === "edit" ? "Edit Provider" : "Add Provider"}
-  ariaLabel="Provider credential editor"
+  title={providersConfig.formMode === "edit" ? m.providers_edit() : m.providers_add()}
+  ariaLabel={m.providers_editor()}
   error={providersConfig.error}
   submitting={providersConfig.formSubmitting}
   novalidate
@@ -65,12 +66,12 @@
   onsubmit={() => providersConfig.submitForm()}
 >
   {#snippet headerHint()}
-    <p class="form-hint">The name is the stable identity used for routing and cannot change once created.</p>
+    <p class="form-hint">{m.providers_identity_help()}</p>
   {/snippet}
 
   <div class="form-field">
     <label class="form-field-label" for="provider-credential-type">
-      Type<span class="form-field-required" aria-hidden="true">*</span>
+      {m.providers_type()}<span class="form-field-required" aria-hidden="true">*</span>
     </label>
     <select
       id="provider-credential-type"
@@ -82,7 +83,7 @@
       onchange={onTypeChange}
       data-modal-autofocus
     >
-      <option value="" disabled>Select a provider type&hellip;</option>
+      <option value="" disabled>{m.providers_select_type()}</option>
       {#each typeOptions as type (type)}
         <option value={type}>{type}</option>
       {/each}
@@ -90,13 +91,13 @@
     {#if typeError}
       <small class="form-field-error" id="provider-credential-type-error" role="alert">{typeError}</small>
     {:else}
-      <small class="form-hint" id="provider-credential-type-hint">Determines which fields the gateway uses to build requests.</small>
+      <small class="form-hint" id="provider-credential-type-hint">{m.providers_type_help()}</small>
     {/if}
   </div>
 
   <div class="form-field">
     <label class="form-field-label" for="provider-credential-name">
-      Name<span class="form-field-required" aria-hidden="true">*</span>
+      {m.providers_name()}<span class="form-field-required" aria-hidden="true">*</span>
     </label>
     <input
       id="provider-credential-name"
@@ -112,14 +113,14 @@
     {#if nameError}
       <small class="form-field-error" id="provider-credential-name-error" role="alert">{nameError}</small>
     {:else if providersConfig.formMode === "create"}
-      <small class="form-hint" id="provider-credential-name-hint">Suggested from the selected type; used to route requests to this provider instance and editable before saving.</small>
+      <small class="form-hint" id="provider-credential-name-hint">{m.providers_name_create_help()}</small>
     {:else}
-      <small class="form-hint" id="provider-credential-name-hint">Immutable once created.</small>
+      <small class="form-hint" id="provider-credential-name-hint">{m.providers_name_edit_help()}</small>
     {/if}
   </div>
 
   {#if !providersConfig.form.type}
-    <p class="form-hint">Pick a type to configure its credentials — each provider type asks for different settings.</p>
+    <p class="form-hint">{m.providers_pick_type()}</p>
   {/if}
 
   {#each fields.primary as field (field.name)}
@@ -130,7 +131,7 @@
     <div class="vm-status-toggle">
       <EnabledToggle
         enabled={providersConfig.form.enabled}
-        label="provider"
+        label={m.providers_provider_toggle()}
         onclick={() => (providersConfig.form.enabled = !providersConfig.form.enabled)}
       />
     </div>
@@ -144,7 +145,7 @@
     >
       <summary>
         <span class="mcp-server-advanced-summary-copy">
-          <span class="mcp-server-advanced-title">Advanced settings</span>
+          <span class="mcp-server-advanced-title">{m.providers_advanced()}</span>
           <span class="form-hint">{fields.advanced.map((field) => field.label).join(", ")}</span>
         </span>
       </summary>

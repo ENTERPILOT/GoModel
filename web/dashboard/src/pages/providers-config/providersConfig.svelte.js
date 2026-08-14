@@ -11,6 +11,7 @@ import { errorPayloadMessage } from "$lib/api/client.js";
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import { flash } from "$lib/stores/flash.svelte.js";
+import * as m from "$lib/paraglide/messages.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import {
   defaultProviderCredentialForm,
@@ -97,7 +98,7 @@ class ProvidersConfigState {
     try {
       const outcome = await loadAdminList("/admin/provider-credentials", {
         label: "provider credentials",
-        errorFallback: "Failed to load provider credentials.",
+        errorFallback: m.providers_load_failed(),
         unavailableStatuses: [503, 404],
         options: { signal: controller.signal },
       });
@@ -212,7 +213,7 @@ class ProvidersConfigState {
   // same names as the schema, so a server-side rule (which field combinations
   // actually authenticate) reads like a local validation error.
   #reportSaveError(data) {
-    const message = errorPayloadMessage(data, "Failed to save provider credential.");
+    const message = errorPayloadMessage(data, m.providers_save_failed());
     const param = String(
       (data && data.error && typeof data.error === "object" && data.error.param) || "",
     ).trim();
@@ -278,8 +279,8 @@ class ProvidersConfigState {
     try {
       const outcome = await sendAdminMutation("/admin/provider-credentials", "PUT", payload, {
         label: "save provider credential",
-        errorFallback: "Failed to save provider credential.",
-        unavailableMessage: "Provider credential management is unavailable.",
+        errorFallback: m.providers_save_failed(),
+        unavailableMessage: m.providers_unavailable(),
       });
       if (outcome.status === "stale") {
         return;
@@ -300,7 +301,7 @@ class ProvidersConfigState {
         return;
       }
 
-      flash.success('Provider "' + payload.name + '" saved.');
+      flash.success(m.providers_saved({ name: payload.name }));
       this.closeForm();
       this.#refreshInventory();
       void this.fetchPage();
@@ -319,8 +320,8 @@ class ProvidersConfigState {
         undefined,
         {
           label: "delete provider credential",
-          errorFallback: "Failed to delete provider credential.",
-          unavailableMessage: "Provider credential management is unavailable.",
+          errorFallback: m.providers_delete_failed(),
+          unavailableMessage: m.providers_unavailable(),
         },
       );
       if (outcome.status === "stale") {
@@ -336,7 +337,7 @@ class ProvidersConfigState {
         return;
       }
 
-      flash.success('Provider "' + name + '" deleted.');
+      flash.success(m.providers_deleted({ name }));
       confirmDialog.close();
       if (this.formOpen && this.form.name === name) {
         this.closeForm();
@@ -364,15 +365,12 @@ class ProvidersConfigState {
       return;
     }
     confirmDialog.open({
-      title: "Delete Provider",
+      title: m.providers_delete_title(),
       titleId: "providerCredentialDeleteDialogTitle",
       inputId: "provider-credential-delete-confirmation",
-      message:
-        'Type "' +
-        target +
-        '" to permanently delete this provider credential. Requests routed to it will fail until it is reconfigured.',
+      message: m.providers_delete_message({ name: target }),
       requiredText: target,
-      confirmLabel: "Delete Provider",
+      confirmLabel: m.providers_delete_title(),
       icon: Trash2,
       dialogClass: "budget-reset-dialog",
       onConfirm: () => this.performDelete(target),

@@ -10,22 +10,23 @@
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import { mcpServers } from "./mcpServers.svelte.js";
   import { Plus, Trash2 } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <EditorDialog
   open={mcpServers.formOpen}
-  title={mcpServers.formMode === "edit" ? "Edit MCP Server" : "Add MCP Server"}
-  ariaLabel="MCP server editor"
+  title={mcpServers.formMode === "edit" ? m.mcp_edit() : m.mcp_add()}
+  ariaLabel={m.mcp_editor_label()}
   error={mcpServers.error}
   submitting={mcpServers.formSubmitting}
   onclose={() => mcpServers.closeForm()}
   onsubmit={() => mcpServers.submitForm()}
 >
   {#snippet headerHint()}
-    <p class="form-hint">The display name can change. The slug is the stable client-facing identity.</p>
+    <p class="form-hint">{m.mcp_identity_help()}</p>
   {/snippet}
 
-  <FormField id="mcp-server-name" label="Name">
+  <FormField id="mcp-server-name" label={m.mcp_name()}>
     <input
       id="mcp-server-name"
       type="text"
@@ -34,10 +35,10 @@
       oninput={() => mcpServers.syncSlugFromName()}
       data-modal-autofocus
     />
-    <small class="form-hint">Human-readable and Unicode-friendly. You can change it later.</small>
+    <small class="form-hint">{m.mcp_name_help()}</small>
   </FormField>
 
-  <FormField id="mcp-server-slug" label="Slug">
+  <FormField id="mcp-server-slug" label={m.mcp_slug()}>
     <input
       id="mcp-server-slug"
       type="text"
@@ -48,18 +49,18 @@
       disabled={mcpServers.formMode === "edit"}
     />
     {#if mcpServers.formMode === "create"}
-      <small class="form-hint">Derived from the name. You may edit it before saving.</small>
+      <small class="form-hint">{m.mcp_slug_create_help()}</small>
     {:else}
-      <small class="form-hint">Immutable because it is used in URLs, scope headers, and aggregated tool names.</small>
+      <small class="form-hint">{m.mcp_slug_edit_help()}</small>
     {/if}
   </FormField>
 
-  <FormField id="mcp-server-transport" label="Transport">
+  <FormField id="mcp-server-transport" label={m.mcp_transport()}>
     <select id="mcp-server-transport" class="form-select" bind:value={mcpServers.form.transport}>
       <option value="http">Streamable HTTP</option>
       <option value="sse">SSE (legacy)</option>
     </select>
-    <small class="form-hint">stdio servers are config-only: declare them in <code>config.yaml</code> under <code>mcp.servers</code>.</small>
+    <small class="form-hint">{m.mcp_stdio_help()}</small>
   </FormField>
 
   <FormField id="mcp-server-url" label="URL">
@@ -73,7 +74,7 @@
   </FormField>
 
   <div class="form-field">
-    <span class="form-field-label">Headers</span>
+    <span class="form-field-label">{m.mcp_headers()}</span>
     <div class="vm-target-list">
       {#each mcpServers.form.headers as header, index (index)}
         <div class="vm-target-row">
@@ -82,17 +83,17 @@
             class="mono vm-target-model"
             placeholder="Authorization"
             bind:value={header.name}
-            aria-label="Header name"
+            aria-label={m.mcp_header_name()}
           />
           <input
             type="text"
             class="mono vm-target-model"
             placeholder="Bearer secret-token"
             bind:value={header.value}
-            aria-label="Header value"
+            aria-label={m.mcp_header_value()}
           />
           <TableActionButton
-            label="Remove header"
+            label={m.mcp_remove_header()}
             class="table-action-btn-danger table-icon-btn vm-target-remove"
             onclick={() => mcpServers.removeHeader(index)}
           >
@@ -108,10 +109,10 @@
         onclick={() => mcpServers.addHeader()}
       >
         <Icon icon={Plus} class="form-action-icon" />
-        <span>Add header</span>
+        <span>{m.mcp_add_header()}</span>
       </button>
     </div>
-    <small class="form-hint">Sent only to the configured server origin. Saved values are shown as <code>***</code>; leave <code>***</code> unchanged to keep the stored value.</small>
+    <small class="form-hint">{m.mcp_headers_help()}</small>
   </div>
 
   <div class="vm-status-row">
@@ -131,46 +132,46 @@
   >
     <summary>
       <span class="mcp-server-advanced-summary-copy">
-        <span class="mcp-server-advanced-title">Advanced settings</span>
-        <span class="form-hint">Description, access rules, and timeout</span>
+        <span class="mcp-server-advanced-title">{m.mcp_advanced()}</span>
+        <span class="form-hint">{m.mcp_advanced_summary()}</span>
       </span>
     </summary>
 
     <div class="mcp-server-advanced-fields">
       <div class="form-field">
-        <label class="form-field-label" for="mcp-server-description">Description</label>
+        <label class="form-field-label" for="mcp-server-description">{m.mcp_description()}</label>
         <input
           id="mcp-server-description"
           type="text"
-          placeholder="Optional description"
+          placeholder={m.mcp_description_placeholder()}
           bind:value={mcpServers.form.description}
         />
       </div>
 
       <div class="form-field">
-        <label class="form-field-label" for="mcp-server-allowed-tools">Allowed tools</label>
+        <label class="form-field-label" for="mcp-server-allowed-tools">{m.mcp_allowed_tools()}</label>
         <input
           id="mcp-server-allowed-tools"
           type="text"
           class="mono"
-          placeholder="search_issues, get_file (comma-separated; empty allows all)"
+          placeholder={m.mcp_allowed_tools_placeholder()}
           bind:value={mcpServers.form.allowed_tools}
         />
       </div>
 
       <div class="form-field">
-        <label class="form-field-label" for="mcp-server-disallowed-tools">Disallowed tools</label>
+        <label class="form-field-label" for="mcp-server-disallowed-tools">{m.mcp_disallowed_tools()}</label>
         <input
           id="mcp-server-disallowed-tools"
           type="text"
           class="mono"
-          placeholder="delete_repo (comma-separated)"
+          placeholder={m.mcp_disallowed_tools_placeholder()}
           bind:value={mcpServers.form.disallowed_tools}
         />
       </div>
 
       <div class="form-field">
-        <label class="form-field-label" for="mcp-server-user-paths">User paths (empty means all)</label>
+        <label class="form-field-label" for="mcp-server-user-paths">{m.mcp_user_paths()}</label>
         <textarea
           id="mcp-server-user-paths"
           rows="4"
@@ -181,14 +182,14 @@
       </div>
 
       <div class="form-field">
-        <label class="form-field-label" for="mcp-server-tool-timeout">Tool timeout (seconds)</label>
+        <label class="form-field-label" for="mcp-server-tool-timeout">{m.mcp_timeout()}</label>
         <input
           id="mcp-server-tool-timeout"
           type="number"
           min="0"
           step="1"
           class="mono"
-          placeholder="Default timeout when empty"
+          placeholder={m.mcp_timeout_placeholder()}
           bind:value={mcpServers.form.tool_timeout_seconds}
         />
       </div>

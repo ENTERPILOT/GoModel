@@ -10,11 +10,14 @@ import {
   workflowSourceGuardrails,
   workflowScopeProviderValue,
 } from "./workflowsLogic.js";
+import * as m from "../../lib/paraglide/messages.js";
 
 export function workflowGuardrailLabel(source) {
   const count = workflowSourceGuardrails(source).length;
   if (count === 0) return "";
-  return count === 1 ? "1 step" : count + " steps";
+  return count === 1
+    ? m.workflows_one_step()
+    : m.workflows_steps_count({ count });
 }
 
 function workflowAiLabel(source, runtime) {
@@ -232,8 +235,8 @@ export function workflowCacheConnClass(runtime) {
 
 export function workflowCacheStatusLabel(runtime) {
   if (!runtime || !runtime.cacheHit) return null;
-  if (runtime.cacheType === "semantic") return "Hit (Semantic)";
-  return "Hit (Exact)";
+  if (runtime.cacheType === "semantic") return m.workflows_hit_semantic();
+  return m.workflows_hit_exact();
 }
 
 export function workflowBudgetNodeClass(visible, runtime, highlightPresent, current) {
@@ -244,7 +247,7 @@ export function workflowBudgetNodeClass(visible, runtime, highlightPresent, curr
 }
 
 export function workflowBudgetStatusLabel(runtime) {
-  return workflowRuntimeBudgetExceeded(runtime) ? "Exceeded" : null;
+  return workflowRuntimeBudgetExceeded(runtime) ? m.workflows_exceeded() : null;
 }
 
 function workflowFailoverNodeClass(runtime) {
@@ -258,7 +261,7 @@ function workflowFailoverConnClass(runtime) {
 }
 
 function workflowFailoverStatusLabel(runtime) {
-  return runtime && runtime.failoverTarget ? "Redirected" : null;
+  return runtime && runtime.failoverTarget ? m.workflows_redirected() : null;
 }
 
 function workflowFailoverTargetLabel(runtime) {

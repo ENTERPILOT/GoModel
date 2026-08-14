@@ -9,6 +9,7 @@
 // land on the input that caused it.
 
 import { splitCommaList } from "../../lib/utils/format.js";
+import * as m from "../../lib/paraglide/messages.js";
 
 export { splitCommaList };
 
@@ -26,77 +27,77 @@ export const FIELD_MODELS = "models";
 // renders, as a labelled text input (see providerCredentialFieldMeta).
 export const PROVIDER_CREDENTIAL_FIELDS = {
   [FIELD_API_KEYS]: {
-    label: "API Keys",
+    label: m.providers_api_keys(),
     control: "keys",
-    hint: "Identified sessions stay on one key by default, improving provider prompt-cache hits. Saved values are shown as ***********; leave the asterisks unchanged to keep the stored key.",
+    hint: m.providers_api_keys_hint(),
   },
   [FIELD_SESSION_STICKY_KEYS]: {
-    label: "Session-sticky API keys",
+    label: m.providers_session_sticky_keys(),
     control: "checkbox",
-    hint: "Keep each identified conversation on one API key to preserve provider prompt-cache affinity. Turn off to rotate keys round-robin on every request.",
+    hint: m.providers_session_sticky_hint(),
   },
   [FIELD_BASE_URL]: {
-    label: "Base URL",
+    label: m.providers_base_url(),
     control: "text",
   },
   api_version: {
-    label: "API Version",
+    label: m.providers_api_version(),
     control: "text",
     placeholder: "e.g. 2024-10-01-preview",
-    hint: "Leave empty for the provider default. Realtime endpoints may need a newer version.",
+    hint: m.providers_api_version_hint(),
   },
   backend: {
-    label: "Backend",
+    label: m.providers_backend(),
     control: "select",
-    hint: "Which Google surface to call. Vertex authenticates with Google credentials instead of an API key.",
+    hint: m.providers_backend_hint(),
   },
   auth_type: {
-    label: "Auth Type",
+    label: m.providers_auth_type(),
     control: "select",
-    hint: "How to obtain Google credentials. Leave on the default to use Application Default Credentials.",
+    hint: m.providers_auth_type_hint(),
   },
   api_mode: {
-    label: "API Mode",
+    label: m.providers_api_mode(),
     control: "select",
-    hint: "Which request shape to send upstream.",
+    hint: m.providers_api_mode_hint(),
   },
   vertex_project: {
-    label: "Vertex Project",
+    label: m.providers_vertex_project(),
     control: "text",
     placeholder: "my-gcp-project",
   },
   vertex_location: {
-    label: "Vertex Location",
+    label: m.providers_vertex_location(),
     control: "text",
     placeholder: "us-central1",
   },
   service_account_file: {
-    label: "Service Account File",
+    label: m.providers_service_account_file(),
     control: "text",
     placeholder: "/path/to/service-account.json",
-    hint: "Path readable by the gateway process.",
+    hint: m.providers_service_account_file_hint(),
   },
   [FIELD_SERVICE_ACCOUNT_JSON]: {
-    label: "Service Account JSON",
+    label: m.providers_service_account_json(),
     control: "textarea",
-    placeholder: "Paste service account JSON",
-    hint: "Saved values are shown as ***********; leave the asterisks unchanged to keep the stored value, or clear it to remove.",
+    placeholder: m.providers_paste_service_account(),
+    hint: m.providers_service_account_json_hint(),
   },
   service_account_json_base64: {
-    label: "Service Account JSON (base64)",
+    label: m.providers_service_account_json_base64(),
     control: "text",
-    hint: "Saved values are shown as ***********; leave the asterisks unchanged to keep the stored value.",
+    hint: m.providers_service_account_json_base64_hint(),
   },
   gcp_scope: {
-    label: "GCP Scope",
+    label: m.providers_gcp_scope(),
     control: "text",
     placeholder: "https://www.googleapis.com/auth/cloud-platform",
   },
   [FIELD_MODELS]: {
-    label: "Models (comma-separated)",
+    label: m.providers_models_field(),
     control: "text",
     placeholder: "gpt-4o, gpt-4o-mini",
-    hint: "Leave empty to auto-discover models from the provider's /models endpoint where supported.",
+    hint: m.providers_models_hint(),
   },
 };
 
@@ -220,7 +221,7 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
     };
     if (name === FIELD_BASE_URL && fallbackBaseURL) {
       field.placeholder = fallbackBaseURL;
-      field.hint = "Defaults to " + fallbackBaseURL;
+      field.hint = m.providers_default_value({ value: fallbackBaseURL });
     }
     if (field.options.length > 0) {
       field.control = "select";
@@ -259,19 +260,21 @@ export function resetProviderCredentialFields(form, fields) {
 export function providerCredentialAuthLabel(row) {
   const keyCount = Array.isArray(row && row.api_keys) ? row.api_keys.length : 0;
   if (keyCount > 0) {
-    return keyCount + " key" + (keyCount === 1 ? "" : "s");
+    return keyCount === 1
+      ? m.providers_keys_count({ count: keyCount })
+      : m.providers_keys_count_plural({ count: keyCount });
   }
   if (
     String((row && row.service_account_json) || "").trim() ||
     String((row && row.service_account_json_base64) || "").trim() ||
     String((row && row.service_account_file) || "").trim()
   ) {
-    return "service account";
+    return m.providers_service_account();
   }
   if (String((row && row.vertex_project) || "").trim()) {
     return "ADC";
   }
-  return "keyless";
+  return m.providers_keyless();
 }
 
 // providerCredentialModelsLabel reports the configured model count, or that
@@ -279,9 +282,11 @@ export function providerCredentialAuthLabel(row) {
 export function providerCredentialModelsLabel(row) {
   const models = Array.isArray(row && row.models) ? row.models : [];
   if (models.length === 0) {
-    return "auto-discovered";
+    return m.providers_auto_discovered();
   }
-  return models.length + " model" + (models.length === 1 ? "" : "s");
+  return models.length === 1
+    ? m.providers_models_count({ count: models.length })
+    : m.providers_models_count_plural({ count: models.length });
 }
 
 // providerCredentialKeysToRows converts a stored api_keys array (usually all
@@ -368,19 +373,19 @@ export function validateProviderCredentialForm(form, mode, existingRows, schema)
   const type = String((form && form.type) || "").trim();
 
   if (!type) {
-    errors.type = "Select a provider type.";
+    errors.type = m.providers_type_required();
   }
   if (!name) {
-    errors.name = "Name is required.";
+    errors.name = m.providers_name_required();
   } else if (name.includes("/")) {
-    errors.name = "Name cannot contain '/' — it separates the provider from the model.";
+    errors.name = m.providers_name_slash();
   } else if (
     mode === "create" &&
     (Array.isArray(existingRows) ? existingRows : []).some(
       (row) => String((row && row.name) || "").trim() === name,
     )
   ) {
-    errors.name = 'Provider "' + name + '" already exists.';
+    errors.name = m.providers_already_exists({ name });
   }
 
   const { primary, advanced } = providerCredentialFormFields(schema);
@@ -401,29 +406,29 @@ function validateProviderCredentialField(form, field) {
     // "no key at all" first: a required field left as one blank row is a
     // missing key, not a stray row to tidy up.
     if (field.required && !keys.some((value) => value.trim())) {
-      return "At least one API key is required for this provider type.";
+      return m.providers_key_required();
     }
     if (keys.some((value) => !value.trim())) {
-      return "Remove the empty row instead of leaving a key blank.";
+      return m.providers_key_blank();
     }
     return "";
   }
 
   const value = String((form && form[field.name]) || "").trim();
   if (field.required && !value) {
-    return field.label + " is required for this provider type.";
+    return m.providers_field_required({ field: field.label });
   }
   if (!value) {
     return "";
   }
   if (field.name === FIELD_BASE_URL && !value.includes("://") && /[./]/.test(value)) {
-    return "Include the scheme, e.g. https://" + value;
+    return m.providers_url_scheme({ value });
   }
   if (field.name === FIELD_SERVICE_ACCOUNT_JSON && !isRedactedCredentialValue(value)) {
     try {
       JSON.parse(value);
     } catch {
-      return "Paste the service account JSON file's contents — this is not valid JSON.";
+      return m.providers_json_invalid();
     }
   }
   // Enumerated fields are not checked against their options: the schema lists

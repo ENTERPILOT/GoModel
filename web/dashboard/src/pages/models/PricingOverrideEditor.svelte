@@ -7,27 +7,28 @@
   import { formatPriceFine } from "$lib/utils/format.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import { Plus, X } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   const po = pricingOverrides;
 </script>
 
 <EditorDialog
   open={po.modelPricingOverrideFormOpen}
-  ariaLabel="Model pricing editor"
+  ariaLabel={m.models_pricing_editor()}
   dialogClass="model-pricing-editor"
   error={po.modelPricingOverrideError}
   submitting={po.modelPricingOverrideSubmitting}
-  submitLabel="Save Pricing"
+  submitLabel={m.models_pricing_save()}
   onclose={() => po.closeModelPricingOverrideForm()}
   onsubmit={() => po.submitModelPricingOverrideForm()}
 >
   {#snippet header()}
-    <p class="form-kicker">Pricing override</p>
-    <h3>{po.modelPricingOverrideFormDisplayName || po.modelPricingOverrideForm.selector || "Pricing"}</h3>
+    <p class="form-kicker">{m.models_pricing_override()}</p>
+    <h3>{po.modelPricingOverrideFormDisplayName || po.modelPricingOverrideForm.selector || m.models_pricing()}</h3>
   {/snippet}
 
   <div class="form-grid">
-    <FormField id="model-pricing-override-selector" label="Selector">
+    <FormField id="model-pricing-override-selector" label={m.models_selector()}>
       <input
         id="model-pricing-override-selector"
         type="text"
@@ -38,7 +39,7 @@
     </FormField>
 
     {#if po.modelPricingOverrideFormScopeOptions.length > 1}
-      <FormField id="model-pricing-override-scope" label="Scope">
+      <FormField id="model-pricing-override-scope" label={m.models_scope()}>
         <select
           id="model-pricing-override-scope"
           class="form-select"
@@ -54,15 +55,14 @@
   </div>
 
   <p class="form-hint">
-    Currency is USD. Saved fields override model registry and config.yaml pricing for this
-    selector; unset fields continue to inherit.
+    {m.models_pricing_help()}
   </p>
 
   <div class="pricing-override-rows">
     {#each po.modelPricingOverrideRows as row (row.id)}
       <div class="pricing-override-row">
         <div class="form-field pricing-override-type-field">
-          <label class="form-field-label" for={"pricing-type-" + row.id}>Price Type</label>
+          <label class="form-field-label" for={"pricing-type-" + row.id}>{m.models_price_type()}</label>
           <select
             id={"pricing-type-" + row.id}
             class="form-select"
@@ -75,7 +75,7 @@
           </select>
         </div>
         <div class="form-field pricing-override-value-field">
-          <label class="form-field-label" for={"pricing-value-" + row.id}>USD Value</label>
+          <label class="form-field-label" for={"pricing-value-" + row.id}>{m.models_usd_value()}</label>
           <input
             id={"pricing-value-" + row.id}
             type="number"
@@ -86,7 +86,7 @@
           />
         </div>
         <TableActionButton
-          label={"Remove " + po.pricingFieldLabel(row.field)}
+          label={m.models_remove_price({ price: po.pricingFieldLabel(row.field) })}
           class="table-action-btn-danger table-icon-btn pricing-override-remove-row"
           onclick={() => po.removeModelPricingOverrideRow(row)}
         >
@@ -103,25 +103,24 @@
       onclick={() => po.addModelPricingOverrideRow()}
     >
       <Icon icon={Plus} class="form-action-icon" />
-      <span>Add Price</span>
+      <span>{m.models_add_price()}</span>
     </button>
   </div>
 
   {#if po.modelPricingOverrideFormPreservedTiers.length > 0}
     <div class="pricing-override-tier-note">
-      Tiered pricing exists for this override and will be preserved. Tier editing can be added
-      without a database migration.
+      {m.models_tiered_pricing_help()}
     </div>
   {/if}
 
   <div class="pricing-preview">
     <div class="pricing-preview-header">
-      <span>Price Type</span>
+      <span>{m.models_price_type()}</span>
       <span>USD</span>
-      <span>Source</span>
+      <span>{m.models_source_column()}</span>
     </div>
     {#if po.modelPricingEffectivePreviewRows().length === 0}
-      <div class="pricing-preview-row pricing-preview-row-empty">No pricing fields set.</div>
+      <div class="pricing-preview-row pricing-preview-row-empty">{m.models_no_pricing()}</div>
     {/if}
     {#each po.modelPricingEffectivePreviewRows() as row (row.field)}
       <div class="pricing-preview-row">
@@ -142,7 +141,7 @@
         disabled={po.modelPricingOverrideSubmitting}
         onclick={() => po.deleteModelPricingOverride()}
       >
-        Remove Override
+        {m.models_remove_override()}
       </button>
     {/if}
   {/snippet}
