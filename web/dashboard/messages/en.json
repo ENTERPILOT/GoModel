@@ -1,0 +1,80 @@
+{
+  "$schema": "https://inlang.com/schema/inlang-message-format",
+  "common_action_cancel": "Cancel",
+  "common_action_next": "Next",
+  "common_action_previous": "Previous",
+  "common_label_admin": "Admin",
+  "navigation_overview": "Overview",
+  "navigation_providers": "Providers",
+  "navigation_models": "Models",
+  "navigation_audit_logs": "Audit Logs",
+  "navigation_usage": "Usage",
+  "navigation_budgets": "Budgets",
+  "navigation_rate_limits": "Rate Limits",
+  "navigation_api_keys": "API Keys",
+  "navigation_workflows": "Workflows",
+  "navigation_guardrails_experimental": "Guardrails (experimental)",
+  "navigation_mcp_servers": "MCP Servers",
+  "navigation_settings": "Settings",
+  "sidebar_action_sign_out": "Sign out",
+  "sidebar_action_enter_api_key": "Enter API key",
+  "sidebar_action_change_api_key": "Change API key",
+  "sidebar_resize_label": "Resize sidebar",
+  "sidebar_resize_help": "Drag to resize; click to collapse or expand",
+  "theme_label": "Theme",
+  "theme_light": "Light theme",
+  "theme_system": "System theme",
+  "theme_dark": "Dark theme",
+  "theme_change": "Change theme (currently {theme})",
+  "language_label": "Language",
+  "auth_banner_required": "Authentication required for dashboard data.",
+  "auth_dialog_locked_title": "Dashboard locked",
+  "auth_dialog_change_key_title": "Change API key",
+  "auth_dialog_close": "Close authentication dialog",
+  "auth_dialog_sign_in_with_sso": "Sign in with SSO",
+  "auth_dialog_or_use_api_key": "or use an API key",
+  "auth_api_key_label": "API key",
+  "auth_api_key_placeholder": "Master key or bearer token",
+  "auth_api_key_invalid": "Enter a valid API key to continue.",
+  "auth_api_key_storage_hint": "Stored in this browser. Requests use the Authorization bearer header.",
+  "auth_action_unlock_dashboard": "Unlock dashboard",
+  "auth_action_save_api_key": "Save API key",
+  "confirmation_close": "Close confirmation dialog",
+  "notification_dismiss": "Dismiss notification",
+  "demo_mode_label": "Demo mode notice",
+  "demo_mode_title": "Public demo",
+  "demo_mode_warning": "Do not enter sensitive or personal data. Demo data is reset regularly.",
+  "demo_mode_website_label": "GoModel website",
+  "pagination_summary": "Showing {start}–{end} of {total}",
+  "date_picker_last_days": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Last {count} day",
+        "count_plural=*": "Last {count} days"
+      }
+    }
+  ],
+  "date_picker_days": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} day",
+        "count_plural=*": "{count} days"
+      }
+    }
+  ],
+  "date_picker_today": "Today",
+  "date_picker_range": "{start} – {end}",
+  "date_picker_open_range": "{start} – ...",
+  "date_picker_select_start": "Select start date",
+  "date_picker_select_end": "Select end date",
+  "date_picker_previous_month": "Previous month",
+  "date_picker_next_month": "Next month",
+  "date_range_chart_title_daily": "Daily Token Usage",
+  "date_range_chart_title_weekly": "Weekly Token Usage",
+  "date_range_chart_title_monthly": "Monthly Token Usage",
+  "date_range_chart_title_yearly": "Yearly Token Usage"
+}

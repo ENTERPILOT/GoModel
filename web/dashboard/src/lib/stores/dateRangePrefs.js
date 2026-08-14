@@ -1,5 +1,5 @@
-// Persistence shape and trigger label for the shared reporting window.
-// Rune-free and relative-imported so node:test can exercise it directly.
+// Persistence shape for the shared reporting window. Localized presentation
+// lives in dateRangeText.js; this module stays rune-free for node:test.
 //
 // Two kinds of window survive a reload:
 //   - preset            "last N days", always relative to today
@@ -24,21 +24,6 @@ const STORAGE_VERSION = 1;
 function isPresetDays(value) {
   return /^[1-9]\d*$/.test(String(value ?? ""));
 }
-
-const MONTH_NAMES = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
 
 /** The persisted payload for a window, or null when there is nothing to save. */
 export function serializeDateRange({
@@ -102,46 +87,4 @@ export function windowEndingToday(startKey, endKey, todayKey) {
   const span = daysBetweenDateKeys(startKey, endKey);
   if (span < 1 || !isDateKey(todayKey)) return { start: startKey, end: endKey };
   return { start: addDaysToDateKey(todayKey, -(span - 1)), end: todayKey };
-}
-
-function formatDateKeyShort(key, todayKey) {
-  if (key === todayKey) return "Today";
-  const [year, month, day] = key.split("-");
-  return MONTH_NAMES[Number(month) - 1] + " " + Number(day) + ", " + year;
-}
-
-/**
- * Tooltip for the picker trigger: how long the window is. A window that
- * tracks today is "the last N days"; a fixed one is just N days long.
- */
-export function rangeSpanLabel({
-  selectedPreset,
-  startKey,
-  endKey,
-  followsToday,
-  todayKey,
-}) {
-  if (selectedPreset) return "Last " + selectedPreset + " days";
-  if (!isDateKey(startKey) || !isDateKey(endKey)) return "";
-
-  const days = daysBetweenDateKeys(startKey, endKey);
-  if (followsToday || endKey === todayKey) {
-    return days === 1 ? "Today" : "Last " + days + " days";
-  }
-  return days === 1 ? "1 day" : days + " days";
-}
-
-/**
- * Label for the picker trigger. A one-day window shows a single date, and
- * today is named rather than dated.
- */
-export function rangeLabel({ selectedPreset, startKey, endKey, todayKey }) {
-  if (selectedPreset) return "Last " + selectedPreset + " days";
-  const short = (key) => formatDateKeyShort(key, todayKey);
-  if (isDateKey(startKey) && isDateKey(endKey)) {
-    if (startKey === endKey) return short(startKey);
-    return short(startKey) + " – " + short(endKey);
-  }
-  if (isDateKey(startKey)) return short(startKey) + " – ...";
-  return "Last " + DEFAULT_PRESET_DAYS + " days";
 }

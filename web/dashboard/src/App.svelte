@@ -11,6 +11,7 @@
   import { dateRange } from "$lib/stores/dateRange.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { syncDocumentLocale } from "$lib/i18n/locale.js";
 
   import OverviewPage from "$pages/overview/OverviewPage.svelte";
   import UsagePage from "$pages/usage/UsagePage.svelte";
@@ -42,6 +43,7 @@
     settings: SettingsPage,
   };
 
+  syncDocumentLocale();
   timezone.init();
   dateRange.init(); // after timezone.init(): "today" is timezone dependent
   auth.init();

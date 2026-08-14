@@ -1,6 +1,8 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import path from "node:path";
+import { paraglideOptions } from "./paraglide.config.js";
 
 // The dashboard is served by the Go binary: `vite build` emits into
 // internal/admin/dashboard/static/dist, which is embedded via go:embed and
@@ -12,7 +14,7 @@ import path from "node:path";
 // fallback instead of being nested under /admin/static/.
 export default defineConfig(({ command }) => ({
   base: command === "build" ? "/admin/static/" : "/",
-  plugins: [svelte()],
+  plugins: [paraglideVitePlugin(paraglideOptions), svelte()],
   resolve: {
     alias: {
       $lib: path.resolve(__dirname, "src/lib"),
