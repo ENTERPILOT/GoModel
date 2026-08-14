@@ -340,7 +340,10 @@ export function liveLogsMethods() {
             if (index < 0) return;
             const head = entries[index];
             const next = [...entries];
-            next.splice(index, 1, { ...head, session_count: Math.max(1, Number(head.session_count || 1) - count) });
+            next.splice(index, 1, {
+                ...head,
+                session_count: Math.max(1, Number(head.session_count || 1) - count)
+            });
             this.auditLog.entries = next;
         },
 
@@ -459,7 +462,11 @@ export function liveLogsMethods() {
                     reloadGroupedList = true;
                     return;
                 }
-                const promoted = { ...children[0], session_id: sessionId, session_count: sessionCount - 1 };
+                const promoted = {
+                    ...children[0],
+                    session_id: sessionId,
+                    session_count: sessionCount - 1
+                };
                 next.push(promoted);
                 this.auditThreadChildren = {
                     ...this.auditThreadChildren,

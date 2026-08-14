@@ -169,11 +169,8 @@ type auditConversationResponse struct {
 }
 
 type auditSessionResponse struct {
-	SessionID      string                `json:"session_id,omitempty"`
-	Count          int                   `json:"count"`
-	FirstTimestamp time.Time             `json:"first_timestamp"`
-	LastTimestamp  time.Time             `json:"last_timestamp"`
-	Latest         auditLogEntryResponse `json:"latest"`
+	RequestCount int                   `json:"request_count"`
+	Latest       auditLogEntryResponse `json:"latest"`
 }
 
 type auditSessionsListResponse struct {

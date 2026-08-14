@@ -135,9 +135,9 @@ export function buildAuditLogQuery({
 }
 
 // buildAuditSessionQuery renders the thread-children fetch for one session:
-// GET /admin/audit/log?session_id=…  Deliberately no date window, so an
-// expanded thread shows the whole session even when older requests fall
-// outside the date picker's range.
+// GET /admin/audit/log?session_id=…  Deliberately no active list filters, so
+// an expanded thread shows the whole session even when requests fall outside
+// the date, user-path, or other filters used to find the thread.
 export function buildAuditSessionQuery({ sessionId, limit }) {
   return (
     "session_id=" +
@@ -178,8 +178,7 @@ export function auditLogFromSessions(payload) {
       .filter((session) => session && session.latest)
       .map((session) => ({
         ...session.latest,
-        session_id: auditSessionId(session.latest) || String(session.session_id || "").trim(),
-        session_count: Number(session.count || 1),
+        session_count: Math.max(1, Number(session.request_count) || 1),
       })),
     total: Number((payload && payload.total) || 0),
     limit: Number((payload && payload.limit) || 25),
@@ -343,9 +342,9 @@ export function auditLogWithLiveEntries(payload, currentEntries, filters) {
 }
 
 // auditGroupedLogWithLiveEntries is auditLogWithLiveEntries for grouped mode:
-// a still-pending live preview folds into its session's fetched head (keeping
-// the larger count) instead of duplicating the thread; previews without an
-// on-screen thread prepend as singleton heads.
+// a still-pending live preview folds into its session's fetched head instead
+// of duplicating the thread; previews without an on-screen thread prepend as
+// singleton heads.
 export function auditGroupedLogWithLiveEntries(payload, currentEntries, filters) {
   const next =
     payload && typeof payload === "object"
@@ -379,15 +378,23 @@ export function auditGroupedLogWithLiveEntries(payload, currentEntries, filters)
     const sid = auditSessionId(entry);
     if (sid && headBySession.has(sid)) {
       // Fold into the fetched thread: the pending preview is newer than the
-      // persisted head, so it becomes the head and keeps the thread's count.
+      // persisted head, so it becomes the head. Counts already accumulated by
+      // the live grouping path are authoritative; otherwise this distinct
+      // request increments the fetched count.
       const index = headBySession.get(sid);
       if (merged === entries) merged = [...entries];
+      const previousCount = auditSessionCount(merged[index]);
+      const incomingValue = Number(entry && entry.session_count);
+      const incomingCount =
+        Number.isFinite(incomingValue) && incomingValue > 1
+          ? incomingValue
+          : null;
       merged[index] = {
         ...entry,
-        session_count: Math.max(
-          auditSessionCount(merged[index]),
-          auditSessionCount(entry),
-        ),
+        session_count:
+          incomingCount === null
+            ? previousCount + 1
+            : Math.max(previousCount, incomingCount),
       };
       keys.forEach((key) => persistedKeys.add(key));
       return;

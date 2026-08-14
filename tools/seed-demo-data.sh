@@ -13,6 +13,8 @@ semantic_cache_pct="${DEMO_SEMANTIC_CACHE_PCT:-7}"
 prompt_cache_pct="${DEMO_PROMPT_CACHE_PCT:-28}"
 rewrite_pct="${DEMO_REWRITE_PCT:-18}"
 prefix="${DEMO_SEED_PREFIX:-demo-generated}"
+seed_utc_epoch="$(date -u +%s)"
+current_utc_second=$((seed_utc_epoch % 86400))
 
 usage() {
   cat <<EOF
@@ -368,7 +370,10 @@ DELETE FROM failover_rules WHERE managed_source = '${prefix}';
 DROP TABLE IF EXISTS temp.demo_days;
 CREATE TEMP TABLE demo_days AS
 WITH RECURSIVE days(day_idx, day) AS (
-  SELECT 0, date(CASE WHEN '${end_date}' = '' THEN 'now' ELSE '${end_date}' END, '-' || (${days} - 1) || ' days')
+  SELECT 0, date(
+    CASE WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch') ELSE '${end_date}' END,
+    '-' || (${days} - 1) || ' days'
+  )
   UNION ALL
   SELECT day_idx + 1, date(day, '+1 day') FROM days WHERE day_idx < ${days} - 1
 ),
@@ -385,7 +390,13 @@ daily_random AS (
 SELECT
   day_idx,
   day,
-  CAST(max(25, min(${max_requests}, round(${avg_requests} * weekday_factor * trend_factor * seasonal_factor * noise_factor))) AS INTEGER) AS request_count
+  CAST(max(25, min(${max_requests}, round(
+    ${avg_requests} * weekday_factor * trend_factor * seasonal_factor * noise_factor *
+    CASE WHEN day = date(${seed_utc_epoch}, 'unixepoch')
+      THEN max(0.02, (${current_utc_second} + 1) / 86400.0)
+      ELSE 1.0
+    END
+  ))) AS INTEGER) AS request_count
 FROM daily_random;
 
 DROP TABLE IF EXISTS temp.demo_slots;
@@ -453,7 +464,10 @@ SELECT
   abs(random()) % 10000 AS rewrite_bucket,
   abs(random()) % 10000 AS label_bucket,
   abs(random()) % 10000 AS session_bucket,
-  abs(random()) % 86400 AS second_of_day,
+  abs(random()) % CASE WHEN d.day = date(${seed_utc_epoch}, 'unixepoch')
+    THEN ${current_utc_second} + 1
+    ELSE 86400
+  END AS second_of_day,
   abs(random()) AS token_noise
 FROM demo_days d
 JOIN demo_slots s ON s.slot_idx < d.request_count;
@@ -968,7 +982,8 @@ SELECT
   strftime('%Y-%m-%dT%H:%M:%fZ', day || ' 00:00:00', '+' || (second_of_day + 1) || ' seconds'),
   80000000 + (token_noise % 110000000)
 FROM demo_generated
-WHERE abs(token_noise / 131) % 1000 >= 994;
+WHERE abs(token_noise / 131) % 1000 >= 994
+  AND (day != date(${seed_utc_epoch}, 'unixepoch') OR second_of_day < ${current_utc_second});
 
 INSERT INTO audit_log_attempts (
   audit_log_id, seq, kind, provider_type, provider_name, model,
@@ -989,7 +1004,10 @@ SELECT
   strftime('%Y-%m-%dT%H:%M:%fZ', day || ' 00:00:00', '+' || (second_of_day + 1) || ' seconds'),
   90000000 + (token_noise % 200000000)
 FROM demo_generated
-WHERE abs(token_noise / 131) % 1000 < 985 AND cache_type IS NULL AND token_noise % 37 = 0;
+WHERE abs(token_noise / 131) % 1000 < 985
+  AND cache_type IS NULL
+  AND token_noise % 37 = 0
+  AND (day != date(${seed_utc_epoch}, 'unixepoch') OR second_of_day < ${current_utc_second});
 
 DROP TABLE IF EXISTS temp.demo_budget_paths;
 CREATE TEMP TABLE demo_budget_paths(user_path TEXT, daily_amount REAL, weekly_amount REAL, monthly_amount REAL);
@@ -1022,9 +1040,12 @@ SELECT
   period_seconds,
   amount,
   '${prefix}',
-  strftime('%s', date(CASE WHEN '${end_date}' = '' THEN 'now' ELSE '${end_date}' END)),
-  strftime('%s', 'now'),
-  strftime('%s', 'now')
+  strftime('%s', CASE
+    WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch')
+    ELSE date('${end_date}')
+  END),
+  ${seed_utc_epoch},
+  ${seed_utc_epoch}
 FROM budget_rows
 WHERE true
 ON CONFLICT(user_path, period_seconds) DO UPDATE SET
