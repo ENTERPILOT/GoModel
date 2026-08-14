@@ -5,24 +5,25 @@
   // sidebar); below 768px it is used regardless.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { themeStore } from "$lib/stores/ui.svelte.js";
+  import { i18n } from "$lib/i18n/i18n.svelte.js";
   import { Monitor, Moon, Sun } from "lucide";
 
   let { compact = false } = $props();
 
-  const themes = [
-    { value: "light", icon: Sun, label: "Light theme" },
-    { value: "system", icon: Monitor, label: "System theme" },
-    { value: "dark", icon: Moon, label: "Dark theme" },
-  ];
+  const themes = $derived([
+    { value: "light", icon: Sun, label: i18n.t("theme.light") },
+    { value: "system", icon: Monitor, label: i18n.t("theme.system") },
+    { value: "dark", icon: Moon, label: i18n.t("theme.dark") },
+  ]);
   const activeTheme = $derived(
     themes.find((t) => t.value === themeStore.theme) || themes[1],
   );
   // The narrow button cycles rather than selects, so it is named for the
   // action it performs and carries the current theme as context.
-  const cycleLabel = $derived("Change theme (currently " + activeTheme.label + ")");
+  const cycleLabel = $derived(i18n.t("theme.change", { theme: activeTheme.label }));
 </script>
 
-<div class="theme-toggle" class:is-compact={compact} role="group" aria-label="Theme">
+<div class="theme-toggle" class:is-compact={compact} role="group" aria-label={i18n.t("theme.label")}>
   {#each themes as theme (theme.value)}
     <button
       class="theme-btn"

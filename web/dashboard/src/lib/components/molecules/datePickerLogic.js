@@ -1,29 +1,6 @@
 // Pure calendar-grid math for DatePicker. Everything here works in UTC and
 // takes explicit inputs so it can be unit-tested without a DOM or a store.
 
-const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
-
-/** Month heading for `calendarMonth` shifted by `offset` months. */
-export function calendarTitle(calendarMonth, offset) {
-  const d = new Date(
-    Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth() + offset, 1),
-  );
-  return MONTH_NAMES[d.getUTCMonth()] + " " + d.getUTCFullYear();
-}
-
 /**
  * The 42 cells (6 weeks, Monday first) of `calendarMonth + offset`.
  * `dateKey` maps a Date to the store's canonical day key and is only used to

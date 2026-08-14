@@ -3,7 +3,8 @@
   // shift from the picker's anchor month (-1 = left pane, 0 = right pane).
   import { dateRange } from "$lib/stores/dateRange.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
-  import { calendarDays, calendarTitle, isSameMonth } from "./datePickerLogic.js";
+  import { calendarDays, isSameMonth } from "./datePickerLogic.js";
+  import { i18n } from "$lib/i18n/i18n.svelte.js";
 
   let { calendarMonth, offset = 0, onprev, onnext, onselect } = $props();
 
@@ -12,6 +13,18 @@
   );
   // The right pane is the anchor month, so "next" is capped at the real month.
   const atCurrentMonth = $derived(isSameMonth(calendarMonth, timezone.todayDate()));
+  const title = $derived(
+    i18n.formatDate(
+      new Date(
+        Date.UTC(
+          calendarMonth.getUTCFullYear(),
+          calendarMonth.getUTCMonth() + offset,
+          1,
+        ),
+      ),
+      { month: "long", year: "numeric", timeZone: "UTC" },
+    ),
+  );
 
   const key = (day) => timezone.dateToDateKey(day.date);
   const isFuture = (day) => key(day) > timezone.currentDateKey();
@@ -39,11 +52,11 @@
       class="dp-nav-btn"
       class:dp-nav-prev-mobile={offset !== -1}
       onclick={onprev}
-      aria-label="Previous month"
+      aria-label={i18n.t("datePicker.previousMonth")}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M8.5 3.5L5 7l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <span class="dp-cal-title">{calendarTitle(calendarMonth, offset)}</span>
+    <span class="dp-cal-title">{title}</span>
     {#if offset === -1}
       <span></span>
     {:else}
@@ -51,14 +64,20 @@
         class="dp-nav-btn"
         onclick={onnext}
         disabled={atCurrentMonth}
-        aria-label="Next month"
+        aria-label={i18n.t("datePicker.nextMonth")}
       >
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5.5 3.5L9 7l-3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     {/if}
   </div>
   <div class="dp-weekdays">
-    <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+    <span>{i18n.t("datePicker.weekdays.mondayShort")}</span>
+    <span>{i18n.t("datePicker.weekdays.tuesdayShort")}</span>
+    <span>{i18n.t("datePicker.weekdays.wednesdayShort")}</span>
+    <span>{i18n.t("datePicker.weekdays.thursdayShort")}</span>
+    <span>{i18n.t("datePicker.weekdays.fridayShort")}</span>
+    <span>{i18n.t("datePicker.weekdays.saturdayShort")}</span>
+    <span>{i18n.t("datePicker.weekdays.sundayShort")}</span>
   </div>
   <div class="dp-days">
     {#each days as day (day.key)}

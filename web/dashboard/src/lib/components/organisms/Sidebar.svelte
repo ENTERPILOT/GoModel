@@ -1,6 +1,7 @@
 <script>
   import Icon from "$lib/components/atoms/Icon.svelte";
   import GoModelLogo from "$lib/components/atoms/GoModelLogo.svelte";
+  import LocaleSelector from "$lib/components/molecules/LocaleSelector.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { sidebar } from "$lib/stores/ui.svelte.js";
@@ -11,6 +12,7 @@
     sidebarWidthFromPointer,
   } from "$lib/stores/sidebar-sizing.js";
   import { gomodelPath } from "$lib/api/paths.js";
+  import { i18n } from "$lib/i18n/i18n.svelte.js";
   import { NAV_ITEMS } from "./navigation.js";
   import { LockKeyhole, LogOut, UserRound } from "lucide";
 
@@ -87,7 +89,7 @@
       <GoModelLogo />
     </div>
     <h1>GoModel</h1>
-    <span class="badge">Admin</span>
+    <span class="badge">{i18n.t("common.labels.admin")}</span>
   </div>
   <nav class="sidebar-nav">
     {#each navItems as item (item.page)}
@@ -95,18 +97,19 @@
         href={gomodelPath("/admin/dashboard/" + item.page)}
         class="nav-item"
         class:active={router.page === item.page}
-        title={item.label}
+        title={i18n.t(item.labelKey)}
         onclick={(event) => {
           event.preventDefault();
           router.navigate(item.page);
         }}
       >
         <Icon icon={item.icon} class="nav-icon" />
-        <span class="nav-label">{item.label}</span>
+        <span class="nav-label">{i18n.t(item.labelKey)}</span>
       </a>
     {/each}
   </nav>
   <div class="sidebar-footer">
+    <LocaleSelector compact={sidebar.collapsed} />
     <ThemeToggle compact={sidebar.collapsed} />
     {#if auth.externalLogoutURL}
       <div class="external-auth-section">
@@ -119,10 +122,10 @@
         <a
           class="api-key-open-btn"
           href={gomodelPath(auth.externalLogoutURL)}
-          aria-label="Sign out"
+          aria-label={i18n.t("sidebar.actions.signOut")}
         >
           <Icon icon={LogOut} class="api-key-open-icon" />
-          <span>Sign out</span>
+          <span>{i18n.t("sidebar.actions.signOut")}</span>
         </a>
       </div>
     {/if}
@@ -132,10 +135,14 @@
           type="button"
           class="api-key-open-btn"
           onclick={() => auth.openDialog()}
-          aria-label={auth.needsAuth ? "Enter API key" : "Change API key"}
+          aria-label={auth.needsAuth
+            ? i18n.t("sidebar.actions.enterApiKey")
+            : i18n.t("sidebar.actions.changeApiKey")}
         >
           <Icon icon={LockKeyhole} class="api-key-open-icon" />
-          <span>{auth.needsAuth ? "Enter API key" : "Change API key"}</span>
+          <span>{auth.needsAuth
+              ? i18n.t("sidebar.actions.enterApiKey")
+              : i18n.t("sidebar.actions.changeApiKey")}</span>
         </button>
       </div>
     {/if}
@@ -147,8 +154,8 @@
   class="sidebar-toggle"
   role="separator"
   tabindex="0"
-  title="Drag to resize; click to collapse or expand"
-  aria-label="Resize sidebar"
+  title={i18n.t("sidebar.resize.help")}
+  aria-label={i18n.t("sidebar.resize.label")}
   aria-orientation="vertical"
   aria-valuemin={MIN_SIDEBAR_WIDTH}
   aria-valuemax={MAX_SIDEBAR_WIDTH}

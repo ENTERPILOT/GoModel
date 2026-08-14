@@ -7,20 +7,36 @@
 // one that ended in the past stays put. See dateRangePrefs.js.
 
 import { timezone } from "./timezone.svelte.js";
+import { i18n } from "$lib/i18n/i18n.svelte.js";
 import { formatDateParam } from "$lib/utils/format.js";
 import { readStored, writeStored } from "$lib/utils/storage.js";
 import {
   DATE_RANGE_STORAGE_KEY,
   DEFAULT_PRESET_DAYS,
   parseDateRange,
-  rangeLabel,
-  rangeSpanLabel,
   serializeDateRange,
   windowEndingToday,
 } from "./dateRangePrefs.js";
+import {
+  localizedRangeChartTitle,
+  localizedRangeLabel,
+  localizedRangeSpanLabel,
+} from "./dateRangeText.js";
 
 // How often an open dashboard re-checks whether the day rolled over.
 const DAY_SYNC_INTERVAL_MS = 60_000;
+
+const localizedText = {
+  t: (key, values) => i18n.t(key, values),
+  plural: (key, count) => i18n.plural(key, count),
+  date: (key) =>
+    i18n.formatDate(new Date(key + "T00:00:00Z"), {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    }),
+};
 
 class DateRangeStore {
   days = $state(DEFAULT_PRESET_DAYS);
@@ -119,22 +135,28 @@ class DateRangeStore {
   }
 
   dateRangeLabel() {
-    return rangeLabel({
-      selectedPreset: this.selectedPreset,
-      startKey: timezone.dateToDateKey(this.customStartDate),
-      endKey: timezone.dateToDateKey(this.customEndDate),
-      todayKey: timezone.currentDateKey(),
-    });
+    return localizedRangeLabel(
+      {
+        selectedPreset: this.selectedPreset,
+        startKey: timezone.dateToDateKey(this.customStartDate),
+        endKey: timezone.dateToDateKey(this.customEndDate),
+        todayKey: timezone.currentDateKey(),
+      },
+      localizedText,
+    );
   }
 
   dateRangeSpanLabel() {
-    return rangeSpanLabel({
-      selectedPreset: this.selectedPreset,
-      startKey: timezone.dateToDateKey(this.customStartDate),
-      endKey: timezone.dateToDateKey(this.customEndDate),
-      followsToday: this.followsToday,
-      todayKey: timezone.currentDateKey(),
-    });
+    return localizedRangeSpanLabel(
+      {
+        selectedPreset: this.selectedPreset,
+        startKey: timezone.dateToDateKey(this.customStartDate),
+        endKey: timezone.dateToDateKey(this.customEndDate),
+        followsToday: this.followsToday,
+        todayKey: timezone.currentDateKey(),
+      },
+      localizedText,
+    );
   }
 
   rangeStart() {
@@ -159,13 +181,7 @@ class DateRangeStore {
   }
 
   chartTitle() {
-    const titles = {
-      daily: "Daily",
-      weekly: "Weekly",
-      monthly: "Monthly",
-      yearly: "Yearly",
-    };
-    return (titles[this.interval] || "Daily") + " Token Usage";
+    return localizedRangeChartTitle(this.interval, localizedText);
   }
 
   // --- persistence ---

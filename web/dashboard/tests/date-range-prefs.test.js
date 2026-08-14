@@ -1,21 +1,39 @@
 // Pure-logic tests for the remembered reporting window: what gets persisted,
-// how a stored window is restored, and the picker trigger label.
+// how a stored window is restored, and localized picker presentation.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
   parseDateRange,
-  rangeLabel,
-  rangeSpanLabel,
   serializeDateRange,
   windowEndingToday,
 } from "../src/lib/stores/dateRangePrefs.js";
+import {
+  localizedRangeChartTitle,
+  localizedRangeLabel,
+  localizedRangeSpanLabel,
+} from "../src/lib/stores/dateRangeText.js";
+import { pluralKey, translate } from "../src/lib/i18n/catalog.js";
+import en from "../src/lib/i18n/locales/en.js";
 import {
   addDaysToDateKey,
   daysBetweenDateKeys,
   isDateKey,
 } from "../src/lib/utils/dateKeys.js";
+
+const englishText = {
+  t: (key, values) => translate(en, en, key, values),
+  plural: (key, count) =>
+    translate(en, en, pluralKey("en", key, count, en, en), { count }),
+  date: (key) =>
+    new Intl.DateTimeFormat("en", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(key + "T00:00:00Z")),
+};
 
 test("serializeDateRange stores a preset as a relative window", () => {
   assert.deepEqual(
@@ -120,12 +138,18 @@ test("windowEndingToday keeps a single-day window one day long", () => {
 });
 
 test("rangeLabel names a preset window", () => {
-  assert.equal(rangeLabel({ selectedPreset: "14" }), "Last 14 days");
+  assert.equal(
+    localizedRangeLabel({ selectedPreset: "14" }, englishText),
+    "Last 14 days",
+  );
 });
 
 test("rangeLabel shows one date when the window is a single day", () => {
   assert.equal(
-    rangeLabel({ startKey: "2026-07-29", endKey: "2026-07-29" }),
+    localizedRangeLabel(
+      { startKey: "2026-07-29", endKey: "2026-07-29" },
+      englishText,
+    ),
     "Jul 29, 2026",
   );
 });
@@ -133,47 +157,71 @@ test("rangeLabel shows one date when the window is a single day", () => {
 test("rangeLabel names today instead of dating it", () => {
   const todayKey = "2026-07-30";
   assert.equal(
-    rangeLabel({ startKey: todayKey, endKey: todayKey, todayKey }),
+    localizedRangeLabel(
+      { startKey: todayKey, endKey: todayKey, todayKey },
+      englishText,
+    ),
     "Today",
   );
   assert.equal(
-    rangeLabel({ startKey: "2026-07-01", endKey: todayKey, todayKey }),
+    localizedRangeLabel(
+      { startKey: "2026-07-01", endKey: todayKey, todayKey },
+      englishText,
+    ),
     "Jul 1, 2026 – Today",
   );
-  assert.equal(rangeLabel({ startKey: todayKey, todayKey }), "Today – ...");
+  assert.equal(
+    localizedRangeLabel({ startKey: todayKey, todayKey }, englishText),
+    "Today – ...",
+  );
 });
 
 test("rangeLabel shows both edges of a multi-day window", () => {
   assert.equal(
-    rangeLabel({ startKey: "2026-07-01", endKey: "2026-07-29" }),
+    localizedRangeLabel(
+      { startKey: "2026-07-01", endKey: "2026-07-29" },
+      englishText,
+    ),
     "Jul 1, 2026 – Jul 29, 2026",
   );
 });
 
 test("rangeLabel falls back while only the start is picked", () => {
-  assert.equal(rangeLabel({ startKey: "2026-07-01" }), "Jul 1, 2026 – ...");
-  assert.equal(rangeLabel({}), "Last 30 days");
+  assert.equal(
+    localizedRangeLabel({ startKey: "2026-07-01" }, englishText),
+    "Jul 1, 2026 – ...",
+  );
+  assert.equal(localizedRangeLabel({}, englishText), "Last 30 days");
 });
 
 test("rangeSpanLabel counts the last N days for a window tracking today", () => {
   const todayKey = "2026-07-30";
-  assert.equal(rangeSpanLabel({ selectedPreset: "7" }), "Last 7 days");
   assert.equal(
-    rangeSpanLabel({
-      startKey: "2026-07-11",
-      endKey: todayKey,
-      followsToday: true,
-      todayKey,
-    }),
+    localizedRangeSpanLabel({ selectedPreset: "7" }, englishText),
+    "Last 7 days",
+  );
+  assert.equal(
+    localizedRangeSpanLabel(
+      {
+        startKey: "2026-07-11",
+        endKey: todayKey,
+        followsToday: true,
+        todayKey,
+      },
+      englishText,
+    ),
     "Last 20 days",
   );
   assert.equal(
-    rangeSpanLabel({
-      startKey: todayKey,
-      endKey: todayKey,
-      followsToday: true,
-      todayKey,
-    }),
+    localizedRangeSpanLabel(
+      {
+        startKey: todayKey,
+        endKey: todayKey,
+        followsToday: true,
+        todayKey,
+      },
+      englishText,
+    ),
     "Today",
   );
 });
@@ -181,14 +229,38 @@ test("rangeSpanLabel counts the last N days for a window tracking today", () => 
 test("rangeSpanLabel states the plain length of a frozen window", () => {
   const todayKey = "2026-07-30";
   assert.equal(
-    rangeSpanLabel({ startKey: "2026-06-01", endKey: "2026-06-30", todayKey }),
+    localizedRangeSpanLabel(
+      { startKey: "2026-06-01", endKey: "2026-06-30", todayKey },
+      englishText,
+    ),
     "30 days",
   );
   assert.equal(
-    rangeSpanLabel({ startKey: "2026-06-09", endKey: "2026-06-09", todayKey }),
+    localizedRangeSpanLabel(
+      { startKey: "2026-06-09", endKey: "2026-06-09", todayKey },
+      englishText,
+    ),
     "1 day",
   );
-  assert.equal(rangeSpanLabel({ startKey: "2026-06-09", todayKey }), "");
+  assert.equal(
+    localizedRangeSpanLabel({ startKey: "2026-06-09", todayKey }, englishText),
+    "",
+  );
+});
+
+test("localizedRangeChartTitle translates complete interval phrases", () => {
+  assert.equal(
+    localizedRangeChartTitle("daily", englishText),
+    "Daily Token Usage",
+  );
+  assert.equal(
+    localizedRangeChartTitle("monthly", englishText),
+    "Monthly Token Usage",
+  );
+  assert.equal(
+    localizedRangeChartTitle("unknown", englishText),
+    "Daily Token Usage",
+  );
 });
 
 test("parseDateRange rejects keys that are not real calendar days", () => {
