@@ -246,6 +246,7 @@ test("rateLimitFormPayload enables independent child counters for user paths", (
 test("syncRateLimitScope resets the subject per scope", () => {
   const form = defaultRateLimitForm();
 
+  form.per_child = true;
   form.scope = "provider";
   syncRateLimitScope(form);
   assert.equal(form.subject, "");
