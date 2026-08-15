@@ -232,6 +232,67 @@ func (r *PostgreSQLReader) GetUsageByLabel(ctx context.Context, params UsageQuer
 	return result, nil
 }
 
+// GetUsageBySession returns request, token, and cost totals grouped by the
+// detected session id and its tracked user path. Legacy rows without a session
+// id are omitted.
+func (r *PostgreSQLReader) GetUsageBySession(ctx context.Context, params SessionUsageParams) (*SessionUsageResult, error) {
+	countQuery, query, args, dataArgs, limit, offset, err := postgresqlSessionUsageQueries(params)
+	if err != nil {
+		return nil, err
+	}
+
+	var total int
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("failed to count usage sessions: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, dataArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage by session: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]SessionUsage, 0)
+	for rows.Next() {
+		var session SessionUsage
+		if err := rows.Scan(&session.SessionID, &session.UserPath, &session.Requests,
+			&session.InputTokens, &session.OutputTokens, &session.TotalTokens,
+			&session.InputCost, &session.OutputCost, &session.TotalCost); err != nil {
+			return nil, fmt.Errorf("failed to scan usage by session row: %w", err)
+		}
+		result = append(result, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage by session rows: %w", err)
+	}
+	return &SessionUsageResult{Entries: result, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+// postgresqlSessionUsageQueries builds matching bounded data and count queries.
+func postgresqlSessionUsageQueries(params SessionUsageParams) (countQuery, dataQuery string, args, dataArgs []any, limit, offset int, err error) {
+	limit, offset = clampLimitOffset(params.Limit, params.Offset)
+	queryParams := params.UsageQueryParams
+	queryParams.CacheMode = CacheModeAll
+	conditions, args, argIdx, err := pgUsageConditions(queryParams, 1)
+	if err != nil {
+		return "", "", nil, nil, 0, 0, err
+	}
+	conditions = append(conditions, "session_id IS NOT NULL", "BTRIM(session_id) <> ''")
+	where := sqlutil.BuildWhereClause(conditions)
+	userPathExpr := usageGroupedUserPathSQL("user_path")
+	groupBy := " GROUP BY session_id, " + userPathExpr
+
+	countQuery = `SELECT COUNT(*) FROM (SELECT 1 FROM "usage"` + where + groupBy + `) AS sessions`
+	dataQuery = `SELECT session_id, ` + userPathExpr + ` AS user_path, COUNT(*),
+		COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0),
+		` + providerSessionCostSQL("input_cost") + `,
+		` + providerSessionCostSQL("output_cost") + `,
+		` + providerSessionCostSQL("total_cost") + `
+		FROM "usage"` + where + groupBy + fmt.Sprintf(` ORDER BY MAX(timestamp) DESC, session_id ASC, user_path ASC LIMIT $%d OFFSET $%d`, argIdx, argIdx+1)
+	dataArgs = append(append([]any(nil), args...), limit, offset)
+	return countQuery, dataQuery, args, dataArgs, limit, offset, nil
+}
+
 // GetUsageLog returns a paginated list of individual usage log entries.
 func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
@@ -243,7 +304,7 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 
 	if params.Search != "" {
 		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
-		conditions = append(conditions, fmt.Sprintf("(model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\' OR request_id ILIKE $%d ESCAPE '\\' OR provider_id ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx, argIdx))
+		conditions = append(conditions, fmt.Sprintf("(model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\' OR request_id ILIKE $%d ESCAPE '\\' OR provider_id ILIKE $%d ESCAPE '\\' OR session_id ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx, argIdx, argIdx))
 		args = append(args, s)
 		argIdx++
 	}
@@ -258,7 +319,7 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	}
 
 	// Fetch page
-	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type, labels,
+	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
 		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved
 		FROM "usage"%s ORDER BY timestamp DESC LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
@@ -301,7 +362,7 @@ func (r *PostgreSQLReader) GetUsageByRequestIDs(ctx context.Context, requestIDs 
 		placeholders = append(placeholders, fmt.Sprintf("$%d", idx+1))
 	}
 
-	query := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type, labels,
+	query := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
 		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved
 		FROM "usage" WHERE request_id IN (%s) ORDER BY timestamp DESC, id DESC`, strings.Join(placeholders, ", "))
@@ -334,9 +395,10 @@ func scanPostgreSQLUsageLogEntries(rows pgxRows) ([]UsageLogEntry, error) {
 		var rawDataJSON *string
 		var providerName *string
 		var userPath *string
+		var sessionID *string
 		var cacheType *string
 		var labelsJSON *string
-		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &e.Timestamp, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &cacheType, &labelsJSON,
+		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &e.Timestamp, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &sessionID, &cacheType, &labelsJSON,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &rawDataJSON, &e.CostsCalculationCaveat,
 			&e.RewriteTokensSaved, &e.RewriteCostSaved); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
@@ -351,6 +413,9 @@ func scanPostgreSQLUsageLogEntries(rows pgxRows) ([]UsageLogEntry, error) {
 		}
 		if userPath != nil {
 			e.UserPath = *userPath
+		}
+		if sessionID != nil {
+			e.SessionID = *sessionID
 		}
 		if providerName != nil {
 			e.ProviderName = displayUsageProviderName(*providerName, e.Provider)
@@ -570,6 +635,11 @@ func pgUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr str
 	if params.Model != "" {
 		conditions = append(conditions, fmt.Sprintf("model = $%d", nextIdx))
 		args = append(args, params.Model)
+		nextIdx++
+	}
+	if params.SessionID != "" {
+		conditions = append(conditions, fmt.Sprintf("session_id = $%d", nextIdx))
+		args = append(args, params.SessionID)
 		nextIdx++
 	}
 	if params.Provider != "" {

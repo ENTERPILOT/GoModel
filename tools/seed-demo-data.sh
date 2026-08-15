@@ -125,6 +125,7 @@ sqlite3 "$db_path" "PRAGMA journal_mode = WAL;" >/dev/null
 sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN labels JSON;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN rewrite_cost_saved REAL;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN session_id TEXT;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE mcp_servers ADD COLUMN display_name TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN user_path TEXT;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN labels JSON;" 2>/dev/null || true
@@ -180,6 +181,7 @@ CREATE TABLE IF NOT EXISTS usage (
   provider_name TEXT,
   endpoint TEXT NOT NULL,
   user_path TEXT,
+  session_id TEXT,
   cache_type TEXT,
   labels JSON,
   input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -337,6 +339,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage(provider);
 CREATE INDEX IF NOT EXISTS idx_usage_provider_name ON usage(provider_name);
 CREATE INDEX IF NOT EXISTS idx_usage_user_path ON usage(user_path);
 CREATE INDEX IF NOT EXISTS idx_usage_cache_type ON usage(cache_type);
+CREATE INDEX IF NOT EXISTS idx_usage_session_id ON usage(session_id);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id);
 CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path);
@@ -590,7 +593,7 @@ FROM session_keys;
 
 INSERT INTO usage (
   id, request_id, provider_id, timestamp, model, provider, provider_name,
-  endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens,
+  endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens,
   rewrite_tokens_saved, rewrite_cost_saved, raw_data,
   input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat
 )
@@ -604,6 +607,7 @@ SELECT
   provider_name,
   endpoint,
   user_path,
+  session_id,
   cache_type,
   -- Request labels as extracted from tagging headers: roughly two thirds of
   -- traffic is labelled, some with two labels, the rest unlabelled (NULL).

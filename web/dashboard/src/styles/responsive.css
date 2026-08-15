@@ -56,7 +56,6 @@
     }
 
   .page-with-sticky-date > .sticky-date-range {
-      top: 10px;
       width: 100%;
       margin-bottom: 24px;
     }

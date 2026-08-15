@@ -1111,6 +1111,14 @@
             }
           },
           {
+            "description": "Filter by exact detected session ID",
+            "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by tracked user path subtree",
             "name": "user_path",
             "in": "query",
@@ -3116,6 +3124,14 @@
             }
           },
           {
+            "description": "Filter by exact detected session ID",
+            "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by tracked user path subtree",
             "name": "user_path",
             "in": "query",
@@ -3232,6 +3248,14 @@
           {
             "description": "Filter by request label (exact match)",
             "name": "label",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact detected session ID",
+            "name": "session_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3375,7 +3399,15 @@
             }
           },
           {
-            "description": "Search across model, provider, request_id, provider_id",
+            "description": "Filter by exact detected session ID",
+            "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Search across model, provider, request_id, provider_id, session_id",
             "name": "search",
             "in": "query",
             "schema": {
@@ -3495,6 +3527,14 @@
           {
             "description": "Filter by request label (exact match)",
             "name": "label",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact detected session ID",
+            "name": "session_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3649,6 +3689,141 @@
         }
       }
     },
+    "/admin/usage/sessions": {
+      "get": {
+        "description": "Returns a bounded page of request, token, and cost aggregates\nfor detected, user-path-scoped sessions. Requests and tokens\ninclude local-cache hits; costs represent provider spend only.\nUsage without a detected session is omitted.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get usage breakdown by detected session",
+        "parameters": [
+          {
+            "description": "Number of days (default 30)",
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Start date (YYYY-MM-DD)",
+            "name": "start_date",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "End date (YYYY-MM-DD)",
+            "name": "end_date",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact model name",
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by provider name or provider type",
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by request label (exact match)",
+            "name": "label",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact detected session ID",
+            "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by tracked user path subtree",
+            "name": "user_path",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 200)",
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Offset for pagination",
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/usage.SessionUsageResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/sessions",
+            "title": "Get usage breakdown by detected session",
+            "description": "GoModel API reference for GET /admin/usage/sessions: Get usage breakdown by detected session."
+          }
+        }
+      }
+    },
     "/admin/usage/summary": {
       "get": {
         "tags": [
@@ -3699,6 +3874,14 @@
           {
             "description": "Filter by request label (exact match)",
             "name": "label",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact detected session ID",
+            "name": "session_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3881,6 +4064,14 @@
           {
             "description": "Filter by request label (exact match)",
             "name": "label",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact detected session ID",
+            "name": "session_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -14355,6 +14546,61 @@
           }
         }
       },
+      "usage.SessionUsage": {
+        "type": "object",
+        "properties": {
+          "input_cost": {
+            "type": "number",
+            "nullable": true
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "output_cost": {
+            "type": "number",
+            "nullable": true
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "total_cost": {
+            "type": "number",
+            "nullable": true
+          },
+          "total_tokens": {
+            "type": "integer"
+          },
+          "user_path": {
+            "type": "string"
+          }
+        }
+      },
+      "usage.SessionUsageResult": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/usage.SessionUsage"
+            }
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
       "usage.ThroughputBucket": {
         "type": "object",
         "properties": {
@@ -14461,6 +14707,9 @@
           },
           "rewrite_tokens_saved": {
             "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
           },
           "timestamp": {
             "type": "string"

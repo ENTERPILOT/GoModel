@@ -9,7 +9,7 @@
 //   - insert-gate fields: auditSearch, auditMethod, auditStatusCode,
 //     auditStream, customStartDate, customEndDate, usageLogSearch,
 //     usageFilterModel, usageFilterProvider, usageFilterLabel,
-//     usageFilterUserPath, usageLogHideCached, page
+//     usageFilterUserPath, usageFilterSession, usageLogHideCached, page
 //   - optional cross-module hooks (guarded with typeof):
 //     fetchUsage, fetchAuditLog, isAuditEntryExpanded, cacheAuditRecord,
 //     noteLiveTokenUsage, fetchAuditEntryDetail
@@ -121,7 +121,7 @@ export function liveLogsMethods() {
         usageLiveInsertAllowed() {
             return this.usageLog && this.usageLog.offset === 0 &&
                 !this.usageLogSearch && !this.usageFilterModel && !this.usageFilterProvider &&
-                !this.usageFilterLabel && !this.usageFilterUserPath;
+                !this.usageFilterLabel && !this.usageFilterUserPath && !this.usageFilterSession;
         },
 
         mergeLiveAuditEntry(incoming, eventType) {

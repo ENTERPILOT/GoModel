@@ -7,7 +7,11 @@
   import * as m from "$lib/paraglide/messages.js";
 
   const onUserPathInput = debounced(() => usagePage.onUsageFilterChanged());
-  $effect(() => onUserPathInput.cancel);
+  const onSessionInput = debounced(() => usagePage.onUsageFilterChanged());
+  $effect(() => () => {
+    onUserPathInput.cancel();
+    onSessionInput.cancel();
+  });
 </script>
 
 <div class="usage-page-filters" role="group" aria-label={m.usage_filters_label()}>
@@ -53,6 +57,18 @@
     bind:value={usagePage.usageFilterUserPath}
     oninput={onUserPathInput}
   />
+  <FilterInput
+    class="usage-page-filters-session"
+    placeholder={m.usage_filter_session_placeholder()}
+    label={m.usage_filter_session()}
+    bind:value={usagePage.usageFilterSession}
+    oninput={onSessionInput}
+    clearLabel={m.usage_clear_session_filter({ session: usagePage.usageFilterSession })}
+    onclear={() => {
+      onSessionInput.cancel();
+      usagePage.onUsageFilterChanged();
+    }}
+  />
 </div>
 
 <style>
@@ -77,9 +93,16 @@
     max-width: 360px;
   }
 
+  .usage-page-filters :global(.usage-page-filters-session) {
+    flex: 1 1 220px;
+    min-width: 180px;
+    max-width: 360px;
+  }
+
   @media (max-width: 768px) {
     .usage-page-filters :global(.usage-log-select),
-    .usage-page-filters :global(.usage-page-filters-user-path) {
+    .usage-page-filters :global(.usage-page-filters-user-path),
+    .usage-page-filters :global(.usage-page-filters-session) {
         flex: 1 1 100%;
         max-width: none;
       }

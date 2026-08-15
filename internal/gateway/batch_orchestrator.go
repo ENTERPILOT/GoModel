@@ -202,6 +202,7 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 			RewrittenInputFileID:      batchPreparation.RewrittenInputFileID,
 			RequestID:                 strings.TrimSpace(meta.RequestID),
 			UserPath:                  core.UserPathFromContext(ctx),
+			SessionID:                 core.SessionIDFromContext(ctx),
 			WorkflowVersionID:         workflowVersionID(workflow),
 			UsageEnabled:              new(workflow == nil || workflow.UsageEnabled()),
 		}

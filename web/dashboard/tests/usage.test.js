@@ -10,6 +10,7 @@ import {
   chartWrapHeight,
   costSourceTooltip,
   divergingDataFrom,
+  emptySessionUsage,
   emptyUsagePageSummary,
   facetOptionList,
   hasProviderCache,
@@ -24,6 +25,8 @@ import {
   rewriteSavingsVisible,
   rewriteTokenEstimateMethodText,
   rewriteTokensSaved,
+  sessionUsageQueryParams,
+  shortSessionID,
   usageEntryCached,
   usageEntryCacheLabel,
   usageFilterQueryStr,
@@ -44,6 +47,16 @@ test("usesResponseCostPricing detects provider-reported costs", () => {
   assert.equal(usesResponseCostPricing({ cost_source: "xai_cost_in_usd_ticks" }), true);
   assert.equal(usesResponseCostPricing({ cost_source: "model_pricing" }), false);
   assert.equal(usesResponseCostPricing({}), false);
+});
+
+test("session usage helpers shape bounded pages and compact long ids", () => {
+  assert.deepEqual(emptySessionUsage(), { entries: [], total: 0, limit: 50, offset: 0 });
+  assert.equal(sessionUsageQueryParams({ limit: 50, offset: 100 }), "&limit=50&offset=100");
+  assert.equal(shortSessionID("short-session"), "short-session");
+  assert.equal(
+    shortSessionID("scoped-0123456789abcdef0123456789abcdef"),
+    "scoped-01234567…89abcdef",
+  );
 });
 
 test("costSourceTooltip explains provider-reported costs", () => {
@@ -116,12 +129,13 @@ test("usageFilterQueryStr includes every active filter, URL-encoded", () => {
     provider: "openai",
     label: "env:prod",
     user_path: "/team",
+    session_id: "session/a",
   });
-  assert.equal(qs, "&model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam");
+  assert.equal(qs, "&model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam&session_id=session%2Fa");
 });
 
 test("usageFilterQueryStr skips empty filters", () => {
-  assert.equal(usageFilterQueryStr({ model: "", provider: "", label: "", user_path: "" }), "");
+  assert.equal(usageFilterQueryStr({ model: "", provider: "", label: "", user_path: "", session_id: "" }), "");
   assert.equal(usageFilterQueryStr({ label: "team alpha" }), "&label=team%20alpha");
 });
 
@@ -131,6 +145,7 @@ test("usageFilterQueryStr honors every filter except the excluded facet", () => 
     provider: "openai",
     label: "env:prod",
     user_path: "/team",
+    session_id: "session-a",
   };
   const withoutModel = usageFilterQueryStr(filters, "model");
   assert.doesNotMatch(withoutModel, /model=/);
@@ -145,6 +160,13 @@ test("usageFilterQueryStr honors every filter except the excluded facet", () => 
   const withoutLabel = usageFilterQueryStr(filters, "label");
   assert.doesNotMatch(withoutLabel, /label=/);
   assert.match(withoutLabel, /provider=openai/);
+
+  const withoutSession = usageFilterQueryStr(filters, "session_id");
+  assert.doesNotMatch(withoutSession, /session_id=/);
+  assert.match(withoutSession, /model=gpt-5/);
+  assert.match(withoutSession, /provider=openai/);
+  assert.match(withoutSession, /label=env%3Aprod/);
+  assert.match(withoutSession, /user_path=%2Fteam/);
 });
 
 test("usageLogQueryParams includes cache_mode=all by default so cached records are returned", () => {

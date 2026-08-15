@@ -1,11 +1,64 @@
 package usage
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
+
+func TestMongoSessionUsagePipelinesArePagedAndExcludeCachedCost(t *testing.T) {
+	dataPipeline, countPipeline, limit, offset, err := mongoSessionUsagePipelines(SessionUsageParams{
+		UsageQueryParams: UsageQueryParams{SessionID: "scoped-session", CacheMode: CacheModeUncached},
+		Limit:            12,
+		Offset:           7,
+	})
+	if err != nil {
+		t.Fatalf("mongoSessionUsagePipelines: %v", err)
+	}
+	if limit != 12 || offset != 7 {
+		t.Fatalf("pagination = %d/%d, want 12/7", limit, offset)
+	}
+	if len(dataPipeline) != 6 {
+		t.Fatalf("data pipeline stages = %d, want 6: %#v", len(dataPipeline), dataPipeline)
+	}
+	if len(countPipeline) != 4 {
+		t.Fatalf("count pipeline stages = %d, want 4: %#v", len(countPipeline), countPipeline)
+	}
+	match := fmt.Sprint(dataPipeline[0])
+	if !strings.Contains(match, "scoped-session") || strings.Contains(match, "cache_type") {
+		t.Fatalf("match stage has unexpected scope: %s", match)
+	}
+	group := fmt.Sprint(dataPipeline[2])
+	for _, fragment := range []string{"provider_requests", CacheTypeExact, CacheTypeSemantic, "total_cost"} {
+		if !strings.Contains(group, fragment) {
+			t.Fatalf("group stage missing %q: %s", fragment, group)
+		}
+	}
+	wantTail := bson.A{
+		bson.D{{Key: "$sort", Value: bson.D{{Key: "latest", Value: -1}, {Key: "_id", Value: 1}}}},
+		bson.D{{Key: "$skip", Value: 7}},
+		bson.D{{Key: "$limit", Value: 12}},
+	}
+	if !reflect.DeepEqual(dataPipeline[3:], wantTail) {
+		t.Fatalf("data pipeline tail = %#v, want %#v", dataPipeline[3:], wantTail)
+	}
+	wantCount := bson.D{{Key: "$count", Value: "count"}}
+	if !reflect.DeepEqual(countPipeline[3], wantCount) {
+		t.Fatalf("count stage = %#v, want %#v", countPipeline[3], wantCount)
+	}
+}
+
+func TestSessionCostPtrUsesZeroForCacheOnlySession(t *testing.T) {
+	if got := sessionCostPtr(0, 0, 123); got == nil || *got != 0 {
+		t.Fatalf("cache-only session cost = %v, want 0", got)
+	}
+	if got := sessionCostPtr(1, 0, 0); got != nil {
+		t.Fatalf("unpriced provider session cost = %v, want nil", got)
+	}
+}
 
 func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 	got, err := mongoUsageLogMatchFilters(UsageLogParams{
@@ -31,6 +84,7 @@ func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 			bson.D{{Key: "provider_name", Value: regex}},
 			bson.D{{Key: "request_id", Value: regex}},
 			bson.D{{Key: "provider_id", Value: regex}},
+			bson.D{{Key: "session_id", Value: regex}},
 		}}},
 	}}}
 
@@ -103,6 +157,7 @@ func TestMongoUsageLogMatchFiltersEscapesSearchRegex(t *testing.T) {
 		bson.D{{Key: "provider_name", Value: regex}},
 		bson.D{{Key: "request_id", Value: regex}},
 		bson.D{{Key: "provider_id", Value: regex}},
+		bson.D{{Key: "session_id", Value: regex}},
 	}}}
 
 	if !reflect.DeepEqual(got, want) {

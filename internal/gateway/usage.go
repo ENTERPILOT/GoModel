@@ -34,6 +34,7 @@ func (o *InferenceOrchestrator) logUsage(
 	if entry := extractFn(pricing); entry != nil {
 		entry.ProviderName = strings.TrimSpace(providerName)
 		entry.UserPath = core.UserPathFromContext(ctx)
+		entry.SessionID = core.SessionIDFromContext(ctx)
 		entry.Labels = core.RequestLabelsFromContext(ctx)
 		usage.ApplyRewriteSavings(entry, core.RewriteTokensSavedFromContext(ctx), pricing)
 		o.usageLogger.Write(entry)

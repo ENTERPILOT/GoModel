@@ -6,7 +6,7 @@ icon: "pin"
 
 Coding agents and chat apps send many requests that belong to one logical
 session — one conversation, one agent task. GoModel detects that session and
-uses it in two places:
+uses it throughout routing and observability:
 
 - **Sticky load balancing** — a load-balanced virtual model routes every
   request of a session to the target that served it first, which keeps provider
@@ -17,6 +17,9 @@ uses it in two places:
 - **Threaded audit logs** — the dashboard's Audit Logs page groups a session's
   requests into one thread: the latest request as the row, with an expander
   that unfolds the older requests beneath it.
+- **Per-session usage and cost** — usage records carry the same scoped session
+  id, so the dashboard and admin API can report the requests, tokens, and
+  provider spend for one conversation or agent task.
 
 Session keeping works with zero configuration. Defaults fit most setups; the
 options below exist for the rare cases they don't.
@@ -105,6 +108,52 @@ appear and which matching request represents each thread.
 `GET /admin/audit/sessions` returns each thread's `request_count` and latest
 matching audit-log entry. `GET /admin/audit/log?session_id=…` returns all
 requests in an expanded session.
+
+Each grouped thread also has a usage-chart action. It opens Usage Analytics
+with that session selected; expanding an individual request exposes the same
+action on its session badge.
+
+## Per-session usage and cost
+
+Usage Analytics includes a full-width **Usage by Recent Session** table. Each
+row represents one detected, user-path-scoped session and shows request count,
+input/output/total tokens, and input/output/total cost. Session chips in that
+table and the request log filter the whole usage page.
+
+The admin API exposes the same bounded report:
+
+```bash
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  "http://localhost:8080/admin/usage/sessions?days=7&limit=50&offset=0"
+```
+
+```json
+{
+  "entries": [
+    {
+      "session_id": "scoped-0123456789abcdef0123456789abcdef",
+      "user_path": "/team/alpha",
+      "requests": 8,
+      "input_tokens": 24000,
+      "output_tokens": 4100,
+      "total_tokens": 28100,
+      "input_cost": 0.42,
+      "output_cost": 0.16,
+      "total_cost": 0.58
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+Requests and tokens include responses served by GoModel's local response
+cache. Cost fields include provider-bound requests only, because cost stored on
+a local-cache hit is the cost that was avoided, not money actually spent.
+Results are ordered by latest session activity; `limit` defaults to 50 and is
+capped at 200. The normal usage filters (`session_id`, `user_path`, `model`,
+`provider`, `label`, and date range) apply.
 
 ## Configuration
 

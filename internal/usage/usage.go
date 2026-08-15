@@ -54,6 +54,7 @@ type UsageEntry struct {
 	ProviderName string `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
 	Endpoint     string `json:"endpoint" bson:"endpoint"`
 	UserPath     string `json:"user_path,omitempty" bson:"user_path,omitempty"`
+	SessionID    string `json:"session_id,omitempty" bson:"session_id,omitempty"`
 	CacheType    string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
 
 	// Labels are request labels extracted from configured tagging headers.

@@ -225,6 +225,57 @@ func (r *SQLiteReader) GetUsageByLabel(ctx context.Context, params UsageQueryPar
 	return result, nil
 }
 
+// GetUsageBySession returns request, token, and cost totals grouped by the
+// detected session id and its tracked user path. Legacy rows without a session
+// id are omitted.
+func (r *SQLiteReader) GetUsageBySession(ctx context.Context, params SessionUsageParams) (*SessionUsageResult, error) {
+	limit, offset := clampLimitOffset(params.Limit, params.Offset)
+	queryParams := params.UsageQueryParams
+	queryParams.CacheMode = CacheModeAll
+	conditions, args, err := sqliteUsageConditions(queryParams)
+	if err != nil {
+		return nil, err
+	}
+	conditions = append(conditions, "session_id IS NOT NULL", "TRIM(session_id) <> ''")
+	where := sqlutil.BuildWhereClause(conditions)
+	userPathExpr := usageGroupedUserPathSQL("user_path")
+	groupBy := " GROUP BY session_id, " + userPathExpr
+
+	var total int
+	countQuery := `SELECT COUNT(*) FROM (SELECT 1 FROM usage` + where + groupBy + `)`
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("failed to count usage sessions: %w", err)
+	}
+
+	query := `SELECT session_id, ` + userPathExpr + ` AS user_path, COUNT(*),
+		COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0),
+		` + providerSessionCostSQL("input_cost") + `,
+		` + providerSessionCostSQL("output_cost") + `,
+		` + providerSessionCostSQL("total_cost") + `
+		FROM usage` + where + groupBy + ` ORDER BY MAX(` + sqliteTimestampEpochExpr() + `) DESC, session_id ASC, user_path ASC LIMIT ? OFFSET ?`
+	dataArgs := append(append([]any(nil), args...), limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, dataArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage by session: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]SessionUsage, 0)
+	for rows.Next() {
+		var session SessionUsage
+		if err := rows.Scan(&session.SessionID, &session.UserPath, &session.Requests,
+			&session.InputTokens, &session.OutputTokens, &session.TotalTokens,
+			&session.InputCost, &session.OutputCost, &session.TotalCost); err != nil {
+			return nil, fmt.Errorf("failed to scan usage by session row: %w", err)
+		}
+		result = append(result, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage by session rows: %w", err)
+	}
+	return &SessionUsageResult{Entries: result, Total: total, Limit: limit, Offset: offset}, nil
+}
+
 // GetUsageLog returns a paginated list of individual usage log entries.
 func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
@@ -235,9 +286,9 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	}
 
 	if params.Search != "" {
-		conditions = append(conditions, "(model LIKE ? ESCAPE '\\' OR provider LIKE ? ESCAPE '\\' OR provider_name LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR provider_id LIKE ? ESCAPE '\\')")
+		conditions = append(conditions, "(model LIKE ? ESCAPE '\\' OR provider LIKE ? ESCAPE '\\' OR provider_name LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR provider_id LIKE ? ESCAPE '\\' OR session_id LIKE ? ESCAPE '\\')")
 		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
-		args = append(args, s, s, s, s, s)
+		args = append(args, s, s, s, s, s, s)
 	}
 
 	where := sqlutil.BuildWhereClause(conditions)
@@ -250,7 +301,7 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	}
 
 	// Fetch page
-	dataQuery := `SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type, labels,
+	dataQuery := `SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
 		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved
 		FROM usage` + where + ` ORDER BY ` + sqliteTimestampEpochExpr() + ` DESC, id DESC LIMIT ? OFFSET ?`
@@ -292,7 +343,7 @@ func (r *SQLiteReader) GetUsageByRequestIDs(ctx context.Context, requestIDs []st
 		args = append(args, requestID)
 	}
 
-	query := `SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type, labels,
+	query := `SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
 		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved
 		FROM usage WHERE request_id IN (` + placeholders + `) ORDER BY ` + sqliteTimestampEpochExpr() + ` DESC, id DESC`
@@ -327,9 +378,10 @@ func scanSQLiteUsageLogEntries(rows *sql.Rows) ([]UsageLogEntry, error) {
 		var rawDataJSON *string
 		var providerName sql.NullString
 		var userPath sql.NullString
+		var sessionID sql.NullString
 		var cacheType sql.NullString
 		var labelsJSON *string
-		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &ts, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &cacheType, &labelsJSON,
+		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &ts, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &sessionID, &cacheType, &labelsJSON,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &rawDataJSON, &caveat,
 			&e.RewriteTokensSaved, &e.RewriteCostSaved); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
@@ -349,6 +401,9 @@ func scanSQLiteUsageLogEntries(rows *sql.Rows) ([]UsageLogEntry, error) {
 		}
 		if userPath.Valid {
 			e.UserPath = userPath.String
+		}
+		if sessionID.Valid {
+			e.SessionID = sessionID.String
 		}
 		if providerName.Valid {
 			e.ProviderName = displayUsageProviderName(providerName.String, e.Provider)
@@ -607,6 +662,10 @@ func sqliteUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr
 	if params.Model != "" {
 		conditions = append(conditions, "model = ?")
 		args = append(args, params.Model)
+	}
+	if params.SessionID != "" {
+		conditions = append(conditions, "session_id = ?")
+		args = append(args, params.SessionID)
 	}
 	if params.Provider != "" {
 		conditions = append(conditions, "(provider = ? OR provider_name = ?)")

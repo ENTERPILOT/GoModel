@@ -15,6 +15,7 @@
     providerDisplayValue,
   } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
+  import SessionIDChip from "./SessionIDChip.svelte";
   import {
     cachedCostTitle,
     costSourceTooltip,
@@ -95,6 +96,7 @@
             <th>{m.usage_column_provider()}</th>
             <th>{m.usage_column_model()}</th>
             <th>{m.usage_column_user_path()}</th>
+            <th>{m.usage_column_session()}</th>
             {#if hasLabels}
               <th>{m.usage_column_labels()}</th>
             {/if}
@@ -119,6 +121,18 @@
               </td>
               <td class="mono font-size-md">{entry.model}</td>
               <td class="mono font-size-md">{entry.user_path || "-"}</td>
+              <td>
+                {#if entry.session_id}
+                  <SessionIDChip
+                    sessionID={entry.session_id}
+                    active={usagePage.usageFilterSession === entry.session_id}
+                    compact
+                    onfilter={(sessionID) => usagePage.filterBySession(sessionID, entry.user_path)}
+                  />
+                {:else}
+                  <span>-</span>
+                {/if}
+              </td>
               {#if hasLabels}
                 <td class="usage-log-labels-cell">
                   {@render labelChips(entry)}

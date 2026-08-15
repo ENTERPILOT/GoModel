@@ -304,6 +304,7 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 		if s.usageLogger != nil && s.usageLogger.Config().Enabled && (workflow == nil || workflow.UsageEnabled()) {
 			if observer := usage.NewStreamUsageObserver(s.usageLogger, model, providerType, requestID, usagePath, s.pricingResolver, core.UserPathFromContext(c.Request().Context())); observer != nil {
 				observer.SetProviderName(providerName)
+				observer.SetSessionID(core.SessionIDFromContext(c.Request().Context()))
 				observer.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 				observer.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
 				observers = append(observers, observer)
