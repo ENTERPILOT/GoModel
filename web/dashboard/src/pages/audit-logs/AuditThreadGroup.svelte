@@ -8,7 +8,6 @@
   import { motionDuration } from "$lib/utils/motion.js";
   import AuditEntryRow from "./AuditEntryRow.svelte";
   import { auditList } from "./auditList.svelte.js";
-  import { usagePage } from "../usage/usage.svelte.js";
   import {
     auditIsThreadHead,
     auditSessionCount,
@@ -38,7 +37,6 @@
         count: auditSessionCount(entry),
         expanded,
         ontoggle: () => auditList.toggleThread(entry),
-        onusage: () => usagePage.filterBySession(sessionId, entry.user_path),
       }}
     />
     {#if expanded}

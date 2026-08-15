@@ -15,7 +15,7 @@
   import * as m from "$lib/paraglide/messages.js";
 
   // `thread` marks a session-thread head row (grouped mode):
-  // { count, expanded, ontoggle, onusage }. `expanded`/`onactivate` wire the
+  // { count, expanded, ontoggle }. `expanded`/`onactivate` wire the
   // Svelte-controlled row expansion: the click is intercepted (the parent
   // <details> stays open so the close can animate) and the state lives in
   // auditList.
@@ -24,6 +24,7 @@
     thread = null,
     expanded = false,
     onactivate = null,
+    onusage = null,
     hidePath = false,
   } = $props();
 
@@ -50,10 +51,10 @@
     thread.ontoggle();
   }
 
-  function openThreadUsage(event) {
+  function openSessionUsage(event) {
     event.stopPropagation();
     event.preventDefault();
-    thread.onusage?.();
+    onusage?.();
   }
 
   function threadDescription() {
@@ -100,14 +101,16 @@
         />
         <span class="audit-thread-count mono">{thread.count}</span>
       </button>
+    {/if}
+    {#if onusage}
       <button
         type="button"
-        class="audit-thread-usage"
+        class="audit-session-usage"
         title={m.audit_view_session_usage()}
         aria-label={m.audit_view_session_usage()}
-        onclick={openThreadUsage}
+        onclick={openSessionUsage}
       >
-        <Icon icon={ChartNoAxesColumnIncreasing} class="audit-thread-usage-svg" />
+        <Icon icon={ChartNoAxesColumnIncreasing} class="audit-session-usage-svg" />
       </button>
     {/if}
     <span
@@ -259,7 +262,7 @@
     font-weight: 600;
   }
 
-  .audit-thread-usage {
+  .audit-session-usage {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -274,12 +277,12 @@
     cursor: pointer;
   }
 
-  .audit-thread-usage:hover {
+  .audit-session-usage:hover {
     background: color-mix(in srgb, var(--accent) 20%, var(--bg));
     border-color: var(--accent);
   }
 
-  .audit-thread-usage :global(.audit-thread-usage-svg) {
+  .audit-session-usage :global(.audit-session-usage-svg) {
     width: 14px;
     height: 14px;
   }
