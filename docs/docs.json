@@ -23,7 +23,7 @@
         "url": "full"
     },
     "seo": {
-        "indexing": "all",
+        "indexing": "navigable",
         "metatags": {
             "generator": "GoModel",
             "google-site-verification": "EhaMJtqC22YnPJetcCW5SCi3fdJF2BOai2WHjae8ymY",

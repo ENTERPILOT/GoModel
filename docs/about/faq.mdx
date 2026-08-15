@@ -49,11 +49,12 @@ The version is also printed on the first line of the startup log.
 Yes — set `GOMODEL_VERSION` before running the installer:
 
 ```bash
-GOMODEL_VERSION=v0.1.53 curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+curl -fsSL https://gomodel.enterpilot.io/install.sh | GOMODEL_VERSION=vX.Y.Z sh
 ```
 
 On Windows set `$env:GOMODEL_VERSION` first. With Docker, use a version tag
-(`enterpilot/gomodel:0.1.53`) instead of `latest`.
+(`enterpilot/gomodel:X.Y.Z`) instead of `latest`. Replace `X.Y.Z` with a
+[published GoModel release](https://github.com/ENTERPILOT/GoModel/releases).
 
 ## Is updating safe for my data?
 
