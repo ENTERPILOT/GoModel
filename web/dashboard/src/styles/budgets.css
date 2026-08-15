@@ -172,7 +172,10 @@
   background: color-mix(in srgb, #b5652d 22%, var(--bg));
 }
 .budget-bar-fill-period-daily {
-  background: #b5652d;
+  /* Darker than the #b5652d badge color: the badge only needs contrast
+     against its own text, but this fill sits under white on-fill text
+     and #b5652d falls short of 4.5:1. */
+  background: #a75a26;
 }
 
 .budget-bar-track-period-hourly {
