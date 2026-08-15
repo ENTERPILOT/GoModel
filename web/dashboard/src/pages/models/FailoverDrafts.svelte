@@ -8,6 +8,7 @@
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { failover } from "./failover.svelte.js";
   import { Check, Save } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <Modal
@@ -19,19 +20,19 @@
     class="model-editor failover-drafts-editor"
     role="dialog"
     aria-modal="true"
-    aria-label="Generated failover drafts"
+    aria-label={m.models_drafts_label()}
   >
     <div class="editor-header">
       <div>
-        <p class="form-kicker">Generated drafts</p>
-        <h3>Failover models</h3>
+        <p class="form-kicker">{m.models_drafts_kicker()}</p>
+        <h3>{m.models_drafts_title()}</h3>
       </div>
       <div class="failover-draft-header-actions">
         {#if failover.failoverGeneratedRules.length > 0}
           <span class="failover-draft-counter">{failover.failoverDraftCountLabel()}</span>
         {/if}
         <DialogCloseButton
-          label="Close failover drafts"
+          label={m.models_drafts_close()}
           onclick={() => failover.closeFailoverDraftsModal()}
           disabled={failover.failoverDraftSaving}
         />
@@ -39,14 +40,14 @@
     </div>
 
     {#if failover.failoverGenerating}
-      <LoadingState label="Generating failover drafts..." class="failover-drafts-loading" />
+      <LoadingState label={m.models_drafts_generating()} class="failover-drafts-loading" />
     {/if}
 
     {#if !failover.failoverGenerating && failover.failoverGeneratedRules.length > 0}
       <div class="failover-draft-toolbar">
         <FilterInput
-          placeholder="Filter failover drafts..."
-          label="Filter failover drafts"
+          placeholder={m.models_drafts_filter_placeholder()}
+          label={m.models_drafts_filter_label()}
           bind:value={failover.failoverDraftFilter}
         />
         <button
@@ -57,7 +58,7 @@
         >
           <Icon icon={Check} class="form-action-icon" />
           <span>
-            {failover.allFailoverDraftsSelected() ? "Deselect all" : "Select all"}
+            {failover.allFailoverDraftsSelected() ? m.models_drafts_deselect_all() : m.models_drafts_select_all()}
           </span>
         </button>
       </div>
@@ -73,8 +74,7 @@
               disabled={failover.failoverDraftSaving}
               onchange={(event) =>
                 failover.setFailoverDraftSelected(rule, event.currentTarget.checked)}
-              aria-label={"Select failover draft for " +
-                failover.failoverPrimaryModel(rule)}
+              aria-label={m.models_drafts_select({ model: failover.failoverPrimaryModel(rule) })}
             />
             <span class="failover-draft-copy">
               <span class="mono failover-draft-source">{failover.failoverPrimaryModel(rule)}</span>
@@ -87,12 +87,12 @@
 
     {#if !failover.failoverGenerating && failover.failoverGeneratedRules.length === 0 && !failover.failoverError}
       <p class="form-hint failover-drafts-empty">
-        No failover suggestions were generated.
+        {m.models_drafts_empty()}
       </p>
     {/if}
     {#if !failover.failoverGenerating && failover.failoverGeneratedRules.length > 0 && failover.filteredFailoverDrafts().length === 0}
       <p class="form-hint failover-drafts-empty">
-        No failover drafts match the filter.
+        {m.models_drafts_no_match()}
       </p>
     {/if}
     {#if failover.failoverError}
@@ -108,7 +108,7 @@
         disabled={failover.failoverDraftSaving}
         onclick={() => failover.closeFailoverDraftsModal()}
       >
-        Cancel
+        {m.common_action_cancel()}
       </button>
       <button
         type="button"
@@ -119,7 +119,7 @@
         onclick={() => failover.saveSelectedFailoverDrafts()}
       >
         <Icon icon={Save} class="form-action-icon" />
-        <span>{failover.failoverDraftSaving ? "Saving..." : "Save selected"}</span>
+        <span>{failover.failoverDraftSaving ? m.models_drafts_saving() : m.models_drafts_save_selected()}</span>
       </button>
     </div>
   </div>

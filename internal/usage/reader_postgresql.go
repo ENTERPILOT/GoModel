@@ -268,6 +268,7 @@ func (r *PostgreSQLReader) GetUsageBySession(ctx context.Context, params Session
 	return &SessionUsageResult{Entries: result, Total: total, Limit: limit, Offset: offset}, nil
 }
 
+// postgresqlSessionUsageQueries builds matching bounded data and count queries.
 func postgresqlSessionUsageQueries(params SessionUsageParams) (countQuery, dataQuery string, args, dataArgs []any, limit, offset int, err error) {
 	limit, offset = clampLimitOffset(params.Limit, params.Offset)
 	queryParams := params.UsageQueryParams
@@ -287,7 +288,7 @@ func postgresqlSessionUsageQueries(params SessionUsageParams) (countQuery, dataQ
 		` + providerSessionCostSQL("input_cost") + `,
 		` + providerSessionCostSQL("output_cost") + `,
 		` + providerSessionCostSQL("total_cost") + `
-		FROM "usage"` + where + groupBy + fmt.Sprintf(` ORDER BY MAX(timestamp) DESC LIMIT $%d OFFSET $%d`, argIdx, argIdx+1)
+		FROM "usage"` + where + groupBy + fmt.Sprintf(` ORDER BY MAX(timestamp) DESC, session_id ASC, user_path ASC LIMIT $%d OFFSET $%d`, argIdx, argIdx+1)
 	dataArgs = append(append([]any(nil), args...), limit, offset)
 	return countQuery, dataQuery, args, dataArgs, limit, offset, nil
 }

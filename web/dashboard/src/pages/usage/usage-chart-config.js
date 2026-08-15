@@ -4,6 +4,7 @@
 
 import { formatTokensShort } from "../../lib/utils/format.js";
 import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
+import * as m from "../../lib/paraglide/messages.js";
 
 // Horizontal input/output bars: one row per entity (model, user path, label).
 // In the default diverging view the input-side series (paid input,
@@ -30,21 +31,21 @@ export function horizontalUsageChartConfig(colors, labels, series, options) {
   });
   const hasData = (values) => (values || []).some((v) => Math.abs(v) > 0);
   const datasets = [
-    bar(costs ? "Input Cost" : "Input Tokens", inputSide(series.inputs), resolve("var(--token-input)")),
-    bar(costs ? "Output Cost" : "Output Tokens", series.outputs, resolve("var(--token-output)")),
+    bar(costs ? m.usage_column_input_cost() : m.usage_column_input_tokens(), inputSide(series.inputs), resolve("var(--token-input)")),
+    bar(costs ? m.usage_column_output_cost() : m.usage_column_output_tokens(), series.outputs, resolve("var(--token-output)")),
   ];
   if (hasData(series.prompts)) {
     datasets.push(
-      bar(costs ? "Prompt Cached Cost" : "Prompt Cached", inputSide(series.prompts), resolve("var(--token-prompt)")),
+      bar(costs ? m.usage_prompt_cached_cost() : m.usage_column_prompt_cached(), inputSide(series.prompts), resolve("var(--token-prompt)")),
     );
   }
   // Local cache hits carry both sides, so each joins its own half of the axis
   // (they pile together in the stacked view).
   if (!costs && hasData(series.localIns)) {
-    datasets.push(bar("Locally Cached (Input)", inputSide(series.localIns), resolve("var(--token-local)")));
+    datasets.push(bar(m.usage_locally_cached_input(), inputSide(series.localIns), resolve("var(--token-local)")));
   }
   if (!costs && hasData(series.localOuts)) {
-    datasets.push(bar("Locally Cached (Output)", series.localOuts, resolve("var(--token-local)")));
+    datasets.push(bar(m.usage_locally_cached_output(), series.localOuts, resolve("var(--token-local)")));
   }
   return {
     type: "bar",
@@ -95,7 +96,7 @@ export function horizontalUsageChartConfig(colors, labels, series, options) {
             items.forEach((it) => {
               total += Math.abs(Number(it.parsed.x)) || 0;
             });
-            return "Total: " + fmtExact(total);
+            return m.overview_total_label({ total: fmtExact(total) });
           },
         }),
       },

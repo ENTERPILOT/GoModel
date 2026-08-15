@@ -2,6 +2,7 @@
 // conversation-helpers.js.
 
 import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
+import * as m from "$lib/paraglide/messages.js";
 import { untrack } from "svelte";
 import { liveLogs } from "./liveLogs.svelte.js";
 import {
@@ -243,8 +244,8 @@ class ConversationDrawerStore {
 
   conversationLiveStatusText() {
     return (this.conversationMessages || []).length > 0
-      ? "Model is responding…"
-      : "Waiting for request data…";
+      ? m.interaction_model_responding()
+      : m.audit_waiting_request_data();
   }
 
   closeConversation() {
@@ -288,7 +289,7 @@ class ConversationDrawerStore {
       if (result.stale) return;
 
       if (!result.ok) {
-        this.conversationError = "Unable to load interactions.";
+        this.conversationError = m.interaction_load_unavailable();
         return;
       }
 
@@ -313,7 +314,7 @@ class ConversationDrawerStore {
     } catch (e) {
       if (requestToken !== this.conversationRequestToken) return;
       console.error("Failed to fetch audit conversation:", e);
-      this.conversationError = "Failed to load interactions.";
+      this.conversationError = m.interaction_load_failed();
     } finally {
       if (requestToken === this.conversationRequestToken) {
         this.conversationLoading = false;
@@ -365,7 +366,7 @@ class ConversationDrawerStore {
       const responseRequestID = String(response.headers.get("X-Request-ID") || "").trim();
       if (responseRequestID && this.followUpRequestID) this.followUpRequestID = responseRequestID;
       if (!response.ok) {
-        let message = "Unable to send message.";
+        let message = m.interaction_send_unavailable();
         try {
           const payload = await response.json();
           message = payload && payload.error && payload.error.message || message;
@@ -384,10 +385,12 @@ class ConversationDrawerStore {
       }
     } catch (error) {
       if (isAbortError(error) || controller.signal.aborted) {
-        if (timedOut && this.conversationOpen) this.followUpError = "The request timed out.";
+        if (timedOut && this.conversationOpen) {
+          this.followUpError = m.interaction_request_timed_out();
+        }
       } else {
         console.error("Failed to send interaction follow-up:", error);
-        this.followUpError = "Failed to send message.";
+        this.followUpError = m.interaction_send_failed();
       }
     } finally {
       clearTimeout(timeout);
@@ -430,7 +433,7 @@ class ConversationDrawerStore {
       await waitFor(FOLLOW_UP_POLL_INTERVAL_MS, signal);
     }
     if (this.conversationOpen && requestToken === this.conversationRequestToken) {
-      this.followUpError = "Message sent, but its saved interaction is not available yet.";
+      this.followUpError = m.interaction_saved_unavailable();
     }
   }
 

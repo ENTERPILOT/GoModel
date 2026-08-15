@@ -25,6 +25,7 @@ import {
   normalizeBudgetListPayload,
 } from "./budgets-helpers.js";
 import { RotateCcw } from "lucide";
+import * as m from "$lib/paraglide/messages.js";
 
 class BudgetsStore {
   budgets = $state([]);
@@ -83,7 +84,7 @@ class BudgetsStore {
     this.error = "";
     const outcome = await loadAdminList("/admin/budgets", {
       label: "budgets",
-      errorFallback: "Unable to load budgets.",
+      errorFallback: m.budgets_load_failed(),
       normalize: normalizeBudgetListPayload,
     });
     this.loading = false;
@@ -190,8 +191,8 @@ class BudgetsStore {
       budgetPutBody(payload),
       {
         label: "save budget",
-        errorFallback: "Unable to save budget.",
-        unavailableMessage: "Budget management is unavailable.",
+        errorFallback: m.budgets_save_failed(),
+        unavailableMessage: m.budgets_unavailable(),
       },
     );
     this.formSubmitting = false;
@@ -209,7 +210,7 @@ class BudgetsStore {
     }
     this.closeForm();
     // Flash before the refetch so feedback is instant.
-    flash.success("Budget saved.");
+    flash.success(m.budgets_saved());
     void this.fetchBudgets();
   }
 
@@ -244,7 +245,7 @@ class BudgetsStore {
       return;
     }
     const label = budgetSubject(item) + " " + budgetPeriodLabel(item);
-    if (!confirm('Reset budget "' + label + '"?')) {
+    if (!confirm(m.budgets_reset_confirm({ label }))) {
       return;
     }
     this.resettingKey = key;
@@ -254,8 +255,8 @@ class BudgetsStore {
       budgetResetOneBody(item),
       {
         label: "reset budget",
-        errorFallback: "Unable to reset budget.",
-        unavailableMessage: "Budget management is unavailable.",
+        errorFallback: m.budgets_reset_failed(),
+        unavailableMessage: m.budgets_unavailable(),
       },
     );
     this.resettingKey = "";
@@ -271,7 +272,7 @@ class BudgetsStore {
       flash.error(outcome.error);
       return;
     }
-    flash.success("Budget reset.");
+    flash.success(m.budgets_reset_done());
     void this.fetchBudgets();
   }
 
@@ -284,7 +285,7 @@ class BudgetsStore {
       return;
     }
     const label = budgetSubject(item) + " " + budgetPeriodLabel(item);
-    if (!confirm('Delete budget "' + label + '"? This cannot be undone.')) {
+    if (!confirm(m.budgets_delete_confirm({ label }))) {
       return;
     }
     this.deletingKey = key;
@@ -294,8 +295,8 @@ class BudgetsStore {
       budgetDeleteBody(item),
       {
         label: "delete budget",
-        errorFallback: "Unable to delete budget.",
-        unavailableMessage: "Budget management is unavailable.",
+        errorFallback: m.budgets_delete_failed(),
+        unavailableMessage: m.budgets_unavailable(),
       },
     );
     this.deletingKey = "";
@@ -312,7 +313,7 @@ class BudgetsStore {
       return;
     }
     this.budgets = normalizeBudgetListPayload(outcome.result.data);
-    flash.success("Budget deleted.");
+    flash.success(m.budgets_deleted());
   }
 
   // Reset-all budgets: typed-confirmation dialog ("type reset"). The
@@ -320,11 +321,11 @@ class BudgetsStore {
   // rest of the budget logic so it can be reused from anywhere.
   openResetDialog() {
     confirmDialog.open({
-      title: "Reset Budgets",
+      title: m.budgets_reset_all_title(),
       titleId: "budgetResetDialogTitle",
       inputId: "budget-reset-confirmation",
       requiredText: "reset",
-      confirmLabel: "Reset All Budgets",
+      confirmLabel: m.budgets_reset_all(),
       icon: RotateCcw,
       dialogClass: "budget-reset-dialog",
       onConfirm: () => this.resetAllBudgets(),
@@ -342,7 +343,7 @@ class BudgetsStore {
       { confirmation: "reset" },
       {
         label: "reset budgets",
-        errorFallback: "Unable to reset budgets.",
+        errorFallback: m.budgets_reset_all_failed(),
         // Reset-all never had a dedicated 503 branch; keep 503 an error.
         unavailableStatuses: [],
       },
@@ -356,7 +357,7 @@ class BudgetsStore {
       return;
     }
     confirmDialog.close();
-    flash.success("Budgets reset.");
+    flash.success(m.budgets_reset_all_done());
     if (router.page === "budgets") {
       void this.fetchBudgets();
     }

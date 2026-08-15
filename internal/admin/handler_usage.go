@@ -272,6 +272,9 @@ func (h *Handler) UsageBySession(c *echo.Context) error {
 	if result == nil {
 		result = &usage.SessionUsageResult{Limit: params.Limit, Offset: params.Offset}
 	}
+	// Keep the paging envelope authoritative even if a reader omits it.
+	result.Limit = params.Limit
+	result.Offset = params.Offset
 	if result.Entries == nil {
 		result.Entries = []usage.SessionUsage{}
 	}

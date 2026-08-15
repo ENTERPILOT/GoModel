@@ -1,6 +1,7 @@
 // Pure interaction shaping shared by the Svelte stores and Node tests.
 
 import { formatJSON } from "../../lib/utils/format.js";
+import * as m from "../../lib/paraglide/messages.js";
 import { findNestedErrorMessage, tryParseJSON } from "./error-text.js";
 
 // Re-exported so the drawer store keeps one import for its formatting.
@@ -12,14 +13,16 @@ function contentPartLabel(part) {
     if (!part || typeof part !== 'object') return '';
     const type = String(part.type || '').toLowerCase();
     if (type === 'image' || type === 'image_url' || type === 'input_image' || type === 'output_image') {
-        return '[Image]';
+        return m.interaction_attachment_image();
     }
     if (type === 'audio' || type === 'input_audio' || type === 'output_audio') {
-        return '[Audio]';
+        return m.interaction_attachment_audio();
     }
     if (type === 'file' || type === 'input_file' || type === 'output_file') {
         const name = String(part.filename || part.name || '').trim();
-        return name ? '[File: ' + name + ']' : '[File]';
+        return name
+            ? m.interaction_attachment_named_file({ name })
+            : m.interaction_attachment_file();
     }
     if (typeof part.refusal === 'string') return part.refusal;
     return '';
@@ -674,8 +677,8 @@ export function renderAudioBody(value) {
             + '</div>';
     }
     const reason = value.too_large
-        ? 'Audio too large to store.'
-        : 'Audio not logged. Set LOGGING_LOG_AUDIO_BODIES=true to capture playable audio.';
+        ? m.audit_audio_too_large()
+        : m.audit_audio_not_logged();
     return '<div class="audit-audio audit-audio-empty">'
         + '<div class="audit-audio-icon" aria-hidden="true">🔊</div>'
         + '<div class="audit-audio-meta mono">' + metaLabel + '</div>'
@@ -798,21 +801,21 @@ export function renderBodyWithConversationHighlights(entry, value, deps) {
 function roleMeta(role) {
     const normalized = String(role || '').toLowerCase();
     if (normalized === 'system' || normalized === 'developer') {
-        return { role: 'system', label: 'System Prompt', className: 'role-system' };
+        return { role: 'system', label: m.interaction_role_system(), className: 'role-system' };
     }
     if (normalized === 'assistant') {
-        return { role: 'assistant', label: 'Agent', className: 'role-assistant' };
+        return { role: 'assistant', label: m.interaction_role_agent(), className: 'role-assistant' };
     }
     if (normalized === 'error') {
-        return { role: 'error', label: 'Error', className: 'role-error' };
+        return { role: 'error', label: m.interaction_role_error(), className: 'role-error' };
     }
     if (normalized === 'function_call') {
-        return { role: 'function_call', label: 'Function Call', className: 'role-function-call' };
+        return { role: 'function_call', label: m.interaction_role_function_call(), className: 'role-function-call' };
     }
     if (normalized === 'function_result') {
-        return { role: 'function_result', label: 'Function Result', className: 'role-function-result' };
+        return { role: 'function_result', label: m.interaction_role_function_result(), className: 'role-function-result' };
     }
-    return { role: 'user', label: 'User', className: 'role-user' };
+    return { role: 'user', label: m.interaction_role_user(), className: 'role-user' };
 }
 
 function conversationMessage(role, text, {

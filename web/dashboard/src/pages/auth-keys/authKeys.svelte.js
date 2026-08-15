@@ -4,6 +4,7 @@
 
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
+import * as m from "$lib/paraglide/messages.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import {
   buildCreateAuthKeyPayload,
@@ -53,7 +54,7 @@ class AuthKeysStore {
     try {
       const outcome = await loadAdminList("/admin/auth-keys", {
         label: "auth keys",
-        errorFallback: "Unable to load API keys.",
+        errorFallback: m.api_keys_load_failed(),
       });
       if (outcome.status === "stale") {
         return;
@@ -125,8 +126,8 @@ class AuthKeysStore {
     try {
       const outcome = await sendAdminMutation("/admin/auth-keys", "POST", built.payload, {
         label: "create API key",
-        errorFallback: "Failed to create API key.",
-        unavailableMessage: "Auth keys feature is unavailable.",
+        errorFallback: m.api_keys_create_failed(),
+        unavailableMessage: m.api_keys_feature_unavailable(),
       });
       if (outcome.status === "stale") {
         return;
@@ -193,8 +194,8 @@ class AuthKeysStore {
         payload,
         {
           label: "update API key labels",
-          errorFallback: "Failed to update labels.",
-          unavailableMessage: "Auth keys feature is unavailable.",
+          errorFallback: m.api_keys_labels_update_failed(),
+          unavailableMessage: m.api_keys_feature_unavailable(),
         },
       );
       if (outcome.status === "stale") {
@@ -212,7 +213,7 @@ class AuthKeysStore {
         }
         return;
       }
-      flash.success('Labels updated for key "' + editor.name + '".');
+      flash.success(m.api_keys_labels_updated({ name: editor.name }));
       editor.submitting = false;
       this.closeLabelsEditor();
       void this.fetchKeys();
@@ -235,8 +236,8 @@ class AuthKeysStore {
         { dashboard_access: grant },
         {
           label: "update API key dashboard access",
-          errorFallback: "Failed to update dashboard access.",
-          unavailableMessage: "Auth keys feature is unavailable.",
+          errorFallback: m.api_keys_access_update_failed(),
+          unavailableMessage: m.api_keys_feature_unavailable(),
         },
       );
       if (outcome.status === "stale") {
@@ -258,9 +259,9 @@ class AuthKeysStore {
         flash.error(outcome.error);
         return;
       }
-      flash.success(
-        'Dashboard access ' + (grant ? "granted to" : "revoked for") + ' key "' + key.name + '".',
-      );
+      flash.success(grant
+        ? m.api_keys_access_granted({ name: key.name })
+        : m.api_keys_access_revoked({ name: key.name }));
       void this.fetchKeys();
     } finally {
       this.dashboardAccessID = "";
@@ -271,7 +272,7 @@ class AuthKeysStore {
     if (!key || !key.active) {
       return;
     }
-    if (!window.confirm('Deactivate key "' + key.name + '"? This cannot be undone.')) {
+    if (!window.confirm(m.api_keys_deactivate_confirm({ name: key.name }))) {
       return;
     }
 
@@ -283,8 +284,8 @@ class AuthKeysStore {
         undefined,
         {
           label: "deactivate API key",
-          errorFallback: "Failed to deactivate key.",
-          unavailableMessage: "Auth keys feature is unavailable.",
+          errorFallback: m.api_keys_deactivate_failed(),
+          unavailableMessage: m.api_keys_feature_unavailable(),
         },
       );
       if (outcome.status === "stale") {
@@ -302,7 +303,7 @@ class AuthKeysStore {
         flash.error(outcome.error);
         return;
       }
-      flash.success('Key "' + key.name + '" deactivated.');
+      flash.success(m.api_keys_deactivate_success({ name: key.name }));
       void this.fetchKeys();
     } finally {
       this.deactivatingID = "";

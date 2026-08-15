@@ -31,6 +31,7 @@
     usesResponseCostPricing,
   } from "./usage-helpers.js";
   import { CircleDollarSign, DatabaseZap } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   const costsMode = $derived(usagePage.usageMode === "costs");
   const hasLabels = $derived(
@@ -65,12 +66,12 @@
 {/snippet}
 
 <div class="usage-log-section">
-  <h3>Request Log</h3>
+  <h3>{m.usage_request_log()}</h3>
   <div class="usage-log-toolbar">
     <div class="usage-filter-row usage-filter-row-search">
       <FilterInput
-        placeholder="Search by request ID, session, model, provider..."
-        label="Search by request ID, session, model, provider"
+        placeholder={m.usage_search_placeholder()}
+        label={m.usage_search_label()}
         bind:value={usagePage.usageLogSearch}
         oninput={onSearchInput}
       />
@@ -82,7 +83,7 @@
           bind:checked={usagePage.usageLogHideCached}
           onchange={() => usagePage.fetchUsageLog(true)}
         />
-        <span>Hide cached requests</span>
+        <span>{m.usage_hide_cached()}</span>
       </label>
     </div>
   </div>
@@ -91,21 +92,21 @@
       <table class="data-table usage-log-table">
         <thead>
           <tr>
-            <th>Timestamp</th>
-            <th>Provider</th>
-            <th>Model</th>
-            <th>User Path</th>
-            <th>Session</th>
+            <th>{m.usage_column_timestamp()}</th>
+            <th>{m.usage_column_provider()}</th>
+            <th>{m.usage_column_model()}</th>
+            <th>{m.usage_column_user_path()}</th>
+            <th>{m.usage_column_session()}</th>
             {#if hasLabels}
-              <th>Labels</th>
+              <th>{m.usage_column_labels()}</th>
             {/if}
-            <th>Cache</th>
-            <th title="Share of input tokens served from the provider's prompt cache">Provider Cache</th>
-            <th class="col-price">{costsMode ? "Input Cost" : "Input"}</th>
-            <th class="col-price">{costsMode ? "Output Cost" : "Output"}</th>
-            <th class="col-price">{costsMode ? "Total Cost" : "Total"}</th>
+            <th>{m.usage_column_cache()}</th>
+            <th title={m.usage_provider_cache_help()}>{m.usage_column_provider_cache()}</th>
+            <th class="col-price">{costsMode ? m.usage_column_input_cost() : m.usage_column_input()}</th>
+            <th class="col-price">{costsMode ? m.usage_column_output_cost() : m.usage_column_output()}</th>
+            <th class="col-price">{costsMode ? m.usage_column_total_cost() : m.usage_column_total()}</th>
             {#if !costsMode}
-              <th class="col-price">Cost</th>
+              <th class="col-price">{m.usage_column_cost()}</th>
             {/if}
           </tr>
         </thead>
@@ -126,7 +127,7 @@
                     sessionID={entry.session_id}
                     active={usagePage.usageFilterSession === entry.session_id}
                     compact
-                    onfilter={(sessionID) => usagePage.filterBySession(sessionID)}
+                    onfilter={(sessionID) => usagePage.filterBySession(sessionID, entry.user_path)}
                   />
                 {:else}
                   <span>-</span>
@@ -147,12 +148,12 @@
               </td>
               <td
                 class="col-price"
-                title={costsMode ? formatNumber(entry.input_tokens) + " tokens" : ""}
+                title={costsMode ? m.usage_tokens_count({ count: formatNumber(entry.input_tokens) }) : ""}
                 >{costsMode ? formatCost(entry.input_cost) : formatNumber(entry.input_tokens)}</td
               >
               <td
                 class="col-price"
-                title={costsMode ? formatNumber(entry.output_tokens) + " tokens" : ""}
+                title={costsMode ? m.usage_tokens_count({ count: formatNumber(entry.output_tokens) }) : ""}
                 >{costsMode ? formatCost(entry.output_cost) : formatNumber(entry.output_tokens)}</td
               >
               <td class="col-price" title={costsMode ? cachedCostTitle(entry, "") : ""}>
@@ -160,7 +161,7 @@
                   title={costsMode
                     ? cachedCostTitle(
                         entry,
-                        formatNumber(entry.total_tokens) + " tokens\n" + formatCostTooltip(entry),
+                        m.usage_tokens_count({ count: formatNumber(entry.total_tokens) }) + "\n" + formatCostTooltip(entry),
                       )
                     : ""}
                   >{costsMode
@@ -207,7 +208,7 @@
   {:else if usagePage.usageLogLoading}
     <!-- Loading affordance while the log fetch is in flight. -->
     <div class="empty-state usage-log-loading">
-      <Spinner size={20} label="Loading request log" />
+      <Spinner size={20} label={m.usage_loading_log()} />
     </div>
   {:else}
     <div class="empty-state">

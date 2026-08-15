@@ -3,6 +3,7 @@
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import ProviderStatusCard from "./ProviderStatusCard.svelte";
   import { providerStatusState } from "./overviewState.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   const providers = $derived(providerStatusState.status.providers);
 </script>
@@ -15,7 +16,7 @@
   >
     <div class="provider-status-section-header">
       <div>
-        <h3>Providers Overview</h3>
+        <h3>{m.overview_providers_title()}</h3>
       </div>
       <button
         type="button"
@@ -43,7 +44,7 @@
   </div>
 {:else if providerStatusState.loading && !providerStatusState.loadedOnce}
   <div class="provider-status-section provider-status-section-loading">
-    <Spinner size={18} label="Loading provider status" />
+    <Spinner size={18} label={m.overview_loading_provider_status()} />
   </div>
 {/if}
 

@@ -4,6 +4,7 @@
 
 import { formatCost } from "../../lib/utils/format.js";
 import { Calendar, CalendarDays, Clock, Settings2, Sun } from "lucide";
+import * as m from "../../lib/paraglide/messages.js";
 
 export function defaultBudgetForm() {
   return {
@@ -21,15 +22,15 @@ export function defaultBudgetForm() {
 export function budgetScopeMeta(scope) {
   const meta = {
     user_path: {
-      label: "User path",
-      chip: "user path",
-      fieldLabel: "User Path",
+      label: m.budgets_scope_user_path(),
+      chip: m.budgets_scope_user_path_chip(),
+      fieldLabel: m.budgets_scope_user_path_field(),
       placeholder: "/team/alpha",
     },
     label: {
-      label: "Label",
-      chip: "label",
-      fieldLabel: "Label",
+      label: m.budgets_scope_label(),
+      chip: m.budgets_scope_label_chip(),
+      fieldLabel: m.budgets_scope_label(),
       placeholder: "Mobile-App-iOS",
     },
   };
@@ -79,11 +80,11 @@ export function syncBudgetScope(form) {
 
 export function budgetPeriodOptions() {
   return [
-    { value: "hourly", label: "Hourly" },
-    { value: "daily", label: "Daily" },
-    { value: "weekly", label: "Weekly" },
-    { value: "monthly", label: "Monthly" },
-    { value: "custom", label: "Custom seconds" },
+    { value: "hourly", label: m.budgets_period_hourly() },
+    { value: "daily", label: m.budgets_period_daily() },
+    { value: "weekly", label: m.budgets_period_weekly() },
+    { value: "monthly", label: m.budgets_period_monthly() },
+    { value: "custom", label: m.budgets_period_custom() },
   ];
 }
 
@@ -142,7 +143,7 @@ export function findExistingBudget(budgets, payload) {
 export function budgetUserPathValidationError(value) {
   const trimmed = String(value || "").trim();
   if (!trimmed) {
-    return "User path is required.";
+    return m.budgets_user_path_required();
   }
   const raw = trimmed.startsWith("/") ? trimmed : "/" + trimmed;
   const segments = raw.split("/");
@@ -152,10 +153,10 @@ export function budgetUserPathValidationError(value) {
       continue;
     }
     if (segment === "." || segment === "..") {
-      return 'User path cannot contain "." or ".." segments.';
+      return m.budgets_user_path_segments();
     }
     if (segment.includes(":")) {
-      return 'User path cannot contain ":" segments.';
+      return m.budgets_user_path_colon();
     }
   }
   return "";
@@ -252,11 +253,11 @@ export function buildBudgetFormPayload(form) {
       return { payload: null, error: userPathError };
     }
   } else if (!subject) {
-    return { payload: null, error: "Label is required." };
+    return { payload: null, error: m.budgets_label_required() };
   }
   const amount = Number(f.amount);
   if (!Number.isFinite(amount) || amount <= 0) {
-    return { payload: null, error: "Amount must be greater than 0." };
+    return { payload: null, error: m.budgets_amount_positive() };
   }
   const period = String(f.period || "").trim();
   let periodSeconds = budgetPeriodSeconds(period);
@@ -264,7 +265,7 @@ export function buildBudgetFormPayload(form) {
     periodSeconds = Number(f.period_seconds);
   }
   if (!Number.isFinite(periodSeconds) || periodSeconds <= 0) {
-    return { payload: null, error: "Period seconds must be greater than 0." };
+    return { payload: null, error: m.budgets_period_positive() };
   }
   return {
     payload: {
@@ -319,15 +320,11 @@ export function budgetOverrideDialogMessage(payload, existing) {
       period_seconds: p.period_seconds || e.period_seconds,
       period_label: e.period_label,
     });
-  return (
-    'A budget for "' +
-    label +
-    '" already exists. Saving will override the current ' +
-    budgetAmountLabel(e.amount) +
-    " limit with " +
-    budgetAmountLabel(p.amount) +
-    "."
-  );
+  return m.budgets_override_message({
+    label,
+    current: budgetAmountLabel(e.amount),
+    next: budgetAmountLabel(p.amount),
+  });
 }
 
 function budgetRatio(value) {
@@ -372,16 +369,16 @@ export function budgetPeriodLabel(item) {
   const seconds = Number((item && item.period_seconds) || 0);
   switch (seconds) {
     case 3600:
-      return "Hourly";
+      return m.budgets_period_hourly();
     case 86400:
-      return "Daily";
+      return m.budgets_period_daily();
     case 604800:
-      return "Weekly";
+      return m.budgets_period_weekly();
     case 2592000:
-      return "Monthly";
+      return m.budgets_period_monthly();
     default: {
       const label = String((item && item.period_label) || "").trim();
-      return label ? "Custom " + label : "Custom " + String(seconds || "") + "s";
+      return m.budgets_custom_period({ period: label || String(seconds || "") + "s" });
     }
   }
 }
@@ -434,20 +431,22 @@ export function budgetPeriodIcon(item) {
 
 function formatBudgetPeriodSeconds(seconds) {
   const normalized = Math.max(0, Math.trunc(Number(seconds || 0)));
-  return normalized + " " + (normalized === 1 ? "second" : "seconds");
+  return normalized === 1
+    ? m.budgets_one_second()
+    : m.budgets_seconds({ count: normalized });
 }
 
 export function budgetPeriodDurationLabel(item) {
   const seconds = Number((item && item.period_seconds) || 0);
   switch (seconds) {
     case 3600:
-      return "1 hour";
+      return m.budgets_one_hour();
     case 86400:
-      return "1 day";
+      return m.budgets_one_day();
     case 604800:
-      return "1 week";
+      return m.budgets_one_week();
     case 2592000:
-      return "1 month";
+      return m.budgets_one_month();
     default:
       return formatBudgetPeriodSeconds(seconds);
   }
@@ -461,12 +460,12 @@ export function budgetSourceLabel(item) {
 export function budgetSourceTitle(item) {
   const source = budgetSourceLabel(item).toLowerCase();
   if (source === "manual") {
-    return "Created from the dashboard.";
+    return m.budgets_source_manual();
   }
   if (source === "config") {
-    return "Loaded from configuration.";
+    return m.budgets_source_config();
   }
-  return "Budget source: " + source;
+  return m.budgets_source_other({ source });
 }
 
 export function budgetRemainingLabel(item) {
@@ -475,7 +474,7 @@ export function budgetRemainingLabel(item) {
     return "";
   }
   if (remaining < 0) {
-    return formatCost(Math.abs(remaining)) + " over";
+    return m.budgets_over({ amount: formatCost(Math.abs(remaining)) });
   }
-  return formatCost(remaining) + " remaining";
+  return m.budgets_remaining({ amount: formatCost(remaining) });
 }

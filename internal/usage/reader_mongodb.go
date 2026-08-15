@@ -42,6 +42,25 @@ type mongoUsageLogRow struct {
 	RewriteCostSaved       *float64       `bson:"rewrite_cost_saved"`
 }
 
+// mongoSessionUsageRow is the decoded shape produced by the session grouping pipeline.
+type mongoSessionUsageRow struct {
+	ID struct {
+		SessionID string `bson:"session_id"`
+		UserPath  string `bson:"user_path"`
+	} `bson:"_id"`
+	Requests         int     `bson:"requests"`
+	InputTokens      int64   `bson:"input_tokens"`
+	OutputTokens     int64   `bson:"output_tokens"`
+	TotalTokens      int64   `bson:"total_tokens"`
+	InputCost        float64 `bson:"input_cost"`
+	OutputCost       float64 `bson:"output_cost"`
+	TotalCost        float64 `bson:"total_cost"`
+	HasInputCost     int     `bson:"has_input_cost"`
+	HasOutputCost    int     `bson:"has_output_cost"`
+	HasTotalCost     int     `bson:"has_total_cost"`
+	ProviderRequests int     `bson:"provider_requests"`
+}
+
 func (row mongoUsageLogRow) toUsageLogEntry() UsageLogEntry {
 	return UsageLogEntry{
 		ID:                     row.ID,
@@ -91,6 +110,7 @@ func costPtr(present int, value float64) *float64 {
 	return nil
 }
 
+// mongoProviderUsageCondition identifies rows that reached a provider.
 func mongoProviderUsageCondition() bson.D {
 	return bson.D{{Key: "$and", Value: bson.A{
 		bson.D{{Key: "$ne", Value: bson.A{"$cache_type", CacheTypeExact}}},
@@ -98,6 +118,7 @@ func mongoProviderUsageCondition() bson.D {
 	}}}
 }
 
+// mongoProviderCostSum builds a conditional provider-spend accumulator.
 func mongoProviderCostSum(field string) bson.D {
 	return bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{
 		mongoProviderUsageCondition(),
@@ -106,6 +127,7 @@ func mongoProviderCostSum(field string) bson.D {
 	}}}}}
 }
 
+// mongoProviderCostPresenceCount counts priced provider rows for one cost field.
 func mongoProviderCostPresenceCount(field string) bson.D {
 	presentProviderCost := bson.D{{Key: "$and", Value: bson.A{
 		mongoProviderUsageCondition(),
@@ -114,6 +136,7 @@ func mongoProviderCostPresenceCount(field string) bson.D {
 	return bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{presentProviderCost, 1, 0}}}}}
 }
 
+// sessionCostPtr distinguishes cache-only zero spend from unknown provider pricing.
 func sessionCostPtr(providerRequests, present int, value float64) *float64 {
 	if providerRequests == 0 {
 		return new(float64)
@@ -622,50 +645,24 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 // GetUsageBySession returns request, token, and cost totals grouped by the
 // detected session id and canonical tracked user path.
 func (r *MongoDBReader) GetUsageBySession(ctx context.Context, params SessionUsageParams) (*SessionUsageResult, error) {
-	pipeline, limit, offset, err := mongoSessionUsagePipeline(params)
+	dataPipeline, countPipeline, limit, offset, err := mongoSessionUsagePipelines(params)
 	if err != nil {
 		return nil, err
 	}
 
-	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	aggregateOptions := options.Aggregate().SetAllowDiskUse(true)
+	cursor, err := r.collection.Aggregate(ctx, dataPipeline, aggregateOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate usage by session: %w", err)
 	}
 	defer cursor.Close(ctx)
 
-	var facetResult struct {
-		Data []struct {
-			ID struct {
-				SessionID string `bson:"session_id"`
-				UserPath  string `bson:"user_path"`
-			} `bson:"_id"`
-			Requests         int     `bson:"requests"`
-			InputTokens      int64   `bson:"input_tokens"`
-			OutputTokens     int64   `bson:"output_tokens"`
-			TotalTokens      int64   `bson:"total_tokens"`
-			InputCost        float64 `bson:"input_cost"`
-			OutputCost       float64 `bson:"output_cost"`
-			TotalCost        float64 `bson:"total_cost"`
-			HasInputCost     int     `bson:"has_input_cost"`
-			HasOutputCost    int     `bson:"has_output_cost"`
-			HasTotalCost     int     `bson:"has_total_cost"`
-			ProviderRequests int     `bson:"provider_requests"`
-		} `bson:"data"`
-		Total []struct {
-			Count int `bson:"count"`
-		} `bson:"total"`
-	}
-	if cursor.Next(ctx) {
-		if err := cursor.Decode(&facetResult); err != nil {
+	result := make([]SessionUsage, 0, limit)
+	for cursor.Next(ctx) {
+		var row mongoSessionUsageRow
+		if err := cursor.Decode(&row); err != nil {
 			return nil, fmt.Errorf("failed to decode usage by session result: %w", err)
 		}
-	}
-	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating usage by session cursor: %w", err)
-	}
-
-	result := make([]SessionUsage, 0, len(facetResult.Data))
-	for _, row := range facetResult.Data {
 		result = append(result, SessionUsage{
 			SessionID:    row.ID.SessionID,
 			UserPath:     row.ID.UserPath,
@@ -678,20 +675,40 @@ func (r *MongoDBReader) GetUsageBySession(ctx context.Context, params SessionUsa
 			TotalCost:    sessionCostPtr(row.ProviderRequests, row.HasTotalCost, row.TotalCost),
 		})
 	}
-	total := 0
-	if len(facetResult.Total) > 0 {
-		total = facetResult.Total[0].Count
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage by session cursor: %w", err)
 	}
+
+	countCursor, err := r.collection.Aggregate(ctx, countPipeline, aggregateOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count usage sessions: %w", err)
+	}
+	defer countCursor.Close(ctx)
+	var countResult struct {
+		Count int `bson:"count"`
+	}
+	if countCursor.Next(ctx) {
+		if err := countCursor.Decode(&countResult); err != nil {
+			return nil, fmt.Errorf("failed to decode usage session count: %w", err)
+		}
+	}
+	if err := countCursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage session count cursor: %w", err)
+	}
+
+	total := countResult.Count
 	return &SessionUsageResult{Entries: result, Total: total, Limit: limit, Offset: offset}, nil
 }
 
-func mongoSessionUsagePipeline(params SessionUsageParams) (bson.A, int, int, error) {
+// mongoSessionUsagePipelines builds separate data and count aggregations so
+// high-cardinality session sets do not collect into one $facet document.
+func mongoSessionUsagePipelines(params SessionUsageParams) (bson.A, bson.A, int, int, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 	queryParams := params.UsageQueryParams
 	queryParams.CacheMode = CacheModeAll
 	matchFilters, err := mongoUsageMatchFilters(queryParams)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, nil, 0, 0, err
 	}
 	nonBlankSession := bson.D{{Key: "session_id", Value: bson.D{
 		{Key: "$exists", Value: true},
@@ -699,11 +716,11 @@ func mongoSessionUsagePipeline(params SessionUsageParams) (bson.A, int, int, err
 		{Key: "$ne", Value: ""},
 	}}}
 	matchFilters = mongoAndFilters(matchFilters, nonBlankSession)
-	pipeline := bson.A{}
+	basePipeline := bson.A{}
 	if len(matchFilters) > 0 {
-		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+		basePipeline = append(basePipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
-	pipeline = append(pipeline,
+	basePipeline = append(basePipeline,
 		mongoCanonicalUserPathAddFieldsStage(),
 		bson.D{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: bson.D{
@@ -723,17 +740,18 @@ func mongoSessionUsagePipeline(params SessionUsageParams) (bson.A, int, int, err
 			{Key: "has_total_cost", Value: mongoProviderCostPresenceCount("$total_cost")},
 			{Key: "latest", Value: bson.D{{Key: "$max", Value: "$timestamp"}}},
 		}}},
-		bson.D{{Key: "$facet", Value: bson.D{
-			{Key: "data", Value: bson.A{
-				bson.D{{Key: "$sort", Value: bson.D{{Key: "latest", Value: -1}}}},
-				bson.D{{Key: "$skip", Value: offset}},
-				bson.D{{Key: "$limit", Value: limit}},
-			}},
-			{Key: "total", Value: bson.A{bson.D{{Key: "$count", Value: "count"}}}},
-		}}},
 	)
 
-	return pipeline, limit, offset, nil
+	dataPipeline := append(append(bson.A(nil), basePipeline...),
+		bson.D{{Key: "$sort", Value: bson.D{{Key: "latest", Value: -1}, {Key: "_id", Value: 1}}}},
+		bson.D{{Key: "$skip", Value: offset}},
+		bson.D{{Key: "$limit", Value: limit}},
+	)
+	countPipeline := append(append(bson.A(nil), basePipeline...),
+		bson.D{{Key: "$count", Value: "count"}},
+	)
+
+	return dataPipeline, countPipeline, limit, offset, nil
 }
 
 // mongoUsageGroupedProviderNameExpr builds the MongoDB expression used to derive a grouped provider name, preferring a trimmed provider name and falling back to the trimmed provider value.

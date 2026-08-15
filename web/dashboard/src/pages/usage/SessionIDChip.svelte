@@ -4,6 +4,7 @@
   import { createCopyState } from "$lib/utils/clipboard.svelte.js";
   import { CircleCheck, Copy } from "lucide";
   import { shortSessionID } from "./usage-helpers.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { sessionID, active = false, onfilter = null, compact = false } = $props();
   const copyState = createCopyState({ logPrefix: "Failed to copy session ID:" });
@@ -18,7 +19,7 @@
   <button
     type="button"
     class="session-id-filter mono"
-    title="Filter by session {sessionID}"
+    title={m.usage_filter_by_session({ session: sessionID })}
     onclick={() => onfilter?.(sessionID)}
   >{shortSessionID(sessionID)}</button>
   <button
@@ -26,11 +27,11 @@
     class="session-id-copy"
     class:copied={copyState.copied}
     title={copyState.error
-      ? "Unable to copy session ID"
+      ? m.usage_session_copy_failed()
       : copyState.copied
-        ? "Session ID copied"
-        : "Copy session ID"}
-    aria-label="Copy session ID {sessionID}"
+        ? m.usage_session_copied()
+        : m.usage_copy_session_id()}
+    aria-label={m.usage_copy_session({ session: sessionID })}
     onclick={() => copyState.copy(sessionID)}
   >
     <Icon icon={copyState.copied ? CircleCheck : Copy} />

@@ -19,12 +19,23 @@
   } from "./virtualModelsLogic.js";
   import AccessToggle from "./AccessToggle.svelte";
   import { CircleDollarSign, Gauge, Pencil, Shuffle, Trash2 } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   // columns: the active category's column spec from categoryColumns.js
   // (ModelTable renders the matching <thead> from the same spec).
   let { row, columns } = $props();
 
   const pricing = $derived(pricingOverrides.modelRowPricing(row));
+  const configuredSlowdown = $derived(
+    row.is_alias
+      ? row.alias && row.alias.slowdown
+      : row.masking_alias && row.masking_alias.slowdown != null
+        ? row.masking_alias.slowdown
+        : row.access && row.access.override && row.access.override.slowdown,
+  );
+  const slowdown = $derived(
+    Number(configuredSlowdown == null ? 0 : configuredSlowdown),
+  );
 </script>
 
 <tr id={rowAnchorID(row) || undefined} class={displayRowClass(row)}>
@@ -33,14 +44,14 @@
       <div class="model-name-primary">
         <span class="mono font-size-md">{row.display_name}</span>
         {#if row.is_alias}
-          <span class="model-kind-icon" role="img" aria-label="Virtual model" title="Virtual model">
+          <span class="model-kind-icon" role="img" aria-label={m.models_virtual_model()} title={m.models_virtual_model()}>
             <svg class="model-kind-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"></path>
             </svg>
           </span>
         {/if}
         {#if !row.is_alias && row.masking_alias}
-          <span class="model-kind-icon" role="img" aria-label="Redirect" title="Redirect">
+          <span class="model-kind-icon" role="img" aria-label={m.models_redirect()} title={m.models_redirect()}>
             <svg class="model-kind-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="6" cy="19" r="3"></circle>
               <path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"></path>
@@ -49,31 +60,36 @@
           </span>
         {/if}
         {#if rowIsManaged(row)}
-          <span class="alias-kind-badge" title="Managed by config.yaml / VIRTUAL_MODELS">Config</span>
+          <span class="alias-kind-badge" title={m.models_managed_config()}>{m.models_config()}</span>
         {/if}
       </div>
       {#if row.is_alias}
         <div class="model-name-secondary">
-          Targets <span class="mono font-size-md">{row.secondary_name}</span>
+          {m.models_targets()} <span class="mono font-size-md">{row.secondary_name}</span>
         </div>
       {/if}
       {#if !row.is_alias && row.masking_alias}
         <div class="model-name-secondary">
-          Redirects to <span class="mono font-size-md">{aliasTargetLabel(row.masking_alias)}</span>
+          {m.models_redirects_to()} <span class="mono font-size-md">{aliasTargetLabel(row.masking_alias)}</span>
           {#if virtualModels.virtualModelsAvailable && rowRedirectCanRemove(row)}
             <button
               type="button"
               class="model-redirect-remove-btn mono"
               aria-label={virtualModels.rowDeletingKey === row.key
-                ? "Removing redirect for " + row.display_name
-                : "Remove redirect for " + row.display_name}
+                ? m.models_removing_redirect({ model: row.display_name })
+                : m.models_remove_redirect({ model: row.display_name })}
               title={virtualModels.rowDeletingKey === row.key
-                ? "Removing redirect for " + row.display_name
-                : "Remove redirect for " + row.display_name}
+                ? m.models_removing_redirect({ model: row.display_name })
+                : m.models_remove_redirect({ model: row.display_name })}
               disabled={Boolean(virtualModels.rowDeletingKey)}
               onclick={() => virtualModels.removeRedirectRow(row)}
-            >[remove]</button>
+            >[{m.models_remove()}]</button>
           {/if}
+        </div>
+      {/if}
+      {#if slowdown > 0}
+        <div class="model-name-secondary">
+          {m.models_slowdown()} <span class="mono font-size-md">{m.models_inference_time({ value: slowdown })}</span>
         </div>
       {/if}
     </div>
@@ -87,7 +103,9 @@
         <AccessToggle {row} />
         {#if virtualModels.virtualModelsAvailable && aliasRowCanRemove(row)}
           <TableActionButton
-            label={virtualModels.rowDeletingKey === row.key ? "Removing alias " + row.alias.name : "Remove alias " + row.alias.name}
+            label={virtualModels.rowDeletingKey === row.key
+              ? m.models_removing_alias({ name: row.alias.name })
+              : m.models_remove_alias({ name: row.alias.name })}
             class="table-action-btn-danger table-icon-btn"
             onclick={() => virtualModels.removeAliasRow(row)}
             disabled={Boolean(virtualModels.rowDeletingKey)}
@@ -97,7 +115,7 @@
         {/if}
         {#if virtualModels.virtualModelsAvailable}
           <TableActionButton
-            label={"Edit alias " + row.alias.name}
+            label={m.models_edit_alias({ name: row.alias.name })}
             class="table-icon-btn table-action-btn-active"
             onclick={() => virtualModels.openVirtualModelEditAlias(row.alias)}
           >
@@ -110,7 +128,7 @@
         <AccessToggle {row} />
         {#if pricingOverrides.modelPricingOverridesAvailable}
           <TableActionButton
-            label={pricingOverrides.modelPricingButtonLabel( "model pricing for " + row.display_name, pricingOverrides.hasModelPricingOverride(row), )}
+            label={pricingOverrides.modelPricingButtonLabel(m.models_model_pricing_for({ name: row.display_name }), pricingOverrides.hasModelPricingOverride(row))}
             class="table-icon-btn {pricingOverrides.modelPricingButtonClass(pricingOverrides.hasModelPricingOverride(row))}"
             onclick={() => pricingOverrides.openModelPricingOverrideEdit(row)}
           >
@@ -137,7 +155,7 @@
         {/if}
         {#if virtualModels.virtualModelsAvailable && row.masking_alias && row.masking_alias.name}
           <TableActionButton
-            label={"Edit redirect for " + row.display_name}
+            label={m.models_edit_redirect({ name: row.display_name })}
             class="table-icon-btn table-action-btn-active"
             onclick={() => virtualModels.openVirtualModelEditAlias(row.masking_alias)}
           >
@@ -146,7 +164,7 @@
         {/if}
         {#if virtualModels.virtualModelsAvailable && !row.masking_alias}
           <TableActionButton
-            label={modelOverrideEditButtonLabel("model access for " + row.display_name, hasAccessOverride(row.access))}
+            label={modelOverrideEditButtonLabel(m.models_model_settings_for({ name: row.display_name }), hasAccessOverride(row.access))}
             class="table-icon-btn {modelOverrideEditButtonClass(hasAccessOverride(row.access))}"
             onclick={() => virtualModels.openVirtualModelEditModel(row)}
           >

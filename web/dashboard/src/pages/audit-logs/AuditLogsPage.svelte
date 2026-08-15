@@ -19,6 +19,7 @@
   import AuditThreadGroup from "./AuditThreadGroup.svelte";
   import { auditList } from "./auditList.svelte.js";
   import { liveLogs } from "./liveLogs.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
   import {
     auditRetentionHighlight,
     auditRetentionPrefix,
@@ -26,10 +27,6 @@
   } from "./audit-logic.js";
 
   const PAGE = "audit-logs";
-
-  const RETENTION_HELP =
-    "If you want to change the retention period, set LOGGING_RETENTION_DAYS (env var) or logging.retention_days (config.yaml) and restart the gateway. Default is 30 days; 0 keeps audit logs forever.";
-
 
   const retentionRaw = $derived(
     runtimeConfig.config && runtimeConfig.config.LOGGING_RETENTION_DAYS,
@@ -67,12 +64,12 @@
 <div class="page-with-sticky-date">
   <div class="page-header date-range-page-header">
     <div class="inline-help-section">
-      <h2>Audit Logs</h2>
+      <h2>{m.audit_title()}</h2>
       {#if auditRetentionText(retentionRaw)}
         <InlineHelpSection
           copyId="audit-retention-help-copy"
-          label="retention help"
-          text={RETENTION_HELP}
+          label={m.audit_retention_help_label()}
+          text={m.audit_retention_help()}
         >
           {#snippet title()}
             <p class="audit-retention-note">
@@ -94,8 +91,9 @@
 
   {#if runtimeConfig.loaded && !runtimeConfig.auditVisible() && !auth.needsAuth}
     <div class="alert alert-warning" role="status">
-      Audit logging is off. Live entries are temporary and disappear after
-      refresh. Set <code>LOGGING_ENABLED=true</code> to persist them.
+      {m.audit_logging_disabled_before_config()}<code
+        >LOGGING_ENABLED=true</code
+      >{m.audit_logging_disabled_after_config()}
     </div>
   {/if}
 
@@ -106,11 +104,23 @@
       <div class="audit-list-toolbar-left">
         {#if auditList.auditLog.total > 0}
           <p class="audit-log-summary">
-            Showing {auditList.auditLog.offset + 1}-{Math.min(
-              auditList.auditLog.offset + auditList.auditLog.limit,
-              auditList.auditLog.total,
-            )} of {auditList.auditLog.total}
-            {auditList.auditGroupSessions ? "sessions" : "logs"}
+            {auditList.auditGroupSessions
+              ? m.audit_summary_sessions({
+                  start: auditList.auditLog.offset + 1,
+                  end: Math.min(
+                    auditList.auditLog.offset + auditList.auditLog.limit,
+                    auditList.auditLog.total,
+                  ),
+                  total: auditList.auditLog.total,
+                })
+              : m.audit_summary_logs({
+                  start: auditList.auditLog.offset + 1,
+                  end: Math.min(
+                    auditList.auditLog.offset + auditList.auditLog.limit,
+                    auditList.auditLog.total,
+                  ),
+                  total: auditList.auditLog.total,
+                })}
           </p>
         {/if}
         <!-- View preference, not a filter: Clear leaves it alone. -->
@@ -120,7 +130,7 @@
             checked={auditList.auditGroupSessions}
             onchange={() => auditList.toggleAuditGroupSessions()}
           />
-          <span>Group by session</span>
+          <span>{m.audit_group_by_session()}</span>
         </label>
       </div>
       <AuditLiveStatus />
@@ -128,7 +138,7 @@
 
     {#if auditList.loading && auditList.auditLog.entries.length === 0}
       <div class="audit-log-loading">
-        <Spinner size={18} label="Loading audit logs" />
+        <Spinner size={18} label={m.audit_loading()} />
       </div>
     {:else if auditList.auditLog.entries.length > 0}
       <div class="audit-log-list">

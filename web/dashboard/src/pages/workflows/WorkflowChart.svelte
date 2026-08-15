@@ -1,4 +1,5 @@
 <script>
+  import * as m from "$lib/paraglide/messages.js";
   // Workflow pipeline visualization.
   // Renders a chart contract object built by workflowChartLogic.js.
   import Icon from "$lib/components/atoms/Icon.svelte";
@@ -45,12 +46,12 @@
     <WorkflowIdBadge workflowID={chart.workflowID} />
   {/if}
   <div class="workflow-pipeline-row">
-    {@render node({ icon: User, label: "Client", variant: "workflow-node-endpoint" })}
+    {@render node({ icon: User, label: m.workflows_client(), variant: "workflow-node-endpoint" })}
 
     <div class="workflow-conn"></div>
     {@render node({
       icon: Database,
-      label: "Auth",
+      label: m.workflows_auth(),
       state: chart.authNodeClass,
       sub: chart.authNodeSublabel,
     })}
@@ -59,7 +60,7 @@
       <div class={["workflow-conn", chart.cacheConnClass]}></div>
       {@render node({
         icon: Database,
-        label: "Cache",
+        label: m.workflows_cache(),
         state: chart.cacheNodeClass,
         badge: chart.cacheStatusLabel,
       })}
@@ -69,7 +70,7 @@
       <div class="workflow-conn"></div>
       {@render node({
         icon: Wallet,
-        label: "Budget",
+        label: m.workflows_budget(),
         state: chart.budgetNodeClass,
         badge: chart.budgetStatusLabel,
       })}
@@ -79,7 +80,7 @@
       <div class="workflow-conn"></div>
       {@render node({
         icon: Shield,
-        label: "Guardrails",
+        label: m.workflows_guardrails(),
         sub: chart.guardrailLabel,
       })}
     {/if}
@@ -96,7 +97,7 @@
       <div class={["workflow-conn", chart.failoverConnClass]}></div>
       {@render node({
         icon: Maximize2,
-        label: "Failover",
+        label: m.workflows_failover(),
         state: chart.failoverNodeClass,
         badge: chart.failoverStatusLabel,
         sub: chart.failoverTargetLabel,
@@ -106,7 +107,7 @@
     <div class={["workflow-conn", chart.responseConnClass]}></div>
     {@render node({
       icon: CircleCheckBig,
-      label: "Response",
+      label: m.workflows_response(),
       variant: "workflow-node-endpoint",
       state: chart.responseNodeClass,
       sub: chart.responseNodeSublabel,
@@ -119,7 +120,7 @@
         {#if chart.showUsage}
           {@render node({
             icon: ChartColumnIncreasing,
-            label: "Usage",
+            label: m.workflows_usage(),
             variant: "workflow-node-feature workflow-node-async",
             state: chart.usageNodeClass,
           })}
@@ -130,14 +131,14 @@
         {#if chart.showAudit}
           {@render node({
             icon: FileText,
-            label: "Audit Log",
+            label: m.workflows_audit_log(),
             variant: "workflow-node-feature workflow-node-async",
             state: chart.auditNodeClass,
           })}
         {/if}
       </div>
       <div class="workflow-async-turn"></div>
-      <span class="workflow-async-label">Async</span>
+      <span class="workflow-async-label">{m.workflows_async()}</span>
     </div>
   {/if}
 </div>

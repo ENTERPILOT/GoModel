@@ -1,155 +1,171 @@
 ---
 title: "GoModel Pro"
-description: "GoModel Pro is the commercial distribution of GoModel: the same gateway plus licensed features. Token compression, how it works, and how to turn it off."
+description: "GoModel Pro adds licensed prompt compression, intelligent routing, and OIDC SSO to the GoModel gateway."
 icon: "gem"
 noindex: true
-keywords: ["GoModel Pro", "token compression", "prompt compression", "license"]
+keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "SSO", "license"]
 ---
 
 ## What Pro is
 
-GoModel Pro is the same gateway as open-source GoModel, in one binary, plus
-licensed features. Every core capability — routing, failover, budgets, rate
-limits, virtual models, caching, audit, the dashboard — works identically and
-is configured the same way.
+GoModel Pro is the commercial distribution of GoModel. It uses the same
+gateway, configuration, providers, dashboard, and APIs as open-source
+GoModel, with licensed extensions for prompt compression, intelligent routing,
+and OIDC single sign-on.
 
-Without a valid license the binary starts as the plain open-source core. Pro
-never blocks traffic.
+Without a valid license, the Pro binary starts as the open-source gateway and
+does not block traffic. An explicitly enabled SSO configuration is the
+exception: startup fails closed when its SSO entitlement or configuration is
+invalid, so an authentication boundary cannot disappear silently.
 
-## Token compression
+## Prompt compression
 
-The one Pro feature available today. It rewrites each inference request
-before it reaches the provider, cutting prompt-token spend on agentic
-traffic.
+Prompt compression rewrites supported inference requests before they reach the
+provider. It reduces repeated or structural context while preserving the
+request's non-text structure.
 
-Two passes run on every request:
+It supports `POST /v1/chat/completions`, `POST /v1/messages`, and
+`POST /v1/responses`. Tool-call arguments, non-text parts, and unknown JSON
+fields are left intact. Responses reasoning items are always replayed
+unchanged, because the Responses API can require them alongside function calls.
 
-**Normalization** removes structure that costs tokens but carries no
-information:
+The default `high` policy combines line-run deduplication with normalization:
 
-- the line-number gutter on file reads becomes a single `lines N-M:` header
-- replayed reasoning is dropped from assistant history (chat-completions only)
-- tool-result envelopes collapse to a `# path` header
-- search results, command logs and unified diffs each get a content-aware
-  cleanup
+- file-read line-number gutters become a compact range header
+- replayed chat-completions reasoning is removed when it is safe to do so
+- known tool-result envelopes, search results, logs, JSON, and unified diffs
+  use content-aware normalization
+- profitable homogeneous JSON arrays and structured logs use reversible,
+  self-describing encodings
 
-**Deduplication** then replaces repeated runs of lines with a reference to
-their first occurrence:
+The compressor is deterministic and fails open. It forwards a request
+unchanged when a rewrite is below the saving threshold or would exceed its work
+budget. Source code is preserved by default; enable code deduplication only
+when the extra saving is worth replacing exact repeated source with references.
 
-```
-(Open file: /src/marshmallow/fields.py)… (same as message 16, 3 lines)
-```
+For a detected session, the gateway retains the exact body it previously sent
+upstream and replays that prefix byte-for-byte on later turns. This protects a
+provider prompt-cache prefix while allowing new messages to reference repeated
+history. Use `new_messages_only` when the gateway may join a conversation whose
+prefix it did not observe.
 
-Measured on a corpus of real agent conversations at default settings:
-**-19.4% of request bytes**, up to -49.3% on the heaviest sessions.
+### Configure compression
 
-### What it never touches
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `PRO_COMPRESSION_LEVEL` | `high` | Select `none`, `low`, `medium`, or `high`. An explicit value makes the Dashboard setting read-only. |
+| `PRO_COMPRESSION_SCOPE` | `full_history` | Use `new_messages_only` to protect pre-existing conversation history. |
+| `PRO_COMPRESSION_EXCLUDE_MODELS` | — | Comma-separated requested-model globs to skip, such as `ollama/*`. |
+| `PRO_COMPRESSION_MIN_BLOCK_CHARS` | `128` | Minimum repeated line-run size under the high preset. |
+| `PRO_COMPRESSION_MIN_SAVINGS_TOKENS` | `32` | Minimum estimated net saving under the high preset. |
+| `PRO_COMPRESSION_DEDUPLICATE_CODE` | `false` | Permit repeated source-code runs to be replaced with references. |
+| `PRO_COMPRESSION_NORMALIZE` | `true` | Enable content normalization and tool-schema stabilization. |
+| `PRO_COMPRESSION_COMPRESS_JSON_STRUCTURE` | high preset | Enable reversible JSON-table encoding. |
+| `PRO_COMPRESSION_COMPRESS_LOG_STRUCTURE` | high preset | Enable reversible structured-log encoding. |
 
-- tool-call arguments, non-text content parts, and unknown JSON fields
-- first occurrences — only later duplicates are replaced
-- on `/v1/responses`: replayed reasoning items (the API requires them back
-  verbatim when `store` is off, so `PRO_COMPRESSION_DROP_REASONING` has no
-  effect there) and text parts carrying citation annotations, whose
-  start/end offsets a rewrite would break
-- anything, if estimated savings fall below the threshold; the request
-  passes through byte-identical
-
-Compression freezes the exact rewritten history already sent for each detected
-session and replays it byte-for-byte in later requests. New turns can still be
-compressed against that history, including slightly modified file reads whose
-unchanged line runs become reconstructable deltas. Very long conversations roll
-forward through bounded compaction epochs without revisiting older epochs.
-
-The final decision is economic: estimated savings on ordinary and expected
-cached reuses must exceed the value of any provider-cache prefix the rewrite
-would destroy. Frozen history normally makes destroyed cache value zero. The
-engine fails open if it cannot safely establish that invariant.
-
-Covered endpoints: `POST /v1/chat/completions`, `POST /v1/messages`, and
-`POST /v1/responses` — including function and custom tool-call outputs on
-the Responses API.
-
-## Turn it off
-
-Four levels, narrowest to broadest.
-
-**One request** — send a header:
+Set `PRO_COMPRESSION_LEVEL=none` to disable compression for the whole
+gateway. For one request, send:
 
 ```http
 X-GoModel-Compression: off
 ```
 
-**Specific models** — comma-separated globs, matched against the model the
-client asked for:
+The per-request opt-out and the `none` level bypass request-body parsing, so
+the request is forwarded unchanged.
 
-```bash
-PRO_COMPRESSION_EXCLUDE_MODELS="ollama/*,gpt-4o-mini"
-```
+### Inspect compression
 
-**The whole gateway**:
-
-```bash
-PRO_COMPRESSION_ENABLED=false
-```
-
-Startup then logs `token compression disabled via
-PRO_COMPRESSION_ENABLED=false`, and no rewriter is placed in the request
-path at all.
-
-**The entitlement** — run a license without the `compression` feature, or no
-license. The gateway starts as open-source core.
-
-<Note>
-  Settings are read once at startup. Changing one needs a gateway restart.
-</Note>
-
-If you want compression but no rewriting of already-sent history, use
-`PRO_COMPRESSION_SCOPE=new_messages_only` instead of disabling it. Only
-messages after the last assistant turn are rewritten — lower savings, maximum
-prompt-cache reuse.
-
-## Main settings
-
-These variables are consumed by the separately distributed GoModel Pro
-compression engine. They are intentionally not parsed by the open-core binary
-when the Pro extension is absent.
-
-| Env var | Default | Meaning |
-|---|---|---|
-| `PRO_COMPRESSION_ENABLED` | `true` | Master switch |
-| `PRO_COMPRESSION_SCOPE` | `full_history` | `new_messages_only` rewrites only after the last assistant turn |
-| `PRO_COMPRESSION_EXCLUDE_MODELS` | — | Model globs to skip |
-| `PRO_COMPRESSION_MIN_SAVINGS_TOKENS` | `64` | Minimum estimated savings before economic evaluation |
-| `PRO_COMPRESSION_EXPECTED_CACHE_REUSES` | `4` | Future cached reuses included in expected savings |
-| `PRO_COMPRESSION_CACHED_INPUT_RATE` | `0.1` | Cached-input price as a fraction of ordinary input |
-| `PRO_COMPRESSION_INPUT_PRICE_PER_MTOK` | `1` | Fallback price scale for monetary audit estimates |
-| `PRO_COMPRESSION_FROZEN_EPOCH_MESSAGES` | `32` | Messages per immutable compaction epoch |
-| `PRO_COMPRESSION_NORMALIZE` | `true` | Master switch for the normalization pass |
-| `PRO_COMPRESSION_STRIP_LINE_NUMBERS` | `true` | Strip the line-number gutter from file reads |
-| `PRO_COMPRESSION_DROP_REASONING` | `true` | Drop replayed reasoning from assistant history |
-
-Each normalization transform has its own `PRO_COMPRESSION_*` flag if you
-need to disable just one.
-
-## Seeing what it did
-
-**Per request** — the response carries:
+Compressed responses include estimated savings and the number of replaced
+duplicate blocks:
 
 ```http
 X-GoModel-Pro-Tokens-Saved: 1843
 X-GoModel-Pro-Compression-Blocks: 12
 ```
 
-Audit entries keep the **original** client request plus a revision chain
-showing exactly what each rewriter changed, so the full before/after is
-always recoverable. Storing the rewritten body copy is governed by
-`LOGGING_LOG_REVISION_BODIES` (default `true`): turning it off keeps the
-revision metadata — rewriter, sizes, tokens saved, the block report — while
-roughly halving audit storage per compressed request.
+Audit logs retain the original request and a revision for each rewriter. The
+revision records its byte sizes and compression detail; the rewritten body is
+also retained when `LOGGING_LOG_BODIES=true`. Prometheus metrics use the
+`gomodel_pro_compression_` prefix, and the Dashboard Usage page reports Pro
+savings in tokens or cost.
 
-**Aggregate** — Prometheus counters on `/metrics`, all prefixed
-`gomodel_pro_compression_`, and the dashboard **Usage** page shows a "Pro
-Saved" card next to Estimated Cost: removed prompt tokens in Tokens mode,
-the money they would have cost in Costs mode, each followed by the share of
-the period it saved — Costs mode shows the value alone when the models in
-play have no pricing configured.
+## Intelligent routing
+
+Intelligent routing has two licensed extensions that compose with Core virtual
+models:
+
+- Smart tier routing classifies configured model aliases into easy and hard
+  tiers before provider selection.
+- Adaptive routing selects an upstream target from a virtual model's pool using
+  observed latency, errors, cooldowns, target capacity, and the configured
+  cost or latency objective.
+
+Configure a tiered alias with ordinary GoModel model names. The tier targets can
+be concrete models or virtual models:
+
+```bash
+PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```
+
+Classification is deterministic and local. It considers explicit reasoning
+requests, code and diagnostics, tools and schemas, structured output,
+attachments, context size, and thread depth. A detected session can escalate
+from easy to hard while its pin is active; it does not silently downgrade.
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `PRO_SMART_ROUTING_ENABLED` | `true` | Enable smart tier routing. |
+| `PRO_SMART_ROUTING_ROUTES` | — | JSON map from requested aliases to `easy` and `hard` models. No routes leaves the feature idle. |
+| `PRO_SMART_ROUTING_THRESHOLD` | `4` | Score at or above this value selects the hard tier. |
+| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | Sliding lifetime of an escalation-only session pin. |
+| `PRO_ROUTING_OBJECTIVE` | `balanced` | Adaptive-target objective: `latency`, `cost`, or `balanced`. |
+
+Send `X-GoModel-Smart-Routing: off` to bypass classification for one request,
+or `X-GoModel-Tier: easy` or `hard` to force its tier without changing the
+session pin. Responses return `X-GoModel-Pro-Tier`,
+`X-GoModel-Pro-Tier-Target`, and `X-GoModel-Pro-Tier-Score`. Metrics use the
+`gomodel_pro_smartroute_` and `gomodel_pro_routing_` prefixes.
+
+## OIDC single sign-on
+
+OIDC SSO protects the Dashboard and supports Authorization Code flow with
+PKCE, state and nonce validation, discovery, and signed `HttpOnly`,
+`SameSite=Lax` sessions. Configure it under `extensions.sso` in the main
+GoModel YAML configuration:
+
+```yaml
+extensions:
+  sso:
+    enabled: true
+    issuer_url: https://login.example.com
+    client_id: gomodel
+    client_secret: ${PRO_SSO_CLIENT_SECRET}
+    redirect_url: https://gomodel.example.com/sso/callback
+    session_secret: ${PRO_SSO_SESSION_SECRET}
+    admin_groups: [gomodel-admins]
+```
+
+`PRO_SSO_*` environment variables override the YAML values. The redirect URL
+must end in `/sso/callback` (including any configured `BASE_PATH`), and HTTPS
+is required except for loopback development URLs. By default, at least one
+administrator group is required; set `PRO_SSO_ALLOW_ALL_ADMINS=true` only for
+an intentionally unrestricted OIDC client.
+
+<Warning>
+  SSO session revocation is process-local. Deploy SSO on exactly one active
+  GoModel Pro replica until a shared session or revocation store is available.
+</Warning>
+
+Successful logins, rejected policies, and logouts are recorded as sanitized
+audit events. Tokens, authorization codes, cookies, raw claims, and provider
+error details are not stored.
+
+## Licensing
+
+Pro features are granted by an offline Ed25519-signed token in
+`GOMODEL_PRO_LICENSE`. Validation requires no network access and works in
+air-gapped environments. A license can independently grant `compression`,
+`routing`, and `sso`.
+
+Use the separate `gomodel-pro` distribution and its documentation for
+installation, production build, and license-issuance instructions.

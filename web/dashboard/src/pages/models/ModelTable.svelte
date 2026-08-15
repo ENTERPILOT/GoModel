@@ -17,6 +17,7 @@
   import ModelRow from "./ModelRow.svelte";
   import { categoryColumns, categoryColspan } from "./categoryColumns.js";
   import { CircleDollarSign, Gauge, Pencil } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   const category = $derived(modelsStore.activeCategory || "all");
   const columns = $derived(categoryColumns(category));
@@ -27,7 +28,7 @@
   <table class="data-table">
     <thead>
       <tr>
-        <th>Model</th>
+        <th>{m.models_column_model()}</th>
         {#each columns as col, i (i)}
           <th class={col.class}>
             {#each col.headerLines as line, li (li)}
@@ -63,7 +64,7 @@
                 {/if}
                 {#if pricingOverrides.modelPricingOverridesAvailable && group.provider_name}
                   <TableActionButton
-                    label={pricingOverrides.modelPricingButtonLabel( "provider pricing for " + group.display_name, pricingOverrides.hasProviderPricingOverride(group), )}
+                    label={pricingOverrides.modelPricingButtonLabel(m.models_provider_pricing_for({ name: group.display_name }), pricingOverrides.hasProviderPricingOverride(group))}
                     class="table-icon-btn {pricingOverrides.modelPricingButtonClass(pricingOverrides.hasProviderPricingOverride(group))}"
                     onclick={() => pricingOverrides.openProviderPricingOverrideEdit(group)}
                   >
@@ -81,7 +82,7 @@
                 {/if}
                 {#if virtualModels.virtualModelsAvailable && group.access.selector}
                   <TableActionButton
-                    label={modelOverrideEditButtonLabel( "provider access for " + group.display_name, hasAccessOverride(group.access), )}
+                    label={modelOverrideEditButtonLabel(m.models_provider_access_for({ name: group.display_name }), hasAccessOverride(group.access))}
                     class="table-icon-btn {modelOverrideEditButtonClass(hasAccessOverride(group.access))}"
                     onclick={() => virtualModels.openProviderOverrideEdit(group)}
                   >

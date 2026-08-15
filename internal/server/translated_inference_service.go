@@ -135,7 +135,9 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 			result.Meta.ProviderName,
 			result.Meta.FailoverModel,
 			result.Stream,
-			nil,
+			func(stream io.ReadCloser) io.ReadCloser {
+				return result.WrapDeliveryStream(ctx, stream)
+			},
 		)
 	}
 
@@ -313,7 +315,9 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			result.Meta.ProviderName,
 			result.Meta.FailoverModel,
 			stream,
-			nil,
+			func(stream io.ReadCloser) io.ReadCloser {
+				return result.WrapDeliveryStream(ctx, stream)
+			},
 		)
 	}
 

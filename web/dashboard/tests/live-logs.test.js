@@ -428,13 +428,13 @@ test("live usage event updates usage log and enriches matching audit row", () =>
   assert.equal(app.auditLog.entries[0]._usage_flushed, true);
 });
 
-test("active session filtering pauses unscoped live usage inserts", () => {
+test("active session filtering pauses non-matching live usage inserts", () => {
   const app = createLiveLogsApp({ usageFilterSession: "scoped-session" });
 
   app.applyLiveLogEvent({
     seq: 1,
     type: "usage.completed",
-    data: { id: "usage-1", request_id: "req-1", session_id: "scoped-session" },
+    data: { id: "usage-1", request_id: "req-1", session_id: "other-session" },
   });
 
   assert.equal(app.usageLog.entries.length, 0);

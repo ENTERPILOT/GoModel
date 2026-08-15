@@ -11,6 +11,7 @@
   import { tick } from "svelte";
   import { cubicOut } from "svelte/easing";
   import { fly, slide } from "svelte/transition";
+  import * as m from "$lib/paraglide/messages.js";
   import ChatMessage from "./ChatMessage.svelte";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import {
@@ -229,7 +230,7 @@
   <div
     class="conversation-resize-handle"
     role="separator"
-    aria-label="Resize interactions panel"
+    aria-label={m.interaction_resize_label()}
     aria-orientation="vertical"
     aria-controls="dashboard-content interactions-drawer-content"
     aria-valuemin={panelMin}
@@ -245,16 +246,16 @@
   ></div>
   <div class="conversation-drawer-header">
     <div class="conversation-drawer-title">
-      <h3 id="interactions-drawer-title">Interactions</h3>
+      <h3 id="interactions-drawer-title">{m.interaction_title()}</h3>
       <span
         class="conversation-follow-status"
         role="status"
         aria-label={drawer.conversationFollowLatest
-          ? "Following the latest interaction"
-          : "Viewing a historical interaction"}
+          ? m.interaction_following_latest()
+          : m.interaction_viewing_history()}
         title={drawer.conversationFollowLatest
-          ? "Following the latest interaction as new events arrive"
-          : "Viewing a historical interaction; live updates are not followed"}
+          ? m.interaction_following_latest_help()
+          : m.interaction_viewing_history_help()}
       >
         <span
           class="live-dot"
@@ -267,15 +268,19 @@
       <button
         type="button"
         class="table-action-btn table-icon-btn"
-        aria-label={renderedFullscreen ? "Exit fullscreen interactions" : "Show interactions fullscreen"}
-        title={renderedFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        aria-label={renderedFullscreen
+          ? m.interaction_exit_fullscreen()
+          : m.interaction_show_fullscreen()}
+        title={renderedFullscreen
+          ? m.interaction_exit_fullscreen_short()
+          : m.interaction_fullscreen()}
         aria-pressed={renderedFullscreen}
         onclick={() => setFullscreen(!renderedFullscreen)}
       >
         <Icon icon={renderedFullscreen ? Minimize2 : Maximize2} class="table-icon-svg" />
       </button>
       <DialogCloseButton
-        label="Close interactions"
+        label={m.interaction_close()}
         onclick={() => drawer.closeConversation()}
         bind:el={drawer.conversationCloseBtnEl}
       />
@@ -284,19 +289,23 @@
 
   <div id="interactions-drawer-content">
     {#if drawer.conversationMessages.length > 1}
-      <div class="conversation-message-navigation" role="group" aria-label="Navigate interaction messages">
+      <div
+        class="conversation-message-navigation"
+        role="group"
+        aria-label={m.interaction_navigation()}
+      >
         <button
           type="button"
-          aria-label="Previous message"
-          title="Previous message"
+          aria-label={m.interaction_previous_message()}
+          title={m.interaction_previous_message()}
           onclick={() => scrollToConversationMessage(-1)}
         >
           <Icon icon={ArrowUp} width="14" height="14" />
         </button>
         <button
           type="button"
-          aria-label="Next message"
-          title="Next message"
+          aria-label={m.interaction_next_message()}
+          title={m.interaction_next_message()}
           onclick={() => scrollToConversationMessage(1)}
         >
           <Icon icon={ArrowDown} width="14" height="14" />
@@ -307,10 +316,10 @@
       <div class="alert alert-warning">{drawer.conversationError}</div>
     {/if}
     {#if drawer.conversationLoading}
-      <p class="empty-state">Loading interactions...</p>
+      <p class="empty-state">{m.interaction_loading()}</p>
     {/if}
     {#if !drawer.conversationLoading && !drawer.followUpSending && !drawer.conversationError && drawer.conversationMessages.length === 0 && !drawer.conversationLiveWaiting()}
-      <p class="empty-state">No interaction data available for this entry.</p>
+      <p class="empty-state">{m.interaction_empty()}</p>
     {/if}
 
     {#if drawer.conversationMessages.length > 0}
@@ -322,13 +331,20 @@
           class="conversation-cache-legend"
           role="switch"
           aria-checked={showPromptCache}
-          title={(showPromptCache ? "Hide" : "Show") + " estimated provider prompt-cache fill"}
+          title={showPromptCache
+            ? m.interaction_hide_cache_fill()
+            : m.interaction_show_cache_fill()}
           onclick={togglePromptCacheFill}
         >
           <span class="conversation-cache-switch" class:is-active={showPromptCache} aria-hidden="true">
             <span class="conversation-cache-switch-thumb"></span>
           </span>
-          <span>Blue fill shows cached prompt share <span class="conversation-cache-estimate">(estimated)</span></span>
+          <span
+            >{m.interaction_cache_legend()}
+            <span class="conversation-cache-estimate"
+              >{m.interaction_estimated()}</span
+            ></span
+          >
         </button>
       {/if}
       <div class="conversation-thread" bind:this={drawer.conversationThreadEl}>
@@ -339,7 +355,7 @@
     {/if}
 
     {#if drawer.conversationTruncated}
-      <p class="conversation-truncated">Showing the newest part of this session and the selected log.</p>
+      <p class="conversation-truncated">{m.interaction_truncated()}</p>
     {/if}
 
     {#if drawer.conversationLiveWaiting()}
@@ -362,8 +378,8 @@
         <textarea
           id="conversation-follow-up"
           rows="2"
-          aria-label="Send a message"
-          placeholder="Continue this interaction…"
+          aria-label={m.interaction_send_label()}
+          placeholder={m.interaction_placeholder()}
           bind:value={drawer.followUpText}
           disabled={drawer.followUpSending || drawer.conversationLiveWaiting()}
         ></textarea>
@@ -373,7 +389,9 @@
         <div class="conversation-composer-actions">
           <span class="conversation-endpoint mono">{drawer.selectedConversationEntry()?.path || ""}</span>
           <button class="btn btn-primary" type="submit" disabled={!drawer.canSendFollowUp()}>
-            {drawer.followUpSending ? "Sending…" : "Send"}
+            {drawer.followUpSending
+              ? m.common_action_sending()
+              : m.common_action_send()}
           </button>
         </div>
       </form>

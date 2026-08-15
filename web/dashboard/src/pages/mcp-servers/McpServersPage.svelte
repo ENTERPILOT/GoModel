@@ -14,10 +14,10 @@
   import McpServerList from "./McpServerList.svelte";
   import { mcpServers } from "./mcpServers.svelte.js";
   import { Plus } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "mcp-servers";
-  const HELP_TEXT =
-    "Upstream Model Context Protocol servers whose tools, prompts, and resources the gateway exposes to clients. Servers added here connect over HTTP or SSE; stdio servers and rows marked Config are declared in config.yaml under mcp.servers and are read-only in the dashboard. Saved header values are masked in API and dashboard responses.";
+  const HELP_TEXT = m.mcp_help();
 
   // Re-fetch when the page becomes active or the API key changes.
   $effect(() => {
@@ -29,8 +29,8 @@
 <div>
   <div class="page-header">
     <div>
-      <InlineHelpSection copyId="mcp-servers-help-copy" label="MCP servers help" text={HELP_TEXT}>
-        {#snippet title()}<h2>MCP Servers</h2>{/snippet}
+      <InlineHelpSection copyId="mcp-servers-help-copy" label={m.mcp_help_label()} text={HELP_TEXT}>
+        {#snippet title()}<h2>{m.mcp_title()}</h2>{/snippet}
       </InlineHelpSection>
     </div>
     <div class="page-header-controls">
@@ -42,20 +42,20 @@
           onclick={() => mcpServers.openCreate()}
         >
           <Icon icon={Plus} class="form-action-icon" />
-          <span>Add MCP Server</span>
+          <span>{m.mcp_add()}</span>
         </button>
       {/if}
     </div>
   </div>
 
   {#if !mcpServers.available && !auth.authError}
-    <div class="alert alert-warning">MCP server management is unavailable.</div>
+    <div class="alert alert-warning">{m.mcp_unavailable()}</div>
   {/if}
   {#if mcpServers.error && !auth.authError && !mcpServers.formOpen}
     <p class="form-error" role="alert" aria-live="assertive">{mcpServers.error}</p>
   {/if}
   {#if mcpServers.loading && !auth.authError}
-    <LoadingState label="Loading MCP servers..." />
+    <LoadingState label={m.mcp_loading()} />
   {/if}
 
   {#if (mcpServers.servers.length > 0 || mcpServers.filter) && mcpServers.available && !auth.authError}
@@ -63,8 +63,8 @@
       <div class="table-toolbar-main">
         <FilterInput
           id="mcp-server-filter"
-          placeholder="Filter by name, slug, URL, transport, or status..."
-          label="Filter MCP servers by name, slug, URL, transport, or status"
+          placeholder={m.mcp_filter_placeholder()}
+          label={m.mcp_filter_label()}
           bind:value={mcpServers.filter}
         />
       </div>
@@ -80,11 +80,10 @@
 
   {#if mcpServers.servers.length === 0 && !mcpServers.filter && !mcpServers.loading && !auth.authError && !mcpServers.error && mcpServers.available}
     <p class="empty-state">
-      No MCP servers yet. Add one here, or declare servers in <code>config.yaml</code> under
-      <code>mcp.servers</code>.
+      {m.mcp_empty()}
     </p>
   {/if}
   {#if mcpServers.servers.length > 0 && mcpServers.filtered.length === 0 && mcpServers.filter && !mcpServers.loading && !auth.authError && mcpServers.available}
-    <p class="empty-state">No MCP servers match your filter.</p>
+    <p class="empty-state">{m.mcp_no_match()}</p>
   {/if}
 </div>

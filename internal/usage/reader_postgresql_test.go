@@ -26,6 +26,7 @@ func TestPostgreSQLSessionUsageQueriesArePagedAndExcludeCachedCost(t *testing.T)
 	for _, fragment := range []string{
 		"session_id = $1",
 		"COUNT(CASE WHEN (cache_type IS NULL OR cache_type = '') THEN 1 END)",
+		"ORDER BY MAX(timestamp) DESC, session_id ASC, user_path ASC",
 		"LIMIT $2 OFFSET $3",
 	} {
 		if !strings.Contains(dataQuery, fragment) {

@@ -1002,6 +1002,44 @@ func TestUsageBySessionRejectsInvalidPagination(t *testing.T) {
 	}
 }
 
+func TestUsageBySessionUsesDefaultLimit(t *testing.T) {
+	reader := &mockUsageReader{sessionUsage: &usage.SessionUsageResult{Entries: []usage.SessionUsage{}}}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/usage/sessions")
+
+	if err := h.UsageBySession(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if reader.lastSessionUsage.Limit != defaultSessionUsageLimit {
+		t.Fatalf("reader limit = %d, want %d", reader.lastSessionUsage.Limit, defaultSessionUsageLimit)
+	}
+	var result usage.SessionUsageResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if result.Limit != defaultSessionUsageLimit {
+		t.Fatalf("response limit = %d, want %d", result.Limit, defaultSessionUsageLimit)
+	}
+}
+
+func TestUsageBySessionPropagatesReaderError(t *testing.T) {
+	reader := &mockUsageReader{
+		sessionUsageErr: core.NewProviderError("usage", http.StatusBadGateway, "reader unavailable", nil),
+	}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/usage/sessions")
+
+	if err := h.UsageBySession(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+}
+
 // --- AuditLog handler tests ---
 
 func TestAuditLog_NilReader(t *testing.T) {

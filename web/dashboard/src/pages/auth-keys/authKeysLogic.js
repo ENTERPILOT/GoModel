@@ -1,5 +1,7 @@
 // Pure logic for the API Keys page.
 
+import * as m from "../../lib/paraglide/messages.js";
+
 export function defaultAuthKeyForm() {
   return {
     name: "",
@@ -38,10 +40,10 @@ export function authKeyUserPathValidationError(value) {
       continue;
     }
     if (segment === "." || segment === "..") {
-      return 'User path cannot contain "." or ".." segments.';
+      return m.api_keys_user_path_segments();
     }
     if (segment.includes(":")) {
-      return 'User path cannot contain ":" segments.';
+      return m.api_keys_user_path_colon();
     }
   }
   return "";
@@ -80,7 +82,7 @@ export function buildCreateAuthKeyPayload(form) {
   const source = form || {};
   const name = String(source.name || "").trim();
   if (!name) {
-    return { error: "Name is required." };
+    return { error: m.api_keys_name_required() };
   }
   const userPathError = authKeyUserPathValidationError(source.user_path);
   if (userPathError) {

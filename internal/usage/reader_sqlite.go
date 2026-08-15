@@ -252,7 +252,7 @@ func (r *SQLiteReader) GetUsageBySession(ctx context.Context, params SessionUsag
 		` + providerSessionCostSQL("input_cost") + `,
 		` + providerSessionCostSQL("output_cost") + `,
 		` + providerSessionCostSQL("total_cost") + `
-		FROM usage` + where + groupBy + ` ORDER BY MAX(` + sqliteTimestampEpochExpr() + `) DESC LIMIT ? OFFSET ?`
+		FROM usage` + where + groupBy + ` ORDER BY MAX(` + sqliteTimestampEpochExpr() + `) DESC, session_id ASC, user_path ASC LIMIT ? OFFSET ?`
 	dataArgs := append(append([]any(nil), args...), limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, dataArgs...)
 	if err != nil {

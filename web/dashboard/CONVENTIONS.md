@@ -43,7 +43,6 @@ follow these rules so the pages compose into one coherent app.
 6. **Shared foundation code lives in `src/lib/`** (plus `src/App.svelte`) —
    changes there affect every page, so keep them deliberate. Page-specific
    helpers belong in the page directory.
-7. **Do NOT add new npm dependencies.**
 
 ## Foundation — use it, don't re-implement
 
@@ -163,6 +162,6 @@ Run from `web/dashboard/`:
 
 ```sh
 npm run check   # svelte-check: zero errors required (warnings OK)
-npm test        # node --test tests/*.test.js
+npm test        # compile messages + node --test tests/*.test.js
 npm run build   # keeps the embedded dist/ in sync — CI enforces drift
 ```

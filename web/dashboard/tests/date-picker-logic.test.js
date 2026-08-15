@@ -3,24 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   calendarDays,
-  calendarTitle,
   isSameMonth,
   shiftMonth,
 } from "../src/lib/components/molecules/datePickerLogic.js";
 
 const utc = (y, m, d = 1) => new Date(Date.UTC(y, m, d));
 const key = (d) => d.toISOString().slice(0, 10);
-
-test("calendarTitle names the offset month", () => {
-  const march = utc(2026, 2);
-  assert.equal(calendarTitle(march, 0), "March 2026");
-  assert.equal(calendarTitle(march, -1), "February 2026");
-});
-
-test("calendarTitle rolls over the year boundary", () => {
-  assert.equal(calendarTitle(utc(2026, 0), -1), "December 2025");
-  assert.equal(calendarTitle(utc(2025, 11), 1), "January 2026");
-});
 
 test("calendarDays always returns a 6-week grid", () => {
   for (let month = 0; month < 12; month++) {

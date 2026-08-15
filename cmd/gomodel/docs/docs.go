@@ -257,7 +257,7 @@ const docTemplate = `{
         },
         "/admin/audit/sessions": {
             "get": {
-                "description": "Groups audit log entries by session id into threads and returns\none summary per thread — its latest entry, entry count, and time\nspan — ordered by latest activity. Entries without a session id\nappear as single-entry threads. Filters apply to entries before\ngrouping.",
+                "description": "Groups audit log entries by session id into threads and returns\none summary per thread — its latest matching entry and complete\nrequest count — ordered by latest activity. Entries without a session id\nappear as single-entry threads. Filters apply to entries before\ngrouping.",
                 "produces": [
                     "application/json"
                 ],
@@ -7142,20 +7142,11 @@ const docTemplate = `{
         "admin.auditSessionResponse": {
             "type": "object",
             "properties": {
-                "count": {
-                    "type": "integer"
-                },
-                "first_timestamp": {
-                    "type": "string"
-                },
-                "last_timestamp": {
-                    "type": "string"
-                },
                 "latest": {
                     "$ref": "#/definitions/admin.auditLogEntryResponse"
                 },
-                "session_id": {
-                    "type": "string"
+                "request_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -7992,6 +7983,10 @@ const docTemplate = `{
                 "session_affinity": {
                     "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
                     "type": "boolean"
+                },
+                "slowdown": {
+                    "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it.",
+                    "type": "number"
                 },
                 "source": {
                     "type": "string"
@@ -11359,6 +11354,10 @@ const docTemplate = `{
                 "session_affinity": {
                     "type": "boolean"
                 },
+                "slowdown": {
+                    "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it.",
+                    "type": "number"
+                },
                 "source": {
                     "type": "string"
                 },
@@ -11410,6 +11409,10 @@ const docTemplate = `{
                 "session_affinity": {
                     "description": "SessionAffinity keeps requests of one detected session on the target that\nserved it before, while that target stays available. Tri-state: nil means\nenabled (the default); explicit false restores stateless balancing.",
                     "type": "boolean"
+                },
+                "slowdown": {
+                    "description": "Slowdown is an extra-time factor from 0.1 to 10; zero disables it. Nil\nleaves the setting unspecified so an alias can inherit its target model.",
+                    "type": "number"
                 },
                 "source": {
                     "type": "string"

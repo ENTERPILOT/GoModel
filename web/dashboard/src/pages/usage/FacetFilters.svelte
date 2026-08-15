@@ -5,6 +5,7 @@
   import { debounced } from "$lib/utils/debounce.js";
   import { usagePage } from "./usage.svelte.js";
   import { shortSessionID } from "./usage-helpers.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   const onUserPathInput = debounced(() => usagePage.onUsageFilterChanged());
   const onSessionInput = debounced(() => usagePage.onUsageFilterChanged());
@@ -14,14 +15,14 @@
   });
 </script>
 
-<div class="usage-page-filters" role="group" aria-label="Usage data filters">
+<div class="usage-page-filters" role="group" aria-label={m.usage_filters_label()}>
   <select
     bind:value={usagePage.usageFilterModel}
     onchange={() => usagePage.onUsageFilterChanged()}
     class="usage-log-select"
-    aria-label="Filter by model"
+    aria-label={m.usage_filter_model()}
   >
-    <option value="">All Models</option>
+    <option value="">{m.usage_all_models()}</option>
     {#each usagePage.usageFilterModelOptions() as m (m)}
       <option value={m}>{m}</option>
     {/each}
@@ -30,9 +31,9 @@
     bind:value={usagePage.usageFilterProvider}
     onchange={() => usagePage.onUsageFilterChanged()}
     class="usage-log-select"
-    aria-label="Filter by provider"
+    aria-label={m.usage_filter_provider()}
   >
-    <option value="">All Providers</option>
+    <option value="">{m.usage_all_providers()}</option>
     {#each usagePage.usageFilterProviderOptions() as p (p)}
       <option value={p}>{p}</option>
     {/each}
@@ -42,9 +43,9 @@
       bind:value={usagePage.usageFilterLabel}
       onchange={() => usagePage.onUsageFilterChanged()}
       class="usage-log-select"
-      aria-label="Filter by label"
+      aria-label={m.usage_filter_label()}
     >
-      <option value="">All Labels</option>
+      <option value="">{m.usage_all_labels()}</option>
       {#each usagePage.usageFilterLabelOptions() as l (l)}
         <option value={l}>{l}</option>
       {/each}
@@ -52,15 +53,15 @@
   {/if}
   <FilterInput
     class="usage-page-filters-user-path"
-    placeholder="User path /team/alpha"
-    label="Filter by user path"
+    placeholder={m.usage_filter_user_path_placeholder()}
+    label={m.usage_filter_user_path()}
     bind:value={usagePage.usageFilterUserPath}
     oninput={onUserPathInput}
   />
   <FilterInput
     class="usage-page-filters-session"
-    placeholder="Session ID"
-    label="Filter by session ID"
+    placeholder={m.usage_filter_session_placeholder()}
+    label={m.usage_filter_session()}
     bind:value={usagePage.usageFilterSession}
     oninput={onSessionInput}
   />
@@ -68,12 +69,12 @@
     <button
       type="button"
       class="active-session-filter mono"
-      title="Clear session filter {usagePage.usageFilterSession}"
+      title={m.usage_clear_session_filter({ session: usagePage.usageFilterSession })}
       onclick={() => {
         usagePage.usageFilterSession = "";
         usagePage.onUsageFilterChanged();
       }}
-    >Session: {shortSessionID(usagePage.usageFilterSession)} ×</button>
+    >{m.usage_session_filter({ session: shortSessionID(usagePage.usageFilterSession) })} ×</button>
   {/if}
 </div>
 

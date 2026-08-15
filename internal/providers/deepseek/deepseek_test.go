@@ -88,6 +88,76 @@ func TestChatCompletion_MapsReasoningToDeepSeekReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_PadsMissingReasoningContentForAssistantToolCalls(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			http.Error(w, "decode error", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-deepseek",
+			"created":1,
+			"model":"deepseek-v4-pro",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	var req core.ChatRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"deepseek-v4-pro",
+		"messages":[
+			{"role":"user","content":"check"},
+			{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},
+			{"role":"tool","tool_call_id":"call_1","content":"ok"},
+			{"role":"assistant","content":null,"reasoning_content":"client reasoning","tool_calls":[{"id":"call_2","type":"function","function":{"name":"lookup","arguments":"{}"}}]}
+		],
+		"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	if _, err := provider.ChatCompletion(context.Background(), &req); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+
+	messages, _ := gotBody["messages"].([]any)
+	missingReasoning, _ := messages[1].(map[string]any)
+	if missingReasoning["reasoning_content"] != " " {
+		t.Fatalf("synthesized reasoning_content = %#v, want one space", missingReasoning["reasoning_content"])
+	}
+	preservedReasoning, _ := messages[3].(map[string]any)
+	if preservedReasoning["reasoning_content"] != "client reasoning" {
+		t.Fatalf("preserved reasoning_content = %#v, want client value", preservedReasoning["reasoning_content"])
+	}
+	if req.Messages[1].ExtraFields.Lookup("reasoning_content") != nil {
+		t.Fatal("ChatCompletion() mutated the caller's request")
+	}
+}
+
+func TestAdaptChatRequest_DoesNotPadWithoutTools(t *testing.T) {
+	req := &core.ChatRequest{
+		Messages: []core.Message{{
+			Role:      "assistant",
+			ToolCalls: []core.ToolCall{{ID: "call_1"}},
+		}},
+	}
+
+	adapted, err := adaptChatRequest(req)
+	if err != nil {
+		t.Fatalf("adaptChatRequest() error = %v", err)
+	}
+	if adapted != req {
+		t.Fatal("adaptChatRequest() copied an unchanged request")
+	}
+	if adapted.Messages[0].ExtraFields.Lookup("reasoning_content") != nil {
+		t.Fatal("reasoning_content should not be added when the request has no tools")
+	}
+}
+
 func TestResponses_TranslatesToChatCompletions(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any

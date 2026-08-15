@@ -3,6 +3,7 @@
   import { providerDisplayValue, qualifiedResolvedModelDisplay } from "$lib/utils/format.js";
   import { workflowFailoverTarget } from "./audit-logic.js";
   import { usagePage } from "../usage/usage.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { entry } = $props();
 
@@ -42,15 +43,15 @@
 </script>
 
 <div class="audit-entry-metadata">
-  <span class="audit-entry-metadata-label">Metadata:</span>
+  <span class="audit-entry-metadata-label">{m.audit_metadata_label()}</span>
   <div class="audit-entry-context">
     {#each badges as badge (badge.key)}
       {#if badge.key === "session_id"}
         <button
           type="button"
           class="provider-badge audit-session-usage-link mono"
-          title="View total usage for this session"
-          onclick={() => usagePage.filterBySession(entry.session_id)}
+          title={m.audit_view_session_usage()}
+          onclick={() => usagePage.filterBySession(entry.session_id, entry.user_path)}
         >{badge.text}</button>
       {:else}
         <span class={["provider-badge", badge.class, { mono: badge.mono }]}

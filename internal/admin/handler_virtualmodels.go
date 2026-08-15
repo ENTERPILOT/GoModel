@@ -26,7 +26,9 @@ type upsertVirtualModelRequest struct {
 	SessionAffinity *bool    `json:"session_affinity,omitempty"`
 	UserPaths       []string `json:"user_paths,omitempty"`
 	Description     string   `json:"description,omitempty"`
-	Enabled         *bool    `json:"enabled,omitempty"`
+	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
+	Slowdown *float64 `json:"slowdown,omitempty"`
+	Enabled  *bool    `json:"enabled,omitempty"`
 }
 
 // virtualModelTargetRequest is one load-balancing destination. Model may be a
@@ -162,6 +164,7 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		SessionAffinity: req.SessionAffinity,
 		UserPaths:       req.UserPaths,
 		Description:     strings.TrimSpace(req.Description),
+		Slowdown:        req.Slowdown,
 		Enabled:         h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),
 	}
 

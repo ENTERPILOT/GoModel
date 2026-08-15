@@ -32,6 +32,7 @@ func configModel(entry config.VirtualModelConfig) VirtualModel {
 		Targets:         configTargets(entry),
 		UserPaths:       entry.UserPaths,
 		Description:     entry.Description,
+		Slowdown:        entry.Slowdown,
 		Enabled:         enabled,
 		Managed:         true,
 	}

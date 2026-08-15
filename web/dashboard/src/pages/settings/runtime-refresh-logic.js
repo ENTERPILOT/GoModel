@@ -1,34 +1,29 @@
 // Pure runtime-refresh report logic.
 
+import * as m from "../../lib/paraglide/messages.js";
+
 function runtimeRefreshStatus(report) {
   return String((report && report.status) || "ok").toLowerCase();
 }
 
 export function runtimeRefreshSummary(report) {
   if (!report || typeof report !== "object") {
-    return "Runtime refresh completed.";
+    return m.settings_runtime_refresh_completed();
   }
   const modelCount = Number(report.model_count || 0);
   const providerCount = Number(report.provider_count || 0);
   const status = runtimeRefreshStatus(report);
   const prefix =
     status === "ok"
-      ? "Runtime refreshed."
+      ? m.settings_runtime_refreshed()
       : status === "partial"
-        ? "Runtime refresh completed with warnings."
-        : "Runtime refresh failed.";
-  return (
-    prefix +
-    " " +
-    modelCount +
-    " model" +
-    (modelCount === 1 ? "" : "s") +
-    " across " +
-    providerCount +
-    " provider" +
-    (providerCount === 1 ? "" : "s") +
-    "."
-  );
+        ? m.settings_runtime_refresh_warnings()
+        : m.settings_runtime_refresh_failed();
+  return m.settings_runtime_refresh_summary({
+    status: prefix,
+    models: m.settings_runtime_refresh_models({ count: modelCount }),
+    providers: m.settings_runtime_refresh_providers({ count: providerCount }),
+  });
 }
 
 export function runtimeRefreshSucceeded(report) {

@@ -16,7 +16,9 @@ func (o *InferenceOrchestrator) ExecuteChatCompletion(ctx context.Context, workf
 	if err := o.validateProviderAndRequest(req != nil, "chat request is required"); err != nil {
 		return nil, err
 	}
-	return executeTranslatedResult(o, ctx, workflow, req, requestID, endpoint, chatExecutionSpec)
+	return executeResultWithSlowdown(ctx, workflow, func() (*ChatCompletionResult, error) {
+		return executeTranslatedResult(o, ctx, workflow, req, requestID, endpoint, chatExecutionSpec)
+	})
 }
 
 // DispatchChatCompletion executes a non-streaming chat request without usage side effects.
@@ -28,7 +30,9 @@ func (o *InferenceOrchestrator) DispatchChatCompletion(
 	if err := o.validateProviderAndRequest(req != nil, "chat request is required"); err != nil {
 		return nil, "", "", "", false, err
 	}
-	return o.executeChatCompletion(ctx, workflow, req)
+	return dispatchTranslatedWithSlowdown(ctx, workflow, func() (*core.ChatResponse, string, string, string, bool, error) {
+		return o.executeChatCompletion(ctx, workflow, req)
+	})
 }
 
 // StreamChatCompletion opens a chat SSE stream. Stream usage is recorded by the caller's stream observer.
@@ -36,13 +40,16 @@ func (o *InferenceOrchestrator) StreamChatCompletion(ctx context.Context, workfl
 	if err := o.validateProviderAndRequest(req != nil, "chat request is required"); err != nil {
 		return nil, err
 	}
+	started := time.Now()
 	streamReq, providerType, providerName, usageModel := o.ResolveChatRoute(workflow, req)
 	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, failoverModel, usedFailover, err := o.streamChatCompletion(ctx, workflow, streamReq, providerType, providerName, usageModel)
 	if err != nil {
 		return nil, err
 	}
 	return &StreamResult{
-		Stream: stream,
+		Stream:           stream,
+		slowdownFactor:   workflowSlowdown(workflow),
+		inferenceStarted: started,
 		Meta: ExecutionMeta{
 			ProviderType:  resolvedProviderType,
 			ProviderName:  resolvedProviderName,
@@ -58,7 +65,9 @@ func (o *InferenceOrchestrator) ExecuteResponses(ctx context.Context, workflow *
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, err
 	}
-	return executeTranslatedResult(o, ctx, workflow, req, requestID, endpoint, responsesExecutionSpec)
+	return executeResultWithSlowdown(ctx, workflow, func() (*ResponsesResult, error) {
+		return executeTranslatedResult(o, ctx, workflow, req, requestID, endpoint, responsesExecutionSpec)
+	})
 }
 
 // DispatchResponses executes a non-streaming Responses request without usage side effects.
@@ -70,7 +79,9 @@ func (o *InferenceOrchestrator) DispatchResponses(
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, "", "", "", false, err
 	}
-	return o.executeResponses(ctx, workflow, req)
+	return dispatchTranslatedWithSlowdown(ctx, workflow, func() (*core.ResponsesResponse, string, string, string, bool, error) {
+		return o.executeResponses(ctx, workflow, req)
+	})
 }
 
 // StreamResponses opens a Responses API SSE stream. Stream usage is recorded by the caller's stream observer.
@@ -78,6 +89,7 @@ func (o *InferenceOrchestrator) StreamResponses(ctx context.Context, workflow *c
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, err
 	}
+	started := time.Now()
 	providerType, providerName, usageModel := o.routeMetadata(workflow, req.Model)
 	if (workflow == nil || workflow.UsageEnabled()) && o.ShouldEnforceReturningUsageData() {
 		ctx = core.WithEnforceReturningUsageData(ctx, true)
@@ -87,7 +99,9 @@ func (o *InferenceOrchestrator) StreamResponses(ctx context.Context, workflow *c
 		return nil, err
 	}
 	return &StreamResult{
-		Stream: stream,
+		Stream:           stream,
+		slowdownFactor:   workflowSlowdown(workflow),
+		inferenceStarted: started,
 		Meta: ExecutionMeta{
 			ProviderType:  resolvedProviderType,
 			ProviderName:  resolvedProviderName,
@@ -103,6 +117,7 @@ func (o *InferenceOrchestrator) ExecuteEmbeddings(ctx context.Context, workflow 
 	if err := o.validateProviderAndRequest(req != nil, "embeddings request is required"); err != nil {
 		return nil, err
 	}
+	started := time.Now()
 	resp, providerType, providerName, err := o.executeEmbeddings(ctx, workflow, req)
 	if err != nil {
 		return nil, err
@@ -111,6 +126,9 @@ func (o *InferenceOrchestrator) ExecuteEmbeddings(ctx context.Context, workflow 
 	o.logUsage(ctx, workflow, pricingModel, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromEmbeddingResponse(resp, requestID, providerType, endpoint, pricing)
 	})
+	if err := waitForInferenceSlowdown(ctx, workflow, time.Since(started)); err != nil {
+		return nil, err
+	}
 	return &EmbeddingResult{
 		Response: resp,
 		Meta: ExecutionMeta{
@@ -130,7 +148,15 @@ func (o *InferenceOrchestrator) DispatchEmbeddings(
 	if err := o.validateProviderAndRequest(req != nil, "embeddings request is required"); err != nil {
 		return nil, "", "", err
 	}
-	return o.executeEmbeddings(ctx, workflow, req)
+	started := time.Now()
+	resp, providerType, providerName, err := o.executeEmbeddings(ctx, workflow, req)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if err := waitForInferenceSlowdown(ctx, workflow, time.Since(started)); err != nil {
+		return nil, "", "", err
+	}
+	return resp, providerType, providerName, nil
 }
 
 // ResolveChatRoute returns the provider route and the request to send for chat streams.
@@ -161,6 +187,9 @@ func (o *InferenceOrchestrator) routeMetadata(workflow *core.Workflow, failoverM
 // CanFastPathStreamingChatPassthrough reports whether a streaming chat request can bypass translation.
 func (o *InferenceOrchestrator) CanFastPathStreamingChatPassthrough(workflow *core.Workflow, req *core.ChatRequest) bool {
 	if req == nil || !req.Stream {
+		return false
+	}
+	if workflowSlowdown(workflow) > 0 {
 		return false
 	}
 	if o.translatedRequestPatcher != nil || o.ShouldEnforceReturningUsageData() {

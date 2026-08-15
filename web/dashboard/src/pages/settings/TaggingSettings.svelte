@@ -16,6 +16,7 @@
     taggingErrorMessage,
   } from "./tagging-logic.js";
   import { Plus, Save } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let taggingHeaders = $state([]);
   let editable = $state(true);
@@ -47,14 +48,14 @@
         return;
       }
       if (!result.ok) {
-        error = "Unable to load tagging settings.";
+        error = m.settings_tagging_load_failed();
         return;
       }
       taggingHeaders = normalizeTaggingHeaders(result.data);
       editable = result.data && result.data.editable !== false;
     } catch (e) {
       console.error("Failed to fetch tagging settings:", e);
-      error = "Unable to load tagging settings.";
+      error = m.settings_tagging_load_failed();
     } finally {
       loading = false;
     }
@@ -78,7 +79,7 @@
       if (!result.ok) {
         flash.error(
           (result.status !== 401 && taggingErrorMessage(result.data)) ||
-            "Unable to save tagging settings.",
+            m.settings_tagging_save_failed(),
         );
         return;
       }
@@ -87,10 +88,10 @@
       // A successful save proves the endpoint works and delivered fresh
       // data, so a load error from a failed earlier fetch is obsolete.
       error = "";
-      flash.success("Tagging settings saved.");
+      flash.success(m.settings_tagging_saved());
     } catch (e) {
       console.error("Failed to save tagging settings:", e);
-      flash.error("Unable to save tagging settings.");
+      flash.error(m.settings_tagging_save_failed());
     } finally {
       saving = false;
     }
@@ -105,17 +106,17 @@
 <div class="settings-refresh-section tagging-settings-section">
   <InlineHelpSection
     copyId="tagging-settings-help-copy"
-    label="tagging help"
-    text="Each request is labelled from the listed headers; labels land in usage tracking and audit logs. A header value can carry several labels split by the delimiter (default: comma). The prefix is trimmed from each label only — the header itself is forwarded unchanged unless 'Do not pass' is checked. Rows marked CONFIG come from config.yaml or TAGGING_HEADER_* env vars and are read-only here."
+    label={m.settings_tagging_help_label()}
+    text={m.settings_tagging_help()}
   >
-    {#snippet title()}<h3>Tagging based on headers</h3>{/snippet}
+    {#snippet title()}<h3>{m.settings_tagging_title()}</h3>{/snippet}
   </InlineHelpSection>
   <div class="tagging-settings-grid" aria-describedby="tagging-settings-help-copy">
     {#each taggingHeaders as rule, index (index)}
       <div class="tagging-settings-row">
         <div class="form-field">
           <label class="form-field-label" for={"tagging-header-" + index}
-            >Header</label
+            >{m.settings_tagging_header()}</label
           >
           <input
             id={"tagging-header-" + index}
@@ -128,7 +129,7 @@
         </div>
         <div class="form-field">
           <label class="form-field-label" for={"tagging-prefix-" + index}
-            >Prefix to trim (optional)</label
+            >{m.settings_tagging_prefix()}</label
           >
           <input
             id={"tagging-prefix-" + index}
@@ -141,7 +142,7 @@
         </div>
         <div class="form-field">
           <label class="form-field-label" for={"tagging-delimiter-" + index}
-            >Delimiter</label
+            >{m.settings_tagging_delimiter()}</label
           >
           <input
             id={"tagging-delimiter-" + index}
@@ -158,13 +159,13 @@
             bind:checked={rule.do_not_pass}
             disabled={rule.managed || !editable}
           />
-          <span>Do not pass upstream</span>
+          <span>{m.settings_tagging_do_not_pass()}</span>
         </label>
         <div class="tagging-row-trailer">
           {#if rule.managed}
             <span
               class="badge"
-              title="Declared in config.yaml or TAGGING_HEADER_* env vars; read-only here."
+              title={m.settings_tagging_config_help()}
               >config</span
             >
           {:else}
@@ -172,19 +173,21 @@
               type="button"
               class="btn btn-danger-outline"
               disabled={!editable}
-              aria-label={"Remove tagging header " + (rule.header || index + 1)}
-              onclick={() => removeHeader(index)}>Remove</button
+              aria-label={m.settings_tagging_remove_label({
+                header: rule.header || index + 1,
+              })}
+              onclick={() => removeHeader(index)}>{m.settings_tagging_remove()}</button
             >
           {/if}
         </div>
       </div>
     {/each}
     {#if loading}
-      <Spinner size={16} label="Loading tagging settings" />
+      <Spinner size={16} label={m.settings_tagging_loading()} />
     {/if}
     {#if !loading && taggingHeaders.length === 0}
       <p class="tagging-settings-empty">
-        No tagging headers configured. Requests are not labelled.
+        {m.settings_tagging_empty()}
       </p>
     {/if}
   </div>
@@ -196,7 +199,7 @@
       onclick={addHeader}
     >
       <Icon icon={Plus} class="form-action-icon" />
-      <span>Add Header</span>
+      <span>{m.settings_tagging_add()}</span>
     </button>
     <button
       type="button"
@@ -206,7 +209,7 @@
       onclick={save}
     >
       <Icon icon={Save} class="form-action-icon" />
-      <span>Save Tagging Settings</span>
+      <span>{m.settings_tagging_save()}</span>
     </button>
   </div>
 </div>

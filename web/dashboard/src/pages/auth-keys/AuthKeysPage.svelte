@@ -11,6 +11,7 @@
   import AuthKeyLabelsEditor from "./AuthKeyLabelsEditor.svelte";
   import AuthKeyList from "./AuthKeyList.svelte";
   import { Plus } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "auth-keys";
 
@@ -23,7 +24,7 @@
 
 <div>
   <div class="page-header">
-    <h2>API Keys</h2>
+    <h2>{m.api_keys_title()}</h2>
     <div class="page-header-controls">
       {#if store.available && !auth.authError}
         <button
@@ -35,14 +36,14 @@
           }}
         >
           <Icon icon={Plus} class="table-icon-svg" />
-          <span>Create API Key</span>
+          <span>{m.api_keys_create()}</span>
         </button>
       {/if}
     </div>
   </div>
 
   {#if !store.available && !auth.authError}
-    <div class="alert alert-warning">API key management is unavailable.</div>
+    <div class="alert alert-warning">{m.api_keys_unavailable()}</div>
   {/if}
   {#if store.error && !auth.authError && !store.formOpen}
     <p class="form-error" role="alert" aria-live="assertive">{store.error}</p>
@@ -50,8 +51,7 @@
 
   {#if store.available && !auth.authError}
     <p class="form-hint auth-keys-help-notice">
-      Managed API keys authenticate requests to the gateway. Deactivation is
-      permanent &mdash; create a new key if access needs to be restored.
+      {m.api_keys_help()}
     </p>
   {/if}
 
@@ -60,7 +60,7 @@
 
   {#if store.loading && store.keys.length === 0}
     <div class="auth-keys-loading">
-      <Spinner size={18} label="Loading API keys" />
+      <Spinner size={18} label={m.api_keys_loading()} />
     </div>
   {/if}
 
@@ -68,8 +68,8 @@
     <div class="table-toolbar">
       <div class="table-toolbar-main">
         <FilterInput
-          placeholder="Filter by name, description, user path, label, or token..."
-          label="Filter API keys by name, description, user path, label, or token"
+          placeholder={m.api_keys_filter_placeholder()}
+          label={m.api_keys_filter_label()}
           bind:value={store.filter}
         />
       </div>
@@ -77,7 +77,7 @@
         <label class="auth-keys-inactive-toggle">
           <input type="checkbox" bind:checked={store.showInactive} />
           <span>
-            Show inactive
+            {m.api_keys_show_inactive()}
             {#if store.inactiveCount > 0}({store.inactiveCount}){/if}
           </span>
         </label>
@@ -91,14 +91,14 @@
 
   {#if store.keys.length > 0 && store.visibleKeys.length === 0 && store.available}
     <p class="empty-state">
-      No API keys match the current filter.{store.inactiveCount > 0 && !store.showInactive
-        ? " " + store.inactiveCount + " inactive " + (store.inactiveCount === 1 ? "key is" : "keys are") + " hidden."
+      {m.api_keys_no_match()}{store.inactiveCount > 0 && !store.showInactive
+        ? " " + m.api_keys_hidden({ count: store.inactiveCount })
         : ""}
     </p>
   {/if}
 
   {#if store.keys.length === 0 && !store.loading && !auth.authError && !store.error && store.available}
-    <p class="empty-state">No API keys yet. Issue a key to get started.</p>
+    <p class="empty-state">{m.api_keys_empty()}</p>
   {/if}
 </div>
 

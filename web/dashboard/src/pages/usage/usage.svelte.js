@@ -10,6 +10,7 @@ import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { usageData } from "$lib/stores/usageData.svelte.js";
 import { providerDisplayValue } from "$lib/utils/format.js";
+import * as m from "$lib/paraglide/messages.js";
 import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
 import {
   emptyUsageLog,
@@ -145,11 +146,11 @@ class UsagePageState {
     this.onUsageFilterChanged();
   }
 
-  filterBySession(sessionID) {
+  filterBySession(sessionID, userPath = "") {
     this.usageFilterModel = "";
     this.usageFilterProvider = "";
     this.usageFilterLabel = "";
-    this.usageFilterUserPath = "";
+    this.usageFilterUserPath = String(userPath || "").trim();
     this.usageFilterSession = String(sessionID || "").trim();
     this.usageLogSearch = "";
     this.usageLog.offset = 0;
@@ -162,8 +163,8 @@ class UsagePageState {
   }
 
   usageLabelChipTitle(label) {
-    if (this.usageFilterLabel === label) return "Clear label filter";
-    return 'Filter usage by "' + label + '"';
+    if (this.usageFilterLabel === label) return m.usage_clear_label_filter();
+    return m.usage_filter_by_label_value({ label });
   }
 
   toggleUsageMode(mode) {

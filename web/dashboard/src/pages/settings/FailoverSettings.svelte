@@ -6,6 +6,7 @@
   import { failover } from "$pages/models/failover.svelte.js";
   import FailoverDrafts from "$pages/models/FailoverDrafts.svelte";
   import { Trash2, WandSparkles } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   const busy = $derived(
     failover.failoverSaving ||
@@ -18,7 +19,7 @@
 
 <div class="settings-refresh-section">
   <div>
-    <h3>Failover</h3>
+    <h3>{m.settings_failover_title()}</h3>
   </div>
   <div class="settings-refresh-actions">
     <button
@@ -30,8 +31,8 @@
       <Icon icon={WandSparkles} class="form-action-icon" />
       <span>
         {failover.failoverGenerating
-          ? "Generating..."
-          : "Generate failover models automatically"}
+          ? m.settings_failover_generating()
+          : m.settings_failover_generate()}
       </span>
     </button>
     <button
@@ -41,7 +42,7 @@
       onclick={() => failover.openFailoverResetDialog()}
     >
       <Icon icon={Trash2} class="form-action-icon" />
-      <span>Remove all the failover models</span>
+      <span>{m.settings_failover_remove_all()}</span>
     </button>
   </div>
 </div>

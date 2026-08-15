@@ -9,36 +9,45 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-func TestMongoSessionUsagePipelineIsPagedAndExcludesCachedCost(t *testing.T) {
-	pipeline, limit, offset, err := mongoSessionUsagePipeline(SessionUsageParams{
+func TestMongoSessionUsagePipelinesArePagedAndExcludeCachedCost(t *testing.T) {
+	dataPipeline, countPipeline, limit, offset, err := mongoSessionUsagePipelines(SessionUsageParams{
 		UsageQueryParams: UsageQueryParams{SessionID: "scoped-session", CacheMode: CacheModeUncached},
 		Limit:            12,
 		Offset:           7,
 	})
 	if err != nil {
-		t.Fatalf("mongoSessionUsagePipeline: %v", err)
+		t.Fatalf("mongoSessionUsagePipelines: %v", err)
 	}
 	if limit != 12 || offset != 7 {
 		t.Fatalf("pagination = %d/%d, want 12/7", limit, offset)
 	}
-	if len(pipeline) != 4 {
-		t.Fatalf("pipeline stages = %d, want 4: %#v", len(pipeline), pipeline)
+	if len(dataPipeline) != 6 {
+		t.Fatalf("data pipeline stages = %d, want 6: %#v", len(dataPipeline), dataPipeline)
 	}
-	match := fmt.Sprint(pipeline[0])
+	if len(countPipeline) != 4 {
+		t.Fatalf("count pipeline stages = %d, want 4: %#v", len(countPipeline), countPipeline)
+	}
+	match := fmt.Sprint(dataPipeline[0])
 	if !strings.Contains(match, "scoped-session") || strings.Contains(match, "cache_type") {
 		t.Fatalf("match stage has unexpected scope: %s", match)
 	}
-	group := fmt.Sprint(pipeline[2])
+	group := fmt.Sprint(dataPipeline[2])
 	for _, fragment := range []string{"provider_requests", CacheTypeExact, CacheTypeSemantic, "total_cost"} {
 		if !strings.Contains(group, fragment) {
 			t.Fatalf("group stage missing %q: %s", fragment, group)
 		}
 	}
-	facet := fmt.Sprint(pipeline[3])
-	for _, fragment := range []string{"$facet", `"$skip":{"$numberInt":"7"}`, `"$limit":{"$numberInt":"12"}`, `"$count":"count"`} {
-		if !strings.Contains(facet, fragment) {
-			t.Fatalf("facet stage missing %q: %s", fragment, facet)
-		}
+	wantTail := bson.A{
+		bson.D{{Key: "$sort", Value: bson.D{{Key: "latest", Value: -1}, {Key: "_id", Value: 1}}}},
+		bson.D{{Key: "$skip", Value: 7}},
+		bson.D{{Key: "$limit", Value: 12}},
+	}
+	if !reflect.DeepEqual(dataPipeline[3:], wantTail) {
+		t.Fatalf("data pipeline tail = %#v, want %#v", dataPipeline[3:], wantTail)
+	}
+	wantCount := bson.D{{Key: "$count", Value: "count"}}
+	if !reflect.DeepEqual(countPipeline[3], wantCount) {
+		t.Fatalf("count stage = %#v, want %#v", countPipeline[3], wantCount)
 	}
 }
 

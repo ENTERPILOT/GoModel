@@ -11,6 +11,7 @@
   import UsageStatCards from "./UsageStatCards.svelte";
   import UsageBreakdownChart from "./UsageBreakdownChart.svelte";
   import UsageLog from "./UsageLog.svelte";
+  import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "usage";
 
@@ -35,16 +36,16 @@
 
 <div class="page-with-sticky-date">
   <div class="page-header date-range-page-header">
-    <h2>Usage Analytics</h2>
+    <h2>{m.usage_title()}</h2>
   </div>
   <!-- The mode toggle lives in the sticky bar so it stays reachable while
        scrolling, like the date range it changes the meaning of. -->
   <div class="sticky-date-range usage-sticky-controls">
     <SegmentedControl
-      ariaLabel="Usage mode"
+      ariaLabel={m.usage_mode_label()}
       options={[
-        { value: "tokens", label: "Tokens" },
-        { value: "costs", label: "Costs" },
+        { value: "tokens", label: m.overview_tokens() },
+        { value: "costs", label: m.overview_costs() },
       ]}
       value={usagePage.usageMode}
       onchange={(mode) => usagePage.toggleUsageMode(mode)}

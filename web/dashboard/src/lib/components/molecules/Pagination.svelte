@@ -1,25 +1,32 @@
 <script>
   // Offset/limit pagination bar.
+  import { formatNumber } from "$lib/i18n/locale.js";
+  import * as m from "$lib/paraglide/messages.js";
+
   let { total = 0, offset = 0, limit = 25, onprev, onnext } = $props();
 </script>
 
 {#if total > 0}
   <div class="pagination">
     <span class="pagination-info">
-      Showing {offset + 1}-{Math.min(offset + limit, total)} of {total}
+      {m.pagination_summary({
+        start: formatNumber(offset + 1),
+        end: formatNumber(Math.min(offset + limit, total)),
+        total: formatNumber(total),
+      })}
     </span>
     <div class="pagination-buttons">
       <button
         type="button"
         class="btn"
         disabled={offset === 0}
-        onclick={() => onprev?.()}>Prev</button
+        onclick={() => onprev?.()}>{m.common_action_previous()}</button
       >
       <button
         type="button"
         class="btn"
         disabled={offset + limit >= total}
-        onclick={() => onnext?.()}>Next</button
+        onclick={() => onnext?.()}>{m.common_action_next()}</button
       >
     </div>
   </div>

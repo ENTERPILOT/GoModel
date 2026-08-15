@@ -5,6 +5,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
+  import * as m from "$lib/paraglide/messages.js";
 
   function save() {
     timezone.saveOverride();
@@ -20,17 +21,17 @@
 <div class="settings-panel-header">
   <InlineHelpSection
     copyId="timezone-help-copy"
-    label="timezone help"
-    text="Day-based analytics, charts, and date filters use your effective timezone. Usage and audit logs keep UTC in the hover title while rendering row timestamps in your effective timezone."
+    label={m.settings_timezone_help_label()}
+    text={m.settings_timezone_help()}
   >
-    {#snippet title()}<h3>Timezone</h3>{/snippet}
+    {#snippet title()}<h3>{m.settings_timezone_title()}</h3>{/snippet}
   </InlineHelpSection>
 </div>
 
 <div class="settings-form-grid">
   <div class="form-field">
     <label class="form-field-label" for="timezone-override-select"
-      >Timezone Override</label
+      >{m.settings_timezone_override()}</label
     >
     <select
       id="timezone-override-select"
@@ -40,7 +41,9 @@
       onfocus={() => timezone.ensureOptions()}
       onchange={save}
     >
-      <option value="">Automatic ({timezone.detectedTimeZoneLabel()})</option>
+      <option value="">{m.settings_timezone_automatic({
+        timezone: timezone.detectedTimeZoneLabel(),
+      })}</option>
       {#each timezone.options as timeZone (timeZone.value)}
         <option value={timeZone.value}>{timeZone.label}</option>
       {/each}
@@ -50,7 +53,7 @@
 <div class="form-actions">
   {#if timezone.override}
     <button type="button" class="btn" onclick={clear}
-      >Use Browser Timezone</button
+      >{m.settings_timezone_use_browser()}</button
     >
   {/if}
 </div>

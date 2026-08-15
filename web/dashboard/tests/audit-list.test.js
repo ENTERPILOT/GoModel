@@ -706,7 +706,7 @@ test("formatJSON pretty-prints JSON strings and objects, passing other text thro
 
 // --- Session grouping helpers ------------------------------------------------
 
-test("buildAuditSessionQuery encodes the session id and omits the date window", () => {
+test("buildAuditSessionQuery encodes the session id and omits active list filters", () => {
   const qs = buildAuditSessionQuery({ sessionId: "team/app|s 1", limit: 100 });
   assert.equal(qs, "session_id=team%2Fapp%7Cs%201&limit=100&offset=0");
 });
@@ -726,12 +726,11 @@ test("auditLogFromSessions maps thread summaries into head entries", () => {
   const payload = {
     sessions: [
       {
-        session_id: "s-1",
-        count: 3,
+        request_count: 6,
         latest: { id: "log-3", session_id: "s-1", status_code: 200 },
       },
-      { count: 1, latest: { id: "solo", status_code: 200 } },
-      { count: 2 }, // no latest: dropped
+      { request_count: 1, latest: { id: "solo", status_code: 200 } },
+      { request_count: 2 }, // no latest: dropped
     ],
     total: 12,
     limit: 25,
@@ -740,7 +739,7 @@ test("auditLogFromSessions maps thread summaries into head entries", () => {
   const mapped = auditLogFromSessions(payload);
   assert.equal(mapped.entries.length, 2);
   assert.equal(mapped.entries[0].id, "log-3");
-  assert.equal(mapped.entries[0].session_count, 3);
+  assert.equal(mapped.entries[0].session_count, 6);
   assert.equal(mapped.entries[1].id, "solo");
   assert.equal(mapped.entries[1].session_count, 1);
   assert.equal(mapped.total, 12);
@@ -873,6 +872,34 @@ test("auditGroupedLogWithLiveEntries folds pending previews into fetched heads",
   );
   assert.equal(next.entries[1].session_count, 4);
   assert.equal(next.total, 3);
+});
+
+test("auditGroupedLogWithLiveEntries increments counts for a new singleton preview", () => {
+  const payload = {
+    entries: [
+      {
+        id: "head-a",
+        session_id: "s-a",
+        session_count: 6,
+      },
+    ],
+    total: 1,
+    limit: 25,
+    offset: 0,
+  };
+  const pending = {
+    id: "live-1",
+    session_id: "s-a",
+    session_count: 1,
+    _live: true,
+    _live_pending: true,
+  };
+
+  const next = auditGroupedLogWithLiveEntries(payload, [pending], {});
+
+  assert.deepEqual(next.entries.map((entry) => entry.id), ["live-1"]);
+  assert.equal(next.entries[0].session_count, 7);
+  assert.equal(next.total, 1);
 });
 
 test("auditGroupedLogWithLiveEntries keeps persisted rows over matching previews", () => {

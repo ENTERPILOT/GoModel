@@ -61,6 +61,7 @@ models:
 # virtual_models:
 #   - source: regular # a plain alias
 #     target: anthropic/claude-sonnet-4-6
+#     slowdown: 0.5 # add 50%; use 0 to disable inherited slowdown (active range: 0.1-10)
 #   - source: smart # weighted round-robin load balancer
 #     strategy: round_robin # round_robin (default) | cost | adaptive (uses a routing extension when registered; otherwise falls back to round_robin)
 #     targets:

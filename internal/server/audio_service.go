@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -87,7 +88,9 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	defer release()
+	started := time.Now()
 	resp, err := router.CreateSpeech(ctx, req)
+	inferenceTime := time.Since(started)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -97,6 +100,9 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromSpeechRequest(req.Input, resp.Data, speechResponseFormat(req, resp), route.requestID, route.model, route.providerType, pricing)
 	})
+	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
+		return handleError(c, err)
+	}
 	return s.respondAudio(c, resp)
 }
 
@@ -167,7 +173,9 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 		return handleError(c, err)
 	}
 	defer release()
+	started := time.Now()
 	resp, err := call(ctx, req)
+	inferenceTime := time.Since(started)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -180,6 +188,9 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 		}
 		return usage.ExtractFromTranscriptionResponse(resp.Data, route.requestID, route.model, route.providerType, pricing)
 	})
+	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
+		return handleError(c, err)
+	}
 	return s.respondAudio(c, resp)
 }
 
@@ -193,6 +204,7 @@ type audioRoute struct {
 	providerType string
 	providerName string
 	requestID    string
+	slowdown     float64
 }
 
 // prepare resolves and authorizes the model, enforces budget, and stamps the
@@ -218,7 +230,14 @@ func (s *audioService) prepare(c *echo.Context, model, providerHint string) (con
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))
-	return ctx, s.routeFor(selector, requestID), nil
+	route := s.routeFor(selector, requestID)
+	route.slowdown = resolveModelSlowdown(
+		ctx,
+		s.modelResolver,
+		core.NewRequestedModelSelector(model, providerHint),
+		selector,
+	)
+	return ctx, route, nil
 }
 
 // routeFor maps a resolved selector to its canonical provider type and concrete

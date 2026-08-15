@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -26,9 +28,8 @@ var Registration = providers.Registration{
 
 // Provider implements the core.Provider interface for DeepSeek. DeepSeek's
 // API is OpenAI-compatible, so all transport goes through the shared
-// chat-centric adapter; the only quirks are the reasoning-effort remap
-// (applied via the AdaptChatRequest hook) and the missing embeddings
-// endpoint.
+// chat-centric adapter. Its request hook handles reasoning-effort mapping and
+// tool-call reasoning replay; DeepSeek does not expose an embeddings endpoint.
 type Provider struct {
 	*openai.ChatCompatible
 }
@@ -66,14 +67,57 @@ func setHeaders(req *http.Request, apiKey string) {
 	})
 }
 
-// adaptChatRequest rewrites GoModel's common reasoning shape into DeepSeek's
-// OpenAI-compatible chat extension. DeepSeek accepts reasoning_effort as a
-// top-level string, not "reasoning": {"effort": "..."}.
+// adaptChatRequest applies DeepSeek's OpenAI-compatible chat extensions.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
-	if req == nil || req.Reasoning == nil || strings.TrimSpace(req.Reasoning.Effort) == "" {
+	if req == nil {
 		return req, nil
 	}
-	return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Reasoning.Effort))
+
+	adapted := req
+	var err error
+	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
+		adapted, err = providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Reasoning.Effort))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return padMissingToolCallReasoningContent(adapted)
+}
+
+// padMissingToolCallReasoningContent satisfies DeepSeek's requirement that assistant
+// tool-call messages replay reasoning_content. Virtual-model clients may not
+// know that DeepSeek will serve the request, so a non-empty neutral value is
+// added when they omit it.
+func padMissingToolCallReasoningContent(req *core.ChatRequest) (*core.ChatRequest, error) {
+	if len(req.Tools) == 0 {
+		return req, nil
+	}
+
+	var adapted *core.ChatRequest
+	for i, message := range req.Messages {
+		if message.Role != "assistant" || len(message.ToolCalls) == 0 || message.ExtraFields.Lookup("reasoning_content") != nil {
+			continue
+		}
+
+		extra, err := core.MergeUnknownJSONFields(message.ExtraFields, map[string]json.RawMessage{
+			"reasoning_content": json.RawMessage(`" "`),
+		})
+		if err != nil {
+			return nil, core.NewInvalidRequestError("failed to adapt DeepSeek tool-call message: "+err.Error(), err)
+		}
+		if adapted == nil {
+			copy := *req
+			copy.Messages = append([]core.Message(nil), req.Messages...)
+			adapted = &copy
+		}
+		adapted.Messages[i].ExtraFields = extra
+	}
+
+	if adapted == nil {
+		return req, nil
+	}
+	return adapted, nil
 }
 
 // normalizeReasoningEffort maps GoModel's OpenAI-style effort levels to the two

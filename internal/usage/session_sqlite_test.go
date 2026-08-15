@@ -117,3 +117,51 @@ func TestSQLiteSessionUsageRoundTripAggregationAndFilter(t *testing.T) {
 		t.Fatalf("filtered log = %+v", logResult)
 	}
 }
+
+func TestSQLiteSessionUsagePaginationHasStableTimestampTies(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteReader: %v", err)
+	}
+
+	timestamp := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	entries := []*UsageEntry{
+		{ID: "d", RequestID: "r-d", Timestamp: timestamp, Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions", SessionID: "session-c", UserPath: "/a"},
+		{ID: "c", RequestID: "r-c", Timestamp: timestamp, Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions", SessionID: "session-b", UserPath: "/a"},
+		{ID: "b", RequestID: "r-b", Timestamp: timestamp, Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions", SessionID: "session-a", UserPath: "/b"},
+		{ID: "a", RequestID: "r-a", Timestamp: timestamp, Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions", SessionID: "session-a", UserPath: "/a"},
+	}
+	if err := store.WriteBatch(context.Background(), entries); err != nil {
+		t.Fatalf("WriteBatch: %v", err)
+	}
+
+	want := []string{"session-a:/a", "session-a:/b", "session-b:/a", "session-c:/a"}
+	var got []string
+	for offset := 0; offset < len(want); offset += 2 {
+		page, err := reader.GetUsageBySession(context.Background(), SessionUsageParams{Limit: 2, Offset: offset})
+		if err != nil {
+			t.Fatalf("GetUsageBySession offset %d: %v", offset, err)
+		}
+		for _, row := range page.Entries {
+			got = append(got, row.SessionID+":"+row.UserPath)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("paged rows = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("paged rows = %v, want %v", got, want)
+		}
+	}
+}

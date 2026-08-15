@@ -1,4 +1,5 @@
 <script>
+  import * as m from "$lib/paraglide/messages.js";
   // Guardrails page: definitions library + schema-driven editor. Port of
   // templates/page-guardrails.html + static/js/modules/guardrails.js.
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
@@ -28,11 +29,11 @@
     <div>
       <InlineHelpSection
         copyId="guardrails-help-copy"
-        label="guardrails help"
-        text="Reusable policy objects stored in the database and kept hot in memory for workflow execution."
+        label={m.guardrails_help_label()}
+        text={m.guardrails_help()}
       >
         {#snippet title()}
-          <h2>Guardrails</h2>
+          <h2>{m.guardrails_title()}</h2>
         {/snippet}
       </InlineHelpSection>
     </div>
@@ -40,20 +41,19 @@
 
   <div class="settings-guardrails-hero">
     <div>
-      <p class="settings-kicker">Reusable Policy Objects</p>
-      <h3>Guardrail Library</h3>
+      <p class="settings-kicker">{m.guardrails_kicker()}</p>
+      <h3>{m.guardrails_library()}</h3>
       <p>
-        Store guardrails in the database, keep them hot in memory, and attach
-        them to workflows by reference.
+        {m.guardrails_library_help()}
       </p>
     </div>
     <div class="settings-guardrails-meta">
       <div class="settings-guardrails-stat">
-        <span class="settings-guardrails-stat-label">Instances</span>
+        <span class="settings-guardrails-stat-label">{m.guardrails_instances()}</span>
         <strong>{formatNumber(store.guardrails.length)}</strong>
       </div>
       <div class="settings-guardrails-stat">
-        <span class="settings-guardrails-stat-label">Types</span>
+        <span class="settings-guardrails-stat-label">{m.guardrails_types()}</span>
         <strong>{formatNumber(store.types.length)}</strong>
       </div>
     </div>
@@ -63,13 +63,11 @@
 
   {#if !runtimeConfig.guardrailsVisible()}
     <div class="alert alert-warning">
-      Runtime guardrail execution is currently off because
-      <code>GUARDRAILS_ENABLED</code> is disabled. You can still manage
-      definitions here.
+      {m.guardrails_disabled()}
     </div>
   {/if}
   {#if !auth.authError && !store.available}
-    <div class="alert alert-warning">Guardrails feature is unavailable.</div>
+    <div class="alert alert-warning">{m.guardrails_unavailable()}</div>
   {/if}
   {#if !auth.authError && store.error && !store.formOpen}
     <div class="alert alert-warning">{store.error}</div>

@@ -11,11 +11,13 @@
     mcpServerEndpointLabel,
     mcpServerSlug,
     mcpServerStatus,
+    mcpServerStatusLabel,
     mcpServerStatusClass,
     mcpServerStatusTitle,
     mcpServerSubCountsLabel,
   } from "./mcp-servers.js";
   import { List, Pencil, RefreshCw, X } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   function statusTitle(server) {
     return mcpServerStatusTitle(server, (ts) => timezone.formatTimestamp(ts));
@@ -26,13 +28,13 @@
   <table class="data-table">
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Transport</th>
-        <th>Endpoint</th>
-        <th>Status</th>
-        <th>Tools</th>
-        <th>Enabled</th>
-        <th class="col-actions">Actions</th>
+        <th>{m.mcp_name()}</th>
+        <th>{m.mcp_column_transport()}</th>
+        <th>{m.mcp_column_endpoint()}</th>
+        <th>{m.mcp_column_status()}</th>
+        <th>{m.mcp_column_tools()}</th>
+        <th>{m.mcp_column_enabled()}</th>
+        <th class="col-actions">{m.mcp_column_actions()}</th>
       </tr>
     </thead>
     <tbody>
@@ -43,8 +45,8 @@
             {#if server.managed}
               <span
                 class="alias-kind-badge"
-                title="Declared in configuration (config.yaml mcp.servers); read-only in the dashboard"
-                >Config</span
+                title={m.mcp_managed()}
+                >{m.common_config()}</span
               >
             {/if}
             <div class="mcp-server-sub-counts mono">{mcpServerSlug(server)}</div>
@@ -56,7 +58,7 @@
           <td>
             <span
               class="audit-status-badge {mcpServerStatusClass(server)}"
-              title={statusTitle(server)}>{mcpServerStatus(server)}</span
+              title={statusTitle(server)}>{mcpServerStatusLabel(server)}</span
             >
             {#if mcpServerStatus(server) === "degraded" && server.last_error}
               <div class="mcp-server-sub-counts">{server.last_error}</div>
@@ -72,14 +74,14 @@
                 "auth-key-status-badge",
                 server.enabled ? "auth-key-status-active" : "auth-key-status-inactive",
               ]}
-              >{server.enabled ? "Enabled" : "Disabled"}</span
+              >{server.enabled ? m.common_enabled() : m.common_disabled()}</span
             >
           </td>
           <td class="col-actions">
             <div class="alias-actions-cell model-list-actions">
               {#if !server.managed}
                 <TableActionButton
-                  label={"Edit MCP server " + server.name}
+                  label={m.mcp_edit_action({ name: server.name })}
                   class="table-icon-btn"
                   onclick={() => mcpServers.openEdit(server)}
                 >
@@ -87,14 +89,16 @@
                 </TableActionButton>
               {/if}
               <TableActionButton
-                label={"Inspect catalog of MCP server " + server.name}
+                label={m.mcp_catalog_action({ name: server.name })}
                 class="table-icon-btn"
                 onclick={() => mcpServers.openCatalog(server)}
               >
                 <Icon icon={List} class="form-action-icon" />
               </TableActionButton>
               <TableActionButton
-                label={(mcpServers.reconnectingName === mcpServerSlug(server) ? "Reconnecting MCP server " : "Reconnect MCP server ") + server.name}
+                label={mcpServers.reconnectingName === mcpServerSlug(server)
+                  ? m.mcp_reconnecting_action({ name: server.name })
+                  : m.mcp_reconnect_action({ name: server.name })}
                 class="table-icon-btn"
                 onclick={() => mcpServers.reconnectServer(server)}
                 disabled={mcpServers.reconnectingName === mcpServerSlug(server)}
@@ -103,7 +107,9 @@
               </TableActionButton>
               {#if !server.managed}
                 <TableActionButton
-                  label={(mcpServers.deletingName === mcpServerSlug(server) ? "Deleting MCP server " : "Delete MCP server ") + server.name}
+                  label={mcpServers.deletingName === mcpServerSlug(server)
+                    ? m.mcp_deleting_action({ name: server.name })
+                    : m.mcp_delete_action({ name: server.name })}
                   class="table-action-btn-danger table-icon-btn"
                   onclick={() => mcpServers.deleteServer(server)}
                   disabled={mcpServers.deletingName === mcpServerSlug(server)}

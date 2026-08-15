@@ -160,6 +160,13 @@ test("usageFilterQueryStr honors every filter except the excluded facet", () => 
   const withoutLabel = usageFilterQueryStr(filters, "label");
   assert.doesNotMatch(withoutLabel, /label=/);
   assert.match(withoutLabel, /provider=openai/);
+
+  const withoutSession = usageFilterQueryStr(filters, "session_id");
+  assert.doesNotMatch(withoutSession, /session_id=/);
+  assert.match(withoutSession, /model=gpt-5/);
+  assert.match(withoutSession, /provider=openai/);
+  assert.match(withoutSession, /label=env%3Aprod/);
+  assert.match(withoutSession, /user_path=%2Fteam/);
 });
 
 test("usageLogQueryParams includes cache_mode=all by default so cached records are returned", () => {

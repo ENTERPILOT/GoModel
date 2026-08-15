@@ -5,6 +5,8 @@
 // runtime-config visibility gates; callers derive them from the shared
 // runtimeConfig store (see workflows.svelte.js featureCaps()).
 
+import * as m from "../../lib/paraglide/messages.js";
+
 export const DRAFT_WORKFLOW_PREVIEW_ID = "draft-workflow-preview";
 
 export function defaultWorkflowForm() {
@@ -133,7 +135,7 @@ export function workflowSourceFeatures(source, caps) {
 }
 
 export function workflowFailoverLabel(source, caps) {
-  return workflowSourceFeatures(source, caps).failover ? "On" : "Off";
+  return workflowSourceFeatures(source, caps).failover ? m.workflows_on() : m.workflows_off();
 }
 
 export function workflowSourceGuardrails(source) {
@@ -220,12 +222,12 @@ export function workflowModelOptions(models, providerName, hydratedScope) {
 
 export function workflowScopeTypeLabel(workflow) {
   const scopeType = String((workflow && workflow.scope_type) || "").trim();
-  if (scopeType === "provider_model") return "Provider Name + Model";
-  if (scopeType === "provider_model_path") return "Provider Name + Model + Path";
-  if (scopeType === "provider_path") return "Provider Name + Path";
-  if (scopeType === "path") return "Path";
-  if (scopeType === "provider") return "Provider Name";
-  return "Global";
+  if (scopeType === "provider_model") return m.workflows_scope_provider_model();
+  if (scopeType === "provider_model_path") return m.workflows_scope_provider_model_path();
+  if (scopeType === "provider_path") return m.workflows_scope_provider_path();
+  if (scopeType === "path") return m.workflows_scope_path();
+  if (scopeType === "provider") return m.workflows_scope_provider();
+  return m.workflows_scope_global();
 }
 
 export function workflowScopeLabel(workflow) {
@@ -239,7 +241,7 @@ export function workflowDisplayName(workflow) {
   }
   const scopeLabel = workflowScopeLabel(workflow);
   if (scopeLabel === "global") {
-    return "All models";
+    return m.workflows_all_models();
   }
   return scopeLabel;
 }
@@ -257,10 +259,10 @@ function workflowScopeUserPathValidationError(value) {
       continue;
     }
     if (segment === "." || segment === "..") {
-      return 'User path cannot contain "." or ".." segments.';
+      return m.api_keys_user_path_segments();
     }
     if (segment.includes(":")) {
-      return 'User path cannot contain ":" segments.';
+      return m.api_keys_user_path_colon();
     }
   }
   return "";
@@ -527,18 +529,18 @@ export function validateWorkflowRequest(payload, { models = [], hydratedScope = 
   if (providerName) {
     const providers = workflowProviderOptions(models, hydrated);
     if (!providers.includes(providerName) && providerName !== preservedProvider) {
-      return "Choose a registered provider name.";
+      return m.workflows_provider_invalid();
     }
   }
   if (scopeModel && !providerName) {
-    return "Model selection requires a provider name.";
+    return m.workflows_model_requires_provider();
   }
   if (scopeModel) {
     const modelOptions = workflowModelOptions(models, providerName, hydrated);
     const isPreservedModel =
       providerName === preservedProvider && scopeModel === preservedModel;
     if (!modelOptions.includes(scopeModel) && !isPreservedModel) {
-      return "Choose a registered model for the selected provider name.";
+      return m.workflows_model_invalid();
     }
   }
   const userPathError = workflowScopeUserPathValidationError(payload.scope_user_path);
@@ -561,13 +563,13 @@ export function validateWorkflowRequest(payload, { models = [], hydratedScope = 
   const seen = new Set();
   for (const step of guardrails) {
     if (!step.ref) {
-      return "Each guardrail step needs a guardrail ref.";
+      return m.workflows_guardrail_ref_required();
     }
     if (!Number.isInteger(step.step) || step.step < 0) {
-      return "Each guardrail step must use a non-negative integer step number.";
+      return m.workflows_guardrail_step_invalid();
     }
     if (seen.has(step.ref)) {
-      return "Each guardrail ref may appear only once in a workflow.";
+      return m.workflows_guardrail_ref_unique();
     }
     seen.add(step.ref);
   }

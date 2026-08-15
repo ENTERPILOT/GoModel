@@ -134,13 +134,17 @@ func ResolveRequestModelWithAuthorizer(
 		}
 	}
 
-	return &core.RequestModelResolution{
+	resolution := &core.RequestModelResolution{
 		Requested:        requested,
 		ResolvedSelector: resolvedSelector,
 		ProviderType:     strings.TrimSpace(provider.GetProviderType(resolvedModel)),
 		ProviderName:     ResolvedProviderName(provider, resolvedSelector, ""),
 		AliasApplied:     aliasApplied,
-	}, nil
+	}
+	if slowdownResolver, ok := resolver.(ModelSlowdownResolver); ok {
+		resolution.Slowdown = slowdownResolver.ResolveSlowdown(ctx, requested, resolvedSelector)
+	}
+	return resolution, nil
 }
 
 func refreshProviderModelsForResolution(

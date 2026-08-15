@@ -8,16 +8,15 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
   import { Pencil, Plus, X } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <section class="settings-panel settings-guardrails-list">
   <div class="editor-header">
     <div>
-      <h3>Instances</h3>
+      <h3>{m.guardrails_instances()}</h3>
       <p class="form-hint">
-        Each instance has a reusable name, a type, an optional user path for
-        future UI visibility scoping, and a JSON-backed config payload for
-        that type.
+        {m.guardrails_instances_help()}
       </p>
     </div>
     <button
@@ -27,7 +26,7 @@
       onclick={() => store.openCreate()}
     >
       <Icon icon={Plus} class="form-action-icon" />
-      <span>Create&nbsp;Guardrail</span>
+      <span>{m.guardrails_create()}</span>
     </button>
   </div>
 
@@ -36,8 +35,8 @@
       <div class="table-toolbar-main">
         <FilterInput
           id="guardrail-filter"
-          placeholder="Filter by name, type, user path, summary..."
-          label="Guardrail filter"
+          placeholder={m.guardrails_filter_placeholder()}
+          label={m.guardrails_filter_label()}
           bind:value={store.filter}
         />
       </div>
@@ -46,7 +45,7 @@
 
   {#if store.loading && store.filtered.length === 0}
     <p class="empty-state">
-      <Spinner size={16} label="Loading guardrails" /> Loading guardrails...
+      <Spinner size={16} label={m.guardrails_loading()} /> {m.guardrails_loading()}
     </p>
   {/if}
 
@@ -55,11 +54,11 @@
       <table class="data-table settings-guardrails-table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>User Path</th>
-            <th>Summary</th>
-            <th class="col-actions">Actions</th>
+            <th>{m.guardrails_name()}</th>
+            <th>{m.guardrails_type()}</th>
+            <th>{m.guardrails_user_path()}</th>
+            <th>{m.guardrails_summary()}</th>
+            <th class="col-actions">{m.guardrails_actions()}</th>
           </tr>
         </thead>
         <tbody>
@@ -74,7 +73,7 @@
               <td class="mono font-size-md">{guardrail.user_path || "—"}</td>
               <td>
                 <div class="settings-guardrail-summary">
-                  {guardrail.summary || guardrail.description || "No summary yet."}
+                  {guardrail.summary || guardrail.description || m.guardrails_no_summary()}
                 </div>
                 {#if guardrail.description}
                   <div class="settings-guardrail-description">
@@ -85,14 +84,16 @@
               <td class="col-actions">
                 <div class="alias-actions-cell model-list-actions">
                   <TableActionButton
-                    label={"Edit guardrail " + guardrail.name}
+                    label={m.guardrails_edit_action({ name: guardrail.name })}
                     class="table-icon-btn"
                     onclick={() => store.openEdit(guardrail)}
                   >
                     <Icon icon={Pencil} class="table-icon-svg" />
                   </TableActionButton>
                   <TableActionButton
-                    label={(store.deletingName === guardrail.name ? "Deleting guardrail " : "Delete guardrail ") + guardrail.name}
+                    label={store.deletingName === guardrail.name
+                      ? m.guardrails_deleting_action({ name: guardrail.name })
+                      : m.guardrails_delete_action({ name: guardrail.name })}
                     class="table-action-btn-danger table-icon-btn"
                     onclick={() => store.deleteGuardrail(guardrail)}
                     disabled={store.deletingName === guardrail.name}
@@ -109,7 +110,7 @@
   {/if}
 
   {#if store.filtered.length === 0 && !store.loading && store.available && !store.error && !auth.authError}
-    <p class="empty-state">No guardrails defined yet.</p>
+    <p class="empty-state">{m.guardrails_empty()}</p>
   {/if}
 </section>
 
