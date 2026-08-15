@@ -3,6 +3,7 @@
   // an optional trailing clear action.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { Search, X } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let {
     value = $bindable(""),
@@ -14,6 +15,10 @@
     clearLabel = "",
     class: className = "",
   } = $props();
+
+  // Clearable inputs always need a non-empty accessible name for the clear
+  // button; fall back to a generic label when a caller omits one.
+  const effectiveClearLabel = $derived(clearLabel || m.common_action_clear());
 
   function clear() {
     value = "";
@@ -37,8 +42,8 @@
     <button
       type="button"
       class="filter-input-clear"
-      title={clearLabel}
-      aria-label={clearLabel}
+      title={effectiveClearLabel}
+      aria-label={effectiveClearLabel}
       onclick={clear}
     >
       <Icon icon={X} />

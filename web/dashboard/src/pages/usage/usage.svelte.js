@@ -323,6 +323,36 @@ class UsagePageState {
     }
   }
 
+  // Shared request lifecycle for the two paginated fetches (session
+  // breakdown, request log): track/abort the in-flight request, reset the
+  // offset, normalize the entries array, and fall back to an empty result
+  // on error. Mirrors #fetchBreakdown but keeps pagination state and entry
+  // normalization on top of it.
+  async #fetchPaginated(key, endpoint, label, { resetOffset, pageState, queryParams, assign, setLoading, emptyResult }) {
+    const controller = this.#startRequest(key);
+    setLoading(true);
+    try {
+      if (resetOffset) pageState.offset = 0;
+      const qs = dateRange.queryStr() + this.filterQueryStr() + queryParams();
+      const result = await getJSON(endpoint + "?" + qs, { label, signal: controller.signal });
+      if (result.stale || controller.signal.aborted) return;
+      if (!result.ok || !result.data || typeof result.data !== "object") {
+        assign(emptyResult());
+        return;
+      }
+      const payload = result.data;
+      payload.entries = Array.isArray(payload.entries) ? payload.entries : [];
+      assign(payload);
+    } catch (e) {
+      if (isAbortError(e)) return;
+      console.error("Failed to fetch " + label + ":", e);
+      assign(emptyResult());
+    } finally {
+      this.#clearRequest(key, controller);
+      if (this.#controllers[key] === null) setLoading(false);
+    }
+  }
+
   fetchModelUsage() {
     return this.#fetchBreakdown(
       "modelUsage",
@@ -353,33 +383,15 @@ class UsagePageState {
     );
   }
 
-  async fetchSessionUsage(resetOffset) {
-    const controller = this.#startRequest("sessionUsage");
-    this.sessionUsageLoading = true;
-    try {
-      if (resetOffset) this.sessionUsage.offset = 0;
-      let qs = dateRange.queryStr() + this.filterQueryStr();
-      qs += sessionUsageQueryParams(this.sessionUsage);
-      const result = await getJSON("/admin/usage/sessions?" + qs, {
-        label: "usage sessions",
-        signal: controller.signal,
-      });
-      if (result.stale || controller.signal.aborted) return;
-      if (!result.ok || !result.data || typeof result.data !== "object") {
-        this.sessionUsage = emptySessionUsage();
-        return;
-      }
-      const payload = result.data;
-      payload.entries = Array.isArray(payload.entries) ? payload.entries : [];
-      this.sessionUsage = payload;
-    } catch (e) {
-      if (isAbortError(e)) return;
-      console.error("Failed to fetch usage sessions:", e);
-      this.sessionUsage = emptySessionUsage();
-    } finally {
-      this.#clearRequest("sessionUsage", controller);
-      if (this.#controllers["sessionUsage"] === null) this.sessionUsageLoading = false;
-    }
+  fetchSessionUsage(resetOffset) {
+    return this.#fetchPaginated("sessionUsage", "/admin/usage/sessions", "usage sessions", {
+      resetOffset,
+      pageState: this.sessionUsage,
+      queryParams: () => sessionUsageQueryParams(this.sessionUsage),
+      assign: (payload) => (this.sessionUsage = payload),
+      setLoading: (v) => (this.sessionUsageLoading = v),
+      emptyResult: emptySessionUsage,
+    });
   }
 
   sessionUsageNextPage() {
@@ -394,40 +406,21 @@ class UsagePageState {
     this.fetchSessionUsage(false);
   }
 
-  async fetchUsageLog(resetOffset) {
-    const controller = this.#startRequest("usageLog");
-    this.usageLogLoading = true;
-    try {
-      if (resetOffset) this.usageLog.offset = 0;
-      let qs = dateRange.queryStr() + this.filterQueryStr();
-      qs += usageLogQueryParams({
-        limit: this.usageLog.limit,
-        offset: this.usageLog.offset,
-        hideCached: this.usageLogHideCached,
-        search: this.usageLogSearch,
-      });
-      const result = await getJSON("/admin/usage/log?" + qs, {
-        label: "usage log",
-        signal: controller.signal,
-      });
-      if (result.stale) return;
-      if (controller.signal.aborted) return;
-      if (!result.ok) {
-        this.usageLog = emptyUsageLog();
-        return;
-      }
-      const payload =
-        result.data && typeof result.data === "object" ? result.data : emptyUsageLog();
-      if (!payload.entries) payload.entries = [];
-      this.usageLog = payload;
-    } catch (e) {
-      if (isAbortError(e)) return;
-      console.error("Failed to fetch usage log:", e);
-      this.usageLog = emptyUsageLog();
-    } finally {
-      this.#clearRequest("usageLog", controller);
-      if (this.#controllers["usageLog"] === null) this.usageLogLoading = false;
-    }
+  fetchUsageLog(resetOffset) {
+    return this.#fetchPaginated("usageLog", "/admin/usage/log", "usage log", {
+      resetOffset,
+      pageState: this.usageLog,
+      queryParams: () =>
+        usageLogQueryParams({
+          limit: this.usageLog.limit,
+          offset: this.usageLog.offset,
+          hideCached: this.usageLogHideCached,
+          search: this.usageLogSearch,
+        }),
+      assign: (payload) => (this.usageLog = payload),
+      setLoading: (v) => (this.usageLogLoading = v),
+      emptyResult: emptyUsageLog,
+    });
   }
 
   usageLogNextPage() {

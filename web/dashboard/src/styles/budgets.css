@@ -150,6 +150,45 @@
   background: var(--danger);
 }
 
+/* Period-elapsed bar: same per-period palette as .budget-period-label-*,
+   applied as a track tint plus a saturated fill (readable under the white
+   .budget-bar-text-row-on-fill text, except custom which stays light and
+   keeps its dark on-fill text override below). */
+.budget-bar-track-period-monthly {
+  background: color-mix(in srgb, #30302c 22%, var(--bg));
+}
+.budget-bar-fill-period-monthly {
+  background: #30302c;
+}
+
+.budget-bar-track-period-weekly {
+  background: color-mix(in srgb, #68765c 22%, var(--bg));
+}
+.budget-bar-fill-period-weekly {
+  background: #68765c;
+}
+
+.budget-bar-track-period-daily {
+  background: color-mix(in srgb, #b5652d 22%, var(--bg));
+}
+.budget-bar-fill-period-daily {
+  background: #b5652d;
+}
+
+.budget-bar-track-period-hourly {
+  background: color-mix(in srgb, #783f22 22%, var(--bg));
+}
+.budget-bar-fill-period-hourly {
+  background: #783f22;
+}
+
+.budget-bar-track-period-custom {
+  background: color-mix(in srgb, #bfa584 22%, var(--bg));
+}
+.budget-bar-fill-period-custom {
+  background: #bfa584;
+}
+
 .budget-bar-text-row {
   position: absolute;
   inset: 0;
