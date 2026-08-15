@@ -34,7 +34,6 @@
   "usage_filter_session": "Filtruj według ID sesji",
   "usage_filter_session_placeholder": "ID sesji",
   "usage_clear_session_filter": "Wyczyść filtr sesji {session}",
-  "usage_session_filter": "Sesja: {session}",
   "usage_all_models": "Wszystkie modele",
   "usage_all_providers": "Wszyscy dostawcy",
   "usage_all_labels": "Wszystkie etykiety",

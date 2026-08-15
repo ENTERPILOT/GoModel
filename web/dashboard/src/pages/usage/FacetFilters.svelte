@@ -4,7 +4,6 @@
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import { usagePage } from "./usage.svelte.js";
-  import { shortSessionID } from "./usage-helpers.js";
   import * as m from "$lib/paraglide/messages.js";
 
   const onUserPathInput = debounced(() => usagePage.onUsageFilterChanged());
@@ -64,18 +63,12 @@
     label={m.usage_filter_session()}
     bind:value={usagePage.usageFilterSession}
     oninput={onSessionInput}
+    clearLabel={m.usage_clear_session_filter({ session: usagePage.usageFilterSession })}
+    onclear={() => {
+      onSessionInput.cancel();
+      usagePage.onUsageFilterChanged();
+    }}
   />
-  {#if usagePage.usageFilterSession}
-    <button
-      type="button"
-      class="active-session-filter mono"
-      title={m.usage_clear_session_filter({ session: usagePage.usageFilterSession })}
-      onclick={() => {
-        usagePage.usageFilterSession = "";
-        usagePage.onUsageFilterChanged();
-      }}
-    >{m.usage_session_filter({ session: shortSessionID(usagePage.usageFilterSession) })} ×</button>
-  {/if}
 </div>
 
 <style>
@@ -104,22 +97,6 @@
     flex: 1 1 220px;
     min-width: 180px;
     max-width: 360px;
-  }
-
-  .active-session-filter {
-    align-self: center;
-    padding: 6px 10px;
-    border: 1px solid var(--accent);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--accent) 16%, var(--bg));
-    color: var(--accent-strong, var(--accent));
-    cursor: pointer;
-    font-size: 12px;
-    white-space: nowrap;
-  }
-
-  .active-session-filter:hover {
-    background: color-mix(in srgb, var(--accent) 25%, var(--bg));
   }
 
   @media (max-width: 768px) {

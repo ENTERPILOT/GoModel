@@ -1,8 +1,8 @@
 <script>
-  // Standard toolbar search field: magnifier icon inside a text input.
-  // `label` fills aria-label; `class` adds modifiers to the wrapper.
+  // Standard toolbar search field: magnifier icon inside a text input, with
+  // an optional trailing clear action.
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { Search } from "lucide";
+  import { Search, X } from "lucide";
 
   let {
     value = $bindable(""),
@@ -10,8 +10,15 @@
     label = "",
     id = undefined,
     oninput = undefined,
+    onclear = undefined,
+    clearLabel = "",
     class: className = "",
   } = $props();
+
+  function clear() {
+    value = "";
+    onclear?.();
+  }
 </script>
 
 <div class={["filter-input-wrap", className]}>
@@ -22,9 +29,21 @@
     {id}
     {placeholder}
     aria-label={label}
+    class:filter-input-clearable={!!onclear}
     bind:value
     {oninput}
   />
+  {#if onclear && value}
+    <button
+      type="button"
+      class="filter-input-clear"
+      title={clearLabel}
+      aria-label={clearLabel}
+      onclick={clear}
+    >
+      <Icon icon={X} />
+    </button>
+  {/if}
 </div>
 
 <style>
@@ -43,6 +62,10 @@
     padding-left: 34px;
   }
 
+  .filter-input-clearable {
+    padding-right: 34px;
+  }
+
   /* The class rides on the Icon child's own <svg>, so it needs :global. */
   .filter-input-wrap :global(.filter-input-icon) {
     position: absolute;
@@ -53,5 +76,33 @@
     color: var(--text-muted);
     pointer-events: none;
     transform: translateY(-50%);
+  }
+
+  .filter-input-clear {
+    position: absolute;
+    right: 7px;
+    top: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transform: translateY(-50%);
+  }
+
+  .filter-input-clear:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text);
+  }
+
+  .filter-input-clear :global(svg) {
+    width: 14px;
+    height: 14px;
   }
 </style>

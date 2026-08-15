@@ -34,7 +34,6 @@
   "usage_filter_session": "Filter by session ID",
   "usage_filter_session_placeholder": "Session ID",
   "usage_clear_session_filter": "Clear session filter {session}",
-  "usage_session_filter": "Session: {session}",
   "usage_all_models": "All Models",
   "usage_all_providers": "All Providers",
   "usage_all_labels": "All Labels",
