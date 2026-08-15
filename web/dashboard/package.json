@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "check": "svelte-check --tsconfig ./jsconfig.json",
-    "test": "node --test \"tests/*.test.js\""
+    "i18n:compile": "node ./scripts/compile-i18n.js",
+    "check": "npm run i18n:compile && svelte-check --tsconfig ./jsconfig.json",
+    "test": "npm run i18n:compile && node --test \"tests/*.test.js\""
   },
   "dependencies": {
     "chart.js": "^4.4.9",
@@ -15,6 +16,7 @@
     "svelte": "^5.35.0"
   },
   "devDependencies": {
+    "@inlang/paraglide-js": "^2.23.2",
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "svelte-check": "^4.2.0",
     "typescript": "^5.8.0",

@@ -5,6 +5,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { authenticationLoginURL } from "$lib/stores/external-auth.js";
   import { gomodelPath } from "$lib/api/paths.js";
+  import * as m from "$lib/paraglide/messages.js";
   import { Check, KeyRound, LockKeyhole } from "lucide";
 </script>
 
@@ -22,11 +23,13 @@
     <div class="auth-dialog-header">
       <div>
         <h2 id="authDialogTitle">
-          {auth.needsAuth ? "Dashboard locked" : "Change API key"}
+          {auth.needsAuth
+            ? m.auth_dialog_locked_title()
+            : m.auth_dialog_change_key_title()}
         </h2>
       </div>
       <DialogCloseButton
-        label="Close authentication dialog"
+        label={m.auth_dialog_close()}
         onclick={() => auth.closeDialog()}
         class="auth-dialog-close"
         iconClass=""
@@ -46,9 +49,9 @@
           onclick={() => auth.selectExternalAuthentication()}
         >
           <Icon icon={KeyRound} />
-          <span>Sign in with SSO</span>
+          <span>{m.auth_dialog_sign_in_with_sso()}</span>
         </a>
-        <div class="auth-dialog-separator"><span>or use an API key</span></div>
+        <div class="auth-dialog-separator"><span>{m.auth_dialog_or_use_api_key()}</span></div>
       {/if}
       <div class="auth-dialog-input-shell">
         <Icon icon={LockKeyhole} class="auth-dialog-input-icon" />
@@ -56,8 +59,8 @@
           id="authDialogApiKey"
           class="auth-dialog-input"
           type="password"
-          placeholder="Master key or bearer token"
-          aria-label="API key"
+          placeholder={m.auth_api_key_placeholder()}
+          aria-label={m.auth_api_key_label()}
           autocomplete="current-password"
           data-modal-autofocus
           bind:value={auth.apiKey}
@@ -65,11 +68,11 @@
       </div>
       {#if auth.authError}
         <p class="auth-dialog-error" role="alert">
-          {auth.authErrorMessage || "Enter a valid API key to continue."}
+          {auth.authErrorMessage || m.auth_api_key_invalid()}
         </p>
       {/if}
       <p class="auth-dialog-hint">
-        Stored in this browser. Requests use the Authorization bearer header.
+        {m.auth_api_key_storage_hint()}
       </p>
       <div class="auth-dialog-actions">
         <button
@@ -77,7 +80,9 @@
           class="btn btn-primary btn-with-icon auth-dialog-submit-btn"
         >
           <Icon icon={Check} class="auth-dialog-submit-icon" />
-          <span>{auth.needsAuth ? "Unlock dashboard" : "Save API key"}</span>
+          <span>{auth.needsAuth
+              ? m.auth_action_unlock_dashboard()
+              : m.auth_action_save_api_key()}</span>
         </button>
       </div>
     </form>

@@ -8,6 +8,7 @@ import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
+import * as m from "$lib/paraglide/messages.js";
 import {
   defaultWorkflowForm,
   emptyHydratedScope,
@@ -88,11 +89,11 @@ class WorkflowsStore {
   }
 
   submitLabel() {
-    return this.submitMode() === "save" ? "Save" : "Create";
+    return this.submitMode() === "save" ? m.workflows_save() : m.workflows_create();
   }
 
   submittingLabel() {
-    return this.submitMode() === "save" ? "Saving..." : "Creating...";
+    return this.submitMode() === "save" ? m.workflows_saving() : m.workflows_creating();
   }
 
   preview() {
@@ -235,7 +236,7 @@ class WorkflowsStore {
     if (outcome.status === "error") {
       this.workflows = [];
       this.error = controller.signal.aborted
-        ? "Loading workflows timed out."
+        ? m.workflows_timeout()
         : outcome.error;
       return;
     }
@@ -292,7 +293,7 @@ class WorkflowsStore {
         return;
       }
 
-      flash.success("Workflow created and activated.");
+      flash.success(m.workflows_created());
       this.closeForm();
       void this.fetchPage();
     } finally {
@@ -308,9 +309,7 @@ class WorkflowsStore {
     const workflowName = workflowDisplayName(workflow);
     if (
       !confirm(
-        'Deactivate workflow "' +
-          workflowName +
-          '"? Requests will fall back to the next active workflow for this scope.',
+        m.workflows_deactivate_confirm({ name: workflowName }),
       )
     ) {
       return;
@@ -337,7 +336,7 @@ class WorkflowsStore {
         return;
       }
 
-      flash.success("Workflow deactivated.");
+      flash.success(m.workflows_deactivated());
       void this.fetchPage();
     } finally {
       this.deactivatingID = "";

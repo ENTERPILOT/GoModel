@@ -8,16 +8,17 @@
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import { authKeysStore as store } from "./authKeys.svelte.js";
   import { Check, Plus } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <EditorDialog
   open={store.formOpen}
-  title="Create API Key"
-  ariaLabel="API key editor"
+  title={m.api_keys_create()}
+  ariaLabel={m.api_keys_editor()}
   error={store.issuedValue ? "" : store.error}
   submitting={store.formSubmitting}
-  submitLabel={store.issuedValue ? "Done, I’ve stored it" : "Create API Key"}
-  submittingLabel="Creating..."
+  submitLabel={store.issuedValue ? m.api_keys_done() : m.api_keys_create()}
+  submittingLabel={m.api_keys_creating()}
   submitIcon={store.issuedValue ? Check : Plus}
   cancel={false}
   dialogClass="auth-key-editor"
@@ -28,7 +29,7 @@
   {#if store.issuedValue}
     <div class="auth-key-issued-banner">
       <p class="auth-key-issued-warning">
-        Store this key securely &mdash; it won&rsquo;t be shown again.
+        {m.api_keys_store_warning()}
       </p>
       <div class="auth-key-issued-value-row">
         <code class="auth-key-issued-token">{store.issuedValue}</code>
@@ -39,7 +40,7 @@
       </div>
       {#if store.copyState.error}
         <p class="form-error" role="alert" aria-live="assertive">
-          Unable to copy the key automatically. Copy it manually.
+          {m.api_keys_copy_failed()}
         </p>
       {/if}
     </div>
@@ -48,7 +49,7 @@
       <div class="form-grid">
         <div class="form-field">
           <label class="form-field-label" for="auth-key-name">
-            Name <span class="form-hint">(required)</span>
+            {m.api_keys_name()} <span class="form-hint">({m.api_keys_required()})</span>
           </label>
           <input
             id="auth-key-name"
@@ -61,19 +62,18 @@
         </div>
         <div class="form-field">
           <label class="form-field-label" for="auth-key-expires">
-            Expires <span class="form-hint">(optional, valid through the selected date)</span>
+            {m.api_keys_expires()} <span class="form-hint">({m.api_keys_expiry_help()})</span>
           </label>
           <input id="auth-key-expires" type="date" bind:value={store.form.expires_at} />
         </div>
       </div>
       <div class="form-field">
-        <InlineHelpSection copyId="auth-key-user-path-help-copy" label="API key user path help">
+        <InlineHelpSection copyId="auth-key-user-path-help-copy" label={m.api_keys_user_path_help_label()}>
           {#snippet title()}
-            <label class="form-field-label" for="auth-key-user-path">User Path (optional)</label>
+            <label class="form-field-label" for="auth-key-user-path">{m.api_keys_user_path()}</label>
           {/snippet}
           {#snippet help()}
-            When set, this key overrides the configured user path request
-            header for audit logging and downstream request context.
+            {m.api_keys_user_path_help()}
           {/snippet}
         </InlineHelpSection>
         <input
@@ -85,16 +85,14 @@
         />
       </div>
       <div class="form-field">
-        <InlineHelpSection copyId="auth-key-labels-help-copy" label="API key labels help">
+        <InlineHelpSection copyId="auth-key-labels-help-copy" label={m.api_keys_labels_help_label()}>
           {#snippet title()}
             <label class="form-field-label" for="auth-key-labels">
-              Labels (optional, comma-separated)
+              {m.api_keys_labels()}
             </label>
           {/snippet}
           {#snippet help()}
-            Every request authenticated with this key gets these labels, in
-            addition to any labels from tagging headers. Labels show up in
-            usage analytics, the request log, and audit logs.
+            {m.api_keys_labels_help()}
           {/snippet}
         </InlineHelpSection>
         <input
@@ -106,14 +104,12 @@
         />
       </div>
       <div class="form-field">
-        <InlineHelpSection copyId="auth-key-dashboard-access-help-copy" label="API key dashboard access help">
+        <InlineHelpSection copyId="auth-key-dashboard-access-help-copy" label={m.api_keys_dashboard_help_label()}>
           {#snippet title()}
-            <label class="form-field-label" for="auth-key-dashboard-access">Dashboard access</label>
+            <label class="form-field-label" for="auth-key-dashboard-access">{m.api_keys_dashboard_access()}</label>
           {/snippet}
           {#snippet help()}
-            When off, this key is denied the dashboard and every /admin API
-            endpoint. Model endpoints and GET /v1/usage stay available to
-            the key. The master key always has dashboard access.
+            {m.api_keys_dashboard_help()}
           {/snippet}
         </InlineHelpSection>
         <label class="auth-key-dashboard-toggle">
@@ -123,14 +119,14 @@
             aria-describedby="auth-key-dashboard-access-help-copy"
             bind:checked={store.form.dashboard_access}
           />
-          <span>Allow this key to use the dashboard and /admin API</span>
+          <span>{m.api_keys_dashboard_allow()}</span>
         </label>
       </div>
-      <FormField id="auth-key-description" label="Description (optional)">
+      <FormField id="auth-key-description" label={m.api_keys_description_optional()}>
         <textarea
           id="auth-key-description"
           rows="2"
-          placeholder="What is this key used for?"
+          placeholder={m.api_keys_description_placeholder()}
           bind:value={store.form.description}
         ></textarea>
       </FormField>

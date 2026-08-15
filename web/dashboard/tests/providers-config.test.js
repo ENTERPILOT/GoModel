@@ -3,6 +3,7 @@
 // re-tested here.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { overwriteGetLocale } from "../src/lib/paraglide/runtime.js";
 
 import {
   defaultProviderCredentialForm,
@@ -273,6 +274,16 @@ test("a missing schema falls back to every known field", () => {
 test("providerCredentialFieldMeta humanizes a field the dashboard has no copy for", () => {
   assert.equal(providerCredentialFieldMeta("some_new_field").label, "Some New Field");
   assert.equal(providerCredentialFieldMeta("some_new_field").control, "text");
+});
+
+test("providerCredentialFieldMeta resolves translations on access", () => {
+  overwriteGetLocale(() => "pl");
+  try {
+    assert.equal(providerCredentialFieldMeta("base_url").label, "Bazowy URL");
+  } finally {
+    overwriteGetLocale(() => "en");
+  }
+  assert.equal(providerCredentialFieldMeta("base_url").label, "Base URL");
 });
 
 test("providerCredentialSchema finds the selected type", () => {

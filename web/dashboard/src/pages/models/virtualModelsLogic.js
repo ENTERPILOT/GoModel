@@ -2,6 +2,8 @@
 // removePrimaryTarget, which mutates the form it is given) so the node:test
 // suite can exercise it without Svelte.
 
+import * as m from "../../lib/paraglide/messages.js";
+
 export const GLOBAL_OVERRIDE_SELECTOR = "/";
 
 // ---- Naming / identity helpers ----
@@ -169,9 +171,9 @@ function strategyLabel(strategy) {
 // (VIRTUAL_MODEL_STRATEGIES); presentation stays here so copy does not ship
 // with the gateway. Unknown values fall back to the raw value.
 const STRATEGY_OPTION_LABELS = {
-  round_robin: "Round-robin (rotate across targets; honors weights)",
-  cost: "Lowest cost (cheapest target per request)",
-  adaptive: "Adaptive (target chosen by the registered routing extension)",
+  round_robin: m.models_strategy_round_robin(),
+  cost: m.models_strategy_cost(),
+  adaptive: m.models_strategy_adaptive(),
 };
 
 // strategyOptions builds the editor dropdown from the deployment's supported
@@ -274,10 +276,10 @@ function aliasStateClass(alias) {
 }
 
 function aliasStateText(alias) {
-  if (!alias) return "Invalid";
-  if (alias.enabled === false) return "Disabled";
-  if (!alias.valid) return "Invalid";
-  return "Active";
+  if (!alias) return m.models_invalid();
+  if (alias.enabled === false) return m.models_disabled();
+  if (!alias.valid) return m.models_invalid();
+  return m.models_active();
 }
 
 export function modelAccessUserPathsRestrict(paths) {
@@ -301,12 +303,12 @@ function modelAccessSummary(access) {
 
   const parts = [];
   if (access.effective_enabled === false) {
-    parts.push(access.default_enabled === false ? "Disabled by default" : "Disabled");
+    parts.push(access.default_enabled === false ? m.models_disabled_default() : m.models_disabled());
   }
 
   const userPaths = Array.isArray(access.user_paths) ? access.user_paths : [];
   if (userPaths.length > 0) {
-    parts.push("Allowed for " + userPaths.join(", "));
+    parts.push(m.models_allowed_for({ paths: userPaths.join(", ") }));
   }
 
   return parts.join(" · ");
@@ -442,7 +444,7 @@ function providerGroupDisplayName(providerName, providerType) {
   if (normalizedProviderType) {
     return normalizedProviderType;
   }
-  return "Unassigned";
+  return m.models_unassigned();
 }
 
 function providerGroupTypeLabel(providerName, providerType) {
@@ -468,10 +470,10 @@ function providerGroupItemCountLabel(rows) {
   const aliasCount = safeRows.filter((row) => row && row.is_alias).length;
   const parts = [];
   if (modelCount > 0) {
-    parts.push(modelCount + (modelCount === 1 ? " model" : " models"));
+    parts.push(m.models_count({ count: modelCount }));
   }
   if (aliasCount > 0) {
-    parts.push(aliasCount + (aliasCount === 1 ? " alias" : " aliases"));
+    parts.push(m.models_alias_count({ count: aliasCount }));
   }
   return parts.join(" · ");
 }
@@ -609,7 +611,7 @@ export function groupDisplayModels(rows, models, modelOverrideViews) {
       is_virtual_models: true,
       provider_name: "",
       provider_type: "",
-      display_name: "Virtual models",
+      display_name: m.models_virtual_models_group(),
       type_label: "",
       rows: virtualRows,
       access: { selector: "" },
@@ -627,7 +629,7 @@ export function buildGlobalScopeRow(models, modelOverrideViews) {
   return {
     key: "scope-global",
     is_alias: false,
-    display_name: "all providers and models",
+    display_name: m.models_global_scope_subject(),
     access: {
       selector: GLOBAL_OVERRIDE_SELECTOR,
       default_enabled: defaultEnabled,
@@ -717,8 +719,10 @@ export function modelOverrideEditButtonClass(hasOverride) {
 }
 
 export function modelOverrideEditButtonLabel(subject, hasOverride) {
-  const base = "Edit " + String(subject || "model access");
-  return hasOverride ? base + " (virtual model exists)" : base;
+  const value = String(subject || m.models_global_access());
+  return hasOverride
+    ? m.models_edit_action_virtual({ subject: value })
+    : m.models_edit_action({ subject: value });
 }
 
 // ---- Editor form helpers ----

@@ -9,7 +9,7 @@
 //   - insert-gate fields: auditSearch, auditMethod, auditStatusCode,
 //     auditStream, customStartDate, customEndDate, usageLogSearch,
 //     usageFilterModel, usageFilterProvider, usageFilterLabel,
-//     usageFilterUserPath, usageLogHideCached, page
+//     usageFilterUserPath, usageFilterSession, usageLogHideCached, page
 //   - optional cross-module hooks (guarded with typeof):
 //     fetchUsage, fetchAuditLog, isAuditEntryExpanded, cacheAuditRecord,
 //     noteLiveTokenUsage, fetchAuditEntryDetail
@@ -18,6 +18,7 @@
 // runs this file directly and cannot resolve the `$lib` alias.
 
 import { consumeEventStream } from "../../lib/api/eventStream.js";
+import * as m from "../../lib/paraglide/messages.js";
 
 const LIVE_LOGS_STREAM_PATH = "/admin/live/logs?types=audit,usage";
 
@@ -31,11 +32,11 @@ function matchesLiveAuditKey(entry, id, requestID) {
 export function auditLivePauseMessage(reason) {
     switch (reason) {
         case 'date_range':
-            return 'Live paused — the selected date range does not include today. Set it to today to resume.';
+            return m.audit_live_pause_date_range();
         case 'filters':
-            return 'Live paused while filters are active. Clear them to resume.';
+            return m.audit_live_pause_filters();
         case 'pagination':
-            return 'Live paused on later pages. Go to the first page to resume.';
+            return m.audit_live_pause_pagination();
         default:
             return '';
     }
@@ -120,7 +121,7 @@ export function liveLogsMethods() {
         usageLiveInsertAllowed() {
             return this.usageLog && this.usageLog.offset === 0 &&
                 !this.usageLogSearch && !this.usageFilterModel && !this.usageFilterProvider &&
-                !this.usageFilterLabel && !this.usageFilterUserPath;
+                !this.usageFilterLabel && !this.usageFilterUserPath && !this.usageFilterSession;
         },
 
         mergeLiveAuditEntry(incoming, eventType) {
@@ -340,7 +341,10 @@ export function liveLogsMethods() {
             if (index < 0) return;
             const head = entries[index];
             const next = [...entries];
-            next.splice(index, 1, { ...head, session_count: Math.max(1, Number(head.session_count || 1) - count) });
+            next.splice(index, 1, {
+                ...head,
+                session_count: Math.max(1, Number(head.session_count || 1) - count)
+            });
             this.auditLog.entries = next;
         },
 
@@ -459,7 +463,11 @@ export function liveLogsMethods() {
                     reloadGroupedList = true;
                     return;
                 }
-                const promoted = { ...children[0], session_id: sessionId, session_count: sessionCount - 1 };
+                const promoted = {
+                    ...children[0],
+                    session_id: sessionId,
+                    session_count: sessionCount - 1
+                };
                 next.push(promoted);
                 this.auditThreadChildren = {
                     ...this.auditThreadChildren,

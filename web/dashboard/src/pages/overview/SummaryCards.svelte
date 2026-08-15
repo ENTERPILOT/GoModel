@@ -35,6 +35,7 @@
   } from "./mcpOverviewLogic.js";
   import { providerStatusState, mcpServersState } from "./overviewState.svelte.js";
   import { resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   const summary = $derived(usageData.summary);
   const cacheOverview = $derived(usageData.cacheOverview);
@@ -55,7 +56,7 @@
     <div class="card-value cache-token-value">
       <span
         class="cache-token-part"
-        title={tokenCountTitle("Input tokens", inputTokens)}
+        title={tokenCountTitle(m.overview_input_tokens(), inputTokens)}
       >
         <span>{formatTokensShort(inputTokens)}</span><span
           class="cache-token-marker">i</span>
@@ -63,7 +64,7 @@
       <span class="cache-token-operator">+</span>
       <span
         class="cache-token-part"
-        title={tokenCountTitle("Output tokens", outputTokens)}
+        title={tokenCountTitle(m.overview_output_tokens(), outputTokens)}
       >
         <span>{formatTokensShort(outputTokens)}</span><span
           class="cache-token-marker">o</span>
@@ -71,7 +72,7 @@
       <span class="cache-token-operator">=</span>
       <span
         class="cache-token-part"
-        title={tokenCountTitle("Total tokens", totalTokens)}
+        title={tokenCountTitle(m.overview_total_tokens(), totalTokens)}
       >{formatTokensShort(totalTokens)}</span>
     </div>
   </div>
@@ -99,13 +100,13 @@
 
 <div class="cards">
   {@render tokenCard(
-    "Tokens",
+    m.overview_tokens(),
     summary.total_input_tokens,
     summary.total_output_tokens,
     summaryTotalTokens(summary),
   )}
   <div class="card">
-    <div class="card-label">Total Requests</div>
+    <div class="card-label">{m.overview_total_requests()}</div>
     <div
       class="card-value"
       title={summaryTotalRequestsTitle(summary, cacheOverview, cacheEnabled)}
@@ -113,17 +114,17 @@
   </div>
   {#if cacheEnabled}
     <div class="card">
-      <div class="card-label">Cache Hits</div>
+      <div class="card-label">{m.overview_cache_hits()}</div>
       <div class="card-value">{formatNumber(cacheOverview.summary.total_hits)}</div>
     </div>
   {/if}
   <div class="card">
-    <div class="card-label">Estimated Cost</div>
+    <div class="card-label">{m.overview_estimated_cost()}</div>
     <div class="card-value">{formatCost(summary.total_cost)}</div>
   </div>
   {#if cacheEnabled}
     {@render tokenCard(
-      "Local Cache",
+      m.overview_local_cache(),
       cacheOverview.summary.total_input_tokens,
       cacheOverview.summary.total_output_tokens,
       cacheOverviewTotalTokens(cacheOverview),
@@ -131,13 +132,15 @@
   {/if}
   <div
     class="card prompt-cache-card"
-    title="Share of input tokens served from the provider prompt cache, over the selected period"
+    title={m.overview_prompt_cache_rate_help()}
   >
-    <div class="card-label">Prompt Cache Rate</div>
+    <div class="card-label">{m.overview_prompt_cache_rate()}</div>
     <div
       class="prompt-cache-gauge"
       role="img"
-      aria-label={"Prompt cache rate " + promptCacheRateText(summary)}
+      aria-label={m.overview_prompt_cache_rate_label({
+        rate: promptCacheRateText(summary),
+      })}
     >
       <ChartCanvas
         build={() =>
@@ -154,11 +157,11 @@
     {@render statusCard(
       "provider-status-overview-card",
       providerStatusSummaryClass(providerSummary),
-      "Provider Status",
+      m.overview_provider_status(),
       providerStatusRatioText(providerSummary),
       providerStatusSummaryText(providerSummary),
       providerStatusHasIssues(providerSummary)
-        ? { title: "View providers overview", onclick: scrollToProviderStatusSection }
+        ? { title: m.overview_view_providers(), onclick: scrollToProviderStatusSection }
         : null,
     )}
   {/if}
@@ -166,10 +169,10 @@
     {@render statusCard(
       "mcp-servers-flag",
       mcpOverviewSummaryClass(mcpServersState.servers),
-      "MCP Servers",
+      m.navigation_mcp_servers(),
       mcpOverviewRatioText(mcpServersState.servers),
       mcpOverviewSummaryText(mcpServersState.servers),
-      { title: "View MCP servers", onclick: () => router.navigate("mcp-servers") },
+      { title: m.overview_view_mcp_servers(), onclick: () => router.navigate("mcp-servers") },
     )}
   {/if}
 </div>

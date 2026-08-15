@@ -1,4 +1,5 @@
 <script>
+  import * as m from "$lib/paraglide/messages.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
@@ -18,8 +19,8 @@
 <div>
   <div class="page-header">
     <div>
-      <h2>Workflows</h2>
-      <p class="workflow-page-note">Active workflows are matched path-first: deepest user path wins first, then provider name and model specificity, then broader matches, then global.</p>
+      <h2>{m.workflows_title()}</h2>
+      <p class="workflow-page-note">{m.workflows_note()}</p>
     </div>
     <div class="page-header-controls">
       {#if wf.available}
@@ -29,14 +30,14 @@
           onclick={() => wf.openCreate()}
         >
           <Icon icon={Plus} class="form-action-icon" aria-hidden="true" />
-          <span>New&nbsp;Workflow</span>
+          <span>{m.workflows_new()}</span>
         </button>
       {/if}
     </div>
   </div>
 
   {#if !wf.available && !auth.authError}
-    <div class="alert alert-warning">Workflows feature is unavailable.</div>
+    <div class="alert alert-warning">{m.workflows_unavailable()}</div>
   {/if}
   {#if wf.error && !auth.authError}
     <div class="alert alert-warning">{wf.error}</div>
@@ -46,8 +47,8 @@
     <div class="table-toolbar">
       <div class="table-toolbar-main">
         <FilterInput
-          placeholder="Filter by scope, name, hash, or guardrail..."
-          label="Filter workflows by scope, name, hash, or guardrail"
+          placeholder={m.workflows_filter_placeholder()}
+          label={m.workflows_filter_label()}
           bind:value={wf.filter}
         />
       </div>

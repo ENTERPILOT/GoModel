@@ -284,6 +284,7 @@ data: [DONE]
 func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "/team/alpha")
+	observer.SetSessionID(" scoped-session ")
 	observer.OnJSONEvent(map[string]any{
 		"id": "chatcmpl-123",
 		"usage": map[string]any{
@@ -300,6 +301,9 @@ func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
 	}
 	if got := entries[0].UserPath; got != "/team/alpha" {
 		t.Fatalf("UserPath = %q, want /team/alpha", got)
+	}
+	if got := entries[0].SessionID; got != "scoped-session" {
+		t.Fatalf("SessionID = %q, want scoped-session", got)
 	}
 }
 

@@ -257,7 +257,7 @@ const docTemplate = `{
         },
         "/admin/audit/sessions": {
             "get": {
-                "description": "Groups audit log entries by session id into threads and returns\none summary per thread — its latest entry, entry count, and time\nspan — ordered by latest activity. Entries without a session id\nappear as single-entry threads. Filters apply to entries before\ngrouping.",
+                "description": "Groups audit log entries by session id into threads and returns\none summary per thread — its latest matching entry and complete\nrequest count — ordered by latest activity. Entries without a session id\nappear as single-entry threads. Filters apply to entries before\ngrouping.",
                 "produces": [
                     "application/json"
                 ],
@@ -831,6 +831,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by request label (exact match)",
                         "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
                         "in": "query"
                     },
                     {
@@ -2292,6 +2298,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
                         "in": "query"
@@ -2378,6 +2390,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by request label (exact match)",
                         "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
                         "in": "query"
                     },
                     {
@@ -2483,7 +2501,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Search across model, provider, request_id, provider_id",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search across model, provider, request_id, provider_id, session_id",
                         "name": "search",
                         "in": "query"
                     },
@@ -2571,6 +2595,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by request label (exact match)",
                         "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
                         "in": "query"
                     },
                     {
@@ -2678,6 +2708,105 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/usage/sessions": {
+            "get": {
+                "description": "Returns a bounded page of request, token, and cost aggregates\nfor detected, user-path-scoped sessions. Requests and tokens\ninclude local-cache hits; costs represent provider spend only.\nUsage without a detected session is omitted.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get usage breakdown by detected session",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact model name",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by tracked user path subtree",
+                        "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset for pagination",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usage.SessionUsageResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/usage/summary": {
             "get": {
                 "produces": [
@@ -2722,6 +2851,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by request label (exact match)",
                         "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
                         "in": "query"
                     },
                     {
@@ -2854,6 +2989,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by request label (exact match)",
                         "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
                         "in": "query"
                     },
                     {
@@ -7004,20 +7145,11 @@ const docTemplate = `{
         "admin.auditSessionResponse": {
             "type": "object",
             "properties": {
-                "count": {
-                    "type": "integer"
-                },
-                "first_timestamp": {
-                    "type": "string"
-                },
-                "last_timestamp": {
-                    "type": "string"
-                },
                 "latest": {
                     "$ref": "#/definitions/admin.auditLogEntryResponse"
                 },
-                "session_id": {
-                    "type": "string"
+                "request_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -10910,6 +11042,61 @@ const docTemplate = `{
                 }
             }
         },
+        "usage.SessionUsage": {
+            "type": "object",
+            "properties": {
+                "input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "output_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "total_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "total_tokens": {
+                    "type": "integer"
+                },
+                "user_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "usage.SessionUsageResult": {
+            "type": "object",
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.SessionUsage"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "usage.ThroughputBucket": {
             "type": "object",
             "properties": {
@@ -11016,6 +11203,9 @@ const docTemplate = `{
                 },
                 "rewrite_tokens_saved": {
                     "type": "integer"
+                },
+                "session_id": {
+                    "type": "string"
                 },
                 "timestamp": {
                     "type": "string"

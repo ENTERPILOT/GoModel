@@ -29,6 +29,7 @@ function createLiveLogsApp(overrides = {}) {
     usageFilterProvider: "",
     usageFilterLabel: "",
     usageFilterUserPath: "",
+    usageFilterSession: "",
     usageLogHideCached: false,
     auditGroupSessions: false,
     auditThreadChildren: {},
@@ -425,6 +426,19 @@ test("live usage event updates usage log and enriches matching audit row", () =>
 
   assert.equal(app.usageLog.entries[0]._live_pending, false);
   assert.equal(app.auditLog.entries[0]._usage_flushed, true);
+});
+
+test("active session filtering pauses non-matching live usage inserts", () => {
+  const app = createLiveLogsApp({ usageFilterSession: "scoped-session" });
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "usage.completed",
+    data: { id: "usage-1", request_id: "req-1", session_id: "other-session" },
+  });
+
+  assert.equal(app.usageLog.entries.length, 0);
+  assert.equal(app.liveLogsLastSeq, 1);
 });
 
 test("usage events forward the type to the live-token hook", () => {

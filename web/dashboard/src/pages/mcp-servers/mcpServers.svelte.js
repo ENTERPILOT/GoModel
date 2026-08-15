@@ -6,6 +6,7 @@ import { errorPayloadMessage, getJSON } from "$lib/api/client.js";
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import * as m from "$lib/paraglide/messages.js";
 import {
   buildMcpServerPayload,
   defaultMcpCatalog,
@@ -63,7 +64,7 @@ class McpServersState {
     try {
       const outcome = await loadAdminList("/admin/mcp-servers", {
         label: "mcp servers",
-        errorFallback: "Failed to load MCP servers.",
+        errorFallback: m.mcp_load_failed(),
         unavailableStatuses: [503, 404],
       });
       if (outcome.status === "stale") {
@@ -160,8 +161,8 @@ class McpServersState {
         built.payload,
         {
           label: "save mcp server",
-          errorFallback: "Failed to save MCP server.",
-          unavailableMessage: "MCP server management is unavailable.",
+          errorFallback: m.mcp_save_failed(),
+          unavailableMessage: m.mcp_unavailable(),
         },
       );
       if (outcome.status === "stale") {
@@ -177,7 +178,7 @@ class McpServersState {
         return;
       }
 
-      flash.success('MCP server "' + built.payload.name + '" saved.');
+      flash.success(m.mcp_saved({ name: built.payload.name }));
       this.closeForm();
       void this.fetchServers();
     } finally {
@@ -195,9 +196,7 @@ class McpServersState {
     }
     if (
       !confirm(
-        'Delete MCP server "' +
-          name +
-          '"? Clients lose access to its tools immediately.',
+        m.mcp_delete_confirm({ name }),
       )
     ) {
       return;
@@ -212,8 +211,8 @@ class McpServersState {
         undefined,
         {
           label: "delete mcp server",
-          errorFallback: "Failed to delete MCP server.",
-          unavailableMessage: "MCP server management is unavailable.",
+          errorFallback: m.mcp_delete_failed(),
+          unavailableMessage: m.mcp_unavailable(),
         },
       );
       if (outcome.status === "stale") {
@@ -229,7 +228,7 @@ class McpServersState {
         return;
       }
 
-      flash.success('MCP server "' + name + '" deleted.');
+      flash.success(m.mcp_deleted({ name }));
       if (this.formOpen && this.form.slug === slug) {
         this.closeForm();
       }
@@ -255,8 +254,8 @@ class McpServersState {
         undefined,
         {
           label: "reconnect mcp server",
-          errorFallback: "Failed to reconnect MCP server.",
-          unavailableMessage: "MCP server management is unavailable.",
+          errorFallback: m.mcp_reconnect_failed(),
+          unavailableMessage: m.mcp_unavailable(),
         },
       );
       if (outcome.status === "stale") {
@@ -275,19 +274,11 @@ class McpServersState {
       const refreshed = outcome.result.data;
       const status = mcpServerStatus(refreshed);
       if (status === "connected") {
-        flash.success('MCP server "' + name + '" reconnected.');
+        flash.success(m.mcp_reconnected({ name }));
       } else if (status === "disabled") {
-        flash.success(
-          'MCP server "' + name + '" is disabled; no connection was attempted.',
-        );
+        flash.success(m.mcp_reconnect_disabled({ name }));
       } else {
-        flash.error(
-          'Reconnect attempted, but MCP server "' +
-            name +
-            '" is still ' +
-            status +
-            ".",
-        );
+        flash.error(m.mcp_reconnect_status({ name, status }));
       }
       if (refreshed && refreshed.name) {
         this.servers = (this.servers || []).map((item) =>
@@ -332,27 +323,27 @@ class McpServersState {
       }
       if (result.status === 503) {
         this.available = false;
-        this.catalogError = "MCP server management is unavailable.";
+        this.catalogError = m.mcp_unavailable();
         return;
       }
       if (result.status === 404) {
-        this.catalogError = 'MCP server "' + name + '" was not found.';
+        this.catalogError = m.mcp_not_found({ name });
         return;
       }
       if (!result.ok) {
         this.catalogError =
           result.status === 401
-            ? "Authentication required."
+            ? m.common_authentication_required()
             : errorPayloadMessage(
                 result.data,
-                "Failed to load MCP server catalog.",
+                m.mcp_catalog_load_failed(),
               );
         return;
       }
       this.catalog = normalizeMcpCatalog(slug, result.data);
     } catch (e) {
       console.error("Failed to load MCP server catalog:", e);
-      this.catalogError = "Failed to load MCP server catalog.";
+      this.catalogError = m.mcp_catalog_load_failed();
     } finally {
       this.catalogLoading = false;
     }

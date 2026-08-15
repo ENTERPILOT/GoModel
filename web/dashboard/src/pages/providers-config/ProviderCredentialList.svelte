@@ -1,4 +1,5 @@
 <script>
+  import * as m from "$lib/paraglide/messages.js";
   // Provider credential table. Managed rows (declared in config.yaml or env
   // vars) show a Config badge and expose no edit/delete actions.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
@@ -16,14 +17,14 @@
   <table class="data-table">
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Base URL</th>
-        <th>Auth</th>
-        <th>Models</th>
-        <th>Enabled</th>
-        <th>Updated</th>
-        <th class="col-actions">Actions</th>
+        <th>{m.providers_name()}</th>
+        <th>{m.providers_type()}</th>
+        <th>{m.overview_base_url()}</th>
+        <th>{m.providers_auth()}</th>
+        <th>{m.providers_models()}</th>
+        <th>{m.providers_enabled()}</th>
+        <th>{m.providers_updated()}</th>
+        <th class="col-actions">{m.providers_actions()}</th>
       </tr>
     </thead>
     <tbody>
@@ -34,8 +35,8 @@
             {#if row.managed}
               <span
                 class="alias-kind-badge"
-                title="Declared in configuration (config.yaml or env vars); read-only in the dashboard"
-                >Config</span>
+                title={m.providers_managed()}
+                >{m.common_config()}</span>
             {/if}
           </td>
           <td><span class="budget-source mono">{row.type}</span></td>
@@ -47,21 +48,23 @@
               class="auth-key-status-badge"
               class:auth-key-status-active={row.enabled}
               class:auth-key-status-inactive={!row.enabled}
-              >{row.enabled ? "Enabled" : "Disabled"}</span>
+              >{row.enabled ? m.common_enabled() : m.common_disabled()}</span>
           </td>
           <td>{timezone.formatTimestamp(row.updated_at)}</td>
           <td class="col-actions">
             <div class="alias-actions-cell model-list-actions">
               {#if !row.managed}
                 <TableActionButton
-                  label={"Edit provider " + row.name}
+                  label={m.providers_edit_action({ name: row.name })}
                   class="table-icon-btn"
                   onclick={() => providersConfig.openEdit(row)}
                 >
                   <Icon icon={Pencil} class="table-icon-svg" />
                 </TableActionButton>
                 <TableActionButton
-                  label={(providersConfig.deletingName === row.name ? "Deleting provider " : "Delete provider ") + row.name}
+                  label={providersConfig.deletingName === row.name
+                    ? m.providers_deleting_action({ name: row.name })
+                    : m.providers_delete_action({ name: row.name })}
                   class="table-action-btn-danger table-icon-btn"
                   onclick={() => providersConfig.requestDelete(row.name)}
                   disabled={providersConfig.deletingName === row.name}

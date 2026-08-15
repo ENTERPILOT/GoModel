@@ -2,6 +2,8 @@
 // Pure functions (state lives in overviewState.svelte.js) so status folding
 // and preference persistence are testable with node.
 
+import * as m from "../../lib/paraglide/messages.js";
+
 const PROVIDER_STATUS_DETAILS_STORAGE_KEY =
   "gomodel_provider_status_details_expanded";
 const PROVIDER_CARD_OVERRIDES_STORAGE_KEY =
@@ -135,13 +137,11 @@ export function providerStatusSummaryText(summary) {
   const s = summary || {};
   const total = Number(s.total || 0);
   const healthy = Number(s.healthy || 0);
-  if (total === 0) return "None configured";
-  if (healthy === total) return "All healthy";
-  if (healthy === 0) return "None healthy";
+  if (total === 0) return m.overview_none_configured();
+  if (healthy === total) return m.overview_all_healthy();
+  if (healthy === 0) return m.overview_none_healthy();
   const attention = total - healthy;
-  return (
-    String(attention) + (attention === 1 ? " needs" : " need") + " attention"
-  );
+  return m.overview_provider_attention({ count: attention });
 }
 
 export function providerStatusNeedsPolling(providers) {
@@ -262,7 +262,7 @@ export function providerModelsSummary(provider) {
     provider && provider.config && Array.isArray(provider.config.models)
       ? provider.config.models.filter(Boolean)
       : [];
-  if (models.length === 0) return "Automatic";
+  if (models.length === 0) return m.overview_automatic();
   return models.join(", ");
 }
 
@@ -275,7 +275,7 @@ export function providerStatusPillTitle(provider) {
     parts.push(String(provider.status_reason));
   }
   if (provider.last_error) {
-    parts.push("Last error: " + String(provider.last_error));
+    parts.push(m.overview_last_error({ error: String(provider.last_error) }));
   }
   return parts.join("\n\n");
 }

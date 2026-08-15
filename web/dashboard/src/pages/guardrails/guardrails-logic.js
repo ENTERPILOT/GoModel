@@ -2,6 +2,8 @@
 // unit-tested with node:test; the Svelte state module (guardrails.svelte.js)
 // owns fetches and reactive state.
 
+import * as m from "../../lib/paraglide/messages.js";
+
 // cloneGuardrailJSON deep-clones a config payload, coercing anything that is
 // not a plain JSON object into {}.
 function cloneGuardrailJSON(value) {
@@ -115,7 +117,7 @@ export function filterGuardrails(guardrails, filter) {
 // guardrailTypeLabel returns the human label for a type.
 export function guardrailTypeLabel(types, type) {
   const definition = guardrailTypeDefinition(types, type);
-  return definition && definition.label ? definition.label : type || "Unknown";
+  return definition && definition.label ? definition.label : type || m.guardrails_unknown();
 }
 
 // guardrailTypeFields returns the schema-driven form fields for a type.

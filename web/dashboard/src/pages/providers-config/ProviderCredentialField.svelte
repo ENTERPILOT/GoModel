@@ -7,6 +7,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { providersConfig } from "./providersConfig.svelte.js";
   import { Plus, Trash2 } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { field } = $props();
 
@@ -47,14 +48,14 @@
             type="text"
             class="mono vm-target-model"
             placeholder="sk-..."
-            aria-label={"API key " + (index + 1)}
+            aria-label={m.providers_api_key({ number: index + 1 })}
             aria-invalid={error ? "true" : undefined}
             aria-describedby={index === 0 ? describedBy : undefined}
             bind:value={key.value}
             oninput={onInput}
           />
           <TableActionButton
-            label={"Remove API key " + (index + 1)}
+            label={m.providers_remove_api_key({ number: index + 1 })}
             class="table-action-btn-danger table-icon-btn vm-target-remove"
             onclick={() => providersConfig.removeApiKeyRow(index)}
           >
@@ -71,7 +72,7 @@
         onclick={() => providersConfig.addApiKeyRow()}
       >
         <Icon icon={Plus} class="form-action-icon" />
-        <span>Add key</span>
+        <span>{m.providers_add_key()}</span>
       </button>
     </div>
   {:else if field.control === "select"}
@@ -83,7 +84,7 @@
       bind:value={providersConfig.form[field.name]}
       onchange={onInput}
     >
-      <option value="">Provider default</option>
+      <option value="">{m.providers_default()}</option>
       {#each options as option (option)}
         <option value={option}>{option}</option>
       {/each}

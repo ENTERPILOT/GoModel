@@ -1,6 +1,8 @@
 // Pure MCP-servers page logic. Everything here is side-effect free so the
 // node:test suite can exercise it directly.
 
+import * as m from "../../lib/paraglide/messages.js";
+
 export function defaultMcpServerForm() {
   return {
     name: "",
@@ -37,6 +39,17 @@ export function mcpServerStatus(server) {
   return String((server && server.status) || "").trim() || "connecting";
 }
 
+export function mcpServerStatusLabel(server) {
+  const labels = {
+    connected: m.mcp_status_connected,
+    degraded: m.mcp_status_degraded,
+    connecting: m.mcp_status_connecting,
+    disabled: m.mcp_status_disabled,
+  };
+  const status = mcpServerStatus(server);
+  return labels[status]?.() || status;
+}
+
 export function mcpServerStatusClass(server) {
   switch (mcpServerStatus(server)) {
     case "connected":
@@ -63,14 +76,14 @@ export function mcpServerStatusTitle(server, formatTimestamp) {
   if (status === "connected" && server && server.connected_at) {
     const format =
       typeof formatTimestamp === "function" ? formatTimestamp : String;
-    return "Connected since " + format(server.connected_at);
+    return m.mcp_connected_since({ date: format(server.connected_at) });
   }
   return "";
 }
 
 export function mcpServerEndpointLabel(server) {
   if (String((server && server.transport) || "") === "stdio") {
-    return "local command";
+    return m.mcp_local_command();
   }
   return String((server && server.url) || "").trim() || "—";
 }
@@ -78,7 +91,7 @@ export function mcpServerEndpointLabel(server) {
 export function mcpServerSubCountsLabel(server) {
   const prompts = Number((server && server.prompt_count) || 0);
   const resources = Number((server && server.resource_count) || 0);
-  return prompts + " prompts · " + resources + " resources";
+  return m.mcp_sub_counts({ prompts, resources });
 }
 
 export function deriveMcpServerSlug(name) {
@@ -196,22 +209,22 @@ export function buildMcpServerPayload(form, mode, servers) {
   const url = String(form.url || "").trim();
   const transport = form.transport === "sse" ? "sse" : "http";
   if (!name) {
-    return { error: "Name is required." };
+    return { error: m.mcp_name_required() };
   }
   if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(slug)) {
     return {
       error:
-        "Slug must use 1–64 lowercase ASCII letters, numbers, hyphens, or underscores.",
+        m.mcp_slug_invalid(),
     };
   }
   if (
     mode === "create" &&
     (servers || []).some((server) => mcpServerSlug(server) === slug)
   ) {
-    return { error: 'Slug "' + slug + '" is already in use.' };
+    return { error: m.mcp_slug_in_use({ slug }) };
   }
   if (!url) {
-    return { error: "URL is required." };
+    return { error: m.mcp_url_required() };
   }
   let toolTimeoutSeconds;
   const rawTimeout = String(form.tool_timeout_seconds || "").trim();
@@ -219,7 +232,7 @@ export function buildMcpServerPayload(form, mode, servers) {
     const parsed = Number(rawTimeout);
     if (!Number.isSafeInteger(parsed) || parsed < 0) {
       return {
-        error: "Tool timeout must be a non-negative whole number of seconds.",
+        error: m.mcp_timeout_invalid(),
       };
     }
     toolTimeoutSeconds = parsed;
@@ -284,15 +297,15 @@ export function mcpCatalogSections(catalog) {
     description: String(item.description || "").trim(),
   });
   const sections = [
-    { key: "tools", title: "Tools", items: (source.tools || []).map(feature("tool")) },
+    { key: "tools", title: m.mcp_catalog_tools(), items: (source.tools || []).map(feature("tool")) },
     {
       key: "prompts",
-      title: "Prompts",
+      title: m.mcp_catalog_prompts(),
       items: (source.prompts || []).map(feature("prompt")),
     },
     {
       key: "resources",
-      title: "Resources",
+      title: m.mcp_catalog_resources(),
       items: (source.resources || []).map((item) => ({
         key: "resource:" + String(item.uri || ""),
         name: String(item.uri || ""),
@@ -302,7 +315,7 @@ export function mcpCatalogSections(catalog) {
     },
     {
       key: "templates",
-      title: "Resource templates",
+      title: m.mcp_catalog_templates(),
       items: (source.templates || []).map((item) => ({
         key: "template:" + String(item.uri_template || ""),
         name: String(item.uri_template || ""),

@@ -1,5 +1,5 @@
 // Usage page state: page-level facet filters, filtered summaries backing the
-// stat cards, per-model / per-user-path / per-label breakdowns, and the
+// stat cards, per-model / per-user-path / per-label / per-session breakdowns, and the
 // request log. The shared window comes from the dateRange store and the
 // shared cache overview lives in usageData (this page passes its filter
 // query through fetchCacheOverview).
@@ -10,11 +10,14 @@ import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { usageData } from "$lib/stores/usageData.svelte.js";
 import { providerDisplayValue } from "$lib/utils/format.js";
+import * as m from "$lib/paraglide/messages.js";
 import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
 import {
   emptyUsageLog,
   emptyUsagePageSummary,
+  emptySessionUsage,
   facetOptionList,
+  sessionUsageQueryParams,
   usageFilterQueryStr,
   usageLogQueryParams,
 } from "./usage-helpers.js";
@@ -50,6 +53,12 @@ class UsagePageState {
   set usageFilterUserPath(value) {
     liveLogs.usageFilterUserPath = value;
   }
+  get usageFilterSession() {
+    return liveLogs.usageFilterSession;
+  }
+  set usageFilterSession(value) {
+    liveLogs.usageFilterSession = value;
+  }
   usageFacetOptions = $state({ models: [], providers: [], labels: [] });
 
   // Filtered summaries backing the stat cards, fetched in both cache modes:
@@ -62,6 +71,7 @@ class UsagePageState {
   modelUsage = $state([]);
   userPathUsage = $state([]);
   labelUsage = $state([]);
+  sessionUsage = $state(emptySessionUsage());
 
   // The request log is backed by liveLogs.usageLog — the live-merge source of
   // truth. Fetched pages are written into it and usage.* stream events merge
@@ -88,11 +98,13 @@ class UsagePageState {
   modelUsageView = $state("chart");
   userPathUsageView = $state("chart");
   labelUsageView = $state("chart");
+  sessionUsageView = $state("table");
 
   summaryLoading = $state(false);
   modelUsageLoading = $state(false);
   userPathUsageLoading = $state(false);
   labelUsageLoading = $state(false);
+  sessionUsageLoading = $state(false);
   usageLogLoading = $state(false);
 
   #controllers = {};
@@ -117,6 +129,7 @@ class UsagePageState {
         provider: this.usageFilterProvider,
         label: this.usageFilterLabel,
         user_path: this.usageFilterUserPath,
+        session_id: this.usageFilterSession,
       },
       excludeFacet,
     );
@@ -133,9 +146,25 @@ class UsagePageState {
     this.onUsageFilterChanged();
   }
 
+  filterBySession(sessionID, userPath = "") {
+    this.usageFilterModel = "";
+    this.usageFilterProvider = "";
+    this.usageFilterLabel = "";
+    this.usageFilterUserPath = String(userPath || "").trim();
+    this.usageFilterSession = String(sessionID || "").trim();
+    this.usageLogSearch = "";
+    this.usageLog.offset = 0;
+    this.sessionUsage.offset = 0;
+    if (router.page === "usage") {
+      this.fetchUsagePage();
+      return;
+    }
+    router.navigate("usage");
+  }
+
   usageLabelChipTitle(label) {
-    if (this.usageFilterLabel === label) return "Clear label filter";
-    return 'Filter usage by "' + label + '"';
+    if (this.usageFilterLabel === label) return m.usage_clear_label_filter();
+    return m.usage_filter_by_label_value({ label });
   }
 
   toggleUsageMode(mode) {
@@ -147,6 +176,7 @@ class UsagePageState {
     if (target === "model") this.modelUsageView = view;
     if (target === "userPath") this.userPathUsageView = view;
     if (target === "label") this.labelUsageView = view;
+    if (target === "session") this.sessionUsageView = view;
   }
 
   usageFilterModelOptions() {
@@ -170,6 +200,7 @@ class UsagePageState {
       this.fetchModelUsage(),
       this.fetchUserPathUsage(),
       this.fetchLabelUsage(),
+      this.fetchSessionUsage(true),
       this.fetchUsageLog(true),
     ];
     if (usageData.cacheAnalyticsEnabled()) {
@@ -292,6 +323,36 @@ class UsagePageState {
     }
   }
 
+  // Shared request lifecycle for the two paginated fetches (session
+  // breakdown, request log): track/abort the in-flight request, reset the
+  // offset, normalize the entries array, and fall back to an empty result
+  // on error. Mirrors #fetchBreakdown but keeps pagination state and entry
+  // normalization on top of it.
+  async #fetchPaginated(key, endpoint, label, { resetOffset, pageState, queryParams, assign, setLoading, emptyResult }) {
+    const controller = this.#startRequest(key);
+    setLoading(true);
+    try {
+      if (resetOffset) pageState.offset = 0;
+      const qs = dateRange.queryStr() + this.filterQueryStr() + queryParams();
+      const result = await getJSON(endpoint + "?" + qs, { label, signal: controller.signal });
+      if (result.stale || controller.signal.aborted) return;
+      if (!result.ok || !result.data || typeof result.data !== "object") {
+        assign(emptyResult());
+        return;
+      }
+      const payload = result.data;
+      payload.entries = Array.isArray(payload.entries) ? payload.entries : [];
+      assign(payload);
+    } catch (e) {
+      if (isAbortError(e)) return;
+      console.error("Failed to fetch " + label + ":", e);
+      assign(emptyResult());
+    } finally {
+      this.#clearRequest(key, controller);
+      if (this.#controllers[key] === null) setLoading(false);
+    }
+  }
+
   fetchModelUsage() {
     return this.#fetchBreakdown(
       "modelUsage",
@@ -322,40 +383,44 @@ class UsagePageState {
     );
   }
 
-  async fetchUsageLog(resetOffset) {
-    const controller = this.#startRequest("usageLog");
-    this.usageLogLoading = true;
-    try {
-      if (resetOffset) this.usageLog.offset = 0;
-      let qs = dateRange.queryStr() + this.filterQueryStr();
-      qs += usageLogQueryParams({
-        limit: this.usageLog.limit,
-        offset: this.usageLog.offset,
-        hideCached: this.usageLogHideCached,
-        search: this.usageLogSearch,
-      });
-      const result = await getJSON("/admin/usage/log?" + qs, {
-        label: "usage log",
-        signal: controller.signal,
-      });
-      if (result.stale) return;
-      if (controller.signal.aborted) return;
-      if (!result.ok) {
-        this.usageLog = emptyUsageLog();
-        return;
-      }
-      const payload =
-        result.data && typeof result.data === "object" ? result.data : emptyUsageLog();
-      if (!payload.entries) payload.entries = [];
-      this.usageLog = payload;
-    } catch (e) {
-      if (isAbortError(e)) return;
-      console.error("Failed to fetch usage log:", e);
-      this.usageLog = emptyUsageLog();
-    } finally {
-      this.#clearRequest("usageLog", controller);
-      if (this.#controllers["usageLog"] === null) this.usageLogLoading = false;
-    }
+  fetchSessionUsage(resetOffset) {
+    return this.#fetchPaginated("sessionUsage", "/admin/usage/sessions", "usage sessions", {
+      resetOffset,
+      pageState: this.sessionUsage,
+      queryParams: () => sessionUsageQueryParams(this.sessionUsage),
+      assign: (payload) => (this.sessionUsage = payload),
+      setLoading: (v) => (this.sessionUsageLoading = v),
+      emptyResult: emptySessionUsage,
+    });
+  }
+
+  sessionUsageNextPage() {
+    if (this.sessionUsage.offset + this.sessionUsage.limit >= this.sessionUsage.total) return;
+    this.sessionUsage.offset += this.sessionUsage.limit;
+    this.fetchSessionUsage(false);
+  }
+
+  sessionUsagePrevPage() {
+    if (this.sessionUsage.offset <= 0) return;
+    this.sessionUsage.offset = Math.max(0, this.sessionUsage.offset - this.sessionUsage.limit);
+    this.fetchSessionUsage(false);
+  }
+
+  fetchUsageLog(resetOffset) {
+    return this.#fetchPaginated("usageLog", "/admin/usage/log", "usage log", {
+      resetOffset,
+      pageState: this.usageLog,
+      queryParams: () =>
+        usageLogQueryParams({
+          limit: this.usageLog.limit,
+          offset: this.usageLog.offset,
+          hideCached: this.usageLogHideCached,
+          search: this.usageLogSearch,
+        }),
+      assign: (payload) => (this.usageLog = payload),
+      setLoading: (v) => (this.usageLogLoading = v),
+      emptyResult: emptyUsageLog,
+    });
   }
 
   usageLogNextPage() {

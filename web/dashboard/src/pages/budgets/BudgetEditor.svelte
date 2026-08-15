@@ -15,6 +15,7 @@
     budgetSubjectPlaceholder,
   } from "./budgets-helpers.js";
   import { Save } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   function onSubjectInput(event) {
     store.setFormSubject(event.target.value);
@@ -25,18 +26,18 @@
 
 <EditorDialog
   open={store.formOpen}
-  title={store.editing ? "Edit Budget" : "Create Budget"}
-  ariaLabel="Budget editor"
+  title={store.editing ? m.budgets_edit_title() : m.budgets_create_title()}
+  ariaLabel={m.budgets_editor_label()}
   error={store.formError}
   submitting={store.formSubmitting}
-  submitLabel="Save Budget"
+  submitLabel={m.budgets_save()}
   dialogClass="budget-editor"
   canClose={() => !store.overrideDialogOpen}
   onclose={() => store.closeForm()}
   onsubmit={() => store.submitForm()}
 >
   <div class="form-grid">
-    <FormField id="budget-scope" label="Scope">
+    <FormField id="budget-scope" label={m.budgets_scope()}>
       <select
         id="budget-scope"
         class="form-select settings-select"
@@ -61,7 +62,7 @@
         data-modal-autofocus={!store.editing || undefined}
       />
     </FormField>
-    <FormField id="budget-period" label="Period">
+    <FormField id="budget-period" label={m.budgets_period()}>
       <select
         id="budget-period"
         class="form-select settings-select"
@@ -78,16 +79,17 @@
       <label class="per-child-option">
         <input type="checkbox" bind:checked={store.form.per_child} />
         <span>
-          <strong>Apply per direct child</strong>
+          <strong>{m.budgets_per_child_option()}</strong>
           <small
-            >Each child below {store.form.subject || "/"} gets an independent budget.
-            Deeper descendants share their direct child's budget.</small
+            >{m.budgets_per_child_option_help({
+              subject: store.form.subject || "/",
+            })}</small
           >
         </span>
       </label>
     {/if}
     {#if store.form.period === "custom"}
-      <FormField id="budget-period-seconds" label="Period Seconds">
+      <FormField id="budget-period-seconds" label={m.budgets_period_seconds()}>
         <input
           id="budget-period-seconds"
           class="form-input"
@@ -99,7 +101,7 @@
         />
       </FormField>
     {/if}
-    <FormField id="budget-amount" label="Amount">
+    <FormField id="budget-amount" label={m.budgets_amount()}>
       <input
         id="budget-amount"
         class="form-input"
@@ -114,8 +116,7 @@
   </div>
   {#if store.editing}
     <p class="form-hint">
-      Editing a budget updates its limit only. Use Reset to start a new budget
-      period.
+      {m.budgets_edit_help()}
     </p>
   {/if}
 </EditorDialog>
@@ -133,9 +134,9 @@
     aria-describedby="budgetOverrideDialogDescription"
   >
     <div class="auth-dialog-header">
-      <h2 id="budgetOverrideDialogTitle">Override Existing Budget</h2>
+      <h2 id="budgetOverrideDialogTitle">{m.budgets_override_title()}</h2>
       <DialogCloseButton
-        label="Close budget override dialog"
+        label={m.budgets_override_close()}
         onclick={() => store.closeOverrideDialog()}
         class="auth-dialog-close"
         iconClass=""
@@ -159,7 +160,7 @@
           type="button"
           class="btn"
           data-modal-autofocus
-          onclick={() => store.closeOverrideDialog()}>Cancel</button
+          onclick={() => store.closeOverrideDialog()}>{m.common_action_cancel()}</button
         >
         <button
           type="submit"
@@ -167,7 +168,7 @@
           disabled={store.formSubmitting}
         >
           <Icon icon={Save} class="form-action-icon" />
-          <span>{store.formSubmitting ? "Saving..." : "Override Budget"}</span>
+          <span>{store.formSubmitting ? m.budgets_saving() : m.budgets_override()}</span>
         </button>
       </div>
     </form>

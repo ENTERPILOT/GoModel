@@ -21,3 +21,13 @@ func usageGroupedUserPathSQL(userPathColumn string) string {
 func clampLimitOffset(limit, offset int) (int, int) {
 	return sqlutil.ClampLimitOffset(limit, offset, 50, 200)
 }
+
+// providerSessionCostSQL sums recorded provider spend while excluding local
+// response-cache rows, whose stored cost represents avoided cost. A session
+// served entirely from the local cache has known zero provider spend; sessions
+// with provider requests but no pricing retain a NULL cost.
+func providerSessionCostSQL(column string) string {
+	providerRow := "(cache_type IS NULL OR cache_type = '')"
+	return "CASE WHEN COUNT(CASE WHEN " + providerRow + " THEN 1 END) = 0 THEN 0 " +
+		"ELSE SUM(CASE WHEN " + providerRow + " THEN " + column + " END) END"
+}

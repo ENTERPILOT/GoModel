@@ -2,13 +2,35 @@ package auditlog
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 )
+
+func TestMongoRequestCountLookup(t *testing.T) {
+	stage, err := bson.MarshalExtJSON(mongoRequestCountLookup("custom_audit_logs"), false, false)
+	if err != nil {
+		t.Fatalf("marshal request count lookup: %v", err)
+	}
+	encoded := string(stage)
+	for _, want := range []string{
+		`"from":"custom_audit_logs"`,
+		`"$ifNull":["$latest.session_id",""]`,
+		`"$ne":["$$sid",""]`,
+		`"$eq":["$session_id","$$sid"]`,
+		`"$count":"count"`,
+		`"as":"request_count"`,
+	} {
+		if !strings.Contains(encoded, want) {
+			t.Fatalf("request count lookup = %s, want fragment %s", encoded, want)
+		}
+	}
+}
 
 // Mirrors TestSQLReader_GetSessions so the hand-written MongoDB aggregation
 // cannot drift from the SQL behaviour. Skips without MONGO_TEST_DSN.
@@ -43,11 +65,8 @@ func TestMongoDBReader_GetSessions(t *testing.T) {
 			t.Fatalf("sessions[0].Latest.ID = %q, want solo", got)
 		}
 		threadA := result.Sessions[1]
-		if threadA.SessionID != "sess-a" || threadA.Count != 2 || threadA.Latest.ID != "a-2" {
+		if threadA.SessionID != "sess-a" || threadA.RequestCount != 2 || threadA.Latest.ID != "a-2" {
 			t.Fatalf("sess-a summary = %+v", threadA)
-		}
-		if !threadA.FirstTimestamp.Equal(base) || !threadA.LastTimestamp.Equal(base.Add(2*time.Minute)) {
-			t.Fatalf("sess-a span = %v..%v", threadA.FirstTimestamp, threadA.LastTimestamp)
 		}
 		if result.Sessions[2].SessionID != "sess-b" {
 			t.Fatalf("sessions[2] = %+v", result.Sessions[2])

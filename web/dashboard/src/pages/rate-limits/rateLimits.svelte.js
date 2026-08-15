@@ -5,6 +5,7 @@
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import * as m from "$lib/paraglide/messages.js";
 import * as logic from "./rateLimitsLogic.js";
 
 class RateLimitsStore {
@@ -148,7 +149,7 @@ class RateLimitsStore {
     this.rateLimitError = "";
     const outcome = await loadAdminList("/admin/rate-limits", {
       label: "rate limits",
-      errorFallback: "Unable to load rate limits.",
+      errorFallback: m.rate_limits_load_failed(),
       normalize: logic.normalizeRateLimitListPayload,
     });
     this.rateLimitsLoading = false;
@@ -256,7 +257,7 @@ class RateLimitsStore {
         payload,
         {
           label: "save rate limit",
-          errorFallback: "Unable to save rate limit.",
+          errorFallback: m.rate_limits_save_failed(),
           // Rate-limit mutations never had a dedicated 503 branch; keep 503 an error.
           unavailableStatuses: [],
         },
@@ -280,8 +281,8 @@ class RateLimitsStore {
       this.closeRateLimitForm();
       flash.success(
         moved
-          ? "Rate limit moved; live counters restarted."
-          : "Rate limit saved.",
+          ? m.rate_limits_moved()
+          : m.rate_limits_saved(),
       );
     } finally {
       this.rateLimitFormSubmitting = false;
@@ -299,8 +300,7 @@ class RateLimitsStore {
       },
       {
         label: "remove the moved rate limit",
-        errorFallback:
-          "The new rule was saved, but the previous one could not be removed. Delete it manually.",
+        errorFallback: m.rate_limits_move_cleanup_failed(),
         unavailableStatuses: [],
       },
     );
@@ -331,7 +331,7 @@ class RateLimitsStore {
       },
       {
         label: "delete rate limit",
-        errorFallback: "Unable to delete rate limit.",
+        errorFallback: m.rate_limits_delete_failed(),
         unavailableStatuses: [],
       },
     );
@@ -344,7 +344,7 @@ class RateLimitsStore {
       return;
     }
     this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
-    flash.success("Rate limit deleted.");
+    flash.success(m.rate_limits_deleted());
   }
 
   async resetRateLimit(item) {
@@ -363,7 +363,7 @@ class RateLimitsStore {
       },
       {
         label: "reset rate limit",
-        errorFallback: "Unable to reset rate limit.",
+        errorFallback: m.rate_limits_reset_failed(),
         unavailableStatuses: [],
       },
     );
@@ -376,7 +376,7 @@ class RateLimitsStore {
       return;
     }
     this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
-    flash.success("Rate limit counters reset.");
+    flash.success(m.rate_limits_reset_success());
   }
 
   // --- Effective-limits inspector (Models page) ---

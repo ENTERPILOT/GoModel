@@ -3,15 +3,16 @@
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import { authKeysStore as store } from "./authKeys.svelte.js";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <EditorDialog
   open={store.labelsEditor.open}
-  title="Edit Labels"
-  ariaLabel="API key labels editor"
+  title={m.api_keys_edit_labels()}
+  ariaLabel={m.api_keys_labels_editor()}
   error={store.labelsEditor.error}
   submitting={store.labelsEditor.submitting}
-  submitLabel="Save Labels"
+  submitLabel={m.api_keys_save_labels()}
   cancel={false}
   dialogClass="auth-key-editor"
   onclose={() => store.closeLabelsEditor()}
@@ -21,7 +22,7 @@
     <p class="form-hint">{store.labelsEditor.name}</p>
   {/snippet}
 
-  <FormField id="auth-key-labels-edit" label="Labels (comma-separated)">
+  <FormField id="auth-key-labels-edit" label={m.api_keys_labels_field()}>
     <input
       id="auth-key-labels-edit"
       type="text"
@@ -31,7 +32,7 @@
       bind:value={store.labelsEditor.value}
     />
     <p class="form-hint">
-      Applies to new requests made with this key. Leave empty to remove all labels.
+      {m.api_keys_labels_edit_help()}
     </p>
   </FormField>
 </EditorDialog>

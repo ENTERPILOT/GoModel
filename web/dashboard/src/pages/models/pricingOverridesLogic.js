@@ -1,22 +1,24 @@
 // Pure model-pricing-override logic.
 
+import * as m from "../../lib/paraglide/messages.js";
+
 export const PRICE_FIELDS = [
-  { value: "input_per_mtok", label: "Input $/MTok", group: "Tokens" },
-  { value: "output_per_mtok", label: "Output $/MTok", group: "Tokens" },
-  { value: "cached_input_per_mtok", label: "Cached input $/MTok", group: "Tokens" },
-  { value: "cache_write_per_mtok", label: "Cache write $/MTok", group: "Tokens" },
-  { value: "reasoning_output_per_mtok", label: "Reasoning output $/MTok", group: "Tokens" },
-  { value: "batch_input_per_mtok", label: "Batch input $/MTok", group: "Batch" },
-  { value: "batch_output_per_mtok", label: "Batch output $/MTok", group: "Batch" },
-  { value: "audio_input_per_mtok", label: "Audio input $/MTok", group: "Audio" },
-  { value: "audio_output_per_mtok", label: "Audio output $/MTok", group: "Audio" },
-  { value: "per_image", label: "$/Image", group: "Image" },
-  { value: "input_per_image", label: "Input $/Image", group: "Image" },
-  { value: "per_second_input", label: "Input $/Second", group: "Audio/Video" },
-  { value: "per_second_output", label: "Output $/Second", group: "Video" },
-  { value: "per_character_input", label: "$/Character", group: "Audio" },
-  { value: "per_page", label: "$/Page", group: "Utility" },
-  { value: "per_request", label: "$/Request", group: "Utility" },
+  { value: "input_per_mtok", label: m.models_price_input(), group: m.models_price_group_tokens() },
+  { value: "output_per_mtok", label: m.models_price_output(), group: m.models_price_group_tokens() },
+  { value: "cached_input_per_mtok", label: m.models_price_cached_input(), group: m.models_price_group_tokens() },
+  { value: "cache_write_per_mtok", label: m.models_price_cache_write(), group: m.models_price_group_tokens() },
+  { value: "reasoning_output_per_mtok", label: m.models_price_reasoning_output(), group: m.models_price_group_tokens() },
+  { value: "batch_input_per_mtok", label: m.models_price_batch_input(), group: m.models_price_group_batch() },
+  { value: "batch_output_per_mtok", label: m.models_price_batch_output(), group: m.models_price_group_batch() },
+  { value: "audio_input_per_mtok", label: m.models_price_audio_input(), group: m.models_price_group_audio() },
+  { value: "audio_output_per_mtok", label: m.models_price_audio_output(), group: m.models_price_group_audio() },
+  { value: "per_image", label: m.models_price_per_image(), group: m.models_price_group_image() },
+  { value: "input_per_image", label: m.models_price_input_image(), group: m.models_price_group_image() },
+  { value: "per_second_input", label: m.models_price_input_second(), group: m.models_price_group_audio_video() },
+  { value: "per_second_output", label: m.models_price_output_second(), group: m.models_price_group_video() },
+  { value: "per_character_input", label: m.models_price_per_character(), group: m.models_price_group_audio() },
+  { value: "per_page", label: m.models_price_per_page(), group: m.models_price_group_utility() },
+  { value: "per_request", label: m.models_price_per_request(), group: m.models_price_group_utility() },
 ];
 
 export const GLOBAL_PRICING_SELECTOR = "/";
@@ -52,9 +54,9 @@ function modelPricingSourceLabel(source) {
     case "config_yaml":
       return "config.yaml";
     case "model_registry":
-      return "Model registry";
+      return m.models_price_registry();
     default:
-      return source ? String(source) : "Unknown";
+      return source ? String(source) : m.models_price_unknown();
   }
 }
 
@@ -75,7 +77,9 @@ function pricingSourcesFromMetadata(metadata) {
 
 function modelPricingOverrideSourceLabel(override) {
   const selector = String((override && override.selector) || "").trim();
-  return selector ? "Dashboard/API override (" + selector + ")" : "Dashboard/API override";
+  return selector
+    ? m.models_price_override_source_selector({ selector })
+    : m.models_price_override_source();
 }
 
 // ---- Selectors ----
@@ -211,19 +215,19 @@ export function buildPricingOverridePayload(rows, preservedTiers) {
   for (const row of Array.isArray(rows) ? rows : []) {
     const field = String(row.field || "").trim();
     if (!field) {
-      return { error: "Choose a price type for every row." };
+      return { error: m.models_price_choose_type() };
     }
     if (seen.has(field)) {
-      return { error: "Each price type can only be used once." };
+      return { error: m.models_price_unique_type() };
     }
     seen.add(field);
     const raw = String(row.value || "").trim();
     if (raw === "") {
-      return { error: "Enter a value for " + pricingFieldLabel(field) + "." };
+      return { error: m.models_price_enter_value({ field: pricingFieldLabel(field) }) };
     }
     const value = Number(raw);
     if (!Number.isFinite(value) || value < 0) {
-      return { error: "Pricing values must be numbers greater than or equal to 0." };
+      return { error: m.models_price_invalid_value() };
     }
     pricing[field] = value;
   }
@@ -232,7 +236,7 @@ export function buildPricingOverridePayload(rows, preservedTiers) {
     pricing.tiers = clonePricing(tiers);
   }
   if (Object.keys(pricing).length === 0) {
-    return { error: "Add at least one pricing field before saving." };
+    return { error: m.models_price_add_field() };
   }
   return { pricing };
 }
@@ -252,10 +256,10 @@ export function effectivePreviewRows(basePricing, baseSources, draftPricing) {
       label: option.label,
       value: effective[option.value],
       source: hasDraft
-        ? "Form/API value"
+        ? m.models_price_form_value()
         : hasBase
-          ? sources[option.value] || "Model registry"
-          : "Unset",
+          ? sources[option.value] || m.models_price_registry()
+          : m.models_price_unset(),
     };
-  }).filter((row) => row.source !== "Unset" || row.value !== undefined);
+  }).filter((row) => row.source !== m.models_price_unset() || row.value !== undefined);
 }

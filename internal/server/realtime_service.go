@@ -51,6 +51,7 @@ type realtimeRoute struct {
 	providerName string
 	requestID    string
 	userPath     string
+	sessionID    string
 	labels       []string
 	endpoint     string
 }
@@ -156,6 +157,7 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 		providerName: selector.Provider,
 		requestID:    requestID,
 		userPath:     core.UserPathFromContext(ctx),
+		sessionID:    core.SessionIDFromContext(ctx),
 		labels:       core.RequestLabelsFromContext(ctx),
 	}
 	if resolver, ok := s.provider.(core.ProviderNameResolver); ok {
@@ -229,6 +231,7 @@ func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute) fun
 		}
 		entry.ProviderName = strings.TrimSpace(route.providerName)
 		entry.UserPath = route.userPath
+		entry.SessionID = route.sessionID
 		entry.Labels = route.labels
 		s.usageLogger.Write(entry)
 	}

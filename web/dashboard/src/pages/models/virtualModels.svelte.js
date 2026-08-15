@@ -3,6 +3,7 @@
 
 import { errorMessage, getJSON, sendJSON } from "$lib/api/client.js";
 import { flash } from "$lib/stores/flash.svelte.js";
+import * as m from "$lib/paraglide/messages.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
@@ -105,11 +106,11 @@ class VirtualModelsStore {
 
   modelLoadingText() {
     if (modelsStore.loading) {
-      return this.displayModels.length > 0 ? "Refreshing models..." : "Loading models...";
+      return this.displayModels.length > 0 ? m.models_refreshing() : m.models_loading();
     }
     const total = this.filteredDisplayModels.length;
     const visible = Math.min(Number(this.modelRenderLimit || 0), total);
-    return "Rendering models... " + visible + " / " + total;
+    return m.models_rendering({ visible, total });
   }
 
   // ---- Incremental render batching (loader paints between batches) ----
@@ -187,7 +188,7 @@ class VirtualModelsStore {
       console.error("Failed to fetch virtual models:", e);
       this.aliases = [];
       this.modelOverrideViews = [];
-      this.aliasError = "Unable to load virtual models.";
+      this.aliasError = m.models_load_failed();
     } finally {
       this.aliasLoading = false;
     }
@@ -247,12 +248,12 @@ class VirtualModelsStore {
 
   rowToggleLabel(row) {
     if (this.rowTogglingKey && this.rowTogglingKey === row.key) {
-      return "Updating...";
+      return m.models_updating();
     }
     if (this.rowToggleRestricted(row)) {
-      return "Restricted";
+      return m.models_restricted();
     }
-    return this.rowToggleEnabled(row) ? "Enabled" : "Disabled";
+    return this.rowToggleEnabled(row) ? m.models_enabled() : m.models_disabled();
   }
 
   rowToggleRestricted(row) {
@@ -267,14 +268,15 @@ class VirtualModelsStore {
     if (!row) {
       return "";
     }
-    const action = this.rowToggleEnabled(row) ? "Disable " : "Enable ";
     let subject;
     if (row.is_alias) {
-      subject = "alias " + String((row.alias && row.alias.name) || "");
+      subject = m.models_alias_subject({ name: String((row.alias && row.alias.name) || "") });
     } else {
-      subject = String(row.display_name || (row.access && row.access.selector) || "model");
+      subject = String(row.display_name || (row.access && row.access.selector) || m.models_model_subject());
     }
-    return action + subject.trim();
+    return this.rowToggleEnabled(row)
+      ? m.models_disable_action({ subject: subject.trim() })
+      : m.models_enable_action({ subject: subject.trim() });
   }
 
   async toggleRowEnabled(row) {
@@ -285,7 +287,7 @@ class VirtualModelsStore {
       return;
     }
     if (rowIsManaged(row)) {
-      flash.success("This virtual model is managed by configuration and is read-only.");
+      flash.success(m.models_managed_read_only());
       return;
     }
     if (row.is_alias) {
@@ -310,7 +312,7 @@ class VirtualModelsStore {
       });
       if (result.status === 503) {
         this.virtualModelsAvailable = false;
-        flash.error("Virtual models feature is unavailable.");
+        flash.error(m.models_unavailable());
         return;
       }
       if (result.stale) {
@@ -319,17 +321,17 @@ class VirtualModelsStore {
       if (!result.ok) {
         flash.error(
           result.status === 401
-            ? "Authentication required."
-            : errorMessage(result, "Failed to update alias state."),
+            ? m.common_authentication_required()
+            : errorMessage(result, m.models_alias_update_failed()),
         );
         return;
       }
 
-      flash.success(payload.enabled ? "Alias enabled." : "Alias disabled.");
+      flash.success(payload.enabled ? m.models_alias_enabled() : m.models_alias_disabled());
       void this.fetchVirtualModels();
     } catch (e) {
       console.error("Failed to toggle alias state:", e);
-      flash.error("Failed to update alias state.");
+      flash.error(m.models_alias_update_failed());
     } finally {
       this.rowTogglingKey = "";
     }
@@ -355,7 +357,7 @@ class VirtualModelsStore {
       });
       if (result.status === 503) {
         this.virtualModelsAvailable = false;
-        flash.error("Virtual models feature is unavailable.");
+        flash.error(m.models_unavailable());
         return;
       }
       if (!(method === "DELETE" && result.status === 404)) {
@@ -365,18 +367,18 @@ class VirtualModelsStore {
         if (!result.ok) {
           flash.error(
             result.status === 401
-              ? "Authentication required."
-              : errorMessage(result, "Failed to update model access."),
+              ? m.common_authentication_required()
+              : errorMessage(result, m.models_access_update_failed()),
           );
           return;
         }
       }
 
-      flash.success(desired ? "Model enabled." : "Model disabled.");
+      flash.success(desired ? m.models_model_enabled() : m.models_model_disabled());
       void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error("Failed to toggle model access:", e);
-      flash.error("Failed to update model access.");
+      flash.error(m.models_access_update_failed());
     } finally {
       this.rowTogglingKey = "";
     }
@@ -397,12 +399,12 @@ class VirtualModelsStore {
     }
     await this.mutateVirtualModelRow({
       rowKey: row.key,
-      confirmMessage: 'Remove the virtual model alias "' + source + '"?',
+      confirmMessage: m.models_remove_alias_confirm({ source }),
       method: "DELETE",
       payload: { source },
       operation: "virtual model",
-      failureMessage: "Failed to remove virtual model.",
-      notice: "Virtual model removed.",
+      failureMessage: m.models_remove_failed(),
+      notice: m.models_removed(),
       ignoreNotFound: true,
     });
   }
@@ -421,8 +423,7 @@ class VirtualModelsStore {
     }
     await this.mutateVirtualModelRow({
       rowKey: row.key,
-      confirmMessage:
-        'Remove the redirect for "' + source + '"? Other virtual model settings will be preserved.',
+      confirmMessage: m.models_remove_redirect_confirm({ source }),
       method: "PUT",
       payload: {
         source,
@@ -432,8 +433,8 @@ class VirtualModelsStore {
         ...(alias.slowdown != null ? { slowdown: Number(alias.slowdown) } : {}),
       },
       operation: "virtual model redirect",
-      failureMessage: "Failed to remove redirect.",
-      notice: "Redirect removed. Other virtual model settings were preserved.",
+      failureMessage: m.models_redirect_remove_failed(),
+      notice: m.models_redirect_removed(),
     });
   }
 
@@ -453,7 +454,7 @@ class VirtualModelsStore {
       });
       if (result.status === 503) {
         this.virtualModelsAvailable = false;
-        flash.error("Virtual models feature is unavailable.");
+        flash.error(m.models_unavailable());
         return;
       }
       if (!(options.ignoreNotFound && result.status === 404)) {
@@ -463,7 +464,7 @@ class VirtualModelsStore {
         if (!result.ok) {
           flash.error(
             result.status === 401
-              ? "Authentication required."
+              ? m.common_authentication_required()
               : errorMessage(result, options.failureMessage),
           );
           return;
@@ -536,9 +537,9 @@ class VirtualModelsStore {
 
   vmFormToggleLabel() {
     if (!this.vmForm || !this.vmForm.enabled) {
-      return "Disabled";
+      return m.models_disabled();
     }
-    return this.vmFormToggleRestricted() ? "Restricted" : "Enabled";
+    return this.vmFormToggleRestricted() ? m.models_restricted() : m.models_enabled();
   }
 
   resetVirtualModelForm() {
@@ -569,7 +570,7 @@ class VirtualModelsStore {
     this.vmFormOpen = true;
     this.vmFormMode = "create";
     this.vmFormSourceLocked = false;
-    this.vmFormDisplayName = "New virtual model";
+    this.vmFormDisplayName = m.models_new_virtual();
     if (model && model.model && model.model.id) {
       this.vmForm.target_model = qualifiedModelName(model);
     }
@@ -670,7 +671,7 @@ class VirtualModelsStore {
     this.vmFormDefaultEnabled = defaultEnabled;
     this.vmFormEffectiveEnabled = override ? override.enabled !== false : defaultEnabled;
     this.vmFormManaged = Boolean(override && override.managed);
-    this.vmFormDisplayName = "All providers and models";
+    this.vmFormDisplayName = m.models_all_scope();
     this.vmForm = {
       source: selector,
       target_model: "",
@@ -690,7 +691,7 @@ class VirtualModelsStore {
     }
     this.openVirtualModelEditModel({
       display_name: group.display_name,
-      access_display_name: "All models in " + group.display_name,
+      access_display_name: m.models_all_in_provider({ provider: group.display_name }),
       provider_name: group.provider_name,
       provider_type: group.provider_type,
       access: group.access,
@@ -704,7 +705,7 @@ class VirtualModelsStore {
   // makes an access policy.
   async submitVirtualModelForm() {
     if (this.vmFormManaged) {
-      this.vmFormError = "This virtual model is managed by configuration and cannot be edited here.";
+      this.vmFormError = m.models_managed_cannot_edit();
       return;
     }
 
@@ -712,7 +713,7 @@ class VirtualModelsStore {
     const { payload, source, isRedirect, isRename } = built;
 
     if (!source) {
-      this.vmFormError = "Source is required.";
+      this.vmFormError = m.models_source_required();
       return;
     }
 
@@ -728,14 +729,10 @@ class VirtualModelsStore {
       const existingPolicy = existingAlias ? null : this.findModelOverrideView(source);
       if (existingAlias || existingPolicy) {
         const overwriteMessage = existingAlias
-          ? 'A virtual model named "' +
-            existingAlias.name +
-            '" already exists. Saving will update that virtual model. Continue?'
-          : 'An access policy for "' +
-            source +
-            '" already exists. Saving will update that virtual model. Continue?';
+          ? m.models_overwrite_alias_confirm({ name: existingAlias.name })
+          : m.models_overwrite_policy_confirm({ source });
         if (!window.confirm(overwriteMessage)) {
-          this.vmFormError = "Choose a different source or edit the existing virtual model.";
+          this.vmFormError = m.models_source_exists();
           return;
         }
       } else if (isRedirect) {
@@ -745,13 +742,9 @@ class VirtualModelsStore {
             qualifiedModelName(matchingModel) ||
             String((matchingModel.model && matchingModel.model.id) || "").trim();
           if (
-            !window.confirm(
-              'A model named "' +
-                modelName +
-                '" already exists. Creating this alias will mask that model in the list. Continue?',
-            )
+            !window.confirm(m.models_mask_create_confirm({ name: modelName }))
           ) {
-            this.vmFormError = "Choose a different source to avoid masking an existing model.";
+            this.vmFormError = m.models_source_masks();
             return;
           }
         }
@@ -765,7 +758,7 @@ class VirtualModelsStore {
       const existingAlias = (this.aliases || []).find((entry) => entry && entry.name === source) || null;
       const existingPolicy = existingAlias ? null : this.findModelOverrideView(source);
       if (existingAlias || existingPolicy) {
-        this.vmFormError = 'A virtual model for "' + source + '" already exists. Choose a different source.';
+        this.vmFormError = m.models_source_conflict({ source });
         return;
       }
       if (isRedirect) {
@@ -775,13 +768,9 @@ class VirtualModelsStore {
             qualifiedModelName(matchingModel) ||
             String((matchingModel.model && matchingModel.model.id) || "").trim();
           if (
-            !window.confirm(
-              'A model named "' +
-                modelName +
-                '" already exists. Renaming to that name will mask the model in the list. Continue?',
-            )
+            !window.confirm(m.models_mask_rename_confirm({ name: modelName }))
           ) {
-            this.vmFormError = "Choose a different source to avoid masking an existing model.";
+            this.vmFormError = m.models_source_masks();
             return;
           }
         }
@@ -796,7 +785,7 @@ class VirtualModelsStore {
       });
       if (result.status === 503) {
         this.virtualModelsAvailable = false;
-        this.vmFormError = "Virtual models feature is unavailable.";
+        this.vmFormError = m.models_unavailable();
         return;
       }
       if (result.stale) {
@@ -805,8 +794,8 @@ class VirtualModelsStore {
       if (!result.ok) {
         this.vmFormError =
           result.status === 401
-            ? "Authentication required."
-            : errorMessage(result, "Failed to save virtual model.");
+            ? m.common_authentication_required()
+            : errorMessage(result, m.models_save_failed());
         return;
       }
       const policyPruned = !isRedirect && result.status === 204;
@@ -815,15 +804,15 @@ class VirtualModelsStore {
       this.closeVirtualModelForm();
       flash.success(
         isRedirect
-          ? "Alias saved."
+          ? m.models_alias_saved()
           : policyPruned
-            ? "Model access reset to inherited/default."
-            : "Model access saved.",
+            ? m.models_access_reset()
+            : m.models_access_saved(),
       );
       void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error("Failed to save virtual model:", e);
-      this.vmFormError = "Failed to save virtual model.";
+      this.vmFormError = m.models_save_failed();
     } finally {
       this.vmSubmitting = false;
     }
@@ -832,7 +821,7 @@ class VirtualModelsStore {
   // deleteVirtualModel removes the virtual model for the editor's source.
   async deleteVirtualModel() {
     if (this.vmFormManaged) {
-      this.vmFormError = "This virtual model is managed by configuration and cannot be removed here.";
+      this.vmFormError = m.models_managed_cannot_remove();
       return;
     }
     const source = String(this.vmForm.source || this.vmFormOriginalSource || "").trim();
@@ -840,9 +829,7 @@ class VirtualModelsStore {
       return;
     }
     if (
-      !window.confirm(
-        'Remove the virtual model for "' + source + '"? This reverts to inherited/default behavior.',
-      )
+      !window.confirm(m.models_remove_policy_confirm({ source }))
     ) {
       return;
     }
@@ -856,7 +843,7 @@ class VirtualModelsStore {
       });
       if (result.status === 503) {
         this.virtualModelsAvailable = false;
-        this.vmFormError = "Virtual models feature is unavailable.";
+        this.vmFormError = m.models_unavailable();
         return;
       }
       if (result.status !== 404) {
@@ -866,19 +853,19 @@ class VirtualModelsStore {
         if (!result.ok) {
           this.vmFormError =
             result.status === 401
-              ? "Authentication required."
-              : errorMessage(result, "Failed to remove virtual model.");
+              ? m.common_authentication_required()
+              : errorMessage(result, m.models_remove_failed());
           return;
         }
       }
       this.virtualModelsAvailable = true;
 
       this.closeVirtualModelForm();
-      flash.success("Virtual model removed.");
+      flash.success(m.models_removed());
       void Promise.all([modelsStore.fetchModels(), this.fetchVirtualModels()]);
     } catch (e) {
       console.error("Failed to delete virtual model:", e);
-      this.vmFormError = "Failed to remove virtual model.";
+      this.vmFormError = m.models_remove_failed();
     } finally {
       this.vmDeleting = false;
     }

@@ -2,6 +2,9 @@
 // and the Models-page gauge/inspector. These functions are also exercised by
 // tests/rate-limits.test.js under plain node.
 
+import * as m from "../../lib/paraglide/messages.js";
+import { formatNumber } from "../../lib/i18n/locale.js";
+
 export function defaultRateLimitForm() {
   return {
     scope: "user_path",
@@ -20,21 +23,21 @@ export function defaultRateLimitForm() {
 export function rateLimitScopeMeta(scope) {
   const meta = {
     user_path: {
-      label: "User path",
-      chip: "user path",
-      fieldLabel: "User Path",
+      label: m.rate_limits_user_path(),
+      chip: m.rate_limits_user_path_chip(),
+      fieldLabel: m.workflows_user_path(),
       placeholder: "/team/alpha",
     },
     provider: {
-      label: "Provider",
-      chip: "provider",
-      fieldLabel: "Provider Name",
+      label: m.rate_limits_provider(),
+      chip: m.rate_limits_provider_chip(),
+      fieldLabel: m.rate_limits_provider_name(),
       placeholder: "openai",
     },
     model: {
-      label: "Model",
-      chip: "model",
-      fieldLabel: "Model",
+      label: m.rate_limits_model(),
+      chip: m.rate_limits_model_chip(),
+      fieldLabel: m.rate_limits_model(),
       placeholder: "openai/gpt-4o",
     },
   };
@@ -80,11 +83,11 @@ export function syncRateLimitScope(form) {
 
 export function rateLimitPeriodOptions() {
   return [
-    { value: "minute", label: "Per minute" },
-    { value: "hour", label: "Per hour" },
-    { value: "day", label: "Per day" },
-    { value: "concurrent", label: "Concurrent (in-flight)" },
-    { value: "custom", label: "Custom seconds" },
+    { value: "minute", label: m.rate_limits_per_minute() },
+    { value: "hour", label: m.rate_limits_per_hour() },
+    { value: "day", label: m.rate_limits_per_day() },
+    { value: "concurrent", label: m.rate_limits_concurrent() },
+    { value: "custom", label: m.rate_limits_custom_seconds() },
   ];
 }
 
@@ -170,7 +173,7 @@ export function formatRateLimitNumber(value) {
   if (!Number.isFinite(numeric)) {
     return "0";
   }
-  return numeric.toLocaleString();
+  return formatNumber(numeric);
 }
 
 export function rateLimitUsagePercent(used, limit) {
@@ -215,7 +218,7 @@ export function filteredRateLimits(rules, filter) {
     const subject = rateLimitSubject(item).toLowerCase();
     const scope = rateLimitScopeLabel(item).toLowerCase();
     const period = rateLimitPeriodLabel(item).toLowerCase();
-    const mode = item && item.per_child ? "per child" : "";
+    const mode = item && item.per_child ? m.rate_limits_per_child_badge() : "";
     return (
       subject.includes(needle) ||
       scope.includes(needle) ||
@@ -274,7 +277,7 @@ export function rateLimitFormPayload(formInput) {
   const scope = String(form.scope || "user_path");
   const subject = String(form.subject || "").trim();
   if (scope !== "user_path" && !subject) {
-    return { error: rateLimitSubjectFieldLabel(form) + " is required." };
+    return { error: m.rate_limits_field_required({ field: rateLimitSubjectFieldLabel(form) }) };
   }
   const isConcurrent = String(form.period || "") === "concurrent";
   // Reject blank custom seconds before Number(): Number('') is 0,
@@ -285,7 +288,7 @@ export function rateLimitFormPayload(formInput) {
     rawPeriodSeconds === null ||
     rawPeriodSeconds === undefined
   ) {
-    return { error: "Period seconds is required." };
+    return { error: m.rate_limits_period_required() };
   }
   const periodSeconds = Number(rawPeriodSeconds);
   if (
@@ -295,7 +298,7 @@ export function rateLimitFormPayload(formInput) {
   ) {
     return {
       error:
-        "Period seconds must be a positive integer (0 only for the concurrent period).",
+        m.rate_limits_period_invalid(),
     };
   }
   const maxRequests = String(
@@ -309,10 +312,10 @@ export function rateLimitFormPayload(formInput) {
       : form.max_tokens,
   ).trim();
   if (!maxRequests && !maxTokens) {
-    return { error: "Set max requests, max tokens, or both." };
+    return { error: m.rate_limits_limit_required() };
   }
   if (isConcurrent && maxTokens) {
-    return { error: "Token limits are not valid for the concurrent period." };
+    return { error: m.rate_limits_concurrent_tokens_invalid() };
   }
   const payload = {
     scope: scope,
@@ -323,14 +326,14 @@ export function rateLimitFormPayload(formInput) {
   if (maxRequests) {
     const parsed = Number(maxRequests);
     if (!Number.isInteger(parsed) || parsed <= 0) {
-      return { error: "Max requests must be a positive integer." };
+      return { error: m.rate_limits_requests_invalid() };
     }
     payload.max_requests = parsed;
   }
   if (maxTokens) {
     const parsed = Number(maxTokens);
     if (!Number.isInteger(parsed) || parsed <= 0) {
-      return { error: "Max tokens must be a positive integer." };
+      return { error: m.rate_limits_tokens_invalid() };
     }
     payload.max_tokens = parsed;
   }
@@ -392,7 +395,7 @@ export function rateLimitInspectorSections(inspectorInput, rulesInput) {
   if (inspector.kind === "model") {
     sections.push({
       key: "model",
-      title: "Model limits",
+      title: m.rate_limits_model_limits(),
       scope: "model",
       subject: rateLimitInspectorQualifiedModel(inspector),
       hint: "",
@@ -403,12 +406,12 @@ export function rateLimitInspectorSections(inspectorInput, rulesInput) {
   }
   sections.push({
     key: "provider",
-    title: "Provider limits (" + inspector.provider + ")",
+    title: m.rate_limits_provider_limits({ provider: inspector.provider }),
     scope: "provider",
     subject: inspector.provider,
     hint:
       inspector.kind === "model"
-        ? "Shared by every model routed to this provider."
+        ? m.rate_limits_provider_hint()
         : "",
     items: rules.filter((rule) =>
       rateLimitRuleMatchesProvider(rule, inspector.provider),
@@ -416,10 +419,10 @@ export function rateLimitInspectorSections(inspectorInput, rulesInput) {
   });
   sections.push({
     key: "global",
-    title: "Global limits",
+    title: m.rate_limits_global_limits(),
     scope: "user_path",
     subject: "/",
-    hint: "Root user-path rules throttle all traffic. Narrower user-path rules also apply, per consumer.",
+    hint: m.rate_limits_global_hint(),
     items: rules.filter(
       (rule) =>
         rateLimitScope(rule) === "user_path" && rateLimitSubject(rule) === "/",
@@ -489,26 +492,26 @@ export function rateLimitGaugeClassForProvider(rulesInput, provider) {
 }
 
 export function rateLimitGaugeTitle(subject, gaugeClass) {
-  const base = "Rate limits for " + subject;
+  const base = m.rate_limits_for({ subject });
   if (gaugeClass === "table-action-btn-active") {
-    return base + " (direct limits configured)";
+    return base + " (" + m.rate_limits_direct() + ")";
   }
   if (gaugeClass) {
-    return base + " (inherited limits apply)";
+    return base + " (" + m.rate_limits_inherited() + ")";
   }
   return base;
 }
 
 export function rateLimitInspectorSummary(item) {
   if (item && item.per_child) {
-    return "Independent counters per direct child";
+    return m.rate_limits_per_child_summary();
   }
   if (rateLimitIsConcurrent(item)) {
     return (
-      formatRateLimitNumber(item.in_flight) +
-      " of " +
-      formatRateLimitNumber(item.max_requests) +
-      " in flight"
+      m.rate_limits_in_flight_progress({
+        used: formatRateLimitNumber(item.in_flight),
+        limit: formatRateLimitNumber(item.max_requests),
+      })
     );
   }
   const parts = [];

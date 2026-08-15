@@ -12,15 +12,16 @@
     mcpServerStatus,
     mcpServerStatusClass,
   } from "./mcp-servers.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   const sections = $derived(mcpCatalogSections(mcpServers.catalog));
 </script>
 
 <Modal open={mcpServers.catalogOpen} variant="editor" onclose={() => mcpServers.closeCatalog()}>
-  <div class="model-editor" role="dialog" aria-modal="true" aria-label="MCP server catalog">
+  <div class="model-editor" role="dialog" aria-modal="true" aria-label={m.mcp_catalog_label()}>
     <div class="editor-header">
       <div>
-        <h3>Server Catalog</h3>
+        <h3>{m.mcp_catalog_title()}</h3>
         <p class="form-hint mcp-catalog-subtitle">
           <code class="mono">{mcpServers.catalog.server}</code>
           <span class="audit-status-badge {mcpServerStatusClass(mcpServers.catalog)}"
@@ -29,13 +30,13 @@
         </p>
       </div>
       <DialogCloseButton
-        label="Close MCP server catalog"
+        label={m.mcp_catalog_close()}
         onclick={() => mcpServers.closeCatalog()}
       />
     </div>
 
     {#if mcpServers.catalogLoading}
-      <LoadingState label="Loading catalog..." />
+      <LoadingState label={m.mcp_catalog_loading()} />
     {:else if mcpServers.catalogError}
       <p class="form-error" role="alert" aria-live="assertive">{mcpServers.catalogError}</p>
     {:else}
@@ -55,7 +56,7 @@
                 {#if item.aggregated}
                   <div
                     class="mcp-catalog-item-aggregated mono"
-                    title={"Exposed on the aggregated /mcp endpoint as " + item.aggregated}
+                    title={m.mcp_catalog_exposed({ name: item.aggregated })}
                   >
                     {item.aggregated}
                   </div>
@@ -70,12 +71,12 @@
       {/each}
 
       {#if mcpCatalogIsEmpty(mcpServers.catalog)}
-        <p class="empty-state">No tools listed — the server may still be connecting or degraded.</p>
+        <p class="empty-state">{m.mcp_catalog_empty()}</p>
       {/if}
     {/if}
 
     <div class="form-actions">
-      <button type="button" class="btn" onclick={() => mcpServers.closeCatalog()}>Close</button>
+      <button type="button" class="btn" onclick={() => mcpServers.closeCatalog()}>{m.mcp_close()}</button>
     </div>
   </div>
 </Modal>

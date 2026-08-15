@@ -23,6 +23,7 @@
   import { auditList } from "./auditList.svelte.js";
   import { auditWorkflows } from "./audit-workflows.svelte.js";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
+  import { usagePage } from "../usage/usage.svelte.js";
   import { extractRequestPromptTextSegments } from "./conversation-helpers.js";
   import { auditPanes } from "./audit-logic.js";
 
@@ -62,7 +63,16 @@
   class:audit-entry-interactions-open={interactionsOpen}
   open
 >
-  <AuditEntrySummary {entry} {thread} {expanded} {hidePath} onactivate={toggleExpanded} />
+  <AuditEntrySummary
+    {entry}
+    {thread}
+    {expanded}
+    {hidePath}
+    onactivate={toggleExpanded}
+    onusage={entry.session_id
+      ? () => usagePage.filterBySession(entry.session_id, entry.user_path)
+      : null}
+  />
   {#if expanded}
     <div
       class="audit-entry-details"

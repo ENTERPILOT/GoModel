@@ -6,6 +6,7 @@
   import { debounced } from "$lib/utils/debounce.js";
   import { auditList } from "./auditList.svelte.js";
   import { X } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   const onSearchInput = debounced(() => auditList.fetchAuditLog(true));
   $effect(() => onSearchInput.cancel);
@@ -15,8 +16,8 @@
   <div class="audit-filter-row audit-filter-row-search">
     <FilterInput
       id="audit-filter-search"
-      placeholder="Search by request ID, model, provider, path, user path, or error..."
-      label="Search by request ID, model, provider, path, user path, or error"
+      placeholder={m.audit_search_placeholder()}
+      label={m.audit_search_label()}
       bind:value={auditList.auditSearch}
       oninput={onSearchInput}
     />
@@ -24,12 +25,12 @@
   <div class="audit-filter-row audit-filter-row-controls">
     <select
       id="audit-filter-method"
-      aria-label="HTTP method filter"
+      aria-label={m.audit_filter_method_label()}
       class="usage-log-select audit-filter-select"
       bind:value={auditList.auditMethod}
       onchange={() => auditList.fetchAuditLog(true)}
     >
-      <option value="">All Methods</option>
+      <option value="">{m.audit_filter_all_methods()}</option>
       <option value="GET">GET</option>
       <option value="POST">POST</option>
       <option value="PUT">PUT</option>
@@ -38,12 +39,12 @@
     </select>
     <select
       id="audit-filter-status"
-      aria-label="Status code filter"
+      aria-label={m.audit_filter_status_label()}
       class="usage-log-select audit-filter-select"
       bind:value={auditList.auditStatusCode}
       onchange={() => auditList.fetchAuditLog(true)}
     >
-      <option value="">All Statuses</option>
+      <option value="">{m.audit_filter_all_statuses()}</option>
       <option value="200">200</option>
       <option value="201">201</option>
       <option value="400">400</option>
@@ -58,14 +59,14 @@
     </select>
     <select
       id="audit-filter-stream"
-      aria-label="Streaming mode filter"
+      aria-label={m.audit_filter_stream_label()}
       class="usage-log-select audit-filter-select"
       bind:value={auditList.auditStream}
       onchange={() => auditList.fetchAuditLog(true)}
     >
-      <option value="">All Modes</option>
-      <option value="true">Streaming</option>
-      <option value="false">Non-streaming</option>
+      <option value="">{m.audit_filter_all_modes()}</option>
+      <option value="true">{m.audit_filter_streaming()}</option>
+      <option value="false">{m.audit_filter_non_streaming()}</option>
     </select>
     <button
       type="button"
@@ -73,7 +74,7 @@
       onclick={() => auditList.clearAuditFilters()}
     >
       <Icon icon={X} class="table-icon-svg" />
-      <span>Clear</span>
+      <span>{m.common_action_clear()}</span>
     </button>
   </div>
 </div>

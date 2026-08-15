@@ -17,6 +17,7 @@
     pricingRecalculateSummary,
   } from "./pricing-logic.js";
   import { Calculator } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let userPath = $state("");
   let selector = $state("");
@@ -28,29 +29,28 @@
 
   function openDialog() {
     if (!enabled) {
-      flash.error("Usage pricing recalculation is unavailable.");
+      flash.error(m.settings_pricing_unavailable());
       return;
     }
     if (loading) {
       return;
     }
     confirmDialog.open({
-      title: "Recalculate Pricing",
+      title: m.settings_pricing_action(),
       titleId: "pricingRecalculateDialogTitle",
       inputId: "pricing-recalculate-confirmation",
-      requiredText: "recalculate",
-      confirmLabel: "Recalculate Pricing",
+      requiredText: m.settings_pricing_confirmation(),
+      confirmLabel: m.settings_pricing_action(),
       icon: Calculator,
       dialogClass: "pricing-recalculate-dialog",
-      message:
-        "Stored usage cost fields matching the selected filters will be overwritten.",
+      message: m.settings_pricing_confirmation_message(),
       onConfirm: () => recalculate(),
     });
   }
 
   async function recalculate() {
     if (!enabled) {
-      flash.error("Usage pricing recalculation is unavailable.");
+      flash.error(m.settings_pricing_unavailable());
       return;
     }
     if (loading) {
@@ -67,7 +67,7 @@
         },
         userPath,
         selector,
-        "recalculate",
+        m.settings_pricing_confirmation(),
       );
       const result = await sendJSON(
         "/admin/usage/recalculate-pricing",
@@ -79,7 +79,7 @@
         return;
       }
       if (!result.ok) {
-        confirmDialog.error = "Unable to recalculate pricing.";
+        confirmDialog.error = m.settings_pricing_failed();
         return;
       }
       confirmDialog.close();
@@ -87,7 +87,7 @@
       void usageData.fetchUsage();
     } catch (e) {
       console.error("Failed to recalculate pricing:", e);
-      confirmDialog.error = "Unable to recalculate pricing.";
+      confirmDialog.error = m.settings_pricing_failed();
     } finally {
       loading = false;
     }
@@ -98,16 +98,16 @@
   <div class="settings-refresh-section pricing-recalculate-section">
     <InlineHelpSection
       copyId="pricing-recalculate-help-copy"
-      label="pricing recalculation help"
-      text="Recalculate stored input, output, total, and Pro Saved costs from the current model pricing metadata. This overwrites matching historical cost fields. Filters are applied to the selected date range, user path subtree, and provider/model selector or alias."
+      label={m.settings_pricing_help_label()}
+      text={m.settings_pricing_help()}
     >
-      {#snippet title()}<h3>Usage Pricing Recalculation</h3>{/snippet}
+      {#snippet title()}<h3>{m.settings_pricing_title()}</h3>{/snippet}
     </InlineHelpSection>
     <div class="pricing-recalculate-grid">
       <div class="form-field pricing-recalculate-date-field">
         <!-- svelte-ignore a11y_label_has_associated_control -- the picker is labelled via aria-labelledby -->
         <label class="form-field-label" id="pricing-recalculate-date-label"
-          >Date Range</label
+          >{m.settings_pricing_date_range()}</label
         >
         <div aria-labelledby="pricing-recalculate-date-label">
           <DatePicker />
@@ -115,7 +115,7 @@
       </div>
       <div class="form-field pricing-recalculate-filter-field">
         <label class="form-field-label" for="pricing-recalculate-user-path"
-          >User Path (optional)</label
+          >{m.settings_pricing_user_path()}</label
         >
         <input
           id="pricing-recalculate-user-path"
@@ -129,13 +129,13 @@
         class="form-field pricing-recalculate-filter-field pricing-recalculate-selector-field"
       >
         <label class="form-field-label" for="pricing-recalculate-selector"
-          >Provider/Model or Alias (optional)</label
+          >{m.settings_pricing_selector()}</label
         >
         <input
           id="pricing-recalculate-selector"
           class="form-input"
           type="text"
-          placeholder="openai/gpt-4o or smart"
+          placeholder={m.settings_pricing_selector_placeholder()}
           bind:value={selector}
         />
       </div>
@@ -150,7 +150,7 @@
         onclick={openDialog}
       >
         <Icon icon={Calculator} class="form-action-icon" />
-        <span>Recalculate Pricing</span>
+        <span>{m.settings_pricing_action()}</span>
       </button>
     </div>
   </div>

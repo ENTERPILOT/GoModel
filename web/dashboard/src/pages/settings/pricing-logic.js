@@ -1,6 +1,7 @@
 // Pure pricing-recalculation logic.
 
 import { formatDateParam } from "../../lib/utils/format.js";
+import * as m from "../../lib/paraglide/messages.js";
 
 export { formatDateParam };
 
@@ -36,21 +37,9 @@ export function pricingRecalculateSummary(result) {
   const matched = Number((result && result.matched) || 0);
   const recalculated = Number((result && result.recalculated) || 0);
   const withoutPricing = Number((result && result.without_pricing) || 0);
-  let message =
-    "Pricing recalculated for " +
-    recalculated +
-    " of " +
-    matched +
-    " usage record" +
-    (matched === 1 ? "" : "s") +
-    ".";
+  let message = m.settings_pricing_summary({ matched, recalculated });
   if (withoutPricing > 0) {
-    message +=
-      " " +
-      withoutPricing +
-      " usage record" +
-      (withoutPricing === 1 ? " still lacks" : "s still lack") +
-      " pricing metadata.";
+    message += " " + m.settings_pricing_missing({ count: withoutPricing });
   }
   return message;
 }

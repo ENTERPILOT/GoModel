@@ -6,6 +6,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { overwriteGetLocale } from "../src/lib/paraglide/runtime.js";
 
 import {
   defaultRateLimitForm,
@@ -33,7 +34,18 @@ import {
   rateLimitGaugeClassForProvider,
   rateLimitGaugeTitle,
   rateLimitInspectorSummary,
+  formatRateLimitNumber,
 } from "../src/pages/rate-limits/rateLimitsLogic.js";
+
+test("rate-limit numbers follow the selected locale", () => {
+  overwriteGetLocale(() => "pl");
+  try {
+    assert.equal(formatRateLimitNumber(1234567), "1 234 567");
+    assert.equal(formatRateLimitNumber("invalid"), "0");
+  } finally {
+    overwriteGetLocale(() => "en");
+  }
+});
 
 test("period helpers map names and seconds both ways", () => {
   assert.equal(rateLimitPeriodSeconds("minute"), 60);

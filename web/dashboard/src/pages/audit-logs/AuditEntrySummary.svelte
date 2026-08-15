@@ -11,7 +11,8 @@
     formatDurationNs,
     statusCodeClass,
   } from "./audit-logic.js";
-  import { ChevronDown, ChevronLeft, ChevronRight } from "lucide";
+  import { ChartNoAxesColumnIncreasing, ChevronDown, ChevronLeft, ChevronRight } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   // `thread` marks a session-thread head row (grouped mode):
   // { count, expanded, ontoggle }. `expanded`/`onactivate` wire the
@@ -23,6 +24,7 @@
     thread = null,
     expanded = false,
     onactivate = null,
+    onusage = null,
     hidePath = false,
   } = $props();
 
@@ -47,6 +49,16 @@
     event.stopPropagation();
     event.preventDefault();
     thread.ontoggle();
+  }
+
+  function openSessionUsage(event) {
+    event.stopPropagation();
+    event.preventDefault();
+    onusage?.();
+  }
+
+  function threadDescription() {
+    return m.audit_session_description({ count: Number(thread.count || 1) });
   }
 
   function openConversation(event) {
@@ -75,11 +87,12 @@
         type="button"
         class="audit-thread-expander"
         aria-expanded={thread.expanded}
-        title={"Session with " + thread.count + " requests"}
-        aria-label={"Session with " +
-          thread.count +
-          " requests, " +
-          (thread.expanded ? "collapse" : "expand")}
+        title={threadDescription()}
+        aria-label={threadDescription() +
+          ", " +
+          (thread.expanded
+            ? m.common_action_collapse()
+            : m.common_action_expand())}
         onclick={toggleThread}
       >
         <Icon
@@ -89,11 +102,25 @@
         <span class="audit-thread-count mono">{thread.count}</span>
       </button>
     {/if}
+    {#if onusage}
+      <button
+        type="button"
+        class="audit-session-usage"
+        title={m.audit_view_session_usage()}
+        aria-label={m.audit_view_session_usage()}
+        onclick={openSessionUsage}
+      >
+        <Icon icon={ChartNoAxesColumnIncreasing} class="audit-session-usage-svg" />
+      </button>
+    {/if}
     <span
       class="audit-status-badge audit-request-badge {statusCodeClass(
         entry.status_code,
       )}"
-      title={"Status " + (entry.status_code || "-") + " · " + (entry.method || "-")}
+      title={m.audit_status({
+        status: entry.status_code || "-",
+        method: entry.method || "-",
+      })}
       aria-label={(entry.status_code || "-") + " " + (entry.method || "-")}
     >
       <span class="audit-request-status" aria-hidden="true"
@@ -124,8 +151,12 @@
         type="button"
         class="audit-conversation-trigger"
         class:audit-conversation-trigger-active={interactionsOpen}
-        title={interactionsOpen ? "Close interactions" : "Open interactions"}
-        aria-label={interactionsOpen ? "Close interactions" : "Open interactions"}
+        title={interactionsOpen
+          ? m.audit_close_interactions()
+          : m.audit_open_interactions()}
+        aria-label={interactionsOpen
+          ? m.audit_close_interactions()
+          : m.audit_open_interactions()}
         aria-pressed={interactionsOpen}
         onclick={openConversation}
       >
@@ -229,6 +260,31 @@
   .audit-thread-count {
     font-size: 11px;
     font-weight: 600;
+  }
+
+  .audit-session-usage {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+    color: var(--accent-strong, var(--accent));
+    cursor: pointer;
+  }
+
+  .audit-session-usage:hover {
+    background: color-mix(in srgb, var(--accent) 20%, var(--bg));
+    border-color: var(--accent);
+  }
+
+  .audit-session-usage :global(.audit-session-usage-svg) {
+    width: 14px;
+    height: 14px;
   }
 
   .audit-conversation-trigger {

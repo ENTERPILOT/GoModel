@@ -1,4 +1,5 @@
 <script>
+  import * as m from "$lib/paraglide/messages.js";
   // Active workflow card grid with loading/empty states.
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
@@ -9,8 +10,8 @@
 <section class="workflows-list">
   {#if wf.loading && !auth.authError}
     <p class="empty-state workflow-list-loading">
-      <Spinner size={16} label="Loading workflows" />
-      Loading workflows...
+      <Spinner size={16} label={m.workflows_loading()} />
+      {m.workflows_loading()}
     </p>
   {/if}
 
@@ -23,10 +24,10 @@
   {/if}
 
   {#if wf.workflows.length === 0 && !wf.loading && !auth.authError && wf.available}
-    <p class="empty-state">No active workflows found.</p>
+    <p class="empty-state">{m.workflows_empty()}</p>
   {/if}
   {#if wf.workflows.length > 0 && wf.filteredWorkflows.length === 0 && !wf.loading}
-    <p class="empty-state">No workflows match your filter.</p>
+    <p class="empty-state">{m.workflows_no_match()}</p>
   {/if}
 </section>
 

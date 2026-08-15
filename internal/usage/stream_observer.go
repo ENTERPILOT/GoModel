@@ -19,6 +19,7 @@ type StreamUsageObserver struct {
 	requestID       string
 	endpoint        string
 	userPath        string
+	sessionID       string
 	labels          []string
 	rewriteSaved    int
 	closed          bool
@@ -55,6 +56,14 @@ func (o *StreamUsageObserver) SetProviderName(providerName string) {
 		return
 	}
 	o.providerName = strings.TrimSpace(providerName)
+}
+
+// SetSessionID attaches the detected, user-path-scoped client session.
+func (o *StreamUsageObserver) SetSessionID(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.sessionID = strings.TrimSpace(sessionID)
 }
 
 // SetLabels attaches the request labels extracted from tagging headers.
@@ -186,6 +195,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	if entry != nil {
 		entry.ProviderName = o.providerName
 		entry.UserPath = o.userPath
+		entry.SessionID = o.sessionID
 		entry.Labels = o.labels
 		var pricing *core.ModelPricing
 		if len(pricingArgs) > 0 {

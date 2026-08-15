@@ -62,9 +62,6 @@ body.dashboard-modal-open .content {
 }
 
 .page-with-sticky-date > .sticky-date-range {
-  position: sticky;
-  top: 16px;
-  z-index: 8;
   grid-column: 2;
   justify-self: end;
 }

@@ -13,11 +13,14 @@ import {
   DATE_RANGE_STORAGE_KEY,
   DEFAULT_PRESET_DAYS,
   parseDateRange,
-  rangeLabel,
-  rangeSpanLabel,
   serializeDateRange,
   windowEndingToday,
 } from "./dateRangePrefs.js";
+import {
+  rangeChartTitle,
+  rangeLabel,
+  rangeSpanLabel,
+} from "./dateRangeText.js";
 
 // How often an open dashboard re-checks whether the day rolled over.
 const DAY_SYNC_INTERVAL_MS = 60_000;
@@ -159,13 +162,7 @@ class DateRangeStore {
   }
 
   chartTitle() {
-    const titles = {
-      daily: "Daily",
-      weekly: "Weekly",
-      monthly: "Monthly",
-      yearly: "Yearly",
-    };
-    return (titles[this.interval] || "Daily") + " Token Usage";
+    return rangeChartTitle(this.interval);
   }
 
   // --- persistence ---

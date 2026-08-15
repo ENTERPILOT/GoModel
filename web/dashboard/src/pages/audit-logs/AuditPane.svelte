@@ -6,6 +6,7 @@
   import { formatJSON } from "./audit-logic.js";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import { isAudioBody, renderAudioBody } from "./conversation-helpers.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { pane } = $props();
 
@@ -52,7 +53,7 @@
 >
   {#if pane.showErrorMessage}
     <div class="audit-pane-block audit-pane-block-error">
-      <h5>Error Message</h5>
+      <h5>{m.audit_error_message_title()}</h5>
       <!-- Clickable error preview opens the Interactions drawer. -->
       <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role, a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
       <pre
@@ -72,11 +73,11 @@
   {#if pane.showHeaders}
     <div class="audit-pane-block audit-pane-block-headers">
       <div class="audit-pane-block-head">
-        <h5>{pane.headersTitle || "Headers"}</h5>
+        <h5>{pane.headersTitle || m.audit_headers_title()}</h5>
         <CopyButton
           state={copyHeadersState}
-          label="Copy Headers"
-          errorLabel="Copy failed"
+          label={m.audit_copy_headers()}
+          errorLabel={m.common_copy_failed()}
           class="audit-copy-btn"
           onclick={() => copyHeadersState.copy(pane.copyHeaders, formatJSON)}
         />
@@ -88,7 +89,7 @@
     <div class="audit-pane-block audit-pane-block-body">
       <div class="audit-pane-block-head">
         <div class="audit-pane-block-title">
-          <h5>Body</h5>
+          <h5>{m.audit_body_title()}</h5>
           {#if pane.bodyCacheRatioLabel}
             <span class="audit-prompt-cache-pill mono"
               >{pane.bodyCacheRatioLabel}</span
@@ -97,14 +98,14 @@
           {#if pane.streaming}
             <span class="audit-pane-streaming">
               <span class="live-dot is-streaming" aria-hidden="true"></span>
-              <span>streaming</span>
+              <span>{m.audit_streaming()}</span>
             </span>
           {/if}
         </div>
         <CopyButton
           state={copyBodyState}
-          label="Copy Body"
-          errorLabel="Copy failed"
+          label={m.audit_copy_body()}
+          errorLabel={m.common_copy_failed()}
           class="audit-copy-btn"
           onclick={() => copyBodyState.copy(pane.copyBody, formatJSON)}
         />

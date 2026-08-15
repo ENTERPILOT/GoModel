@@ -53,7 +53,8 @@ func normalizedUsageEntryForStorage(entry *UsageEntry) *UsageEntry {
 	providerName := strings.TrimSpace(entry.ProviderName)
 	costSource := strings.TrimSpace(entry.CostSource)
 	userPath := normalizeUsageEntryUserPath(entry.UserPath)
-	if normalized == entry.CacheType && providerName == entry.ProviderName && costSource == entry.CostSource && userPath == entry.UserPath {
+	sessionID := strings.TrimSpace(entry.SessionID)
+	if normalized == entry.CacheType && providerName == entry.ProviderName && costSource == entry.CostSource && userPath == entry.UserPath && sessionID == entry.SessionID {
 		return entry
 	}
 
@@ -62,6 +63,7 @@ func normalizedUsageEntryForStorage(entry *UsageEntry) *UsageEntry {
 	cloned.ProviderName = providerName
 	cloned.CostSource = costSource
 	cloned.UserPath = userPath
+	cloned.SessionID = sessionID
 	return &cloned
 }
 

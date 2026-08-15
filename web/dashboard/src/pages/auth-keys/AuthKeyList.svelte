@@ -7,29 +7,30 @@
   import { authKeyDeactivated, authKeyExpired, labelChipStyle } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
   import { Info, Pencil, Power, ShieldCheck, ShieldOff } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <div class="table-wrapper">
   <table class="data-table">
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Description</th>
-        <th>User Path</th>
-        <th>Labels</th>
-        <th>Token</th>
+        <th>{m.api_keys_name()}</th>
+        <th>{m.api_keys_column_description()}</th>
+        <th>{m.api_keys_column_user_path()}</th>
+        <th>{m.api_keys_column_labels()}</th>
+        <th>{m.api_keys_column_token()}</th>
         <th>
           <span
             class="auth-key-th-help"
-            title="Keys without dashboard access are denied the dashboard and every /admin API endpoint. Model endpoints and GET /v1/usage stay available to all keys."
+            title={m.api_keys_dashboard_access_help()}
           >
-            Dashboard Access
+            {m.api_keys_dashboard_access()}
             <Icon icon={Info} width="13" height="13" />
           </span>
         </th>
-        <th>Expires</th>
-        <th>Created</th>
-        <th aria-label="Actions"></th>
+        <th>{m.api_keys_expires()}</th>
+        <th>{m.api_keys_column_created()}</th>
+        <th aria-label={m.api_keys_actions()}></th>
       </tr>
     </thead>
     <tbody>
@@ -58,14 +59,14 @@
               class="auth-key-status-badge"
               class:auth-key-status-active={key.dashboard_access}
               class:auth-key-status-inactive={!key.dashboard_access}
-            >{key.dashboard_access ? "Allowed" : "Denied"}</span>
+            >{key.dashboard_access ? m.api_keys_allowed() : m.api_keys_denied()}</span>
           </td>
           <td title={key.expires_at ? formatTimestampUTC(key.expires_at) : ""}>
             {#if key.expires_at}
               <span class="auth-key-expiry">
                 <span>{formatDateUTC(key.expires_at)}</span>
                 {#if authKeyExpired(key)}
-                  <span class="auth-key-status-badge auth-key-status-inactive">Expired</span>
+                  <span class="auth-key-status-badge auth-key-status-inactive">{m.api_keys_expired()}</span>
                 {/if}
               </span>
             {:else}
@@ -77,7 +78,9 @@
             <div class="auth-key-row-actions">
               {#if key.active}
                 <TableActionButton
-                  label={(key.dashboard_access ? "Revoke dashboard access for API key " : "Grant dashboard access to API key ") + key.name}
+                  label={key.dashboard_access
+                    ? m.api_keys_revoke_access_action({ name: key.name })
+                    : m.api_keys_grant_access_action({ name: key.name })}
                   class="table-icon-btn"
                   onclick={() => store.toggleDashboardAccess(key)}
                   disabled={Boolean(store.dashboardAccessID)}
@@ -85,14 +88,16 @@
                   <Icon icon={key.dashboard_access ? ShieldOff : ShieldCheck} class="table-icon-svg" />
                 </TableActionButton>
                 <TableActionButton
-                  label={"Edit labels for API key " + key.name}
+                  label={m.api_keys_edit_labels_action({ name: key.name })}
                   class="table-icon-btn"
                   onclick={() => store.openLabelsEditor(key)}
                 >
                   <Icon icon={Pencil} class="table-icon-svg" />
                 </TableActionButton>
                 <TableActionButton
-                  label={(store.deactivatingID === key.id ? "Deactivating API key " : "Deactivate API key ") + key.name}
+                  label={store.deactivatingID === key.id
+                    ? m.api_keys_deactivating_action({ name: key.name })
+                    : m.api_keys_deactivate_action({ name: key.name })}
                   class="table-action-btn-danger table-icon-btn"
                   onclick={() => store.deactivateKey(key)}
                   disabled={store.deactivatingID === key.id}
@@ -103,9 +108,9 @@
                 <span
                   class="auth-key-status-badge auth-key-status-inactive"
                   title={key.deactivated_at
-                    ? "Deactivated on " + formatTimestampUTC(key.deactivated_at)
-                    : "Deactivated"}
-                >Deactivated</span>
+                    ? m.api_keys_deactivated_on({ date: formatTimestampUTC(key.deactivated_at) })
+                    : m.api_keys_deactivated()}
+                >{m.api_keys_deactivated()}</span>
               {/if}
             </div>
           </td>

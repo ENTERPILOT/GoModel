@@ -10,6 +10,7 @@
   } from "./virtualModelsLogic.js";
   import AccessToggle from "./AccessToggle.svelte";
   import { CircleDollarSign, Pencil } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <div class="alias-actions-cell model-list-actions">
@@ -18,7 +19,7 @@
   {/if}
   {#if pricingOverrides.modelPricingOverridesAvailable}
     <TableActionButton
-      label={pricingOverrides.modelPricingButtonLabel("global model pricing", pricingOverrides.hasGlobalPricingOverride())}
+      label={pricingOverrides.modelPricingButtonLabel(m.models_global_pricing(), pricingOverrides.hasGlobalPricingOverride())}
       class="table-icon-btn {pricingOverrides.modelPricingButtonClass(pricingOverrides.hasGlobalPricingOverride())}"
       onclick={() => pricingOverrides.openGlobalPricingOverrideEdit()}
     >
@@ -27,7 +28,7 @@
   {/if}
   {#if virtualModels.virtualModelsAvailable}
     <TableActionButton
-      label={modelOverrideEditButtonLabel("global model access", virtualModels.hasGlobalModelOverride())}
+      label={modelOverrideEditButtonLabel(m.models_global_access(), virtualModels.hasGlobalModelOverride())}
       class="table-icon-btn {modelOverrideEditButtonClass(virtualModels.hasGlobalModelOverride())}"
       onclick={() => virtualModels.openGlobalModelOverrideEdit()}
     >

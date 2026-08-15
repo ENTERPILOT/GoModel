@@ -28,6 +28,7 @@
     budgetUsageRatio,
   } from "./budgets-helpers.js";
   import { Pencil, RotateCcw, Tag, Trash2 } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { budgets = [] } = $props();
 
@@ -65,9 +66,9 @@
             {#if item.per_child}
               <span
                 class="budget-period-label"
-                title="An independent budget is created for each direct child path"
+                title={m.budgets_per_child_title()}
               >
-                <span>per child</span>
+                <span>{m.budgets_per_child_badge()}</span>
               </span>
             {/if}
             <span class="budget-period-label {budgetPeriodClass(item)}">
@@ -83,17 +84,17 @@
             </div>
             <div class="budget-row-actions">
               <TableActionButton
-                label="Edit budget"
+                label={m.budgets_edit_label()}
                 class="budget-action-btn"
                 onclick={() => store.openForm(item)}
               >
                 <Icon icon={Pencil} class="budget-action-icon" />
-                <span class="budget-action-label">Edit</span>
+                <span class="budget-action-label">{m.budgets_edit()}</span>
               </TableActionButton>
               <TableActionButton
                 label={store.resettingKey === budgetKey(item)
-                  ? "Resetting budget"
-                  : "Reset budget"}
+                  ? m.budgets_resetting_label()
+                  : m.budgets_reset_label()}
                 class="budget-action-btn budget-action-btn-warning"
                 onclick={() => store.resetBudget(item)}
                 disabled={store.resettingKey === budgetKey(item)}
@@ -101,14 +102,14 @@
                 <Icon icon={RotateCcw} class="budget-action-icon" />
                 <span class="budget-action-label">
                   {store.resettingKey === budgetKey(item)
-                    ? "Resetting"
-                    : "Reset"}
+                    ? m.budgets_resetting()
+                    : m.budgets_reset()}
                 </span>
               </TableActionButton>
               <TableActionButton
                 label={store.deletingKey === budgetKey(item)
-                  ? "Deleting budget"
-                  : "Delete budget"}
+                  ? m.budgets_deleting_label()
+                  : m.budgets_delete_label()}
                 class="table-action-btn-danger budget-action-btn"
                 onclick={() => store.deleteBudget(item)}
                 disabled={store.deletingKey === budgetKey(item)}
@@ -116,8 +117,8 @@
                 <Icon icon={Trash2} class="budget-action-icon" />
                 <span class="budget-action-label">
                   {store.deletingKey === budgetKey(item)
-                    ? "Deleting"
-                    : "Delete"}
+                    ? m.budgets_deleting()
+                    : m.budgets_delete()}
                 </span>
               </TableActionButton>
             </div>
@@ -126,14 +127,15 @@
         <div class="budget-bars">
           {#if item.per_child}
             <div class="per-child-summary">
-              Usage is tracked independently for each direct child of <code
+              {m.budgets_per_child_before_subject()}<code
                 >{budgetSubject(item)}</code
-              >. Query <code>/v1/usage</code> as a child to inspect its budget.
+              >{m.budgets_per_child_before_usage()}<code>/v1/usage</code
+              >{m.budgets_per_child_after_usage()}
             </div>
           {:else}
             <div class="budget-bar-line">
               <div class="budget-bar-label">
-                <span>Usage</span>
+                <span>{m.budgets_usage()}</span>
                 <span class="budget-bar-percent"
                   >{budgetUsagePercentLabel(item)}</span
                 >
@@ -144,12 +146,11 @@
                 aria-valuemin="0"
                 aria-valuemax="100"
                 aria-valuenow={budgetUsagePercent(item)}
-                aria-label={"Budget usage: " +
-                  formatCost(item.spent) +
-                  " of " +
-                  formatCost(item.amount) +
-                  ", " +
-                  budgetRemainingLabel(item)}
+                aria-label={m.budgets_usage_label({
+                  spent: formatCost(item.spent),
+                  amount: formatCost(item.amount),
+                  remaining: budgetRemainingLabel(item),
+                })}
                 style="--budget-progress: {budgetUsagePercent(item)}%"
               >
                 <div
@@ -159,7 +160,10 @@
                 ></div>
                 <span class="budget-bar-text-row">
                   <span class="budget-bar-text budget-bar-text-center">
-                    {formatCost(item.spent) + " of " + formatCost(item.amount)}
+                    {m.budgets_spent_of({
+                      spent: formatCost(item.spent),
+                      amount: formatCost(item.amount),
+                    })}
                   </span>
                   <span class="budget-bar-text budget-bar-text-end">
                     {budgetRemainingLabel(item)}
@@ -170,7 +174,10 @@
                   aria-hidden="true"
                 >
                   <span class="budget-bar-text budget-bar-text-center">
-                    {formatCost(item.spent) + " of " + formatCost(item.amount)}
+                    {m.budgets_spent_of({
+                      spent: formatCost(item.spent),
+                      amount: formatCost(item.amount),
+                    })}
                   </span>
                   <span class="budget-bar-text budget-bar-text-end">
                     {budgetRemainingLabel(item)}
@@ -181,7 +188,7 @@
           {/if}
           <div class="budget-bar-line">
             <div class="budget-bar-label">
-              <span>Period</span>
+              <span>{m.budgets_period()}</span>
               <span class="budget-bar-percent"
                 >{budgetPeriodPercentLabel(item)}</span
               >
@@ -189,7 +196,7 @@
             <div
               class="budget-bar-track {budgetPeriodTrackClass(item)}"
               role="progressbar"
-              aria-label="Budget period elapsed"
+              aria-label={m.budgets_period_elapsed()}
               aria-valuemin="0"
               aria-valuemax="100"
               aria-valuenow={budgetPeriodPercent(item)}

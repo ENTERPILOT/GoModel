@@ -21,6 +21,7 @@
     providerRetrySummary,
     providerCircuitBreakerSummary,
   } from "./providersLogic.js";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { provider, expanded } = $props();
 
@@ -29,8 +30,8 @@
   // Config rows that are only rendered when the provider declares them.
   const optionalConfig = $derived(
     [
-      ["Base URL", provider.config?.base_url],
-      ["API Version", provider.config?.api_version],
+      [m.overview_base_url(), provider.config?.base_url],
+      [m.overview_api_version(), provider.config?.api_version],
     ].filter(([, value]) => !!value),
   );
 </script>
@@ -60,10 +61,10 @@
 
     {#if providerRequestHealth(provider)}
       <div class="provider-status-health">
-        {@render configRow("Recent Requests", providerRecentTrafficSummary(provider))}
+        {@render configRow(m.overview_recent_requests(), providerRecentTrafficSummary(provider))}
         {#if providerBreakerState(provider)}
           <div class="provider-status-config-row">
-            <span class="provider-status-config-label">Breaker State</span>
+            <span class="provider-status-config-label">{m.overview_breaker_state()}</span>
             <span>
               <span
                 class={["provider-status-health-state", breakerClass]}
@@ -73,7 +74,9 @@
         {/if}
         {#if providerHealthModels(provider).length > 0}
           <div class="provider-status-config-row">
-            <span class="provider-status-config-label">Models (Recent Traffic)</span>
+            <span class="provider-status-config-label"
+              >{m.overview_models_recent_traffic()}</span
+            >
             <div class="provider-status-health-models">
               {#each providerHealthModels(provider) as model (model.model)}
                 <div
@@ -97,9 +100,9 @@
       {#each optionalConfig as [label, value] (label)}
         {@render configRow(label, value, true)}
       {/each}
-      {@render configRow("Configured Models", providerModelsSummary(provider))}
-      {@render configRow("Retry", providerRetrySummary(provider))}
-      {@render configRow("Circuit Breaker", providerCircuitBreakerSummary(provider))}
+      {@render configRow(m.overview_configured_models(), providerModelsSummary(provider))}
+      {@render configRow(m.overview_retry(), providerRetrySummary(provider))}
+      {@render configRow(m.overview_circuit_breaker(), providerCircuitBreakerSummary(provider))}
     </div>
   </div>
 </div>
