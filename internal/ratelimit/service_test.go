@@ -15,6 +15,8 @@ import (
 type memStore struct {
 	rules    []Rule
 	counters []WindowSnapshot
+	// written stamps each row the way a real store's updated_at column does.
+	written map[string]int64
 }
 
 func (m *memStore) ListRules(context.Context) ([]Rule, error) {
@@ -82,8 +84,11 @@ func snapshotIdentity(s WindowSnapshot) string {
 // that went two periods without a write.
 func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) error {
 	now := time.Now().Unix()
+	if m.written == nil {
+		m.written = make(map[string]int64)
+	}
 	for _, snap := range snapshots {
-		snap.UpdatedAt = now
+		m.written[snapshotIdentity(snap)] = now
 		replaced := false
 		for i, existing := range m.counters {
 			if snapshotIdentity(existing) == snapshotIdentity(snap) {
@@ -98,7 +103,7 @@ func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) e
 	}
 	kept := m.counters[:0]
 	for _, snap := range m.counters {
-		if snap.UpdatedAt+2*snap.PeriodSeconds >= now {
+		if m.written[snapshotIdentity(snap)]+2*snap.PeriodSeconds >= now {
 			kept = append(kept, snap)
 		}
 	}

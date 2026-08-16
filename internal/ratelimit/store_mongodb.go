@@ -377,15 +377,22 @@ func (s *MongoDBStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, erro
 	return snapshots, nil
 }
 
+// counterDocument is a window row as stored: the snapshot plus the write
+// stamp that drives staleness collection. The stamp is the store's own
+// bookkeeping, so it stays out of WindowSnapshot.
+type counterDocument struct {
+	WindowSnapshot `bson:",inline"`
+	UpdatedAt      int64 `bson:"updated_at"`
+}
+
 func (s *MongoDBStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
 	now := time.Now().Unix()
 	if len(snapshots) > 0 {
 		writes := make([]mongo.WriteModel, 0, len(snapshots))
 		for _, snap := range snapshots {
-			snap.UpdatedAt = now
 			writes = append(writes, mongo.NewUpdateOneModel().
 				SetFilter(counterIdentityFilter(snap)).
-				SetUpdate(bson.D{{Key: "$set", Value: snap}}).
+				SetUpdate(bson.D{{Key: "$set", Value: counterDocument{WindowSnapshot: snap, UpdatedAt: now}}}).
 				SetUpsert(true))
 		}
 		if _, err := s.counters.BulkWrite(ctx, writes, options.BulkWrite().SetOrdered(false)); err != nil {

@@ -154,8 +154,12 @@ func TestStartLoadsAndCloseFlushes(t *testing.T) {
 	}
 }
 
-func TestCloseWithoutStartDoesNotWrite(t *testing.T) {
-	store := &recordingStore{memStore: memStore{}}
+// TestServiceWithoutStartNeverWrites covers both halves of the "not this
+// generation" rule: admission never touches storage, and a service that was
+// built but never started writes nothing on the way out either — a discarded
+// reload replacement must not flush its empty windows over the live ones.
+func TestServiceWithoutStartNeverWrites(t *testing.T) {
+	store := &recordingStore{}
 	if err := store.UpsertRules(context.Background(), []Rule{{
 		Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(5)), Source: SourceManual,
 	}}); err != nil {
@@ -168,9 +172,12 @@ func TestCloseWithoutStartDoesNotWrite(t *testing.T) {
 	if _, err := service.Acquire(onPath("/"), time.Now().UTC()); err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
+	if store.saves.Load() != 0 {
+		t.Fatalf("Acquire saved %d times, want 0", store.saves.Load())
+	}
 	service.Close()
 	if store.saves.Load() != 0 {
-		t.Fatalf("saves = %d, want 0", store.saves.Load())
+		t.Fatalf("Close without Start saved %d times, want 0", store.saves.Load())
 	}
 }
 
@@ -205,26 +212,6 @@ func TestResetClearsPersistedWindow(t *testing.T) {
 	next.Start(context.Background())
 	if _, err := next.Acquire(onPath("/team"), now); err != nil {
 		t.Fatalf("Acquire after reset restore: %v", err)
-	}
-}
-
-func TestAdmitDoesNotSave(t *testing.T) {
-	store := &recordingStore{memStore: memStore{}}
-	if err := store.UpsertRules(context.Background(), []Rule{{
-		Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(5)), Source: SourceManual,
-	}}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	service, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
-	t.Cleanup(service.Close)
-	if _, err := service.Acquire(onPath("/"), time.Now().UTC()); err != nil {
-		t.Fatalf("Acquire: %v", err)
-	}
-	if store.saves.Load() != 0 {
-		t.Fatalf("Admit saved %d times", store.saves.Load())
 	}
 }
 

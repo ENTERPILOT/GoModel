@@ -30,15 +30,13 @@ func WithFlushInterval(interval time.Duration) ServiceOption {
 	}
 }
 
+// flushIntervalFromSeconds converts the configured seconds, clamping an
+// absurd value rather than letting it overflow into a negative duration.
 func flushIntervalFromSeconds(seconds int) time.Duration {
 	if seconds <= 0 {
 		return 0
 	}
-	maxSeconds := int(math.MaxInt64 / int64(time.Second))
-	if seconds > maxSeconds {
-		return time.Duration(math.MaxInt64)
-	}
-	return time.Duration(seconds) * time.Second
+	return time.Duration(min(int64(seconds), int64(math.MaxInt64/time.Second))) * time.Second
 }
 
 func persistContext(parent context.Context) (context.Context, context.CancelFunc) {

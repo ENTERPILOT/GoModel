@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
@@ -254,101 +253,15 @@ func TestSQLStoreMigratesPreScopeTable(t *testing.T) {
 
 func TestSQLStoreCounterRoundTrip(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
-		ctx := context.Background()
-		first := []WindowSnapshot{
-			{
-				Scope: string(ScopeUserPath), Subject: "/customers", Partition: "/customers/alice",
-				PeriodSeconds:       PeriodHourSeconds,
-				RequestsWindowStart: 1700000000, RequestsCurrent: 3, RequestsPrevious: 1,
-				TokensWindowStart: 1700000000, TokensCurrent: 40, TokensPrevious: 10,
-			},
-			{
-				Scope: string(ScopeUserPath), Subject: "/customers", Partition: "/customers/bob",
-				PeriodSeconds:       PeriodHourSeconds,
-				RequestsWindowStart: 1700000060, RequestsCurrent: 1, RequestsPrevious: 2,
-				TokensWindowStart: 1700000060, TokensCurrent: 7, TokensPrevious: 8,
-			},
-		}
-		if err := store.SaveCounters(ctx, first); err != nil {
-			t.Fatalf("SaveCounters: %v", err)
-		}
-		got, err := store.LoadCounters(ctx)
-		if err != nil {
-			t.Fatalf("LoadCounters: %v", err)
-		}
-		if len(got) != 2 {
-			t.Fatalf("loaded = %d, want 2", len(got))
-		}
-		byPart := map[string]WindowSnapshot{}
-		for _, snap := range got {
-			byPart[snap.Partition] = snap
-		}
-		alice := byPart["/customers/alice"]
-		if alice.RequestsWindowStart != 1700000000 || alice.RequestsCurrent != 3 || alice.RequestsPrevious != 1 ||
-			alice.TokensWindowStart != 1700000000 || alice.TokensCurrent != 40 || alice.TokensPrevious != 10 {
-			t.Fatalf("alice = %+v", alice)
-		}
-		bob := byPart["/customers/bob"]
-		if bob.RequestsWindowStart != 1700000060 || bob.RequestsCurrent != 1 || bob.RequestsPrevious != 2 ||
-			bob.TokensWindowStart != 1700000060 || bob.TokensCurrent != 7 || bob.TokensPrevious != 8 {
-			t.Fatalf("bob = %+v", bob)
-		}
-
-		if err := store.DeleteCounter(ctx, ScopeUserPath, "/customers", PeriodHourSeconds); err != nil {
-			t.Fatalf("DeleteCounter: %v", err)
-		}
-		got, err = store.LoadCounters(ctx)
-		if err != nil {
-			t.Fatalf("LoadCounters after delete: %v", err)
-		}
-		if len(got) != 0 {
-			t.Fatalf("after delete = %d, want 0", len(got))
-		}
-
-		// A save that omits a row leaves it alone: it is still restorable
-		// until it goes two periods without a write.
-		if err := store.SaveCounters(ctx, first); err != nil {
-			t.Fatalf("SaveCounters again: %v", err)
-		}
-		if err := store.SaveCounters(ctx, first[:1]); err != nil {
-			t.Fatalf("SaveCounters partial: %v", err)
-		}
-		got, err = store.LoadCounters(ctx)
-		if err != nil {
-			t.Fatalf("LoadCounters after partial save: %v", err)
-		}
-		if len(got) != 2 {
-			t.Fatalf("partial save dropped a live row: %+v", got)
-		}
-
-		// A row nobody has written for two of its periods is collected by the
-		// next save.
-		if _, err := store.db.Exec(ctx, upsertCounterSQL,
-			string(ScopeUserPath), "/gone", "", PeriodHourSeconds,
-			0, 4, 0, 0, 0, 0, time.Now().Unix()-3*PeriodHourSeconds,
-		); err != nil {
-			t.Fatalf("seed stale counter: %v", err)
-		}
-		if err := store.SaveCounters(ctx, first); err != nil {
-			t.Fatalf("SaveCounters collecting: %v", err)
-		}
-		got, err = store.LoadCounters(ctx)
-		if err != nil {
-			t.Fatalf("LoadCounters after collection: %v", err)
-		}
-		if len(got) != 2 {
-			t.Fatalf("expired row not collected: %+v", got)
-		}
-
-		if err := store.DeleteAllCounters(ctx); err != nil {
-			t.Fatalf("DeleteAllCounters: %v", err)
-		}
-		got, err = store.LoadCounters(ctx)
-		if err != nil {
-			t.Fatalf("LoadCounters after delete all: %v", err)
-		}
-		if len(got) != 0 {
-			t.Fatalf("after delete all = %d, want 0", len(got))
-		}
+		runCounterStoreSuite(t, store, func(t *testing.T, snap WindowSnapshot, updatedAt int64) {
+			t.Helper()
+			if _, err := store.db.Exec(context.Background(), upsertCounterSQL,
+				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds,
+				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
+				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, updatedAt,
+			); err != nil {
+				t.Fatalf("seed stale counter: %v", err)
+			}
+		})
 	})
 }
