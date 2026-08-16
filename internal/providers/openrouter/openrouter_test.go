@@ -12,6 +12,58 @@ import (
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
+// ListModels must keep OpenRouter's architecture modalities and context
+// length, mapping output modalities onto gateway modes so the catalog's long
+// tail is categorized without remote-registry entries.
+func TestListModels_StampsArchitectureModalities(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Errorf("Path = %q, want /models", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"openai/gpt-4o-mini","created":1721260800,"context_length":128000,
+			 "architecture":{"input_modalities":["text","image"],"output_modalities":["text"]}},
+			{"id":"google/gemini-3-pro-image","created":1721260800,
+			 "architecture":{"input_modalities":["text"],"output_modalities":["image"]}},
+			{"id":"mystery/no-architecture","created":1721260800}
+		]}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Data) != 3 {
+		t.Fatalf("len(Data) = %d, want 3", len(resp.Data))
+	}
+	byID := map[string]core.Model{}
+	for _, m := range resp.Data {
+		byID[m.ID] = m
+	}
+
+	chat := byID["openai/gpt-4o-mini"]
+	if chat.Metadata == nil || len(chat.Metadata.Modes) != 1 || chat.Metadata.Modes[0] != "chat" {
+		t.Errorf("gpt-4o-mini metadata = %+v, want chat modes", chat.Metadata)
+	}
+	if chat.Metadata == nil || chat.Metadata.ContextWindow == nil || *chat.Metadata.ContextWindow != 128000 {
+		t.Errorf("gpt-4o-mini context window = %+v, want 128000", chat.Metadata)
+	}
+	image := byID["google/gemini-3-pro-image"]
+	if image.Metadata == nil || len(image.Metadata.Modes) != 1 || image.Metadata.Modes[0] != "image_generation" {
+		t.Errorf("image model metadata = %+v, want image_generation modes", image.Metadata)
+	}
+	if image.Metadata == nil || len(image.Metadata.Categories) != 1 || image.Metadata.Categories[0] != core.CategoryImage {
+		t.Errorf("image model categories = %+v, want [image]", image.Metadata)
+	}
+	if byID["mystery/no-architecture"].Metadata != nil {
+		t.Errorf("no-architecture metadata = %+v, want nil", byID["mystery/no-architecture"].Metadata)
+	}
+}
+
 func TestChatCompletion_AddsDefaultAttributionHeaders(t *testing.T) {
 	var gotReferer string
 	var gotTitle string

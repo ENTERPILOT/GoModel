@@ -1,6 +1,7 @@
 package openrouter
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -73,6 +74,79 @@ func (p *Provider) mutateRequest(req *llmclient.Request) {
 		strings.TrimSpace(p.appName) != "" {
 		req.Headers.Set("X-OpenRouter-Title", p.appName)
 	}
+}
+
+// openrouterModel is the subset of OpenRouter's /models entry the gateway
+// reads beyond the OpenAI-compatible shape: per-model architecture modalities
+// and context length, which the generic listing parser would drop.
+type openrouterModel struct {
+	ID            string `json:"id"`
+	Created       int64  `json:"created"`
+	ContextLength int    `json:"context_length"`
+	Architecture  struct {
+		InputModalities  []string `json:"input_modalities"`
+		OutputModalities []string `json:"output_modalities"`
+	} `json:"architecture"`
+}
+
+// ListModels parses OpenRouter's native models listing so architecture
+// modalities and context length survive into model metadata. OpenRouter's
+// catalog is far larger than the remote model registry, so discovery-time
+// classification keeps its long tail categorized; registry enrichment and
+// operator config still override the stamp.
+func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
+	var upstream struct {
+		Data []openrouterModel `json:"data"`
+	}
+	if err := p.Do(ctx, llmclient.Request{
+		Method:   http.MethodGet,
+		Endpoint: "/models",
+	}, &upstream); err != nil {
+		return nil, err
+	}
+	models := make([]core.Model, 0, len(upstream.Data))
+	for _, m := range upstream.Data {
+		id := strings.TrimSpace(m.ID)
+		if id == "" {
+			continue
+		}
+		models = append(models, core.Model{
+			ID:       id,
+			Object:   "model",
+			OwnedBy:  "openrouter",
+			Created:  m.Created,
+			Metadata: openrouterMetadata(m),
+		})
+	}
+	return &core.ModelsResponse{Object: "list", Data: models}, nil
+}
+
+// openrouterMetadata maps output modalities onto gateway modes. Only the
+// unambiguous mappings are claimed (text output → chat, image output → image
+// generation); anything else is left for the registry or ID inference.
+func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
+	modes := make([]string, 0, 2)
+	for _, modality := range m.Architecture.OutputModalities {
+		switch strings.ToLower(strings.TrimSpace(modality)) {
+		case "text":
+			modes = append(modes, "chat")
+		case "image":
+			modes = append(modes, "image_generation")
+		}
+	}
+	if len(modes) == 0 && m.ContextLength <= 0 {
+		return nil
+	}
+	meta := &core.ModelMetadata{}
+	if len(modes) > 0 {
+		meta.Modes = modes
+		meta.Categories = core.CategoriesForModes(modes)
+	}
+	if m.ContextLength > 0 {
+		contextWindow := m.ContextLength
+		meta.ContextWindow = &contextWindow
+	}
+	return meta
 }
 
 func setHeaders(req *http.Request, apiKey string) {

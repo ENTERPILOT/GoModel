@@ -585,6 +585,28 @@ func TestListModelsFiltersUnsupportedEndpointsAndRotatesKeys(t *testing.T) {
 			*resp.Data[0].Metadata.ContextWindow != 128000 {
 			t.Fatalf("model metadata = %#v", resp.Data[0].Metadata)
 		}
+		wantModes := map[string][]string{
+			"command-a":                 {"chat"},
+			"embed-v4.0":                {"embedding"},
+			"cohere-transcribe-03-2026": {"audio_transcription"},
+			"legacy-unknown":            nil,
+		}
+		for _, model := range resp.Data {
+			want := wantModes[model.ID]
+			var got []string
+			if model.Metadata != nil {
+				got = model.Metadata.Modes
+			}
+			if len(got) != len(want) || (len(want) > 0 && got[0] != want[0]) {
+				t.Errorf("%s Modes = %v, want %v", model.ID, got, want)
+			}
+			if len(want) > 0 {
+				cats := core.CategoriesForModes(want)
+				if model.Metadata == nil || len(model.Metadata.Categories) != len(cats) || model.Metadata.Categories[0] != cats[0] {
+					t.Errorf("%s Categories = %+v, want %v", model.ID, model.Metadata, cats)
+				}
+			}
+		}
 	}
 	if len(headers) != 2 || headers[0] != "Bearer first" || headers[1] != "Bearer second" {
 		t.Fatalf("Authorization headers = %#v", headers)

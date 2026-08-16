@@ -90,9 +90,17 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 			continue
 		}
 		var metadata *core.ModelMetadata
-		if model.ContextLength > 0 {
-			contextWindow := int(model.ContextLength)
-			metadata = &core.ModelMetadata{ContextWindow: &contextWindow}
+		modes := modesFromEndpoints(model.Endpoints)
+		if model.ContextLength > 0 || len(modes) > 0 {
+			metadata = &core.ModelMetadata{}
+			if model.ContextLength > 0 {
+				contextWindow := int(model.ContextLength)
+				metadata.ContextWindow = &contextWindow
+			}
+			if len(modes) > 0 {
+				metadata.Modes = modes
+				metadata.Categories = core.CategoriesForModes(modes)
+			}
 		}
 		models = append(models, core.Model{
 			ID:       model.Name,
@@ -102,6 +110,30 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		})
 	}
 	return &core.ModelsResponse{Object: "list", Data: models}, nil
+}
+
+// modesFromEndpoints maps Cohere's per-model endpoints list onto gateway mode
+// strings so models are classified from discovery even when the remote model
+// registry lacks an entry. Endpoints without a gateway surface are skipped;
+// registry enrichment and operator config still override this stamp.
+func modesFromEndpoints(endpoints []string) []string {
+	modes := make([]string, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		switch strings.ToLower(strings.TrimSpace(endpoint)) {
+		case "chat":
+			modes = append(modes, "chat")
+		case "embed":
+			modes = append(modes, "embedding")
+		case "rerank":
+			modes = append(modes, "rerank")
+		case "transcriptions":
+			modes = append(modes, "audio_transcription")
+		}
+	}
+	if len(modes) == 0 {
+		return nil
+	}
+	return modes
 }
 
 func supportedModel(model modelInfo) bool {
