@@ -191,3 +191,50 @@ func TestGeminiToolsFromOpenAIRejectsUnsupportedToolShapes(t *testing.T) {
 		})
 	}
 }
+
+func TestCopyResponseFormatJSONSchemaUsesResponseJsonSchema(t *testing.T) {
+	raw := []byte(`{
+		"type": "json_schema",
+		"json_schema": {
+			"name": "planets",
+			"schema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"type": "object",
+				"properties": {"planets": {"type": "array", "items": {"type": "string"}}},
+				"required": ["planets"],
+				"additionalProperties": false
+			}
+		}
+	}`)
+
+	cfg := map[string]any{}
+	copyResponseFormat(raw, cfg)
+
+	if got := cfg["responseMimeType"]; got != "application/json" {
+		t.Fatalf("responseMimeType = %#v, want application/json", got)
+	}
+	if _, ok := cfg["responseSchema"]; ok {
+		t.Fatal("responseSchema should not be set; responseJsonSchema accepts full JSON Schema")
+	}
+	schema, ok := cfg["responseJsonSchema"].(map[string]any)
+	if !ok {
+		t.Fatalf("responseJsonSchema = %#v, want object", cfg["responseJsonSchema"])
+	}
+	if _, ok := schema["$schema"]; ok {
+		t.Fatal("$schema should be stripped")
+	}
+	if got := schema["additionalProperties"]; got != false {
+		t.Fatalf("additionalProperties = %#v, want false (preserved)", got)
+	}
+}
+
+func TestCopyResponseFormatJSONObject(t *testing.T) {
+	cfg := map[string]any{}
+	copyResponseFormat([]byte(`{"type": "json_object"}`), cfg)
+	if got := cfg["responseMimeType"]; got != "application/json" {
+		t.Fatalf("responseMimeType = %#v, want application/json", got)
+	}
+	if _, ok := cfg["responseJsonSchema"]; ok {
+		t.Fatal("responseJsonSchema should not be set for json_object")
+	}
+}

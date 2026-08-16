@@ -65,6 +65,12 @@
       "id": "grok-4.5",
       "object": "model",
       "owned_by": "xai"
+    },
+    {
+      "created": 0,
+      "id": "grok-4.6",
+      "object": "model",
+      "owned_by": "xai"
     }
   ],
   "object": "list"
