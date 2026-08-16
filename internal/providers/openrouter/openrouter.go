@@ -164,8 +164,9 @@ func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 			modes = append(modes, "image_generation")
 		case "embeddings":
 			modes = append(modes, "embedding")
-		case "rerank":
-			modes = append(modes, "rerank")
+			// "rerank" is deliberately not mapped: the gateway has no rerank
+			// surface on OpenRouter, and the rerank mode would sort the model
+			// into the Embeddings category despite being unreachable here.
 		}
 	}
 	if len(modes) == 0 && m.ContextLength <= 0 {

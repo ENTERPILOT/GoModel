@@ -2,6 +2,7 @@ package openrouter
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -83,8 +84,33 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	if _, ok := byID["acme/video-only"]; ok {
 		t.Error("video-only model must be skipped: no gateway surface reaches it on OpenRouter")
 	}
-	if byID["mystery/no-architecture"].Metadata != nil {
-		t.Errorf("no-architecture metadata = %+v, want nil", byID["mystery/no-architecture"].Metadata)
+	noArch, ok := byID["mystery/no-architecture"]
+	if !ok {
+		t.Fatal("no-architecture model must be retained: missing signal is not proof of unservability")
+	}
+	if noArch.Metadata != nil {
+		t.Errorf("no-architecture metadata = %+v, want nil", noArch.Metadata)
+	}
+}
+
+// A failed upstream listing must propagate as an error, not an empty catalog.
+func TestListModels_UpstreamErrorPropagates(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"upstream exploded"}}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.ListModels(context.Background())
+	if err == nil {
+		t.Fatalf("expected error, got response: %+v", resp)
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error type = %T, want *core.GatewayError: %v", err, err)
 	}
 }
 
