@@ -3,7 +3,7 @@ title: "GoModel Pro"
 description: "GoModel Pro adds licensed prompt compression, intelligent routing, and OIDC SSO to the GoModel gateway."
 icon: "gem"
 noindex: true
-keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "SSO", "license"]
+keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "SSO", "OpenTelemetry", "quota templates", "license"]
 ---
 
 ## What Pro is
@@ -11,7 +11,7 @@ keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "
 GoModel Pro is the commercial distribution of GoModel. It uses the same
 gateway, configuration, providers, dashboard, and APIs as open-source
 GoModel, with licensed extensions for prompt compression, intelligent routing,
-and OIDC single sign-on.
+OIDC single sign-on, OpenTelemetry export, and per-child quota templates.
 
 Without a valid license, the Pro binary starts as the open-source gateway and
 does not block traffic. An explicitly enabled SSO configuration is the
@@ -160,12 +160,52 @@ Successful logins, rejected policies, and logouts are recorded as sanitized
 audit events. Tokens, authorization codes, cookies, raw claims, and provider
 error details are not stored.
 
+## OpenTelemetry
+
+OpenTelemetry export instruments inbound HTTP requests and outbound provider
+calls, using the GenAI semantic conventions for the latter. It never records
+prompts, responses, credentials, or error messages.
+
+Enable it explicitly, then configure exporters, resource attributes, sampling,
+and propagation with the standard `OTEL_*` environment variables:
+
+```env
+PRO_OTEL_ENABLED=true
+OTEL_TRACES_EXPORTER=otlp
+OTEL_METRICS_EXPORTER=otlp
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+```
+
+`OTEL_TRACES_EXPORTER` and `OTEL_METRICS_EXPORTER` accept `otlp` (default) or
+`none`. Metrics record `gen_ai.client.operation.duration` and
+`gen_ai.client.operation.time_to_first_chunk` histograms. Traces record a
+client span per non-streaming provider call carrying `gen_ai.operation.name`,
+`gen_ai.provider.name`, `gen_ai.request.model`, and `gomodel.provider.name`.
+Streaming calls that error retroactively synthesize a span so failures are
+still traced. HTTP instrumentation excludes client and server addresses from
+span attributes and cardinality-sensitive attributes from metrics, and skips
+`/health`, `/health/ready`, `/metrics`, and `/debug/pprof*`.
+
+Like SSO, `PRO_OTEL_ENABLED=true` without the `opentelemetry` entitlement fails
+startup rather than starting unobserved.
+
+## Quota templates
+
+Per-child quota templates let one `user_path` budget definition apply
+independently to each direct child path instead of one shared subtree budget.
+Set `per_child: true` on a `budgets.user_paths` entry — see
+[Budgets](/features/budgets#dynamic-per-child-budgets) for YAML and
+environment-variable examples and matching rules. Without the
+`quota_templates` entitlement, `per_child: true` in configuration aborts
+startup and admin API writes are rejected with 403
+`quota_templates_not_entitled`.
+
 ## Licensing
 
 Pro features are granted by an offline Ed25519-signed token in
 `GOMODEL_PRO_LICENSE`. Validation requires no network access and works in
 air-gapped environments. A license can independently grant `compression`,
-`routing`, and `sso`.
+`routing`, `sso`, `opentelemetry`, and `quota_templates`.
 
 Use the separate `gomodel-pro` distribution and its documentation for
 installation, production build, and license-issuance instructions.
