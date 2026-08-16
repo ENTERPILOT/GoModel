@@ -36,11 +36,12 @@ flowchart LR
    models, matching IDs directly, through aliases, and with release-date
    suffixes stripped. Wrong or missing data is best fixed by contributing to the
    registry; use an override for an immediate fix.
-4. **Provider discovery** — the provider's own `/models` response is where every
-   catalog entry starts, and some providers report capabilities there that
-   GoModel keeps: Gemini's `supportedGenerationMethods`, Cohere's per-model
-   `endpoints` and context length, OpenRouter's architecture modalities and
-   context length, and Ollama's `/api/show` capabilities.
+4. **Provider discovery** — some providers report capabilities in their own
+   model listings, and GoModel keeps them for the models it discovers there:
+   Gemini's `supportedGenerationMethods`, Cohere's per-model `endpoints` and
+   context length, OpenRouter's architecture modalities and context length, and
+   Ollama's `/api/show` capabilities. Models declared via configured model
+   lists skip this step.
 5. **ID heuristic** — a last-resort name check for models that end up with no
    modes at all (typical for llama.cpp and LM Studio): IDs containing `embed` or
    matching well-known embedding families (`bge`, `e5`, `gte`, `minilm`) become
@@ -61,6 +62,8 @@ flowchart LR
 ## Offline behavior
 
 If the catalog fetch fails or the deployment is air-gapped, the gateway runs
-normally — models just have no enriched metadata (and therefore no pricing).
-Mirror `MODEL_LIST_URL` internally or declare metadata in `config.yaml`; see
-[Production guide](/guides/production) for details.
+normally — only the catalog-supplied defaults (including catalog pricing) are
+missing. Pricing overrides, `config.yaml` metadata, provider discovery signals,
+and the ID heuristic still apply. Mirror `MODEL_LIST_URL` internally or declare
+metadata in `config.yaml`; see [Production guide](/guides/production) for
+details.
