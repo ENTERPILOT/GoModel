@@ -177,9 +177,9 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 ```
 
 `OTEL_TRACES_EXPORTER` and `OTEL_METRICS_EXPORTER` accept `otlp` (default) or
-`none`. Traces emit `gen_ai.client.operation.duration` and
-`gen_ai.client.operation.time_to_first_chunk` histograms, plus a client span
-per non-streaming provider call carrying `gen_ai.operation.name`,
+`none`. Metrics record `gen_ai.client.operation.duration` and
+`gen_ai.client.operation.time_to_first_chunk` histograms. Traces record a
+client span per non-streaming provider call carrying `gen_ai.operation.name`,
 `gen_ai.provider.name`, `gen_ai.request.model`, and `gomodel.provider.name`.
 Streaming calls that error retroactively synthesize a span so failures are
 still traced. HTTP instrumentation excludes client and server addresses from
