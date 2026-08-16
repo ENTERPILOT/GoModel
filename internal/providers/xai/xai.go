@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -110,7 +111,9 @@ func normalizeReasoningEffort(model, effort string) string {
 }
 
 // supportsXHighEffort reports whether the model documents the "xhigh"
-// reasoning effort level: the multi-agent family and grok-4.6+.
+// reasoning effort level: the multi-agent family and grok-4.6+. The
+// grok-4.20 family is excluded: it predates 4.6 as an experimental
+// release, not a successor.
 func supportsXHighEffort(model string) bool {
 	model = strings.ToLower(model)
 	if strings.Contains(model, "multi-agent") {
@@ -124,9 +127,11 @@ func supportsXHighEffort(model string) bool {
 	if i := strings.IndexFunc(rest, func(r rune) bool { return r < '0' || r > '9' }); i >= 0 {
 		digits = rest[:i]
 	}
-	// Two-or-more-digit minors (4.20 family) are older experimental
-	// releases, not successors of 4.6.
-	return len(digits) == 1 && digits >= "6"
+	minor, err := strconv.Atoi(digits)
+	if err != nil {
+		return false
+	}
+	return minor >= 6 && minor != 20
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider

@@ -42,7 +42,7 @@ and passes through unchanged.
 | Client sends | xAI receives |
 | ------------ | ------------ |
 | `none` / `low` / `medium` / `high` | unchanged |
-| `xhigh` / `max` | `xhigh` on `grok-4.6` and later, and on the multi-agent Grok family (where it selects the agent count); `high` on older models |
+| `xhigh` / `max` | `xhigh` on `grok-4.6` and later, and on the multi-agent Grok family (where it selects the agent count); `high` on older models, including the experimental `grok-4.20` family |
 | anything else | passed through for xAI to judge |
 
 Models without reasoning support reject the field upstream; omit `reasoning`
