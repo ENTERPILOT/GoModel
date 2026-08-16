@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -33,7 +34,9 @@ type fakeBudgetStatusChecker struct {
 	gotSubjects budget.Subjects
 }
 
-func (f *fakeBudgetStatusChecker) Check(context.Context, budget.Subjects, time.Time) error { return nil }
+func (f *fakeBudgetStatusChecker) Check(context.Context, budget.Subjects, time.Time) error {
+	return nil
+}
 
 func (f *fakeBudgetStatusChecker) StatusesFor(_ context.Context, subjects budget.Subjects, _ time.Time) ([]budget.CheckResult, error) {
 	f.gotSubjects = subjects
@@ -141,6 +144,80 @@ func TestUsageStatusReportsManagedKeyPath(t *testing.T) {
 	rl := body.RateLimits[0]
 	if rl.UserPath != "/team" || rl.PeriodLabel != "minute" || rl.RequestsUsed != 3 || rl.MaxRequests == nil || *rl.MaxRequests != 7 {
 		t.Fatalf("rate limit status = %+v, want /team minute rule with 3 used", rl)
+	}
+}
+
+// A per-child template reports the parent it was declared on as `subject`
+// while `user_path` names the child partition the caller was actually
+// charged against; a plain rule reports the same path for both.
+func TestUsageStatusReportsPerChildSubjects(t *testing.T) {
+	requests := int64(7)
+	tests := []struct {
+		name             string
+		perChild         bool
+		effectiveSubject string
+		wantUserPath     string
+	}{
+		{
+			name:         "plain user path rule",
+			wantUserPath: "/team",
+		},
+		{
+			name:             "per-child template",
+			perChild:         true,
+			effectiveSubject: "/team/alice",
+			wantUserPath:     "/team/alice",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				UsageSummarizer: &fakeUsageSummarizer{summary: &usage.UsageSummary{}},
+				BudgetChecker: &fakeBudgetStatusChecker{results: []budget.CheckResult{{
+					Budget: budget.Budget{
+						Scope:            budget.ScopeUserPath,
+						Subject:          "/team",
+						PerChild:         tt.perChild,
+						EffectiveSubject: tt.effectiveSubject,
+						PeriodSeconds:    budget.PeriodDailySeconds,
+						Amount:           10,
+					},
+				}}},
+				RateLimiter: &fakeRateLimiterWithStatus{statuses: []ratelimit.Status{{
+					Rule: ratelimit.Rule{
+						Scope:            ratelimit.ScopeUserPath,
+						Subject:          "/team",
+						PerChild:         tt.perChild,
+						EffectiveSubject: tt.effectiveSubject,
+						PeriodSeconds:    60,
+						MaxRequests:      &requests,
+					},
+				}}},
+			}
+
+			rec, body := getUsageStatus(t, cfg, "/v1/usage", map[string]string{core.UserPathHeader: "/team/alice"})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+			}
+
+			if len(body.Budgets) != 1 {
+				t.Fatalf("budgets = %d, want 1", len(body.Budgets))
+			}
+			b := body.Budgets[0]
+			if b.Subject != "/team" || b.PerChild != tt.perChild || b.UserPath != tt.wantUserPath {
+				t.Errorf("budget subject/per_child/user_path = %q/%v/%q, want /team/%v/%q",
+					b.Subject, b.PerChild, b.UserPath, tt.perChild, tt.wantUserPath)
+			}
+
+			if len(body.RateLimits) != 1 {
+				t.Fatalf("rate_limits = %d, want 1", len(body.RateLimits))
+			}
+			rl := body.RateLimits[0]
+			if rl.Subject != "/team" || rl.PerChild != tt.perChild || rl.UserPath != tt.wantUserPath {
+				t.Errorf("rate limit subject/per_child/user_path = %q/%v/%q, want /team/%v/%q",
+					rl.Subject, rl.PerChild, rl.UserPath, tt.perChild, tt.wantUserPath)
+			}
+		})
 	}
 }
 

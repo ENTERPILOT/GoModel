@@ -13,26 +13,55 @@ import (
 // ErrUnavailable indicates a rate limit service was used without an initialized store.
 var ErrUnavailable = errors.New("rate limit service is unavailable")
 
+// ErrQuotaTemplatesUnavailable indicates that a per-child template was found
+// while the deployment does not have the quota-templates capability.
+var ErrQuotaTemplatesUnavailable = errors.New("per-child quota templates are not enabled")
+
+// ServiceOption configures a rate limit service.
+type ServiceOption func(*Service)
+
+// WithQuotaTemplates controls whether per-child user-path rules are accepted.
+func WithQuotaTemplates(enabled bool) ServiceOption {
+	return func(service *Service) {
+		service.quotaTemplates = enabled
+	}
+}
+
 type Service struct {
 	store   Store
 	limiter *limiter
 
 	mu    sync.RWMutex
 	rules []Rule
+
+	quotaTemplates bool
 }
 
-func NewService(ctx context.Context, store Store) (*Service, error) {
+func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("rate limit store is required")
 	}
 	service := &Service{
-		store:   store,
-		limiter: newLimiter(),
+		store:          store,
+		limiter:        newLimiter(),
+		quotaTemplates: true,
+	}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
 	}
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err
 	}
 	return service, nil
+}
+
+// Close stops the in-memory expiry cleanup worker.
+func (s *Service) Close() {
+	if s != nil && s.limiter != nil {
+		s.limiter.close()
+	}
 }
 
 func (s *Service) Refresh(ctx context.Context) error {
@@ -41,6 +70,9 @@ func (s *Service) Refresh(ctx context.Context) error {
 	}
 	rules, err := s.store.ListRules(ctx)
 	if err != nil {
+		return err
+	}
+	if err := s.validateQuotaTemplates(rules); err != nil {
 		return err
 	}
 	sort.SliceStable(rules, func(i, j int) bool {
@@ -53,8 +85,22 @@ func (s *Service) Refresh(ctx context.Context) error {
 		return rules[i].PeriodSeconds < rules[j].PeriodSeconds
 	})
 	s.mu.Lock()
+	previous := s.rules
 	s.rules = rules
 	s.mu.Unlock()
+
+	// Removed definitions and shared/per-child mode changes must not leave
+	// counters that can reappear if the same key is added again later.
+	next := make(map[ruleKey]Rule, len(rules))
+	for _, rule := range rules {
+		next[keyForRule(rule)] = rule
+	}
+	for _, old := range previous {
+		newRule, exists := next[keyForRule(old)]
+		if !exists || old.PerChild != newRule.PerChild {
+			s.limiter.reset(keyForRule(old))
+		}
+	}
 	return nil
 }
 
@@ -70,6 +116,9 @@ func (s *Service) Rules() []Rule {
 func (s *Service) UpsertRules(ctx context.Context, rules []Rule) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
+	}
+	if err := s.validateQuotaTemplates(rules); err != nil {
+		return err
 	}
 	if err := s.store.UpsertRules(ctx, rules); err != nil {
 		return err
@@ -96,10 +145,25 @@ func (s *Service) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
+	if err := s.validateQuotaTemplates(rules); err != nil {
+		return err
+	}
 	if err := s.store.ReplaceConfigRules(ctx, rules); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
+}
+
+func (s *Service) validateQuotaTemplates(rules []Rule) error {
+	if s == nil || s.quotaTemplates {
+		return nil
+	}
+	for _, rule := range rules {
+		if rule.PerChild {
+			return fmt.Errorf("%w: rate limit for user path %q", ErrQuotaTemplatesUnavailable, rule.Subject)
+		}
+	}
+	return nil
 }
 
 // HasTokenRules reports whether any rule limits tokens. Used at startup to
@@ -221,6 +285,12 @@ func (s *Service) Statuses(now time.Time) []Status {
 	rules := s.Rules()
 	statuses := make([]Status, 0, len(rules))
 	for _, rule := range rules {
+		// A per-child definition has no single aggregate counter. Child-specific
+		// status is available through StatusesForUserPath.
+		if rule.PerChild {
+			statuses = append(statuses, Status{Rule: rule})
+			continue
+		}
 		statuses = append(statuses, s.limiter.status(rule, now))
 	}
 	return statuses
@@ -244,10 +314,14 @@ func (s *Service) StatusesForUserPath(userPath string, now time.Time) []Status {
 
 	var statuses []Status
 	for _, rule := range s.Rules() {
-		if rule.Scope != ScopeUserPath || !ruleAppliesToPath(rule.Subject, userPath) {
+		if rule.Scope != ScopeUserPath {
 			continue
 		}
-		statuses = append(statuses, s.limiter.status(rule, now))
+		resolved, ok := rule.resolve(Subjects{UserPath: userPath})
+		if !ok {
+			continue
+		}
+		statuses = append(statuses, s.limiter.status(resolved, now))
 	}
 	return statuses
 }
@@ -279,8 +353,8 @@ func (s *Service) matchingRules(subjects Subjects) []Rule {
 	defer s.mu.RUnlock()
 	var matching []Rule
 	for _, rule := range s.rules {
-		if rule.appliesTo(subjects) {
-			matching = append(matching, rule)
+		if matched, ok := rule.resolve(subjects); ok {
+			matching = append(matching, matched)
 		}
 	}
 	return matching

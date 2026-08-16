@@ -70,21 +70,31 @@ func (w *windowCounter) retryAfter(now time.Time, periodSeconds, limit int64) ti
 type ruleKey struct {
 	scope         RuleScope
 	subject       string
+	partition     string
 	periodSeconds int64
 }
 
 func keyForRule(rule Rule) ruleKey {
-	return ruleKey{scope: rule.Scope, subject: rule.Subject, periodSeconds: rule.PeriodSeconds}
+	return ruleKey{scope: rule.Scope, subject: rule.Subject, partition: rule.EffectiveSubject, periodSeconds: rule.PeriodSeconds}
 }
 
-// limiter holds all live counters. Counters exist per rule (one shared
-// counter for the rule's whole subject), so cardinality equals the number of
-// configured rules and a single mutex is sufficient.
+// limiter holds all live counters. Ordinary rules own one counter; per-child
+// rules own one counter per active direct child. Expired child partitions are
+// pruned below, and a single mutex keeps admission atomic across all matches.
 type limiter struct {
 	mu       sync.Mutex
 	requests map[ruleKey]*windowCounter
 	tokens   map[ruleKey]*windowCounter
 	inFlight map[ruleKey]int64
+
+	expiries        counterExpiryQueue
+	expiryByCounter map[counterExpiryKey]*counterExpiry
+	expiryWake      chan struct{}
+	expiryStop      chan struct{}
+	expiryDone      chan struct{}
+	expiryStarted   bool
+	expiryClosed    bool
+	expiryCloseOnce sync.Once
 }
 
 func newLimiter() *limiter {
@@ -178,6 +188,7 @@ func (l *limiter) breach(rule Rule, now time.Time) *ExceededError {
 	if rule.MaxRequests != nil {
 		counter := l.counter(l.requests, key)
 		counter.advance(now, rule.PeriodSeconds)
+		l.trackCounterExpiry(requestCounter, key, counter)
 		if used := counter.estimate(now, rule.PeriodSeconds); used >= *rule.MaxRequests {
 			return &ExceededError{
 				Rule:       rule,
@@ -191,6 +202,7 @@ func (l *limiter) breach(rule Rule, now time.Time) *ExceededError {
 	if rule.MaxTokens != nil {
 		counter := l.counter(l.tokens, key)
 		counter.advance(now, rule.PeriodSeconds)
+		l.trackCounterExpiry(tokenCounter, key, counter)
 		if used := counter.estimate(now, rule.PeriodSeconds); used >= *rule.MaxTokens {
 			return &ExceededError{
 				Rule:       rule,
@@ -229,6 +241,9 @@ func (l *limiter) release(held []ruleKey) {
 		if l.inFlight[key] > 0 {
 			l.inFlight[key]--
 		}
+		if l.inFlight[key] == 0 {
+			delete(l.inFlight, key)
+		}
 	}
 }
 
@@ -243,6 +258,7 @@ func (l *limiter) recordTokens(rules []Rule, tokens int64, now time.Time) {
 		counter := l.counter(l.tokens, keyForRule(rule))
 		counter.advance(now, rule.PeriodSeconds)
 		counter.current += tokens
+		l.trackCounterExpiry(tokenCounter, keyForRule(rule), counter)
 	}
 }
 
@@ -268,6 +284,7 @@ func (l *limiter) status(rule Rule, now time.Time) Status {
 	if rule.MaxRequests != nil {
 		counter := l.counter(l.requests, key)
 		counter.advance(now, rule.PeriodSeconds)
+		l.trackCounterExpiry(requestCounter, key, counter)
 		status.RequestsUsed = counter.estimate(now, rule.PeriodSeconds)
 		remaining := max(*rule.MaxRequests-status.RequestsUsed, 0)
 		status.RequestsRemaining = &remaining
@@ -275,6 +292,7 @@ func (l *limiter) status(rule Rule, now time.Time) Status {
 	if rule.MaxTokens != nil {
 		counter := l.counter(l.tokens, key)
 		counter.advance(now, rule.PeriodSeconds)
+		l.trackCounterExpiry(tokenCounter, key, counter)
 		status.TokensUsed = counter.estimate(now, rule.PeriodSeconds)
 		remaining := max(*rule.MaxTokens-status.TokensUsed, 0)
 		status.TokensRemaining = &remaining
@@ -287,8 +305,22 @@ func (l *limiter) status(rule Rule, now time.Time) Status {
 func (l *limiter) reset(key ruleKey) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	delete(l.requests, key)
-	delete(l.tokens, key)
+	for candidate := range l.requests {
+		if candidate.sameDefinition(key) {
+			l.removeCounterExpiry(requestCounter, candidate)
+			delete(l.requests, candidate)
+		}
+	}
+	for candidate := range l.tokens {
+		if candidate.sameDefinition(key) {
+			l.removeCounterExpiry(tokenCounter, candidate)
+			delete(l.tokens, candidate)
+		}
+	}
+}
+
+func (k ruleKey) sameDefinition(other ruleKey) bool {
+	return k.scope == other.scope && k.subject == other.subject && k.periodSeconds == other.periodSeconds
 }
 
 // resetAll clears every window counter.
@@ -297,4 +329,5 @@ func (l *limiter) resetAll() {
 	defer l.mu.Unlock()
 	l.requests = make(map[ruleKey]*windowCounter)
 	l.tokens = make(map[ruleKey]*windowCounter)
+	l.resetCounterExpiries()
 }

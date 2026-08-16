@@ -63,6 +63,22 @@
         {/each}
       </select>
     </FormField>
+    {#if rateLimits.rateLimitForm.scope === "user_path" && rateLimits.quotaTemplatesEnabled()}
+      <label class="per-child-option">
+        <input
+          type="checkbox"
+          bind:checked={rateLimits.rateLimitForm.per_child}
+        />
+        <span>
+          <strong>{m.rate_limits_per_child_option()}</strong>
+          <small
+            >{m.rate_limits_per_child_option_help({
+              subject: rateLimits.rateLimitForm.subject || "/",
+            })}</small
+          >
+        </span>
+      </label>
+    {/if}
     {#if rateLimits.rateLimitForm.period === "custom"}
       <FormField id="rate-limit-period-seconds" label={m.rate_limits_period_seconds()}>
         <input
@@ -115,3 +131,27 @@
     </p>
   {/if}
 </EditorDialog>
+
+<style>
+  .per-child-option {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 0.65rem;
+    align-items: flex-start;
+    cursor: pointer;
+  }
+
+  .per-child-option input {
+    margin-top: 0.2rem;
+  }
+
+  .per-child-option span {
+    display: grid;
+    gap: 0.2rem;
+  }
+
+  .per-child-option small {
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+</style>

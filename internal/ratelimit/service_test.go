@@ -3,9 +3,12 @@ package ratelimit
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/enterpilot/gomodel/config"
 )
 
 // memStore is a minimal in-memory Store for service tests.
@@ -78,7 +81,55 @@ func newTestService(t *testing.T, rules ...Rule) *Service {
 	if err != nil {
 		t.Fatalf("NewService() failed: %v", err)
 	}
+	t.Cleanup(service.Close)
 	return service
+}
+
+func TestServiceRejectsQuotaTemplatesWhenDisabled(t *testing.T) {
+	template := Rule{
+		Scope: ScopeUserPath, Subject: "/customers", PerChild: true,
+		PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(10)),
+	}
+
+	if _, err := NewService(context.Background(), &memStore{rules: []Rule{template}}, WithQuotaTemplates(false)); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
+		t.Fatalf("NewService() error = %v, want ErrQuotaTemplatesUnavailable", err)
+	}
+
+	store := &memStore{}
+	service, err := NewService(context.Background(), store, WithQuotaTemplates(false))
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	if err := service.UpsertRules(context.Background(), []Rule{template}); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
+		t.Fatalf("UpsertRules() error = %v, want ErrQuotaTemplatesUnavailable", err)
+	}
+	if err := service.ReplaceConfigRules(context.Background(), []Rule{template}); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
+		t.Fatalf("ReplaceConfigRules() error = %v, want ErrQuotaTemplatesUnavailable", err)
+	}
+	if len(store.rules) != 0 {
+		t.Fatalf("stored rules = %+v, want none", store.rules)
+	}
+}
+
+func TestSeedConfiguredRulesCarriesPerChild(t *testing.T) {
+	store := &memStore{}
+	service, err := NewService(context.Background(), store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	err = seedConfiguredRules(context.Background(), service, config.RateLimitsConfig{
+		UserPaths: []config.RateLimitUserPathConfig{{
+			Path: "/users", PerChild: true,
+			Limits: []config.RateLimitRuleConfig{{Period: "minute", MaxRequests: new(int64(100))}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("seedConfiguredRules() failed: %v", err)
+	}
+	rules := service.Rules()
+	if len(rules) != 1 || !rules[0].PerChild || rules[0].Subject != "/users" {
+		t.Fatalf("seeded rules = %+v, want per-child /users", rules)
+	}
 }
 
 // windowBase is aligned to every supported period, keeping sliding-window
@@ -215,6 +266,88 @@ func TestAcquireRequestsShareSubtreeCounter(t *testing.T) {
 	if _, err := service.Acquire(onPath("/team-alpha"), windowBase); err != nil {
 		t.Fatalf("Acquire() outside subtree failed: %v", err)
 	}
+}
+
+func TestPerChildRuleIsolatesDirectChildrenAndSharesDescendants(t *testing.T) {
+	service := newTestService(t, Rule{
+		Scope: ScopeUserPath, Subject: "/users", PerChild: true,
+		PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1)),
+	})
+
+	if _, err := service.Acquire(onPath("/users/alice/app"), windowBase); err != nil {
+		t.Fatalf("alice Acquire() failed: %v", err)
+	}
+	_, err := service.Acquire(onPath("/users/alice/other"), windowBase)
+	var exceeded *ExceededError
+	if !errors.As(err, &exceeded) {
+		t.Fatalf("second alice Acquire() error = %v, want ExceededError", err)
+	}
+	if exceeded.Rule.Subject != "/users" || exceeded.Rule.EffectiveSubject != "/users/alice" {
+		t.Fatalf("resolved exceeded rule = %+v", exceeded.Rule)
+	}
+	if _, err := service.Acquire(onPath("/users/bob/app"), windowBase); err != nil {
+		t.Fatalf("bob Acquire() failed, want independent counter: %v", err)
+	}
+	if _, err := service.Acquire(onPath("/users"), windowBase); err != nil {
+		t.Fatalf("template base Acquire() failed, want no match: %v", err)
+	}
+
+	statuses := service.StatusesForUserPath("/users/alice/app", windowBase)
+	if len(statuses) != 1 || statuses[0].RequestsUsed != 1 || statuses[0].Rule.EffectiveSubject != "/users/alice" {
+		t.Fatalf("alice statuses = %+v", statuses)
+	}
+	if got := service.StatusesForUserPath("/users", windowBase); len(got) != 0 {
+		t.Fatalf("base statuses = %+v, want no template match", got)
+	}
+	global := service.Statuses(windowBase)
+	if len(global) != 1 || global[0].RequestsRemaining != nil || global[0].RequestsUsed != 0 {
+		t.Fatalf("global template status = %+v, want no invented aggregate", global)
+	}
+
+	if err := service.ResetRule(ScopeUserPath, "/users", PeriodMinuteSeconds); err != nil {
+		t.Fatalf("ResetRule() failed: %v", err)
+	}
+	for _, child := range []string{"/users/alice", "/users/bob"} {
+		got := service.StatusesForUserPath(child, windowBase)
+		if len(got) != 1 || got[0].RequestsUsed != 0 {
+			t.Fatalf("%s status after template reset = %+v", child, got)
+		}
+	}
+}
+
+func TestPerChildExpiryCleanupIsBoundedAndPreservesStaticCounters(t *testing.T) {
+	service := newTestService(t,
+		Rule{Scope: ScopeUserPath, Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(1000))},
+		Rule{Scope: ScopeUserPath, Subject: "/users", PerChild: true, PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(1000))},
+	)
+	now := time.Now().UTC()
+	for i := range maxExpiryCleanupBatch + 6 {
+		path := "/users/child-" + strconv.Itoa(i)
+		if _, err := service.Acquire(onPath(path), now); err != nil {
+			t.Fatalf("Acquire(%q) failed: %v", path, err)
+		}
+	}
+
+	limiter := service.limiter
+	limiter.mu.Lock()
+	cleanupAt := now.Add(3 * time.Hour).Unix()
+	if more := limiter.pruneCounterExpiries(cleanupAt); !more {
+		limiter.mu.Unlock()
+		t.Fatal("first cleanup reported no remaining due batch")
+	}
+	if got, want := len(limiter.requests), 7; got != want {
+		limiter.mu.Unlock()
+		t.Fatalf("request counters after first cleanup = %d, want %d", got, want)
+	}
+	if more := limiter.pruneCounterExpiries(cleanupAt); more {
+		limiter.mu.Unlock()
+		t.Fatal("second cleanup still reports due entries")
+	}
+	if got := len(limiter.requests); got != 1 {
+		limiter.mu.Unlock()
+		t.Fatalf("request counters after cleanup = %d, want one static counter", got)
+	}
+	limiter.mu.Unlock()
 }
 
 func TestAcquireSlidingWindowWeighsPreviousWindow(t *testing.T) {

@@ -56,6 +56,10 @@ class BudgetsStore {
     return runtimeConfig.budgetsVisible();
   }
 
+  quotaTemplatesEnabled() {
+    return runtimeConfig.quotaTemplatesVisible();
+  }
+
   filteredBudgets() {
     return filterAndSortBudgets(this.budgets, this.filter, this.sortBy);
   }
@@ -121,6 +125,7 @@ class BudgetsStore {
         period: budgetPeriodFromSeconds(periodSeconds),
         period_seconds: periodSeconds,
         amount: String(item.amount || ""),
+        per_child: Boolean(item.per_child),
         source: String(item.source || "manual"),
       };
     } else {
@@ -142,7 +147,9 @@ class BudgetsStore {
   // taken verbatim, since labels are matched exactly.
   setFormSubject(value) {
     this.form.subject =
-      this.form.scope === "label" ? String(value ?? "") : budgetInputUserPath(value);
+      this.form.scope === "label"
+        ? String(value ?? "")
+        : budgetInputUserPath(value);
   }
 
   // syncScope clears the subject when the scope changes, so a user path is

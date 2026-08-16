@@ -8,6 +8,17 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
+// Capability names an optional core behavior that an extension can enable.
+// Core remains the source of truth for enforcing capabilities; extensions
+// only declare which behaviors their startup configuration has unlocked.
+type Capability string
+
+const (
+	// CapabilityQuotaTemplates enables per-child user-path templates for
+	// budgets and rate limits.
+	CapabilityQuotaTemplates Capability = "quota_templates"
+)
+
 // HTTPServerConfig exposes generation-specific HTTP settings needed when an
 // extension constructs outer middleware. A new value is supplied on reload.
 type HTTPServerConfig struct {
@@ -33,6 +44,28 @@ type Registry struct {
 	settings        []RuntimeSetting
 	authenticators  []RequestAuthenticator
 	observers       []UpstreamObserver
+	capabilities    map[Capability]struct{}
+}
+
+// EnableCapability unlocks an optional core behavior for this registry.
+func (r *Registry) EnableCapability(capability Capability) {
+	if capability == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.capabilities == nil {
+		r.capabilities = make(map[Capability]struct{})
+	}
+	r.capabilities[capability] = struct{}{}
+}
+
+// HasCapability reports whether an optional core behavior is enabled.
+func (r *Registry) HasCapability(capability Capability) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.capabilities[capability]
+	return ok
 }
 
 // UseOuterMiddleware adds middleware at the outer HTTP boundary, after
@@ -241,6 +274,9 @@ func RegisterSetting(setting RuntimeSetting) { Default.RegisterSetting(setting) 
 func RegisterAuthenticator(authenticator RequestAuthenticator) {
 	Default.RegisterAuthenticator(authenticator)
 }
+
+// EnableCapability unlocks an optional core behavior on the Default registry.
+func EnableCapability(capability Capability) { Default.EnableCapability(capability) }
 
 // RegisterUpstreamObserver registers an observer on the Default registry.
 func RegisterUpstreamObserver(observer UpstreamObserver) {

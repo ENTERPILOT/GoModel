@@ -6984,6 +6984,9 @@ const docTemplate = `{
                 "MCP_ENABLED": {
                     "type": "string"
                 },
+                "PER_CHILD_QUOTAS_ENABLED": {
+                    "type": "string"
+                },
                 "RATE_LIMITS_ENABLED": {
                     "type": "string"
                 },
@@ -7204,11 +7207,17 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "effective_subject": {
+                    "type": "string"
+                },
                 "has_usage": {
                     "type": "boolean"
                 },
                 "last_reset_at": {
                     "type": "string"
+                },
+                "per_child": {
+                    "type": "boolean"
                 },
                 "period_end": {
                     "type": "string"
@@ -7578,6 +7587,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "effective_subject": {
+                    "type": "string"
+                },
                 "in_flight": {
                     "type": "integer"
                 },
@@ -7586,6 +7598,9 @@ const docTemplate = `{
                 },
                 "max_tokens": {
                     "type": "integer"
+                },
+                "per_child": {
+                    "type": "boolean"
                 },
                 "period_label": {
                     "type": "string"
@@ -7794,6 +7809,9 @@ const docTemplate = `{
                 "budget_key": {
                     "$ref": "#/definitions/admin.budgetKeyRequest"
                 },
+                "per_child": {
+                    "type": "boolean"
+                },
                 "scope": {
                     "type": "string"
                 },
@@ -7956,6 +7974,9 @@ const docTemplate = `{
                 },
                 "max_tokens": {
                     "type": "integer"
+                },
+                "per_child": {
+                    "type": "boolean"
                 },
                 "scope": {
                     "type": "string"
@@ -10558,6 +10579,9 @@ const docTemplate = `{
                 "exceeded": {
                     "type": "boolean"
                 },
+                "per_child": {
+                    "type": "boolean"
+                },
                 "period_end": {
                     "type": "string"
                 },
@@ -10609,6 +10633,9 @@ const docTemplate = `{
                 "max_tokens": {
                     "type": "integer"
                 },
+                "per_child": {
+                    "type": "boolean"
+                },
                 "period_label": {
                     "type": "string"
                 },
@@ -10627,6 +10654,9 @@ const docTemplate = `{
                 },
                 "resets_in_seconds": {
                     "type": "integer"
+                },
+                "subject": {
+                    "type": "string"
                 },
                 "tokens_remaining": {
                     "type": "integer"

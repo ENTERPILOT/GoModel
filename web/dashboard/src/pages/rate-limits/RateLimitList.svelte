@@ -25,6 +25,14 @@
                 {rateLimits.rateLimitSubject(item)}
               </code>
               <div class="budget-row-period">
+                {#if item.per_child}
+                  <span
+                    class="budget-period-label"
+                    title={m.rate_limits_per_child_title()}
+                  >
+                    <span>{m.rate_limits_per_child_badge()}</span>
+                  </span>
+                {/if}
                 {#if rateLimits.rateLimitScope(item) !== "user_path"}
                   <span
                     class="budget-period-label"
@@ -109,161 +117,170 @@
               </div>
             </div>
             <div class="budget-bars">
-              {#if rateLimits.rateLimitIsConcurrent(item)}
-                <div class="budget-bar-line">
-                  <div class="budget-bar-label">
-                    <span>{m.rate_limits_in_flight()}</span>
-                    <span class="budget-bar-percent">
-                      {rateLimits.rateLimitUsagePercent(
+              {#if item.per_child}
+                <div class="per-child-summary">
+                  {m.rate_limits_per_child_before_subject()}<code
+                    >{rateLimits.rateLimitSubject(item)}</code
+                  >{m.rate_limits_per_child_before_usage()}<code>/v1/usage</code
+                  >{m.rate_limits_per_child_after_usage()}
+                </div>
+              {:else}
+                {#if rateLimits.rateLimitIsConcurrent(item)}
+                  <div class="budget-bar-line">
+                    <div class="budget-bar-label">
+                      <span>{m.rate_limits_in_flight()}</span>
+                      <span class="budget-bar-percent">
+                        {rateLimits.rateLimitUsagePercent(
+                          item.in_flight,
+                          item.max_requests,
+                        ) + "%"}
+                      </span>
+                    </div>
+                    <div
+                      class="budget-bar-track"
+                      role="progressbar"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-valuenow={rateLimits.rateLimitUsagePercent(
                         item.in_flight,
                         item.max_requests,
-                      ) + "%"}
-                    </span>
-                  </div>
-                  <div
-                    class="budget-bar-track"
-                    role="progressbar"
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    aria-valuenow={rateLimits.rateLimitUsagePercent(
-                      item.in_flight,
-                      item.max_requests,
-                    )}
-                    aria-label={m.rate_limits_in_flight_progress({
-                      used: rateLimits.formatRateLimitNumber(item.in_flight),
-                      limit: rateLimits.formatRateLimitNumber(item.max_requests),
-                    })}
-                    style={"--budget-progress: " +
-                      rateLimits.rateLimitUsagePercent(
-                        item.in_flight,
-                        item.max_requests,
-                      ) +
-                      "%"}
-                  >
-                    <div
-                      class="budget-bar-fill budget-bar-fill-usage"
-                      class:budget-bar-fill-danger={rateLimits.rateLimitUsagePercent(
-                        item.in_flight,
-                        item.max_requests,
-                      ) >= 100}
-                      style="width: var(--budget-progress)"
-                    ></div>
-                    <span class="budget-bar-text-row">
-                      <span class="budget-bar-text budget-bar-text-center">
-                        {m.rate_limits_in_flight_progress({
-                          used: rateLimits.formatRateLimitNumber(item.in_flight),
-                          limit: rateLimits.formatRateLimitNumber(item.max_requests),
-                        })}
+                      )}
+                      aria-label={m.rate_limits_in_flight_progress({
+                        used: rateLimits.formatRateLimitNumber(item.in_flight),
+                        limit: rateLimits.formatRateLimitNumber(item.max_requests),
+                      })}
+                      style={"--budget-progress: " +
+                        rateLimits.rateLimitUsagePercent(
+                          item.in_flight,
+                          item.max_requests,
+                        ) +
+                        "%"}
+                    >
+                      <div
+                        class="budget-bar-fill budget-bar-fill-usage"
+                        class:budget-bar-fill-danger={rateLimits.rateLimitUsagePercent(
+                          item.in_flight,
+                          item.max_requests,
+                        ) >= 100}
+                        style="width: var(--budget-progress)"
+                      ></div>
+                      <span class="budget-bar-text-row">
+                        <span class="budget-bar-text budget-bar-text-center">
+                          {m.rate_limits_in_flight_progress({
+                            used: rateLimits.formatRateLimitNumber(item.in_flight),
+                            limit: rateLimits.formatRateLimitNumber(item.max_requests),
+                          })}
+                        </span>
                       </span>
-                    </span>
+                    </div>
                   </div>
-                </div>
-              {/if}
-              {#if !rateLimits.rateLimitIsConcurrent(item) && item.max_requests}
-                <div class="budget-bar-line">
-                  <div class="budget-bar-label">
-                    <span>{m.rate_limits_requests()}</span>
-                    <span class="budget-bar-percent">
-                      {rateLimits.rateLimitUsagePercent(
+                {/if}
+                {#if !rateLimits.rateLimitIsConcurrent(item) && item.max_requests}
+                  <div class="budget-bar-line">
+                    <div class="budget-bar-label">
+                      <span>{m.rate_limits_requests()}</span>
+                      <span class="budget-bar-percent">
+                        {rateLimits.rateLimitUsagePercent(
+                          item.requests_used,
+                          item.max_requests,
+                        ) + "%"}
+                      </span>
+                    </div>
+                    <div
+                      class="budget-bar-track"
+                      role="progressbar"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-valuenow={rateLimits.rateLimitUsagePercent(
                         item.requests_used,
                         item.max_requests,
-                      ) + "%"}
-                    </span>
+                      )}
+                      aria-label={m.rate_limits_requests_progress({
+                        used: rateLimits.formatRateLimitNumber(item.requests_used),
+                        limit: rateLimits.formatRateLimitNumber(item.max_requests),
+                      })}
+                      style={"--budget-progress: " +
+                        rateLimits.rateLimitUsagePercent(
+                          item.requests_used,
+                          item.max_requests,
+                        ) +
+                        "%"}
+                    >
+                      <div
+                        class="budget-bar-fill budget-bar-fill-usage"
+                        class:budget-bar-fill-danger={rateLimits.rateLimitUsagePercent(
+                          item.requests_used,
+                          item.max_requests,
+                        ) >= 100}
+                        style="width: var(--budget-progress)"
+                      ></div>
+                      <span class="budget-bar-text-row">
+                        <span class="budget-bar-text budget-bar-text-center">
+                          {m.rate_limits_requests_progress({
+                            used: rateLimits.formatRateLimitNumber(item.requests_used),
+                            limit: rateLimits.formatRateLimitNumber(item.max_requests),
+                          })}
+                        </span>
+                        <span class="budget-bar-text budget-bar-text-end">
+                          {m.rate_limits_left({ count: rateLimits.formatRateLimitNumber(item.requests_remaining) })}
+                        </span>
+                      </span>
+                    </div>
                   </div>
-                  <div
-                    class="budget-bar-track"
-                    role="progressbar"
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    aria-valuenow={rateLimits.rateLimitUsagePercent(
-                      item.requests_used,
-                      item.max_requests,
-                    )}
-                    aria-label={m.rate_limits_requests_progress({
-                      used: rateLimits.formatRateLimitNumber(item.requests_used),
-                      limit: rateLimits.formatRateLimitNumber(item.max_requests),
-                    })}
-                    style={"--budget-progress: " +
-                      rateLimits.rateLimitUsagePercent(
-                        item.requests_used,
-                        item.max_requests,
-                      ) +
-                      "%"}
-                  >
+                {/if}
+                {#if !rateLimits.rateLimitIsConcurrent(item) && item.max_tokens}
+                  <div class="budget-bar-line">
+                    <div class="budget-bar-label">
+                      <span>{m.rate_limits_tokens()}</span>
+                      <span class="budget-bar-percent">
+                        {rateLimits.rateLimitUsagePercent(
+                          item.tokens_used,
+                          item.max_tokens,
+                        ) + "%"}
+                      </span>
+                    </div>
                     <div
-                      class="budget-bar-fill budget-bar-fill-usage"
-                      class:budget-bar-fill-danger={rateLimits.rateLimitUsagePercent(
-                        item.requests_used,
-                        item.max_requests,
-                      ) >= 100}
-                      style="width: var(--budget-progress)"
-                    ></div>
-                    <span class="budget-bar-text-row">
-                      <span class="budget-bar-text budget-bar-text-center">
-                        {m.rate_limits_requests_progress({
-                          used: rateLimits.formatRateLimitNumber(item.requests_used),
-                          limit: rateLimits.formatRateLimitNumber(item.max_requests),
-                        })}
-                      </span>
-                      <span class="budget-bar-text budget-bar-text-end">
-                        {m.rate_limits_left({ count: rateLimits.formatRateLimitNumber(item.requests_remaining) })}
-                      </span>
-                    </span>
-                  </div>
-                </div>
-              {/if}
-              {#if !rateLimits.rateLimitIsConcurrent(item) && item.max_tokens}
-                <div class="budget-bar-line">
-                  <div class="budget-bar-label">
-                    <span>{m.rate_limits_tokens()}</span>
-                    <span class="budget-bar-percent">
-                      {rateLimits.rateLimitUsagePercent(
+                      class="budget-bar-track"
+                      role="progressbar"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-valuenow={rateLimits.rateLimitUsagePercent(
                         item.tokens_used,
                         item.max_tokens,
-                      ) + "%"}
-                    </span>
-                  </div>
-                  <div
-                    class="budget-bar-track"
-                    role="progressbar"
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    aria-valuenow={rateLimits.rateLimitUsagePercent(
-                      item.tokens_used,
-                      item.max_tokens,
-                    )}
-                    aria-label={m.rate_limits_tokens_progress({
-                      used: rateLimits.formatRateLimitNumber(item.tokens_used),
-                      limit: rateLimits.formatRateLimitNumber(item.max_tokens),
-                    })}
-                    style={"--budget-progress: " +
-                      rateLimits.rateLimitUsagePercent(
-                        item.tokens_used,
-                        item.max_tokens,
-                      ) +
-                      "%"}
-                  >
-                    <div
-                      class="budget-bar-fill budget-bar-fill-usage"
-                      class:budget-bar-fill-danger={rateLimits.rateLimitUsagePercent(
-                        item.tokens_used,
-                        item.max_tokens,
-                      ) >= 100}
-                      style="width: var(--budget-progress)"
-                    ></div>
-                    <span class="budget-bar-text-row">
-                      <span class="budget-bar-text budget-bar-text-center">
-                        {m.rate_limits_tokens_progress({
-                          used: rateLimits.formatRateLimitNumber(item.tokens_used),
-                          limit: rateLimits.formatRateLimitNumber(item.max_tokens),
-                        })}
+                      )}
+                      aria-label={m.rate_limits_tokens_progress({
+                        used: rateLimits.formatRateLimitNumber(item.tokens_used),
+                        limit: rateLimits.formatRateLimitNumber(item.max_tokens),
+                      })}
+                      style={"--budget-progress: " +
+                        rateLimits.rateLimitUsagePercent(
+                          item.tokens_used,
+                          item.max_tokens,
+                        ) +
+                        "%"}
+                    >
+                      <div
+                        class="budget-bar-fill budget-bar-fill-usage"
+                        class:budget-bar-fill-danger={rateLimits.rateLimitUsagePercent(
+                          item.tokens_used,
+                          item.max_tokens,
+                        ) >= 100}
+                        style="width: var(--budget-progress)"
+                      ></div>
+                      <span class="budget-bar-text-row">
+                        <span class="budget-bar-text budget-bar-text-center">
+                          {m.rate_limits_tokens_progress({
+                            used: rateLimits.formatRateLimitNumber(item.tokens_used),
+                            limit: rateLimits.formatRateLimitNumber(item.max_tokens),
+                          })}
+                        </span>
+                        <span class="budget-bar-text budget-bar-text-end">
+                          {m.rate_limits_left({ count: rateLimits.formatRateLimitNumber(item.tokens_remaining) })}
+                        </span>
                       </span>
-                      <span class="budget-bar-text budget-bar-text-end">
-                        {m.rate_limits_left({ count: rateLimits.formatRateLimitNumber(item.tokens_remaining) })}
-                      </span>
-                    </span>
+                    </div>
                   </div>
-                </div>
+                {/if}
               {/if}
             </div>
           </div>

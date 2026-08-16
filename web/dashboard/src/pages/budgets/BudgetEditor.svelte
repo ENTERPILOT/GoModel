@@ -75,6 +75,19 @@
         {/each}
       </select>
     </FormField>
+    {#if store.form.scope === "user_path" && store.quotaTemplatesEnabled()}
+      <label class="per-child-option">
+        <input type="checkbox" bind:checked={store.form.per_child} />
+        <span>
+          <strong>{m.budgets_per_child_option()}</strong>
+          <small
+            >{m.budgets_per_child_option_help({
+              subject: store.form.subject || "/",
+            })}</small
+          >
+        </span>
+      </label>
+    {/if}
     {#if store.form.period === "custom"}
       <FormField id="budget-period-seconds" label={m.budgets_period_seconds()}>
         <input
@@ -163,6 +176,28 @@
 </Modal>
 
 <style>
+  .per-child-option {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 0.65rem;
+    align-items: flex-start;
+    cursor: pointer;
+  }
+
+  .per-child-option input {
+    margin-top: 0.2rem;
+  }
+
+  .per-child-option span {
+    display: grid;
+    gap: 0.2rem;
+  }
+
+  .per-child-option small {
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
   .budget-override-dialog {
     max-width: 460px;
   }

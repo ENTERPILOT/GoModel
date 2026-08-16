@@ -75,8 +75,10 @@
                 <section
                   class="budget-row {rateLimits.rateLimitPressureClass(item)}"
                   style={rateLimits.rateLimitPressureStyle(item)}
-                  title={rateLimits.rateLimitPressurePercent(item) +
-                    "% of the most constrained cap used"}
+                  title={item.per_child
+                    ? m.rate_limits_per_child_title()
+                    : rateLimits.rateLimitPressurePercent(item) +
+                      "% of the most constrained cap used"}
                 >
                   <div class="budget-row-main">
                     <div class="budget-row-head">
@@ -84,6 +86,11 @@
                         {rateLimits.rateLimitSubject(item)}
                       </code>
                       <div class="budget-row-period">
+                        {#if item.per_child}
+                          <span class="budget-period-label"
+                            >{m.rate_limits_per_child_badge()}</span
+                          >
+                        {/if}
                         <span class="budget-period-label">
                           <Icon
                             icon={rateLimits.rateLimitIsConcurrent(item)

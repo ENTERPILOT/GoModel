@@ -98,6 +98,12 @@ rate_limits:
           max_requests: 10000
         - period: "concurrent"
           max_requests: 10
+    - path: "/customers"
+      # GoModel Pro: requires the quota_templates entitlement.
+      per_child: true
+      limits:
+        - period: "minute"
+          max_requests: 100
   providers:
     - name: "openai"
       limits:
@@ -121,6 +127,8 @@ path segments); provider rules use `SET_PROVIDER_RATE_LIMIT_<NAME>`
 SET_RATE_LIMIT_TEAM__ALPHA="rpm=100,tpm=50000,rpd=10000,concurrent=10"
 SET_RATE_LIMIT_="rpm=1000"
 SET_PROVIDER_RATE_LIMIT_OPENAI="rpm=500,concurrent=50"
+# GoModel Pro (quota_templates entitlement):
+SET_RATE_LIMIT_CUSTOMERS='[{"period":"minute","max_requests":100,"per_child":true}]'
 ```
 
 Compact names map to periods: `rpm`/`tpm` per minute, `rph`/`tph` per hour,
@@ -161,6 +169,26 @@ any provider. Matching is case-insensitive.
 combined; a `500 rpm` rule on provider `openai` is shared by every consumer
 and model routed there. For per-key limits, bind each managed API key to its
 own user path and define rules there.
+
+<Info>
+  Dynamic per-child rate limits are available in GoModel Pro and require the
+  `quota_templates` license entitlement. Without it, admin API writes are
+  rejected with 403 `quota_templates_not_entitled`, and `per_child: true` in
+  configuration aborts startup — GoModel never silently falls back to one
+  shared subtree counter, since that would change enforcement semantics.
+</Info>
+
+Set `per_child: true` on a user-path entry to turn it into a dynamic template.
+Each direct child then owns independent counters: with a template on
+`/customers`, `/customers/alice/app` shares `/customers/alice`'s counter while
+`/customers/bob` gets another. The template path `/customers` itself does not
+match. Provider and model rules cannot be per-child.
+
+The global admin list shows a `per child` template without a misleading
+aggregate counter. `GET /v1/usage` resolves the template for the caller's user
+path and returns that child's live counters. Resetting or deleting the template
+clears all child request and token windows for that definition; active
+concurrency slots release normally when their requests finish.
 
 All matching rules are checked; the first exhausted limit rejects the request.
 
@@ -284,6 +312,7 @@ curl -X PUT http://localhost:8080/admin/rate-limits \
   -H "Content-Type: application/json" \
   -d '{
     "user_path": "/team/alpha",
+    "per_child": false,
     "limit_key": {"period": "minute"},
     "max_requests": 100,
     "max_tokens": 50000

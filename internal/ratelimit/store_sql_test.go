@@ -25,7 +25,7 @@ func TestSQLStoreRoundTripsNullableLimits(t *testing.T) {
 		ctx := context.Background()
 
 		if err := store.UpsertRules(ctx, []Rule{
-			{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(100)), MaxTokens: new(int64(5000)), Source: SourceManual},
+			{Subject: "/team", PerChild: true, PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(100)), MaxTokens: new(int64(5000)), Source: SourceManual},
 			{Subject: "/team", PeriodSeconds: PeriodDaySeconds, MaxRequests: new(int64(1000)), Source: SourceManual},
 			{Subject: "/team", PeriodSeconds: PeriodConcurrent, MaxRequests: new(int64(10)), Source: SourceManual},
 			{Subject: "/tokens-only", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(100)), Source: SourceManual},
@@ -45,6 +45,9 @@ func TestSQLStoreRoundTripsNullableLimits(t *testing.T) {
 			byKey[ruleStoreKey(rule.Scope, rule.Subject, rule.PeriodSeconds)] = rule
 		}
 		minute := byKey[ruleStoreKey(ScopeUserPath, "/team", PeriodMinuteSeconds)]
+		if !minute.PerChild {
+			t.Fatal("minute rule per_child = false, want true")
+		}
 		if minute.MaxRequests == nil || *minute.MaxRequests != 100 || minute.MaxTokens == nil || *minute.MaxTokens != 5000 {
 			t.Fatalf("minute rule = %+v, want 100 requests / 5000 tokens", minute)
 		}

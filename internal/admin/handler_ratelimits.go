@@ -54,6 +54,9 @@ func (h *Handler) UpsertRateLimit(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
+	if req.PerChild && !h.quotaTemplates {
+		return handleError(c, quotaTemplatesUnavailableError())
+	}
 	scope, subject, periodSeconds, err := rateLimitRequestKey(req.Scope, req.Subject, req.UserPath, req.LimitKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
@@ -61,6 +64,7 @@ func (h *Handler) UpsertRateLimit(c *echo.Context) error {
 	item, err := ratelimit.NormalizeRule(ratelimit.Rule{
 		Scope:         scope,
 		Subject:       subject,
+		PerChild:      req.PerChild,
 		PeriodSeconds: periodSeconds,
 		MaxRequests:   req.MaxRequests,
 		MaxTokens:     req.MaxTokens,
@@ -174,6 +178,8 @@ type rateLimitListResponse struct {
 type rateLimitStatusResponse struct {
 	Scope             string     `json:"scope"`
 	Subject           string     `json:"subject"`
+	PerChild          bool       `json:"per_child"`
+	EffectiveSubject  string     `json:"effective_subject,omitempty"`
 	UserPath          string     `json:"user_path,omitempty"`
 	PeriodSeconds     int64      `json:"period_seconds"`
 	PeriodLabel       string     `json:"period_label"`
@@ -198,6 +204,7 @@ type upsertRateLimitRequest struct {
 	LimitKey    *rateLimitKeyRequest `json:"limit_key"`
 	MaxRequests *int64               `json:"max_requests"`
 	MaxTokens   *int64               `json:"max_tokens"`
+	PerChild    bool                 `json:"per_child"`
 }
 
 type deleteRateLimitRequest struct {
@@ -235,6 +242,8 @@ func rateLimitStatusResponses(statuses []ratelimit.Status) []rateLimitStatusResp
 		item := rateLimitStatusResponse{
 			Scope:             string(rule.Scope),
 			Subject:           rule.Subject,
+			PerChild:          rule.PerChild,
+			EffectiveSubject:  rule.EffectiveSubject,
 			PeriodSeconds:     rule.PeriodSeconds,
 			PeriodLabel:       ratelimit.PeriodLabel(rule.PeriodSeconds),
 			MaxRequests:       rule.MaxRequests,

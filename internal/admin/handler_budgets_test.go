@@ -130,7 +130,34 @@ func newBudgetHandler(t *testing.T, store *adminBudgetStore) *Handler {
 	if err != nil {
 		t.Fatalf("NewService() failed: %v", err)
 	}
-	return NewHandler(nil, nil, WithBudgets(service))
+	return NewHandler(nil, nil, WithBudgets(service), WithQuotaTemplatesEnabled(true))
+}
+
+func TestBudgetEndpointsRejectPerChildWithoutEntitlement(t *testing.T) {
+	store := &adminBudgetStore{}
+	service, err := budget.NewService(context.Background(), store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	h := NewHandler(nil, nil, WithBudgets(service))
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/budgets",
+		strings.NewReader(`{"user_path":"/team","per_child":true,"budget_key":{"period":"daily"},"amount":10}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	if err := h.UpsertBudget(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertBudget() failed: %v", err)
+	}
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "quota_templates_not_entitled") {
+		t.Fatalf("response = %d %s, want quota entitlement error", rec.Code, rec.Body.String())
+	}
+	if len(store.budgets) != 0 {
+		t.Fatalf("stored budgets = %+v, want none", store.budgets)
+	}
 }
 
 func TestBudgetEndpointsListStatuses(t *testing.T) {
@@ -172,7 +199,7 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 	upsertReq := httptest.NewRequest(
 		http.MethodPut,
 		"/admin/budgets",
-		strings.NewReader(`{"user_path":"/team/beta","budget_key":{"period":"weekly"},"amount":12.5}`),
+		strings.NewReader(`{"user_path":"/team/beta","per_child":true,"budget_key":{"period":"weekly"},"amount":12.5}`),
 	)
 	upsertReq.Header.Set("Content-Type", "application/json")
 	upsertRec := httptest.NewRecorder()
@@ -183,7 +210,7 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 	if upsertRec.Code != http.StatusOK {
 		t.Fatalf("upsert status = %d, want %d body=%s", upsertRec.Code, http.StatusOK, upsertRec.Body.String())
 	}
-	if len(store.budgets) != 1 || store.budgets[0].Subject != "/team/beta" || store.budgets[0].PeriodSeconds != budget.PeriodWeeklySeconds {
+	if len(store.budgets) != 1 || store.budgets[0].Subject != "/team/beta" || !store.budgets[0].PerChild || store.budgets[0].PeriodSeconds != budget.PeriodWeeklySeconds {
 		t.Fatalf("stored budgets = %+v", store.budgets)
 	}
 

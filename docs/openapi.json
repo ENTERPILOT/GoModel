@@ -10436,6 +10436,9 @@
           "MCP_ENABLED": {
             "type": "string"
           },
+          "PER_CHILD_QUOTAS_ENABLED": {
+            "type": "string"
+          },
           "RATE_LIMITS_ENABLED": {
             "type": "string"
           },
@@ -10668,11 +10671,17 @@
           "created_at": {
             "type": "string"
           },
+          "effective_subject": {
+            "type": "string"
+          },
           "has_usage": {
             "type": "boolean"
           },
           "last_reset_at": {
             "type": "string"
+          },
+          "per_child": {
+            "type": "boolean"
           },
           "period_end": {
             "type": "string"
@@ -11048,6 +11057,9 @@
           "created_at": {
             "type": "string"
           },
+          "effective_subject": {
+            "type": "string"
+          },
           "in_flight": {
             "type": "integer"
           },
@@ -11056,6 +11068,9 @@
           },
           "max_tokens": {
             "type": "integer"
+          },
+          "per_child": {
+            "type": "boolean"
           },
           "period_label": {
             "type": "string"
@@ -11267,6 +11282,9 @@
           "budget_key": {
             "$ref": "#/components/schemas/admin.budgetKeyRequest"
           },
+          "per_child": {
+            "type": "boolean"
+          },
           "scope": {
             "type": "string"
           },
@@ -11437,6 +11455,9 @@
           },
           "max_tokens": {
             "type": "integer"
+          },
+          "per_child": {
+            "type": "boolean"
           },
           "scope": {
             "type": "string"
@@ -14092,6 +14113,9 @@
           "exceeded": {
             "type": "boolean"
           },
+          "per_child": {
+            "type": "boolean"
+          },
           "period_end": {
             "type": "string"
           },
@@ -14143,6 +14167,9 @@
           "max_tokens": {
             "type": "integer"
           },
+          "per_child": {
+            "type": "boolean"
+          },
           "period_label": {
             "type": "string"
           },
@@ -14161,6 +14188,9 @@
           },
           "resets_in_seconds": {
             "type": "integer"
+          },
+          "subject": {
+            "type": "string"
           },
           "tokens_remaining": {
             "type": "integer"

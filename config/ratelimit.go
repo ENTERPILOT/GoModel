@@ -32,8 +32,9 @@ type RateLimitsConfig struct {
 
 // RateLimitUserPathConfig declares one or more rate limit rules for a user path.
 type RateLimitUserPathConfig struct {
-	Path   string                `yaml:"path"`
-	Limits []RateLimitRuleConfig `yaml:"limits"`
+	Path     string                `yaml:"path"`
+	PerChild bool                  `yaml:"per_child"`
+	Limits   []RateLimitRuleConfig `yaml:"limits"`
 }
 
 // RateLimitProviderConfig declares one or more rate limit rules for a provider.
@@ -66,6 +67,10 @@ type RateLimitRuleConfig struct {
 	// MaxTokens caps total tokens per period. Not valid for the concurrent
 	// period. Requires usage tracking to be enforced.
 	MaxTokens *int64 `yaml:"max_tokens" json:"max_tokens"`
+
+	// PerChild is accepted only in the JSON-array environment-variable form.
+	// YAML keeps this setting on the enclosing user-path entry.
+	PerChild bool `yaml:"-" json:"per_child,omitempty"`
 }
 
 func applyRateLimitEnv(cfg *Config, strict bool) error {
@@ -256,6 +261,11 @@ func validateRateLimitConfig(cfg *RateLimitsConfig) error {
 		}
 		cfg.Providers[providerIdx].Name = name
 		context := fmt.Sprintf("rate_limits.providers[%d]", providerIdx)
+		for limitIdx, limit := range cfg.Providers[providerIdx].Limits {
+			if limit.PerChild {
+				return fmt.Errorf("%s.limits[%d].per_child is only valid for user_path rules", context, limitIdx)
+			}
+		}
 		if err := validateRateLimitLimits(context, "provider:"+name, cfg.Providers[providerIdx].Limits, seen); err != nil {
 			return err
 		}
@@ -267,6 +277,11 @@ func validateRateLimitConfig(cfg *RateLimitsConfig) error {
 		}
 		cfg.Models[modelIdx].Model = model
 		context := fmt.Sprintf("rate_limits.models[%d]", modelIdx)
+		for limitIdx, limit := range cfg.Models[modelIdx].Limits {
+			if limit.PerChild {
+				return fmt.Errorf("%s.limits[%d].per_child is only valid for user_path rules", context, limitIdx)
+			}
+		}
 		if err := validateRateLimitLimits(context, "model:"+strings.ToLower(model), cfg.Models[modelIdx].Limits, seen); err != nil {
 			return err
 		}

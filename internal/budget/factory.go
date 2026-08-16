@@ -39,7 +39,7 @@ func (r *Result) Close() error {
 	return r.closeErr
 }
 
-func New(ctx context.Context, cfg *config.Config, shared storage.Storage) (*Result, error) {
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage, quotaTemplatesEnabled bool) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -49,15 +49,15 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage) (*Resu
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	return newResult(ctx, cfg, shared)
+	return newResult(ctx, cfg, shared, quotaTemplatesEnabled)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage) (*Result, error) {
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, quotaTemplatesEnabled bool) (*Result, error) {
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(ctx, store)
+	service, err := NewService(ctx, store, WithQuotaTemplates(quotaTemplatesEnabled))
 	if err != nil {
 		return nil, err
 	}
@@ -82,14 +82,14 @@ func seedConfiguredBudgets(ctx context.Context, service *Service, cfg config.Bud
 	}
 	budgets := make([]Budget, 0, len(cfg.UserPaths)+len(cfg.Labels))
 	for _, entry := range cfg.UserPaths {
-		seeded, err := seedBudgets(ScopeUserPath, entry.Path, entry.Limits)
+		seeded, err := seedBudgets(ScopeUserPath, entry.Path, entry.PerChild, entry.Limits)
 		if err != nil {
 			return err
 		}
 		budgets = append(budgets, seeded...)
 	}
 	for _, entry := range cfg.Labels {
-		seeded, err := seedBudgets(ScopeLabel, entry.Label, entry.Limits)
+		seeded, err := seedBudgets(ScopeLabel, entry.Label, false, entry.Limits)
 		if err != nil {
 			return err
 		}
@@ -98,7 +98,7 @@ func seedConfiguredBudgets(ctx context.Context, service *Service, cfg config.Bud
 	return service.ReplaceConfigBudgets(ctx, budgets)
 }
 
-func seedBudgets(scope Scope, rawSubject string, limits []config.BudgetLimitConfig) ([]Budget, error) {
+func seedBudgets(scope Scope, rawSubject string, perChild bool, limits []config.BudgetLimitConfig) ([]Budget, error) {
 	subject, err := NormalizeSubject(scope, rawSubject)
 	if err != nil {
 		return nil, fmt.Errorf("invalid budget %s %q: %w", scope, rawSubject, err)
@@ -116,6 +116,7 @@ func seedBudgets(scope Scope, rawSubject string, limits []config.BudgetLimitConf
 		budgets = append(budgets, Budget{
 			Scope:         scope,
 			Subject:       subject,
+			PerChild:      perChild || limit.PerChild,
 			PeriodSeconds: seconds,
 			Amount:        limit.Amount,
 			Source:        SourceConfig,

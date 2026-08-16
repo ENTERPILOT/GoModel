@@ -33,8 +33,9 @@ type BudgetsConfig struct {
 
 // BudgetUserPathConfig declares one or more budget limits for a user path.
 type BudgetUserPathConfig struct {
-	Path   string              `yaml:"path"`
-	Limits []BudgetLimitConfig `yaml:"limits"`
+	Path     string              `yaml:"path"`
+	PerChild bool                `yaml:"per_child"`
+	Limits   []BudgetLimitConfig `yaml:"limits"`
 }
 
 // BudgetLabelConfig declares one or more budget limits for a request label.
@@ -56,6 +57,10 @@ type BudgetLimitConfig struct {
 
 	// Amount is the maximum allowed tracked provider spend for the period.
 	Amount float64 `yaml:"amount" json:"amount"`
+
+	// PerChild is accepted only in the JSON-array environment-variable form.
+	// YAML keeps this setting on the enclosing user-path entry.
+	PerChild bool `yaml:"-" json:"per_child,omitempty"`
 }
 
 func applyBudgetEnv(cfg *Config, strict bool) error {

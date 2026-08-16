@@ -33,6 +33,7 @@ type SQLStore struct {
 var sqlBudgetsSchema = `CREATE TABLE IF NOT EXISTS budgets (
 		scope TEXT NOT NULL DEFAULT 'user_path',
 		subject TEXT NOT NULL,
+		per_child ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
 		period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
 		amount ` + sqlx.TypeFloat + ` NOT NULL,
 		source TEXT NOT NULL DEFAULT '',
@@ -57,9 +58,10 @@ var sqlRest = []string{
 // a column is only overwritten when the incoming or stored row is manual, or
 // when both are config-sourced.
 const upsertBudgetSQL = `
-	INSERT INTO budgets (scope, subject, period_seconds, amount, source, last_reset_at, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO budgets (scope, subject, per_child, period_seconds, amount, source, last_reset_at, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
+		per_child = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.per_child ELSE budgets.per_child END,
 		amount = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.amount ELSE budgets.amount END,
 		source = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.source ELSE budgets.source END,
 		updated_at = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.updated_at ELSE budgets.updated_at END
@@ -76,6 +78,11 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := db.Schema(ctx, sqlBudgetsSchema); err != nil {
 		return nil, fmt.Errorf("failed to create budgets table: %w", err)
 	}
+	if err := sqlx.AddColumns(ctx, db,
+		`ALTER TABLE budgets ADD COLUMN per_child `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE`,
+	); err != nil {
+		return nil, fmt.Errorf("failed to migrate budgets table: %w", err)
+	}
 	if err := db.Schema(ctx, sqlRest...); err != nil {
 		return nil, fmt.Errorf("failed to create budget tables: %w", err)
 	}
@@ -84,7 +91,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 
 func (s *SQLStore) ListBudgets(ctx context.Context) ([]Budget, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT scope, subject, period_seconds, amount, source, last_reset_at, created_at, updated_at
+		SELECT scope, subject, per_child, period_seconds, amount, source, last_reset_at, created_at, updated_at
 		FROM budgets
 		ORDER BY scope ASC, subject ASC, period_seconds ASC
 	`)
@@ -366,12 +373,14 @@ func upsertBudgets(ctx context.Context, q sqlx.Querier, budgets []Budget) error 
 		_, err := q.Exec(ctx, upsertBudgetSQL,
 			budget.Scope,
 			budget.Subject,
+			budget.PerChild,
 			budget.PeriodSeconds,
 			budget.Amount,
 			budget.Source,
 			sqlutil.UnixOrNil(budget.LastResetAt),
 			budget.CreatedAt.Unix(),
 			budget.UpdatedAt.Unix(),
+			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
@@ -390,6 +399,7 @@ func scanSQLBudget(scanner sqlx.Row) (Budget, error) {
 	if err := scanner.Scan(
 		&budget.Scope,
 		&budget.Subject,
+		&budget.PerChild,
 		&budget.PeriodSeconds,
 		&budget.Amount,
 		&budget.Source,

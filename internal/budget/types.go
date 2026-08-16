@@ -41,14 +41,18 @@ const (
 
 // Budget stores one spend limit for one scope, subject, and reset period.
 type Budget struct {
-	Scope         Scope      `json:"scope" bson:"scope"`
-	Subject       string     `json:"subject" bson:"subject"`
-	PeriodSeconds int64      `json:"period_seconds" bson:"period_seconds"`
-	Amount        float64    `json:"amount" bson:"amount"`
-	Source        string     `json:"source,omitempty" bson:"source,omitempty"`
-	LastResetAt   *time.Time `json:"last_reset_at,omitempty" bson:"last_reset_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at" bson:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at" bson:"updated_at"`
+	Scope    Scope  `json:"scope" bson:"scope"`
+	Subject  string `json:"subject" bson:"subject"`
+	PerChild bool   `json:"per_child" bson:"per_child"`
+	// EffectiveSubject is populated only while evaluating a per-child budget.
+	// It is not part of the persisted definition or public JSON representation.
+	EffectiveSubject string     `json:"-" bson:"-"`
+	PeriodSeconds    int64      `json:"period_seconds" bson:"period_seconds"`
+	Amount           float64    `json:"amount" bson:"amount"`
+	Source           string     `json:"source,omitempty" bson:"source,omitempty"`
+	LastResetAt      *time.Time `json:"last_reset_at,omitempty" bson:"last_reset_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at" bson:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at" bson:"updated_at"`
 }
 
 // Subjects identifies the dimensions one request can be budgeted by. UserPath
@@ -67,10 +71,38 @@ func (b Budget) appliesTo(s Subjects) bool {
 	return budgetAppliesToPath(b.Subject, s.UserPath)
 }
 
+// resolve returns the budget instance that applies to the request. Per-child
+// definitions retain Subject as their configured template and carry the
+// derived child separately for spend queries and diagnostics.
+func (b Budget) resolve(s Subjects) (Budget, bool) {
+	if !b.PerChild {
+		return b, b.appliesTo(s)
+	}
+	if b.Scope != ScopeUserPath {
+		return Budget{}, false
+	}
+	child, ok := core.UserPathChild(b.Subject, s.UserPath)
+	if !ok {
+		return Budget{}, false
+	}
+	b.EffectiveSubject = child
+	return b, true
+}
+
 // SubjectLabel names the budget subject for error messages and logs.
 func (b Budget) SubjectLabel() string {
 	if b.Scope == ScopeLabel {
 		return "label " + b.Subject
+	}
+	if b.EffectiveSubject != "" {
+		return b.EffectiveSubject
+	}
+	return b.Subject
+}
+
+func (b Budget) evaluationSubject() string {
+	if b.EffectiveSubject != "" {
+		return b.EffectiveSubject
 	}
 	return b.Subject
 }
@@ -219,6 +251,10 @@ func NormalizeBudget(b Budget) (Budget, error) {
 		return Budget{}, err
 	}
 	b.Subject = subject
+	b.EffectiveSubject = ""
+	if b.PerChild && scope != ScopeUserPath {
+		return Budget{}, fmt.Errorf("per_child is only valid for user_path budgets")
+	}
 	if b.PeriodSeconds <= 0 {
 		return Budget{}, fmt.Errorf("period_seconds must be greater than 0")
 	}

@@ -13,6 +13,7 @@ export function defaultBudgetForm() {
     period: "daily",
     period_seconds: 86400,
     amount: "",
+    per_child: false,
     source: "manual",
   };
 }
@@ -76,6 +77,7 @@ export function budgetSubjectPlaceholder(form) {
 // label. Mutates the form in place.
 export function syncBudgetScope(form) {
   form.subject = String((form && form.scope) || "") === "user_path" ? "/" : "";
+  form.per_child = false;
 }
 
 export function budgetPeriodOptions() {
@@ -204,6 +206,7 @@ function budgetFilterText(item) {
     budgetScopeLabel(item),
     budgetPeriodLabel(item),
     budgetPeriodFromSeconds(seconds),
+    item && item.per_child ? m.budgets_per_child_badge() : "",
     seconds ? String(seconds) + "s" : "",
     seconds ? String(seconds) + " seconds" : "",
   ]
@@ -218,10 +221,12 @@ function sortBudgets(items, sortBy) {
   const by = String(sortBy || "subject");
   sorted.sort((a, b) => {
     const scopeCompare =
-      (budgetScopeOrder[budgetScope(a)] || 0) - (budgetScopeOrder[budgetScope(b)] || 0);
+      (budgetScopeOrder[budgetScope(a)] || 0) -
+      (budgetScopeOrder[budgetScope(b)] || 0);
     const subjectCompare = budgetSubject(a).localeCompare(budgetSubject(b));
     const periodCompare =
-      Number((b && b.period_seconds) || 0) - Number((a && a.period_seconds) || 0);
+      Number((b && b.period_seconds) || 0) -
+      Number((a && a.period_seconds) || 0);
     if (by === "period") {
       return periodCompare || scopeCompare || subjectCompare;
     }
@@ -270,9 +275,11 @@ export function buildBudgetFormPayload(form) {
   return {
     payload: {
       scope,
-      subject: scope === "user_path" ? normalizeBudgetUserPath(subject) : subject,
+      subject:
+        scope === "user_path" ? normalizeBudgetUserPath(subject) : subject,
       period_seconds: Math.trunc(periodSeconds),
       amount,
+      per_child: scope === "user_path" && Boolean(f.per_child),
       source: String(f.source || "manual").trim() || "manual",
     },
     error: "",
@@ -287,6 +294,7 @@ export function budgetPutBody(payload) {
     subject: budgetSubject(payload),
     budget_key: { period_seconds: payload.period_seconds },
     amount: payload.amount,
+    per_child: Boolean(payload.per_child),
   };
 }
 

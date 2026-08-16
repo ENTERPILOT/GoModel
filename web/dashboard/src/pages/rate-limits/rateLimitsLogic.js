@@ -13,6 +13,7 @@ export function defaultRateLimitForm() {
     period_seconds: 60,
     max_requests: "",
     max_tokens: "",
+    per_child: false,
     source: "manual",
   };
 }
@@ -77,6 +78,7 @@ export function rateLimitSubjectPlaceholder(form) {
 export function syncRateLimitScope(form) {
   const scope = String((form && form.scope) || "");
   form.subject = scope === "user_path" ? "/" : "";
+  form.per_child = false;
 }
 
 export function rateLimitPeriodOptions() {
@@ -177,7 +179,11 @@ export function formatRateLimitNumber(value) {
 export function rateLimitUsagePercent(used, limit) {
   const usedNum = Number(used);
   const limitNum = Number(limit);
-  if (!Number.isFinite(usedNum) || !Number.isFinite(limitNum) || limitNum <= 0) {
+  if (
+    !Number.isFinite(usedNum) ||
+    !Number.isFinite(limitNum) ||
+    limitNum <= 0
+  ) {
     return 0;
   }
   const percent = Math.round((usedNum / limitNum) * 100);
@@ -192,11 +198,14 @@ export function filteredRateLimits(rules, filter) {
   const scopeOrder = { user_path: 0, provider: 1, model: 2 };
   items.sort((a, b) => {
     const scopeCompare =
-      (scopeOrder[rateLimitScope(a)] || 0) - (scopeOrder[rateLimitScope(b)] || 0);
+      (scopeOrder[rateLimitScope(a)] || 0) -
+      (scopeOrder[rateLimitScope(b)] || 0);
     if (scopeCompare !== 0) {
       return scopeCompare;
     }
-    const subjectCompare = rateLimitSubject(a).localeCompare(rateLimitSubject(b));
+    const subjectCompare = rateLimitSubject(a).localeCompare(
+      rateLimitSubject(b),
+    );
     if (subjectCompare !== 0) {
       return subjectCompare;
     }
@@ -209,8 +218,12 @@ export function filteredRateLimits(rules, filter) {
     const subject = rateLimitSubject(item).toLowerCase();
     const scope = rateLimitScopeLabel(item).toLowerCase();
     const period = rateLimitPeriodLabel(item).toLowerCase();
+    const mode = item && item.per_child ? m.rate_limits_per_child_badge() : "";
     return (
-      subject.includes(needle) || scope.includes(needle) || period.includes(needle)
+      subject.includes(needle) ||
+      scope.includes(needle) ||
+      period.includes(needle) ||
+      mode.includes(needle)
     );
   });
 }
@@ -307,6 +320,7 @@ export function rateLimitFormPayload(formInput) {
   const payload = {
     scope: scope,
     subject: subject || "/",
+    per_child: scope === "user_path" && Boolean(form.per_child),
     limit_key: { period_seconds: periodSeconds },
   };
   if (maxRequests) {
@@ -489,6 +503,9 @@ export function rateLimitGaugeTitle(subject, gaugeClass) {
 }
 
 export function rateLimitInspectorSummary(item) {
+  if (item && item.per_child) {
+    return m.rate_limits_per_child_summary();
+  }
   if (rateLimitIsConcurrent(item)) {
     return (
       m.rate_limits_in_flight_progress({

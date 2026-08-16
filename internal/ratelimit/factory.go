@@ -27,6 +27,9 @@ func (r *Result) Close() error {
 	}
 	r.closeOnce.Do(func() {
 		var errs []error
+		if r.Service != nil {
+			r.Service.Close()
+		}
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
 				errs = append(errs, fmt.Errorf("store close: %w", err))
@@ -39,7 +42,7 @@ func (r *Result) Close() error {
 	return r.closeErr
 }
 
-func New(ctx context.Context, cfg *config.Config, shared storage.Storage) (*Result, error) {
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage, quotaTemplatesEnabled bool) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -49,15 +52,15 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage) (*Resu
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	return newResult(ctx, cfg, shared)
+	return newResult(ctx, cfg, shared, quotaTemplatesEnabled)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage) (*Result, error) {
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, quotaTemplatesEnabled bool) (*Result, error) {
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(ctx, store)
+	service, err := NewService(ctx, store, WithQuotaTemplates(quotaTemplatesEnabled))
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +84,7 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 		return nil
 	}
 	rules := make([]Rule, 0)
-	appendRules := func(scope RuleScope, subject string, limits []config.RateLimitRuleConfig) error {
+	appendRules := func(scope RuleScope, subject string, perChild bool, limits []config.RateLimitRuleConfig) error {
 		normalized, err := NormalizeSubject(scope, subject)
 		if err != nil {
 			return fmt.Errorf("invalid rate limit %s subject %q: %w", scope, subject, err)
@@ -100,6 +103,7 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 			rules = append(rules, Rule{
 				Scope:         scope,
 				Subject:       normalized,
+				PerChild:      perChild || limit.PerChild,
 				PeriodSeconds: seconds,
 				MaxRequests:   limit.MaxRequests,
 				MaxTokens:     limit.MaxTokens,
@@ -109,17 +113,17 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 		return nil
 	}
 	for _, entry := range cfg.UserPaths {
-		if err := appendRules(ScopeUserPath, entry.Path, entry.Limits); err != nil {
+		if err := appendRules(ScopeUserPath, entry.Path, entry.PerChild, entry.Limits); err != nil {
 			return err
 		}
 	}
 	for _, entry := range cfg.Providers {
-		if err := appendRules(ScopeProvider, entry.Name, entry.Limits); err != nil {
+		if err := appendRules(ScopeProvider, entry.Name, false, entry.Limits); err != nil {
 			return err
 		}
 	}
 	for _, entry := range cfg.Models {
-		if err := appendRules(ScopeModel, entry.Model, entry.Limits); err != nil {
+		if err := appendRules(ScopeModel, entry.Model, false, entry.Limits); err != nil {
 			return err
 		}
 	}

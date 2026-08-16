@@ -66,7 +66,30 @@ func newRateLimitHandler(t *testing.T, store *adminRateLimitStore) (*Handler, *r
 	if err != nil {
 		t.Fatalf("NewService() failed: %v", err)
 	}
-	return NewHandler(nil, nil, WithRateLimits(service)), service
+	return NewHandler(nil, nil, WithRateLimits(service), WithQuotaTemplatesEnabled(true)), service
+}
+
+func TestRateLimitEndpointsRejectPerChildWithoutEntitlement(t *testing.T) {
+	store := &adminRateLimitStore{}
+	service, err := ratelimit.NewService(context.Background(), store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	h := NewHandler(nil, nil, WithRateLimits(service))
+	c, rec := adminRateLimitRequest(
+		http.MethodPut,
+		`{"user_path":"/team","per_child":true,"limit_key":{"period":"minute"},"max_requests":10}`,
+	)
+
+	if err := h.UpsertRateLimit(c); err != nil {
+		t.Fatalf("UpsertRateLimit() failed: %v", err)
+	}
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "quota_templates_not_entitled") {
+		t.Fatalf("response = %d %s, want quota entitlement error", rec.Code, rec.Body.String())
+	}
+	if len(store.rules) != 0 {
+		t.Fatalf("stored rules = %+v, want none", store.rules)
+	}
 }
 
 func adminRateLimitRequest(method, body string) (*echo.Context, *httptest.ResponseRecorder) {
@@ -99,7 +122,7 @@ func TestRateLimitEndpointsUpsertListDelete(t *testing.T) {
 
 	c, rec := adminRateLimitRequest(
 		http.MethodPut,
-		`{"user_path":"/team/beta","limit_key":{"period":"minute"},"max_requests":100,"max_tokens":5000}`,
+		`{"user_path":"/team/beta","per_child":true,"limit_key":{"period":"minute"},"max_requests":100,"max_tokens":5000}`,
 	)
 	if err := h.UpsertRateLimit(c); err != nil {
 		t.Fatalf("UpsertRateLimit() failed: %v", err)
@@ -119,14 +142,17 @@ func TestRateLimitEndpointsUpsertListDelete(t *testing.T) {
 	if item.UserPath != "/team/beta" || item.PeriodSeconds != 60 || item.PeriodLabel != "minute" {
 		t.Fatalf("item = %+v, want /team/beta minute", item)
 	}
+	if !item.PerChild {
+		t.Fatal("per_child = false, want true")
+	}
 	if item.MaxRequests == nil || *item.MaxRequests != 100 || item.MaxTokens == nil || *item.MaxTokens != 5000 {
 		t.Fatalf("item limits = %+v, want 100/5000", item)
 	}
 	if item.Source != ratelimit.SourceManual {
 		t.Fatalf("source = %q, want manual", item.Source)
 	}
-	if item.RequestsRemaining == nil || *item.RequestsRemaining != 100 {
-		t.Fatalf("requests remaining = %v, want 100", item.RequestsRemaining)
+	if item.RequestsRemaining != nil {
+		t.Fatalf("requests remaining = %v, want no aggregate for a per-child template", item.RequestsRemaining)
 	}
 
 	// The service enforces the freshly persisted rule immediately.
