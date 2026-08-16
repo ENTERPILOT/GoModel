@@ -185,6 +185,12 @@
       "id": "gemini-2.5-flash-native-audio-preview-12-2025",
       "object": "model",
       "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.7-flash",
+      "object": "model",
+      "owned_by": "google"
     }
   ],
   "object": "list"

@@ -562,7 +562,14 @@ func copyResponseFormat(raw json.RawMessage, cfg map[string]any) {
 		cfg["responseMimeType"] = "application/json"
 		if schemaObj, ok := responseFormat["json_schema"].(map[string]any); ok {
 			if schema, ok := schemaObj["schema"]; ok {
-				cfg["responseSchema"] = schema
+				// responseJsonSchema accepts standard JSON Schema (like the
+				// tools' parametersJsonSchema), while responseSchema is an
+				// OpenAPI subset that rejects common keywords such as
+				// additionalProperties, which OpenAI strict schemas require.
+				if schemaMap, isMap := schema.(map[string]any); isMap {
+					delete(schemaMap, "$schema")
+				}
+				cfg["responseJsonSchema"] = schema
 			}
 		}
 	}

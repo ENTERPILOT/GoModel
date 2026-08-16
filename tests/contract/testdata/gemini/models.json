@@ -318,6 +318,12 @@
       "object": "model",
       "owned_by": "google",
       "display_name": "Lyria Realtime Experimental"
+    },
+    {
+      "id": "models/gemini-3.7-flash",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.7 Flash"
     }
   ]
 }

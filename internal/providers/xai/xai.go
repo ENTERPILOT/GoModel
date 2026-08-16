@@ -91,21 +91,42 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 }
 
 // normalizeReasoningEffort downgrades GoModel effort levels xAI does not
-// accept to their nearest equivalent. Only the multi-agent Grok family
-// accepts "xhigh" (it selects the agent count); every other model tops out
+// accept to their nearest equivalent. The multi-agent Grok family accepts
+// "xhigh" (it selects the agent count), and grok-4.6 and later frontier
+// models document it as a regular top effort level; older models top out
 // at "high". Unknown values pass through for the upstream to judge. See
 // docs/providers/xai.mdx for the user-facing table.
 func normalizeReasoningEffort(model, effort string) string {
 	normalized := strings.ToLower(strings.TrimSpace(effort))
 	switch normalized {
 	case "xhigh", "max":
-		if strings.Contains(strings.ToLower(model), "multi-agent") {
+		if supportsXHighEffort(model) {
 			return "xhigh"
 		}
 		return "high"
 	default:
 		return normalized
 	}
+}
+
+// supportsXHighEffort reports whether the model documents the "xhigh"
+// reasoning effort level: the multi-agent family and grok-4.6+.
+func supportsXHighEffort(model string) bool {
+	model = strings.ToLower(model)
+	if strings.Contains(model, "multi-agent") {
+		return true
+	}
+	rest, ok := strings.CutPrefix(model, "grok-4.")
+	if !ok {
+		return false
+	}
+	digits := rest
+	if i := strings.IndexFunc(rest, func(r rune) bool { return r < '0' || r > '9' }); i >= 0 {
+		digits = rest[:i]
+	}
+	// Two-or-more-digit minors (4.20 family) are older experimental
+	// releases, not successors of 4.6.
+	return len(digits) == 1 && digits >= "6"
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider

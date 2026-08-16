@@ -6,7 +6,7 @@ keywords: ["xAI", "Grok", "reasoning effort", "prompt cache", "provider setup"]
 ---
 
 xAI's API is OpenAI-compatible, including a native Responses API. Models such
-as `grok-4.5` are discovered automatically from xAI's `/models` endpoint — no
+as `grok-4.6` are discovered automatically from xAI's `/models` endpoint — no
 configuration beyond the API key is needed.
 
 ## Configure
@@ -33,7 +33,7 @@ providers:
 
 ## Reasoning effort mapping
 
-Grok reasoning models (e.g. `grok-4.5`, defaulting to `high`) accept
+Grok reasoning models (e.g. `grok-4.6`, defaulting to `high`) accept
 `reasoning_effort` as a top-level string on Chat Completions. GoModel rewrites
 the OpenAI-shaped `"reasoning": {"effort": "..."}` into that flat field — no
 client change required. On the Responses API the nested shape is xAI-native
@@ -42,7 +42,7 @@ and passes through unchanged.
 | Client sends | xAI receives |
 | ------------ | ------------ |
 | `none` / `low` / `medium` / `high` | unchanged |
-| `xhigh` / `max` | `high` (`xhigh` on the multi-agent Grok family, where it selects the agent count) |
+| `xhigh` / `max` | `xhigh` on `grok-4.6` and later, and on the multi-agent Grok family (where it selects the agent count); `high` on older models |
 | anything else | passed through for xAI to judge |
 
 Models without reasoning support reject the field upstream; omit `reasoning`

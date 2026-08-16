@@ -1005,6 +1005,13 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 		{"grok-4.20-multi-agent-0309", "xhigh", "xhigh"},
 		{"grok-4.20-multi-agent-0309", "max", "xhigh"},
 		{"grok-4.20-multi-agent-0309", "low", "low"},
+		{"grok-4.6", "xhigh", "xhigh"},
+		{"grok-4.6", "max", "xhigh"},
+		{"grok-4.6", "high", "high"},
+		{"grok-4.6-latest", "xhigh", "xhigh"},
+		{"grok-4.7", "xhigh", "xhigh"},
+		{"grok-4.20-0309-reasoning", "xhigh", "high"},
+		{"grok-4.3", "xhigh", "high"},
 		{"grok-4.5", "custom-level", "custom-level"},
 	}
 	for _, tt := range tests {
