@@ -140,16 +140,19 @@ support, not every individual model capability exposed by an upstream provider.
   `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models
   for providers that define a list, skipping their upstream `/models` calls.
 - **Model categories (chat vs embeddings vs audio)** — a model's category comes
-  from its `modes` in the remote model registry. Local models the registry does
-  not know (llama.cpp, LM Studio, Ollama, vLLM custom IDs) fall back to a
-  conservative name check: IDs containing `embed` or matching well-known
-  embedding families (`bge`, `e5`, `gte`, `minilm`) are categorized as
-  embedding models automatically, and IDs containing `rerank` as reranking
-  models. For anything the heuristic misses, declare
-  `modes: [embedding]` under `providers.<name>.models` metadata in
-  `config.yaml` — operator metadata always wins. Categories affect dashboard
-  grouping and failover suggestions only; `/v1/embeddings` routes to any model
-  the provider serves regardless of category.
+  from its `modes`, resolved from four sources in precedence order: the remote
+  model registry, operator metadata declared under `providers.<name>.models` in
+  `config.yaml` (e.g. `modes: [embedding]`), capability signals in the
+  provider's own model listing (Gemini `supportedGenerationMethods`, Cohere
+  `endpoints`, OpenRouter architecture modalities, Ollama `/api/show`
+  capabilities), and finally a conservative name check for models still
+  unclassified: IDs containing `embed` or matching well-known embedding
+  families (`bge`, `e5`, `gte`, `minilm`) are categorized as embedding models,
+  and IDs containing `rerank` as reranking models — namespaced IDs like
+  `org/model` are checked by their final path segment. Declare operator
+  metadata only when a model stays unclassified after all of this. Categories
+  affect dashboard grouping and failover suggestions only; `/v1/embeddings`
+  routes to any model the provider serves regardless of category.
 - **vLLM** — set `VLLM_API_KEY` only if the upstream server was started with
   `--api-key`.
 - **llm-d** — `LLMD_BASE_URL` is required. `LLMD_API_KEY` is optional and is

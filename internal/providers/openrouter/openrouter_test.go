@@ -20,11 +20,22 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 		if r.URL.Path != "/models" {
 			t.Errorf("Path = %q, want /models", r.URL.Path)
 		}
+		// The endpoint defaults to text-output models; without this parameter
+		// embedding models would never enter the catalog.
+		if got := r.URL.Query().Get("output_modalities"); got != "all" {
+			t.Errorf("output_modalities = %q, want all", got)
+		}
 		_, _ = w.Write([]byte(`{"data":[
 			{"id":"openai/gpt-4o-mini","created":1721260800,"context_length":128000,
 			 "architecture":{"input_modalities":["text","image"],"output_modalities":["text"]}},
 			{"id":"google/gemini-3-pro-image","created":1721260800,
 			 "architecture":{"input_modalities":["text"],"output_modalities":["image"]}},
+			{"id":"voyageai/voyage-4-lite","created":1721260800,
+			 "architecture":{"input_modalities":["text"],"output_modalities":["embeddings"]}},
+			{"id":"cohere/rerank-only","created":1721260800,
+			 "architecture":{"input_modalities":["text"],"output_modalities":["rerank"]}},
+			{"id":"acme/video-only","created":1721260800,
+			 "architecture":{"input_modalities":["text"],"output_modalities":["video"]}},
 			{"id":"mystery/no-architecture","created":1721260800}
 		]}`))
 	}))
@@ -37,8 +48,8 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Data) != 3 {
-		t.Fatalf("len(Data) = %d, want 3", len(resp.Data))
+	if len(resp.Data) != 4 {
+		t.Fatalf("len(Data) = %d, want 4 (rerank-only and video-only skipped): %+v", len(resp.Data), resp.Data)
 	}
 	byID := map[string]core.Model{}
 	for _, m := range resp.Data {
@@ -58,6 +69,19 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	}
 	if image.Metadata == nil || len(image.Metadata.Categories) != 1 || image.Metadata.Categories[0] != core.CategoryImage {
 		t.Errorf("image model categories = %+v, want [image]", image.Metadata)
+	}
+	embed := byID["voyageai/voyage-4-lite"]
+	if embed.Metadata == nil || len(embed.Metadata.Modes) != 1 || embed.Metadata.Modes[0] != "embedding" {
+		t.Errorf("voyage-4-lite metadata = %+v, want embedding modes", embed.Metadata)
+	}
+	if embed.Metadata == nil || len(embed.Metadata.Categories) != 1 || embed.Metadata.Categories[0] != core.CategoryEmbedding {
+		t.Errorf("voyage-4-lite categories = %+v, want [embedding]", embed.Metadata)
+	}
+	if _, ok := byID["cohere/rerank-only"]; ok {
+		t.Error("rerank-only model must be skipped: no gateway surface reaches it on OpenRouter")
+	}
+	if _, ok := byID["acme/video-only"]; ok {
+		t.Error("video-only model must be skipped: no gateway surface reaches it on OpenRouter")
 	}
 	if byID["mystery/no-architecture"].Metadata != nil {
 		t.Errorf("no-architecture metadata = %+v, want nil", byID["mystery/no-architecture"].Metadata)

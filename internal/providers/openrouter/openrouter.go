@@ -94,20 +94,26 @@ type openrouterModel struct {
 // catalog is far larger than the remote model registry, so discovery-time
 // classification keeps its long tail categorized; registry enrichment and
 // operator config still override the stamp.
+//
+// output_modalities=all is required: the endpoint defaults to text-output
+// models only, which would hide OpenRouter's embedding models from the
+// catalog. Models whose every modality maps outside the gateway's OpenRouter
+// surface (rerank-only, video-only, speech/transcription-only) are skipped so
+// the catalog never advertises a model that can only fail.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	var upstream struct {
 		Data []openrouterModel `json:"data"`
 	}
 	if err := p.Do(ctx, llmclient.Request{
 		Method:   http.MethodGet,
-		Endpoint: "/models",
+		Endpoint: "/models?output_modalities=all",
 	}, &upstream); err != nil {
 		return nil, err
 	}
 	models := make([]core.Model, 0, len(upstream.Data))
 	for _, m := range upstream.Data {
 		id := strings.TrimSpace(m.ID)
-		if id == "" {
+		if id == "" || !openrouterServable(m) {
 			continue
 		}
 		models = append(models, core.Model{
@@ -121,9 +127,33 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	return &core.ModelsResponse{Object: "list", Data: models}, nil
 }
 
+// servableOpenRouterModalities are output modalities the gateway can reach on
+// OpenRouter: text and image generation flow through chat completions, and
+// embeddings through /embeddings. A model listing none of these (rerank-only,
+// video, speech, transcription) has no working endpoint here.
+var servableOpenRouterModalities = map[string]struct{}{
+	"text":       {},
+	"image":      {},
+	"embeddings": {},
+}
+
+func openrouterServable(m openrouterModel) bool {
+	// Missing architecture info means no signal, not proof of unservability;
+	// keep the model rather than hiding it.
+	if len(m.Architecture.OutputModalities) == 0 {
+		return true
+	}
+	for _, modality := range m.Architecture.OutputModalities {
+		if _, ok := servableOpenRouterModalities[strings.ToLower(strings.TrimSpace(modality))]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // openrouterMetadata maps output modalities onto gateway modes. Only the
-// unambiguous mappings are claimed (text output → chat, image output → image
-// generation); anything else is left for the registry or ID inference.
+// unambiguous mappings are claimed; anything else is left for the registry or
+// ID inference.
 func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 	modes := make([]string, 0, 2)
 	for _, modality := range m.Architecture.OutputModalities {
@@ -132,6 +162,10 @@ func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 			modes = append(modes, "chat")
 		case "image":
 			modes = append(modes, "image_generation")
+		case "embeddings":
+			modes = append(modes, "embedding")
+		case "rerank":
+			modes = append(modes, "rerank")
 		}
 	}
 	if len(modes) == 0 && m.ContextLength <= 0 {
