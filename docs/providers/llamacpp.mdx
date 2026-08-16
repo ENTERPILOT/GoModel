@@ -16,10 +16,11 @@ not implement.
 The same recipe applies to LM Studio and any other plain OpenAI-compatible
 local server.
 
-Start llama-server first:
+Start llama-server first. Without `--alias`, the model ID in `/v1/models` is
+the model file's path — set an alias so requests can use a clean name:
 
 ```bash
-llama-server -hf ggml-org/gemma-3-4b-it-GGUF --port 8081
+llama-server -hf ggml-org/gemma-3-4b-it-GGUF --alias gemma-3-4b-it --port 8081
 # add --api-key token-abc123 if you want llama-server to require bearer auth
 ```
 
@@ -62,7 +63,7 @@ GGUFs usually declare pooling in their metadata; otherwise pass `--pooling mean`
 server to embeddings only:
 
 ```bash
-llama-server -hf nomic-ai/nomic-embed-text-v1.5-GGUF --embeddings --port 8081
+llama-server -hf nomic-ai/nomic-embed-text-v1.5-GGUF --embeddings --alias nomic-embed-text-v1.5 --port 8081
 ```
 
 ```bash
@@ -90,7 +91,8 @@ any model the provider serves regardless of category.
   multimodal models when llama-server is started with a projector
   (`--mmproj`, auto-loaded with `-hf` when available). These requests flow
   through `/v1/chat/completions` normally.
-- **Reranking** — llama-server serves `/v1/rerank` (start with `--rerank`, a
-  reranker model, and `--pooling rank`), but GoModel has no rerank endpoint;
-  reach it through [passthrough](/features/passthrough-api):
-  `POST /p/vllm/v1/rerank`.
+- **Reranking** — llama-server serves `/v1/rerank` (start with a reranker
+  model and `--rerank --embedding --pooling rank`), but GoModel has no rerank
+  endpoint; reach it through [passthrough](/features/passthrough-api):
+  `POST /p/vllm/v1/rerank` (use the instance name, e.g.
+  `/p/vllm-llamacpp/v1/rerank`, for a suffixed setup).
