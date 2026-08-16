@@ -261,11 +261,10 @@ three-backend layout (`store_sqlite.go`, `store_postgresql.go`,
 byte-for-byte the budget module pattern. No settings table: windows are
 epoch-aligned UTC; rate limits do not need budget-style calendar anchors.
 
-**Counters are ephemeral.** A restart starts fresh windows. For minute windows
-this is invisible; a `day` window can under-count after a restart. That
-tradeoff is documented — durable long-horizon control is what budgets (DB-sum
-based) are for. Bifrost makes the same tradeoff in its default mode (memory
-counters, 10 s DB flush).
+**Request and token windows are snapshotted** to the rule store (see
+`docs/dev/2026-08-16_rate-limit-counter-persistence-spec.md`). Admission stays
+in memory. Concurrency gauges stay ephemeral. Multi-replica sharing is still
+§11.2.
 
 ## 9. Multi-instance stance
 
@@ -335,7 +334,8 @@ backends.
    instead of hard 429s (top LiteLLM enterprise upsell).
 5. Upstream `x-ratelimit-*` passthrough when GoModel itself imposes no limit.
 6. Workflow `features.rate_limit` gating, if a use case appears.
-7. Counter persistence across restarts (periodic flush) for day windows.
+7. ~~Counter persistence across restarts (periodic flush) for day windows.~~
+   Done: `docs/dev/2026-08-16_rate-limit-counter-persistence-spec.md`.
 8. Attempt-level request counting for failover targets (today only the
    resolved primary route is charged a request; tokens are always correct).
 9. Virtual-model (alias) subjects for model rules -- needs the requested

@@ -250,3 +250,65 @@ func TestSQLStoreMigratesPreScopeTable(t *testing.T) {
 		}
 	})
 }
+
+func TestSQLStoreCounterRoundTrip(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		ctx := context.Background()
+		first := []WindowSnapshot{
+			{
+				Scope: string(ScopeUserPath), Subject: "/customers", Partition: "/customers/alice",
+				PeriodSeconds: PeriodHourSeconds, RequestsWindowStart: 1700000000, RequestsCurrent: 3,
+			},
+			{
+				Scope: string(ScopeUserPath), Subject: "/customers", Partition: "/customers/bob",
+				PeriodSeconds: PeriodHourSeconds, RequestsWindowStart: 1700000000, RequestsCurrent: 1,
+			},
+		}
+		if err := store.SaveCounters(ctx, first); err != nil {
+			t.Fatalf("SaveCounters: %v", err)
+		}
+		got, err := store.LoadCounters(ctx)
+		if err != nil {
+			t.Fatalf("LoadCounters: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("loaded = %d, want 2", len(got))
+		}
+
+		if err := store.DeleteCounter(ctx, ScopeUserPath, "/customers", PeriodHourSeconds); err != nil {
+			t.Fatalf("DeleteCounter: %v", err)
+		}
+		got, err = store.LoadCounters(ctx)
+		if err != nil {
+			t.Fatalf("LoadCounters after delete: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("after delete = %d, want 0", len(got))
+		}
+
+		if err := store.SaveCounters(ctx, first); err != nil {
+			t.Fatalf("SaveCounters again: %v", err)
+		}
+		if err := store.SaveCounters(ctx, first[:1]); err != nil {
+			t.Fatalf("SaveCounters replace: %v", err)
+		}
+		got, err = store.LoadCounters(ctx)
+		if err != nil {
+			t.Fatalf("LoadCounters after replace: %v", err)
+		}
+		if len(got) != 1 || got[0].Partition != "/customers/alice" {
+			t.Fatalf("replaced = %+v, want alice only", got)
+		}
+
+		if err := store.DeleteAllCounters(ctx); err != nil {
+			t.Fatalf("DeleteAllCounters: %v", err)
+		}
+		got, err = store.LoadCounters(ctx)
+		if err != nil {
+			t.Fatalf("LoadCounters after delete all: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("after delete all = %d, want 0", len(got))
+		}
+	})
+}

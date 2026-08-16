@@ -154,7 +154,8 @@ func buildDefaultConfig() *Config {
 			Enabled: true,
 		},
 		RateLimits: RateLimitsConfig{
-			Enabled: true,
+			Enabled:       true,
+			FlushInterval: 1,
 		},
 		Metrics: MetricsConfig{
 			Endpoint: "/metrics",

@@ -1,7 +1,8 @@
 // Package ratelimit enforces request, token, and concurrency limits for the
 // AI gateway. Rules are scoped to a consumer user-path subtree, a provider, or
-// a model. Rule definitions are persisted; live counters are in-memory and per
-// instance.
+// a model. Rule definitions are persisted. Request and token windows are
+// snapshotted to the same store so they survive restart and reload; live
+// admission stays in memory and per instance.
 package ratelimit
 
 import (

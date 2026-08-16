@@ -991,6 +991,10 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 	a.serverDone = done
 	a.serverMu.Unlock()
 
+	if a.rateLimits != nil && a.rateLimits.Service != nil {
+		a.rateLimits.Service.Start(ctx)
+	}
+
 	slog.Info("starting server", "address", address)
 	err := start(serverCtx)
 

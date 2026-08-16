@@ -15,6 +15,11 @@ type RateLimitsConfig struct {
 	// Default: true. With no rules configured the check is a no-op.
 	Enabled bool `yaml:"enabled" env:"RATE_LIMITS_ENABLED"`
 
+	// FlushInterval is how often live request/token windows are written to
+	// storage, in seconds. Default 1. 0 disables the periodic loop; Start
+	// still loads and Close of an active generation still writes once.
+	FlushInterval int `yaml:"flush_interval" env:"RATE_LIMITS_FLUSH_INTERVAL"`
+
 	// UserPaths declares rate limit rules by tracked user path.
 	UserPaths []RateLimitUserPathConfig `yaml:"user_paths"`
 
@@ -229,6 +234,9 @@ func rateLimitEnvName(name string) (periodSeconds int64, isTokens bool, err erro
 func validateRateLimitConfig(cfg *RateLimitsConfig) error {
 	if cfg == nil {
 		return nil
+	}
+	if cfg.FlushInterval < 0 {
+		return fmt.Errorf("rate_limits.flush_interval must be >= 0")
 	}
 	if !cfg.Enabled {
 		return nil

@@ -198,6 +198,7 @@ budgets:
 
 rate_limits:
   enabled: true # env: RATE_LIMITS_ENABLED; with no configured rules this has no effect
+  flush_interval: 1 # seconds; env: RATE_LIMITS_FLUSH_INTERVAL; 0 = no periodic snapshot (still load + shutdown flush)
   user_paths:
     # Env equivalent:
     # SET_RATE_LIMIT_USER__PATH__EXAMPLE="rpm=100,tpm=50000,rpd=10000,concurrent=10"

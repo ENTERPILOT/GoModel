@@ -227,9 +227,14 @@ Details worth knowing:
 - A realtime session counts as one request and holds one concurrency slot for
   the whole session. A batch submission counts as one request and holds no
   concurrency slot.
-- Counters live in memory, per gateway instance: with N replicas the
-  effective limit is about N times the configured value, and counters reset
-  on restart. Use budgets for durable, cross-instance control.
+- Request and token windows live in memory for admission and are snapshotted
+  to the configured store about once a second (and on shutdown), so they
+  survive a restart and `gomodel --reload`. Concurrency gauges are not
+  persisted: after a bounce nothing is in flight. With N replicas the
+  effective limit is still about N times the configured value — use budgets
+  for durable, cross-instance control. Tune the snapshot interval with
+  `RATE_LIMITS_FLUSH_INTERVAL` (seconds; default `1`; `0` skips the periodic
+  write but still loads on start and flushes on a clean shutdown).
 
 ## Client behavior
 

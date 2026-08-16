@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -35,6 +36,13 @@ type Service struct {
 	rules []Rule
 
 	quotaTemplates bool
+
+	flushInterval time.Duration
+	persistMu     sync.Mutex
+	flushStop     chan struct{}
+	flushDone     chan struct{}
+	flushOnce     sync.Once
+	active        atomic.Bool
 }
 
 func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
@@ -57,9 +65,14 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 	return service, nil
 }
 
-// Close stops the in-memory expiry cleanup worker.
+// Close stops the flush loop, writes a final snapshot if this generation
+// was started, and stops the in-memory expiry cleanup worker.
 func (s *Service) Close() {
-	if s != nil && s.limiter != nil {
+	if s == nil {
+		return
+	}
+	s.stopFlushAndSave()
+	if s.limiter != nil {
 		s.limiter.close()
 	}
 }
@@ -138,6 +151,7 @@ func (s *Service) DeleteRule(ctx context.Context, scope RuleScope, subject strin
 		return err
 	}
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
+	s.persistDelete(scope, subject, periodSeconds)
 	return s.Refresh(ctx)
 }
 
@@ -336,6 +350,7 @@ func (s *Service) ResetRule(scope RuleScope, subject string, periodSeconds int64
 		return err
 	}
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
+	s.persistDelete(scope, subject, periodSeconds)
 	return nil
 }
 
@@ -345,6 +360,7 @@ func (s *Service) ResetAll() error {
 		return ErrUnavailable
 	}
 	s.limiter.resetAll()
+	s.persistDeleteAll()
 	return nil
 }
 

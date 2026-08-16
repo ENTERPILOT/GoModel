@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -13,7 +14,8 @@ import (
 )
 
 type MongoDBStore struct {
-	rules *mongo.Collection
+	rules    *mongo.Collection
+	counters *mongo.Collection
 }
 
 func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBStore, error) {
@@ -21,7 +23,8 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 		return nil, fmt.Errorf("database is required")
 	}
 	store := &MongoDBStore{
-		rules: database.Collection("rate_limits"),
+		rules:    database.Collection("rate_limits"),
+		counters: database.Collection("rate_limit_counters"),
 	}
 	if err := store.migratePreScopeDocuments(ctx); err != nil {
 		return nil, err
@@ -32,6 +35,18 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create rate limit indexes: %w", err)
+	}
+	_, err = store.counters.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "scope", Value: 1},
+			{Key: "subject", Value: 1},
+			{Key: "partition", Value: 1},
+			{Key: "period_seconds", Value: 1},
+		},
+		Options: options.Index().SetUnique(true),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create rate limit counter indexes: %w", err)
 	}
 	return store, nil
 }
@@ -338,6 +353,97 @@ func (s *MongoDBStore) configRulesWithoutManualCollisions(ctx context.Context, r
 		filtered = append(filtered, rule)
 	}
 	return filtered, nil
+}
+
+func (s *MongoDBStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
+	cursor, err := s.counters.Find(ctx, bson.D{})
+	if err != nil {
+		return nil, fmt.Errorf("list rate limit counters: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var snapshots []WindowSnapshot
+	for cursor.Next(ctx) {
+		var snap WindowSnapshot
+		if err := cursor.Decode(&snap); err != nil {
+			return nil, fmt.Errorf("decode rate limit counter: %w", err)
+		}
+		snapshots = append(snapshots, snap)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rate limit counters: %w", err)
+	}
+	return snapshots, nil
+}
+
+func (s *MongoDBStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
+	write := func(writeCtx context.Context) error {
+		if _, err := s.counters.DeleteMany(writeCtx, bson.D{}); err != nil {
+			return fmt.Errorf("clear rate limit counters: %w", err)
+		}
+		if len(snapshots) == 0 {
+			return nil
+		}
+		now := time.Now().Unix()
+		docs := make([]any, 0, len(snapshots))
+		for _, snap := range snapshots {
+			snap.UpdatedAt = now
+			docs = append(docs, snap)
+		}
+		if _, err := s.counters.InsertMany(writeCtx, docs); err != nil {
+			return fmt.Errorf("insert rate limit counters: %w", err)
+		}
+		return nil
+	}
+
+	session, err := s.counters.Database().Client().StartSession()
+	if err != nil {
+		return fmt.Errorf("start rate limit counter transaction: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
+		if err := write(txCtx); err != nil {
+			if isMongoTransactionCapabilityError(err) {
+				return nil, &mongoTransactionFallbackError{err: err}
+			}
+			return nil, err
+		}
+		return nil, nil
+	})
+	if err != nil {
+		if fallbackErr := mongoTransactionFallbackCause(err); fallbackErr != nil || isMongoTransactionCapabilityError(err) {
+			if fallbackErr == nil {
+				fallbackErr = err
+			}
+			slog.Warn("MongoDB transactions unavailable for rate limit counters; falling back to non-transactional update", "error", fallbackErr)
+			if err := write(ctx); err != nil {
+				return fmt.Errorf("save rate limit counters without transaction: %w", errors.Join(fallbackErr, err))
+			}
+			return nil
+		}
+		return fmt.Errorf("save rate limit counters transaction: %w", err)
+	}
+	return nil
+}
+
+func (s *MongoDBStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	_, err := s.counters.DeleteMany(ctx, bson.D{
+		{Key: "scope", Value: scope},
+		{Key: "subject", Value: subject},
+		{Key: "period_seconds", Value: periodSeconds},
+	})
+	if err != nil {
+		return fmt.Errorf("delete rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
+	}
+	return nil
+}
+
+func (s *MongoDBStore) DeleteAllCounters(ctx context.Context) error {
+	if _, err := s.counters.DeleteMany(ctx, bson.D{}); err != nil {
+		return fmt.Errorf("delete all rate limit counters: %w", err)
+	}
+	return nil
 }
 
 func (s *MongoDBStore) Close() error {

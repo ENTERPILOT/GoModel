@@ -25,6 +25,22 @@ const sqlRateLimitsSchema = `
 		PRIMARY KEY (scope, subject, period_seconds)
 	)`
 
+const sqlRateLimitCountersSchema = `
+	CREATE TABLE IF NOT EXISTS rate_limit_counters (
+		scope TEXT NOT NULL,
+		subject TEXT NOT NULL,
+		partition TEXT NOT NULL DEFAULT '',
+		period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
+		requests_window_start ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		requests_current ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		requests_previous ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		tokens_window_start ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		tokens_current ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		tokens_previous ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
+		PRIMARY KEY (scope, subject, partition, period_seconds)
+	)`
+
 // SQLStore stores rate limit rules in a SQL database.
 type SQLStore struct {
 	db sqlx.DB
@@ -63,6 +79,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	}
 	if err := db.Schema(ctx, `CREATE INDEX IF NOT EXISTS idx_rate_limits_subject ON rate_limits(scope, subject)`); err != nil {
 		return nil, fmt.Errorf("failed to create rate limit index: %w", err)
+	}
+	if err := db.Schema(ctx, sqlRateLimitCountersSchema); err != nil {
+		return nil, fmt.Errorf("failed to create rate_limit_counters table: %w", err)
 	}
 	return &SQLStore{db: db}, nil
 }
@@ -150,6 +169,78 @@ func (s *SQLStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 		}
 		return upsertRules(ctx, q, rules)
 	})
+}
+
+func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT scope, subject, partition, period_seconds,
+			requests_window_start, requests_current, requests_previous,
+			tokens_window_start, tokens_current, tokens_previous
+		FROM rate_limit_counters
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list rate limit counters: %w", err)
+	}
+	defer rows.Close()
+
+	var snapshots []WindowSnapshot
+	for rows.Next() {
+		var snap WindowSnapshot
+		if err := rows.Scan(
+			&snap.Scope, &snap.Subject, &snap.Partition, &snap.PeriodSeconds,
+			&snap.RequestsWindowStart, &snap.RequestsCurrent, &snap.RequestsPrevious,
+			&snap.TokensWindowStart, &snap.TokensCurrent, &snap.TokensPrevious,
+		); err != nil {
+			return nil, fmt.Errorf("scan rate limit counter: %w", err)
+		}
+		snapshots = append(snapshots, snap)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rate limit counters: %w", err)
+	}
+	return snapshots, nil
+}
+
+func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
+	now := time.Now().Unix()
+	return s.db.InTx(ctx, func(q sqlx.Querier) error {
+		if _, err := q.Exec(ctx, `DELETE FROM rate_limit_counters`); err != nil {
+			return fmt.Errorf("clear rate limit counters: %w", err)
+		}
+		for _, snap := range snapshots {
+			if _, err := q.Exec(ctx, `
+				INSERT INTO rate_limit_counters (
+					scope, subject, partition, period_seconds,
+					requests_window_start, requests_current, requests_previous,
+					tokens_window_start, tokens_current, tokens_previous, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds,
+				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
+				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, now,
+			); err != nil {
+				return fmt.Errorf("insert rate limit counter: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+func (s *SQLStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	_, err := s.db.Exec(ctx, `
+		DELETE FROM rate_limit_counters
+		WHERE scope = ? AND subject = ? AND period_seconds = ?
+	`, scope, subject, periodSeconds)
+	if err != nil {
+		return fmt.Errorf("delete rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
+	}
+	return nil
+}
+
+func (s *SQLStore) DeleteAllCounters(ctx context.Context) error {
+	if _, err := s.db.Exec(ctx, `DELETE FROM rate_limit_counters`); err != nil {
+		return fmt.Errorf("delete all rate limit counters: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLStore) Close() error {

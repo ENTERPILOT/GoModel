@@ -13,7 +13,8 @@ import (
 
 // memStore is a minimal in-memory Store for service tests.
 type memStore struct {
-	rules []Rule
+	rules    []Rule
+	counters []WindowSnapshot
 }
 
 func (m *memStore) ListRules(context.Context) ([]Rule, error) {
@@ -67,6 +68,31 @@ func (m *memStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 }
 
 func (m *memStore) Close() error { return nil }
+
+func (m *memStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
+	return append([]WindowSnapshot(nil), m.counters...), nil
+}
+
+func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) error {
+	m.counters = append([]WindowSnapshot(nil), snapshots...)
+	return nil
+}
+
+func (m *memStore) DeleteCounter(_ context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	kept := m.counters[:0]
+	for _, snap := range m.counters {
+		if snap.Scope != string(scope) || snap.Subject != subject || snap.PeriodSeconds != periodSeconds {
+			kept = append(kept, snap)
+		}
+	}
+	m.counters = kept
+	return nil
+}
+
+func (m *memStore) DeleteAllCounters(context.Context) error {
+	m.counters = nil
+	return nil
+}
 
 // onPath builds request subjects for user-path-only tests.
 func onPath(path string) Subjects { return Subjects{UserPath: path} }
