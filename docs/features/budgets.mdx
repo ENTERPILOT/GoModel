@@ -186,8 +186,10 @@ lookup. The request is rejected if any matching limit is exhausted.
 
 <Info>
   Dynamic per-child budgets are available in GoModel Pro and require the
-  `quota_templates` license entitlement. Without that entitlement, GoModel
-  rejects `per_child: true` configuration and admin API writes.
+  `quota_templates` license entitlement. Without it, admin API writes are
+  rejected with 403 `quota_templates_not_entitled`, and `per_child: true` in
+  configuration aborts startup — GoModel never silently falls back to one
+  shared subtree budget, since that would change enforcement semantics.
 </Info>
 
 Set `per_child: true` on a user-path entry when its limit is a template for
