@@ -96,9 +96,12 @@ func TestSessionIDVisibilityByBodySize(t *testing.T) {
 				t.Fatalf("rewriter never ran (status %d): %s", rec.Code, rec.Body.String())
 			}
 
-			detected := strings.TrimSpace(in.SessionID) != ""
-			t.Logf("body=%d KiB status=%d session_id=%q detected=%t",
-				len(body)/1024, rec.Code, in.SessionID, detected)
+			if strings.TrimSpace(in.SessionID) == "" {
+				t.Fatalf("no session id detected for %d KiB body (status %d)",
+					len(body)/1024, rec.Code)
+			}
+			t.Logf("body=%d KiB status=%d session_id=%q",
+				len(body)/1024, rec.Code, in.SessionID)
 		})
 	}
 }
