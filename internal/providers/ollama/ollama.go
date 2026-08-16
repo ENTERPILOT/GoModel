@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -44,6 +45,41 @@ type Provider struct {
 	compat       *openai.CompatibleProvider
 	nativeClient *llmclient.Client
 	keys         *providers.Keyring // Optional; Ollama accepts a bearer token but does not require one
+	// modeCache remembers /api/show-derived modes per model name (including
+	// confirmed-empty results) so repeated listings don't re-probe upstream.
+	modeCache sync.Map // string → []string
+}
+
+// discoveredModes maps a model's native /api/show capabilities onto gateway
+// mode strings. Errors are swallowed and not cached, so a transient failure
+// retries on the next listing while a server without the capabilities field
+// (older Ollama, or an OpenAI-compatible impostor) caches an empty result.
+func (p *Provider) discoveredModes(ctx context.Context, model string) []string {
+	if cached, ok := p.modeCache.Load(model); ok {
+		return cached.([]string)
+	}
+	var show struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	err := p.nativeClient.Do(ctx, llmclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: "/api/show",
+		Body:     map[string]string{"model": model},
+	}, &show)
+	if err != nil {
+		return nil
+	}
+	modes := make([]string, 0, len(show.Capabilities))
+	for _, capability := range show.Capabilities {
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "completion":
+			modes = append(modes, "chat")
+		case "embedding":
+			modes = append(modes, "embedding")
+		}
+	}
+	p.modeCache.Store(model, modes)
+	return modes
 }
 
 // New creates a new Ollama provider.
@@ -130,9 +166,29 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	return p.compat.StreamChatCompletion(ctx, req)
 }
 
-// ListModels retrieves the list of available models from Ollama
+// ListModels retrieves the list of available models from Ollama, stamping
+// modes/categories from each model's native /api/show capabilities so local
+// embedding models are classified without a remote-registry entry. Capability
+// lookups are best-effort (older Ollama versions lack the field; a failed call
+// just leaves the model unstamped for the ID heuristic) and cached per model
+// name, so steady-state listings cost no extra requests.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compat.ListModels(ctx)
+	resp, err := p.compat.ListModels(ctx)
+	if err != nil || resp == nil {
+		return resp, err
+	}
+	for i := range resp.Data {
+		if resp.Data[i].Metadata != nil {
+			continue
+		}
+		if modes := p.discoveredModes(ctx, resp.Data[i].ID); len(modes) > 0 {
+			resp.Data[i].Metadata = &core.ModelMetadata{
+				Modes:      modes,
+				Categories: core.CategoriesForModes(modes),
+			}
+		}
+	}
+	return resp, nil
 }
 
 // Responses sends a Responses API request to Ollama (converted to chat format)

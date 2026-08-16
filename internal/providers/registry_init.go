@@ -388,6 +388,7 @@ func (r *ModelRegistry) enrichFetchedProviderModelMaps(
 		metadataStats = enrichProviderModelMaps(list, providerTypes, modelsByProvider, nil)
 	}
 	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, modelsByProvider, nil)
+	metadataStats.Enriched += applyInferredModelMetadata(modelsByProvider, nil)
 	return metadataStats
 }
 

@@ -20,7 +20,9 @@ func MergeMetadata(base, override *core.ModelMetadata) *core.ModelMetadata {
 		return base.Clone()
 	}
 	if base == nil {
-		return override.Clone()
+		merged := override.Clone()
+		deriveCategoriesFromModes(merged, override)
+		return merged
 	}
 
 	merged := base.Clone()
@@ -40,6 +42,7 @@ func MergeMetadata(base, override *core.ModelMetadata) *core.ModelMetadata {
 	if len(override.Categories) > 0 {
 		merged.Categories = append([]core.ModelCategory(nil), override.Categories...)
 	}
+	deriveCategoriesFromModes(merged, override)
 	if len(override.Tags) > 0 {
 		merged.Tags = append([]string(nil), override.Tags...)
 	}
@@ -78,6 +81,17 @@ func MergeMetadata(base, override *core.ModelMetadata) *core.ModelMetadata {
 	}
 
 	return merged
+}
+
+// deriveCategoriesFromModes keeps Categories consistent when an override
+// declares Modes without Categories. Categories are derived data (the
+// dashboard's category filter and failover suggestions read them), so an
+// operator writing `modes: [embedding]` must end up with the embedding
+// category rather than the base's stale categories or none at all.
+func deriveCategoriesFromModes(merged, override *core.ModelMetadata) {
+	if len(override.Modes) > 0 && len(override.Categories) == 0 {
+		merged.Categories = core.CategoriesForModes(merged.Modes)
+	}
 }
 
 func clonePricingSources(in map[string]string) map[string]string {

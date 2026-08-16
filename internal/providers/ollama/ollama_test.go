@@ -381,6 +381,12 @@ func TestListModels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Best-effort capability probe issued per listed model.
+				if r.URL.Path == "/api/show" && r.Method == http.MethodPost {
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`{"capabilities":["completion"]}`))
+					return
+				}
 				// Verify request method and path
 				if r.Method != http.MethodGet {
 					t.Errorf("Method = %q, want %q", r.Method, http.MethodGet)
@@ -412,6 +418,76 @@ func TestListModels(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ListModels must stamp modes from native /api/show capabilities (embedding
+// models get classified without a remote-registry entry), cache the results so
+// repeat listings don't re-probe, and leave models unstamped when the probe
+// fails so the ID heuristic can still apply.
+func TestListModels_StampsShowCapabilities(t *testing.T) {
+	showCalls := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/show" {
+			var req struct {
+				Model string `json:"model"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			showCalls[req.Model]++
+			switch req.Model {
+			case "nomic-embed-text":
+				_, _ = w.Write([]byte(`{"capabilities":["embedding"]}`))
+			case "llama3.2":
+				_, _ = w.Write([]byte(`{"capabilities":["completion","tools"]}`))
+			default:
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+			return
+		}
+		_, _ = w.Write([]byte(`{"object":"list","data":[
+			{"id":"llama3.2","object":"model","owned_by":"library"},
+			{"id":"nomic-embed-text","object":"model","owned_by":"library"},
+			{"id":"mystery-model","object":"model","owned_by":"library"}
+		]}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	byID := map[string]core.Model{}
+	for _, m := range resp.Data {
+		byID[m.ID] = m
+	}
+
+	embed := byID["nomic-embed-text"]
+	if embed.Metadata == nil || len(embed.Metadata.Modes) != 1 || embed.Metadata.Modes[0] != "embedding" {
+		t.Errorf("nomic-embed-text metadata = %+v, want embedding modes", embed.Metadata)
+	}
+	if embed.Metadata == nil || len(embed.Metadata.Categories) != 1 || embed.Metadata.Categories[0] != core.CategoryEmbedding {
+		t.Errorf("nomic-embed-text categories = %+v, want [embedding]", embed.Metadata)
+	}
+	chat := byID["llama3.2"]
+	if chat.Metadata == nil || len(chat.Metadata.Modes) != 1 || chat.Metadata.Modes[0] != "chat" {
+		t.Errorf("llama3.2 metadata = %+v, want chat modes (tools capability skipped)", chat.Metadata)
+	}
+	if byID["mystery-model"].Metadata != nil {
+		t.Errorf("mystery-model metadata = %+v, want nil after failed probe", byID["mystery-model"].Metadata)
+	}
+
+	// Second listing: successes served from cache, the failure re-probed.
+	if _, err := provider.ListModels(context.Background()); err != nil {
+		t.Fatalf("unexpected error on second listing: %v", err)
+	}
+	if showCalls["nomic-embed-text"] != 1 || showCalls["llama3.2"] != 1 {
+		t.Errorf("show calls = %v, want cached results for successful probes", showCalls)
+	}
+	if showCalls["mystery-model"] != 2 {
+		t.Errorf("mystery-model show calls = %d, want re-probe after failure", showCalls["mystery-model"])
 	}
 }
 

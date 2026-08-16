@@ -1,0 +1,69 @@
+---
+title: "Model metadata"
+description: "Where a model's pricing, context window, capabilities, and category come from, and which source wins when they disagree."
+icon: "layers"
+keywords: ["model metadata", "pricing", "context window", "capabilities", "model catalog", "ai-model-list", "enrichment"]
+---
+
+Every model in the catalog carries metadata — pricing, context window, max output
+tokens, capabilities, and modes (which decide whether it shows up as a chat,
+embeddings, image, or audio model). GoModel assembles it from five sources,
+strongest first:
+
+```mermaid
+flowchart LR
+    A[Pricing overrides] -->|pricing fields only| B[config.yaml metadata]
+    B -->|declared fields win| C[ai-model-list catalog]
+    C -->|when it knows the model| D[Provider discovery]
+    D -.->|modes still missing| E[ID heuristic]
+```
+
+## The sources
+
+1. **Pricing overrides** — set per model in the dashboard's **Models** page.
+   The top layer for pricing fields only; unset price types keep inheriting.
+   See [Cost tracking](/features/cost-tracking).
+2. **`config.yaml` metadata** — `providers.<name>.models` entries can attach
+   `metadata` (`pricing`, `context_window`, `modes`, `capabilities`, …). Declared
+   fields win field-by-field over everything below; omitted fields inherit. This
+   is the escape hatch for local models: declaring `modes: [embedding]` also
+   derives the model's category.
+3. **The model catalog** — the
+   [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) registry,
+   fetched from `MODEL_LIST_URL` (default: the registry's `models.min.json` on
+   GitHub) at startup and on every catalog refresh. It supplies the rich
+   defaults — pricing, context windows, capabilities, modes — for most hosted
+   models, matching IDs directly, through aliases, and with release-date
+   suffixes stripped. Wrong or missing data is best fixed by contributing to the
+   registry; use an override for an immediate fix.
+4. **Provider discovery** — some providers report capabilities in their own
+   model listings, and GoModel keeps them for the models it discovers there:
+   Gemini's `supportedGenerationMethods`, Cohere's per-model `endpoints` and
+   context length, OpenRouter's architecture modalities and context length, and
+   Ollama's `/api/show` capabilities. Models declared via configured model
+   lists skip this step.
+5. **ID heuristic** — a last-resort name check for models that end up with no
+   modes at all (typical for llama.cpp and LM Studio): IDs containing `embed` or
+   matching well-known embedding families (`bge`, `e5`, `gte`, `minilm`) become
+   embedding models, IDs containing `rerank` become reranking models. Namespaced
+   IDs are matched by their final path segment. When unsure, it claims nothing.
+
+## What metadata affects
+
+- **Pricing** drives [cost tracking](/features/cost-tracking), budgets, and
+  `cost` load-balancing. Each priced field remembers its source, so the
+  dashboard can show where a rate came from.
+- **Modes and categories** drive dashboard grouping and failover suggestions
+  only — routing never blocks on them, so `/v1/embeddings` reaches any model
+  the provider serves.
+- **Context window and capabilities** are advertised on `GET /v1/models` for
+  clients that pick models dynamically.
+
+## Offline behavior
+
+If the catalog fetch fails or the deployment is air-gapped, the gateway runs
+normally — only the catalog-supplied defaults (including catalog pricing) are
+missing. Pricing overrides, `config.yaml` metadata, provider discovery signals,
+and the ID heuristic still apply. Mirror `MODEL_LIST_URL` internally or declare
+metadata in `config.yaml`; see [Production guide](/guides/production) for
+details.

@@ -39,6 +39,8 @@ Pricing for a model is resolved in priority order:
 
 The catalog supplies the default pricing for most models. If a model's price looks wrong or a rate is missing (for example, a cached-input rate), check it against [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) and contribute a correction there, or set an override for an immediate fix.
 
+Pricing is one part of a wider metadata pipeline that also resolves context windows, capabilities, and model categories — see [Model metadata](/advanced/model-metadata) for the full source chain.
+
 ## Override pricing
 
 Override pricing when the catalog price is wrong, missing, or differs from your negotiated rate. Open the **Models** page, find the model, and open its **Pricing override** editor. Set one or more price types (input, output, cached input, and so on) in USD. Saved fields override catalog and `config.yaml` pricing for that selector; unset fields keep inheriting.
