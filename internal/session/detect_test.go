@@ -218,6 +218,10 @@ func TestCanonicalSegmentFallsBackToExactRawJSON(t *testing.T) {
 	for _, raw := range []string{
 		`{"unterminated":`,
 		`{"first":1}{"second":2}`,
+		// Stray closing brackets: Decoder.More treats these as end of input,
+		// so the trailing-data guard must decode to io.EOF to catch them.
+		`1]`,
+		`1}`,
 	} {
 		result := gjson.Result{Type: gjson.JSON, Raw: raw}
 		if got := string(canonicalSegment(result)); got != raw {

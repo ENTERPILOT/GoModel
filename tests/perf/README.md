@@ -30,3 +30,21 @@ bare one and is independent of catalog size.
 `BenchmarkSharedStreamingObserversDefaultConfig` covers streaming observation
 with audit body capture disabled (the default), where the observed stream
 skips JSON decoding for chunks no observer wants.
+
+## Production shape and ablation
+
+`BenchmarkGatewayHotPathProductionShape` runs the routed path with the
+default-deployment middleware chain fully wired: master-key auth, audit
+logging (bodies + headers), usage tracking, session keeping, and a configured
+rate limit. The guard enforces allocation ceilings on this case too, so
+regressions in any of those subsystems fail CI even though the bare cases
+cannot see them.
+
+The `BenchmarkAblation*` family turns exactly one subsystem off relative to
+that full shape; the delta against `BenchmarkAblationFull` attributes
+per-request cost to that subsystem. These are diagnostic benchmarks (run via
+`make perf-bench`), not guarded.
+
+`TestSessionIDVisibilityByBodySize` pins that content-based session
+auto-detection is independent of request body size — there is no size above
+which a request quietly stops carrying a session id to downstream consumers.

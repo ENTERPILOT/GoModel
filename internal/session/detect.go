@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"strings"
 
+	"github.com/goccy/go-json"
 	"github.com/tidwall/gjson"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -196,6 +196,14 @@ func rawSegment(result gjson.Result) json.RawMessage {
 // equivalent string escapes must not split one conversation into multiple
 // auto-detected sessions. UseNumber preserves number spelling/precision while
 // arrays retain their original order.
+//
+// The goccy canonical bytes are byte-identical to encoding/json's (pinned by
+// TestCanonicalSegmentMatchesStdlib), so auto-detected ids are stable across
+// the library switch. The trailing-data guard must decode to io.EOF rather
+// than check Decoder.More: More treats a stray closing bracket ("1]", "1}")
+// as end of input, which would canonicalize malformed raw segments instead of
+// falling back to their exact bytes. For valid input the extra decode reads
+// only the empty remainder, so it costs nothing on the hot path.
 func canonicalSegment(result gjson.Result) json.RawMessage {
 	raw := rawSegment(result)
 	if len(raw) == 0 {
@@ -207,7 +215,8 @@ func canonicalSegment(result gjson.Result) json.RawMessage {
 	if err := decoder.Decode(&value); err != nil {
 		return raw
 	}
-	if err := ensureJSONEOF(decoder); err != nil {
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return raw
 	}
 	canonical, err := json.Marshal(value)
@@ -215,16 +224,4 @@ func canonicalSegment(result gjson.Result) json.RawMessage {
 		return raw
 	}
 	return canonical
-}
-
-func ensureJSONEOF(decoder *json.Decoder) error {
-	var trailing any
-	err := decoder.Decode(&trailing)
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-	if err == nil {
-		return errors.New("multiple JSON values")
-	}
-	return err
 }
