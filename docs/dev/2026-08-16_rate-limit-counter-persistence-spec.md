@@ -63,6 +63,12 @@ used for rules.
 
 Cardinality stays one row per rule, not per caller.
 
+Several replicas sharing Postgres or Mongo last-write-wins on that
+row. That is accepted: this work does not give shared live counters, and
+the schema has no `instance_id`. A restart loads whoever flushed last.
+Use one instance, or wait for the Redis-Lua backend, when the limit
+must be exact across replicas.
+
 ## 5. `counterBackend`
 
 Unexported interface in `internal/ratelimit`, matching what `limiter`
@@ -134,8 +140,9 @@ Add to the existing `Store` interface. No second factory.
 - `LoadCounters(ctx) ([]windowSnapshot, error)` — all rows.
 - `SaveCounters(ctx, []windowSnapshot) error` — one transaction that
   **replaces** the table/collection with the provided set (delete all,
-  then insert). The memory backend always passes the full live window
-  set, so orphans disappear on the next flush.
+  then insert). The payload is only **current windowed rules** (period
+  > 0 still present in `Service.rules`), never leftover limiter-map
+  entries for a rule that was dropped.
 - `DeleteCounter(ctx, scope, subject, periodSeconds) error` — one row.
   Missing row is not an error.
 - `DeleteAllCounters(ctx) error` — empty the table.
@@ -164,6 +171,22 @@ call `Start` keep today’s in-memory-only behavior.
 
 Flush copies the request and token maps under the limiter mutex, then
 writes outside the lock. `admit()` never waits on storage.
+
+A second mutex (`persistMu`) serializes snapshot writes against
+reset/delete row deletes. `admit()` does not take it.
+
+1. Flush: lock `persistMu`, copy maps (only keys that are still
+   windowed rules), `SaveCounters`, unlock.
+2. `Reset` / `DeleteRule` / `ResetAll`: clear memory, lock `persistMu`,
+   delete the row(s), unlock.
+
+Without that, a flush that sampled before a reset can `SaveCounters`
+after the row delete and resurrect the burned window (S206 would flake).
+
+Orphan snapshot rows (rule gone, row still there) are dropped only by
+an **active** generation: `Start` applies matching keys and ignores the
+rest; the next flush replace-all omits them. Construction must not
+delete snapshot rows — see §10.
 
 ## 9. Configuration
 
@@ -197,14 +220,27 @@ that concurrency is in-memory only.
 | Operation | Memory | Snapshot |
 |---|---|---|
 | `Admit` / `RecordTokens` | update windows | next flush / Close |
-| `ResetRule` | `limiter.reset` | `DeleteCounter` immediately |
-| `ResetAll` | `limiter.resetAll` | `DeleteAllCounters` immediately |
-| `DeleteRule` | reset that key | `DeleteCounter` immediately |
-| `ReplaceConfigRules` | refresh rules | after refresh, `DeleteCounter` for every snapshot key that is no longer a windowed rule |
+| `ResetRule` | `limiter.reset` | `DeleteCounter` under `persistMu` |
+| `ResetAll` | `limiter.resetAll` | `DeleteAllCounters` under `persistMu` |
+| `DeleteRule` | reset that key **and drop it from the limiter maps** | `DeleteCounter` under `persistMu` |
+| `ReplaceConfigRules` | refresh rules; **prune limiter maps** for keys that are no longer a windowed rule | **do not touch the store** |
+
+`ReplaceConfigRules` runs from `factory.New` → `seedConfiguredRules`
+while the previous generation is still serving. Deleting snapshot rows
+there would wipe a live hour/day window if the replacement is then
+discarded (failed reload). Orphans are left for the **active**
+generation: `Start` does not apply them; the next flush replace-all
+drops them.
+
+When the rule set changes (`ReplaceConfigRules`, `DeleteRule`), prune
+the request/token maps so a later flush cannot reinsert a dropped
+rule’s window. `SaveCounters` is only ever given current windowed
+rules.
 
 Reset and delete clear memory first (the operator-visible effect), then
-the row. A failed row delete is logged; the in-memory reset still
-stands. The next successful flush replace-all drops the stale row.
+the row under `persistMu`. A failed row delete is logged; the in-memory
+reset still stands. `persistMu` is what stops the next flush from
+putting the row back.
 
 ## 11. Error handling
 
@@ -238,7 +274,11 @@ Persistence never fails a request. `admit()` does not see store errors.
   never ticks.
 - `ResetRule` / `ResetAll` / `DeleteRule` clear memory and the row; a
   later `Start` on a new service does not resurrect them.
-- `ReplaceConfigRules` dropping a config rule deletes that row.
+- `ReplaceConfigRules` dropping a config rule prunes the limiter maps
+  and does not call `DeleteCounter`. After `Start`, the next flush
+  omit that key from `SaveCounters`.
+- An in-flight flush cannot resurrect a completed `ResetRule` /
+  `DeleteRule` (`persistMu`).
 - SQL store (and Mongo, same as rules) round-trip: replace, load,
   delete one, delete all. Migration creates `rate_limit_counters` on an
   existing DB.
@@ -266,12 +306,15 @@ Use **hour** windows so the cap outlives the reload wait. Each scenario
 creates a `$QA_SUFFIX`-scoped user-path rule and deletes it.
 
 - **S205 — Request-window counters survive `--reload` (SQLite).**
-  `max_requests=1` on `$BASE_URL`. First chat succeeds. Sleep ~2s so
-  the 1s flush lands. Reload `sqlite-main`. Second chat is `429` with
-  `code: rate_limit_exceeded`. Delete the rule.
+  `max_requests=1` on `$BASE_URL`. First chat succeeds. Reload
+  `sqlite-main` (old `Close` writes the snapshot; no sleep required
+  for the happy path). Second chat is `429` with
+  `code: rate_limit_exceeded`. Delete the rule. Crash-before-`Close`
+  (periodic flush only) is a unit test, not this scenario.
 - **S206 — `reset-one` stays cleared across `--reload`.** Same shape:
-  burn the hour window, `reset-one`, sleep, reload `sqlite-main`. Next
-  chat succeeds. Delete the rule.
+  burn the hour window, `reset-one`, reload `sqlite-main`. Next chat
+  succeeds. Delete the rule. `persistMu` is what makes this
+  deterministic.
 - **S207 — Same request-window survival on PostgreSQL and MongoDB.**
   S203-style loop over `$PG_BASE_URL` / `$MONGO_BASE_URL`, reloading
   `pg-smoke` and `mongo-smoke`. Distinct paths, delete each rule.
@@ -282,8 +325,10 @@ plus unit tests; concurrent is not persisted and is not an E2E case.
 
 ## 13. Docs and comments
 
-- `docs/features/rate-limits.mdx` — windows survive restart and
-  `--reload`; concurrency does not; still per instance.
+- `docs/features/rate-limits.mdx` and `docs/advanced/cli.mdx` —
+  windows survive restart and `--reload`; concurrency does not; still
+  per instance. Drop the “counters start fresh” wording on the CLI
+  reload page.
 - `docs/dev/2026-07-05_rate-limiting-spec.md` §8 and §11.7 — mark
   persistence done; §11.2 stays future work.
 - `CLAUDE.md` / `Agents.md` — drop rate-limit counters from the
