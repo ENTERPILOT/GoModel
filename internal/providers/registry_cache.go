@@ -128,6 +128,7 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	}
 	configOverrides := r.snapshotConfigOverrides()
 	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
+	metadataStats.Enriched += applyInferredModelMetadata(newModelsByProvider, nil)
 
 	r.mu.Lock()
 	r.models = newModels

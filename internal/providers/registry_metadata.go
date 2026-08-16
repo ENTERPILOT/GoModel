@@ -40,9 +40,6 @@ func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
 	if len(r.models) == 0 {
 		return metadataEnrichmentStats{}
 	}
-	if r.modelList == nil && len(r.configMetadataOverrides) == 0 {
-		return metadataEnrichmentStats{}
-	}
 
 	providerTypes := make(map[core.Provider]string, len(r.providerTypes))
 	maps.Copy(providerTypes, r.providerTypes)
@@ -53,6 +50,7 @@ func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
 		stats = enrichProviderModelMaps(r.modelList, providerTypes, r.modelsByProvider, replacements)
 	}
 	stats.Enriched += applyConfigMetadataOverrides(r.configMetadataOverrides, r.modelsByProvider, replacements)
+	stats.Enriched += applyInferredModelMetadata(r.modelsByProvider, replacements)
 	for modelID, info := range r.models {
 		if replacement, ok := replacements[info]; ok {
 			r.models[modelID] = replacement
@@ -340,6 +338,64 @@ func applyConfigMetadataOverrides(
 			if reflect.DeepEqual(current.Model.Metadata, merged) {
 				continue
 			}
+			if replacements == nil {
+				current.Model.Metadata = merged
+				applied++
+				continue
+			}
+			cloned := *current
+			cloned.Model.Metadata = merged
+			next := &cloned
+			providerModels[modelID] = next
+			if orig, hasOrig := reverse[current]; hasOrig {
+				replacements[orig] = next
+				reverse[next] = orig
+			} else {
+				replacements[current] = next
+				reverse[next] = current
+			}
+			applied++
+		}
+	}
+	return applied
+}
+
+// applyInferredModelMetadata is the last enrichment step: models that ended up
+// with no modes and no categories — neither the remote model registry nor
+// operator config knows them, the common case for local llama.cpp/LM Studio/
+// Ollama models — get modes inferred from their ID so obvious embedding models
+// are categorized as such instead of falling out of every category listing.
+// Runs after enrichProviderModelMaps and applyConfigMetadataOverrides so both
+// real sources always win; uses the same replacements protocol (nil for fresh,
+// unpublished maps). Returns the number of models that received inferred modes.
+func applyInferredModelMetadata(
+	modelsByProvider map[string]map[string]*ModelInfo,
+	replacements map[*ModelInfo]*ModelInfo,
+) int {
+	var reverse map[*ModelInfo]*ModelInfo
+	if replacements != nil {
+		reverse = make(map[*ModelInfo]*ModelInfo, len(replacements))
+		for orig, repl := range replacements {
+			reverse[repl] = orig
+		}
+	}
+	applied := 0
+	for _, providerModels := range modelsByProvider {
+		for modelID, current := range providerModels {
+			meta := current.Model.Metadata
+			if meta != nil && (len(meta.Modes) > 0 || len(meta.Categories) > 0) {
+				continue
+			}
+			modes := modeldata.InferModesFromID(modelID)
+			if len(modes) == 0 {
+				continue
+			}
+			merged := meta.Clone()
+			if merged == nil {
+				merged = &core.ModelMetadata{}
+			}
+			merged.Modes = modes
+			merged.Categories = core.CategoriesForModes(modes)
 			if replacements == nil {
 				current.Model.Metadata = merged
 				applied++
