@@ -243,3 +243,40 @@ func TestMongoDBStoreCounterRoundTrip(t *testing.T) {
 		})
 	})
 }
+
+// TestMongoDBStoreLoadCountersSkipsMalformedDocument is the MongoDB half of
+// TestSQLStoreLoadCountersSkipsMalformedRow: one undecodable document must not
+// cost every other window its restore.
+func TestMongoDBStoreLoadCountersSkipsMalformedDocument(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		if err != nil {
+			t.Fatalf("NewMongoDBStore() failed: %v", err)
+		}
+		good := WindowSnapshot{
+			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+			RequestsWindowStart: 1700000000, RequestsCurrent: 2,
+		}
+		if err := store.SaveCounters(ctx, []WindowSnapshot{good}); err != nil {
+			t.Fatalf("SaveCounters: %v", err)
+		}
+		if _, err := db.Collection("rate_limit_counters").InsertOne(ctx, bson.D{
+			{Key: "scope", Value: string(ScopeUserPath)},
+			{Key: "subject", Value: "/broken"},
+			{Key: "partition", Value: ""},
+			{Key: "period_seconds", Value: "not-a-number"},
+			{Key: "updated_at", Value: time.Now().Unix()},
+		}); err != nil {
+			t.Fatalf("seed malformed document: %v", err)
+		}
+
+		got, err := store.LoadCounters(ctx)
+		if err != nil {
+			t.Fatalf("LoadCounters: %v", err)
+		}
+		if len(got) != 1 || got[0] != good {
+			t.Fatalf("loaded = %+v, want only the readable window %+v", got, good)
+		}
+	})
+}

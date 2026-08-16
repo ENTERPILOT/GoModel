@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -191,7 +192,11 @@ func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
 			&snap.RequestsWindowStart, &snap.RequestsCurrent, &snap.RequestsPrevious,
 			&snap.TokensWindowStart, &snap.TokensCurrent, &snap.TokensPrevious,
 		); err != nil {
-			return nil, fmt.Errorf("scan rate limit counter: %w", err)
+			// One unreadable row must not cost every other window its
+			// restore: Start treats a load error as "do not persist this
+			// generation". Same policy as the Mongo loader.
+			slog.Warn("rate limit counters: skipping malformed snapshot", "error", err)
+			continue
 		}
 		snapshots = append(snapshots, snap)
 	}
