@@ -136,10 +136,15 @@ func TestAudio_UsesOpenAISurfaceWithAttributionHeaders(t *testing.T) {
 	type seen struct {
 		path    string
 		referer string
+		title   string
 	}
 	requests := make(chan seen, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests <- seen{path: r.URL.Path, referer: r.Header.Get("HTTP-Referer")}
+		requests <- seen{
+			path:    r.URL.Path,
+			referer: r.Header.Get("HTTP-Referer"),
+			title:   r.Header.Get("X-OpenRouter-Title"),
+		}
 		switch r.URL.Path {
 		case "/audio/speech":
 			w.Header().Set("Content-Type", "audio/mpeg")
@@ -188,6 +193,9 @@ func TestAudio_UsesOpenAISurfaceWithAttributionHeaders(t *testing.T) {
 		}
 		if got.referer != defaultSiteURL {
 			t.Errorf("HTTP-Referer on %s = %q, want %q", want, got.referer, defaultSiteURL)
+		}
+		if got.title != defaultAppName {
+			t.Errorf("X-OpenRouter-Title on %s = %q, want %q", want, got.title, defaultAppName)
 		}
 	}
 }
