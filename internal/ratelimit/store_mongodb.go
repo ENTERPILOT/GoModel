@@ -378,67 +378,31 @@ func (s *MongoDBStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, erro
 }
 
 func (s *MongoDBStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
-	write := func(writeCtx context.Context) error {
-		now := time.Now().Unix()
+	now := time.Now().Unix()
+	if len(snapshots) > 0 {
+		writes := make([]mongo.WriteModel, 0, len(snapshots))
 		for _, snap := range snapshots {
 			snap.UpdatedAt = now
-			_, err := s.counters.UpdateOne(
-				writeCtx,
-				counterIdentityFilter(snap),
-				bson.D{{Key: "$set", Value: snap}},
-				options.UpdateOne().SetUpsert(true),
-			)
-			if err != nil {
-				return fmt.Errorf("upsert rate limit counter: %w", err)
-			}
+			writes = append(writes, mongo.NewUpdateOneModel().
+				SetFilter(counterIdentityFilter(snap)).
+				SetUpdate(bson.D{{Key: "$set", Value: snap}}).
+				SetUpsert(true))
 		}
-		return s.deleteOrphanCounters(writeCtx, snapshots)
-	}
-
-	session, err := s.counters.Database().Client().StartSession()
-	if err != nil {
-		return fmt.Errorf("start rate limit counter transaction: %w", err)
-	}
-	defer session.EndSession(ctx)
-
-	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
-		if err := write(txCtx); err != nil {
-			if isMongoTransactionCapabilityError(err) {
-				return nil, &mongoTransactionFallbackError{err: err}
-			}
-			return nil, err
+		if _, err := s.counters.BulkWrite(ctx, writes, options.BulkWrite().SetOrdered(false)); err != nil {
+			return fmt.Errorf("upsert rate limit counters: %w", err)
 		}
-		return nil, nil
-	})
-	if err != nil {
-		if fallbackErr := mongoTransactionFallbackCause(err); fallbackErr != nil || isMongoTransactionCapabilityError(err) {
-			if fallbackErr == nil {
-				fallbackErr = err
-			}
-			slog.Warn("MongoDB transactions unavailable for rate limit counters; falling back to non-transactional update", "error", fallbackErr)
-			if err := write(ctx); err != nil {
-				return fmt.Errorf("save rate limit counters without transaction: %w", errors.Join(fallbackErr, err))
-			}
-			return nil
-		}
-		return fmt.Errorf("save rate limit counters transaction: %w", err)
 	}
-	return nil
-}
-
-func (s *MongoDBStore) deleteOrphanCounters(ctx context.Context, snapshots []WindowSnapshot) error {
-	if len(snapshots) == 0 {
-		if _, err := s.counters.DeleteMany(ctx, bson.D{}); err != nil {
-			return fmt.Errorf("clear rate limit counters: %w", err)
-		}
-		return nil
-	}
-	keep := make(bson.A, 0, len(snapshots))
-	for _, snap := range snapshots {
-		keep = append(keep, counterIdentityFilter(snap))
-	}
-	if _, err := s.counters.DeleteMany(ctx, bson.D{{Key: "$nor", Value: keep}}); err != nil {
-		return fmt.Errorf("prune rate limit counters: %w", err)
+	// Collect the rows nobody writes any more, on the same staleness bound
+	// restore applies, so this only ever deletes rows a load would discard.
+	stale := bson.D{{Key: "$expr", Value: bson.D{{Key: "$lt", Value: bson.A{
+		bson.D{{Key: "$add", Value: bson.A{
+			"$updated_at",
+			bson.D{{Key: "$multiply", Value: bson.A{2, "$period_seconds"}}},
+		}}},
+		now,
+	}}}}}
+	if _, err := s.counters.DeleteMany(ctx, stale); err != nil {
+		return fmt.Errorf("prune expired rate limit counters: %w", err)
 	}
 	return nil
 }

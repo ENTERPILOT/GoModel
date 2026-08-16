@@ -16,9 +16,11 @@ type Store interface {
 	DeleteRule(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
 	ReplaceConfigRules(ctx context.Context, rules []Rule) error
 	LoadCounters(ctx context.Context) ([]WindowSnapshot, error)
-	// SaveCounters upserts snapshots and deletes rows that are no longer
-	// present. It must not delete existing rows before the new values are
-	// durable, so a crash cannot wipe the previous generation.
+	// SaveCounters upserts the given snapshots and collects rows no writer has
+	// refreshed for two of their own periods — the same staleness bound a load
+	// applies, so it only ever drops rows that could no longer be restored.
+	// Nothing is deleted to make room for a write, so a crash mid-save costs at
+	// most the flush interval rather than a whole window.
 	SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error
 	DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
 	DeleteAllCounters(ctx context.Context) error

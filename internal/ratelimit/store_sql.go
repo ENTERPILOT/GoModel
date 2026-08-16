@@ -229,53 +229,21 @@ func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot)
 				return fmt.Errorf("upsert rate limit counter: %w", err)
 			}
 		}
-		return deleteOrphanCounters(ctx, q, snapshots)
+		if _, err := q.Exec(ctx, pruneCountersSQL, now); err != nil {
+			return fmt.Errorf("prune expired rate limit counters: %w", err)
+		}
+		return nil
 	})
 }
 
-func deleteOrphanCounters(ctx context.Context, q sqlx.Querier, snapshots []WindowSnapshot) error {
-	if len(snapshots) == 0 {
-		if _, err := q.Exec(ctx, `DELETE FROM rate_limit_counters`); err != nil {
-			return fmt.Errorf("clear rate limit counters: %w", err)
-		}
-		return nil
-	}
-	keep := make(map[string]struct{}, len(snapshots))
-	for _, snap := range snapshots {
-		keep[snapshotIdentity(snap)] = struct{}{}
-	}
-	rows, err := q.Query(ctx, `
-		SELECT scope, subject, partition, period_seconds
-		FROM rate_limit_counters
-	`)
-	if err != nil {
-		return fmt.Errorf("list rate limit counters for prune: %w", err)
-	}
-	defer rows.Close()
-
-	var stale []WindowSnapshot
-	for rows.Next() {
-		var snap WindowSnapshot
-		if err := rows.Scan(&snap.Scope, &snap.Subject, &snap.Partition, &snap.PeriodSeconds); err != nil {
-			return fmt.Errorf("scan rate limit counter identity: %w", err)
-		}
-		if _, ok := keep[snapshotIdentity(snap)]; !ok {
-			stale = append(stale, snap)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate rate limit counters for prune: %w", err)
-	}
-	for _, snap := range stale {
-		if _, err := q.Exec(ctx, `
-			DELETE FROM rate_limit_counters
-			WHERE scope = ? AND subject = ? AND partition = ? AND period_seconds = ?
-		`, snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds); err != nil {
-			return fmt.Errorf("prune rate limit counter: %w", err)
-		}
-	}
-	return nil
-}
+// pruneCountersSQL collects the rows nobody writes any more: a rule that was
+// deleted, or a window that fell out of memory. Two periods without a write is
+// the same staleness bound restore applies, so this only ever deletes rows a
+// load would have discarded.
+const pruneCountersSQL = `
+	DELETE FROM rate_limit_counters
+	WHERE updated_at + 2 * period_seconds < ?
+`
 
 func (s *SQLStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	_, err := s.db.Exec(ctx, `

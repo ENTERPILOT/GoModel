@@ -51,6 +51,13 @@ func persistContext(parent context.Context) (context.Context, context.CancelFunc
 	return context.WithTimeout(context.Background(), persistTimeout)
 }
 
+// Start restores persisted windows and, from then on, keeps writing them.
+// It is separate from NewService because a reload builds the next generation
+// while the current one still serves: only the generation that gets to serve
+// may touch the snapshot, or a replacement that is built and then discarded
+// would flush its empty windows over the live ones. Start is idempotent, and
+// a failed load leaves the generation idle rather than persisting from a
+// blank slate.
 func (s *Service) Start(ctx context.Context) {
 	if s == nil || s.store == nil {
 		return
@@ -81,6 +88,9 @@ func (s *Service) Start(ctx context.Context) {
 	s.limiter.restore(snapshots, s.Rules(), time.Now().UTC())
 	s.startFlushLoop()
 	s.persistState = persistActive
+	if len(snapshots) > 0 {
+		slog.Info("rate limit counters restored", "windows", len(snapshots))
+	}
 }
 
 func (s *Service) startFlushLoop() {

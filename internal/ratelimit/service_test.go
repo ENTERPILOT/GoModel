@@ -73,8 +73,36 @@ func (m *memStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
 	return append([]WindowSnapshot(nil), m.counters...), nil
 }
 
+// snapshotIdentity is the primary key every store keys a window row by.
+func snapshotIdentity(s WindowSnapshot) string {
+	return s.Scope + "\x00" + s.Subject + "\x00" + s.Partition + "\x00" + strconv.FormatInt(s.PeriodSeconds, 10)
+}
+
+// SaveCounters mirrors the real stores: upsert by identity, then collect rows
+// that went two periods without a write.
 func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) error {
-	m.counters = append([]WindowSnapshot(nil), snapshots...)
+	now := time.Now().Unix()
+	for _, snap := range snapshots {
+		snap.UpdatedAt = now
+		replaced := false
+		for i, existing := range m.counters {
+			if snapshotIdentity(existing) == snapshotIdentity(snap) {
+				m.counters[i] = snap
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			m.counters = append(m.counters, snap)
+		}
+	}
+	kept := m.counters[:0]
+	for _, snap := range m.counters {
+		if snap.UpdatedAt+2*snap.PeriodSeconds >= now {
+			kept = append(kept, snap)
+		}
+	}
+	m.counters = kept
 	return nil
 }
 

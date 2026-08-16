@@ -3,8 +3,8 @@ package ratelimit
 import (
 	"context"
 	"errors"
-	"strconv"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
@@ -305,40 +305,39 @@ func TestSQLStoreCounterRoundTrip(t *testing.T) {
 			t.Fatalf("after delete = %d, want 0", len(got))
 		}
 
+		// A save that omits a row leaves it alone: it is still restorable
+		// until it goes two periods without a write.
 		if err := store.SaveCounters(ctx, first); err != nil {
 			t.Fatalf("SaveCounters again: %v", err)
 		}
 		if err := store.SaveCounters(ctx, first[:1]); err != nil {
-			t.Fatalf("SaveCounters replace: %v", err)
+			t.Fatalf("SaveCounters partial: %v", err)
 		}
 		got, err = store.LoadCounters(ctx)
 		if err != nil {
-			t.Fatalf("LoadCounters after replace: %v", err)
+			t.Fatalf("LoadCounters after partial save: %v", err)
 		}
-		if len(got) != 1 || got[0].Partition != "/customers/alice" {
-			t.Fatalf("replaced = %+v, want alice only", got)
+		if len(got) != 2 {
+			t.Fatalf("partial save dropped a live row: %+v", got)
 		}
 
-		many := make([]WindowSnapshot, 0, 300)
-		for i := range 300 {
-			many = append(many, WindowSnapshot{
-				Scope: string(ScopeUserPath), Subject: "/customers",
-				Partition:     "/customers/" + strconv.Itoa(i),
-				PeriodSeconds: PeriodHourSeconds, RequestsCurrent: int64(i + 1),
-			})
+		// A row nobody has written for two of its periods is collected by the
+		// next save.
+		if _, err := store.db.Exec(ctx, upsertCounterSQL,
+			string(ScopeUserPath), "/gone", "", PeriodHourSeconds,
+			0, 4, 0, 0, 0, 0, time.Now().Unix()-3*PeriodHourSeconds,
+		); err != nil {
+			t.Fatalf("seed stale counter: %v", err)
 		}
-		if err := store.SaveCounters(ctx, many); err != nil {
-			t.Fatalf("SaveCounters many: %v", err)
-		}
-		if err := store.SaveCounters(ctx, many[:1]); err != nil {
-			t.Fatalf("SaveCounters prune many: %v", err)
+		if err := store.SaveCounters(ctx, first); err != nil {
+			t.Fatalf("SaveCounters collecting: %v", err)
 		}
 		got, err = store.LoadCounters(ctx)
 		if err != nil {
-			t.Fatalf("LoadCounters after prune many: %v", err)
+			t.Fatalf("LoadCounters after collection: %v", err)
 		}
-		if len(got) != 1 || got[0].RequestsCurrent != 1 {
-			t.Fatalf("after pruning 299 orphans = %+v, want the first snapshot", got)
+		if len(got) != 2 {
+			t.Fatalf("expired row not collected: %+v", got)
 		}
 
 		if err := store.DeleteAllCounters(ctx); err != nil {

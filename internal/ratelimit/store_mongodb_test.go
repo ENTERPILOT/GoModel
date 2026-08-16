@@ -224,3 +224,88 @@ func TestMongoDBStoreMigratesPreScopeDocuments(t *testing.T) {
 		}
 	})
 }
+
+// TestMongoDBStoreCounterRoundTrip mirrors TestSQLStoreCounterRoundTrip: the
+// same window survives a save, a partial save leaves an omitted row alone, and
+// a row nobody writes for two periods is collected.
+func TestMongoDBStoreCounterRoundTrip(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		if err != nil {
+			t.Fatalf("NewMongoDBStore() failed: %v", err)
+		}
+
+		live := []WindowSnapshot{
+			{
+				Scope: string(ScopeUserPath), Subject: "/customers", Partition: "/customers/alice",
+				PeriodSeconds:       PeriodHourSeconds,
+				RequestsWindowStart: 1700000000, RequestsCurrent: 3, RequestsPrevious: 1,
+				TokensWindowStart: 1700000000, TokensCurrent: 40, TokensPrevious: 10,
+			},
+			{
+				Scope: string(ScopeUserPath), Subject: "/customers", Partition: "/customers/bob",
+				PeriodSeconds:       PeriodHourSeconds,
+				RequestsWindowStart: 1700000060, RequestsCurrent: 1, RequestsPrevious: 2,
+			},
+		}
+		if err := store.SaveCounters(ctx, live); err != nil {
+			t.Fatalf("SaveCounters: %v", err)
+		}
+		got, err := store.LoadCounters(ctx)
+		if err != nil {
+			t.Fatalf("LoadCounters: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("loaded = %+v, want both partitions", got)
+		}
+		byPartition := map[string]WindowSnapshot{}
+		for _, snap := range got {
+			byPartition[snap.Partition] = snap
+		}
+		alice := byPartition["/customers/alice"]
+		if alice.RequestsWindowStart != 1700000000 || alice.RequestsCurrent != 3 || alice.RequestsPrevious != 1 ||
+			alice.TokensWindowStart != 1700000000 || alice.TokensCurrent != 40 || alice.TokensPrevious != 10 {
+			t.Fatalf("alice = %+v", alice)
+		}
+
+		// Omitting bob does not delete bob: the row is still restorable.
+		if err := store.SaveCounters(ctx, live[:1]); err != nil {
+			t.Fatalf("SaveCounters partial: %v", err)
+		}
+		if got, err = store.LoadCounters(ctx); err != nil || len(got) != 2 {
+			t.Fatalf("after partial save = %+v (err %v), want both rows", got, err)
+		}
+
+		// A row left unwritten for two of its periods is collected.
+		if _, err := db.Collection("rate_limit_counters").InsertOne(ctx, WindowSnapshot{
+			Scope: string(ScopeUserPath), Subject: "/gone", PeriodSeconds: PeriodHourSeconds,
+			RequestsCurrent: 4, UpdatedAt: time.Now().Unix() - 3*PeriodHourSeconds,
+		}); err != nil {
+			t.Fatalf("seed stale counter: %v", err)
+		}
+		if err := store.SaveCounters(ctx, live); err != nil {
+			t.Fatalf("SaveCounters collecting: %v", err)
+		}
+		if got, err = store.LoadCounters(ctx); err != nil || len(got) != 2 {
+			t.Fatalf("after collection = %+v (err %v), want the two live rows", got, err)
+		}
+
+		if err := store.DeleteCounter(ctx, ScopeUserPath, "/customers", PeriodHourSeconds); err != nil {
+			t.Fatalf("DeleteCounter: %v", err)
+		}
+		if got, err = store.LoadCounters(ctx); err != nil || len(got) != 0 {
+			t.Fatalf("after delete = %+v (err %v), want every partition gone", got, err)
+		}
+
+		if err := store.SaveCounters(ctx, live); err != nil {
+			t.Fatalf("SaveCounters again: %v", err)
+		}
+		if err := store.DeleteAllCounters(ctx); err != nil {
+			t.Fatalf("DeleteAllCounters: %v", err)
+		}
+		if got, err = store.LoadCounters(ctx); err != nil || len(got) != 0 {
+			t.Fatalf("after delete all = %+v (err %v), want empty", got, err)
+		}
+	})
+}

@@ -16,8 +16,8 @@ this and listed two follow-ups:
 - §11.7 counter persistence across restarts (this work)
 - §11.2 Redis live counters for exact multi-replica enforcement (later)
 
-This spec does §11.7 and extracts the seam §11.2 will need. It does not
-implement Redis-Lua.
+This spec does §11.7. It does not implement Redis-Lua, and does not
+build a seam for it in advance (§5).
 
 ## 2. Goals
 
@@ -25,8 +25,6 @@ implement Redis-Lua.
   `--reload`.
 - `admit()` stays in memory. Persistence is a background snapshot, never on
   the request path.
-- A later Redis-Lua backend can replace the in-memory limiter without
-  changing `Acquire`, the usage tap, or `RouteAvailable`.
 - Default on whenever rate limits are on. No extra dependency. Uses the
   existing SQLite / Postgres / Mongo store that already holds the rules.
 - Crash loses at most one flush interval. Graceful stop and reload lose
@@ -49,22 +47,19 @@ implement Redis-Lua.
 
 ## 4. Architecture
 
-Two seams, only the first used as a live store today.
-
 ```text
 Service.Acquire / RecordTokens / RouteAvailable / Status / Reset
         │
         ▼
-  counterBackend          (unexported; package ratelimit)
-        │
-        ├── memoryBackend     current limiter + snapshot load/save
-        └── (later) redisLua  live INCR; no snapshots
+   limiter (in memory, authoritative)
+        │  snapshot() / restore()
+        ▼
+   Store.LoadCounters / SaveCounters / DeleteCounter / DeleteAllCounters
 ```
 
-Snapshots are an implementation detail of `memoryBackend`. They persist
-only the sliding windows. The backend talks to the existing `Store`,
-which grows four methods implemented by the SQL and Mongo stores already
-used for rules.
+Snapshots persist only the sliding windows, through the existing `Store`
+that already holds the rules — four new methods on the SQL and Mongo
+implementations, no second factory and no new dependency.
 
 Cardinality is one row per **live window key**, not one per rule
 definition:
@@ -82,36 +77,25 @@ the limiter maps, so table size tracks live children, not historical
 ones.
 
 Several replicas sharing Postgres or Mongo last-write-wins **per
-window key**. That is accepted: this work does not give shared live
-counters, and the schema has no `instance_id`. A restart loads whoever
-flushed last. Use one instance, or wait for the Redis-Lua backend, when
-the limit must be exact across replicas.
+window key** — no replica's save deletes a key it did not write, so
+replicas overwrite each other only where they overlap, and never wipe
+each other's table. That is accepted: this work does not give shared
+live counters, and the schema has no `instance_id`. A restart loads
+whoever flushed that key last. Use one instance, or wait for the
+Redis-Lua backend, when the limit must be exact across replicas.
 
-## 5. `counterBackend`
+## 5. No backend interface (decided against)
 
-Unexported interface in `internal/ratelimit`, matching what `limiter`
-already does:
+An earlier draft extracted a `counterBackend` interface so a Redis-Lua
+implementation could drop in later. It is not built, on purpose: there
+is one implementation, so the interface would be an abstraction with no
+second caller to justify it. `Service` keeps its concrete `*limiter`,
+and the Redis work — if it happens — extracts the seam then, against a
+real second implementation rather than a guess at one.
 
-- `Admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey, *ExceededError)`
-- `Available(rules []Rule, now time.Time) bool`
-- `Release(held []ruleKey)`
-- `RecordTokens(rules []Rule, tokens int64, now time.Time)`
-- `Status(rule Rule, now time.Time) Status`
-- `Reset(key ruleKey)`
-- `ResetAll()`
-
-`Service` holds a `counterBackend` instead of a concrete `*limiter`.
-`ruleKey` stays unexported and already includes `partition` (`#670`).
-`Reset(key)` keeps today’s `sameDefinition` behavior: it clears every
-partition of that `(scope, subject, period)` definition.
-
-Public API additions: `Service.Start` and the flush-interval config
-field. `Service.Close` already exists (stops the child-expiry worker);
-persistence `Close` must call it after the final snapshot.
-
-The memory implementation is the current `limiter` plus snapshot
-helpers. A future Redis-Lua type implements the same interface and
-ignores the snapshot store.
+What this change actually adds to the package surface is `Service.Start`
+and the flush-interval option. `Service.Close` already existed (it stops
+the child-expiry worker) and now writes the final snapshot first.
 
 ## 6. Snapshot data model
 
@@ -129,7 +113,7 @@ requests_previous          INT64
 tokens_window_start        INT64
 tokens_current             INT64
 tokens_previous            INT64
-updated_at                 INT64    -- unix seconds, diagnostics only
+updated_at                 INT64    -- unix seconds; drives staleness collection
 PRIMARY KEY (scope, subject, partition, period_seconds)
 ```
 
@@ -145,7 +129,8 @@ Older databases just gain the table; no backfill.
 
 Units match `windowCounter`: Unix seconds and `int64` counts. After
 load, `advance()` already zeros a window more than one period old, so
-rows do not need a TTL. Load still skips a child row whose window is
+rows need no TTL of their own; `SaveCounters` collects them once they
+stop being written. Load still skips a child row whose window is
 already past the in-memory expiry horizon (`windowStart + 2*period`),
 and must call `trackCounterExpiry` for every restored partition so the
 existing worker keeps pruning.
@@ -174,12 +159,18 @@ Add to the existing `Store` interface. No second factory.
   malformed row is skipped and logged; a query failure is a load
   error.
 - `SaveCounters(ctx, []windowSnapshot) error` — **upsert** each
-  snapshot, then delete rows that are no longer in the set. Never
-  delete-all first: a crash or a failed insert must leave the previous
-  generation intact. SQL does upsert+prune in one transaction. Mongo
-  uses the same algorithm, with the existing transaction-plus-
-  standalone-fallback. The payload is every **live window key** still
-  in the limiter maps whose definition is a current windowed rule
+  snapshot (stamping `updated_at`), then collect rows that went two of
+  their own periods without a write. Nothing is ever deleted to make
+  room for a write, so a crash mid-save costs at most the flush
+  interval, never a whole window. Two periods is the same staleness
+  bound `restore` applies, so collection can only remove rows a load
+  would have discarded anyway — which also means a save is not
+  destructive to rows this instance does not know about (see the
+  replica note in §4). SQL is one upsert loop plus one bounded
+  `DELETE` in a transaction; Mongo is one unordered `BulkWrite` plus
+  the equivalent `DeleteMany`, no transaction needed because no step
+  depends on another. The payload is every **live window key** still in
+  the limiter maps whose definition is a current windowed rule
   (period > 0). That includes one row per active per-child partition.
   It never includes leftover map entries for a dropped definition, and
   never includes concurrent keys.
@@ -229,10 +220,10 @@ reset/delete row deletes. `admit()` does not take it.
 Without that, a flush that sampled before a reset can `SaveCounters`
 after the row delete and resurrect the burned window (S206 would flake).
 
-Orphan snapshot rows (rule gone, row still there) are dropped only by
-an **active** generation: `Start` applies matching keys and ignores the
-rest; the next flush replace-all omits them. Construction must not
-delete snapshot rows — see §10.
+Orphan snapshot rows (rule gone, row still there) are inert: `Start`
+applies matching keys and ignores the rest, and they are collected two
+periods after the last write. Construction must not delete snapshot
+rows — see §10.
 
 ## 9. Configuration
 
@@ -274,9 +265,8 @@ that concurrency is in-memory only.
 `ReplaceConfigRules` runs from `factory.New` → `seedConfiguredRules`
 while the previous generation is still serving. Deleting snapshot rows
 there would wipe a live hour/day window if the replacement is then
-discarded (failed reload). Orphans are left for the **active**
-generation: `Start` does not apply them; the next flush replace-all
-drops them.
+discarded (failed reload). Orphans are harmless instead: `Start` does
+not apply them, and staleness collection removes them.
 
 Do not add a second prune path. `Refresh` already drops limiter keys
 when a definition is removed or shared/per-child mode changes; a later
@@ -289,9 +279,10 @@ definition is not per-child. A mode flip therefore starts empty for
 that definition, matching `Refresh`.
 
 Reset and delete clear memory first (the operator-visible effect), then
-the row under `persistMu`. A failed row delete is logged; the in-memory
-reset still stands. `persistMu` is what stops the next flush from
-putting the row back.
+the row under `persistMu`. A failed row delete is returned to the
+caller: the in-memory reset stands, but the operator has to know the
+window can come back on the next restart. `persistMu` is what stops the
+next flush from putting the row back.
 
 ## 11. Error handling
 
@@ -305,8 +296,9 @@ Persistence never fails a request. `admit()` does not see store errors.
   stays authoritative.
 - **Shutdown flush failure:** log and continue teardown. Do not hang
   past the existing shutdown budget.
-- **Reset/delete row failure:** log at error level. Memory is already
-  cleared.
+- **Reset/delete row failure:** returned to the admin caller. Memory is
+  already cleared, so the reset took effect for this process; the error
+  says the durable row may outlive it.
 - **Migrate:** creating the new table/collection fails store init the
   same way a missing `rate_limits` table would — that is a hard start
   error, not a soft persist error.
@@ -331,9 +323,10 @@ Persistence never fails a request. `admit()` does not see store errors.
   omit that key from `SaveCounters`.
 - An in-flight flush cannot resurrect a completed `ResetRule` /
   `DeleteRule` (`persistMu`).
-- SQL store (and Mongo, same as rules) round-trip: replace, load,
-  delete one, delete all. Migration creates `rate_limit_counters` on an
-  existing DB.
+- SQL store (and Mongo, same as rules) round-trip: save, load, save a
+  subset (the omitted row survives — it is still restorable), collect a
+  row left unwritten for two periods, delete one, delete all. Migration
+  creates `rate_limit_counters` on an existing DB.
 - Config: default interval is 1; `RATE_LIMITS_FLUSH_INTERVAL=0` is
   valid; a negative value is rejected.
 - Existing admit/release/header tests stay in-memory. A recording
@@ -405,9 +398,9 @@ plus unit tests; concurrent is not persisted and is not an E2E case.
 
 ## 14. Follow-up (not this change)
 
-Redis-Lua `counterBackend`: every `Admit` is an atomic script on shared
+Redis live counters: every `Admit` becomes an atomic script on shared
 keys (the key must include `partition`, same as `ruleKey`). No
 snapshots. Chosen when `REDIS_URL` is set, or behind an explicit config
 once someone is running HA and wants N replicas to share one limit.
-The interface in §5 is the only preparation this change makes for that
-work.
+That work extracts whatever seam it needs from the concrete `limiter`;
+this change deliberately leaves none behind (§5).
