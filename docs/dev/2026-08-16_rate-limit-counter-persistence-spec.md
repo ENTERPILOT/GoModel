@@ -51,7 +51,7 @@ implement Redis-Lua.
 
 Two seams, only the first used as a live store today.
 
-```
+```text
 Service.Acquire / RecordTokens / RouteAvailable / Status / Reset
         │
         ▼
@@ -170,17 +170,19 @@ A shared rule’s `Partition` is `""`.
 
 Add to the existing `Store` interface. No second factory.
 
-- `LoadCounters(ctx) ([]windowSnapshot, error)` — all rows.
-- `SaveCounters(ctx, []windowSnapshot) error` — **replaces** the
-  table/collection with the provided set (delete all, then insert).
-  SQL does this in one transaction. Mongo uses the same
-  transaction-plus-standalone-fallback as `ReplaceConfigRules` today
-  (replica-set e2e uses `rs0`; a hard transaction-only write would
-  fail open on standalone Mongo). The payload is every **live window
-  key** still in the limiter maps whose definition is a current
-  windowed rule (period > 0). That includes one row per active
-  per-child partition. It never includes leftover map entries for a
-  dropped definition, and never includes concurrent keys.
+- `LoadCounters(ctx) ([]windowSnapshot, error)` — all rows. A
+  malformed row is skipped and logged; a query failure is a load
+  error.
+- `SaveCounters(ctx, []windowSnapshot) error` — **upsert** each
+  snapshot, then delete rows that are no longer in the set. Never
+  delete-all first: a crash or a failed insert must leave the previous
+  generation intact. SQL does upsert+prune in one transaction. Mongo
+  uses the same algorithm, with the existing transaction-plus-
+  standalone-fallback. The payload is every **live window key** still
+  in the limiter maps whose definition is a current windowed rule
+  (period > 0). That includes one row per active per-child partition.
+  It never includes leftover map entries for a dropped definition, and
+  never includes concurrent keys.
 - `DeleteCounter(ctx, scope, subject, periodSeconds) error` — every
   partition of that **definition** (matches `limiter.reset` /
   `sameDefinition`). Missing rows are not an error. Resetting a
@@ -198,8 +200,8 @@ serving, then shuts the old one down, then starts the new one
 | Call | When | Persistence |
 |---|---|---|
 | `New` / `NewService` | `app.New`, tests | Empty limiter. No load, no flush, no loop. |
-| `Start` | `App.startServer`, after the previous generation’s `Shutdown` | Load snapshot, apply rows whose **definition** still matches a current rule and whose `partition` matches the rule’s mode (empty iff `!PerChild`), re-arm child expiry, then start the flush loop if `flush_interval > 0`. Mark the generation **active**. |
-| `Close` (`Result.Close`) | `App.Shutdown` | Stop the flush loop. If **active**, write one last snapshot. Then `Service.Close()` (expiry worker, already wired today) and close the store. |
+| `Start` | `App.startServer`, after the previous generation’s `Shutdown` | Load snapshot, apply rows whose **definition** still matches a current rule and whose `partition` matches the rule’s mode (empty iff `!PerChild`), re-arm child expiry, then start the flush loop if `flush_interval > 0`. Mark the generation **active** only if load succeeded. Start is idempotent. A failed load leaves the generation idle so it cannot flush an empty snapshot over durable windows. |
+| `Close` (`Result.Close`) | `App.Shutdown` | Stop the flush loop. If **active**, write one last snapshot. Then stop the expiry worker and close the store. Close is idempotent. |
 
 An idle replacement that is built and then discarded (failed listen,
 process exiting during rebuild) is not active, so its `Close` must not
@@ -264,9 +266,9 @@ that concurrency is in-memory only.
 | Operation | Memory | Snapshot |
 |---|---|---|
 | `Admit` / `RecordTokens` | update windows | next flush / Close |
-| `ResetRule` | `limiter.reset` (all partitions of the definition) | `DeleteCounter` under `persistMu` (all partitions) |
-| `ResetAll` | `limiter.resetAll` | `DeleteAllCounters` under `persistMu` |
-| `DeleteRule` | `limiter.reset` of that definition | `DeleteCounter` under `persistMu` |
+| `ResetRule` | `limiter.reset` (all partitions of the definition) | `DeleteCounter` under `persistMu` (all partitions); store errors are returned |
+| `ResetAll` | `limiter.resetAll` | `DeleteAllCounters` under `persistMu`; store errors are returned |
+| `DeleteRule` | `limiter.reset` of that definition | `DeleteCounter` under `persistMu`; store errors are returned |
 | `ReplaceConfigRules` / `Refresh` | already prunes maps when a definition disappears or `PerChild` flips (`Service.Refresh` after `#670`) | **do not touch the store** |
 
 `ReplaceConfigRules` runs from `factory.New` → `seedConfiguredRules`
@@ -295,9 +297,10 @@ putting the row back.
 
 Persistence never fails a request. `admit()` does not see store errors.
 
-- **Load failure:** log and start with empty windows. Do not block the
-  listener. Skip corrupt rows; restore the good ones. Still mark the
-  generation active so later flushes work.
+- **Load failure:** log and leave the generation **idle**. Do not
+  block the listener. Do not flush. The previous snapshot stays on
+  disk. Skip corrupt rows; restore the good ones. Only a successful
+  load (including “no rows”) activates persistence.
 - **Periodic flush failure:** log and retry on the next tick. Memory
   stays authoritative.
 - **Shutdown flush failure:** log and continue teardown. Do not hang

@@ -3,7 +3,18 @@ package ratelimit
 import (
 	"context"
 	"log/slog"
+	"math"
 	"time"
+)
+
+const persistTimeout = 5 * time.Second
+
+type persistState int
+
+const (
+	persistIdle persistState = iota
+	persistActive
+	persistClosed
 )
 
 // WithFlushInterval sets how often an active generation writes window
@@ -18,22 +29,63 @@ func WithFlushInterval(interval time.Duration) ServiceOption {
 	}
 }
 
+func flushIntervalFromSeconds(seconds int) time.Duration {
+	if seconds <= 0 {
+		return 0
+	}
+	maxSeconds := int(math.MaxInt64 / int64(time.Second))
+	if seconds > maxSeconds {
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func persistContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent != nil {
+		if _, ok := parent.Deadline(); ok {
+			return context.WithCancel(parent)
+		}
+		return context.WithTimeout(parent, persistTimeout)
+	}
+	return context.WithTimeout(context.Background(), persistTimeout)
+}
+
 func (s *Service) Start(ctx context.Context) {
 	if s == nil || s.store == nil {
 		return
 	}
-	s.loadCounters(ctx)
-	s.startFlushLoop()
-	s.active.Store(true)
-}
 
-func (s *Service) loadCounters(ctx context.Context) {
-	snapshots, err := s.store.LoadCounters(ctx)
-	if err != nil {
-		slog.Warn("rate limit counters: load failed; starting empty", "error", err)
+	s.lifeMu.Lock()
+	if s.persistState != persistIdle {
+		s.lifeMu.Unlock()
 		return
 	}
+	s.lifeMu.Unlock()
+
+	loadCtx, cancel := persistContext(ctx)
+	err := s.loadCounters(loadCtx)
+	cancel()
+
+	s.lifeMu.Lock()
+	defer s.lifeMu.Unlock()
+	if s.persistState != persistIdle {
+		return
+	}
+	if err != nil {
+		slog.Warn("rate limit counters: load failed; not persisting this generation", "error", err)
+		return
+	}
+	s.startFlushLoop()
+	s.persistState = persistActive
+}
+
+func (s *Service) loadCounters(ctx context.Context) error {
+	snapshots, err := s.store.LoadCounters(ctx)
+	if err != nil {
+		return err
+	}
 	s.limiter.restore(snapshots, s.Rules(), time.Now().UTC())
+	return nil
 }
 
 func (s *Service) startFlushLoop() {
@@ -42,15 +94,20 @@ func (s *Service) startFlushLoop() {
 	}
 	s.flushStop = make(chan struct{})
 	s.flushDone = make(chan struct{})
+	interval := s.flushInterval
+	stop := s.flushStop
+	done := s.flushDone
 	go func() {
-		defer close(s.flushDone)
-		ticker := time.NewTicker(s.flushInterval)
+		defer close(done)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				s.flush(context.Background())
-			case <-s.flushStop:
+				flushCtx, cancel := persistContext(context.Background())
+				s.flush(flushCtx)
+				cancel()
+			case <-stop:
 				return
 			}
 		}
@@ -68,36 +125,24 @@ func (s *Service) flush(ctx context.Context) {
 	}
 }
 
-func (s *Service) persistDelete(scope RuleScope, subject string, periodSeconds int64) {
+func (s *Service) persistDelete(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	if s == nil || s.store == nil {
-		return
+		return nil
 	}
+	writeCtx, cancel := persistContext(ctx)
+	defer cancel()
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
-	if err := s.store.DeleteCounter(context.Background(), scope, subject, periodSeconds); err != nil {
-		slog.Error("rate limit counters: delete failed", "scope", scope, "subject", subject, "period_seconds", periodSeconds, "error", err)
-	}
+	return s.store.DeleteCounter(writeCtx, scope, subject, periodSeconds)
 }
 
-func (s *Service) persistDeleteAll() {
+func (s *Service) persistDeleteAll(ctx context.Context) error {
 	if s == nil || s.store == nil {
-		return
+		return nil
 	}
+	writeCtx, cancel := persistContext(ctx)
+	defer cancel()
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
-	if err := s.store.DeleteAllCounters(context.Background()); err != nil {
-		slog.Error("rate limit counters: delete-all failed", "error", err)
-	}
-}
-
-func (s *Service) stopFlushAndSave() {
-	s.flushOnce.Do(func() {
-		if s.flushStop != nil {
-			close(s.flushStop)
-			<-s.flushDone
-		}
-		if s.active.Load() {
-			s.flush(context.Background())
-		}
-	})
+	return s.store.DeleteAllCounters(writeCtx)
 }

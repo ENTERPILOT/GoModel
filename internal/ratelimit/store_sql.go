@@ -201,28 +201,60 @@ func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
 	return snapshots, nil
 }
 
+const upsertCounterSQL = `
+	INSERT INTO rate_limit_counters (
+		scope, subject, partition, period_seconds,
+		requests_window_start, requests_current, requests_previous,
+		tokens_window_start, tokens_current, tokens_previous, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(scope, subject, partition, period_seconds) DO UPDATE SET
+		requests_window_start = excluded.requests_window_start,
+		requests_current = excluded.requests_current,
+		requests_previous = excluded.requests_previous,
+		tokens_window_start = excluded.tokens_window_start,
+		tokens_current = excluded.tokens_current,
+		tokens_previous = excluded.tokens_previous,
+		updated_at = excluded.updated_at
+`
+
 func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
 	now := time.Now().Unix()
 	return s.db.InTx(ctx, func(q sqlx.Querier) error {
-		if _, err := q.Exec(ctx, `DELETE FROM rate_limit_counters`); err != nil {
-			return fmt.Errorf("clear rate limit counters: %w", err)
-		}
 		for _, snap := range snapshots {
-			if _, err := q.Exec(ctx, `
-				INSERT INTO rate_limit_counters (
-					scope, subject, partition, period_seconds,
-					requests_window_start, requests_current, requests_previous,
-					tokens_window_start, tokens_current, tokens_previous, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds,
+			if _, err := q.Exec(ctx, upsertCounterSQL,
+				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds,
 				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
 				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, now,
 			); err != nil {
-				return fmt.Errorf("insert rate limit counter: %w", err)
+				return fmt.Errorf("upsert rate limit counter: %w", err)
 			}
 		}
-		return nil
+		return deleteOrphanCounters(ctx, q, snapshots)
 	})
+}
+
+func deleteOrphanCounters(ctx context.Context, q sqlx.Querier, snapshots []WindowSnapshot) error {
+	if len(snapshots) == 0 {
+		if _, err := q.Exec(ctx, `DELETE FROM rate_limit_counters`); err != nil {
+			return fmt.Errorf("clear rate limit counters: %w", err)
+		}
+		return nil
+	}
+	var query strings.Builder
+	query.WriteString(`DELETE FROM rate_limit_counters WHERE NOT (`)
+	args := make([]any, 0, len(snapshots)*4)
+	for i, snap := range snapshots {
+		if i > 0 {
+			query.WriteString(` OR `)
+		}
+		query.WriteString(`(scope = ? AND subject = ? AND partition = ? AND period_seconds = ?)`)
+		args = append(args, snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds)
+	}
+	query.WriteString(`)`)
+	if _, err := q.Exec(ctx, query.String(), args...); err != nil {
+		return fmt.Errorf("prune rate limit counters: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {

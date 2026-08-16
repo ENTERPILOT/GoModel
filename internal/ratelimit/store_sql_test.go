@@ -257,11 +257,15 @@ func TestSQLStoreCounterRoundTrip(t *testing.T) {
 		first := []WindowSnapshot{
 			{
 				Scope: string(ScopeUserPath), Subject: "/customers", Partition: "/customers/alice",
-				PeriodSeconds: PeriodHourSeconds, RequestsWindowStart: 1700000000, RequestsCurrent: 3,
+				PeriodSeconds:       PeriodHourSeconds,
+				RequestsWindowStart: 1700000000, RequestsCurrent: 3, RequestsPrevious: 1,
+				TokensWindowStart: 1700000000, TokensCurrent: 40, TokensPrevious: 10,
 			},
 			{
 				Scope: string(ScopeUserPath), Subject: "/customers", Partition: "/customers/bob",
-				PeriodSeconds: PeriodHourSeconds, RequestsWindowStart: 1700000000, RequestsCurrent: 1,
+				PeriodSeconds:       PeriodHourSeconds,
+				RequestsWindowStart: 1700000060, RequestsCurrent: 1, RequestsPrevious: 2,
+				TokensWindowStart: 1700000060, TokensCurrent: 7, TokensPrevious: 8,
 			},
 		}
 		if err := store.SaveCounters(ctx, first); err != nil {
@@ -273,6 +277,20 @@ func TestSQLStoreCounterRoundTrip(t *testing.T) {
 		}
 		if len(got) != 2 {
 			t.Fatalf("loaded = %d, want 2", len(got))
+		}
+		byPart := map[string]WindowSnapshot{}
+		for _, snap := range got {
+			byPart[snap.Partition] = snap
+		}
+		alice := byPart["/customers/alice"]
+		if alice.RequestsWindowStart != 1700000000 || alice.RequestsCurrent != 3 || alice.RequestsPrevious != 1 ||
+			alice.TokensWindowStart != 1700000000 || alice.TokensCurrent != 40 || alice.TokensPrevious != 10 {
+			t.Fatalf("alice = %+v", alice)
+		}
+		bob := byPart["/customers/bob"]
+		if bob.RequestsWindowStart != 1700000060 || bob.RequestsCurrent != 1 || bob.RequestsPrevious != 2 ||
+			bob.TokensWindowStart != 1700000060 || bob.TokensCurrent != 7 || bob.TokensPrevious != 8 {
+			t.Fatalf("bob = %+v", bob)
 		}
 
 		if err := store.DeleteCounter(ctx, ScopeUserPath, "/customers", PeriodHourSeconds); err != nil {

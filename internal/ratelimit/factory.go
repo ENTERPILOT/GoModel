@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
@@ -63,7 +62,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	}
 	service, err := NewService(ctx, store,
 		WithQuotaTemplates(quotaTemplatesEnabled),
-		WithFlushInterval(time.Duration(cfg.RateLimits.FlushInterval)*time.Second),
+		WithFlushInterval(flushIntervalFromSeconds(cfg.RateLimits.FlushInterval)),
 	)
 	if err != nil {
 		return nil, err

@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -39,10 +38,10 @@ type Service struct {
 
 	flushInterval time.Duration
 	persistMu     sync.Mutex
+	lifeMu        sync.Mutex
+	persistState  persistState
 	flushStop     chan struct{}
 	flushDone     chan struct{}
-	flushOnce     sync.Once
-	active        atomic.Bool
 }
 
 func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
@@ -71,7 +70,28 @@ func (s *Service) Close() {
 	if s == nil {
 		return
 	}
-	s.stopFlushAndSave()
+	s.lifeMu.Lock()
+	if s.persistState == persistClosed {
+		s.lifeMu.Unlock()
+		return
+	}
+	wasActive := s.persistState == persistActive
+	s.persistState = persistClosed
+	stop := s.flushStop
+	done := s.flushDone
+	s.flushStop = nil
+	s.flushDone = nil
+	s.lifeMu.Unlock()
+
+	if stop != nil {
+		close(stop)
+		<-done
+	}
+	if wasActive {
+		flushCtx, cancel := persistContext(context.Background())
+		s.flush(flushCtx)
+		cancel()
+	}
 	if s.limiter != nil {
 		s.limiter.close()
 	}
@@ -151,7 +171,9 @@ func (s *Service) DeleteRule(ctx context.Context, scope RuleScope, subject strin
 		return err
 	}
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
-	s.persistDelete(scope, subject, periodSeconds)
+	if err := s.persistDelete(ctx, scope, subject, periodSeconds); err != nil {
+		return err
+	}
 	return s.Refresh(ctx)
 }
 
@@ -350,8 +372,7 @@ func (s *Service) ResetRule(scope RuleScope, subject string, periodSeconds int64
 		return err
 	}
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
-	s.persistDelete(scope, subject, periodSeconds)
-	return nil
+	return s.persistDelete(context.Background(), scope, subject, periodSeconds)
 }
 
 // ResetAll clears every live window counter.
@@ -360,8 +381,7 @@ func (s *Service) ResetAll() error {
 		return ErrUnavailable
 	}
 	s.limiter.resetAll()
-	s.persistDeleteAll()
-	return nil
+	return s.persistDeleteAll(context.Background())
 }
 
 func (s *Service) matchingRules(subjects Subjects) []Rule {

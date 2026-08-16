@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -244,6 +245,122 @@ func TestRestoreIgnoresSharedRowOnPerChildRule(t *testing.T) {
 	}
 }
 
+func TestFailedLoadDoesNotReplacePersistedWindows(t *testing.T) {
+	now := time.Now().Unix()
+	store := &failLoadStore{err: errors.New("store down")}
+	store.counters = []WindowSnapshot{{
+		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+		RequestsWindowStart: now, RequestsCurrent: 9,
+	}}
+	if err := store.UpsertRules(context.Background(), []Rule{{
+		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+		MaxRequests: new(int64(10)), Source: SourceManual,
+	}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	service, err := NewService(context.Background(), store, WithFlushInterval(10*time.Millisecond))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	service.Start(context.Background())
+	if _, err := service.Acquire(onPath("/team"), time.Now().UTC()); err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	service.Close()
+	time.Sleep(30 * time.Millisecond)
+	if len(store.counters) != 1 || store.counters[0].RequestsCurrent != 9 {
+		t.Fatalf("persisted windows = %+v, want the pre-failure snapshot", store.counters)
+	}
+}
+
+func TestStartIsIdempotentAndCloseStopsTheLoop(t *testing.T) {
+	store := &recordingStore{}
+	if err := store.UpsertRules(context.Background(), []Rule{{
+		Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(50)), Source: SourceManual,
+	}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	service, err := NewService(context.Background(), store, WithFlushInterval(15*time.Millisecond))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	service.Start(context.Background())
+	service.Start(context.Background())
+	service.Close()
+	afterClose := store.saves.Load()
+	time.Sleep(50 * time.Millisecond)
+	if got := store.saves.Load(); got != afterClose {
+		t.Fatalf("saves after Close grew from %d to %d; an extra flush loop is still running", afterClose, got)
+	}
+}
+
+func TestFlushIntervalWritesBeforeClose(t *testing.T) {
+	store := &recordingStore{}
+	if err := store.UpsertRules(context.Background(), []Rule{{
+		Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(50)), Source: SourceManual,
+	}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	service, err := NewService(context.Background(), store, WithFlushInterval(15*time.Millisecond))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	t.Cleanup(service.Close)
+	if _, err := service.Acquire(onPath("/"), time.Now().UTC()); err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	service.Start(context.Background())
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for store.saves.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if store.saves.Load() == 0 {
+		t.Fatal("positive flush interval never wrote before Close")
+	}
+}
+
+func TestFlushIntervalZeroOnlyWritesOnClose(t *testing.T) {
+	store := &recordingStore{}
+	if err := store.UpsertRules(context.Background(), []Rule{{
+		Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(50)), Source: SourceManual,
+	}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	service, err := NewService(context.Background(), store, WithFlushInterval(0))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if _, err := service.Acquire(onPath("/"), time.Now().UTC()); err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	service.Start(context.Background())
+	time.Sleep(30 * time.Millisecond)
+	if store.saves.Load() != 0 {
+		t.Fatalf("interval 0 wrote %d times before Close", store.saves.Load())
+	}
+	service.Close()
+	if store.saves.Load() != 1 {
+		t.Fatalf("saves after Close = %d, want 1", store.saves.Load())
+	}
+}
+
+func TestResetRuleReturnsPersistError(t *testing.T) {
+	store := &failDeleteStore{err: errors.New("delete failed")}
+	if err := store.UpsertRules(context.Background(), []Rule{{
+		Subject: "/team", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(1)), Source: SourceManual,
+	}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	service, err := NewService(context.Background(), store)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	t.Cleanup(service.Close)
+	if err := service.ResetRule(ScopeUserPath, "/team", PeriodHourSeconds); err == nil {
+		t.Fatal("ResetRule() error = nil, want persist error")
+	}
+}
+
 type recordingStore struct {
 	memStore
 	saves atomic.Int64
@@ -252,4 +369,22 @@ type recordingStore struct {
 func (s *recordingStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
 	s.saves.Add(1)
 	return s.memStore.SaveCounters(ctx, snapshots)
+}
+
+type failLoadStore struct {
+	memStore
+	err error
+}
+
+func (s *failLoadStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
+	return nil, s.err
+}
+
+type failDeleteStore struct {
+	memStore
+	err error
+}
+
+func (s *failDeleteStore) DeleteCounter(context.Context, RuleScope, string, int64) error {
+	return s.err
 }

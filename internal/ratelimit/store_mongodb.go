@@ -366,7 +366,8 @@ func (s *MongoDBStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, erro
 	for cursor.Next(ctx) {
 		var snap WindowSnapshot
 		if err := cursor.Decode(&snap); err != nil {
-			return nil, fmt.Errorf("decode rate limit counter: %w", err)
+			slog.Warn("rate limit counters: skipping malformed snapshot", "error", err)
+			continue
 		}
 		snapshots = append(snapshots, snap)
 	}
@@ -378,22 +379,20 @@ func (s *MongoDBStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, erro
 
 func (s *MongoDBStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
 	write := func(writeCtx context.Context) error {
-		if _, err := s.counters.DeleteMany(writeCtx, bson.D{}); err != nil {
-			return fmt.Errorf("clear rate limit counters: %w", err)
-		}
-		if len(snapshots) == 0 {
-			return nil
-		}
 		now := time.Now().Unix()
-		docs := make([]any, 0, len(snapshots))
 		for _, snap := range snapshots {
 			snap.UpdatedAt = now
-			docs = append(docs, snap)
+			_, err := s.counters.UpdateOne(
+				writeCtx,
+				counterIdentityFilter(snap),
+				bson.D{{Key: "$set", Value: snap}},
+				options.UpdateOne().SetUpsert(true),
+			)
+			if err != nil {
+				return fmt.Errorf("upsert rate limit counter: %w", err)
+			}
 		}
-		if _, err := s.counters.InsertMany(writeCtx, docs); err != nil {
-			return fmt.Errorf("insert rate limit counters: %w", err)
-		}
-		return nil
+		return s.deleteOrphanCounters(writeCtx, snapshots)
 	}
 
 	session, err := s.counters.Database().Client().StartSession()
@@ -425,6 +424,32 @@ func (s *MongoDBStore) SaveCounters(ctx context.Context, snapshots []WindowSnaps
 		return fmt.Errorf("save rate limit counters transaction: %w", err)
 	}
 	return nil
+}
+
+func (s *MongoDBStore) deleteOrphanCounters(ctx context.Context, snapshots []WindowSnapshot) error {
+	if len(snapshots) == 0 {
+		if _, err := s.counters.DeleteMany(ctx, bson.D{}); err != nil {
+			return fmt.Errorf("clear rate limit counters: %w", err)
+		}
+		return nil
+	}
+	keep := make(bson.A, 0, len(snapshots))
+	for _, snap := range snapshots {
+		keep = append(keep, counterIdentityFilter(snap))
+	}
+	if _, err := s.counters.DeleteMany(ctx, bson.D{{Key: "$nor", Value: keep}}); err != nil {
+		return fmt.Errorf("prune rate limit counters: %w", err)
+	}
+	return nil
+}
+
+func counterIdentityFilter(snap WindowSnapshot) bson.D {
+	return bson.D{
+		{Key: "scope", Value: snap.Scope},
+		{Key: "subject", Value: snap.Subject},
+		{Key: "partition", Value: snap.Partition},
+		{Key: "period_seconds", Value: snap.PeriodSeconds},
+	}
 }
 
 func (s *MongoDBStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {

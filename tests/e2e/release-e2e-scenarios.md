@@ -169,7 +169,7 @@ reload_release_gateway() {
   for _ in $(seq 1 50); do
     if tail -n +$((before + 1)) "$log_file" 2>/dev/null | grep -Fq 'configuration reloaded'; then
       for __ in $(seq 1 20); do
-        if curl -fsS "$url/health" >/dev/null 2>&1; then
+        if curl -fsS --connect-timeout 1 --max-time 2 "$url/health" >/dev/null 2>&1; then
           return 0
         fi
         sleep 0.1
