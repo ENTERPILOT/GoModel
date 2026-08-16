@@ -629,6 +629,61 @@ func TestSetBaseURLDerivesModelsURL(t *testing.T) {
 	}
 }
 
+// ListModels must stamp modes/categories from supportedGenerationMethods so
+// embedding models are classified even when the remote model registry has no
+// entry for them (new or preview IDs).
+func TestListModels_StampsDiscoveredModes(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"models": [{
+				"name": "models/gemini-2.5-flash",
+				"supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
+			}, {
+				"name": "models/text-embedding-004",
+				"supportedGenerationMethods": ["embedContent"]
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	resp, err := provider.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	byID := make(map[string]core.Model, len(resp.Data))
+	for _, m := range resp.Data {
+		byID[m.ID] = m
+	}
+
+	chat, ok := byID["gemini-2.5-flash"]
+	if !ok || chat.Metadata == nil {
+		t.Fatalf("gemini-2.5-flash missing or has no metadata: %+v", resp.Data)
+	}
+	if len(chat.Metadata.Modes) != 1 || chat.Metadata.Modes[0] != "chat" {
+		t.Errorf("chat Modes = %v, want [chat]", chat.Metadata.Modes)
+	}
+	if len(chat.Metadata.Categories) != 1 || chat.Metadata.Categories[0] != core.CategoryTextGeneration {
+		t.Errorf("chat Categories = %v, want [text_generation]", chat.Metadata.Categories)
+	}
+
+	embed, ok := byID["text-embedding-004"]
+	if !ok || embed.Metadata == nil {
+		t.Fatalf("text-embedding-004 missing or has no metadata: %+v", resp.Data)
+	}
+	if len(embed.Metadata.Modes) != 1 || embed.Metadata.Modes[0] != "embedding" {
+		t.Errorf("embed Modes = %v, want [embedding]", embed.Metadata.Modes)
+	}
+	if len(embed.Metadata.Categories) != 1 || embed.Metadata.Categories[0] != core.CategoryEmbedding {
+		t.Errorf("embed Categories = %v, want [embedding]", embed.Metadata.Categories)
+	}
+}
+
 func TestVertexNativeChatUsesOAuthAuthorization(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 

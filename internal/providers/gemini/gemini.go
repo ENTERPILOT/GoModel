@@ -720,6 +720,28 @@ func geminiModelSupportedMethods(modelID string, methods []string) (supportsGene
 		slices.Contains(methods, "embedContent")
 }
 
+// geminiDiscoveredMetadata stamps modes/categories from the native listing's
+// supportedGenerationMethods so embedding models are classified even when the
+// remote model registry has no entry (new or preview IDs). Registry enrichment
+// replaces this metadata whenever it does have an entry, and operator config
+// merges on top, so the discovery stamp is only the lowest-precedence signal.
+func geminiDiscoveredMetadata(supportsGenerate, supportsEmbed bool) *core.ModelMetadata {
+	modes := make([]string, 0, 2)
+	if supportsGenerate {
+		modes = append(modes, "chat")
+	}
+	if supportsEmbed {
+		modes = append(modes, "embedding")
+	}
+	if len(modes) == 0 {
+		return nil
+	}
+	return &core.ModelMetadata{
+		Modes:      modes,
+		Categories: core.CategoriesForModes(modes),
+	}
+}
+
 // ListModels retrieves the list of available models from Gemini
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	if err := p.ready(); err != nil {
@@ -770,10 +792,11 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 			isOpenAICompatModel := isGeminiExposedModel(modelID)
 			if (supportsGenerate || supportsEmbed) && isOpenAICompatModel {
 				models = append(models, core.Model{
-					ID:      modelID,
-					Object:  "model",
-					OwnedBy: "google",
-					Created: now,
+					ID:       modelID,
+					Object:   "model",
+					OwnedBy:  "google",
+					Created:  now,
+					Metadata: geminiDiscoveredMetadata(supportsGenerate, supportsEmbed),
 				})
 			}
 		}
