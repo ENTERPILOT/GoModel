@@ -1011,6 +1011,7 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 		{"grok-4.6-latest", "xhigh", "xhigh"},
 		{"grok-4.7", "xhigh", "xhigh"},
 		{"grok-4.10", "xhigh", "xhigh"},
+		{"grok-4.foo", "xhigh", "high"},
 		{"grok-4.20-0309-reasoning", "xhigh", "high"},
 		{"grok-4.20-0309-reasoning", "max", "high"},
 		{"grok-4.3", "xhigh", "high"},

@@ -111,9 +111,9 @@ func normalizeReasoningEffort(model, effort string) string {
 }
 
 // supportsXHighEffort reports whether the model documents the "xhigh"
-// reasoning effort level: the multi-agent family and grok-4.6+. The
-// grok-4.20 family is excluded: it predates 4.6 as an experimental
-// release, not a successor.
+// reasoning effort level: the multi-agent family and grok-4.6+.
+// Non-multi-agent grok-4.20 models are excluded: the 4.20 family
+// predates 4.6 as an experimental release, not a successor.
 func supportsXHighEffort(model string) bool {
 	model = strings.ToLower(model)
 	if strings.Contains(model, "multi-agent") {
