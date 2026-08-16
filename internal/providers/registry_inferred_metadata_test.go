@@ -67,6 +67,54 @@ func TestInitialize_InfersEmbeddingModesForUnknownModels(t *testing.T) {
 	}
 }
 
+// TestApplyInferredModelMetadata_ReplacementsProtocol exercises the published-
+// map path (EnrichModels), where entries must be replaced rather than mutated
+// in place so concurrent readers keep a stable view. Covers both a fresh entry
+// and one already replaced by an earlier enrichment step (reverse-chain case).
+func TestApplyInferredModelMetadata_ReplacementsProtocol(t *testing.T) {
+	fresh := &ModelInfo{Model: core.Model{ID: "nomic-embed-text"}, ProviderName: "eridu"}
+	orig := &ModelInfo{Model: core.Model{ID: "bge-m3"}, ProviderName: "eridu"}
+	// Simulate a prior pass (registry enrichment) having already replaced orig
+	// with a clone that still lacks modes/categories.
+	priorClone := *orig
+	prior := &priorClone
+	chat := &ModelInfo{Model: core.Model{ID: "some-chat-model"}, ProviderName: "eridu"}
+
+	providerModels := map[string]*ModelInfo{
+		"nomic-embed-text": fresh,
+		"bge-m3":           prior,
+		"some-chat-model":  chat,
+	}
+	replacements := map[*ModelInfo]*ModelInfo{orig: prior}
+
+	applied := applyInferredModelMetadata(map[string]map[string]*ModelInfo{"eridu": providerModels}, replacements)
+	if applied != 2 {
+		t.Fatalf("applied = %d, want 2", applied)
+	}
+
+	// Original pointers must be untouched; new entries carry the metadata.
+	if fresh.Model.Metadata != nil || prior.Model.Metadata != nil {
+		t.Error("published ModelInfo values were mutated in place")
+	}
+	for _, id := range []string{"nomic-embed-text", "bge-m3"} {
+		next := providerModels[id]
+		if next.Model.Metadata == nil || len(next.Model.Metadata.Modes) != 1 || next.Model.Metadata.Modes[0] != "embedding" {
+			t.Errorf("%s replacement metadata = %+v, want embedding modes", id, next.Model.Metadata)
+		}
+	}
+	if got := replacements[fresh]; got != providerModels["nomic-embed-text"] {
+		t.Error("fresh entry not recorded in replacements")
+	}
+	// The chain must point from the ORIGINAL pre-enrichment pointer, not the
+	// intermediate clone, so callers fixing up r.models find their entry.
+	if got := replacements[orig]; got != providerModels["bge-m3"] {
+		t.Error("replacement chain broken: orig does not map to the final entry")
+	}
+	if chat.Model.Metadata != nil || providerModels["some-chat-model"] != chat {
+		t.Error("non-inferable model must be left untouched")
+	}
+}
+
 // TestEnrichModels_RegistryDataWinsOverInference verifies that when the remote
 // model list later supplies real metadata for a model the heuristic had
 // classified, the registry data replaces the inferred modes.

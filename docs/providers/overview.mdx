@@ -144,7 +144,8 @@ support, not every individual model capability exposed by an upstream provider.
   not know (llama.cpp, LM Studio, Ollama, vLLM custom IDs) fall back to a
   conservative name check: IDs containing `embed` or matching well-known
   embedding families (`bge`, `e5`, `gte`, `minilm`) are categorized as
-  embedding models automatically. For anything the heuristic misses, declare
+  embedding models automatically, and IDs containing `rerank` as reranking
+  models. For anything the heuristic misses, declare
   `modes: [embedding]` under `providers.<name>.models` metadata in
   `config.yaml` — operator metadata always wins. Categories affect dashboard
   grouping and failover suggestions only; `/v1/embeddings` routes to any model
