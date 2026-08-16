@@ -138,11 +138,14 @@ the reverse. Zero `windowStart` with zero counts means “no window yet.”
 Add to the existing `Store` interface. No second factory.
 
 - `LoadCounters(ctx) ([]windowSnapshot, error)` — all rows.
-- `SaveCounters(ctx, []windowSnapshot) error` — one transaction that
-  **replaces** the table/collection with the provided set (delete all,
-  then insert). The payload is only **current windowed rules** (period
-  > 0 still present in `Service.rules`), never leftover limiter-map
-  entries for a rule that was dropped.
+- `SaveCounters(ctx, []windowSnapshot) error` — **replaces** the
+  table/collection with the provided set (delete all, then insert).
+  SQL does this in one transaction. Mongo uses the same
+  transaction-plus-standalone-fallback as `ReplaceConfigRules` today
+  (replica-set e2e uses `rs0`; a hard transaction-only write would
+  fail open on standalone Mongo). The payload is only **current
+  windowed rules** (period > 0 still present in `Service.rules`),
+  never leftover limiter-map entries for a rule that was dropped.
 - `DeleteCounter(ctx, scope, subject, periodSeconds) error` — one row.
   Missing row is not an error.
 - `DeleteAllCounters(ctx) error` — empty the table.
@@ -176,7 +179,8 @@ A second mutex (`persistMu`) serializes snapshot writes against
 reset/delete row deletes. `admit()` does not take it.
 
 1. Flush: lock `persistMu`, copy maps (only keys that are still
-   windowed rules), `SaveCounters`, unlock.
+   windowed rules) **by value** (`windowCounter` structs, not the
+   pointers `admit()` still mutates), `SaveCounters`, unlock.
 2. `Reset` / `DeleteRule` / `ResetAll`: clear memory, lock `persistMu`,
    delete the row(s), unlock.
 
@@ -298,8 +302,11 @@ Shared helper in the common environment block:
 - `reload_release_gateway <name> <base_url>` sends `SIGHUP` to
   `$RELEASE_STACK_DIR/<name>/server.pid`, then waits until that
   gateway’s `logs/server.log` contains a **new** `configuration reloaded`
-  line. A request sent immediately after `kill -HUP` can still hit the
-  old generation, which still has in-memory counters — the log wait is
+  line, then retries `/health` briefly. `configuration reloaded` is
+  logged after the old `Shutdown` and before the new
+  `StartWithListener`; the next request may sit in the held accept
+  queue until the new listener is up. A request sent immediately after
+  `kill -HUP` can still hit the old generation — the log wait is
   required.
 
 Use **hour** windows so the cap outlives the reload wait. Each scenario
