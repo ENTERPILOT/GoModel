@@ -13,7 +13,10 @@ import (
 
 // memStore is a minimal in-memory Store for service tests.
 type memStore struct {
-	rules []Rule
+	rules    []Rule
+	counters []WindowSnapshot
+	// written stamps each row the way a real store's updated_at column does.
+	written map[string]int64
 }
 
 func (m *memStore) ListRules(context.Context) ([]Rule, error) {
@@ -67,6 +70,62 @@ func (m *memStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 }
 
 func (m *memStore) Close() error { return nil }
+
+func (m *memStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
+	return append([]WindowSnapshot(nil), m.counters...), nil
+}
+
+// snapshotIdentity is the primary key every store keys a window row by.
+func snapshotIdentity(s WindowSnapshot) string {
+	return s.Scope + "\x00" + s.Subject + "\x00" + s.Partition + "\x00" + strconv.FormatInt(s.PeriodSeconds, 10)
+}
+
+// SaveCounters mirrors the real stores: upsert by identity, then collect rows
+// that went two periods without a write.
+func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) error {
+	now := time.Now().Unix()
+	if m.written == nil {
+		m.written = make(map[string]int64)
+	}
+	for _, snap := range snapshots {
+		m.written[snapshotIdentity(snap)] = now
+		replaced := false
+		for i, existing := range m.counters {
+			if snapshotIdentity(existing) == snapshotIdentity(snap) {
+				m.counters[i] = snap
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			m.counters = append(m.counters, snap)
+		}
+	}
+	kept := m.counters[:0]
+	for _, snap := range m.counters {
+		if m.written[snapshotIdentity(snap)]+2*snap.PeriodSeconds >= now {
+			kept = append(kept, snap)
+		}
+	}
+	m.counters = kept
+	return nil
+}
+
+func (m *memStore) DeleteCounter(_ context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	kept := m.counters[:0]
+	for _, snap := range m.counters {
+		if snap.Scope != string(scope) || snap.Subject != subject || snap.PeriodSeconds != periodSeconds {
+			kept = append(kept, snap)
+		}
+	}
+	m.counters = kept
+	return nil
+}
+
+func (m *memStore) DeleteAllCounters(context.Context) error {
+	m.counters = nil
+	return nil
+}
 
 // onPath builds request subjects for user-path-only tests.
 func onPath(path string) Subjects { return Subjects{UserPath: path} }

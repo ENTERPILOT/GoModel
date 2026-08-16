@@ -58,6 +58,17 @@ func (s *adminRateLimitStore) ReplaceConfigRules(ctx context.Context, rules []ra
 	return s.UpsertRules(ctx, rules)
 }
 
+func (s *adminRateLimitStore) LoadCounters(context.Context) ([]ratelimit.WindowSnapshot, error) {
+	return nil, nil
+}
+func (s *adminRateLimitStore) SaveCounters(context.Context, []ratelimit.WindowSnapshot) error {
+	return nil
+}
+func (s *adminRateLimitStore) DeleteCounter(context.Context, ratelimit.RuleScope, string, int64) error {
+	return nil
+}
+func (s *adminRateLimitStore) DeleteAllCounters(context.Context) error { return nil }
+
 func (s *adminRateLimitStore) Close() error { return nil }
 
 func newRateLimitHandler(t *testing.T, store *adminRateLimitStore) (*Handler, *ratelimit.Service) {

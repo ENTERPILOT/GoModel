@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
@@ -249,4 +250,53 @@ func TestSQLStoreMigratesPreScopeTable(t *testing.T) {
 			t.Fatalf("rules = %d, want 2", len(rules))
 		}
 	})
+}
+
+func TestSQLStoreCounterRoundTrip(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		runCounterStoreSuite(t, store, func(t *testing.T, snap WindowSnapshot, updatedAt int64) {
+			t.Helper()
+			if _, err := store.db.Exec(context.Background(), upsertCounterSQL,
+				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds,
+				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
+				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, updatedAt,
+			); err != nil {
+				t.Fatalf("seed stale counter: %v", err)
+			}
+		})
+	})
+}
+
+// TestSQLStoreLoadCountersSkipsMalformedRow keeps one unreadable row from
+// costing every other window its restore: Start treats a load error as "do not
+// persist this generation". SQLite only — its dynamic typing is what lets a
+// row hold a value the scan cannot read.
+func TestSQLStoreLoadCountersSkipsMalformedRow(t *testing.T) {
+	ctx := context.Background()
+	db := sqlxtest.NewSQLite(t)
+	store, err := NewSQLStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	good := WindowSnapshot{
+		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+		RequestsWindowStart: 1700000000, RequestsCurrent: 2,
+	}
+	if err := store.SaveCounters(ctx, []WindowSnapshot{good}); err != nil {
+		t.Fatalf("SaveCounters: %v", err)
+	}
+	if _, err := db.Exec(ctx, upsertCounterSQL,
+		string(ScopeUserPath), "/broken", "", PeriodHourSeconds,
+		0, "not-a-number", 0, 0, 0, 0, time.Now().Unix(),
+	); err != nil {
+		t.Fatalf("seed malformed counter: %v", err)
+	}
+
+	got, err := store.LoadCounters(ctx)
+	if err != nil {
+		t.Fatalf("LoadCounters: %v", err)
+	}
+	if len(got) != 1 || got[0] != good {
+		t.Fatalf("loaded = %+v, want only the readable window %+v", got, good)
+	}
 }

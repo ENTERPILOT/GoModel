@@ -9,13 +9,21 @@ import (
 
 var ErrNotFound = errors.New("rate limit rule not found")
 
-// Store persists rate limit rule definitions. Live counters are in-memory
-// and never stored.
+// Store persists rate limit rule definitions and optional window snapshots.
 type Store interface {
 	ListRules(ctx context.Context) ([]Rule, error)
 	UpsertRules(ctx context.Context, rules []Rule) error
 	DeleteRule(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
 	ReplaceConfigRules(ctx context.Context, rules []Rule) error
+	LoadCounters(ctx context.Context) ([]WindowSnapshot, error)
+	// SaveCounters upserts the given snapshots and collects rows no writer has
+	// refreshed for two of their own periods — the same staleness bound a load
+	// applies, so it only ever drops rows that could no longer be restored.
+	// Nothing is deleted to make room for a write, so a crash mid-save costs at
+	// most the flush interval rather than a whole window.
+	SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error
+	DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
+	DeleteAllCounters(ctx context.Context) error
 	Close() error
 }
 

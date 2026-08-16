@@ -457,6 +457,9 @@ func TestRateLimitsEnabledByDefaultAndTogglable(t *testing.T) {
 		if !result.Config.RateLimits.Enabled {
 			t.Fatal("rate limits should be enabled by default")
 		}
+		if result.Config.RateLimits.FlushInterval != 1 {
+			t.Fatalf("FlushInterval = %d, want 1", result.Config.RateLimits.FlushInterval)
+		}
 	})
 
 	withTempDir(t, func(string) {
@@ -467,6 +470,29 @@ func TestRateLimitsEnabledByDefaultAndTogglable(t *testing.T) {
 		}
 		if result.Config.RateLimits.Enabled {
 			t.Fatal("RATE_LIMITS_ENABLED=false was not applied")
+		}
+	})
+}
+
+func TestRateLimitsFlushIntervalEnv(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		t.Setenv("RATE_LIMITS_FLUSH_INTERVAL", "0")
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		if result.Config.RateLimits.FlushInterval != 0 {
+			t.Fatalf("FlushInterval = %d, want 0", result.Config.RateLimits.FlushInterval)
+		}
+	})
+
+	clearAllConfigEnvVars(t)
+	withTempDir(t, func(string) {
+		t.Setenv("RATE_LIMITS_FLUSH_INTERVAL", "-1")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "flush_interval") {
+			t.Fatalf("Load() error = %v, want flush_interval", err)
 		}
 	})
 }

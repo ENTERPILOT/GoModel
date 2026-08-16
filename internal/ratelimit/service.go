@@ -35,6 +35,13 @@ type Service struct {
 	rules []Rule
 
 	quotaTemplates bool
+
+	flushInterval time.Duration
+	persistMu     sync.Mutex
+	lifeMu        sync.Mutex
+	persistState  persistState
+	flushStop     chan struct{}
+	flushDone     chan struct{}
 }
 
 func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
@@ -57,9 +64,35 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 	return service, nil
 }
 
-// Close stops the in-memory expiry cleanup worker.
+// Close stops the flush loop, writes a final snapshot if this generation
+// was started, and stops the in-memory expiry cleanup worker.
 func (s *Service) Close() {
-	if s != nil && s.limiter != nil {
+	if s == nil {
+		return
+	}
+	s.lifeMu.Lock()
+	if s.persistState == persistClosed {
+		s.lifeMu.Unlock()
+		return
+	}
+	wasActive := s.persistState == persistActive
+	s.persistState = persistClosed
+	stop := s.flushStop
+	done := s.flushDone
+	s.flushStop = nil
+	s.flushDone = nil
+	s.lifeMu.Unlock()
+
+	if stop != nil {
+		close(stop)
+		<-done
+	}
+	if wasActive {
+		flushCtx, cancel := persistContext(context.Background())
+		s.flush(flushCtx)
+		cancel()
+	}
+	if s.limiter != nil {
 		s.limiter.close()
 	}
 }
@@ -138,7 +171,15 @@ func (s *Service) DeleteRule(ctx context.Context, scope RuleScope, subject strin
 		return err
 	}
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
-	return s.Refresh(ctx)
+	// The rule is already gone from the store, so the refresh has to happen
+	// either way — dropping it on a snapshot-row failure would leave the
+	// deleted rule enforced in memory, which is worse than the stale row.
+	// The caller still hears about the row.
+	persistErr := s.persistDelete(ctx, scope, subject, periodSeconds)
+	if err := s.Refresh(ctx); err != nil {
+		return err
+	}
+	return persistErr
 }
 
 func (s *Service) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
@@ -336,7 +377,7 @@ func (s *Service) ResetRule(scope RuleScope, subject string, periodSeconds int64
 		return err
 	}
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
-	return nil
+	return s.persistDelete(context.Background(), scope, subject, periodSeconds)
 }
 
 // ResetAll clears every live window counter.
@@ -345,7 +386,7 @@ func (s *Service) ResetAll() error {
 		return ErrUnavailable
 	}
 	s.limiter.resetAll()
-	return nil
+	return s.persistDeleteAll(context.Background())
 }
 
 func (s *Service) matchingRules(subjects Subjects) []Rule {

@@ -173,9 +173,11 @@ docker exec my-gateway /gomodel --reload
   needs a restart. The gateway logs a warning naming both ports.
 - **`PID_FILE`** — it names the process that is already running.
 - **`GOMODEL_DEMO_MODE`** — the demo warnings are wired up once at startup.
-- **In-memory state** — rate limit counters, virtual-model session affinity, and
-  live log buffers start fresh, exactly as they would after a restart. Budgets
-  and usage are stored in the database and are unaffected.
+- **In-memory state** — virtual-model session affinity and live log buffers
+  start fresh, exactly as they would after a restart. Request and token rate
+  limit windows are written on shutdown and restored by the next generation.
+  Concurrency gauges and budgets/usage behave as they do on restart (gauges
+  start empty; budgets and usage live in the database).
 
 For refreshing provider model catalogs and admin-managed data *without* re-reading
 configuration, the dashboard's runtime refresh (`POST /admin/runtime/refresh`) is

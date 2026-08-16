@@ -60,7 +60,10 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(ctx, store, WithQuotaTemplates(quotaTemplatesEnabled))
+	service, err := NewService(ctx, store,
+		WithQuotaTemplates(quotaTemplatesEnabled),
+		WithFlushInterval(flushIntervalFromSeconds(cfg.RateLimits.FlushInterval)),
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 204 end-to-end curl scenarios for release validation.
+This file contains 207 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -127,6 +127,11 @@ Stateful note:
   order. `S200` deliberately registers its managed key on the auth-enabled
   gateway rather than the no-master-key main SQLite gateway — see the note on
   that scenario for why
+- `S205`-`S207` exercise request-window persistence across `SIGHUP` reload on
+  SQLite, reset-one across reload, and PostgreSQL/MongoDB parity. Each creates
+  a `$QA_SUFFIX`-scoped **shared** hour rule (not `per_child` — this stack has
+  no `quota_templates` entitlement) and deletes it. They reload a shared
+  gateway, which is safe in this sequential runner.
 - For stateful partial reruns, prefer a contiguous range that includes the
   prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
   `--keep-artifacts`
@@ -150,6 +155,34 @@ export BASE_URL=http://localhost:18080
 export PG_BASE_URL=http://localhost:18081
 export MONGO_BASE_URL=http://localhost:18082
 export GR_BASE_URL=http://localhost:18083
+export RELEASE_STACK_DIR="${RELEASE_STACK_DIR:-/tmp/gomodel-release-stack}"
+
+reload_release_gateway() {
+  local gateway="$1"
+  local url="$2"
+  local pid_file="$RELEASE_STACK_DIR/$gateway/server.pid"
+  local log_file="$RELEASE_STACK_DIR/$gateway/logs/server.log"
+  local pid before
+  pid="$(cat "$pid_file")"
+  before="$(wc -l < "$log_file" | tr -d ' ')"
+  kill -HUP "$pid"
+  for _ in $(seq 1 50); do
+    if tail -n +$((before + 1)) "$log_file" 2>/dev/null | grep -Fq 'configuration reloaded'; then
+      for __ in $(seq 1 20); do
+        if curl -fsS --connect-timeout 1 --max-time 2 "$url/health" >/dev/null 2>&1; then
+          return 0
+        fi
+        sleep 0.1
+      done
+      echo "error: $gateway did not become healthy after reload" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  echo "error: $gateway did not log configuration reloaded" >&2
+  tail -n 40 "$log_file" >&2 || true
+  return 1
+}
 
 cat > "$QA_RUN_DIR/qa-openai-batch.jsonl" <<'EOF'
 {"custom_id":"qa-batch-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_BATCH_FILE_OK"}],"max_tokens":20}}
@@ -5229,4 +5262,122 @@ curl -fsS -H "$ADMIN_AUTH_HEADER" -X PUT "$AUTH_BASE_URL/admin/budgets" \
 curl -fsS -H "$ADMIN_AUTH_HEADER" -X DELETE "$AUTH_BASE_URL/admin/budgets" \
   -H 'Content-Type: application/json' \
   -d "{\"scope\":\"label\",\"subject\":\"$QA_LBL\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
+```
+
+## 25. Rate limit counters across reload
+
+These scenarios cover request-window persistence across `gomodel --reload`
+(SIGHUP). Hour windows so the cap outlives the reload wait. Shared
+user-path rules only — the OSS release stack has no `quota_templates`
+entitlement.
+
+### S205 Request-window counters survive `--reload` (SQLite)
+
+Creates a one-request-per-hour rule, burns it, reloads `sqlite-main`, and
+verifies the next request is still `429`.
+
+```bash
+RL_PATH="/qa/ratelimit/persist/$QA_SUFFIX"
+BODY_FILE="$QA_RUN_DIR/s205.body.json"
+
+curl -fsS -X PUT "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"hour\"},\"max_requests\":1}" \
+  | jq -e --arg p "$RL_PATH" 'any(.rate_limits[]?; .scope == "user_path" and .user_path == $p and .max_requests == 1)' >/dev/null
+
+curl -fsS -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_PERSIST_OK"}],"max_tokens":20}'
+assert_chat_response_contains "$BODY_FILE" "openai" "QA_RL_PERSIST_OK"
+
+reload_release_gateway sqlite-main "$BASE_URL"
+
+curl -sS -o "$BODY_FILE" -w '%{http_code}' "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_PERSIST_BLOCKED"}],"max_tokens":20}' \
+  | jq -R -e '. == "429"' >/dev/null
+jq -e '.error.type == "rate_limit_error" and .error.code == "rate_limit_exceeded"' "$BODY_FILE" >/dev/null
+
+curl -fsS -X DELETE "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"hour\"}}" \
+  | jq -e --arg p "$RL_PATH" 'all(.rate_limits[]?; .user_path != $p)' >/dev/null
+```
+
+### S206 `reset-one` stays cleared across `--reload`
+
+Burns an hour window, resets it, reloads, and verifies the next request
+succeeds.
+
+```bash
+RL_PATH="/qa/ratelimit/persist-reset/$QA_SUFFIX"
+BODY_FILE="$QA_RUN_DIR/s206.body.json"
+
+curl -fsS -X PUT "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"hour\"},\"max_requests\":1}" \
+  | jq -e --arg p "$RL_PATH" 'any(.rate_limits[]?; .user_path == $p and .max_requests == 1)' >/dev/null
+
+curl -fsS -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_RESET_PERSIST_OK"}],"max_tokens":20}'
+assert_chat_response_contains "$BODY_FILE" "openai" "QA_RL_RESET_PERSIST_OK"
+
+curl -fsS -X POST "$BASE_URL/admin/rate-limits/reset-one" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"period\":\"hour\"}" >/dev/null
+
+reload_release_gateway sqlite-main "$BASE_URL"
+
+curl -fsS -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_RESET_PERSIST_AGAIN"}],"max_tokens":20}'
+assert_chat_response_contains "$BODY_FILE" "openai" "QA_RL_RESET_PERSIST_AGAIN"
+
+curl -fsS -X DELETE "$BASE_URL/admin/rate-limits" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"hour\"}}" \
+  | jq -e --arg p "$RL_PATH" 'all(.rate_limits[]?; .user_path != $p)' >/dev/null
+```
+
+### S207 Request-window counters survive `--reload` on PostgreSQL and MongoDB
+
+Same as S205 against the smoke gateways.
+
+```bash
+for item in "pg-smoke $PG_BASE_URL" "mongo-smoke $MONGO_BASE_URL"; do
+  set -- $item
+  GW="$1"
+  URL="$2"
+  RL_PATH="/qa/ratelimit/persist-$GW/$QA_SUFFIX"
+  BODY_FILE="$QA_RUN_DIR/s207.$GW.body.json"
+
+  curl -fsS -X PUT "$URL/admin/rate-limits" \
+    -H 'Content-Type: application/json' \
+    -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"hour\"},\"max_requests\":1}" \
+    | jq -e --arg p "$RL_PATH" 'any(.rate_limits[]?; .user_path == $p and .max_requests == 1)' >/dev/null
+
+  curl -fsS -o "$BODY_FILE" "$URL/v1/chat/completions" \
+    -H 'Content-Type: application/json' \
+    -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+    -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_PERSIST_BACKEND_OK"}],"max_tokens":20}'
+  assert_chat_response_contains "$BODY_FILE" "openai" "QA_RL_PERSIST_BACKEND_OK"
+
+  reload_release_gateway "$GW" "$URL"
+
+  curl -sS -o "$BODY_FILE" -w '%{http_code}' "$URL/v1/chat/completions" \
+    -H 'Content-Type: application/json' \
+    -H "X-GoModel-User-Path: $RL_PATH/leaf" \
+    -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_RL_PERSIST_BACKEND_BLOCKED"}],"max_tokens":20}' \
+    | jq -R -e '. == "429"' >/dev/null
+
+  curl -fsS -X DELETE "$URL/admin/rate-limits" \
+    -H 'Content-Type: application/json' \
+    -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"hour\"}}" \
+    | jq -e --arg p "$RL_PATH" 'all(.rate_limits[]?; .user_path != $p)' >/dev/null
+done
 ```
