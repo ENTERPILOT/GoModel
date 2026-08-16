@@ -33,6 +33,13 @@ type Provider struct {
 	appName string
 }
 
+// OpenRouter's /audio/speech and /audio/transcriptions endpoints are
+// OpenAI-shaped, so the embedded CompatibleProvider implementation serves them
+// as-is; this assertion keeps the audio surface (and the catalog's audio-only
+// models, which the registry hides for providers without it) from silently
+// disappearing if the embedding changes.
+var _ core.AudioProvider = (*Provider)(nil)
+
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
 	p := &Provider{
@@ -96,10 +103,10 @@ type openrouterModel struct {
 // operator config still override the stamp.
 //
 // output_modalities=all is required: the endpoint defaults to text-output
-// models only, which would hide OpenRouter's embedding models from the
-// catalog. Models whose every modality maps outside the gateway's OpenRouter
-// surface (rerank-only, video-only, speech/transcription-only) are skipped so
-// the catalog never advertises a model that can only fail.
+// models only, which would hide OpenRouter's embedding and audio models from
+// the catalog. Models whose every modality maps outside the gateway's
+// OpenRouter surface (rerank-only, video-only) are skipped so the catalog
+// never advertises a model that can only fail.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	var upstream struct {
 		Data []openrouterModel `json:"data"`
@@ -128,13 +135,16 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 }
 
 // servableOpenRouterModalities are output modalities the gateway can reach on
-// OpenRouter: text and image generation flow through chat completions, and
-// embeddings through /embeddings. A model listing none of these (rerank-only,
-// video, speech, transcription) has no working endpoint here.
+// OpenRouter: text and image generation flow through chat completions,
+// embeddings through /embeddings, and speech/transcription through the
+// /audio endpoints. A model listing none of these (rerank-only, video) has no
+// working endpoint here.
 var servableOpenRouterModalities = map[string]struct{}{
-	"text":       {},
-	"image":      {},
-	"embeddings": {},
+	"text":          {},
+	"image":         {},
+	"embeddings":    {},
+	"speech":        {},
+	"transcription": {},
 }
 
 func openrouterServable(m openrouterModel) bool {
@@ -156,6 +166,9 @@ func openrouterServable(m openrouterModel) bool {
 // ID inference.
 func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 	modes := make([]string, 0, 2)
+	// "rerank" is deliberately not mapped: the gateway has no rerank surface
+	// on OpenRouter, and the rerank mode would sort the model into the
+	// Embeddings category despite being unreachable here.
 	for _, modality := range m.Architecture.OutputModalities {
 		switch strings.ToLower(strings.TrimSpace(modality)) {
 		case "text":
@@ -164,9 +177,10 @@ func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 			modes = append(modes, "image_generation")
 		case "embeddings":
 			modes = append(modes, "embedding")
-			// "rerank" is deliberately not mapped: the gateway has no rerank
-			// surface on OpenRouter, and the rerank mode would sort the model
-			// into the Embeddings category despite being unreachable here.
+		case "speech":
+			modes = append(modes, "audio_speech")
+		case "transcription":
+			modes = append(modes, "audio_transcription")
 		}
 	}
 	if len(modes) == 0 && m.ContextLength <= 0 {
