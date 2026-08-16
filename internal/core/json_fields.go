@@ -292,6 +292,24 @@ func (fields UnknownJSONFields) Without(keys ...string) UnknownJSONFields {
 	return UnknownJSONFields{raw: buf.Bytes()}
 }
 
+// jsonFieldSet answers "is this key a known typed field?" in O(1). Use it via
+// jsonFieldSetOf for the derived struct lists (dozens of fields, checked once
+// per JSON key of every decoded request); the variadic
+// extractUnknownJSONFields stays optimal for the hand-listed callers with a
+// handful of fields, where a linear scan beats a map lookup.
+type jsonFieldSet map[string]struct{}
+
+// jsonFieldSetOf derives the known-field set from v's struct definition, like
+// jsonFieldNames but as a lookup set.
+func jsonFieldSetOf(v any) jsonFieldSet {
+	names := jsonFieldNames(v)
+	set := make(jsonFieldSet, len(names))
+	for _, name := range names {
+		set[name] = struct{}{}
+	}
+	return set
+}
+
 // extractUnknownJSONFields captures the object's keys that are not in
 // knownFields, preserving their raw bytes for passthrough (Postel's Law).
 //
@@ -301,6 +319,21 @@ func (fields UnknownJSONFields) Without(keys ...string) UnknownJSONFields {
 // benefit. The cheap first-byte and IsObject checks remain to reject non-object
 // JSON explicitly.
 func extractUnknownJSONFields(data []byte, knownFields ...string) (UnknownJSONFields, error) {
+	return extractUnknownJSONFieldsWith(data, func(key string) bool {
+		return slices.Contains(knownFields, key)
+	})
+}
+
+// extractUnknownJSONFieldsSet is extractUnknownJSONFields with a precomputed
+// known-field set, for the struct-derived lists too large to scan per key.
+func extractUnknownJSONFieldsSet(data []byte, known jsonFieldSet) (UnknownJSONFields, error) {
+	return extractUnknownJSONFieldsWith(data, func(key string) bool {
+		_, ok := known[key]
+		return ok
+	})
+}
+
+func extractUnknownJSONFieldsWith(data []byte, isKnown func(string) bool) (UnknownJSONFields, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 || data[0] != '{' {
 		return UnknownJSONFields{}, fmt.Errorf("expected JSON object")
@@ -320,7 +353,7 @@ func extractUnknownJSONFields(data []byte, knownFields ...string) (UnknownJSONFi
 	buf.WriteByte('{')
 	wrote := false
 	root.ForEach(func(key, value gjson.Result) bool {
-		if slices.Contains(knownFields, key.String()) {
+		if isKnown(key.String()) {
 			return true
 		}
 		if wrote {

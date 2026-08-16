@@ -138,6 +138,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 			AllowOverwritingRoute: true,
 			NotFoundHandler:       handleRouteNotFound,
 		}),
+		JSONSerializer: goJSONSerializer{},
 	})
 	e.Logger = slog.Default()
 	basePath := configuredBasePath(cfg)
@@ -311,19 +312,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	e.Use(middleware.BodyLimit(parseBodySizeLimitBytes(bodySizeLimit)))
 
-	// Request ID middleware (always active — ensures every request has a unique ID
-	// for usage tracking, audit logging, and response correlation)
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c *echo.Context) error {
-			req, id := ensureRequestID(c.Request())
-			c.SetRequest(req)
-			c.Response().Header().Set("X-Request-ID", id)
-			return next(c)
-		}
-	})
 	e.Use(modelInteractionWriteDeadlineMiddleware())
 
-	// Ingress capture (before auth/audit/model validation so they can consume shared raw request state)
+	// Ingress capture (before auth/audit/model validation so they can consume
+	// shared raw request state). Also assigns the per-request ID: the snapshot
+	// middleware runs unconditionally and calls ensureRequestID first thing, so
+	// a separate request-ID middleware would just repeat that work (a second
+	// context wrap + request copy) on every request.
 	userPathHeaderName := configuredUserPathHeader(cfg)
 	handler.userPathHeaderName = userPathHeaderName
 	e.Use(RequestSnapshotCapture(userPathHeaderName))

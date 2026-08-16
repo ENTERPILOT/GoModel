@@ -4,7 +4,7 @@ import "github.com/goccy/go-json"
 
 // chatRequestFields is derived from the struct's json tags at package init so
 // the known-field list cannot drift from the type definition.
-var chatRequestFields = jsonFieldNames(ChatRequest{})
+var chatRequestFields = jsonFieldSetOf(ChatRequest{})
 
 // UnmarshalJSON decodes the typed fields via an alias (so new fields are
 // picked up automatically) and captures every other member in ExtraFields.
@@ -15,7 +15,7 @@ func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	extraFields, err := extractUnknownJSONFields(data, chatRequestFields...)
+	extraFields, err := extractUnknownJSONFieldsSet(data, chatRequestFields)
 	if err != nil {
 		return err
 	}

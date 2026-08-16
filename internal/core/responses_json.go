@@ -12,15 +12,15 @@ import (
 // captured as an unknown extra field. ContentSchema swagger phantoms share
 // tags with real fields, which is harmless here (duplicates in the list).
 var (
-	responsesRequestFields        = jsonFieldNames(ResponsesRequest{})
-	responsesUtilityRequestFields = jsonFieldNames(ResponseInputTokensRequest{})
-	responsesOutputItemFields     = jsonFieldNames(ResponsesOutputItem{})
+	responsesRequestFields        = jsonFieldSetOf(ResponsesRequest{})
+	responsesUtilityRequestFields = jsonFieldSetOf(ResponseInputTokensRequest{})
+	responsesOutputItemFields     = jsonFieldSetOf(ResponsesOutputItem{})
 )
 
 // responsesExtrasAndInput finishes a responses-shaped decode: it captures
 // unknown members and decodes the raw input union.
-func responsesExtrasAndInput(data []byte, rawInput json.RawMessage, knownFields []string) (any, UnknownJSONFields, error) {
-	extraFields, err := extractUnknownJSONFields(data, knownFields...)
+func responsesExtrasAndInput(data []byte, rawInput json.RawMessage, knownFields jsonFieldSet) (any, UnknownJSONFields, error) {
+	extraFields, err := extractUnknownJSONFieldsSet(data, knownFields)
 	if err != nil {
 		return nil, UnknownJSONFields{}, err
 	}
@@ -328,7 +328,7 @@ func (i *ResponsesOutputItem) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	extraFields, err := extractUnknownJSONFields(data, responsesOutputItemFields...)
+	extraFields, err := extractUnknownJSONFieldsSet(data, responsesOutputItemFields)
 	if err != nil {
 		return err
 	}
