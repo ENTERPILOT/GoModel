@@ -246,12 +246,6 @@ RATE_LIMITS_FLUSH_INTERVAL=1
 - Persistence is on whenever `RATE_LIMITS_ENABLED` is on. There is no
   second flag.
 
-Document in `.env.template`, `config/config.example.yaml`,
-`docs/features/rate-limits.mdx`, and `CLAUDE.md` / `Agents.md`. Remove
-the wording that counters reset on restart / `--reload`. Keep the
-wording that counters are per instance (N replicas ≈ N × limit) and
-that concurrency is in-memory only.
-
 ## 10. Service operations vs snapshot
 
 | Operation | Memory | Snapshot |
@@ -305,98 +299,47 @@ Persistence never fails a request. `admit()` does not see store errors.
 
 ## 12. Testing
 
-### Unit / store
+The suites live in `internal/ratelimit`; this section records only what
+they are there to pin, not a per-test inventory.
 
-- Snapshot encode/restore: `estimate` after load matches the pre-flush
-  value for both request and token windows.
-- A snapshot whose `windowStart` is more than one period old advances
-  to zero.
-- Concurrent keys never appear in a snapshot.
-- `New` does not read or write. `Start` loads. `Close` after `Start`
-  writes a final snapshot. `Close` without `Start` writes nothing.
-- `flush_interval=0` still loads and still flushes on `Close`; the loop
-  never ticks.
-- `ResetRule` / `ResetAll` / `DeleteRule` clear memory and the row; a
-  later `Start` on a new service does not resurrect them.
-- `ReplaceConfigRules` dropping a config rule prunes the limiter maps
-  and does not call `DeleteCounter`. After `Start`, the next flush
-  omit that key from `SaveCounters`.
-- An in-flight flush cannot resurrect a completed `ResetRule` /
-  `DeleteRule` (`persistMu`).
-- SQL store (and Mongo, same as rules) round-trip: save, load, save a
-  subset (the omitted row survives — it is still restorable), collect a
-  row left unwritten for two periods, delete one, delete all. Migration
-  creates `rate_limit_counters` on an existing DB.
-- Config: default interval is 1; `RATE_LIMITS_FLUSH_INTERVAL=0` is
-  valid; a negative value is rejected.
-- Existing admit/release/header tests stay in-memory. A recording
-  `Store` asserts `Admit` does not call `SaveCounters`.
-- Per-child: two children of one template flush as two rows (same
-  `subject`, different `partition`); after `Start` each child is still
-  isolated. Reset of the template deletes both rows. A restored
-  partition is registered with the expiry worker. A shared-rule row is
-  not applied to a definition that is now `PerChild`, and the reverse.
-- OSS without `quota_templates` still persists shared / provider /
-  model windows. Per-child config continues to abort startup / reject
-  admin writes; persistence does not change that gate.
+- `New` neither reads nor writes. `Start` loads. `Close` after `Start`
+  writes once. `Close` without `Start` writes nothing, and neither does
+  admission — the "only a serving generation persists" rule of §8.
+- A failed load leaves the generation idle, so a store hiccup cannot
+  cost the persisted windows.
+- `Close` during an in-flight load does not restore after shutdown.
+- An in-flight flush cannot resurrect a completed reset or delete
+  (`persistMu`), and a failed row delete reaches the caller.
+- Per-child partitions round-trip independently, re-arm the expiry
+  worker, and never cross-apply between shared and template modes.
+- Concurrent keys are never written.
+- One counter-store suite (`runCounterStoreSuite`) runs on SQLite,
+  PostgreSQL and MongoDB: field-exact round trip, an omitted row
+  surviving a save, a two-period-stale row being collected, and both
+  delete paths. A malformed row is skipped, not fatal — asserted per
+  backend, since each has its own decoder.
 
 ### Release E2E
 
-Add to `tests/e2e/release-e2e-scenarios.md` (after S204). Update the
-file header count and the stateful-note list.
+S205–S207 in `tests/e2e/release-e2e-scenarios.md` cover reload survival
+on SQLite, `reset-one` staying cleared across a reload, and the same on
+PostgreSQL and MongoDB. Hour windows, so the cap outlives the reload
+wait. Shared user-path rules only: the release stack is OSS and a
+per-child admin write would 403, so per-child persistence is covered by
+the unit suites instead.
 
-Shared helper in the common environment block:
+The one non-obvious part is the shared `reload_release_gateway` helper.
+It sends `SIGHUP`, then waits for a **new** `configuration reloaded`
+line in that gateway's log before probing `/health`. That line is
+logged after the old generation's `Shutdown` and before the new
+`StartWithListener`, and a request sent straight after `kill -HUP` can
+still be served by the old generation — without the log wait the
+scenarios race.
 
-- Export `RELEASE_STACK_DIR` (default `/tmp/gomodel-release-stack`).
-- `reload_release_gateway <name> <base_url>` sends `SIGHUP` to
-  `$RELEASE_STACK_DIR/<name>/server.pid`, then waits until that
-  gateway’s `logs/server.log` contains a **new** `configuration reloaded`
-  line, then retries `/health` briefly. `configuration reloaded` is
-  logged after the old `Shutdown` and before the new
-  `StartWithListener`; the next request may sit in the held accept
-  queue until the new listener is up. A request sent immediately after
-  `kill -HUP` can still hit the old generation — the log wait is
-  required.
+Crash-before-`Close` (periodic flush only) and token-window reload stay
+unit tests; concurrency is not persisted, so it has no E2E case.
 
-Use **hour** windows so the cap outlives the reload wait. Each scenario
-creates a `$QA_SUFFIX`-scoped **shared** user-path rule (`per_child`
-unset) and deletes it. The release stack is OSS and has no
-`quota_templates` entitlement; a per-child admin write would 403.
-Per-child persistence is the unit tests above, not this matrix.
-
-- **S205 — Request-window counters survive `--reload` (SQLite).**
-  `max_requests=1` on `$BASE_URL`. First chat succeeds. Reload
-  `sqlite-main` (old `Close` writes the snapshot; no sleep required
-  for the happy path). Second chat is `429` with
-  `code: rate_limit_exceeded`. Delete the rule. Crash-before-`Close`
-  (periodic flush only) is a unit test, not this scenario.
-- **S206 — `reset-one` stays cleared across `--reload`.** Same shape:
-  burn the hour window, `reset-one`, reload `sqlite-main`. Next chat
-  succeeds. Delete the rule. `persistMu` is what makes this
-  deterministic.
-- **S207 — Same request-window survival on PostgreSQL and MongoDB.**
-  S203-style loop over `$PG_BASE_URL` / `$MONGO_BASE_URL`, reloading
-  `pg-smoke` and `mongo-smoke`. Distinct paths, delete each rule.
-
-S205–S207 reload a shared gateway. That is safe in this sequential
-runner (same class as S137). Token-window reload is covered by S157
-plus unit tests; concurrent is not persisted and is not an E2E case.
-
-## 13. Docs and comments
-
-- `docs/features/rate-limits.mdx` and `docs/advanced/cli.mdx` —
-  windows survive restart and `--reload`, including each active
-  per-child partition; concurrency does not; still per instance. Drop
-  the “counters start fresh” wording on the CLI reload page.
-- `docs/dev/2026-07-05_rate-limiting-spec.md` §8 and §11.7 — mark
-  persistence done; §11.2 stays future work.
-- `CLAUDE.md` / `Agents.md` — drop rate-limit counters from the
-  “in-memory state resets on reload” list; keep session affinity and
-  live log buffers.
-- `.env.template` and `config/config.example.yaml` — document
-  `RATE_LIMITS_FLUSH_INTERVAL` / `flush_interval`.
-
-## 14. Follow-up (not this change)
+## 13. Follow-up (not this change)
 
 Redis live counters: every `Admit` becomes an atomic script on shared
 keys (the key must include `partition`, same as `ruleKey`). No
