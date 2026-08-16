@@ -1,8 +1,9 @@
 # Rate Limit Counter Persistence
 
-Status: approved design
+Status: approved design (updated 2026-08-16 for `#670` per-child templates)
 Date: 2026-08-16
 Extends: `docs/dev/2026-07-05_rate-limiting-spec.md` §8, §11.2, §11.7
+Depends on: `feat(quotas): add per-child user-path templates` (`#670`)
 
 ## 1. Why
 
@@ -41,6 +42,10 @@ implement Redis-Lua.
 - A separate persist-on/off flag. `RATE_LIMITS_ENABLED=false` already
   builds no limiter. `RATE_LIMITS_FLUSH_INTERVAL=0` is the escape hatch
   that turns off the periodic loop only.
+- Changing `#670` semantics or the `quota_templates` entitlement gate.
+  Persistence lives in OSS `internal/ratelimit`. Pro (`../gomodel-pro`)
+  only enables the capability; it gets snapshot restore of child
+  partitions for free.
 
 ## 4. Architecture
 
@@ -61,13 +66,26 @@ only the sliding windows. The backend talks to the existing `Store`,
 which grows four methods implemented by the SQL and Mongo stores already
 used for rules.
 
-Cardinality stays one row per rule, not per caller.
+Cardinality is one row per **live window key**, not one per rule
+definition:
 
-Several replicas sharing Postgres or Mongo last-write-wins on that
-row. That is accepted: this work does not give shared live counters, and
-the schema has no `instance_id`. A restart loads whoever flushed last.
-Use one instance, or wait for the Redis-Lua backend, when the limit
-must be exact across replicas.
+- A shared rule (`per_child=false`, and every provider/model rule) still
+  has one window. `partition` is empty.
+- A per-child user-path template (`#670`) has one window per active
+  direct child. `partition` is `Rule.EffectiveSubject` (for example
+  `/customers/alice` under a template on `/customers`). Deeper paths
+  share that child’s counter, same as live enforcement.
+
+Idle child partitions are already dropped from memory after two periods
+(`limiter_expiry.go`). The snapshot only writes keys that are still in
+the limiter maps, so table size tracks live children, not historical
+ones.
+
+Several replicas sharing Postgres or Mongo last-write-wins **per
+window key**. That is accepted: this work does not give shared live
+counters, and the schema has no `instance_id`. A restart loads whoever
+flushed last. Use one instance, or wait for the Redis-Lua backend, when
+the limit must be exact across replicas.
 
 ## 5. `counterBackend`
 
@@ -83,8 +101,13 @@ already does:
 - `ResetAll()`
 
 `Service` holds a `counterBackend` instead of a concrete `*limiter`.
-`ruleKey` stays unexported. No public API change except `Service.Start`
-and the new config field.
+`ruleKey` stays unexported and already includes `partition` (`#670`).
+`Reset(key)` keeps today’s `sameDefinition` behavior: it clears every
+partition of that `(scope, subject, period)` definition.
+
+Public API additions: `Service.Start` and the flush-interval config
+field. `Service.Close` already exists (stops the child-expiry worker);
+persistence `Close` must call it after the final snapshot.
 
 The memory implementation is the current `limiter` plus snapshot
 helpers. A future Redis-Lua type implements the same interface and
@@ -92,12 +115,13 @@ ignores the snapshot store.
 
 ## 6. Snapshot data model
 
-One row per windowed rule. Concurrent rules (`period_seconds = 0`) are
-never written.
+One row per live window key. Concurrent rules (`period_seconds = 0`)
+are never written.
 
 ```text
 scope                      TEXT     -- user_path | provider | model
-subject                    TEXT
+subject                    TEXT     -- rule definition subject (template path)
+partition                  TEXT     -- "" for shared; child path for per-child
 period_seconds             INT64    -- > 0
 requests_window_start      INT64    -- unix seconds, 0 if unused
 requests_current           INT64
@@ -106,24 +130,32 @@ tokens_window_start        INT64
 tokens_current             INT64
 tokens_previous            INT64
 updated_at                 INT64    -- unix seconds, diagnostics only
-PRIMARY KEY (scope, subject, period_seconds)
+PRIMARY KEY (scope, subject, partition, period_seconds)
 ```
 
+`partition` is `ruleKey.partition` / `EffectiveSubject`. It is **not**
+the request’s full user path. A template on `/customers` stores
+`subject=/customers`, `partition=/customers/alice`, never
+`/customers/alice/app`.
+
 SQL table: `rate_limit_counters`. Mongo collection: `rate_limit_counters`
-with a unique index on `(scope, subject, period_seconds)`. Created at
-store init with `CREATE TABLE IF NOT EXISTS` / `CreateIndex`. Older
-databases just gain the table; no backfill.
+with a unique index on `(scope, subject, partition, period_seconds)`.
+Created at store init with `CREATE TABLE IF NOT EXISTS` / `CreateIndex`.
+Older databases just gain the table; no backfill.
 
 Units match `windowCounter`: Unix seconds and `int64` counts. After
 load, `advance()` already zeros a window more than one period old, so
-rows do not need a TTL.
+rows do not need a TTL. Load still skips a child row whose window is
+already past the in-memory expiry horizon (`windowStart + 2*period`),
+and must call `trackCounterExpiry` for every restored partition so the
+existing worker keeps pruning.
 
 Package type (exported only if tests in another package need it;
 otherwise unexported is fine):
 
 ```go
 type windowSnapshot struct {
-    Scope, Subject                                      string
+    Scope, Subject, Partition                           string
     PeriodSeconds                                       int64
     RequestsWindowStart, RequestsCurrent, RequestsPrevious int64
     TokensWindowStart, TokensCurrent, TokensPrevious    int64
@@ -132,6 +164,7 @@ type windowSnapshot struct {
 
 A rule that only limits requests leaves the token fields at zero, and
 the reverse. Zero `windowStart` with zero counts means “no window yet.”
+A shared rule’s `Partition` is `""`.
 
 ## 7. Store methods
 
@@ -143,11 +176,15 @@ Add to the existing `Store` interface. No second factory.
   SQL does this in one transaction. Mongo uses the same
   transaction-plus-standalone-fallback as `ReplaceConfigRules` today
   (replica-set e2e uses `rs0`; a hard transaction-only write would
-  fail open on standalone Mongo). The payload is only **current
-  windowed rules** (period > 0 still present in `Service.rules`),
-  never leftover limiter-map entries for a rule that was dropped.
-- `DeleteCounter(ctx, scope, subject, periodSeconds) error` — one row.
-  Missing row is not an error.
+  fail open on standalone Mongo). The payload is every **live window
+  key** still in the limiter maps whose definition is a current
+  windowed rule (period > 0). That includes one row per active
+  per-child partition. It never includes leftover map entries for a
+  dropped definition, and never includes concurrent keys.
+- `DeleteCounter(ctx, scope, subject, periodSeconds) error` — every
+  partition of that **definition** (matches `limiter.reset` /
+  `sameDefinition`). Missing rows are not an error. Resetting a
+  per-child template must not leave sibling children in the table.
 - `DeleteAllCounters(ctx) error` — empty the table.
 
 `Close` is unchanged.
@@ -161,8 +198,8 @@ serving, then shuts the old one down, then starts the new one
 | Call | When | Persistence |
 |---|---|---|
 | `New` / `NewService` | `app.New`, tests | Empty limiter. No load, no flush, no loop. |
-| `Start` | `App.startServer`, after the previous generation’s `Shutdown` | Load snapshot, apply rows whose key still matches a rule, then start the flush loop if `flush_interval > 0`. Mark the generation **active**. |
-| `Close` (`Result.Close`) | `App.Shutdown` | Stop the loop. If **active**, write one last snapshot. Then close the store as today. |
+| `Start` | `App.startServer`, after the previous generation’s `Shutdown` | Load snapshot, apply rows whose **definition** still matches a current rule and whose `partition` matches the rule’s mode (empty iff `!PerChild`), re-arm child expiry, then start the flush loop if `flush_interval > 0`. Mark the generation **active**. |
+| `Close` (`Result.Close`) | `App.Shutdown` | Stop the flush loop. If **active**, write one last snapshot. Then `Service.Close()` (expiry worker, already wired today) and close the store. |
 
 An idle replacement that is built and then discarded (failed listen,
 process exiting during rebuild) is not active, so its `Close` must not
@@ -178,11 +215,14 @@ writes outside the lock. `admit()` never waits on storage.
 A second mutex (`persistMu`) serializes snapshot writes against
 reset/delete row deletes. `admit()` does not take it.
 
-1. Flush: lock `persistMu`, copy maps (only keys that are still
-   windowed rules) **by value** (`windowCounter` structs, not the
-   pointers `admit()` still mutates), `SaveCounters`, unlock.
-2. `Reset` / `DeleteRule` / `ResetAll`: clear memory, lock `persistMu`,
-   delete the row(s), unlock.
+1. Flush: lock `persistMu`, copy maps **by value** (`windowCounter`
+   structs, not the pointers `admit()` still mutates). Keep a key only
+   when its definition is still a windowed rule. Merge request+token
+   windows that share a `ruleKey` into one `windowSnapshot`.
+   `SaveCounters`, unlock.
+2. `Reset` / `DeleteRule` / `ResetAll`: clear memory (all partitions of
+   the definition), lock `persistMu`, delete those snapshot rows,
+   unlock.
 
 Without that, a flush that sampled before a reset can `SaveCounters`
 after the row delete and resurrect the burned window (S206 would flake).
@@ -224,10 +264,10 @@ that concurrency is in-memory only.
 | Operation | Memory | Snapshot |
 |---|---|---|
 | `Admit` / `RecordTokens` | update windows | next flush / Close |
-| `ResetRule` | `limiter.reset` | `DeleteCounter` under `persistMu` |
+| `ResetRule` | `limiter.reset` (all partitions of the definition) | `DeleteCounter` under `persistMu` (all partitions) |
 | `ResetAll` | `limiter.resetAll` | `DeleteAllCounters` under `persistMu` |
-| `DeleteRule` | reset that key **and drop it from the limiter maps** | `DeleteCounter` under `persistMu` |
-| `ReplaceConfigRules` | refresh rules; **prune limiter maps** for keys that are no longer a windowed rule | **do not touch the store** |
+| `DeleteRule` | `limiter.reset` of that definition | `DeleteCounter` under `persistMu` |
+| `ReplaceConfigRules` / `Refresh` | already prunes maps when a definition disappears or `PerChild` flips (`Service.Refresh` after `#670`) | **do not touch the store** |
 
 `ReplaceConfigRules` runs from `factory.New` → `seedConfiguredRules`
 while the previous generation is still serving. Deleting snapshot rows
@@ -236,10 +276,15 @@ discarded (failed reload). Orphans are left for the **active**
 generation: `Start` does not apply them; the next flush replace-all
 drops them.
 
-When the rule set changes (`ReplaceConfigRules`, `DeleteRule`), prune
-the request/token maps so a later flush cannot reinsert a dropped
-rule’s window. `SaveCounters` is only ever given current windowed
-rules.
+Do not add a second prune path. `Refresh` already drops limiter keys
+when a definition is removed or shared/per-child mode changes; a later
+flush therefore cannot reinsert those windows. `SaveCounters` is only
+ever given live keys whose definition is still a windowed rule.
+
+A per-child row is applied on `Start` only if the matching definition
+still has `PerChild=true`. A shared row is applied only if that
+definition is not per-child. A mode flip therefore starts empty for
+that definition, matching `Refresh`.
 
 Reset and delete clear memory first (the operator-visible effect), then
 the row under `persistMu`. A failed row delete is logged; the in-memory
@@ -290,6 +335,14 @@ Persistence never fails a request. `admit()` does not see store errors.
   valid; a negative value is rejected.
 - Existing admit/release/header tests stay in-memory. A recording
   `Store` asserts `Admit` does not call `SaveCounters`.
+- Per-child: two children of one template flush as two rows (same
+  `subject`, different `partition`); after `Start` each child is still
+  isolated. Reset of the template deletes both rows. A restored
+  partition is registered with the expiry worker. A shared-rule row is
+  not applied to a definition that is now `PerChild`, and the reverse.
+- OSS without `quota_templates` still persists shared / provider /
+  model windows. Per-child config continues to abort startup / reject
+  admin writes; persistence does not change that gate.
 
 ### Release E2E
 
@@ -310,7 +363,10 @@ Shared helper in the common environment block:
   required.
 
 Use **hour** windows so the cap outlives the reload wait. Each scenario
-creates a `$QA_SUFFIX`-scoped user-path rule and deletes it.
+creates a `$QA_SUFFIX`-scoped **shared** user-path rule (`per_child`
+unset) and deletes it. The release stack is OSS and has no
+`quota_templates` entitlement; a per-child admin write would 403.
+Per-child persistence is the unit tests above, not this matrix.
 
 - **S205 — Request-window counters survive `--reload` (SQLite).**
   `max_requests=1` on `$BASE_URL`. First chat succeeds. Reload
@@ -333,9 +389,9 @@ plus unit tests; concurrent is not persisted and is not an E2E case.
 ## 13. Docs and comments
 
 - `docs/features/rate-limits.mdx` and `docs/advanced/cli.mdx` —
-  windows survive restart and `--reload`; concurrency does not; still
-  per instance. Drop the “counters start fresh” wording on the CLI
-  reload page.
+  windows survive restart and `--reload`, including each active
+  per-child partition; concurrency does not; still per instance. Drop
+  the “counters start fresh” wording on the CLI reload page.
 - `docs/dev/2026-07-05_rate-limiting-spec.md` §8 and §11.7 — mark
   persistence done; §11.2 stays future work.
 - `CLAUDE.md` / `Agents.md` — drop rate-limit counters from the
@@ -347,7 +403,8 @@ plus unit tests; concurrent is not persisted and is not an E2E case.
 ## 14. Follow-up (not this change)
 
 Redis-Lua `counterBackend`: every `Admit` is an atomic script on shared
-keys. No snapshots. Chosen when `REDIS_URL` is set, or behind an
-explicit config once someone is running HA and wants N replicas to
-share one limit. The interface in §5 is the only preparation this
-change makes for that work.
+keys (the key must include `partition`, same as `ruleKey`). No
+snapshots. Chosen when `REDIS_URL` is set, or behind an explicit config
+once someone is running HA and wants N replicas to share one limit.
+The interface in §5 is the only preparation this change makes for that
+work.
