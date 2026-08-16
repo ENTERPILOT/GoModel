@@ -33,6 +33,10 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 			 "architecture":{"input_modalities":["text"],"output_modalities":["image"]}},
 			{"id":"voyageai/voyage-4-lite","created":1721260800,
 			 "architecture":{"input_modalities":["text"],"output_modalities":["embeddings"]}},
+			{"id":"fish-audio/s1","created":1721260800,
+			 "architecture":{"input_modalities":["text"],"output_modalities":["speech"]}},
+			{"id":"mistralai/voxtral-mini-3b-2507","created":1721260800,
+			 "architecture":{"input_modalities":["audio"],"output_modalities":["transcription"]}},
 			{"id":"cohere/rerank-only","created":1721260800,
 			 "architecture":{"input_modalities":["text"],"output_modalities":["rerank"]}},
 			{"id":"acme/video-only","created":1721260800,
@@ -49,8 +53,8 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Data) != 4 {
-		t.Fatalf("len(Data) = %d, want 4 (rerank-only and video-only skipped): %+v", len(resp.Data), resp.Data)
+	if len(resp.Data) != 6 {
+		t.Fatalf("len(Data) = %d, want 6 (rerank-only and video-only skipped): %+v", len(resp.Data), resp.Data)
 	}
 	byID := map[string]core.Model{}
 	for _, m := range resp.Data {
@@ -77,6 +81,17 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	}
 	if embed.Metadata == nil || len(embed.Metadata.Categories) != 1 || embed.Metadata.Categories[0] != core.CategoryEmbedding {
 		t.Errorf("voyage-4-lite categories = %+v, want [embedding]", embed.Metadata)
+	}
+	speech := byID["fish-audio/s1"]
+	if speech.Metadata == nil || len(speech.Metadata.Modes) != 1 || speech.Metadata.Modes[0] != "audio_speech" {
+		t.Errorf("speech model metadata = %+v, want audio_speech modes", speech.Metadata)
+	}
+	if speech.Metadata == nil || len(speech.Metadata.Categories) != 1 || speech.Metadata.Categories[0] != core.CategoryAudio {
+		t.Errorf("speech model categories = %+v, want [audio]", speech.Metadata)
+	}
+	stt := byID["mistralai/voxtral-mini-3b-2507"]
+	if stt.Metadata == nil || len(stt.Metadata.Modes) != 1 || stt.Metadata.Modes[0] != "audio_transcription" {
+		t.Errorf("transcription model metadata = %+v, want audio_transcription modes", stt.Metadata)
 	}
 	if _, ok := byID["cohere/rerank-only"]; ok {
 		t.Error("rerank-only model must be skipped: no gateway surface reaches it on OpenRouter")
@@ -111,6 +126,69 @@ func TestListModels_UpstreamErrorPropagates(t *testing.T) {
 	var gatewayErr *core.GatewayError
 	if !errors.As(err, &gatewayErr) {
 		t.Fatalf("error type = %T, want *core.GatewayError: %v", err, err)
+	}
+}
+
+// Audio flows through the embedded OpenAI-compatible implementation;
+// OpenRouter-specific request mutation (attribution headers) must still apply
+// on that path so audio traffic is attributed like every other call.
+func TestAudio_UsesOpenAISurfaceWithAttributionHeaders(t *testing.T) {
+	type seen struct {
+		path    string
+		referer string
+	}
+	requests := make(chan seen, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- seen{path: r.URL.Path, referer: r.Header.Get("HTTP-Referer")}
+		switch r.URL.Path {
+		case "/audio/speech":
+			w.Header().Set("Content-Type", "audio/mpeg")
+			_, _ = w.Write([]byte("mp3-bytes"))
+		case "/audio/transcriptions":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"text":"hello"}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	speech, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+		Model: "fish-audio/s1",
+		Input: "hello world",
+		Voice: "alloy",
+	})
+	if err != nil {
+		t.Fatalf("CreateSpeech() error = %v", err)
+	}
+	if speech.ContentType != "audio/mpeg" {
+		t.Errorf("speech ContentType = %q, want audio/mpeg", speech.ContentType)
+	}
+
+	transcription, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
+		Model:    "mistralai/voxtral-mini-3b-2507",
+		File:     []byte("wav-bytes"),
+		Filename: "clip.wav",
+	})
+	if err != nil {
+		t.Fatalf("CreateTranscription() error = %v", err)
+	}
+	if !strings.Contains(string(transcription.Data), "hello") {
+		t.Errorf("transcription Data = %q, want to contain hello", transcription.Data)
+	}
+
+	for _, want := range []string{"/audio/speech", "/audio/transcriptions"} {
+		got := <-requests
+		if got.path != want {
+			t.Errorf("path = %q, want %q", got.path, want)
+		}
+		if got.referer != defaultSiteURL {
+			t.Errorf("HTTP-Referer on %s = %q, want %q", want, got.referer, defaultSiteURL)
+		}
 	}
 }
 
