@@ -132,10 +132,12 @@ func (s *Service) persistDelete(ctx context.Context, scope RuleScope, subject st
 	if s == nil || s.store == nil {
 		return nil
 	}
-	writeCtx, cancel := persistContext(ctx)
-	defer cancel()
+	// Take the lock before starting the clock: a delete that queued behind a
+	// slow flush would otherwise spend its whole budget waiting.
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
+	writeCtx, cancel := persistContext(ctx)
+	defer cancel()
 	return s.store.DeleteCounter(writeCtx, scope, subject, periodSeconds)
 }
 
@@ -143,9 +145,9 @@ func (s *Service) persistDeleteAll(ctx context.Context) error {
 	if s == nil || s.store == nil {
 		return nil
 	}
-	writeCtx, cancel := persistContext(ctx)
-	defer cancel()
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
+	writeCtx, cancel := persistContext(ctx)
+	defer cancel()
 	return s.store.DeleteAllCounters(writeCtx)
 }

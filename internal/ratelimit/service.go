@@ -171,10 +171,15 @@ func (s *Service) DeleteRule(ctx context.Context, scope RuleScope, subject strin
 		return err
 	}
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
-	if err := s.persistDelete(ctx, scope, subject, periodSeconds); err != nil {
+	// The rule is already gone from the store, so the refresh has to happen
+	// either way — dropping it on a snapshot-row failure would leave the
+	// deleted rule enforced in memory, which is worse than the stale row.
+	// The caller still hears about the row.
+	persistErr := s.persistDelete(ctx, scope, subject, periodSeconds)
+	if err := s.Refresh(ctx); err != nil {
 		return err
 	}
-	return s.Refresh(ctx)
+	return persistErr
 }
 
 func (s *Service) ReplaceConfigRules(ctx context.Context, rules []Rule) error {

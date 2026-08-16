@@ -423,3 +423,34 @@ func (s *blockingLoadStore) LoadCounters(context.Context) ([]WindowSnapshot, err
 	<-s.release
 	return s.memStore.LoadCounters(context.Background())
 }
+
+// TestDeleteRuleStopsEnforcingWhenSnapshotDeleteFails: the rule row is already
+// gone, so the in-memory refresh has to happen even when the snapshot row
+// cannot be removed. The caller still hears about the row.
+func TestDeleteRuleStopsEnforcingWhenSnapshotDeleteFails(t *testing.T) {
+	ctx := context.Background()
+	store := &failDeleteStore{err: errors.New("delete failed")}
+	if err := store.UpsertRules(ctx, []Rule{{
+		Subject: "/team", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(1)), Source: SourceManual,
+	}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	t.Cleanup(service.Close)
+
+	if err := service.DeleteRule(ctx, ScopeUserPath, "/team", PeriodHourSeconds); err == nil {
+		t.Fatal("DeleteRule() error = nil, want the snapshot-row error")
+	}
+	if rules := service.Rules(); len(rules) != 0 {
+		t.Fatalf("rules = %+v, want the deleted rule gone from memory", rules)
+	}
+	// Two admissions: the deleted one-per-hour rule is no longer enforced.
+	for i := range 2 {
+		if _, err := service.Acquire(onPath("/team"), time.Now().UTC()); err != nil {
+			t.Fatalf("Acquire %d after delete: %v", i, err)
+		}
+	}
+}
