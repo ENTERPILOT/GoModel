@@ -389,7 +389,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
-			maxAllocs: 112,   // baseline 110 (incl. +1 strings.Clone that unpins the body from RouteHints)
+			maxAllocs: 108,   // baseline 106 (goccy response serializer + single ensureRequestID)
 			maxBytes:  14080, // baseline ~13.5 KB (incl. per-attempt response body/header capture fields)
 		},
 		{
@@ -400,8 +400,19 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// full catalog several times per request) would blow these limits.
 			name:      "gateway_chat_completion_hot_path_routed",
 			bench:     BenchmarkGatewayHotPathChatCompletionRouted,
-			maxAllocs: 130,   // baseline 128 (incl. +1 strings.Clone that unpins the body from RouteHints)
+			maxAllocs: 128,   // baseline 126 (goccy response serializer + single ensureRequestID)
 			maxBytes:  14656, // baseline ~14.0 KB
+		},
+		{
+			// Default-deployment shape: auth + audit (bodies/headers) + usage +
+			// session keeping + a configured rate limit, through the routed
+			// catalog. The bare cases above cannot see regressions in any of
+			// those subsystems; this one holds the line for the configuration
+			// deployments actually run.
+			name:      "gateway_chat_completion_production_shape",
+			bench:     BenchmarkGatewayHotPathProductionShape,
+			maxAllocs: 306,   // baseline 300
+			maxBytes:  26496, // baseline ~25.1 KB
 		},
 		{
 			// Typed chunk decoding + reused read buffer keep this converter at a
