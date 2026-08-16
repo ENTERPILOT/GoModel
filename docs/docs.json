@@ -114,6 +114,7 @@
                         "pages": [
                             "advanced/configuration",
                             "advanced/config-yaml",
+                            "advanced/model-metadata",
                             "advanced/cli",
                             "advanced/api-endpoints",
                             "advanced/resilience",
