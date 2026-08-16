@@ -177,6 +177,7 @@
                     "providers/opencode-go",
                     "providers/sglang",
                     "providers/vllm",
+                    "providers/llamacpp",
                     "providers/llmd",
                     "providers/multiple-ollama",
                     "providers/kimicode",

@@ -1,0 +1,101 @@
+---
+title: "llama.cpp"
+description: "Route OpenAI-compatible GoModel requests to a llama.cpp llama-server instance (the same recipe works for LM Studio)."
+icon: "server"
+keywords: ["llama.cpp", "llama-server", "LM Studio", "local models", "self-hosted", "OpenAI-compatible server"]
+---
+
+llama.cpp's `llama-server` speaks the OpenAI API directly, so GoModel needs no
+dedicated provider type for it: register the server as a **vLLM-type provider**.
+That type fits llama.cpp exactly — the API key is optional (llama-server
+usually runs keyless), and slash-shaped model IDs work. Do **not** register it
+as an
+`ollama` provider: that type speaks Ollama's native API, which llama.cpp does
+not implement.
+
+The same recipe applies to LM Studio and any other plain OpenAI-compatible
+local server.
+
+Start llama-server first:
+
+```bash
+llama-server -hf ggml-org/gemma-3-4b-it-GGUF --port 8081
+# add --api-key token-abc123 if you want llama-server to require bearer auth
+```
+
+## Configure
+
+```bash
+VLLM_BASE_URL=http://host.docker.internal:8081/v1   # include /v1
+# VLLM_API_KEY=token-abc123                         # only if llama-server was started with --api-key
+GOMODEL_MASTER_KEY=change-me
+```
+
+<Note>
+  These examples assume GoModel runs in Docker and llama-server is on the host
+  at `localhost:8081` — hence `host.docker.internal`. If GoModel runs on the
+  host directly, use `http://localhost:8081/v1`. Already using `VLLM_BASE_URL`
+  for a real vLLM server? Register llama.cpp under a suffixed instance instead:
+  `VLLM_LLAMACPP_BASE_URL=...` creates provider `vllm-llamacpp`.
+</Note>
+
+## Verify
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "vllm/gemma-3-4b-it",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+`GET /v1/models` returns llama-server's model IDs prefixed by provider name.
+
+## Embeddings
+
+`/v1/embeddings` works through GoModel as long as llama-server can serve it:
+the loaded model must use a pooling type other than `none`. Dedicated embedding
+GGUFs usually declare pooling in their metadata; otherwise pass `--pooling mean`
+(or `cls`/`last`). The `--embeddings` flag is optional — it restricts the
+server to embeddings only:
+
+```bash
+llama-server -hf nomic-ai/nomic-embed-text-v1.5-GGUF --embeddings --port 8081
+```
+
+```bash
+curl -s http://localhost:8080/v1/embeddings \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "vllm/nomic-embed-text-v1.5", "input": "hello"}'
+```
+
+## Model classification
+
+llama-server's `/v1/models` listing carries no capability metadata, so GoModel
+classifies its models by ID: names containing `embed` or matching well-known
+embedding families (`bge`, `e5`, `gte`, `minilm`) are categorized as embedding
+models, and names containing `rerank` as reranking models — namespaced IDs are
+checked by their final path segment. For anything that stays unclassified,
+declare `modes` (and context window or pricing) under the provider's model
+metadata — see [Model metadata](/advanced/model-metadata). Categories only
+affect dashboard grouping and failover suggestions; `/v1/embeddings` routes to
+any model the provider serves regardless of category.
+
+## Beyond chat and embeddings
+
+- **Multimodal input** — image and audio *input* in chat messages works with
+  multimodal models when llama-server is started with a projector
+  (`--mmproj`, auto-loaded with `-hf` when available). These requests flow
+  through `/v1/chat/completions` normally.
+- **Reranking** — llama-server serves `/v1/rerank` (start with `--rerank`, a
+  reranker model, and `--pooling rank`), but GoModel has no rerank endpoint;
+  reach it through [passthrough](/features/passthrough-api):
+  `POST /p/vllm/v1/rerank`.
+- **Image generation and audio endpoints** — llama.cpp has neither: no
+  `/v1/images/generations`, `/v1/audio/speech`, or `/v1/audio/transcriptions`
+  (text-to-image lives in the separate stable-diffusion.cpp project, and
+  whisper.cpp's server is not OpenAI-compatible). Requests for those
+  capabilities must route to a provider that serves them.
