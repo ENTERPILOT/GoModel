@@ -1,6 +1,9 @@
 package ratelimit
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // WindowSnapshot is one persisted request/token sliding window.
 // Partition is empty for a shared rule and the child path for a per-child
@@ -21,6 +24,10 @@ type WindowSnapshot struct {
 
 func definitionKey(scope RuleScope, subject string, periodSeconds int64) ruleKey {
 	return ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds}
+}
+
+func snapshotIdentity(s WindowSnapshot) string {
+	return s.Scope + "\x00" + s.Subject + "\x00" + s.Partition + "\x00" + strconv.FormatInt(s.PeriodSeconds, 10)
 }
 
 func (l *limiter) snapshot(rules []Rule) []WindowSnapshot {

@@ -240,19 +240,39 @@ func deleteOrphanCounters(ctx context.Context, q sqlx.Querier, snapshots []Windo
 		}
 		return nil
 	}
-	var query strings.Builder
-	query.WriteString(`DELETE FROM rate_limit_counters WHERE NOT (`)
-	args := make([]any, 0, len(snapshots)*4)
-	for i, snap := range snapshots {
-		if i > 0 {
-			query.WriteString(` OR `)
-		}
-		query.WriteString(`(scope = ? AND subject = ? AND partition = ? AND period_seconds = ?)`)
-		args = append(args, snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds)
+	keep := make(map[string]struct{}, len(snapshots))
+	for _, snap := range snapshots {
+		keep[snapshotIdentity(snap)] = struct{}{}
 	}
-	query.WriteString(`)`)
-	if _, err := q.Exec(ctx, query.String(), args...); err != nil {
-		return fmt.Errorf("prune rate limit counters: %w", err)
+	rows, err := q.Query(ctx, `
+		SELECT scope, subject, partition, period_seconds
+		FROM rate_limit_counters
+	`)
+	if err != nil {
+		return fmt.Errorf("list rate limit counters for prune: %w", err)
+	}
+	defer rows.Close()
+
+	var stale []WindowSnapshot
+	for rows.Next() {
+		var snap WindowSnapshot
+		if err := rows.Scan(&snap.Scope, &snap.Subject, &snap.Partition, &snap.PeriodSeconds); err != nil {
+			return fmt.Errorf("scan rate limit counter identity: %w", err)
+		}
+		if _, ok := keep[snapshotIdentity(snap)]; !ok {
+			stale = append(stale, snap)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate rate limit counters for prune: %w", err)
+	}
+	for _, snap := range stale {
+		if _, err := q.Exec(ctx, `
+			DELETE FROM rate_limit_counters
+			WHERE scope = ? AND subject = ? AND partition = ? AND period_seconds = ?
+		`, snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds); err != nil {
+			return fmt.Errorf("prune rate limit counter: %w", err)
+		}
 	}
 	return nil
 }

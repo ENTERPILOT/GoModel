@@ -344,6 +344,42 @@ func TestFlushIntervalZeroOnlyWritesOnClose(t *testing.T) {
 	}
 }
 
+func TestCloseDuringLoadDoesNotRestore(t *testing.T) {
+	now := time.Now().Unix()
+	store := &blockingLoadStore{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	store.counters = []WindowSnapshot{{
+		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+		RequestsWindowStart: now, RequestsCurrent: 1,
+	}}
+	if err := store.UpsertRules(context.Background(), []Rule{{
+		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+		MaxRequests: new(int64(1)), Source: SourceManual,
+	}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	service, err := NewService(context.Background(), store)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		service.Start(context.Background())
+	}()
+	<-store.started
+	service.Close()
+	close(store.release)
+	<-done
+
+	if _, err := service.Acquire(onPath("/team"), time.Now().UTC()); err != nil {
+		t.Fatalf("Acquire after Close-during-load: %v (window must not have been restored)", err)
+	}
+}
+
 func TestResetRuleReturnsPersistError(t *testing.T) {
 	store := &failDeleteStore{err: errors.New("delete failed")}
 	if err := store.UpsertRules(context.Background(), []Rule{{
@@ -387,4 +423,16 @@ type failDeleteStore struct {
 
 func (s *failDeleteStore) DeleteCounter(context.Context, RuleScope, string, int64) error {
 	return s.err
+}
+
+type blockingLoadStore struct {
+	memStore
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingLoadStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
+	close(s.started)
+	<-s.release
+	return s.memStore.LoadCounters(context.Background())
 }

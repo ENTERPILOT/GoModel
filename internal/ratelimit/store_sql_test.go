@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
@@ -316,6 +317,28 @@ func TestSQLStoreCounterRoundTrip(t *testing.T) {
 		}
 		if len(got) != 1 || got[0].Partition != "/customers/alice" {
 			t.Fatalf("replaced = %+v, want alice only", got)
+		}
+
+		many := make([]WindowSnapshot, 0, 300)
+		for i := range 300 {
+			many = append(many, WindowSnapshot{
+				Scope: string(ScopeUserPath), Subject: "/customers",
+				Partition:     "/customers/" + strconv.Itoa(i),
+				PeriodSeconds: PeriodHourSeconds, RequestsCurrent: int64(i + 1),
+			})
+		}
+		if err := store.SaveCounters(ctx, many); err != nil {
+			t.Fatalf("SaveCounters many: %v", err)
+		}
+		if err := store.SaveCounters(ctx, many[:1]); err != nil {
+			t.Fatalf("SaveCounters prune many: %v", err)
+		}
+		got, err = store.LoadCounters(ctx)
+		if err != nil {
+			t.Fatalf("LoadCounters after prune many: %v", err)
+		}
+		if len(got) != 1 || got[0].RequestsCurrent != 1 {
+			t.Fatalf("after pruning 299 orphans = %+v, want the first snapshot", got)
 		}
 
 		if err := store.DeleteAllCounters(ctx); err != nil {

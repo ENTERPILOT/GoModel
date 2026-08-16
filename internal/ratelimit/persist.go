@@ -13,6 +13,7 @@ type persistState int
 
 const (
 	persistIdle persistState = iota
+	persistStarting
 	persistActive
 	persistClosed
 )
@@ -60,32 +61,26 @@ func (s *Service) Start(ctx context.Context) {
 		s.lifeMu.Unlock()
 		return
 	}
+	s.persistState = persistStarting
 	s.lifeMu.Unlock()
 
 	loadCtx, cancel := persistContext(ctx)
-	err := s.loadCounters(loadCtx)
+	snapshots, err := s.store.LoadCounters(loadCtx)
 	cancel()
 
 	s.lifeMu.Lock()
 	defer s.lifeMu.Unlock()
-	if s.persistState != persistIdle {
+	if s.persistState != persistStarting {
 		return
 	}
 	if err != nil {
+		s.persistState = persistIdle
 		slog.Warn("rate limit counters: load failed; not persisting this generation", "error", err)
 		return
 	}
+	s.limiter.restore(snapshots, s.Rules(), time.Now().UTC())
 	s.startFlushLoop()
 	s.persistState = persistActive
-}
-
-func (s *Service) loadCounters(ctx context.Context) error {
-	snapshots, err := s.store.LoadCounters(ctx)
-	if err != nil {
-		return err
-	}
-	s.limiter.restore(snapshots, s.Rules(), time.Now().UTC())
-	return nil
 }
 
 func (s *Service) startFlushLoop() {
