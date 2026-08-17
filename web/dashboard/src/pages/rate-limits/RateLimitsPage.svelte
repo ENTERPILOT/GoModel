@@ -43,6 +43,47 @@
         return "";
     }
   }
+
+  // Stable ids wire each tab to the single panel below (aria-controls /
+  // aria-labelledby). Scopes come from the fixed set in the store, so the
+  // ids are deterministic.
+  const TAB_PANEL_ID = "rate-limit-panel";
+
+  function tabId(scope) {
+    return "rate-limit-tab-" + scope;
+  }
+
+  // Roving tabindex keyboard contract for the tab strip: Arrow keys move and
+  // activate the adjacent tab (wrapping), Home/End jump to the first/last.
+  // Automatic activation matches the APG pattern for lightweight panels and
+  // keeps the existing scope-selection behavior — the arrow keys drive the
+  // same setActiveScope the click handler uses.
+  function onTabKeydown(event) {
+    const key = String((event && event.key) || "");
+    const scopes = rateLimits.tabCounts().map((tab) => tab.scope);
+    if (scopes.length === 0) {
+      return;
+    }
+    const current = scopes.indexOf(rateLimits.rateLimitActiveScope);
+    let next = -1;
+    if (key === "ArrowRight") {
+      next = (current + 1 + scopes.length) % scopes.length;
+    } else if (key === "ArrowLeft") {
+      next = (current - 1 + scopes.length) % scopes.length;
+    } else if (key === "Home") {
+      next = 0;
+    } else if (key === "End") {
+      next = scopes.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    rateLimits.setActiveScope(scopes[next]);
+    const tab = typeof document !== "undefined" ? document.getElementById(tabId(scopes[next])) : null;
+    if (tab) {
+      tab.focus();
+    }
+  }
 </script>
 
 <div>
@@ -102,10 +143,14 @@
         <button
           type="button"
           role="tab"
+          id={tabId(tab.scope)}
+          aria-controls={TAB_PANEL_ID}
           aria-selected={rateLimits.rateLimitActiveScope === tab.scope}
+          tabindex={rateLimits.rateLimitActiveScope === tab.scope ? 0 : -1}
           class="rate-limit-tab scope-{tab.scope}"
           class:active={rateLimits.rateLimitActiveScope === tab.scope}
           onclick={() => rateLimits.setActiveScope(tab.scope)}
+          onkeydown={onTabKeydown}
         >
           <span class="rate-limit-tab-label">{tabLabel(tab.scope)}</span>
           <span class="rate-limit-tab-count">{tab.count}</span>
@@ -114,7 +159,12 @@
     </div>
 
     {#if visibleGroup}
-      <section class="rate-limit-group scope-{visibleGroup.scope}">
+      <div
+        id={TAB_PANEL_ID}
+        role="tabpanel"
+        aria-labelledby={tabId(rateLimits.rateLimitActiveScope)}
+        class="rate-limit-group scope-{visibleGroup.scope}"
+      >
         {#if visibleGroup.scope === "provider" && visibleGroup.subGroups && visibleGroup.subGroups.length > 0}
           {#each visibleGroup.subGroups as sub (sub.key)}
             <div class="rate-limit-subgroup">
@@ -124,10 +174,13 @@
           {/each}
         {:else if visibleGroup.rows.length > 0}
           <RateLimitList rules={visibleGroup.rows} />
-        {:else}
+        {:else if rateLimits.rateLimits.length === 0}
+          <!-- Stored rules missing entirely: only this case shows the per-group
+               empty copy. Stored rules exist but the filter emptied the panel?
+               Stay quiet — the global no-match state below covers it. -->
           <p class="rate-limit-group-empty">{m.rate_limits_no_rules()}</p>
         {/if}
-      </section>
+      </div>
     {/if}
   {/if}
 
