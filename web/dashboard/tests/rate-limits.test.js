@@ -25,6 +25,7 @@ import {
   normalizeRateLimitListPayload,
   groupRateLimits,
   rateLimitNormalizedIdentity,
+  pickRateLimitActiveScope,
   rateLimitIdentityMoved,
   rateLimitFormPayload,
   rateLimitInspectorSections,
@@ -433,6 +434,38 @@ test("config-sourced rules are read-only", () => {
   assert.equal(rateLimitIsReadOnly({ source: "manual" }), false);
   assert.equal(rateLimitSourceLabel({ source: "config" }), "config");
   assert.equal(rateLimitSourceLabel({}), "manual");
+});
+
+test("pickRateLimitActiveScope keeps the current scope when it has rules", () => {
+  const rules = [
+    { scope: "user_path", subject: "/", period_seconds: 60 },
+    { scope: "provider", subject: "openai", period_seconds: 60 },
+  ];
+  assert.equal(pickRateLimitActiveScope(rules, "user_path"), "user_path");
+  assert.equal(pickRateLimitActiveScope(rules, "provider"), "provider");
+});
+
+test("pickRateLimitActiveScope switches to a populated scope when the current is empty", () => {
+  const rules = [
+    { scope: "provider", subject: "openai", period_seconds: 60 },
+    { scope: "model", subject: "openai/gpt-4o", period_seconds: 60 },
+  ];
+  assert.equal(pickRateLimitActiveScope(rules, "user_path"), "provider");
+  // No user_path rules: initial load lands on provider, not on an empty tab.
+  assert.equal(pickRateLimitActiveScope(rules, "provider"), "provider");
+  assert.equal(pickRateLimitActiveScope(rules, "model"), "model");
+});
+
+test("pickRateLimitActiveScope falls back in canonical order", () => {
+  const rules = [{ scope: "model", subject: "openai/gpt-4o", period_seconds: 60 }];
+  assert.equal(pickRateLimitActiveScope(rules, "user_path"), "model");
+  assert.equal(pickRateLimitActiveScope(rules, "provider"), "model");
+});
+
+test("pickRateLimitActiveScope keeps the current scope when the list is empty", () => {
+  assert.equal(pickRateLimitActiveScope([], "provider"), "provider");
+  assert.equal(pickRateLimitActiveScope(null, "model"), "model");
+  assert.equal(pickRateLimitActiveScope([], "bogus"), "user_path");
 });
 
 test("rateLimitNormalizedIdentity mirrors server normalization per scope", () => {

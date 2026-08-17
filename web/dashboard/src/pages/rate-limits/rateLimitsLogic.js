@@ -235,6 +235,30 @@ export function normalizeRateLimitListPayload(payload) {
   return payload.rate_limits;
 }
 
+// pickRateLimitActiveScope returns the scope the tab strip should show
+// after the rule list is replaced: the current scope when it still has
+// rules, else the first populated scope in canonical order (user_path →
+// provider → model), else the current scope when the list is empty (the
+// page falls through to the global empty state). Used to keep the active
+// tab from landing on an empty scope when another scope has rules
+// (greptile P1: stale selection on initial load and after deletion).
+export function pickRateLimitActiveScope(rules, currentScope) {
+  const safe = Array.isArray(rules) ? rules : [];
+  const order = ["user_path", "provider", "model"];
+  const hasRules = (scope) =>
+    safe.some((item) => rateLimitScope(item) === scope);
+  const current = order.includes(currentScope) ? currentScope : "user_path";
+  if (hasRules(current)) {
+    return current;
+  }
+  for (const scope of order) {
+    if (hasRules(scope)) {
+      return scope;
+    }
+  }
+  return current;
+}
+
 // groupRateLimits partitions rules into the three scope buckets in the order
 // user_path → provider → model. Each top-level group is always present (even
 // when empty) so the page can render a header for every scope regardless of
