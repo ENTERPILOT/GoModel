@@ -222,12 +222,24 @@ func TestListModels_ForwardsToModelsEndpoint(t *testing.T) {
 
 // TestEmbeddings_ReturnsUnsupportedError asserts that Embeddings returns a typed
 // "not supported" error without calling upstream — Hetzner documents no embeddings
-// endpoint, so the provider overrides the embedded adapter to fail fast.
+// endpoint, so the provider overrides the embedded adapter to fail fast. The
+// httptest server asserts zero requests: a regression that forwards embeddings
+// upstream fails this test deterministically instead of hitting the network.
 func TestEmbeddings_ReturnsUnsupportedError(t *testing.T) {
-	provider := NewWithHTTPClient("hetzner-key", "", nil, llmclient.Hooks{})
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.Error(w, "should not be called", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("hetzner-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "any"})
 	if err == nil || !strings.Contains(err.Error(), "hetzner does not support embeddings") {
 		t.Fatalf("Embeddings() error = %v, want unsupported error", err)
+	}
+	if requests != 0 {
+		t.Fatalf("upstream received %d requests, want 0 (embeddings must not be forwarded)", requests)
 	}
 }
 
@@ -247,5 +259,50 @@ func TestProvider_DoesNotExposeOptionalOpenAICompatibleInterfaces(t *testing.T) 
 	}
 	if _, ok := any(provider).(core.AudioProvider); ok {
 		t.Fatal("hetzner provider should not implement audio provider")
+	}
+}
+
+// TestResponses_TranslatesToChatCompletions asserts that a Responses API request is
+// translated to a chat-completions call (the doc claims /v1/responses is served via
+// chat translation; this test keeps that claim honest).
+func TestResponses_TranslatesToChatCompletions(t *testing.T) {
+	var gotPath string
+	var gotBody struct {
+		Model string `json:"model"`
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			http.Error(w, "decode error", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-hetzner",
+			"created":1677652288,
+			"model":"Qwen/Qwen3.6-35B-A3B-FP8",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"translated"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("hetzner-key", server.URL, server.Client(), llmclient.Hooks{})
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
+		Model: "Qwen/Qwen3.6-35B-A3B-FP8",
+		Input: "hi",
+	})
+	if err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
+	if gotPath != "/chat/completions" {
+		t.Fatalf("path = %q, want /chat/completions", gotPath)
+	}
+	if gotBody.Model != "Qwen/Qwen3.6-35B-A3B-FP8" {
+		t.Fatalf("request model = %q, want Qwen/Qwen3.6-35B-A3B-FP8", gotBody.Model)
+	}
+	if resp.Object != "response" || resp.Status != "completed" {
+		t.Fatalf("response metadata = object %q status %q, want response/completed", resp.Object, resp.Status)
 	}
 }
