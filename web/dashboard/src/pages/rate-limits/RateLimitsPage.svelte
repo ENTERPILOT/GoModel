@@ -27,16 +27,18 @@
   });
 
   const filtered = $derived.by(() => rateLimits.filteredRateLimits());
-  const groups = $derived.by(() => rateLimits.groupedRateLimits());
+  const visibleGroup = $derived.by(() => rateLimits.visibleGroup());
 
-  function groupTitle(scope) {
+  // Tab labels are the same scope names, but the in-group eyebrow was the
+  // same copy — the tab now plays that role, so the group header is gone.
+  function tabLabel(scope) {
     switch (scope) {
       case "user_path":
-        return m.rate_limits_group_user_path();
+        return m.rate_limits_user_path();
       case "provider":
-        return m.rate_limits_group_provider();
+        return m.rate_limits_provider();
       case "model":
-        return m.rate_limits_group_model();
+        return m.rate_limits_model();
       default:
         return "";
     }
@@ -108,26 +110,36 @@
   <RateLimitEditor />
 
   {#if filtered.length > 0 && rateLimits.rateLimitsAvailable && !auth.authError}
-    {#each groups as group (group.key)}
-      <section class="rate-limit-group scope-{group.scope}">
-        <div class="rate-limit-group-header">
-          <span class="rate-limit-group-title">{groupTitle(group.scope)}</span>
-          <span class="rate-limit-group-count">{groupCount(group.scope, group.count)}</span>
-        </div>
-        {#if group.scope === "provider" && group.subGroups && group.subGroups.length > 0}
-          {#each group.subGroups as sub (sub.key)}
+    <nav class="rate-limit-tabs" aria-label="Rate limit scope">
+      {#each rateLimits.tabCounts() as tab (tab.scope)}
+        <button
+          type="button"
+          class="rate-limit-tab scope-{tab.scope}"
+          class:active={rateLimits.rateLimitActiveScope === tab.scope}
+          onclick={() => rateLimits.setActiveScope(tab.scope)}
+        >
+          <span class="rate-limit-tab-label">{tabLabel(tab.scope)}</span>
+          <span class="rate-limit-tab-count">{groupCount(tab.scope, tab.count)}</span>
+        </button>
+      {/each}
+    </nav>
+
+    {#if visibleGroup}
+      <section class="rate-limit-group scope-{visibleGroup.scope}">
+        {#if visibleGroup.scope === "provider" && visibleGroup.subGroups && visibleGroup.subGroups.length > 0}
+          {#each visibleGroup.subGroups as sub (sub.key)}
             <div class="rate-limit-subgroup">
               <h4 class="rate-limit-subgroup-title">{sub.subject}</h4>
               <RateLimitList rules={sub.rows} />
             </div>
           {/each}
-        {:else if group.rows.length > 0}
-          <RateLimitList rules={group.rows} />
+        {:else if visibleGroup.rows.length > 0}
+          <RateLimitList rules={visibleGroup.rows} />
         {:else}
           <p class="rate-limit-group-empty">{m.rate_limits_no_rules()}</p>
         {/if}
       </section>
-    {/each}
+    {/if}
   {/if}
 
   {#if rateLimits.rateLimits.length === 0 && !rateLimits.rateLimitFilter && !rateLimits.rateLimitsLoading && !auth.authError && !rateLimits.rateLimitError && rateLimits.rateLimitsAvailable && rateLimits.rateLimitsEnabled()}

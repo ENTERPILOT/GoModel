@@ -1437,9 +1437,6 @@
   "models_mask_rename_confirm": "Model „{name}” już istnieje. Zmiana nazwy przesłoni go na liście. Kontynuować?",
   "models_remove_policy_confirm": "Usunąć model wirtualny dla „{source}”? Przywróci to zachowanie dziedziczone/domyślne.",
   "models_pricing_remove_confirm": "Usunąć nadpisanie cen modelu dla „{selector}”?",
-  "rate_limits_group_user_path": "Reguły User Path",
-  "rate_limits_group_provider": "Reguły dostawcy",
-  "rate_limits_group_model": "Reguły modelu",
   "rate_limits_group_count_user_path": [
     {
       "declarations": ["input count", "local count_plural = count: plural"],

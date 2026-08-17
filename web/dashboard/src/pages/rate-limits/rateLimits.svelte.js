@@ -27,6 +27,11 @@ class RateLimitsStore {
   rateLimitInspectorOpen = $state(false);
   rateLimitInspector = $state({ kind: "", provider: "", model: "", title: "" });
   rateLimitForm = $state(logic.defaultRateLimitForm());
+  // Active scope tab (user_path / provider / model). Drives the tab strip
+  // and the single-group view that replaces the previous all-three-groups
+  // layout. Default lands on the first scope with rules, so the page never
+  // opens on an empty tab while other scopes are populated.
+  rateLimitActiveScope = $state("user_path");
 
   rateLimitsEnabled() {
     return runtimeConfig.rateLimitsVisible();
@@ -126,6 +131,37 @@ class RateLimitsStore {
   // buckets (user_path → provider → model) for the page's group headers.
   groupedRateLimits() {
     return logic.groupRateLimits(this.filteredRateLimits());
+  }
+
+  // visibleGroup returns just the bucket for the active scope tab. The
+  // single-group view replaces the previous three-up layout once a tab is
+  // active; the tab strip still surfaces counts for the inactive scopes via
+  // tabCounts().
+  visibleGroup() {
+    const groups = this.groupedRateLimits();
+    return (
+      groups.find((group) => group.scope === this.rateLimitActiveScope) ||
+      groups[0]
+    );
+  }
+
+  // tabCounts surfaces all three scope counts in the canonical order so the
+  // tab strip stays stable when the active tab changes.
+  tabCounts() {
+    return this.groupedRateLimits().map((group) => ({
+      scope: group.scope,
+      count: group.count,
+    }));
+  }
+
+  setActiveScope(scope) {
+    if (
+      scope === "user_path" ||
+      scope === "provider" ||
+      scope === "model"
+    ) {
+      this.rateLimitActiveScope = scope;
+    }
   }
 
   normalizeRateLimitListPayload(payload) {

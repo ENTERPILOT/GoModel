@@ -1405,9 +1405,6 @@
   "models_mask_rename_confirm": "A model named \"{name}\" already exists. Renaming to that name will mask the model in the list. Continue?",
   "models_remove_policy_confirm": "Remove the virtual model for \"{source}\"? This reverts to inherited/default behavior.",
   "models_pricing_remove_confirm": "Remove the model pricing override for \"{selector}\"?",
-  "rate_limits_group_user_path": "User path rules",
-  "rate_limits_group_provider": "Provider rules",
-  "rate_limits_group_model": "Model rules",
   "rate_limits_group_count_user_path": [
     {
       "declarations": ["input count", "local count_plural = count: plural"],
