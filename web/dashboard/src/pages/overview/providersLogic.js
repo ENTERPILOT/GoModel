@@ -25,6 +25,7 @@ const PROVIDER_DOC_SLUGS = {
   deepseek: "deepseek",
   elevenlabs: "elevenlabs",
   gemini: "gemini",
+  llamacpp: "llamacpp",
   llmd: "llmd",
   opencode_go: "opencode-go",
   oracle: "oracle",
