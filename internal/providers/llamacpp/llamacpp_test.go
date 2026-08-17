@@ -10,6 +10,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 func TestChatCompletion_UsesOptionalBearerAuthAndChatEndpoint(t *testing.T) {
@@ -128,6 +129,8 @@ func TestPassthrough_RoutesNativeEndpointsToServerRoot(t *testing.T) {
 		{name: "explicit v1 rerank", endpoint: "v1/rerank", wantPath: "/v1/rerank"},
 		{name: "chat completions", endpoint: "chat/completions", wantPath: "/v1/chat/completions"},
 		{name: "embeddings", endpoint: "embeddings", wantPath: "/v1/embeddings"},
+		{name: "chat completions with query", endpoint: "chat/completions?stream=true", wantPath: "/v1/chat/completions"},
+		{name: "native endpoint with query", endpoint: "health?include_slots=true", wantPath: "/health"},
 	}
 
 	for _, tt := range tests {
@@ -163,5 +166,45 @@ func TestPassthrough_RoutesNativeEndpointsToServerRoot(t *testing.T) {
 				t.Fatalf("authorization = %q, want Bearer llamacpp-key", gotAuth)
 			}
 		})
+	}
+}
+
+func TestPassthrough_NativeEndpointRotatesConfiguredKeys(t *testing.T) {
+	var gotAuths []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuths = append(gotAuths, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	provider := New(providers.ProviderConfig{
+		APIKey:  "key-1",
+		APIKeys: []string{"key-1", "key-2"},
+		BaseURL: server.URL + "/v1",
+	}, providers.ProviderOptions{
+		Keys: providers.NewKeyringWithSessionStickiness(false, "key-1", "key-2"),
+	}).(*Provider)
+
+	for range 2 {
+		resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+			Method:   http.MethodGet,
+			Endpoint: "health",
+			Headers:  http.Header{},
+		})
+		if err != nil {
+			t.Fatalf("Passthrough() error = %v", err)
+		}
+		resp.Body.Close()
+	}
+
+	if len(gotAuths) != 2 || gotAuths[0] == gotAuths[1] {
+		t.Fatalf("native passthrough should rotate keys per request, got %v", gotAuths)
+	}
+	for _, auth := range gotAuths {
+		if auth != "Bearer key-1" && auth != "Bearer key-2" {
+			t.Fatalf("unexpected authorization %q", auth)
+		}
 	}
 }

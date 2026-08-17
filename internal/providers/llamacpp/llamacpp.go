@@ -43,6 +43,11 @@ var (
 // New creates a new llama.cpp provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	// One keyring shared by both clients, resolved per request rather than
+	// captured, so native root endpoints rotate across configured keys exactly
+	// like the OpenAI-compatible surface.
+	keys := opts.Keyring(cfg.APIKey)
+	opts.Keys = keys
 	return &Provider{
 		compatible: openai.NewCompatibleProvider(cfg.APIKey, opts, openai.CompatibleProviderConfig{
 			ProviderName: "llamacpp",
@@ -56,7 +61,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			Hooks:          opts.Hooks,
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
 		}, func(req *http.Request) {
-			setHeaders(req, cfg.APIKey)
+			setHeaders(req, keys.NextForContext(req.Context()))
 		}),
 	}
 }
@@ -166,6 +171,9 @@ func passthroughBaseURL(baseURL string) string {
 
 func usesV1PassthroughBase(endpoint string) bool {
 	endpoint = providers.PassthroughEndpoint(endpoint)
+	// Classify by path only; the server appends the request's query string to
+	// the endpoint before it reaches the provider.
+	endpoint, _, _ = strings.Cut(endpoint, "?")
 	if strings.HasPrefix(endpoint, "/v1/") {
 		return false
 	}
