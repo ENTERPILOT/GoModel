@@ -96,7 +96,7 @@
 
   <RateLimitEditor />
 
-  {#if filtered.length > 0 && rateLimits.rateLimitsAvailable && !auth.authError}
+  {#if (rateLimits.rateLimits.length > 0 || rateLimits.rateLimitFilter) && rateLimits.rateLimitsAvailable && !auth.authError}
     <nav class="rate-limit-tabs" aria-label="Rate limit scope">
       {#each rateLimits.tabCounts() as tab (tab.scope)}
         <button
