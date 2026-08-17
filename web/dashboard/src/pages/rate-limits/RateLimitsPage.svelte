@@ -109,7 +109,7 @@
 
   {#if filtered.length > 0 && rateLimits.rateLimitsAvailable && !auth.authError}
     {#each groups as group (group.key)}
-      <section class="rate-limit-group">
+      <section class="rate-limit-group scope-{group.scope}">
         <div class="rate-limit-group-header">
           <span class="rate-limit-group-title">{groupTitle(group.scope)}</span>
           <span class="rate-limit-group-count">{groupCount(group.scope, group.count)}</span>
@@ -139,24 +139,51 @@
 </div>
 
 <style>
+  /* Scope rail: each group gets a categorical hue drawn from the dashboard's
+     own palette (user_path = accent tan, provider = info blue, model = olive
+     from the budget period badges). The rail runs the group's full height so
+     the scope identity is scannable without reading the header. */
   .rate-limit-group {
-    margin-bottom: 20px;
+    --scope-hue: var(--accent);
+    position: relative;
+    margin-bottom: 24px;
+    padding-left: 16px;
+  }
+
+  .rate-limit-group::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 2px;
+    bottom: 2px;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--scope-hue);
+  }
+
+  .rate-limit-group.scope-provider {
+    --scope-hue: var(--info);
+  }
+
+  .rate-limit-group.scope-model {
+    --scope-hue: #68765c;
   }
 
   .rate-limit-group-header {
     display: flex;
     align-items: baseline;
-    gap: 12px;
-    padding: 10px 14px;
-    background: color-mix(in srgb, var(--accent) 6%, var(--bg));
-    border-radius: 6px;
-    margin-bottom: 8px;
+    gap: 10px;
+    margin-bottom: 10px;
   }
 
   .rate-limit-group-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    /* Mix toward --text so the hue stays readable in both themes: it
+       lightens the tan/olive on dark, darkens the blue on light. */
+    color: color-mix(in srgb, var(--scope-hue) 62%, var(--text));
   }
 
   .rate-limit-group-count {
@@ -164,21 +191,28 @@
     color: var(--text-muted);
   }
 
+  /* Subject chips inside a group inherit the rail hue, reinforcing scope
+     identity on every row. The shared inspector is untouched — it does not
+     render inside .rate-limit-group. */
+  .rate-limit-group :global(.budget-scope-value) {
+    border-color: color-mix(in srgb, var(--scope-hue) 40%, var(--border));
+    background: color-mix(in srgb, var(--scope-hue) 12%, var(--bg));
+  }
+
   .rate-limit-subgroup {
-    margin-left: 16px;
     margin-bottom: 12px;
   }
 
   .rate-limit-subgroup-title {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-muted);
-    margin: 8px 0 6px;
-    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: color-mix(in srgb, var(--scope-hue) 45%, var(--text-muted));
+    margin: 10px 0 6px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
   }
 
   .rate-limit-group-empty {
-    padding: 12px 16px;
+    padding: 4px 0 8px;
     color: var(--text-muted);
     font-size: 13px;
     margin: 0;
