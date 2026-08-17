@@ -122,6 +122,12 @@ class RateLimitsStore {
     return logic.filteredRateLimits(this.rateLimits, this.rateLimitFilter);
   }
 
+  // groupedRateLimits partitions the filtered list into the three scope
+  // buckets (user_path → provider → model) for the page's group headers.
+  groupedRateLimits() {
+    return logic.groupRateLimits(this.filteredRateLimits());
+  }
+
   normalizeRateLimitListPayload(payload) {
     return logic.normalizeRateLimitListPayload(payload);
   }

@@ -235,6 +235,82 @@ export function normalizeRateLimitListPayload(payload) {
   return payload.rate_limits;
 }
 
+// groupRateLimits partitions rules into the three scope buckets in the order
+// user_path → provider → model. Each top-level group is always present (even
+// when empty) so the page can render a header for every scope regardless of
+// how many rules exist. user_path and model keep their rows flat; provider
+// further nests rows by subject (provider name) so a glance at the page
+// shows which providers carry limits. Pure function — display / i18n copy
+// belongs in the component.
+export function groupRateLimits(rules) {
+  const safe = Array.isArray(rules) ? rules : [];
+
+  function sortedBySubject(items) {
+    return items
+      .slice()
+      .sort((a, b) =>
+        rateLimitSubject(a).localeCompare(rateLimitSubject(b)),
+      );
+  }
+
+  function partitionByScope(scope) {
+    const items = safe.filter((item) => rateLimitScope(item) === scope);
+    const rows = sortedBySubject(items);
+    if (scope !== "provider") {
+      return { rows, subGroups: null };
+    }
+    const buckets = new Map();
+    for (const item of rows) {
+      const subject = rateLimitSubject(item);
+      const key = "provider-subject:" + subject;
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          key,
+          subject,
+          display_name: subject,
+          rows: [],
+        });
+      }
+      buckets.get(key).rows.push(item);
+    }
+    const subGroups = Array.from(buckets.values()).sort((a, b) =>
+      String(a.display_name).localeCompare(String(b.display_name)),
+    );
+    return { rows, subGroups };
+  }
+
+  const userPath = partitionByScope("user_path");
+  const provider = partitionByScope("provider");
+  const model = partitionByScope("model");
+
+  return [
+    {
+      key: "scope:user_path",
+      scope: "user_path",
+      display_name: rateLimitScopeMeta("user_path").label,
+      rows: userPath.rows,
+      subGroups: null,
+      count: userPath.rows.length,
+    },
+    {
+      key: "scope:provider",
+      scope: "provider",
+      display_name: rateLimitScopeMeta("provider").label,
+      rows: provider.rows,
+      subGroups: provider.subGroups,
+      count: provider.rows.length,
+    },
+    {
+      key: "scope:model",
+      scope: "model",
+      display_name: rateLimitScopeMeta("model").label,
+      rows: model.rows,
+      subGroups: null,
+      count: model.rows.length,
+    },
+  ];
+}
+
 // Mirrors the server's per-scope subject normalization so an edit
 // that only respells the same identity (case, slashes) is treated
 // as an in-place update, never a move-plus-delete of itself.

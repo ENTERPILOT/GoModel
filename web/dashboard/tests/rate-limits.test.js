@@ -23,6 +23,7 @@ import {
   rateLimitUsagePercent,
   filteredRateLimits,
   normalizeRateLimitListPayload,
+  groupRateLimits,
   rateLimitNormalizedIdentity,
   rateLimitIdentityMoved,
   rateLimitFormPayload,
@@ -258,6 +259,94 @@ test("syncRateLimitScope resets the subject per scope", () => {
   syncRateLimitScope(form);
   assert.equal(form.subject, "/");
   assert.equal(rateLimitSubjectFieldLabel(form), "User Path");
+});
+
+test("groupRateLimits buckets every scope and nests providers by subject", () => {
+  const rules = [
+    {
+      scope: "user_path",
+      subject: "/team",
+      user_path: "/team",
+      period_seconds: 60,
+    },
+    {
+      scope: "provider",
+      subject: "openai",
+      period_seconds: 60,
+    },
+    {
+      scope: "model",
+      subject: "openai/gpt-4o",
+      period_seconds: 60,
+    },
+    {
+      scope: "provider",
+      subject: "anthropic",
+      period_seconds: 0,
+    },
+    {
+      scope: "user_path",
+      subject: "/",
+      user_path: "/",
+      period_seconds: 86400,
+    },
+    {
+      scope: "model",
+      subject: "openai/gpt-4o-mini",
+      period_seconds: 3600,
+    },
+  ];
+
+  const groups = groupRateLimits(rules);
+  assert.deepEqual(
+    groups.map((group) => group.scope),
+    ["user_path", "provider", "model"],
+  );
+  assert.deepEqual(
+    groups.map((group) => group.count),
+    [2, 2, 2],
+  );
+
+  // user_path stays flat and subject-sorted.
+  assert.deepEqual(
+    groups[0].rows.map((item) => item.subject),
+    ["/", "/team"],
+  );
+  assert.equal(groups[0].subGroups, null);
+
+  // Provider scope is sub-grouped per provider name (alphabetical).
+  assert.deepEqual(
+    groups[1].subGroups.map((sub) => sub.subject),
+    ["anthropic", "openai"],
+  );
+  assert.deepEqual(
+    groups[1].subGroups.map((sub) => sub.rows.length),
+    [1, 1],
+  );
+
+  // model stays flat and subject-sorted.
+  assert.deepEqual(
+    groups[2].rows.map((item) => item.subject),
+    ["openai/gpt-4o", "openai/gpt-4o-mini"],
+  );
+});
+
+test("groupRateLimits keeps every scope header even when empty", () => {
+  const groups = groupRateLimits([]);
+  assert.equal(groups.length, 3);
+  assert.deepEqual(
+    groups.map((group) => group.scope),
+    ["user_path", "provider", "model"],
+  );
+  assert.deepEqual(
+    groups.map((group) => group.count),
+    [0, 0, 0],
+  );
+  assert.equal(groups[1].subGroups.length, 0);
+
+  const withNull = groupRateLimits(null);
+  assert.equal(withNull.length, 3);
+  assert.equal(withNull[0].rows.length, 0);
 });
 
 test("scope meta falls back to user_path for unknown scopes", () => {
