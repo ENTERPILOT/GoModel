@@ -119,9 +119,10 @@ func TestProvider_ExposesPassthroughButNotOptionalNativeInterfaces(t *testing.T)
 
 func TestPassthrough_RoutesNativeEndpointsToServerRoot(t *testing.T) {
 	tests := []struct {
-		name     string
-		endpoint string
-		wantPath string
+		name      string
+		endpoint  string
+		wantPath  string
+		wantQuery string
 	}{
 		{name: "rerank", endpoint: "rerank", wantPath: "/rerank"},
 		{name: "health", endpoint: "health", wantPath: "/health"},
@@ -129,17 +130,19 @@ func TestPassthrough_RoutesNativeEndpointsToServerRoot(t *testing.T) {
 		{name: "explicit v1 rerank", endpoint: "v1/rerank", wantPath: "/v1/rerank"},
 		{name: "chat completions", endpoint: "chat/completions", wantPath: "/v1/chat/completions"},
 		{name: "embeddings", endpoint: "embeddings", wantPath: "/v1/embeddings"},
-		{name: "chat completions with query", endpoint: "chat/completions?stream=true", wantPath: "/v1/chat/completions"},
-		{name: "native endpoint with query", endpoint: "health?include_slots=true", wantPath: "/health"},
+		{name: "chat completions with query", endpoint: "chat/completions?stream=true", wantPath: "/v1/chat/completions", wantQuery: "stream=true"},
+		{name: "native endpoint with query", endpoint: "health?include_slots=true", wantPath: "/health", wantQuery: "include_slots=true"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotPath string
+			var gotQuery string
 			var gotAuth string
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gotPath = r.URL.Path
+				gotQuery = r.URL.RawQuery
 				gotAuth = r.Header.Get("Authorization")
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`{"ok":true}`))
@@ -161,6 +164,9 @@ func TestPassthrough_RoutesNativeEndpointsToServerRoot(t *testing.T) {
 
 			if gotPath != tt.wantPath {
 				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
+			}
+			if gotQuery != tt.wantQuery {
+				t.Fatalf("query = %q, want %q", gotQuery, tt.wantQuery)
 			}
 			if gotAuth != "Bearer llamacpp-key" {
 				t.Fatalf("authorization = %q, want Bearer llamacpp-key", gotAuth)
@@ -206,5 +212,63 @@ func TestPassthrough_NativeEndpointRotatesConfiguredKeys(t *testing.T) {
 		if auth != "Bearer key-1" && auth != "Bearer key-2" {
 			t.Fatalf("unexpected authorization %q", auth)
 		}
+	}
+}
+
+func TestNew_DefaultOptionsAuthenticatesAndRelaysNativeErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer llamacpp-key" {
+			t.Errorf("authorization = %q, want Bearer llamacpp-key", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/health":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "/slots":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotImplemented)
+			_, _ = w.Write([]byte(`{"error":{"message":"slots endpoint is disabled"}}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := New(providers.ProviderConfig{
+		APIKey:  "llamacpp-key",
+		BaseURL: server.URL + "/v1",
+	}, providers.ProviderOptions{}).(*Provider)
+
+	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodGet,
+		Endpoint: "health",
+		Headers:  http.Header{},
+	})
+	if err != nil {
+		t.Fatalf("Passthrough(health) error = %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"ok"`) {
+		t.Fatalf("health status = %d body = %s, want 200 with ok", resp.StatusCode, body)
+	}
+
+	// Provider-native errors relay status and body verbatim instead of being
+	// converted into gateway errors.
+	resp, err = provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodGet,
+		Endpoint: "slots",
+		Headers:  http.Header{},
+	})
+	if err != nil {
+		t.Fatalf("Passthrough(slots) error = %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("slots status = %d, want 501", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "slots endpoint is disabled") {
+		t.Fatalf("slots body = %s, want relayed upstream error", body)
 	}
 }
