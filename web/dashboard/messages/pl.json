@@ -1436,41 +1436,5 @@
   "models_source_conflict": "Model wirtualny dla „{source}” już istnieje. Wybierz inne Źródło.",
   "models_mask_rename_confirm": "Model „{name}” już istnieje. Zmiana nazwy przesłoni go na liście. Kontynuować?",
   "models_remove_policy_confirm": "Usunąć model wirtualny dla „{source}”? Przywróci to zachowanie dziedziczone/domyślne.",
-  "models_pricing_remove_confirm": "Usunąć nadpisanie cen modelu dla „{selector}”?",
-  "rate_limits_group_count_user_path": [
-    {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
-      "match": {
-        "count_plural=one": "{count} User Path",
-        "count_plural=few": "{count} User Pathy",
-        "count_plural=many": "{count} User Pathów",
-        "count_plural=*": "{count} User Pathów"
-      }
-    }
-  ],
-  "rate_limits_group_count_provider": [
-    {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
-      "match": {
-        "count_plural=one": "{count} dostawca",
-        "count_plural=few": "{count} dostawców",
-        "count_plural=many": "{count} dostawców",
-        "count_plural=*": "{count} dostawców"
-      }
-    }
-  ],
-  "rate_limits_group_count_model": [
-    {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
-      "match": {
-        "count_plural=one": "{count} model",
-        "count_plural=few": "{count} modele",
-        "count_plural=many": "{count} modeli",
-        "count_plural=*": "{count} modelu"
-      }
-    }
-  ]
+  "models_pricing_remove_confirm": "Usunąć nadpisanie cen modelu dla „{selector}”?"
 }

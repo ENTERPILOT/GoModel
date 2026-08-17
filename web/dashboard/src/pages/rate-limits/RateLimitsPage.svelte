@@ -43,19 +43,6 @@
         return "";
     }
   }
-
-  function groupCount(scope, count) {
-    switch (scope) {
-      case "user_path":
-        return m.rate_limits_group_count_user_path({ count });
-      case "provider":
-        return m.rate_limits_group_count_provider({ count });
-      case "model":
-        return m.rate_limits_group_count_model({ count });
-      default:
-        return "";
-    }
-  }
 </script>
 
 <div>
@@ -119,7 +106,7 @@
           onclick={() => rateLimits.setActiveScope(tab.scope)}
         >
           <span class="rate-limit-tab-label">{tabLabel(tab.scope)}</span>
-          <span class="rate-limit-tab-count">{groupCount(tab.scope, tab.count)}</span>
+          <span class="rate-limit-tab-count">{tab.count}</span>
         </button>
       {/each}
     </nav>
@@ -151,6 +138,95 @@
 </div>
 
 <style>
+  /* Tab strip: pill idiom from the Models page category tabs, adapted to the
+     scope-hue system. flex: 1 spreads the three tabs evenly across the row —
+     first at the start, middle centered, last at the end. The active tab
+     carries its scope hue (tinted background, hue border, hue-mixed text) so
+     the strip reads as part of the rail design below, not a separate widget. */
+  .rate-limit-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .rate-limit-tab {
+    --scope-hue: var(--accent);
+    flex: 1 1 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 14px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition:
+      color 0.15s,
+      background 0.15s,
+      border-color 0.15s;
+  }
+
+  .rate-limit-tab.scope-provider {
+    --scope-hue: var(--info);
+  }
+
+  .rate-limit-tab.scope-model {
+    --scope-hue: #68765c;
+  }
+
+  .rate-limit-tab:hover {
+    color: var(--text);
+    background: var(--bg-surface-hover);
+  }
+
+  .rate-limit-tab:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--scope-hue) 70%, var(--border));
+    outline-offset: 1px;
+  }
+
+  .rate-limit-tab.active {
+    color: color-mix(in srgb, var(--scope-hue) 62%, var(--text));
+    background: color-mix(in srgb, var(--scope-hue) 12%, var(--bg-surface));
+    border-color: color-mix(in srgb, var(--scope-hue) 45%, var(--border));
+  }
+
+  .rate-limit-tab-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rate-limit-tab-count {
+    flex: 0 0 auto;
+    min-width: 20px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text-muted);
+    background: var(--bg);
+    border-radius: 999px;
+  }
+
+  .rate-limit-tab.active .rate-limit-tab-count {
+    color: inherit;
+    background: color-mix(in srgb, var(--scope-hue) 18%, var(--bg));
+  }
+
+  @media (max-width: 768px) {
+    .rate-limit-tab {
+      padding: 6px 10px;
+      font-size: 12px;
+      gap: 6px;
+    }
+  }
+
   /* Scope rail: each group gets a categorical hue drawn from the dashboard's
      own palette (user_path = accent tan, provider = info blue, model = olive
      from the budget period badges). The rail runs the group's full height so
