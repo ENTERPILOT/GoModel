@@ -19,6 +19,13 @@ translated through chat completions. Files, batches, and embeddings are not supp
 Hetzner exposes no `/v1/embeddings` endpoint. Embedding requests fail fast with a typed
 "not supported" error; no upstream call is made.
 
+<Note>
+  Passthrough is a generic forwarder: it sends any path you give it to Hetzner
+  unchanged. Hetzner's tolerance for arbitrary upstream paths is unverified while the
+  API is experimental — expect HTTP 404 or 405 for paths outside `/v1/models`,
+  `/v1/completions`, and `/v1/chat/completions`.
+</Note>
+
 ## Configure
 
 Create an API token in the [Hetzner Experiments console](https://experiments.hetzner.com/inference)

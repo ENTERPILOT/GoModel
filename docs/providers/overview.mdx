@@ -134,10 +134,14 @@ support, not every individual model capability exposed by an upstream provider.
 - **Hetzner (experimental)** — Hetzner declares the inference API experimental:
   expect breaking changes and no SLA. The model catalogue and rate-limit windows
   change while the experiment runs; query the live `/v1/models` endpoint and the
-  official docs instead of relying on snapshots. Free while experimental, so
+  official docs instead of relying on snapshots. The example model ID in the table
+  above (`Qwen/Qwen3.6-35B-A3B-FP8`) is the entry from the official Hetzner docs as
+  of 2026-08-17 and may differ at read time. Free while experimental, so
   usage-cost tracking reports zero and `cost` load-balancing cannot price it.
   No embeddings endpoint; chat, `/v1/responses` (via chat), model listing, and
-  passthrough only.
+  passthrough only. Passthrough is a generic forwarder — the ✅ marks adapter
+  capability; Hetzner's tolerance for arbitrary upstream paths is unverified
+  while the API is experimental.
 - **Configured model lists** — available for every provider with
   `<PROVIDER>_MODELS`, for example
   `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` or
