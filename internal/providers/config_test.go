@@ -85,6 +85,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"kimicode": {
 		DefaultBaseURL: "https://api.kimi.com/coding/v1",
 	},
+	"hetzner": {
+		DefaultBaseURL: "https://inference.hetzner.com/api/v1",
+	},
 }
 
 // --- buildProviderConfig ---
@@ -1895,5 +1898,28 @@ func TestResolveProviders_NoProvidersNoEnvVars(t *testing.T) {
 	}
 	if len(filteredRaw) != 0 {
 		t.Errorf("expected empty filtered raw, got %d entries", len(filteredRaw))
+	}
+}
+
+func TestBuildProviderConfig_Hetzner_ResolvesBaseURL(t *testing.T) {
+	t.Setenv("HETZNER_API_KEY", "hetzner-test-key")
+
+	raw := map[string]config.RawProviderConfig{
+		"hetzner": {Type: "hetzner", APIKey: "hetzner-test-key"},
+	}
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+
+	p, exists := got["hetzner"]
+	if !exists {
+		t.Fatal("hetzner not discovered by config parser")
+	}
+	if p.Type != "hetzner" {
+		t.Errorf("Type = %q, want hetzner", p.Type)
+	}
+	if p.APIKey != "hetzner-test-key" {
+		t.Errorf("APIKey = %q, want hetzner-test-key", p.APIKey)
+	}
+	if p.BaseURL != testDiscoveryConfigs["hetzner"].DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["hetzner"].DefaultBaseURL)
 	}
 }
