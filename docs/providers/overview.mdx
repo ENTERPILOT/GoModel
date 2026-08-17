@@ -65,7 +65,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Ollama | `OLLAMA_BASE_URL` | `llama3.2` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Ollama](/providers/multiple-ollama) |
 | SGLang | `SGLANG_BASE_URL` (`SGLANG_API_KEY` optional) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [SGLang](/providers/sglang) |
 | vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/providers/vllm) |
-| llama.cpp / LM Studio (as vLLM type) | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | `gemma-3-4b-it` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llama.cpp](/providers/llamacpp) |
+| llama.cpp / LM Studio | `LLAMACPP_BASE_URL` (`LLAMACPP_API_KEY` optional) | `gemma-3-4b-it` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llama.cpp](/providers/llamacpp) |
 | llm-d | `LLMD_BASE_URL` (`LLMD_API_KEY` optional) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/providers/llmd) |
 | Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + AWS credentials | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/providers/bedrock) |
 | Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` or AWS credentials | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/providers/bedrock-mantle) |
@@ -156,10 +156,10 @@ support, not every individual model capability exposed by an upstream provider.
   routes to any model the provider serves regardless of category.
 - **vLLM** — set `VLLM_API_KEY` only if the upstream server was started with
   `--api-key`.
-- **llama.cpp / LM Studio** — no dedicated provider type; register the server
-  as a vLLM-type provider (`VLLM_BASE_URL` or a suffixed instance), not as
-  `ollama`, which speaks Ollama's native API. See
-  [llama.cpp](/providers/llamacpp).
+- **llama.cpp / LM Studio** — `LLAMACPP_BASE_URL` is required (llama-server's
+  default port collides with GoModel's own 8080, so there is no default);
+  `LLAMACPP_API_KEY` is optional. Do not register these servers as `ollama`,
+  which speaks Ollama's native API. See [llama.cpp](/providers/llamacpp).
 - **llm-d** — `LLMD_BASE_URL` is required. `LLMD_API_KEY` is optional and is
   sent only when the Gateway in front of the Router requires bearer auth.
 - **SGLang** — set `SGLANG_API_KEY` only if the upstream server was started

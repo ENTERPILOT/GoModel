@@ -1,19 +1,18 @@
 ---
 title: "llama.cpp"
-description: "Route OpenAI-compatible GoModel requests to a llama.cpp llama-server instance (the same recipe works for LM Studio)."
+description: "Route OpenAI-compatible GoModel requests to a llama.cpp llama-server instance (the same provider type works for LM Studio)."
 icon: "server"
 keywords: ["llama.cpp", "llama-server", "LM Studio", "local models", "self-hosted", "OpenAI-compatible server"]
 ---
 
-llama.cpp's `llama-server` speaks the OpenAI API directly, so GoModel needs no
-dedicated provider type for it: register the server as a **vLLM-type provider**.
-That type fits llama.cpp exactly — the API key is optional (llama-server
-usually runs keyless), and slash-shaped model IDs work. Do **not** register it
-as an
-`ollama` provider: that type speaks Ollama's native API, which llama.cpp does
-not implement.
+llama.cpp's `llama-server` speaks the OpenAI API directly, and GoModel has a
+dedicated `llamacpp` provider type for it: the API key is optional
+(llama-server usually runs keyless), and provider-native endpoints such as
+`/health` and `/rerank` are reachable through passthrough. Do **not** register
+llama.cpp as an `ollama` provider: that type speaks Ollama's native API, which
+llama.cpp does not implement.
 
-The same recipe applies to LM Studio and any other plain OpenAI-compatible
+The same provider type fits LM Studio and any other plain OpenAI-compatible
 local server.
 
 Start llama-server first. Without `--alias`, the model ID in `/v1/models` is
@@ -26,18 +25,21 @@ llama-server -hf ggml-org/gemma-3-4b-it-GGUF --alias gemma-3-4b-it --port 8081
 
 ## Configure
 
+The base URL is required and registers the provider — llama-server's default
+port (8080) collides with GoModel's own, so there is no default:
+
 ```bash
-VLLM_BASE_URL=http://host.docker.internal:8081/v1   # include /v1
-# VLLM_API_KEY=token-abc123                         # only if llama-server was started with --api-key
+LLAMACPP_BASE_URL=http://host.docker.internal:8081/v1   # include /v1
+# LLAMACPP_API_KEY=token-abc123                         # only if llama-server was started with --api-key
 GOMODEL_MASTER_KEY=change-me
 ```
 
 <Note>
   These examples assume GoModel runs in Docker and llama-server is on the host
   at `localhost:8081` — hence `host.docker.internal`. If GoModel runs on the
-  host directly, use `http://localhost:8081/v1`. Already using `VLLM_BASE_URL`
-  for a real vLLM server? Register llama.cpp under a suffixed instance instead:
-  `VLLM_LLAMACPP_BASE_URL=...` creates provider `vllm-llamacpp`.
+  host directly, use `http://localhost:8081/v1`. Running several llama-server
+  instances? Register each under a suffixed name:
+  `LLAMACPP_STUDIO_BASE_URL=...` creates provider `llamacpp-studio`.
 </Note>
 
 ## Verify
@@ -47,7 +49,7 @@ curl -s http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "vllm/gemma-3-4b-it",
+    "model": "llamacpp/gemma-3-4b-it",
     "messages": [{"role": "user", "content": "Reply with exactly ok."}]
   }'
 ```
@@ -70,7 +72,7 @@ llama-server -hf nomic-ai/nomic-embed-text-v1.5-GGUF --embeddings --alias nomic-
 curl -s http://localhost:8080/v1/embeddings \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
-  -d '{"model": "vllm/nomic-embed-text-v1.5", "input": "hello"}'
+  -d '{"model": "llamacpp/nomic-embed-text-v1.5", "input": "hello"}'
 ```
 
 ## Model classification
@@ -91,8 +93,13 @@ any model the provider serves regardless of category.
   multimodal models when llama-server is started with a projector
   (`--mmproj`, auto-loaded with `-hf` when available). These requests flow
   through `/v1/chat/completions` normally.
-- **Reranking** — llama-server serves `/v1/rerank` (start with a reranker
-  model and `--rerank --embedding --pooling rank`), but GoModel has no rerank
-  endpoint; reach it through [passthrough](/features/passthrough-api):
-  `POST /p/vllm/v1/rerank` (use the instance name, e.g.
-  `/p/vllm-llamacpp/v1/rerank`, for a suffixed setup).
+- **Native endpoints** — llama-server's provider-native routes are reachable
+  through [passthrough](/features/passthrough-api) at `/p/llamacpp/...`:
+  OpenAI-shaped paths (`chat/completions`, `embeddings`, ...) are served from
+  the `/v1` base, everything else (`/health`, `/props`, `/tokenize`,
+  `/infill`, ...) from the server root. For a suffixed setup use the instance
+  name, e.g. `/p/llamacpp-studio/health`.
+- **Reranking** — llama-server serves reranking (start with a reranker model
+  and `--rerank --embedding --pooling rank`), but GoModel has no rerank
+  endpoint; reach it through passthrough: `POST /p/llamacpp/rerank` (or
+  `/p/llamacpp/v1/rerank`).

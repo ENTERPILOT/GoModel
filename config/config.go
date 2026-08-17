@@ -102,6 +102,7 @@ func buildDefaultConfig() *Config {
 				"zai",
 				"sglang",
 				"vllm",
+				"llamacpp",
 				"llmd",
 				"deepseek",
 			},
