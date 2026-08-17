@@ -257,3 +257,21 @@ func TestMain_KimicodeProviderRegistration(t *testing.T) {
 		t.Fatal("factory.Create(kimicode) returned nil provider")
 	}
 }
+
+func TestMain_HetznerProviderRegistration(t *testing.T) {
+	factory := defaultProviderFactory(&config.Config{})
+
+	registered := factory.RegisteredTypes()
+	found := slices.Contains(registered, "hetzner")
+	if !found {
+		t.Fatalf("hetzner not in RegisteredTypes() = %v", registered)
+	}
+
+	provider, err := factory.Create(providers.ProviderConfig{Type: "hetzner", APIKey: "test"})
+	if err != nil {
+		t.Fatalf("factory.Create(hetzner) error = %v, want nil", err)
+	}
+	if provider == nil {
+		t.Fatal("factory.Create(hetzner) returned nil provider")
+	}
+}
