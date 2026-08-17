@@ -94,6 +94,15 @@ class UsageDataStore {
   async fetchCacheOverview(extraQuery = "") {
     await runtimeConfig.ensureLoaded();
     if (!this.cacheAnalyticsEnabled()) {
+      // The gate can flip off while a fetch is in flight (auth refresh):
+      // abort it so its stale response cannot land after this reset. Its
+      // finally block no longer owns the controller, so clear the loading
+      // flag here too.
+      if (this.#cacheController) {
+        this.#cacheController.abort();
+        this.#cacheController = null;
+      }
+      this.cacheLoading = false;
       this.cacheOverview = emptyCacheOverview();
       return;
     }

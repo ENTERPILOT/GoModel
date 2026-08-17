@@ -44,6 +44,10 @@
   const providerSummary = $derived(providerStatusState.status.summary);
   const loading = $derived(usageData.loading);
   const cacheLoading = $derived(usageData.cacheLoading);
+  // Total Requests folds cache hits in when cache analytics is on, so that
+  // card must also wait for the cache overview or it briefly shows a total
+  // computed from the still-pending cache data.
+  const requestsLoading = $derived(loading || (cacheEnabled && cacheLoading));
 
   function scrollToProviderStatusSection() {
     const section = document.getElementById("provider-status-section");
@@ -119,7 +123,7 @@
       class="card-value"
       title={summaryTotalRequestsTitle(summary, cacheOverview, cacheEnabled)}
     >
-      {#if loading}
+      {#if requestsLoading}
         <Spinner size={18} label={m.usage_loading()} />
       {:else}
         {formatNumber(summaryTotalRequests(summary, cacheOverview, cacheEnabled))}

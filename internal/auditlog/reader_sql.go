@@ -259,9 +259,12 @@ func (r *SQLReader) searchFilter(search string) (string, []any) {
 	// most expensive term here. Error messages are only ever written together
 	// with a non-empty error_type (EnrichEntryWithError and the streaming
 	// error recorders), so gate the parse behind that plain column and
-	// healthy rows never pay it.
+	// healthy rows never pay it. The gate is a CASE, not a plain AND:
+	// PostgreSQL may reorder AND predicates, while CASE is documented not to
+	// evaluate arms it does not need.
 	clauses = append(clauses,
-		"(error_type IS NOT NULL AND error_type <> '' AND "+r.likeClause(r.dialect.errorMessage)+")")
+		"(CASE WHEN error_type IS NOT NULL AND error_type <> '' THEN "+
+			r.likeClause(r.dialect.errorMessage)+" ELSE FALSE END)")
 	values = append(values, pattern)
 	return "(" + strings.Join(clauses, " OR ") + ")", values
 }

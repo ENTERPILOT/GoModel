@@ -35,11 +35,14 @@
     <h3>{m.overview_tokens()}</h3>
     <span class="cache-meter-subtitle">{m.overview_cache_share()}</span>
   </div>
+  <!-- role="img" makes descendants presentational, which would hide the
+       loading spinner's role="status" from assistive technology — so the
+       image semantics only apply once the meter actually shows data. -->
   <div
     class="cache-meter-bar"
     class:is-empty={!visible}
-    role="img"
-    aria-label={cacheMeterAriaLabel(segments)}
+    role={loading ? undefined : "img"}
+    aria-label={loading ? undefined : cacheMeterAriaLabel(segments)}
   >
     {#each segments as seg (seg.key)}
       <div
