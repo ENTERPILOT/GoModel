@@ -26,3 +26,20 @@ func TestBuildPassthroughHeadersSkipsConfiguredUserPathHeader(t *testing.T) {
 		t.Fatalf("OpenAI-Beta = %q, want responses=v1", value)
 	}
 }
+
+// TestDefaultEnabledPassthroughProvidersIncludesHetzner asserts that the default
+// allowlist contains hetzner — the provider matrix marks hetzner passthrough ✅,
+// and the default handler must not reject those requests before contacting the
+// upstream. Caught by greptile P1 on PR #701.
+func TestDefaultEnabledPassthroughProvidersIncludesHetzner(t *testing.T) {
+	found := false
+	for _, p := range defaultEnabledPassthroughProviders {
+		if p == "hetzner" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("defaultEnabledPassthroughProviders = %v, want hetzner included", defaultEnabledPassthroughProviders)
+	}
+}

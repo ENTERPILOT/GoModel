@@ -23,7 +23,9 @@ Hetzner exposes no `/v1/embeddings` endpoint. Embedding requests fail fast with 
   Passthrough is a generic forwarder: it sends any path you give it to Hetzner
   unchanged. Hetzner's tolerance for arbitrary upstream paths is unverified while the
   API is experimental — expect HTTP 404 or 405 for paths outside `/v1/models`,
-  `/v1/completions`, and `/v1/chat/completions`.
+  `/v1/completions`, and `/v1/chat/completions`. `hetzner` is in the default
+  `ENABLED_PASSTHROUGH_PROVIDERS` allowlist, so `/p/hetzner/...` routes work
+  without operator opt-in.
 </Note>
 
 ## Configure
@@ -75,11 +77,12 @@ unchanged.
 
 ## Rate limits
 
-Hetzner enforces per-key rate limits on input tokens, output tokens, and request count.
-Exceeding any limit returns HTTP 429. The exact windows changed during the experimental
-period, so check the
+Hetzner enforces per-key rate limits on input tokens and output tokens.
+Exceeding either limit returns HTTP 429. The documented windows are 3M input tokens /
+60k output tokens per 60s and 500M input / 5M output per 24h. The exact values change
+while the experiment runs, so check the
 [official inference docs](https://docs.hetzner.com/general/company-and-policy/experiments/inference/)
-for the current values. Prefer conservative retry settings:
+for the current numbers. Prefer conservative retry settings:
 
 ```yaml
 providers:

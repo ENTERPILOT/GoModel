@@ -141,7 +141,9 @@ support, not every individual model capability exposed by an upstream provider.
   No embeddings endpoint; chat, `/v1/responses` (via chat), model listing, and
   passthrough only. Passthrough is a generic forwarder — the ✅ marks adapter
   capability; Hetzner's tolerance for arbitrary upstream paths is unverified
-  while the API is experimental.
+  while the API is experimental. `hetzner` is included in the default
+  `ENABLED_PASSTHROUGH_PROVIDERS` allowlist so `/p/hetzner/...` routes work
+  without operator opt-in; remove it from the list to gate them.
 - **Configured model lists** — available for every provider with
   `<PROVIDER>_MODELS`, for example
   `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` or

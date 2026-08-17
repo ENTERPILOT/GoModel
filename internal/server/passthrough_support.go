@@ -16,7 +16,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
-var defaultEnabledPassthroughProviders = []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek"}
+var defaultEnabledPassthroughProviders = []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner"}
 
 const llmdDroppedReasonHeader = "X-Llm-D-Request-Dropped-Reason"
 

@@ -3,6 +3,7 @@ package hetzner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -225,6 +226,8 @@ func TestListModels_ForwardsToModelsEndpoint(t *testing.T) {
 // endpoint, so the provider overrides the embedded adapter to fail fast. The
 // httptest server asserts zero requests: a regression that forwards embeddings
 // upstream fails this test deterministically instead of hitting the network.
+// The typed contract is asserted via errors.As against *core.GatewayError so the
+// test would fail on a plain error with the same text.
 func TestEmbeddings_ReturnsUnsupportedError(t *testing.T) {
 	var requests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -235,8 +238,22 @@ func TestEmbeddings_ReturnsUnsupportedError(t *testing.T) {
 
 	provider := NewWithHTTPClient("hetzner-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "any"})
-	if err == nil || !strings.Contains(err.Error(), "hetzner does not support embeddings") {
-		t.Fatalf("Embeddings() error = %v, want unsupported error", err)
+	if err == nil {
+		t.Fatal("Embeddings() error = nil, want typed unsupported error")
+	}
+
+	var gwErr *core.GatewayError
+	if !errors.As(err, &gwErr) {
+		t.Fatalf("Embeddings() error type = %T, want *core.GatewayError", err)
+	}
+	if gwErr.Type != core.ErrorTypeInvalidRequest {
+		t.Errorf("error Type = %v, want %v", gwErr.Type, core.ErrorTypeInvalidRequest)
+	}
+	if gwErr.StatusCode != http.StatusBadRequest {
+		t.Errorf("error StatusCode = %v, want %v", gwErr.StatusCode, http.StatusBadRequest)
+	}
+	if !strings.Contains(err.Error(), "hetzner does not support embeddings") {
+		t.Errorf("Embeddings() error = %v, want message containing \"hetzner does not support embeddings\"", err)
 	}
 	if requests != 0 {
 		t.Fatalf("upstream received %d requests, want 0 (embeddings must not be forwarded)", requests)
