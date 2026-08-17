@@ -3,7 +3,7 @@
   // definitions table.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import Spinner from "$lib/components/atoms/Spinner.svelte";
+  import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
@@ -44,9 +44,7 @@
   {/if}
 
   {#if store.loading && store.filtered.length === 0}
-    <p class="empty-state">
-      <Spinner size={16} label={m.guardrails_loading()} /> {m.guardrails_loading()}
-    </p>
+    <LoadingState label={m.guardrails_loading()} />
   {/if}
 
   {#if store.filtered.length > 0}

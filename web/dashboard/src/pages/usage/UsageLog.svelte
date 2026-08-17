@@ -3,7 +3,7 @@
   // window and facet filters.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import NoDataIllustration from "$lib/components/atoms/NoDataIllustration.svelte";
-  import Spinner from "$lib/components/atoms/Spinner.svelte";
+  import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import Pagination from "$lib/components/molecules/Pagination.svelte";
@@ -74,6 +74,7 @@
         label={m.usage_search_label()}
         bind:value={usagePage.usageLogSearch}
         oninput={onSearchInput}
+        loading={usagePage.usageLogLoading}
       />
     </div>
     <div class="usage-filter-row usage-filter-row-options">
@@ -206,10 +207,7 @@
       </table>
     </div>
   {:else if usagePage.usageLogLoading}
-    <!-- Loading affordance while the log fetch is in flight. -->
-    <div class="empty-state usage-log-loading">
-      <Spinner size={20} label={m.usage_loading_log()} />
-    </div>
+    <LoadingState label={m.usage_loading_log()} class="usage-log-loading" />
   {:else}
     <div class="empty-state">
       <NoDataIllustration />
@@ -225,12 +223,11 @@
 </div>
 
 <style>
-.usage-log-loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 120px;
-  }
+/* Match the empty-state block's height so the section doesn't jump when the
+   fetch settles. The class lands in LoadingState's markup, so :global. */
+.usage-log-section :global(.usage-log-loading) {
+  --loading-state-min-height: 120px;
+}
 
 .usage-log-section {
   background: var(--bg-surface);

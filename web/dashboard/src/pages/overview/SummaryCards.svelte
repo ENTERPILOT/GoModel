@@ -2,6 +2,7 @@
   // Overview summary cards: token totals, requests, cache hits, cost, the
   // prompt-cache gauge, and the provider/MCP status flags.
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
+  import Spinner from "$lib/components/atoms/Spinner.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { usageData } from "$lib/stores/usageData.svelte.js";
   import {
@@ -41,6 +42,12 @@
   const cacheOverview = $derived(usageData.cacheOverview);
   const cacheEnabled = $derived(usageData.cacheAnalyticsEnabled());
   const providerSummary = $derived(providerStatusState.status.summary);
+  const loading = $derived(usageData.loading);
+  const cacheLoading = $derived(usageData.cacheLoading);
+  // Total Requests folds cache hits in when cache analytics is on, so that
+  // card must also wait for the cache overview or it briefly shows a total
+  // computed from the still-pending cache data.
+  const requestsLoading = $derived(loading || (cacheEnabled && cacheLoading));
 
   function scrollToProviderStatusSection() {
     const section = document.getElementById("provider-status-section");
@@ -50,10 +57,13 @@
   }
 </script>
 
-{#snippet tokenCard(label, inputTokens, outputTokens, totalTokens)}
+{#snippet tokenCard(label, inputTokens, outputTokens, totalTokens, busy)}
   <div class="card card-wide">
     <div class="card-label">{label}</div>
     <div class="card-value cache-token-value">
+      {#if busy}
+        <Spinner size={18} label={m.usage_loading()} />
+      {:else}
       <span
         class="cache-token-part"
         title={tokenCountTitle(m.overview_input_tokens(), inputTokens)}
@@ -74,6 +84,7 @@
         class="cache-token-part"
         title={tokenCountTitle(m.overview_total_tokens(), totalTokens)}
       >{formatTokensShort(totalTokens)}</span>
+      {/if}
     </div>
   </div>
 {/snippet}
@@ -104,23 +115,42 @@
     summary.total_input_tokens,
     summary.total_output_tokens,
     summaryTotalTokens(summary),
+    loading,
   )}
   <div class="card">
     <div class="card-label">{m.overview_total_requests()}</div>
     <div
       class="card-value"
       title={summaryTotalRequestsTitle(summary, cacheOverview, cacheEnabled)}
-    >{formatNumber(summaryTotalRequests(summary, cacheOverview, cacheEnabled))}</div>
+    >
+      {#if requestsLoading}
+        <Spinner size={18} label={m.usage_loading()} />
+      {:else}
+        {formatNumber(summaryTotalRequests(summary, cacheOverview, cacheEnabled))}
+      {/if}
+    </div>
   </div>
   {#if cacheEnabled}
     <div class="card">
       <div class="card-label">{m.overview_cache_hits()}</div>
-      <div class="card-value">{formatNumber(cacheOverview.summary.total_hits)}</div>
+      <div class="card-value">
+        {#if cacheLoading}
+          <Spinner size={18} label={m.usage_loading()} />
+        {:else}
+          {formatNumber(cacheOverview.summary.total_hits)}
+        {/if}
+      </div>
     </div>
   {/if}
   <div class="card">
     <div class="card-label">{m.overview_estimated_cost()}</div>
-    <div class="card-value">{formatCost(summary.total_cost)}</div>
+    <div class="card-value">
+      {#if loading}
+        <Spinner size={18} label={m.usage_loading()} />
+      {:else}
+        {formatCost(summary.total_cost)}
+      {/if}
+    </div>
   </div>
   {#if cacheEnabled}
     {@render tokenCard(
@@ -128,6 +158,7 @@
       cacheOverview.summary.total_input_tokens,
       cacheOverview.summary.total_output_tokens,
       cacheOverviewTotalTokens(cacheOverview),
+      cacheLoading,
     )}
   {/if}
   <div
@@ -135,6 +166,11 @@
     title={m.overview_prompt_cache_rate_help()}
   >
     <div class="card-label">{m.overview_prompt_cache_rate()}</div>
+    {#if loading}
+      <div class="prompt-cache-gauge prompt-cache-gauge-loading">
+        <Spinner size={18} label={m.usage_loading()} />
+      </div>
+    {:else}
     <div
       class="prompt-cache-gauge"
       role="img"
@@ -152,6 +188,7 @@
       />
       <span class="prompt-cache-gauge-value">{promptCacheRateText(summary)}</span>
     </div>
+    {/if}
   </div>
   {#if providerSummary.total > 0}
     {@render statusCard(
@@ -284,6 +321,12 @@
 
   .prompt-cache-gauge :global(canvas) {
     display: block;
+  }
+
+  .prompt-cache-gauge-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .prompt-cache-gauge-value {
