@@ -220,29 +220,14 @@ func TestListModels_ForwardsToModelsEndpoint(t *testing.T) {
 	}
 }
 
-// TestEmbeddings_ForwardsToUpstreamWhichReturnsError documents that the embedded
-// ChatCompatible forwards embedding requests to /v1/embeddings even though Hetzner
-// documents no embeddings endpoint. The call is expected to fail at the upstream;
-// GoModel does not currently override Embeddings to return a clearer error.
-func TestEmbeddings_ForwardsToUpstreamWhichReturnsError(t *testing.T) {
-	var gotPath string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		http.Error(w, "not found", http.StatusNotFound)
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("hetzner-key", server.URL, server.Client(), llmclient.Hooks{})
-	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
-		Model: "anything",
-		Input: "hi",
-	})
-	if err == nil {
-		t.Fatal("Embeddings() error = nil, want error (Hetzner has no embeddings endpoint)")
-	}
-	if gotPath != "/embeddings" {
-		t.Errorf("path = %q, want /embeddings (proves request was forwarded)", gotPath)
+// TestEmbeddings_ReturnsUnsupportedError asserts that Embeddings returns a typed
+// "not supported" error without calling upstream — Hetzner documents no embeddings
+// endpoint, so the provider overrides the embedded adapter to fail fast.
+func TestEmbeddings_ReturnsUnsupportedError(t *testing.T) {
+	provider := NewWithHTTPClient("hetzner-key", "", nil, llmclient.Hooks{})
+	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "any"})
+	if err == nil || !strings.Contains(err.Error(), "hetzner does not support embeddings") {
+		t.Fatalf("Embeddings() error = %v, want unsupported error", err)
 	}
 }
 

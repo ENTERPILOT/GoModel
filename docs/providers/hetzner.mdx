@@ -16,7 +16,8 @@ Hetzner Inference is an OpenAI-compatible REST API served at
 `https://inference.hetzner.com/api/v1`. GoModel routes chat, model listing, and
 passthrough requests through the shared OpenAI adapter. The `/v1/responses` endpoint is
 translated through chat completions. Files, batches, and embeddings are not supported —
-Hetzner exposes no `/v1/embeddings` endpoint.
+Hetzner exposes no `/v1/embeddings` endpoint. Embedding requests fail fast with a typed
+"not supported" error; no upstream call is made.
 
 ## Configure
 

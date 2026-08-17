@@ -11,6 +11,7 @@
 package hetzner
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -34,7 +35,7 @@ var Registration = providers.Registration{
 // OpenAI-compatible, so all transport goes through the shared chat-centric
 // adapter: chat completions, model listing, and passthrough are exposed via
 // the embedded *openai.ChatCompatible. Hetzner documents no embeddings
-// endpoint, so embedding requests fail upstream.
+// endpoint, so Embeddings is overridden to fail fast with a typed error.
 type Provider struct {
 	*openai.ChatCompatible
 }
@@ -59,4 +60,9 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 		ProviderName: "hetzner",
 		BaseURL:      providers.ResolveBaseURL(baseURL, defaultBaseURL),
 	})}
+}
+
+// Embeddings returns an error because Hetzner does not expose an embeddings endpoint.
+func (p *Provider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	return nil, core.NewInvalidRequestError("hetzner does not support embeddings", nil)
 }
