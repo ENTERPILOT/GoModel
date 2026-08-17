@@ -283,7 +283,11 @@
 
   /* Subject chips inside a group inherit the rail hue, reinforcing scope
      identity on every row. The shared inspector is untouched — it does not
-     render inside .rate-limit-group. */
+     render inside .rate-limit-group.
+     Cascade note: this scoped selector wins over budgets.css' single-class
+     .budget-user-path/.budget-label (two classes beat one). If budgets.css
+     ever raises the chip's specificity (e.g. .budget-row .budget-user-path),
+     this override must be strengthened to match or the rail hue is lost. */
   .rate-limit-group :global(.budget-scope-value) {
     border-color: color-mix(in srgb, var(--scope-hue) 40%, var(--border));
     background: color-mix(in srgb, var(--scope-hue) 12%, var(--bg));
