@@ -235,6 +235,106 @@ export function normalizeRateLimitListPayload(payload) {
   return payload.rate_limits;
 }
 
+// pickRateLimitActiveScope returns the scope the tab strip should show
+// after the rule list is replaced: the current scope when it still has
+// rules, else the first populated scope in canonical order (user_path →
+// provider → model), else the current scope when the list is empty (the
+// page falls through to the global empty state). Used to keep the active
+// tab from landing on an empty scope when another scope has rules
+// (greptile P1: stale selection on initial load and after deletion).
+export function pickRateLimitActiveScope(rules, currentScope) {
+  const safe = Array.isArray(rules) ? rules : [];
+  const order = ["user_path", "provider", "model"];
+  const hasRules = (scope) =>
+    safe.some((item) => rateLimitScope(item) === scope);
+  const current = order.includes(currentScope) ? currentScope : "user_path";
+  if (hasRules(current)) {
+    return current;
+  }
+  for (const scope of order) {
+    if (hasRules(scope)) {
+      return scope;
+    }
+  }
+  return current;
+}
+
+// groupRateLimits partitions rules into the three scope buckets in the order
+// user_path → provider → model. Each top-level group is always present (even
+// when empty) so the page can render a header for every scope regardless of
+// how many rules exist. user_path and model keep their rows flat; provider
+// further nests rows by subject (provider name) so a glance at the page
+// shows which providers carry limits. Pure function — display / i18n copy
+// belongs in the component.
+export function groupRateLimits(rules) {
+  const safe = Array.isArray(rules) ? rules : [];
+
+  function sortedBySubject(items) {
+    return items
+      .slice()
+      .sort((a, b) =>
+        rateLimitSubject(a).localeCompare(rateLimitSubject(b)),
+      );
+  }
+
+  function partitionByScope(scope) {
+    const items = safe.filter((item) => rateLimitScope(item) === scope);
+    const rows = sortedBySubject(items);
+    if (scope !== "provider") {
+      return { rows, subGroups: null };
+    }
+    const buckets = new Map();
+    for (const item of rows) {
+      const subject = rateLimitSubject(item);
+      const key = "provider-subject:" + subject;
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          key,
+          subject,
+          display_name: subject,
+          rows: [],
+        });
+      }
+      buckets.get(key).rows.push(item);
+    }
+    const subGroups = Array.from(buckets.values()).sort((a, b) =>
+      String(a.display_name).localeCompare(String(b.display_name)),
+    );
+    return { rows, subGroups };
+  }
+
+  const userPath = partitionByScope("user_path");
+  const provider = partitionByScope("provider");
+  const model = partitionByScope("model");
+
+  return [
+    {
+      key: "scope:user_path",
+      scope: "user_path",
+      display_name: rateLimitScopeMeta("user_path").label,
+      rows: userPath.rows,
+      subGroups: null,
+      count: userPath.rows.length,
+    },
+    {
+      key: "scope:provider",
+      scope: "provider",
+      display_name: rateLimitScopeMeta("provider").label,
+      rows: provider.rows,
+      subGroups: provider.subGroups,
+      count: provider.rows.length,
+    },
+    {
+      key: "scope:model",
+      scope: "model",
+      display_name: rateLimitScopeMeta("model").label,
+      rows: model.rows,
+      subGroups: null,
+      count: model.rows.length,
+    },
+  ];
+}
+
 // Mirrors the server's per-scope subject normalization so an edit
 // that only respells the same identity (case, slashes) is treated
 // as an in-place update, never a move-plus-delete of itself.

@@ -1,11 +1,13 @@
 <script>
   import * as m from "$lib/paraglide/messages.js";
-  // Rate limit rule rows (scope badge, window chips, source, actions) —
-  // shares the budget-row look, like the Budgets page list.
+  // Rate limit rule rows (window chips, source, actions) — shares the
+  // budget-row look, like the Budgets page list. Scope lives in the page's
+  // group header now, so this component no longer renders a per-row scope
+  // badge.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { rateLimits } from "./rateLimits.svelte.js";
-  import { Activity, Box, Pencil, RotateCcw, Server, Timer, Trash2 } from "lucide";
+  import { Activity, Pencil, RotateCcw, Timer, Trash2 } from "lucide";
 
   // rules: the filtered rule list to render (filtering stays on the page).
   let { rules } = $props();
@@ -31,20 +33,6 @@
                     title={m.rate_limits_per_child_title()}
                   >
                     <span>{m.rate_limits_per_child_badge()}</span>
-                  </span>
-                {/if}
-                {#if rateLimits.rateLimitScope(item) !== "user_path"}
-                  <span
-                    class="budget-period-label"
-                    title={m.rate_limits_rule_scope({ scope: rateLimits.rateLimitScopeLabel(item) })}
-                  >
-                    <Icon
-                      icon={rateLimits.rateLimitScope(item) === "provider"
-                        ? Server
-                        : Box}
-                      class="budget-period-icon"
-                    />
-                    <span>{rateLimits.rateLimitScopeLabel(item)}</span>
                   </span>
                 {/if}
                 <span class="budget-period-label">

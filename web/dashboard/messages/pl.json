@@ -1225,7 +1225,6 @@
   "guardrails_delete_confirm": "Usunąć Guardrail „{name}”? Workflows, które nadal się do niego odwołują, muszą zostać najpierw zaktualizowane.",
   "guardrails_delete_failed": "Nie udało się usunąć Guardrail.",
   "guardrails_deleted": "Usunięto Guardrail „{name}”.",
-  "rate_limits_rule_scope": "Zakres reguły: {scope}",
   "rate_limits_config_read_only": "Zadeklarowano w konfiguracji; tylko do odczytu w dashboardzie",
   "rate_limits_managed": "Zarządzane przez dashboard lub admin API",
   "rate_limits_edit_action": "Edytuj Rate Limit",

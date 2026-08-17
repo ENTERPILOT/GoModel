@@ -27,6 +27,11 @@ class RateLimitsStore {
   rateLimitInspectorOpen = $state(false);
   rateLimitInspector = $state({ kind: "", provider: "", model: "", title: "" });
   rateLimitForm = $state(logic.defaultRateLimitForm());
+  // Active scope tab (user_path / provider / model). Drives the tab strip
+  // and the single-group view that replaces the previous all-three-groups
+  // layout. Default lands on the first scope with rules, so the page never
+  // opens on an empty tab while other scopes are populated.
+  rateLimitActiveScope = $state("user_path");
 
   rateLimitsEnabled() {
     return runtimeConfig.rateLimitsVisible();
@@ -122,6 +127,54 @@ class RateLimitsStore {
     return logic.filteredRateLimits(this.rateLimits, this.rateLimitFilter);
   }
 
+  // Normalize the active tab whenever the rule list is replaced so the
+  // strip never lands on an empty scope while another scope has rules
+  // (greptile P1: initial selection + stale selection after deletion).
+  // Called from every code path that assigns this.rateLimits.
+  normalizeActiveScope() {
+    this.rateLimitActiveScope = logic.pickRateLimitActiveScope(
+      this.rateLimits,
+      this.rateLimitActiveScope,
+    );
+  }
+
+  // groupedRateLimits partitions the filtered list into the three scope
+  // buckets (user_path → provider → model) for the page's group headers.
+  groupedRateLimits() {
+    return logic.groupRateLimits(this.filteredRateLimits());
+  }
+
+  // visibleGroup returns just the bucket for the active scope tab. The
+  // single-group view replaces the previous three-up layout once a tab is
+  // active; the tab strip still surfaces counts for the inactive scopes via
+  // tabCounts().
+  visibleGroup() {
+    const groups = this.groupedRateLimits();
+    return (
+      groups.find((group) => group.scope === this.rateLimitActiveScope) ||
+      groups[0]
+    );
+  }
+
+  // tabCounts surfaces all three scope counts in the canonical order so the
+  // tab strip stays stable when the active tab changes.
+  tabCounts() {
+    return this.groupedRateLimits().map((group) => ({
+      scope: group.scope,
+      count: group.count,
+    }));
+  }
+
+  setActiveScope(scope) {
+    if (
+      scope === "user_path" ||
+      scope === "provider" ||
+      scope === "model"
+    ) {
+      this.rateLimitActiveScope = scope;
+    }
+  }
+
   normalizeRateLimitListPayload(payload) {
     return logic.normalizeRateLimitListPayload(payload);
   }
@@ -133,6 +186,7 @@ class RateLimitsStore {
       this.rateLimits = [];
       this.rateLimitsAvailable = false;
       this.rateLimitError = "";
+      this.normalizeActiveScope();
       return;
     }
     if (this.rateLimitFetchPromise) {
@@ -159,12 +213,14 @@ class RateLimitsStore {
     if (outcome.status === "unavailable") {
       this.rateLimitsAvailable = false;
       this.rateLimits = [];
+      this.normalizeActiveScope();
       return;
     }
     if (!outcome.result) {
       // Network failure: clear the rows, keep the availability flag as-is.
       this.rateLimits = [];
       this.rateLimitError = outcome.error;
+      this.normalizeActiveScope();
       return;
     }
     this.rateLimitsAvailable = true;
@@ -173,6 +229,7 @@ class RateLimitsStore {
       return;
     }
     this.rateLimits = outcome.items;
+    this.normalizeActiveScope();
   }
 
   openRateLimitForm(item) {
@@ -272,6 +329,7 @@ class RateLimitsStore {
       this.rateLimits = logic.normalizeRateLimitListPayload(
         outcome.result.data,
       );
+      this.normalizeActiveScope();
       // Identity change = move: the new rule exists, now drop
       // the one it replaces. The new rule is created first so a
       // failed delete can never lose the rule.
@@ -312,6 +370,7 @@ class RateLimitsStore {
       return false;
     }
     this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
+    this.normalizeActiveScope();
     return true;
   }
 
@@ -344,6 +403,7 @@ class RateLimitsStore {
       return;
     }
     this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
+    this.normalizeActiveScope();
     flash.success(m.rate_limits_deleted());
   }
 
@@ -376,6 +436,7 @@ class RateLimitsStore {
       return;
     }
     this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
+    this.normalizeActiveScope();
     flash.success(m.rate_limits_reset_success());
   }
 

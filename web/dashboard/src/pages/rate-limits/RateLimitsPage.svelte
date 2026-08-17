@@ -27,6 +27,63 @@
   });
 
   const filtered = $derived.by(() => rateLimits.filteredRateLimits());
+  const visibleGroup = $derived.by(() => rateLimits.visibleGroup());
+
+  // Tab labels are the same scope names, but the in-group eyebrow was the
+  // same copy — the tab now plays that role, so the group header is gone.
+  function tabLabel(scope) {
+    switch (scope) {
+      case "user_path":
+        return m.rate_limits_user_path();
+      case "provider":
+        return m.rate_limits_provider();
+      case "model":
+        return m.rate_limits_model();
+      default:
+        return "";
+    }
+  }
+
+  // Stable ids wire each tab to the single panel below (aria-controls /
+  // aria-labelledby). Scopes come from the fixed set in the store, so the
+  // ids are deterministic.
+  const TAB_PANEL_ID = "rate-limit-panel";
+
+  function tabId(scope) {
+    return "rate-limit-tab-" + scope;
+  }
+
+  // Roving tabindex keyboard contract for the tab strip: Arrow keys move and
+  // activate the adjacent tab (wrapping), Home/End jump to the first/last.
+  // Automatic activation matches the APG pattern for lightweight panels and
+  // keeps the existing scope-selection behavior — the arrow keys drive the
+  // same setActiveScope the click handler uses.
+  function onTabKeydown(event) {
+    const key = String((event && event.key) || "");
+    const scopes = rateLimits.tabCounts().map((tab) => tab.scope);
+    if (scopes.length === 0) {
+      return;
+    }
+    const current = scopes.indexOf(rateLimits.rateLimitActiveScope);
+    let next = -1;
+    if (key === "ArrowRight") {
+      next = (current + 1 + scopes.length) % scopes.length;
+    } else if (key === "ArrowLeft") {
+      next = (current - 1 + scopes.length) % scopes.length;
+    } else if (key === "Home") {
+      next = 0;
+    } else if (key === "End") {
+      next = scopes.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    rateLimits.setActiveScope(scopes[next]);
+    const tab = typeof document !== "undefined" ? document.getElementById(tabId(scopes[next])) : null;
+    if (tab) {
+      tab.focus();
+    }
+  }
 </script>
 
 <div>
@@ -80,8 +137,51 @@
 
   <RateLimitEditor />
 
-  {#if filtered.length > 0 && rateLimits.rateLimitsAvailable && !auth.authError}
-    <RateLimitList rules={filtered} />
+  {#if (rateLimits.rateLimits.length > 0 || rateLimits.rateLimitFilter) && rateLimits.rateLimitsAvailable && !auth.authError}
+    <div class="rate-limit-tabs" role="tablist" aria-label="Rate limit scope">
+      {#each rateLimits.tabCounts() as tab (tab.scope)}
+        <button
+          type="button"
+          role="tab"
+          id={tabId(tab.scope)}
+          aria-controls={TAB_PANEL_ID}
+          aria-selected={rateLimits.rateLimitActiveScope === tab.scope}
+          tabindex={rateLimits.rateLimitActiveScope === tab.scope ? 0 : -1}
+          class="rate-limit-tab scope-{tab.scope}"
+          class:active={rateLimits.rateLimitActiveScope === tab.scope}
+          onclick={() => rateLimits.setActiveScope(tab.scope)}
+          onkeydown={onTabKeydown}
+        >
+          <span class="rate-limit-tab-label">{tabLabel(tab.scope)}</span>
+          <span class="rate-limit-tab-count">{tab.count}</span>
+        </button>
+      {/each}
+    </div>
+
+    {#if visibleGroup}
+      <div
+        id={TAB_PANEL_ID}
+        role="tabpanel"
+        aria-labelledby={tabId(rateLimits.rateLimitActiveScope)}
+        class="rate-limit-group scope-{visibleGroup.scope}"
+      >
+        {#if visibleGroup.scope === "provider" && visibleGroup.subGroups && visibleGroup.subGroups.length > 0}
+          {#each visibleGroup.subGroups as sub (sub.key)}
+            <div class="rate-limit-subgroup">
+              <h4 class="rate-limit-subgroup-title">{sub.subject}</h4>
+              <RateLimitList rules={sub.rows} />
+            </div>
+          {/each}
+        {:else if visibleGroup.rows.length > 0}
+          <RateLimitList rules={visibleGroup.rows} />
+        {:else if rateLimits.rateLimits.length === 0}
+          <!-- Stored rules missing entirely: only this case shows the per-group
+               empty copy. Stored rules exist but the filter emptied the panel?
+               Stay quiet — the global no-match state below covers it. -->
+          <p class="rate-limit-group-empty">{m.rate_limits_no_rules()}</p>
+        {/if}
+      </div>
+    {/if}
   {/if}
 
   {#if rateLimits.rateLimits.length === 0 && !rateLimits.rateLimitFilter && !rateLimits.rateLimitsLoading && !auth.authError && !rateLimits.rateLimitError && rateLimits.rateLimitsAvailable && rateLimits.rateLimitsEnabled()}
@@ -91,3 +191,177 @@
     <p class="empty-state">{m.rate_limits_no_match()}</p>
   {/if}
 </div>
+
+<style>
+  /* Tab strip: pill idiom from the Models page category tabs, adapted to the
+     scope-hue system. flex: 1 spreads the three tabs evenly across the row —
+     first at the start, middle centered, last at the end. The active tab
+     carries its scope hue (tinted background, hue border, hue-mixed text) so
+     the strip reads as part of the rail design below, not a separate widget. */
+  .rate-limit-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .rate-limit-tab {
+    --scope-hue: var(--accent);
+    flex: 1 1 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 14px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition:
+      color 0.15s,
+      background 0.15s,
+      border-color 0.15s;
+  }
+
+  .rate-limit-tab.scope-provider {
+    --scope-hue: var(--info);
+  }
+
+  .rate-limit-tab.scope-model {
+    --scope-hue: #68765c;
+  }
+
+  .rate-limit-tab:hover {
+    color: var(--text);
+    background: var(--bg-surface-hover);
+  }
+
+  .rate-limit-tab:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--scope-hue) 70%, var(--border));
+    outline-offset: 1px;
+  }
+
+  .rate-limit-tab.active {
+    color: color-mix(in srgb, var(--scope-hue) 62%, var(--text));
+    background: color-mix(in srgb, var(--scope-hue) 12%, var(--bg-surface));
+    border-color: color-mix(in srgb, var(--scope-hue) 45%, var(--border));
+  }
+
+  .rate-limit-tab-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rate-limit-tab-count {
+    flex: 0 0 auto;
+    min-width: 20px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text-muted);
+    background: var(--bg);
+    border-radius: 999px;
+  }
+
+  .rate-limit-tab.active .rate-limit-tab-count {
+    color: inherit;
+    background: color-mix(in srgb, var(--scope-hue) 18%, var(--bg));
+  }
+
+  @media (max-width: 768px) {
+    .rate-limit-tab {
+      padding: 6px 10px;
+      font-size: 12px;
+      gap: 6px;
+    }
+  }
+
+  /* Scope rail: each group gets a categorical hue drawn from the dashboard's
+     own palette (user_path = accent tan, provider = info blue, model = olive
+     from the budget period badges). The rail runs the group's full height so
+     the scope identity is scannable without reading the header. */
+  .rate-limit-group {
+    --scope-hue: var(--accent);
+    position: relative;
+    margin-bottom: 24px;
+    padding-left: 16px;
+  }
+
+  .rate-limit-group::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 2px;
+    bottom: 2px;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--scope-hue);
+  }
+
+  .rate-limit-group.scope-provider {
+    --scope-hue: var(--info);
+  }
+
+  .rate-limit-group.scope-model {
+    --scope-hue: #68765c;
+  }
+
+  .rate-limit-group-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .rate-limit-group-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    /* Mix toward --text so the hue stays readable in both themes: it
+       lightens the tan/olive on dark, darkens the blue on light. */
+    color: color-mix(in srgb, var(--scope-hue) 62%, var(--text));
+  }
+
+  .rate-limit-group-count {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* Subject chips inside a group inherit the rail hue, reinforcing scope
+     identity on every row. The shared inspector is untouched — it does not
+     render inside .rate-limit-group.
+     Cascade note: this scoped selector wins over budgets.css' single-class
+     .budget-user-path/.budget-label (two classes beat one). If budgets.css
+     ever raises the chip's specificity (e.g. .budget-row .budget-user-path),
+     this override must be strengthened to match or the rail hue is lost. */
+  .rate-limit-group :global(.budget-scope-value) {
+    border-color: color-mix(in srgb, var(--scope-hue) 40%, var(--border));
+    background: color-mix(in srgb, var(--scope-hue) 12%, var(--bg));
+  }
+
+  .rate-limit-subgroup {
+    margin-bottom: 12px;
+  }
+
+  .rate-limit-subgroup-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: color-mix(in srgb, var(--scope-hue) 45%, var(--text-muted));
+    margin: 10px 0 6px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  .rate-limit-group-empty {
+    padding: 4px 0 8px;
+    color: var(--text-muted);
+    font-size: 13px;
+    margin: 0;
+  }
+</style>

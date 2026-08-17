@@ -1197,7 +1197,6 @@
   "guardrails_delete_confirm": "Delete Guardrail \"{name}\"? Workflows that still reference it must be updated first.",
   "guardrails_delete_failed": "Failed to delete Guardrail.",
   "guardrails_deleted": "Guardrail \"{name}\" deleted.",
-  "rate_limits_rule_scope": "Rule scope: {scope}",
   "rate_limits_config_read_only": "Declared in configuration; read-only in the dashboard",
   "rate_limits_managed": "Managed via dashboard or admin API",
   "rate_limits_edit_action": "Edit rate limit",
