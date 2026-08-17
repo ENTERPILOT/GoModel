@@ -1,7 +1,7 @@
 <script>
   // API Keys page: managed gateway API keys (create with one-time secret
   // reveal, label editing, permanent deactivation).
-  import Spinner from "$lib/components/atoms/Spinner.svelte";
+  import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { router } from "$lib/stores/router.svelte.js";
@@ -59,9 +59,7 @@
   <AuthKeyLabelsEditor />
 
   {#if store.loading && store.keys.length === 0}
-    <div class="auth-keys-loading">
-      <Spinner size={18} label={m.api_keys_loading()} />
-    </div>
+    <LoadingState label={m.api_keys_loading()} />
   {/if}
 
   {#if store.keys.length > 0 && store.available}
@@ -103,12 +101,6 @@
 </div>
 
 <style>
-  .auth-keys-loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 32px 0;
-  }
 /* --- API Keys page --- */
 .auth-keys-help-notice {
   margin-bottom: 20px;

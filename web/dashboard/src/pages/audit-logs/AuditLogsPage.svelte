@@ -11,7 +11,7 @@
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import DatePicker from "$lib/components/molecules/DatePicker.svelte";
   import Pagination from "$lib/components/molecules/Pagination.svelte";
-  import Spinner from "$lib/components/atoms/Spinner.svelte";
+  import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import AuditFilters from "./AuditFilters.svelte";
   import AuditLiveStatus from "./AuditLiveStatus.svelte";
@@ -137,9 +137,7 @@
     </div>
 
     {#if auditList.loading && auditList.auditLog.entries.length === 0}
-      <div class="audit-log-loading">
-        <Spinner size={18} label={m.audit_loading()} />
-      </div>
+      <LoadingState label={m.audit_loading()} />
     {:else if auditList.auditLog.entries.length > 0}
       <div class="audit-log-list">
         <!-- Live rows slide in and neighbours shift down via FLIP; fetched
@@ -180,13 +178,6 @@
 </div>
 
 <style>
-  /* Loading affordance while the list fetch is in flight. */
-  .audit-log-loading {
-    display: flex;
-    justify-content: center;
-    padding: 2rem 0;
-  }
-
   /* Row above the list: page summary and view preference on the left, the
      live-stream status on the right. */
   .audit-list-toolbar {

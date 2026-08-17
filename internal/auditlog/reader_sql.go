@@ -215,19 +215,79 @@ func (r *SQLReader) logFilters(params LogQueryParams) ([]string, []any, error) {
 		add("stream = ?", *params.Stream)
 	}
 	if params.Search != "" {
-		searchColumns := []string{
-			"request_id", "auth_key_id", "requested_model", "provider", "provider_name",
-			"method", "path", "user_path", "session_id", "error_type", r.dialect.errorMessage,
-		}
-		clauses := make([]string, 0, len(searchColumns))
-		values := make([]any, 0, len(searchColumns))
-		for _, column := range searchColumns {
-			clauses = append(clauses, r.likeClause(column))
-			values = append(values, contains(params.Search))
-		}
-		add("("+strings.Join(clauses, " OR ")+")", values...)
+		condition, values := r.searchFilter(params.Search)
+		add(condition, values...)
 	}
 	return conditions, args, nil
+}
+
+// searchFilter builds the free-text search condition.
+//
+// A term shaped like a canonical UUID is a pasted identifier (request id,
+// API key id, session id, or an entry id): those are matched by equality
+// against the indexed identity columns, so the planner answers from index
+// lookups instead of the leading-wildcard LIKE scan every other term needs.
+// The trade is deliberate: a full UUID that only appears inside an error
+// message no longer matches, and identifiers live in these columns.
+func (r *SQLReader) searchFilter(search string) (string, []any) {
+	if isCanonicalUUID(search) {
+		// Equality is case-sensitive (unlike the LIKE path), and pasted UUIDs
+		// may be uppercase while stored ones are not; match both spellings.
+		lower := strings.ToLower(search)
+		columns := []string{r.dialect.idColumn, "request_id", "auth_key_id", "session_id"}
+		clauses := make([]string, 0, len(columns))
+		values := make([]any, 0, 2*len(columns))
+		for _, column := range columns {
+			clauses = append(clauses, column+" IN (?, ?)")
+			values = append(values, search, lower)
+		}
+		return "(" + strings.Join(clauses, " OR ") + ")", values
+	}
+
+	pattern := "%" + sqlutil.EscapeLikeWildcards(search) + "%"
+	searchColumns := []string{
+		"request_id", "auth_key_id", "requested_model", "provider", "provider_name",
+		"method", "path", "user_path", "session_id", "error_type",
+	}
+	clauses := make([]string, 0, len(searchColumns)+1)
+	values := make([]any, 0, len(searchColumns)+1)
+	for _, column := range searchColumns {
+		clauses = append(clauses, r.likeClause(column))
+		values = append(values, pattern)
+	}
+	// The error-message clause parses the row's JSON data blob — by far the
+	// most expensive term here. Error messages are only ever written together
+	// with a non-empty error_type (EnrichEntryWithError and the streaming
+	// error recorders), so gate the parse behind that plain column and
+	// healthy rows never pay it. The gate is a CASE, not a plain AND:
+	// PostgreSQL may reorder AND predicates, while CASE is documented not to
+	// evaluate arms it does not need.
+	clauses = append(clauses,
+		"(CASE WHEN error_type IS NOT NULL AND error_type <> '' THEN "+
+			r.likeClause(r.dialect.errorMessage)+" ELSE FALSE END)")
+	values = append(values, pattern)
+	return "(" + strings.Join(clauses, " OR ") + ")", values
+}
+
+// isCanonicalUUID reports whether s is a full 8-4-4-4-12 hex UUID.
+func isCanonicalUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range []byte(s) {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+			if !isHex {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (r *SQLReader) likeClause(column string) string {

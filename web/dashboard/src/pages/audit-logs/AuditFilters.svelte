@@ -20,6 +20,7 @@
       label={m.audit_search_label()}
       bind:value={auditList.auditSearch}
       oninput={onSearchInput}
+      loading={auditList.loading}
     />
   </div>
   <div class="audit-filter-row audit-filter-row-controls">

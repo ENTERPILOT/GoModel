@@ -1,6 +1,7 @@
 <script>
   // Tokens cache meter: share of input tokens over the selected period split
   // into regular / prompt-cached / locally-cached segments.
+  import Spinner from "$lib/components/atoms/Spinner.svelte";
   import { usageData } from "$lib/stores/usageData.svelte.js";
   import { formatNumber } from "$lib/utils/format.js";
   import {
@@ -22,6 +23,11 @@
   const visible = $derived(
     cacheMeterVisible(usageData.summary, usageData.cacheOverview, cacheEnabled),
   );
+  // With segments on screen, refetches settle in place; the spinner only
+  // covers the first load of an empty meter.
+  const loading = $derived(
+    !visible && (usageData.loading || usageData.cacheLoading),
+  );
 </script>
 
 <div class="cache-meter">
@@ -29,11 +35,14 @@
     <h3>{m.overview_tokens()}</h3>
     <span class="cache-meter-subtitle">{m.overview_cache_share()}</span>
   </div>
+  <!-- role="img" makes descendants presentational, which would hide the
+       loading spinner's role="status" from assistive technology — so the
+       image semantics only apply once the meter actually shows data. -->
   <div
     class="cache-meter-bar"
     class:is-empty={!visible}
-    role="img"
-    aria-label={cacheMeterAriaLabel(segments)}
+    role={loading ? undefined : "img"}
+    aria-label={loading ? undefined : cacheMeterAriaLabel(segments)}
   >
     {#each segments as seg (seg.key)}
       <div
@@ -46,7 +55,9 @@
         {/if}
       </div>
     {/each}
-    {#if !visible}
+    {#if loading}
+      <Spinner size={16} label={m.usage_loading()} />
+    {:else if !visible}
       <span class="cache-meter-empty">{m.overview_no_usage()}</span>
     {/if}
   </div>
