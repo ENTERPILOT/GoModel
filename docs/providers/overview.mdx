@@ -60,6 +60,7 @@ support, not every individual model capability exposed by an upstream provider.
 | ElevenLabs (voice only) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` optional) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/providers/elevenlabs) |
 | OpenCode Go | `OPENCODE_GO_API_KEY` (`OPENCODE_GO_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [OpenCode Go](/providers/opencode-go) |
 | Kimi Code | `KIMICODE_API_KEY` | `kimi-for-coding` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Kimi Code](/providers/kimicode) |
+| Hetzner (experimental) | `HETZNER_API_KEY` (`HETZNER_BASE_URL` optional) | `Qwen/Qwen3.6-35B-A3B-FP8` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Hetzner](/providers/hetzner) |
 | Azure OpenAI | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Azure OpenAI](/providers/azure) |
 | Oracle GenAI | `ORACLE_API_KEY` + `ORACLE_BASE_URL` | `openai.gpt-oss-120b` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Oracle GenAI](/providers/oracle) |
 | Ollama | `OLLAMA_BASE_URL` | `llama3.2` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Ollama](/providers/multiple-ollama) |
@@ -130,6 +131,13 @@ support, not every individual model capability exposed by an upstream provider.
   constrained by a rolling 5-hour window. Usage-cost tracking reports zero for
   Kimi Code, so `cost` load-balancing cannot price it; prefer conservative
   retry strategies.
+- **Hetzner (experimental)** — Hetzner declares the inference API experimental:
+  expect breaking changes and no SLA. The model catalogue and rate-limit windows
+  change while the experiment runs; query the live `/v1/models` endpoint and the
+  official docs instead of relying on snapshots. Free while experimental, so
+  usage-cost tracking reports zero and `cost` load-balancing cannot price it.
+  No embeddings endpoint; chat, `/v1/responses` (via chat), model listing, and
+  passthrough only.
 - **Configured model lists** — available for every provider with
   `<PROVIDER>_MODELS`, for example
   `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` or

@@ -181,6 +181,7 @@
                     "providers/llmd",
                     "providers/multiple-ollama",
                     "providers/kimicode",
+                    "providers/hetzner",
                     {
                         "group": "Cloud Platforms",
                         "icon": "cloud",
