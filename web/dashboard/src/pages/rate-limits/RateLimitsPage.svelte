@@ -97,10 +97,12 @@
   <RateLimitEditor />
 
   {#if (rateLimits.rateLimits.length > 0 || rateLimits.rateLimitFilter) && rateLimits.rateLimitsAvailable && !auth.authError}
-    <nav class="rate-limit-tabs" aria-label="Rate limit scope">
+    <div class="rate-limit-tabs" role="tablist" aria-label="Rate limit scope">
       {#each rateLimits.tabCounts() as tab (tab.scope)}
         <button
           type="button"
+          role="tab"
+          aria-selected={rateLimits.rateLimitActiveScope === tab.scope}
           class="rate-limit-tab scope-{tab.scope}"
           class:active={rateLimits.rateLimitActiveScope === tab.scope}
           onclick={() => rateLimits.setActiveScope(tab.scope)}
@@ -109,7 +111,7 @@
           <span class="rate-limit-tab-count">{tab.count}</span>
         </button>
       {/each}
-    </nav>
+    </div>
 
     {#if visibleGroup}
       <section class="rate-limit-group scope-{visibleGroup.scope}">
