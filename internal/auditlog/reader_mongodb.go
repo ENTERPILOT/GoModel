@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -282,7 +283,21 @@ func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
 	if params.Stream != nil {
 		matchFilters = append(matchFilters, bson.E{Key: "stream", Value: *params.Stream})
 	}
-	if params.Search != "" {
+	if params.Search != "" && isCanonicalUUID(params.Search) {
+		// A full canonical UUID is a pasted identifier: match the indexed
+		// identity fields by equality (both spellings — stored ids are
+		// lowercase, pastes may not be) instead of the regex sweep below.
+		// Mirrors the SQL reader's fast path, including its trade-off: a UUID
+		// that only appears inside free text no longer matches.
+		spellings := bson.A{params.Search, strings.ToLower(params.Search)}
+		exact := bson.D{{Key: "$in", Value: spellings}}
+		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
+			bson.D{{Key: "_id", Value: exact}},
+			bson.D{{Key: "request_id", Value: exact}},
+			bson.D{{Key: "auth_key_id", Value: exact}},
+			bson.D{{Key: "session_id", Value: exact}},
+		}})
+	} else if params.Search != "" {
 		pattern := regexp.QuoteMeta(params.Search)
 		regex := bson.D{{Key: "$regex", Value: pattern}, {Key: "$options", Value: "i"}}
 		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{

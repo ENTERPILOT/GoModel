@@ -2,6 +2,7 @@
   // Requests by Status + Provider Latency charts fed by /admin/audit/stats.
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
+  import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import { chartColors, resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
   import { formatNumber } from "$lib/utils/format.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
@@ -117,6 +118,11 @@
       </div>
     </div>
   {/if}
+{:else if auditStatsState.loading}
+  <!-- First load: hold the section's place instead of popping it in. -->
+  <div class="model-chart-section audit-stats-section">
+    <LoadingState label={m.overview_loading_request_stats()} />
+  </div>
 {/if}
 
 <style>

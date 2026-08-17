@@ -38,6 +38,7 @@ class UsageDataStore {
   daily = $state([]);
   cacheOverview = $state(emptyCacheOverview());
   loading = $state(false);
+  cacheLoading = $state(false);
   #usageController = null;
   #cacheController = null;
 
@@ -99,6 +100,7 @@ class UsageDataStore {
     if (this.#cacheController) this.#cacheController.abort();
     const controller = new AbortController();
     this.#cacheController = controller;
+    this.cacheLoading = true;
     try {
       const queryStr =
         dateRange.queryStr() + "&interval=" + dateRange.interval + extraQuery;
@@ -130,6 +132,7 @@ class UsageDataStore {
     } finally {
       if (this.#cacheController === controller) {
         this.#cacheController = null;
+        this.cacheLoading = false;
       }
     }
   }

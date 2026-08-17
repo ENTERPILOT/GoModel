@@ -1,6 +1,7 @@
 <script>
   // Tokens cache meter: share of input tokens over the selected period split
   // into regular / prompt-cached / locally-cached segments.
+  import Spinner from "$lib/components/atoms/Spinner.svelte";
   import { usageData } from "$lib/stores/usageData.svelte.js";
   import { formatNumber } from "$lib/utils/format.js";
   import {
@@ -21,6 +22,11 @@
   );
   const visible = $derived(
     cacheMeterVisible(usageData.summary, usageData.cacheOverview, cacheEnabled),
+  );
+  // With segments on screen, refetches settle in place; the spinner only
+  // covers the first load of an empty meter.
+  const loading = $derived(
+    !visible && (usageData.loading || usageData.cacheLoading),
   );
 </script>
 
@@ -46,7 +52,9 @@
         {/if}
       </div>
     {/each}
-    {#if !visible}
+    {#if loading}
+      <Spinner size={16} label={m.usage_loading()} />
+    {:else if !visible}
       <span class="cache-meter-empty">{m.overview_no_usage()}</span>
     {/if}
   </div>

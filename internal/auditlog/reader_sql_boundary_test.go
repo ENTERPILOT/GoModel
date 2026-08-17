@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,6 +129,75 @@ func TestSQLReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
 		}
 		if result.Entries[0].ID != "team-match" {
 			t.Fatalf("expected matching entry %q, got %q", "team-match", result.Entries[0].ID)
+		}
+	})
+}
+
+// A full canonical UUID takes the indexed-identifier fast path: equality on
+// id/request_id/auth_key_id/session_id, case-insensitively — and deliberately
+// no longer the LIKE sweep over the free-text columns.
+func TestSQLReaderGetLogs_SearchUUIDMatchesIdentifierColumns(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		const searchUUID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+
+		ctx := context.Background()
+		if err := store.WriteBatch(ctx, []*LogEntry{
+			{
+				ID:             "request-id-match",
+				Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
+				RequestedModel: "gpt-5",
+				Provider:       "openai",
+				RequestID:      searchUUID,
+			},
+			{
+				ID:             "session-id-match",
+				Timestamp:      time.Date(2026, 1, 16, 11, 0, 0, 0, time.UTC),
+				RequestedModel: "gpt-5",
+				Provider:       "openai",
+				SessionID:      searchUUID,
+			},
+			{
+				// A UUID buried in an error message is not an identifier hit:
+				// the fast path skips the free-text columns on purpose.
+				ID:             "error-message-only",
+				Timestamp:      time.Date(2026, 1, 16, 10, 0, 0, 0, time.UTC),
+				RequestedModel: "gpt-5",
+				Provider:       "openai",
+				ErrorType:      "provider_error",
+				Data:           &LogData{ErrorMessage: "upstream rejected request " + searchUUID},
+			},
+		}); err != nil {
+			t.Fatalf("failed to seed audit logs: %v", err)
+		}
+
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
+
+		// Uppercase paste must still find the lowercase stored identifiers.
+		result, err := reader.GetLogs(ctx, LogQueryParams{
+			Search: strings.ToUpper(searchUUID),
+			Limit:  10,
+		})
+		if err != nil {
+			t.Fatalf("GetLogs returned error: %v", err)
+		}
+
+		if result.Total != 2 {
+			t.Fatalf("expected 2 logs in search result, got %d", result.Total)
+		}
+		if len(result.Entries) != 2 {
+			t.Fatalf("expected 2 returned entries, got %d", len(result.Entries))
+		}
+		if result.Entries[0].ID != "request-id-match" || result.Entries[1].ID != "session-id-match" {
+			t.Fatalf("expected identifier matches, got %q and %q",
+				result.Entries[0].ID, result.Entries[1].ID)
 		}
 	})
 }

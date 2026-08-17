@@ -1,7 +1,9 @@
 <script>
   // Standard toolbar search field: magnifier icon inside a text input, with
-  // an optional trailing clear action.
+  // an optional trailing clear action. `loading` shows a small trailing
+  // spinner while a search-triggered fetch is in flight.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import Spinner from "$lib/components/atoms/Spinner.svelte";
   import { Search, X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -13,6 +15,7 @@
     oninput = undefined,
     onclear = undefined,
     clearLabel = "",
+    loading = false,
     class: className = "",
   } = $props();
 
@@ -38,6 +41,11 @@
     bind:value
     {oninput}
   />
+  {#if loading}
+    <span class="filter-input-spinner" class:with-clear={!!(onclear && value)}>
+      <Spinner size={14} label={m.common_loading()} />
+    </span>
+  {/if}
   {#if onclear && value}
     <button
       type="button"
@@ -81,6 +89,20 @@
     color: var(--text-muted);
     pointer-events: none;
     transform: translateY(-50%);
+  }
+
+  .filter-input-spinner {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    display: inline-flex;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  /* Make room for the trailing clear button when both are shown. */
+  .filter-input-spinner.with-clear {
+    right: 38px;
   }
 
   .filter-input-clear {
