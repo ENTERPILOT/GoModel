@@ -100,9 +100,60 @@ func (o *StreamUsageObserver) WantsJSONEvent(raw []byte) bool {
 
 func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]any) {
 	entry := o.extractUsageFromEvent(chunk)
-	if entry != nil {
-		o.cachedEntry = entry
+	if entry == nil {
+		return
 	}
+	o.cachedEntry = o.mergeWithCachedEntry(entry)
+}
+
+// mergeWithCachedEntry folds usage from an earlier event into the latest one.
+// Providers that report usage across events (Anthropic: input tokens in
+// message_start, output tokens in the final message_delta) need the pieces
+// combined; providers with cumulative usage chunks (OpenAI) are unaffected
+// because their later events carry every field. Costs are recomputed when the
+// merge changes token counts.
+func (o *StreamUsageObserver) mergeWithCachedEntry(entry *UsageEntry) *UsageEntry {
+	cached := o.cachedEntry
+	if cached == nil {
+		return entry
+	}
+
+	merged := false
+	if entry.InputTokens == 0 && cached.InputTokens > 0 {
+		entry.InputTokens = cached.InputTokens
+		merged = true
+	}
+	if entry.OutputTokens == 0 && cached.OutputTokens > 0 {
+		entry.OutputTokens = cached.OutputTokens
+		merged = true
+	}
+	if entry.ProviderID == "" {
+		entry.ProviderID = cached.ProviderID
+	}
+	for key, value := range cached.RawData {
+		if entry.RawData == nil {
+			entry.RawData = make(map[string]any, len(cached.RawData))
+		}
+		if _, exists := entry.RawData[key]; !exists {
+			entry.RawData[key] = value
+			merged = true
+		}
+	}
+	if !merged {
+		return entry
+	}
+
+	if entry.TotalTokens < entry.InputTokens+entry.OutputTokens {
+		entry.TotalTokens = entry.InputTokens + entry.OutputTokens
+	}
+	var pricingArgs []*core.ModelPricing
+	if o.pricingResolver != nil {
+		if p := o.pricingResolver.ResolvePricing(o.pricingModel(entry.Model), o.pricingProvider()); p != nil {
+			pricingArgs = append(pricingArgs, p)
+		}
+	}
+	applyUsageCosts(entry, o.provider, o.endpoint, pricingArgs...)
+	return entry
 }
 
 func (o *StreamUsageObserver) OnStreamClose() {
@@ -125,13 +176,28 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 
 	usageRaw, ok := chunk["usage"]
 	if !ok {
-		if eventType, _ := chunk["type"].(string); eventType == "response.completed" || eventType == "response.done" {
+		switch eventType, _ := chunk["type"].(string); eventType {
+		case "response.completed", "response.done":
 			if response, respOK := chunk["response"].(map[string]any); respOK {
 				usageRaw, ok = response["usage"]
 				if id, idOK := response["id"].(string); idOK && id != "" {
 					providerID = id
 				}
 				if m, modelOK := response["model"].(string); modelOK && m != "" {
+					model = m
+				}
+			}
+		case "message_start":
+			// Anthropic-native streams report input_tokens (and cache token
+			// details) only here, nested under "message"; the final
+			// message_delta usually carries just output_tokens. Both events
+			// are extracted and merged in OnJSONEvent.
+			if message, msgOK := chunk["message"].(map[string]any); msgOK {
+				usageRaw, ok = message["usage"]
+				if id, idOK := message["id"].(string); idOK && id != "" {
+					providerID = id
+				}
+				if m, modelOK := message["model"].(string); modelOK && m != "" {
 					model = m
 				}
 			}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -125,6 +126,111 @@ func TestMessages_Streaming(t *testing.T) {
 		!provider.capturedChatReq.StreamOptions.IncludeUsage {
 		t.Error("translated stream request did not request usage")
 	}
+}
+
+func TestMessages_NativeAnthropicForwarding(t *testing.T) {
+	nativeResponse := `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"native"}],"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	provider := &mockProvider{
+		supportedModels: []string{"claude-test"},
+		providerTypes:   map[string]string{"claude-test": "anthropic"},
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    map[string][]string{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(nativeResponse)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	// cache_control does not survive the translated pipeline; the native path
+	// must forward it verbatim.
+	reqBody := `{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"Hi","cache_control":{"type":"ephemeral"}}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-beta", "claude-code-20250219")
+	rec := httptest.NewRecorder()
+
+	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != nativeResponse {
+		t.Errorf("body = %s, want provider-native response verbatim", rec.Body.String())
+	}
+
+	if provider.lastPassthroughProvider != "anthropic" {
+		t.Fatalf("passthrough provider = %q, want anthropic", provider.lastPassthroughProvider)
+	}
+	forwarded := provider.lastPassthroughReq
+	if forwarded == nil {
+		t.Fatal("provider did not receive a passthrough request")
+	}
+	if forwarded.Endpoint != "messages" || forwarded.Method != http.MethodPost {
+		t.Errorf("endpoint = %q method = %q", forwarded.Endpoint, forwarded.Method)
+	}
+	forwardedBody, err := io.ReadAll(forwarded.Body)
+	if err != nil {
+		t.Fatalf("read forwarded body: %v", err)
+	}
+	if string(forwardedBody) != reqBody {
+		t.Errorf("forwarded body = %s, want original request verbatim", forwardedBody)
+	}
+	if got := forwarded.Headers.Get("anthropic-beta"); got != "claude-code-20250219" {
+		t.Errorf("forwarded anthropic-beta = %q", got)
+	}
+}
+
+func TestRewriteMessagesModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		body  string
+		model string
+		want  string
+	}{
+		{
+			name:  "same model leaves body untouched",
+			body:  `{"model":"claude-test","max_tokens":1,"messages":[]}`,
+			model: "claude-test",
+			want:  `{"model":"claude-test","max_tokens":1,"messages":[]}`,
+		},
+		{
+			name:  "empty model leaves body untouched",
+			body:  `{"model":"claude-test"}`,
+			model: "",
+			want:  `{"model":"claude-test"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := rewriteMessagesModel([]byte(tt.body), tt.model)
+			if err != nil {
+				t.Fatalf("rewriteMessagesModel: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("body = %s, want %s", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("alias rewrites model field", func(t *testing.T) {
+		got, err := rewriteMessagesModel([]byte(`{"model":"my-alias","max_tokens":1}`), "claude-test")
+		if err != nil {
+			t.Fatalf("rewriteMessagesModel: %v", err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(got, &fields); err != nil {
+			t.Fatalf("unmarshal rewritten body: %v", err)
+		}
+		if fields["model"] != "claude-test" {
+			t.Errorf("model = %v, want claude-test", fields["model"])
+		}
+		if fields["max_tokens"] != float64(1) {
+			t.Errorf("max_tokens = %v, want 1", fields["max_tokens"])
+		}
+	})
 }
 
 func TestMessages_InvalidRequestReturnsAnthropicError(t *testing.T) {

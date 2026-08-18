@@ -33,7 +33,20 @@ var Registration = providers.Registration{
 const (
 	defaultBaseURL      = "https://api.anthropic.com/v1"
 	anthropicAPIVersion = "2023-06-01"
+
+	// oauthTokenPrefix identifies Claude subscription OAuth tokens (created
+	// with `claude setup-token`). Anthropic only authorizes these credentials
+	// for Claude Code-shaped traffic; they authenticate with a Bearer header
+	// plus the oauth beta instead of x-api-key.
+	oauthTokenPrefix = "sk-ant-oat"
+	oauthBetaFlag    = "oauth-2025-04-20"
+
+	anthropicBetaHeader = "anthropic-beta"
 )
+
+func isOAuthToken(key string) bool {
+	return strings.HasPrefix(key, oauthTokenPrefix)
+}
 
 var allowedAnthropicImageMediaTypes = map[string]struct{}{
 	"image/jpeg": {},
@@ -158,7 +171,13 @@ func (p *Provider) getBatchResultEndpoints(batchID string) map[string]string {
 // setHeaders sets the required headers for Anthropic API requests. It runs once
 // per outbound request; identified sessions resolve to a stable key.
 func (p *Provider) setHeaders(req *http.Request) {
-	req.Header.Set("x-api-key", p.keys.NextForContext(req.Context()))
+	key := p.keys.NextForContext(req.Context())
+	if isOAuthToken(key) {
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set(anthropicBetaHeader, oauthBetaFlag)
+	} else {
+		req.Header.Set("x-api-key", key)
+	}
 	req.Header.Set("anthropic-version", anthropicAPIVersion)
 
 	// Forward request ID if present in context
@@ -167,10 +186,40 @@ func (p *Provider) setHeaders(req *http.Request) {
 	}
 }
 
+// ensureOAuthBeta returns headers with the oauth beta flag merged into a
+// client-supplied anthropic-beta value. Forwarded headers override the ones set
+// by setHeaders, so a client that sends its own beta list would otherwise drop
+// the oauth flag subscription tokens require. Headers without an anthropic-beta
+// entry are returned unchanged: setHeaders' value survives in that case.
+func ensureOAuthBeta(headers http.Header) http.Header {
+	for name, values := range headers {
+		if !strings.EqualFold(strings.TrimSpace(name), anthropicBetaHeader) {
+			continue
+		}
+		for _, value := range values {
+			for flag := range strings.SplitSeq(value, ",") {
+				if strings.TrimSpace(flag) == oauthBetaFlag {
+					return headers
+				}
+			}
+		}
+		merged := make(http.Header, len(headers))
+		maps.Copy(merged, headers)
+		merged[name] = append(append([]string{}, values...), oauthBetaFlag)
+		return merged
+	}
+	return headers
+}
+
 // Passthrough forwards an opaque Anthropic-native request without typed translation.
 func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
+	}
+
+	headers := req.Headers
+	if p.keys.Any(isOAuthToken) {
+		headers = ensureOAuthBeta(headers)
 	}
 
 	resp, err := p.client.DoPassthrough(ctx, llmclient.Request{
@@ -181,7 +230,7 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 		Stream:          req.Stream,
 		StreamUncertain: req.StreamUncertain,
 		RawBodyReader:   req.Body,
-		Headers:         req.Headers,
+		Headers:         headers,
 	})
 	if err != nil {
 		return nil, err

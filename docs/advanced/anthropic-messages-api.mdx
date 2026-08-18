@@ -22,6 +22,22 @@ This differs from the [passthrough API](/features/passthrough-api): `/p/anthropi
 forwards bytes verbatim to the Anthropic upstream only, while the managed `/v1/messages`
 endpoint routes anywhere and is fully managed.
 
+## Native forwarding to Anthropic
+
+When a `/v1/messages` request resolves to an **Anthropic** provider, GoModel
+skips the translation round-trip and forwards the original request body
+verbatim (rewriting only the `model` field when an alias resolved to a
+different name), then relays the provider-native response or SSE stream
+unchanged. This preserves everything the canonical translation cannot —
+`cache_control` breakpoints, thinking-block signatures, `anthropic-beta`
+headers — which coding agents like Claude Code depend on. Rate limits,
+budgets, audit logging, and streaming usage tracking still apply.
+
+Native forwarding is automatic. Requests fall back to the translated pipeline
+when a feature that operates on the canonical request is in play: guardrails
+request patching, the response cache, or failover routing. Requests resolving
+to any non-Anthropic provider always translate.
+
 ## Supported endpoints
 
 | Endpoint | Behavior |
@@ -153,6 +169,11 @@ routes. Cost is computed from the actual provider that served the request, and u
 is recorded under the `/v1/messages` endpoint so it can be filtered in the dashboard.
 
 ## Limitations
+
+These limitations apply to the **translated** pipeline — requests routed to a
+non-Anthropic provider, or to Anthropic with guardrails, response cache, or
+failover engaged. Requests [natively forwarded to Anthropic](#native-forwarding-to-anthropic)
+are preserved byte-exactly and none of the below applies.
 
 `/v1/messages` translates through GoModel's canonical chat type. Anthropic-specific
 features that have no canonical equivalent are not preserved end to end:

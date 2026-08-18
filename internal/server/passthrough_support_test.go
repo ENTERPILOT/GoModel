@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -32,13 +33,7 @@ func TestBuildPassthroughHeadersSkipsConfiguredUserPathHeader(t *testing.T) {
 // and the default handler must not reject those requests before contacting the
 // upstream. Caught by greptile P1 on PR #701.
 func TestDefaultEnabledPassthroughProvidersIncludesHetzner(t *testing.T) {
-	found := false
-	for _, p := range defaultEnabledPassthroughProviders {
-		if p == "hetzner" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(defaultEnabledPassthroughProviders, "hetzner")
 	if !found {
 		t.Fatalf("defaultEnabledPassthroughProviders = %v, want hetzner included", defaultEnabledPassthroughProviders)
 	}

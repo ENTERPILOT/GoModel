@@ -717,3 +717,55 @@ data: [DONE]
 		t.Errorf("RewriteCostSaved = %v, want nil without pricing", *entries[0].RewriteCostSaved)
 	}
 }
+
+func TestStreamUsageObserverAnthropicNativeEvents(t *testing.T) {
+	logger := &trackingLogger{enabled: true}
+	observer := NewStreamUsageObserver(logger, "claude-fable-5", "anthropic", "req-native", "/v1/messages", nil)
+
+	// Anthropic-native streams split usage across events: input tokens and
+	// cache details arrive in message_start, output tokens in the final
+	// message_delta.
+	observer.OnJSONEvent(map[string]any{
+		"type": "message_start",
+		"message": map[string]any{
+			"id":    "msg_native",
+			"model": "claude-fable-5",
+			"usage": map[string]any{
+				"input_tokens":                float64(19560),
+				"output_tokens":               float64(3),
+				"cache_creation_input_tokens": float64(100),
+				"cache_read_input_tokens":     float64(200),
+			},
+		},
+	})
+	observer.OnJSONEvent(map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": "end_turn"},
+		"usage": map[string]any{"output_tokens": float64(31)},
+	})
+	observer.OnStreamClose()
+
+	entries := logger.getEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.InputTokens != 19560 {
+		t.Errorf("InputTokens = %d, want 19560", entry.InputTokens)
+	}
+	if entry.OutputTokens != 31 {
+		t.Errorf("OutputTokens = %d, want 31", entry.OutputTokens)
+	}
+	if entry.TotalTokens != 19591 {
+		t.Errorf("TotalTokens = %d, want 19591", entry.TotalTokens)
+	}
+	if entry.ProviderID != "msg_native" {
+		t.Errorf("ProviderID = %q, want msg_native", entry.ProviderID)
+	}
+	if entry.RawData["cache_creation_input_tokens"] != 100 {
+		t.Errorf("cache_creation_input_tokens = %v, want 100", entry.RawData["cache_creation_input_tokens"])
+	}
+	if entry.RawData["cache_read_input_tokens"] != 200 {
+		t.Errorf("cache_read_input_tokens = %v, want 200", entry.RawData["cache_read_input_tokens"])
+	}
+}
