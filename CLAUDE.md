@@ -86,7 +86,7 @@ docs(config): document default provider timeout
 
 Squash merges should preserve the PR title as the resulting commit subject.
 
-Do not add any information that the a PR or a commit was co-authored by Claude Code! Make PR description concise. Don't write commit description unless it contains essential information for reviewer. Don't add Claude links to PRs or commits.
+Do not add any information that a PR or a commit was co-authored by Claude Code! Make PR description concise. Don't write commit description unless it contains essential information for reviewer. Don't add Claude links to PRs or commits.
 
 ## Pull Request Guidance
 
