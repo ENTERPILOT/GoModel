@@ -255,9 +255,10 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 }
 
 // proxyPassthroughResponse relays a provider-native response (JSON or SSE) to
-// the client, attaching audit and usage stream observers. It is shared by the
+// the client, attaching audit and usage stream observers plus any
+// extraObservers the caller supplies for SSE responses. It is shared by the
 // /p/ passthrough surface and the /v1/messages native forwarding path.
-func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver, providerType, providerName, endpoint string, info *core.PassthroughRouteInfo, resp *core.PassthroughResponse) error {
+func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver, providerType, providerName, endpoint string, info *core.PassthroughRouteInfo, resp *core.PassthroughResponse, extraObservers ...streaming.Observer) error {
 	if resp == nil || resp.Body == nil {
 		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty passthrough response", nil))
 	}
@@ -310,7 +311,7 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		}
 		model = resolvedModelFromWorkflow(workflow, model)
 
-		observers := make([]streaming.Observer, 0, 2)
+		observers := make([]streaming.Observer, 0, 2+len(extraObservers))
 		if auditEnabled && streamEntry != nil {
 			if observer := auditlog.NewStreamLogObserver(logger, streamEntry, auditPath); observer != nil {
 				observers = append(observers, observer)
@@ -325,6 +326,7 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 				observers = append(observers, observer)
 			}
 		}
+		observers = append(observers, extraObservers...)
 		wrappedStream := streaming.NewObservedSSEStream(resp.Body, observers...)
 		if len(observers) > 0 {
 			defer func() {

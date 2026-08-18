@@ -12,8 +12,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 const anthropicProviderType = "anthropic"
@@ -100,7 +102,23 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 		AuditPath:          "/v1/messages",
 		Model:              req.Model,
 	}
-	return proxyPassthroughResponse(c, s.logger, s.usageLogger, s.pricingResolver, anthropicProviderType, providerName, "messages", info, resp)
+	// Request rewriters (ext extensions) that asked for response feedback
+	// observe the native SSE stream too; its Anthropic-native usage events
+	// are understood by the feedback observer.
+	var extraObservers []streaming.Observer
+	if hasResponseFeedbackObservers(c) {
+		extraObservers = append(extraObservers, &responseFeedbackStreamObserver{
+			ctx:          c.Request().Context(),
+			observers:    responseFeedbackObservers(c),
+			requestID:    requestIDFromContextOrHeader(c.Request()),
+			sessionID:    core.SessionIDFromContext(c.Request().Context()),
+			endpoint:     ext.Endpoint("/v1/messages"),
+			model:        req.Model,
+			providerType: anthropicProviderType,
+			providerName: providerName,
+		})
+	}
+	return proxyPassthroughResponse(c, s.logger, s.usageLogger, s.pricingResolver, anthropicProviderType, providerName, "messages", info, resp, extraObservers...)
 }
 
 // rewriteMessagesModel returns body with its top-level "model" value replaced
