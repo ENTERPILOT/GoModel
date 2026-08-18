@@ -32,16 +32,10 @@ func (s *translatedInferenceService) canForwardMessagesNatively(workflow *core.W
 	if workflow == nil || strings.TrimSpace(workflow.ProviderType) != anthropicProviderType {
 		return false
 	}
-	if s.translatedRequestPatcher != nil {
-		return false
-	}
 	if s.responseCache != nil && workflow.CacheEnabled() {
 		return false
 	}
-	if len(s.inference().FailoverSelectors(workflow)) > 0 {
-		return false
-	}
-	_, ok := s.provider.(core.RoutablePassthrough)
+	_, ok := s.nativeForwardingProvider(workflow)
 	return ok
 }
 
@@ -49,11 +43,6 @@ func (s *translatedInferenceService) canForwardMessagesNatively(workflow *core.W
 // resolved Anthropic provider and relays the provider-native response (JSON or
 // SSE) unchanged, with admission, audit, and streaming usage accounting.
 func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req *core.ChatRequest, workflow *core.Workflow) error {
-	passthroughProvider, ok := s.provider.(core.RoutablePassthrough)
-	if !ok {
-		return handleError(c, core.NewInvalidRequestError("provider passthrough is not supported by the current provider router", nil))
-	}
-
 	body, err := requestBodyBytes(c)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
@@ -77,7 +66,7 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 		providerName = workflow.Resolution.ProviderName
 	}
 
-	resp, err := passthroughProvider.Passthrough(ctx, anthropicProviderType, &core.PassthroughRequest{
+	passthroughReq := &core.PassthroughRequest{
 		Method:       http.MethodPost,
 		Endpoint:     "messages",
 		Operation:    "anthropic.messages",
@@ -86,9 +75,6 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 		Body:         io.NopCloser(bytes.NewReader(body)),
 		Headers:      buildPassthroughHeaders(ctx, c.Request().Header),
 		ProviderName: providerName,
-	})
-	if err != nil {
-		return handleError(c, err)
 	}
 
 	auditlog.EnrichEntryWithWorkflow(c, workflow)
@@ -118,7 +104,7 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 			providerName: providerName,
 		})
 	}
-	return proxyPassthroughResponse(c, s.logger, s.usageLogger, s.pricingResolver, anthropicProviderType, providerName, "messages", info, resp, extraObservers...)
+	return s.forwardNative(c, ctx, passthroughReq, info, extraObservers...)
 }
 
 // rewriteMessagesModel returns body with its top-level "model" value replaced

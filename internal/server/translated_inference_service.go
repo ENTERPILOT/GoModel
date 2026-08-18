@@ -443,8 +443,7 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 		return false, nil
 	}
 
-	passthroughProvider, ok := s.provider.(core.RoutablePassthrough)
-	if !ok {
+	if _, ok := s.nativeForwardingProvider(workflow); !ok {
 		return false, nil
 	}
 
@@ -453,33 +452,24 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 
 	const endpoint = "/chat/completions"
 	providerType := strings.TrimSpace(workflow.ProviderType)
-	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
+	model := resolvedModelFromWorkflow(workflow, req.Model)
+	passthroughReq := &core.PassthroughRequest{
 		Method:       c.Request().Method,
 		Endpoint:     endpoint,
 		Operation:    llmclient.OperationChat,
-		Model:        resolvedModelFromWorkflow(workflow, req.Model),
+		Model:        model,
 		Stream:       req.Stream,
 		Body:         c.Request().Body,
 		Headers:      buildPassthroughHeaders(ctx, c.Request().Header),
 		ProviderName: providerNameFromWorkflow(workflow),
-	})
-	if err != nil {
-		return true, handleError(c, err)
 	}
-
 	info := &core.PassthroughRouteInfo{
 		Provider:    providerType,
 		RawEndpoint: strings.TrimPrefix(endpoint, "/"),
 		AuditPath:   c.Request().URL.Path,
-		Model:       resolvedModelFromWorkflow(workflow, req.Model),
+		Model:       model,
 	}
-	passthrough := passthroughService{
-		provider:        s.provider,
-		logger:          s.logger,
-		usageLogger:     s.usageLogger,
-		pricingResolver: s.pricingResolver,
-	}
-	return true, passthrough.proxyPassthroughResponse(c, providerType, providerNameFromWorkflow(workflow), endpoint, info, resp)
+	return true, s.forwardNative(c, ctx, passthroughReq, info)
 }
 
 func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
