@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -125,6 +126,128 @@ func TestMessages_Streaming(t *testing.T) {
 		!provider.capturedChatReq.StreamOptions.IncludeUsage {
 		t.Error("translated stream request did not request usage")
 	}
+}
+
+func TestMessages_NativeAnthropicForwarding(t *testing.T) {
+	nativeResponse := `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"native"}],"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	provider := &mockProvider{
+		supportedModels: []string{"claude-test"},
+		providerTypes:   map[string]string{"claude-test": "anthropic"},
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    map[string][]string{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(nativeResponse)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	// cache_control does not survive the translated pipeline; the native path
+	// must forward it verbatim.
+	reqBody := `{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"Hi","cache_control":{"type":"ephemeral"}}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-beta", "claude-code-20250219")
+	rec := httptest.NewRecorder()
+
+	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != nativeResponse {
+		t.Errorf("body = %s, want provider-native response verbatim", rec.Body.String())
+	}
+
+	if provider.lastPassthroughProvider != "anthropic" {
+		t.Fatalf("passthrough provider = %q, want anthropic", provider.lastPassthroughProvider)
+	}
+	forwarded := provider.lastPassthroughReq
+	if forwarded == nil {
+		t.Fatal("provider did not receive a passthrough request")
+	}
+	if forwarded.Endpoint != "messages" || forwarded.Method != http.MethodPost {
+		t.Errorf("endpoint = %q method = %q", forwarded.Endpoint, forwarded.Method)
+	}
+	forwardedBody, err := io.ReadAll(forwarded.Body)
+	if err != nil {
+		t.Fatalf("read forwarded body: %v", err)
+	}
+	if string(forwardedBody) != reqBody {
+		t.Errorf("forwarded body = %s, want original request verbatim", forwardedBody)
+	}
+	if got := forwarded.Headers.Get("anthropic-beta"); got != "claude-code-20250219" {
+		t.Errorf("forwarded anthropic-beta = %q", got)
+	}
+}
+
+func TestRewriteMessagesModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		body  string
+		model string
+		want  string
+	}{
+		{
+			name:  "same model leaves body untouched",
+			body:  `{"model":"claude-test","max_tokens":1,"messages":[]}`,
+			model: "claude-test",
+			want:  `{"model":"claude-test","max_tokens":1,"messages":[]}`,
+		},
+		{
+			name:  "empty model leaves body untouched",
+			body:  `{"model":"claude-test"}`,
+			model: "",
+			want:  `{"model":"claude-test"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := rewriteMessagesModel([]byte(tt.body), tt.model)
+			if err != nil {
+				t.Fatalf("rewriteMessagesModel: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("body = %s, want %s", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("alias rewrites only the model value", func(t *testing.T) {
+		// Whitespace, member order, and numeric spelling elsewhere must
+		// survive the rewrite untouched.
+		body := `{"max_tokens": 1,  "model" : "my-alias" , "temperature": 1.50}`
+		want := `{"max_tokens": 1,  "model" : "claude-test" , "temperature": 1.50}`
+		got, err := rewriteMessagesModel([]byte(body), "claude-test")
+		if err != nil {
+			t.Fatalf("rewriteMessagesModel: %v", err)
+		}
+		if string(got) != want {
+			t.Errorf("body = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("duplicate model members rewrite the last one", func(t *testing.T) {
+		// Decoders keep the last duplicate member, so the rewrite must target
+		// it — rewriting the first would leave the effective model unchanged.
+		body := `{"model":"ignored","max_tokens":1,"model":"my-alias"}`
+		want := `{"model":"ignored","max_tokens":1,"model":"claude-test"}`
+		got, err := rewriteMessagesModel([]byte(body), "claude-test")
+		if err != nil {
+			t.Fatalf("rewriteMessagesModel: %v", err)
+		}
+		if string(got) != want {
+			t.Errorf("body = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("non-object body errors", func(t *testing.T) {
+		if _, err := rewriteMessagesModel([]byte(`[1,2]`), "claude-test"); err == nil {
+			t.Fatal("expected error for non-object body")
+		}
+	})
 }
 
 func TestMessages_InvalidRequestReturnsAnthropicError(t *testing.T) {

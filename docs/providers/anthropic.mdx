@@ -32,6 +32,31 @@ providers:
   it, keeping the OpenAI-compatible surface lenient.
 </Note>
 
+## Claude subscription (OAuth token)
+
+GoModel also accepts a Claude subscription OAuth token as the Anthropic
+credential. Generate one with `claude setup-token` (requires a Claude
+subscription — Pro, Max, Team, or Enterprise — and the Claude Code CLI) and
+set it as the provider key:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-oat01-...
+```
+
+Tokens with the `sk-ant-oat` prefix are detected automatically: GoModel sends
+them as `Authorization: Bearer` with the `oauth-2025-04-20` beta instead of
+`x-api-key`. No extra configuration is needed.
+
+<Warning>
+  Anthropic authorizes subscription OAuth tokens **only for Claude Code
+  traffic**. Use this to route your own Claude Code through GoModel (see the
+  [Claude Code guide](/guides/claude-code)); requests from other clients are
+  rejected upstream with "This credential is only authorized for use with
+  Claude Code". Endpoints outside the Claude Code surface (such as model
+  listing) may also be rejected — if provider model discovery fails, configure
+  the `models` list for the provider explicitly.
+</Warning>
+
 ## Reasoning effort mapping
 
 GoModel accepts the OpenAI-shaped `"reasoning": {"effort": "..."}` object as

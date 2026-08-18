@@ -139,6 +139,13 @@ func (o *responseFeedbackStreamObserver) OnJSONEvent(payload map[string]any) {
 	if details, ok := nestedMap(usageMap["input_tokens_details"]); ok {
 		usage.read = max(usage.read, firstNumericInt(details, "cached_tokens"))
 	}
+	// Merge rather than replace: Anthropic-native streams split usage across
+	// events (input and cache tokens in message_start, output in the final
+	// message_delta), while cumulative dialects report full usage in their
+	// last event — max keeps both correct.
+	usage.input = max(usage.input, o.usage.input)
+	usage.read = max(usage.read, o.usage.read)
+	usage.write = max(usage.write, o.usage.write)
 	o.usage = usage
 }
 
