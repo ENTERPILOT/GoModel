@@ -229,6 +229,20 @@ func TestRewriteMessagesModel(t *testing.T) {
 		}
 	})
 
+	t.Run("duplicate model members rewrite the last one", func(t *testing.T) {
+		// Decoders keep the last duplicate member, so the rewrite must target
+		// it — rewriting the first would leave the effective model unchanged.
+		body := `{"model":"ignored","max_tokens":1,"model":"my-alias"}`
+		want := `{"model":"ignored","max_tokens":1,"model":"claude-test"}`
+		got, err := rewriteMessagesModel([]byte(body), "claude-test")
+		if err != nil {
+			t.Fatalf("rewriteMessagesModel: %v", err)
+		}
+		if string(got) != want {
+			t.Errorf("body = %s, want %s", got, want)
+		}
+	})
+
 	t.Run("non-object body errors", func(t *testing.T) {
 		if _, err := rewriteMessagesModel([]byte(`[1,2]`), "claude-test"); err == nil {
 			t.Fatal("expected error for non-object body")

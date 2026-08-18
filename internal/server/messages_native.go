@@ -120,6 +120,11 @@ func rewriteMessagesModel(body []byte, model string) ([]byte, error) {
 	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
 		return nil, errors.New("request body is not a JSON object")
 	}
+	// Walk every top-level member and remember the span of the last "model"
+	// value: decoders keep the last duplicate member, so that is the one the
+	// resolved model came from and the one to rewrite.
+	var modelRaw json.RawMessage
+	var modelEnd int64
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
@@ -133,24 +138,27 @@ func rewriteMessagesModel(body []byte, model string) ([]byte, error) {
 		if key != "model" {
 			continue
 		}
-		var current string
-		_ = json.Unmarshal(raw, &current)
-		if current == model {
-			return body, nil
-		}
-		encoded, err := json.Marshal(model)
-		if err != nil {
-			return nil, err
-		}
-		// The model value is a scalar, so raw holds its exact source bytes
-		// and InputOffset points just past them.
-		end := dec.InputOffset()
-		start := end - int64(len(raw))
-		rewritten := make([]byte, 0, int64(len(body))-int64(len(raw))+int64(len(encoded)))
-		rewritten = append(rewritten, body[:start]...)
-		rewritten = append(rewritten, encoded...)
-		rewritten = append(rewritten, body[end:]...)
-		return rewritten, nil
+		modelRaw = raw
+		modelEnd = dec.InputOffset()
 	}
-	return body, nil
+	if modelRaw == nil {
+		return body, nil
+	}
+	var current string
+	_ = json.Unmarshal(modelRaw, &current)
+	if current == model {
+		return body, nil
+	}
+	encoded, err := json.Marshal(model)
+	if err != nil {
+		return nil, err
+	}
+	// The model value is a scalar, so modelRaw holds its exact source bytes
+	// and modelEnd points just past them.
+	start := modelEnd - int64(len(modelRaw))
+	rewritten := make([]byte, 0, int64(len(body))-int64(len(modelRaw))+int64(len(encoded)))
+	rewritten = append(rewritten, body[:start]...)
+	rewritten = append(rewritten, encoded...)
+	rewritten = append(rewritten, body[modelEnd:]...)
+	return rewritten, nil
 }
