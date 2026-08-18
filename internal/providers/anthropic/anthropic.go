@@ -168,10 +168,23 @@ func (p *Provider) getBatchResultEndpoints(batchID string) map[string]string {
 	return cloned
 }
 
+// pinnedKeyContextKey carries a credential selected before the header hook
+// runs. Passthrough pins its key so header adaptation (the oauth beta merge)
+// and the auth header always describe the same credential, even when the
+// keyring mixes OAuth tokens and API keys.
+type pinnedKeyContextKey struct{}
+
+func withPinnedKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, pinnedKeyContextKey{}, key)
+}
+
 // setHeaders sets the required headers for Anthropic API requests. It runs once
 // per outbound request; identified sessions resolve to a stable key.
 func (p *Provider) setHeaders(req *http.Request) {
-	key := p.keys.NextForContext(req.Context())
+	key, pinned := req.Context().Value(pinnedKeyContextKey{}).(string)
+	if !pinned {
+		key = p.keys.NextForContext(req.Context())
+	}
 	if isOAuthToken(key) {
 		req.Header.Set("Authorization", "Bearer "+key)
 		req.Header.Set(anthropicBetaHeader, oauthBetaFlag)
@@ -217,8 +230,12 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
 	}
 
+	// Select the credential once and pin it for setHeaders, so the beta
+	// merge below and the auth header are always based on the same key.
+	key := p.keys.NextForContext(ctx)
+	ctx = withPinnedKey(ctx, key)
 	headers := req.Headers
-	if p.keys.Any(isOAuthToken) {
+	if isOAuthToken(key) {
 		headers = ensureOAuthBeta(headers)
 	}
 

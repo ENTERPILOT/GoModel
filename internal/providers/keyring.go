@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"slices"
 	"sync/atomic"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -143,15 +142,6 @@ func rendezvousKeyScore(sessionID, key string) [sha256.Size]byte {
 	var score [sha256.Size]byte
 	copy(score[:], hash.Sum(nil))
 	return score
-}
-
-// Any reports whether at least one configured key satisfies pred. It never
-// advances the rotation. An empty or nil ring reports false.
-func (k *Keyring) Any(pred func(string) bool) bool {
-	if k == nil || pred == nil {
-		return false
-	}
-	return slices.ContainsFunc(k.keys, pred)
 }
 
 // Primary returns the first configured key without advancing the rotation.

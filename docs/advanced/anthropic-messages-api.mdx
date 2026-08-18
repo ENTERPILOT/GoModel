@@ -173,7 +173,8 @@ is recorded under the `/v1/messages` endpoint so it can be filtered in the dashb
 These limitations apply to the **translated** pipeline — requests routed to a
 non-Anthropic provider, or to Anthropic with guardrails, response cache, or
 failover engaged. Requests [natively forwarded to Anthropic](#native-forwarding-to-anthropic)
-are preserved byte-exactly and none of the below applies.
+are preserved byte-for-byte apart from the `model` value when an alias
+resolved to a different name, and none of the below applies.
 
 `/v1/messages` translates through GoModel's canonical chat type. Anthropic-specific
 features that have no canonical equivalent are not preserved end to end:

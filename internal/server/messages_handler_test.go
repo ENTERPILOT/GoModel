@@ -215,20 +215,23 @@ func TestRewriteMessagesModel(t *testing.T) {
 		})
 	}
 
-	t.Run("alias rewrites model field", func(t *testing.T) {
-		got, err := rewriteMessagesModel([]byte(`{"model":"my-alias","max_tokens":1}`), "claude-test")
+	t.Run("alias rewrites only the model value", func(t *testing.T) {
+		// Whitespace, member order, and numeric spelling elsewhere must
+		// survive the rewrite untouched.
+		body := `{"max_tokens": 1,  "model" : "my-alias" , "temperature": 1.50}`
+		want := `{"max_tokens": 1,  "model" : "claude-test" , "temperature": 1.50}`
+		got, err := rewriteMessagesModel([]byte(body), "claude-test")
 		if err != nil {
 			t.Fatalf("rewriteMessagesModel: %v", err)
 		}
-		var fields map[string]any
-		if err := json.Unmarshal(got, &fields); err != nil {
-			t.Fatalf("unmarshal rewritten body: %v", err)
+		if string(got) != want {
+			t.Errorf("body = %s, want %s", got, want)
 		}
-		if fields["model"] != "claude-test" {
-			t.Errorf("model = %v, want claude-test", fields["model"])
-		}
-		if fields["max_tokens"] != float64(1) {
-			t.Errorf("max_tokens = %v, want 1", fields["max_tokens"])
+	})
+
+	t.Run("non-object body errors", func(t *testing.T) {
+		if _, err := rewriteMessagesModel([]byte(`[1,2]`), "claude-test"); err == nil {
+			t.Fatal("expected error for non-object body")
 		}
 	})
 }

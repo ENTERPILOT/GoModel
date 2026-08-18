@@ -5313,6 +5313,75 @@ func TestPassthroughOAuthToken(t *testing.T) {
 	}
 }
 
+// A keyring mixing OAuth tokens and API keys must keep each request
+// self-consistent: the oauth beta merge and the auth header always describe
+// the credential actually dispatched.
+func TestPassthroughMixedKeyringConsistency(t *testing.T) {
+	type observed struct {
+		auth   string
+		apiKey string
+		beta   string
+	}
+	var got []observed
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, observed{
+			auth:   r.Header.Get("Authorization"),
+			apiKey: r.Header.Get("x-api-key"),
+			beta:   strings.Join(r.Header.Values(anthropicBetaHeader), ","),
+		})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	p := &Provider{
+		keys:                 providers.NewKeyring("sk-ant-oat01-a", "sk-ant-api03-b"),
+		batchResultEndpoints: make(map[string]map[string]string),
+	}
+	cfg := llmclient.DefaultConfig("anthropic", server.URL)
+	p.client = llmclient.NewWithHTTPClient(server.Client(), cfg, p.setHeaders)
+
+	for range 4 {
+		headers := http.Header{"Content-Type": {"application/json"}}
+		headers.Set(anthropicBetaHeader, "claude-code-20250219")
+		resp, err := p.Passthrough(context.Background(), &core.PassthroughRequest{
+			Method:   http.MethodPost,
+			Endpoint: "messages",
+			Body:     io.NopCloser(strings.NewReader(`{"model":"claude-sonnet-5"}`)),
+			Headers:  headers,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		_ = resp.Body.Close()
+	}
+
+	sawOAuth, sawAPIKey := false, false
+	for i, o := range got {
+		hasOAuthBeta := strings.Contains(o.beta, oauthBetaFlag)
+		switch {
+		case o.auth != "":
+			sawOAuth = true
+			if o.apiKey != "" {
+				t.Errorf("request %d: both Authorization and x-api-key set", i)
+			}
+			if !hasOAuthBeta {
+				t.Errorf("request %d: OAuth credential without oauth beta (beta = %q)", i, o.beta)
+			}
+		case o.apiKey != "":
+			sawAPIKey = true
+			if hasOAuthBeta {
+				t.Errorf("request %d: API key with oauth beta (beta = %q)", i, o.beta)
+			}
+		default:
+			t.Errorf("request %d: no credential sent", i)
+		}
+	}
+	if !sawOAuth || !sawAPIKey {
+		t.Fatalf("rotation did not cover both credentials (oauth=%v apiKey=%v)", sawOAuth, sawAPIKey)
+	}
+}
+
 func TestResolveDefaultMaxTokens(t *testing.T) {
 	tests := []struct {
 		name string

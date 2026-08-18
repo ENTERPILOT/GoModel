@@ -2,11 +2,14 @@ package server
 
 import (
 	"bytes"
+	// encoding/json rather than goccy: rewriteMessagesModel needs the
+	// decoder's InputOffset to splice the model value in place.
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 
-	"github.com/goccy/go-json"
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
@@ -100,28 +103,54 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 	return proxyPassthroughResponse(c, s.logger, s.usageLogger, s.pricingResolver, anthropicProviderType, providerName, "messages", info, resp)
 }
 
-// rewriteMessagesModel returns body with its "model" field replaced by the
-// resolved model, leaving the body untouched when it already matches so
-// aliased/renamed models reach the provider under their real name.
+// rewriteMessagesModel returns body with its top-level "model" value replaced
+// by the resolved model so aliased/renamed models reach the provider under
+// their real name. Only the model value's bytes are spliced; every other byte
+// of the request is preserved. The body is returned unchanged when the model
+// already matches or has no model field (upstream validation rejects that).
 func rewriteMessagesModel(body []byte, model string) ([]byte, error) {
 	if strings.TrimSpace(model) == "" {
 		return body, nil
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &fields); err != nil {
-		return nil, err
-	}
-	var current string
-	if raw, ok := fields["model"]; ok {
-		_ = json.Unmarshal(raw, &current)
-	}
-	if current == model {
-		return body, nil
-	}
-	encoded, err := json.Marshal(model)
+	dec := json.NewDecoder(bytes.NewReader(body))
+	tok, err := dec.Token()
 	if err != nil {
 		return nil, err
 	}
-	fields["model"] = encoded
-	return json.Marshal(fields)
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return nil, errors.New("request body is not a JSON object")
+	}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, _ := keyTok.(string)
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, err
+		}
+		if key != "model" {
+			continue
+		}
+		var current string
+		_ = json.Unmarshal(raw, &current)
+		if current == model {
+			return body, nil
+		}
+		encoded, err := json.Marshal(model)
+		if err != nil {
+			return nil, err
+		}
+		// The model value is a scalar, so raw holds its exact source bytes
+		// and InputOffset points just past them.
+		end := dec.InputOffset()
+		start := end - int64(len(raw))
+		rewritten := make([]byte, 0, int64(len(body))-int64(len(raw))+int64(len(encoded)))
+		rewritten = append(rewritten, body[:start]...)
+		rewritten = append(rewritten, encoded...)
+		rewritten = append(rewritten, body[end:]...)
+		return rewritten, nil
+	}
+	return body, nil
 }

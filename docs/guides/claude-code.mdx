@@ -42,7 +42,7 @@ settings.
   are separate. API key usage is billed as API usage.
 </Warning>
 
-**Option B — Claude subscription token (Pro/Max):**
+**Option B — Claude subscription token (Pro, Max, Team, or Enterprise):**
 
 1. Run `claude setup-token` on a machine where Claude Code is logged in to
    your subscription.
@@ -180,8 +180,9 @@ export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 
 The managed base URL serves `/v1/messages` with
 [native forwarding](/advanced/anthropic-messages-api#native-forwarding-to-anthropic):
-requests that resolve to Anthropic are relayed byte-exactly (preserving
-`cache_control`, thinking signatures, and beta headers) while rate limits,
+requests that resolve to Anthropic are relayed unchanged apart from model
+alias resolution (preserving `cache_control`, thinking signatures, and beta
+headers) while rate limits,
 budgets, audit, and usage tracking apply — and model aliases or virtual models
 can route Claude Code to other providers. Alternatively,
 `ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic` uses raw passthrough
