@@ -105,6 +105,9 @@ func TestProxyPassthroughNonStreamingLogsUsageForNon200Success(t *testing.T) {
 		if len(usageLogger.entries) != 1 {
 			t.Fatalf("status %d: usage entries = %d, want 1", status, len(usageLogger.entries))
 		}
+		if rec.Code != status {
+			t.Fatalf("status = %d, want %d", rec.Code, status)
+		}
 	}
 }
 
@@ -146,6 +149,9 @@ func TestProxyPassthroughNonStreamingSkipsNonAccountableResponses(t *testing.T) 
 			}
 			if len(usageLogger.entries) != 0 {
 				t.Fatalf("usage entries = %d, want 0", len(usageLogger.entries))
+			}
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.status)
 			}
 		})
 	}
