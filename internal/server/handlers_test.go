@@ -4990,6 +4990,7 @@ func TestResponsesLifecycle_RetrievesStoredResponseAndInputItems(t *testing.T) {
 	if createRec.Code != http.StatusOK {
 		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
 	}
+	srv.handler.drainSnapshotWrites()
 
 	getReq := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_store_1", nil)
 	getRec := httptest.NewRecorder()
@@ -5061,6 +5062,7 @@ func TestResponsesLifecycle_StoresConcreteProviderName(t *testing.T) {
 	if createRec.Code != http.StatusOK {
 		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
 	}
+	srv.handler.drainSnapshotWrites()
 
 	stored, err := store.Get(context.Background(), "resp_provider_name_1")
 	if err != nil {
@@ -5097,6 +5099,7 @@ func TestResponsesLifecycle_StoreFalseSkipsLocalSnapshot(t *testing.T) {
 	if createRec.Code != http.StatusOK {
 		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
 	}
+	srv.handler.drainSnapshotWrites()
 
 	if _, err := store.Get(context.Background(), "resp_store_false_1"); !errors.Is(err, responsestore.ErrNotFound) {
 		t.Fatalf("store.Get() error = %v, want ErrNotFound", err)
@@ -5134,7 +5137,119 @@ func TestResponsesLifecycle_ReturnsSuccessWhenSnapshotStoreFails(t *testing.T) {
 	if resp.ID != "resp_store_failure_1" {
 		t.Fatalf("response id = %q, want resp_store_failure_1", resp.ID)
 	}
+	srv.handler.drainSnapshotWrites()
 
+	counter := observability.ResponseSnapshotStoreFailures.WithLabelValues("mock", "", "store")
+	if got := testutil.ToFloat64(counter); got != 1 {
+		t.Fatalf("snapshot store failures = %v, want 1", got)
+	}
+}
+
+// blockingResponseStore delays Create until released, to prove the request
+// path does not wait on snapshot persistence.
+type blockingResponseStore struct {
+	responsestore.Store
+	release chan struct{}
+	created chan string
+}
+
+func (s *blockingResponseStore) Create(ctx context.Context, r *responsestore.StoredResponse) error {
+	<-s.release
+	if err := s.Store.Create(ctx, r); err != nil {
+		return err
+	}
+	s.created <- r.Response.ID
+	return nil
+}
+
+func TestResponsesLifecycle_SnapshotWriteDoesNotBlockResponse(t *testing.T) {
+	inner := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
+	store := &blockingResponseStore{
+		Store:   inner,
+		release: make(chan struct{}),
+		created: make(chan string, 1),
+	}
+	provider := &mockProvider{
+		supportedModels: []string{"gpt-5-mini"},
+		providerTypes: map[string]string{
+			"gpt-5-mini": "mock",
+		},
+		responsesResponse: &core.ResponsesResponse{
+			ID:     "resp_async_1",
+			Object: "response",
+			Model:  "gpt-5-mini",
+			Status: "completed",
+		},
+	}
+	srv := New(provider, &Config{ResponseStore: store})
+
+	// Release the blocked store write on every exit path so a hung request
+	// goroutine cannot outlive the test.
+	releaseOnce := sync.OnceFunc(func() { close(store.release) })
+	t.Cleanup(releaseOnce)
+
+	// The store write is blocked, yet the request must complete.
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		srv.ServeHTTP(rec, req)
+	}()
+	select {
+	case <-served:
+	case <-time.After(10 * time.Second):
+		t.Fatal("request blocked on the snapshot write; snapshot persistence must be asynchronous")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if _, err := inner.Get(context.Background(), "resp_async_1"); !errors.Is(err, responsestore.ErrNotFound) {
+		t.Fatalf("snapshot stored before release, Get() error = %v, want ErrNotFound", err)
+	}
+
+	// Releasing the write and draining must leave the snapshot stored.
+	releaseOnce()
+	srv.handler.drainSnapshotWrites()
+	if id := <-store.created; id != "resp_async_1" {
+		t.Fatalf("created id = %q, want resp_async_1", id)
+	}
+	if _, err := inner.Get(context.Background(), "resp_async_1"); err != nil {
+		t.Fatalf("store.Get() after drain error = %v", err)
+	}
+}
+
+func TestResponsesLifecycle_SnapshotWriteSkippedAfterDrain(t *testing.T) {
+	observability.ResetMetrics()
+	store := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
+	provider := &mockProvider{
+		supportedModels: []string{"gpt-5-mini"},
+		providerTypes: map[string]string{
+			"gpt-5-mini": "mock",
+		},
+		responsesResponse: &core.ResponsesResponse{
+			ID:     "resp_after_drain_1",
+			Object: "response",
+			Model:  "gpt-5-mini",
+			Status: "completed",
+		},
+	}
+	srv := New(provider, &Config{ResponseStore: store})
+	srv.handler.drainSnapshotWrites()
+
+	// A handler outliving the shutdown drain must still answer the client,
+	// but its snapshot write is skipped and recorded as a store failure.
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if _, err := store.Get(context.Background(), "resp_after_drain_1"); !errors.Is(err, responsestore.ErrNotFound) {
+		t.Fatalf("store.Get() error = %v, want ErrNotFound", err)
+	}
 	counter := observability.ResponseSnapshotStoreFailures.WithLabelValues("mock", "", "store")
 	if got := testutil.ToFloat64(counter); got != 1 {
 		t.Fatalf("snapshot store failures = %v, want 1", got)
@@ -5238,6 +5353,7 @@ func TestResponsesLifecycle_DeleteStoredResponseWithoutNativeSupport(t *testing.
 	if createRec.Code != http.StatusOK {
 		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
 	}
+	srv.handler.drainSnapshotWrites()
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/responses/resp_delete_1", nil)
 	deleteRec := httptest.NewRecorder()

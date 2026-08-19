@@ -46,6 +46,12 @@ func cloneResponse(src *StoredResponse) (*StoredResponse, error) {
 	return dst, err
 }
 
+// Clone deep-copies a snapshot. Callers that hand a snapshot to another
+// goroutine use it to detach from later mutations of the source response.
+func Clone(src *StoredResponse) (*StoredResponse, error) {
+	return cloneResponse(src)
+}
+
 // cloneResponseWithSize deep-copies a snapshot and reports its serialized size,
 // which the memory store uses for byte-budget accounting.
 func cloneResponseWithSize(src *StoredResponse) (*StoredResponse, int64, error) {

@@ -240,6 +240,14 @@ func (h *Handler) currentResponseStore() responsestore.Store {
 	return h.responseStore
 }
 
+// drainSnapshotWrites stops new background response snapshot writes and waits
+// for in-flight ones. Called during server shutdown before the response store
+// closes. It creates the (lazily initialized) inference service if needed so
+// the drain gate is set even when a request races shutdown into first use.
+func (h *Handler) drainSnapshotWrites() {
+	h.translatedInference().drainSnapshotWrites()
+}
+
 func (h *Handler) realtime() *realtimeService {
 	return &realtimeService{
 		provider:        h.provider,

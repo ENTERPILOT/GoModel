@@ -33,7 +33,13 @@ providers, see [Responses compatibility](/advanced/responses-compatibility).
 ## Stored responses
 
 For non-streaming `POST /v1/responses` calls, GoModel stores the normalized
-response body and the normalized input items from the request.
+response body and the normalized input items from the request. The snapshot is
+written in the background after the response is returned, so storage latency
+never delays the client. A `GET /v1/responses/{id}` issued immediately after
+the `POST` can arrive before the snapshot is stored; graceful shutdown waits
+for pending snapshot writes, but a hard process exit can lose one that has not
+finished. A snapshot write that fails is logged and counted in the
+`gomodel_response_snapshot_store_failures_total` metric.
 
 This enables:
 
