@@ -327,6 +327,73 @@ export function followUpEndpointKind(path) {
     }
 }
 
+// --- Request steps (ingress rewrite preview) --------------------------------
+//
+// Audit records keep the original client request in data.request_body and the
+// ingress rewrite chain (e.g. token compression) in data.request_revisions.
+// The drawer can preview the request at any step of that chain and defaults
+// to the final shape — the request that was actually sent to the provider.
+
+export const REQUEST_STEP_FINAL = 'final';
+export const REQUEST_STEP_ORIGINAL = 'original';
+
+function changedRequestRevisions(entry) {
+    const revisions = entry && entry.data && Array.isArray(entry.data.request_revisions)
+        ? entry.data.request_revisions
+        : [];
+    return revisions.filter((revision) => revision && !revision.no_change);
+}
+
+// conversationRequestSteps lists the previewable request steps of one entry:
+// the original client request followed by every revision that rewrote the
+// body. hasBody reports whether the rewritten body is loaded — conversation
+// entries arrive with revision bodies stripped until a detail fetch fills
+// them in.
+export function conversationRequestSteps(entry) {
+    if (!entry || !entry.data || entry.data.request_body == null) return [];
+    const revisions = changedRequestRevisions(entry);
+    const steps = [{
+        id: REQUEST_STEP_ORIGINAL,
+        rewriter: '',
+        seq: 0,
+        hasBody: true,
+        isFinal: revisions.length === 0,
+    }];
+    revisions.forEach((revision, index) => {
+        steps.push({
+            id: 'revision-' + Number(revision.seq || 0),
+            rewriter: String(revision.rewriter || ''),
+            seq: Number(revision.seq || 0),
+            hasBody: revision.body != null && revision.body !== '',
+            isFinal: index === revisions.length - 1,
+        });
+    });
+    return steps;
+}
+
+// conversationRequestStepBody resolves the request body previewed at `step`.
+// REQUEST_STEP_FINAL (the default) is the last rewritten body — what went to
+// the provider — falling back to the original when nothing rewrote the
+// request or the rewritten body has not been captured/loaded (yet).
+export function conversationRequestStepBody(entry, step) {
+    const original = entry && entry.data ? entry.data.request_body : null;
+    if (original == null) return null;
+    const wanted = String(step || REQUEST_STEP_FINAL);
+    if (wanted === REQUEST_STEP_ORIGINAL) return original;
+    const revisions = changedRequestRevisions(entry);
+    if (wanted !== REQUEST_STEP_FINAL) {
+        const match = revisions.find((revision) =>
+            'revision-' + Number(revision.seq || 0) === wanted);
+        if (match && match.body != null && match.body !== '') return match.body;
+        // Unknown step or body not yet loaded: fall through to the final shape.
+    }
+    for (let i = revisions.length - 1; i >= 0; i--) {
+        const body = revisions[i].body;
+        if (body != null && body !== '') return body;
+    }
+    return original;
+}
+
 function cloneJSON(value) {
     if (!value || typeof value !== 'object') return null;
     try {
@@ -991,8 +1058,11 @@ function compareConversationEntries(a, b) {
     return aID < bID ? -1 : aID > bID ? 1 : 0;
 }
 
-export function buildConversationView(entries, anchorID) {
+export function buildConversationView(entries, anchorID, options) {
     if (!Array.isArray(entries) || entries.length === 0) return { messages: [], entryIDs: [] };
+    const anchorRequestStep = options && options.anchorRequestStep != null
+        ? String(options.anchorRequestStep)
+        : '';
 
     const sorted = [...entries].sort(compareConversationEntries);
 
@@ -1024,7 +1094,15 @@ export function buildConversationView(entries, anchorID) {
         const isAnchor = entry.id === anchorID;
         const isAfterAnchor = anchorIndex >= 0 && entryIndex > anchorIndex;
         const ts = entry.timestamp;
-        const requestBody = entry.data && entry.data.request_body ? entry.data.request_body : null;
+        const originalRequestBody = entry.data && entry.data.request_body ? entry.data.request_body : null;
+        // The previewed (anchor) entry renders its request at the selected
+        // rewrite step — by default the final shape sent to the provider.
+        // Branch/lineage bookkeeping below intentionally stays on the
+        // original body so the step preview can never change which entries
+        // belong to the rendered branch.
+        const requestBody = isAnchor && anchorRequestStep !== ''
+            ? conversationRequestStepBody(entry, anchorRequestStep) || originalRequestBody
+            : originalRequestBody;
         const responseBody = entry.data && entry.data.response_body ? entry.data.response_body : null;
         const requestStart = messages.length;
         const cachedPrompt = (text, sourceSegments) =>
@@ -1167,12 +1245,12 @@ export function buildConversationView(entries, anchorID) {
         // only a delta, so those continue to extend the rendered transcript.
         const requestMessages = messages.splice(requestStart);
         const requestSignatures = requestMessages.map(signature);
-        const lineage = fullSnapshotLineage(requestBody);
+        const lineage = fullSnapshotLineage(originalRequestBody);
         const isFullSnapshot = lineage !== null;
         const parentID = interactionParentID(entry);
         const linkedParent = !!parentID && branchEntryIDSet.has(parentID);
-        const previousResponseID = String(requestBody && requestBody.previous_response_id || '').trim();
-        const conversationID = conversationReference(requestBody);
+        const previousResponseID = String(originalRequestBody && originalRequestBody.previous_response_id || '').trim();
+        const conversationID = conversationReference(originalRequestBody);
         const linkedDelta = linkedParent ||
             (!!previousResponseID && acceptedResponseIDs.has(previousResponseID)) ||
             (!!conversationID && acceptedConversationIDs.has(conversationID));
@@ -1302,8 +1380,8 @@ export function buildConversationView(entries, anchorID) {
     return { messages, entryIDs: [...branchEntryIDSet] };
 }
 
-export function buildConversationMessages(entries, anchorID) {
-    return buildConversationView(entries, anchorID).messages;
+export function buildConversationMessages(entries, anchorID, options) {
+    return buildConversationView(entries, anchorID, options).messages;
 }
 
 export function functionExpandedContent(msg) {

@@ -27,6 +27,11 @@ export function mergeAuditRecord(previous, incoming) {
     merged.data = current.data;
   } else if (plainObject(current.data) && plainObject(patch.data)) {
     merged.data = { ...current.data, ...patch.data };
+    const revisions = mergedRequestRevisions(
+      current.data.request_revisions,
+      patch.data.request_revisions,
+    );
+    if (revisions) merged.data.request_revisions = revisions;
   }
 
   // Lifecycle fields belong to the live transport. Persisted/list projections
@@ -61,6 +66,30 @@ export function auditRecordChangesAfter(changes, version) {
 
 export function isLiveAuditRecordChange(change) {
   return liveAuditEvents.has(String(change && change.eventType || "").trim());
+}
+
+// Revision bodies arrive only via the detail endpoint; slim projections
+// (conversation, list) carry metadata-only revisions. Merge per step so a
+// later slim refresh cannot downgrade an already-loaded rewrite body.
+function mergedRequestRevisions(currentRevisions, patchRevisions) {
+  if (!Array.isArray(currentRevisions) || !Array.isArray(patchRevisions)) {
+    return null;
+  }
+  return patchRevisions.map((revision) => {
+    const seq = Number(revision && revision.seq || 0);
+    const previous = currentRevisions.find(
+      (candidate) => Number(candidate && candidate.seq || 0) === seq,
+    );
+    if (!previous) return revision;
+    const richer = { ...revision };
+    if ((richer.body == null || richer.body === "") && previous.body != null) {
+      richer.body = previous.body;
+    }
+    if (richer.detail == null && previous.detail != null) {
+      richer.detail = previous.detail;
+    }
+    return richer;
+  });
 }
 
 function plainObject(value) {

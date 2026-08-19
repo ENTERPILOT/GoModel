@@ -12,6 +12,8 @@ import {
   conversationEntryIsLatest,
   conversationFollowUpEntry,
   conversationMessageCopyText,
+  conversationRequestStepBody,
+  conversationRequestSteps,
   extractConversationErrorMessage,
   extractRequestPromptTextSegments,
   formatFunctionArguments,
@@ -1117,4 +1119,136 @@ test("follow-up headers replace a captured parent instead of duplicating it", ()
     name.toLowerCase() === "x-gomodel-interaction-parent");
   assert.deepEqual(parentNames, ["X-GoModel-Interaction-Parent"]);
   assert.equal(new Headers(headers).get("x-gomodel-interaction-parent"), "log-2");
+});
+
+// --- Request-step preview (ingress rewrites) --------------------------------
+
+function revisionedEntry(overrides = {}) {
+  return {
+    id: "audit-rev",
+    path: "/v1/chat/completions",
+    timestamp: "2026-07-06T12:00:00Z",
+    data: {
+      request_body: {
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "Be verbose" },
+          { role: "user", content: "Original long question" },
+        ],
+      },
+      response_body: {
+        choices: [{ message: { role: "assistant", content: "Answer" } }],
+      },
+      request_revisions: [
+        {
+          seq: 1,
+          rewriter: "compress",
+          bytes_before: 200,
+          bytes_after: 100,
+          body: {
+            model: "gpt-4o",
+            messages: [
+              { role: "system", content: "Be verbose" },
+              { role: "user", content: "Compressed question" },
+            ],
+          },
+        },
+        { seq: 2, rewriter: "guard", bytes_before: 100, bytes_after: 100, no_change: true },
+      ],
+    },
+    ...overrides,
+  };
+}
+
+test("request steps list the original plus every revision that changed the body", () => {
+  const steps = conversationRequestSteps(revisionedEntry());
+  assert.deepEqual(steps.map((step) => step.id), ["original", "revision-1"]);
+  assert.equal(steps[0].isFinal, false);
+  assert.equal(steps[1].isFinal, true);
+  assert.equal(steps[1].rewriter, "compress");
+  assert.equal(steps[1].hasBody, true);
+
+  // No rewrites: the original is the only, final step.
+  const plain = conversationRequestSteps({
+    id: "a",
+    data: { request_body: { messages: [] } },
+  });
+  assert.deepEqual(plain.map((step) => step.id), ["original"]);
+  assert.equal(plain[0].isFinal, true);
+});
+
+test("request-step bodies resolve final/original/explicit revisions with fallbacks", () => {
+  const entry = revisionedEntry();
+  assert.equal(
+    conversationRequestStepBody(entry, "final").messages[1].content,
+    "Compressed question",
+  );
+  assert.equal(
+    conversationRequestStepBody(entry, "original").messages[1].content,
+    "Original long question",
+  );
+  assert.equal(
+    conversationRequestStepBody(entry, "revision-1").messages[1].content,
+    "Compressed question",
+  );
+
+  // Metadata-only revisions (bodies stripped server-side) fall back to the
+  // original until the detail fetch fills them in.
+  const slim = revisionedEntry();
+  slim.data = {
+    ...slim.data,
+    request_revisions: [{ seq: 1, rewriter: "compress", bytes_before: 200, bytes_after: 100 }],
+  };
+  assert.equal(
+    conversationRequestStepBody(slim, "final").messages[1].content,
+    "Original long question",
+  );
+  assert.equal(
+    conversationRequestStepBody(slim, "revision-1").messages[1].content,
+    "Original long question",
+  );
+});
+
+test("the drawer renders the anchor's selected request step, defaulting to the final provider shape", () => {
+  const entry = revisionedEntry();
+
+  // Legacy callers without options keep the original client request.
+  const legacy = buildConversationMessages([entry], entry.id);
+  assert.ok(legacy.some((msg) => msg.text === "Original long question"));
+
+  const finalView = buildConversationView([entry], entry.id, { anchorRequestStep: "final" });
+  assert.ok(finalView.messages.some((msg) => msg.text === "Compressed question"));
+  assert.ok(!finalView.messages.some((msg) => msg.text === "Original long question"));
+  // The response still renders after the rewritten request.
+  assert.equal(finalView.messages[finalView.messages.length - 1].text, "Answer");
+
+  const originalView = buildConversationView([entry], entry.id, { anchorRequestStep: "original" });
+  assert.ok(originalView.messages.some((msg) => msg.text === "Original long question"));
+});
+
+test("step preview never changes branch membership: lineage stays on the original body", () => {
+  const anchor = revisionedEntry();
+  const followUp = {
+    id: "audit-rev-2",
+    path: "/v1/chat/completions",
+    timestamp: "2026-07-06T12:01:00Z",
+    data: {
+      request_body: {
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "Be verbose" },
+          { role: "user", content: "Original long question" },
+          { role: "assistant", content: "Answer" },
+          { role: "user", content: "Follow-up" },
+        ],
+      },
+    },
+  };
+  const view = buildConversationView([anchor, followUp], anchor.id, {
+    anchorRequestStep: "final",
+  });
+  // The follow-up extends the anchor's original lineage, so it must stay in
+  // the branch even while the anchor previews its compressed shape.
+  assert.deepEqual(view.entryIDs, ["audit-rev", "audit-rev-2"]);
+  assert.ok(view.messages.some((msg) => msg.text === "Follow-up"));
 });

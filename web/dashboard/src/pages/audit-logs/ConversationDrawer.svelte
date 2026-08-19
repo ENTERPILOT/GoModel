@@ -15,6 +15,10 @@
   import ChatMessage from "./ChatMessage.svelte";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import {
+    REQUEST_STEP_FINAL,
+    REQUEST_STEP_ORIGINAL,
+  } from "./conversation-helpers.js";
+  import {
     DEFAULT_CONVERSATION_PANEL_WIDTH,
     clampConversationPanelWidth,
     conversationMessageNavigationTarget,
@@ -35,6 +39,23 @@
   let returningFromFullscreen = $state(false);
   let showPromptCache = $state(readStored(promptCacheFillStorageKey, "true") !== "false");
   let resizePointerID = null;
+
+  // The final step's option submits REQUEST_STEP_FINAL so the default
+  // selection ("final") matches it, and a later step list (e.g. a live entry
+  // gaining another rewrite) keeps the selection on the final shape.
+  function requestStepValue(step) {
+    return step.isFinal && step.id !== REQUEST_STEP_ORIGINAL
+      ? REQUEST_STEP_FINAL
+      : step.id;
+  }
+
+  function requestStepLabel(step) {
+    if (!step || step.seq === 0) return m.interaction_request_step_original();
+    if (step.isFinal) {
+      return m.interaction_request_step_final({ rewriter: step.rewriter });
+    }
+    return m.interaction_request_step_after({ rewriter: step.rewriter });
+  }
 
   function interactionsTransition(node, { fullscreen: isFullscreen, revealWithoutSlide = false }) {
     const duration = motionDuration(180);
@@ -322,6 +343,22 @@
       <p class="empty-state">{m.interaction_empty()}</p>
     {/if}
 
+    {#if drawer.conversationRequestSteps().length > 1}
+      <label
+        class="conversation-step-picker"
+        title={m.interaction_request_step_help()}
+      >
+        <span>{m.interaction_request_step()}</span>
+        <select
+          value={drawer.conversationRequestStep}
+          onchange={(event) => drawer.selectRequestStep(event.currentTarget.value)}
+        >
+          {#each drawer.conversationRequestSteps() as step (step.id)}
+            <option value={requestStepValue(step)}>{requestStepLabel(step)}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
     {#if drawer.conversationMessages.length > 0}
       {#if drawer.conversationMessages.some((msg) =>
         Number(msg.promptCacheRatio || 0) > 0
@@ -619,6 +656,32 @@
     padding: 0 16px 14px;
     color: var(--text-muted);
     font-size: 12px;
+  }
+
+  .conversation-step-picker {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 12px 16px 0;
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .conversation-step-picker select {
+    min-width: 0;
+    max-width: 100%;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 11px;
+    font-family: inherit;
+  }
+
+  .conversation-step-picker select:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
+    outline-offset: 1px;
   }
 
   .conversation-cache-legend {

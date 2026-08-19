@@ -11,6 +11,7 @@ import {
   isLiveAuditRecordChange,
 } from "./audit-records.js";
 import {
+  REQUEST_STEP_FINAL,
   buildConversationView,
   buildFollowUpHeaders,
   buildFollowUpRequest,
@@ -19,6 +20,7 @@ import {
   conversationEntryByRequestID,
   conversationEntryIsLatest,
   conversationFollowUpEntry,
+  conversationRequestSteps,
   followUpEndpointKind,
   formatJSON,
   latestRenderableConversationEntry,
@@ -42,6 +44,9 @@ class ConversationDrawerStore {
   conversationTruncated = $state(false);
   conversationFollowLatest = $state(false);
   conversationOpenedFromID = $state("");
+  // Which request step of the previewed (anchor) entry the transcript renders.
+  // Defaults to the final shape — the request actually sent to the provider.
+  conversationRequestStep = $state(REQUEST_STEP_FINAL);
   followUpText = $state("");
   followUpSending = $state(false);
   followUpError = $state("");
@@ -51,6 +56,7 @@ class ConversationDrawerStore {
   conversationRequestToken = 0;
   conversationReturnFocusEl = null;
   bodyPointerStart = null;
+  revisionDetailRequested = new Set();
 
   conversationDialogEl = $state(null);
   conversationCloseBtnEl = $state(null);
@@ -63,7 +69,9 @@ class ConversationDrawerStore {
   }
 
   conversationView = $derived.by(() =>
-    buildConversationView(this.conversationEntries, this.conversationAnchorID));
+    buildConversationView(this.conversationEntries, this.conversationAnchorID, {
+      anchorRequestStep: this.conversationRequestStep,
+    }));
 
   get conversationMessages() {
     return this.conversationView.messages;
@@ -158,6 +166,8 @@ class ConversationDrawerStore {
     this._setConversationEntryIDs([]);
     this.conversationTruncated = false;
     this.conversationFollowLatest = false;
+    this.conversationRequestStep = REQUEST_STEP_FINAL;
+    this.revisionDetailRequested = new Set();
     this.followUpText = "";
     this.followUpError = "";
     this.followUpRequestID = "";
@@ -191,6 +201,45 @@ class ConversationDrawerStore {
       if (latest && latest.id && String(latest.id) !== this.conversationAnchorID) {
         this.conversationAnchorID = String(latest.id);
       }
+    }
+    void this._ensureAnchorRevisionBodies();
+  }
+
+  // Request-step preview (ingress rewrites, e.g. token compression).
+
+  conversationRequestSteps() {
+    return conversationRequestSteps(this.selectedConversationEntry());
+  }
+
+  selectRequestStep(stepID) {
+    this.conversationRequestStep = String(stepID || REQUEST_STEP_FINAL);
+    void this._ensureAnchorRevisionBodies();
+  }
+
+  // Conversation entries arrive with revision bodies stripped (metadata
+  // only). When the previewed entry has rewrite steps whose bodies are
+  // missing, load the full record once from the detail endpoint so the step
+  // preview — including the default final shape — can render them.
+  async _ensureAnchorRevisionBodies() {
+    const entry = this.selectedConversationEntry();
+    const entryID = String(entry && entry.id || "").trim();
+    if (!entryID || entry._detail_loaded) return;
+    const steps = conversationRequestSteps(entry);
+    if (!steps.some((step) => step.seq > 0 && !step.hasBody)) return;
+    if (this.revisionDetailRequested.has(entryID)) return;
+    this.revisionDetailRequested.add(entryID);
+    try {
+      const result = await getJSON(
+        "/admin/audit/detail?log_id=" + encodeURIComponent(entryID),
+        { label: "audit detail" },
+      );
+      if (!result.ok || result.stale || !result.data) return;
+      liveLogs.upsertAuditRecord(
+        { ...result.data, _detail_loaded: true },
+        "audit.detail",
+      );
+    } catch (e) {
+      console.error("Failed to fetch audit detail for request steps:", e);
     }
   }
 
