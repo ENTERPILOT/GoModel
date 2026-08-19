@@ -5183,11 +5183,25 @@ func TestResponsesLifecycle_SnapshotWriteDoesNotBlockResponse(t *testing.T) {
 	}
 	srv := New(provider, &Config{ResponseStore: store})
 
+	// Release the blocked store write on every exit path so a hung request
+	// goroutine cannot outlive the test.
+	releaseOnce := sync.OnceFunc(func() { close(store.release) })
+	t.Cleanup(releaseOnce)
+
 	// The store write is blocked, yet the request must complete.
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		srv.ServeHTTP(rec, req)
+	}()
+	select {
+	case <-served:
+	case <-time.After(10 * time.Second):
+		t.Fatal("request blocked on the snapshot write; snapshot persistence must be asynchronous")
+	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -5196,13 +5210,49 @@ func TestResponsesLifecycle_SnapshotWriteDoesNotBlockResponse(t *testing.T) {
 	}
 
 	// Releasing the write and draining must leave the snapshot stored.
-	close(store.release)
+	releaseOnce()
 	srv.handler.drainSnapshotWrites()
 	if id := <-store.created; id != "resp_async_1" {
 		t.Fatalf("created id = %q, want resp_async_1", id)
 	}
 	if _, err := inner.Get(context.Background(), "resp_async_1"); err != nil {
 		t.Fatalf("store.Get() after drain error = %v", err)
+	}
+}
+
+func TestResponsesLifecycle_SnapshotWriteSkippedAfterDrain(t *testing.T) {
+	observability.ResetMetrics()
+	store := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
+	provider := &mockProvider{
+		supportedModels: []string{"gpt-5-mini"},
+		providerTypes: map[string]string{
+			"gpt-5-mini": "mock",
+		},
+		responsesResponse: &core.ResponsesResponse{
+			ID:     "resp_after_drain_1",
+			Object: "response",
+			Model:  "gpt-5-mini",
+			Status: "completed",
+		},
+	}
+	srv := New(provider, &Config{ResponseStore: store})
+	srv.handler.drainSnapshotWrites()
+
+	// A handler outliving the shutdown drain must still answer the client,
+	// but its snapshot write is skipped and recorded as a store failure.
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if _, err := store.Get(context.Background(), "resp_after_drain_1"); !errors.Is(err, responsestore.ErrNotFound) {
+		t.Fatalf("store.Get() error = %v, want ErrNotFound", err)
+	}
+	counter := observability.ResponseSnapshotStoreFailures.WithLabelValues("mock", "", "store")
+	if got := testutil.ToFloat64(counter); got != 1 {
+		t.Fatalf("snapshot store failures = %v, want 1", got)
 	}
 }
 

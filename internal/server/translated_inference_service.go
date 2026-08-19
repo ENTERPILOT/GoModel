@@ -50,8 +50,12 @@ type translatedInferenceService struct {
 	conversationStore        conversationstore.Store
 	conversationStoreMu      sync.RWMutex
 	// snapshotWrites tracks background response snapshot writes so shutdown
-	// can drain them before closing the response store.
-	snapshotWrites sync.WaitGroup
+	// can drain them before closing the response store. snapshotMu gates new
+	// writes against the drain: a handler that outlives the HTTP drain window
+	// must not register a write after drainSnapshotWrites has begun waiting.
+	snapshotWrites   sync.WaitGroup
+	snapshotMu       sync.RWMutex
+	snapshotDraining bool
 
 	orchestrator *gateway.InferenceOrchestrator
 
@@ -403,13 +407,32 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 	}
 
 	writeCtx := context.WithoutCancel(ctx)
-	s.snapshotWrites.Go(func() {
+	scheduled := s.goSnapshotWrite(func() {
 		writeCtx, cancel := context.WithTimeout(writeCtx, snapshotWriteTimeout)
 		defer cancel()
 		if err := writeResponseSnapshot(writeCtx, store, stored); err != nil {
 			s.recordResponseSnapshotStoreFailure(workflow, stored.Response, providerType, providerName, requestID, err)
 		}
 	})
+	if !scheduled {
+		s.recordResponseSnapshotStoreFailure(workflow, stored.Response, providerType, providerName, requestID,
+			errors.New("server shutting down, snapshot write skipped"))
+	}
+}
+
+// goSnapshotWrite runs fn as a tracked background snapshot write. It reports
+// false without running fn when draining has begun: registering a write after
+// drainSnapshotWrites starts waiting would race the WaitGroup and could touch
+// a store that shutdown already closed. The read lock is held across the
+// WaitGroup registration so the drain cannot observe it as untracked.
+func (s *translatedInferenceService) goSnapshotWrite(fn func()) bool {
+	s.snapshotMu.RLock()
+	defer s.snapshotMu.RUnlock()
+	if s.snapshotDraining {
+		return false
+	}
+	s.snapshotWrites.Go(fn)
+	return true
 }
 
 // writeResponseSnapshot upserts one snapshot: Create first, falling back to
@@ -425,10 +448,14 @@ func writeResponseSnapshot(ctx context.Context, store responsestore.Store, store
 	return nil
 }
 
-// drainSnapshotWrites blocks until every in-flight background snapshot write
-// finishes. The server calls it during shutdown, before the response store
-// closes.
+// drainSnapshotWrites stops accepting new background snapshot writes and
+// blocks until every in-flight one finishes. The server calls it during
+// shutdown, before the response store closes; writes attempted afterwards are
+// skipped and recorded as store failures.
 func (s *translatedInferenceService) drainSnapshotWrites() {
+	s.snapshotMu.Lock()
+	s.snapshotDraining = true
+	s.snapshotMu.Unlock()
 	s.snapshotWrites.Wait()
 }
 
