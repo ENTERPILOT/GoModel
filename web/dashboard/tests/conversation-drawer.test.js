@@ -1209,6 +1209,27 @@ test("request-step bodies resolve final/original/explicit revisions with fallbac
     conversationRequestStepBody(slim, "revision-1").messages[1].content,
     "Original long question",
   );
+
+  // A step never falls back to a *different* revision: with only a later
+  // revision's body loaded, an earlier selection and an unloaded final step
+  // both show the original, not the other revision.
+  const partial = revisionedEntry();
+  partial.data = {
+    ...partial.data,
+    request_revisions: [
+      { seq: 1, rewriter: "compress", bytes_before: 200, bytes_after: 150,
+        body: { messages: [{ role: "user", content: "Mid rewrite" }] } },
+      { seq: 2, rewriter: "trim", bytes_before: 150, bytes_after: 100 },
+    ],
+  };
+  assert.equal(
+    conversationRequestStepBody(partial, "final").messages[1].content,
+    "Original long question",
+  );
+  assert.equal(
+    conversationRequestStepBody(partial, "revision-1").messages[0].content,
+    "Mid rewrite",
+  );
 });
 
 test("the drawer renders the anchor's selected request step, defaulting to the final provider shape", () => {

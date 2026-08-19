@@ -204,13 +204,23 @@ class ConversationDrawerStore {
     if (this.conversationFollowLatest) {
       const latest = latestRenderableConversationEntry(entries, view.entryIDs);
       if (latest && latest.id && String(latest.id) !== this.conversationAnchorID) {
-        this.conversationAnchorID = String(latest.id);
+        this._setConversationAnchor(String(latest.id));
       }
     }
     void this._ensureAnchorRevisionBodies();
   }
 
   // Request-step preview (ingress rewrites, e.g. token compression).
+
+  // A step selection addresses one entry's rewrite chain. When the anchor
+  // moves to a different entry (follow-latest, a persisted follow-up), the
+  // new anchor renders its own final shape until the operator picks again.
+  _setConversationAnchor(id) {
+    const next = String(id || "");
+    if (next === this.conversationAnchorID) return;
+    this.conversationAnchorID = next;
+    this.conversationRequestStep = REQUEST_STEP_FINAL;
+  }
 
   conversationRequestSteps() {
     return conversationRequestSteps(this.selectedConversationEntry());
@@ -272,7 +282,7 @@ class ConversationDrawerStore {
     this.followUpRequestID = match.followUpRequestID;
 
     if (entryID && match.submittedChild) {
-      this.conversationAnchorID = entryID;
+      this._setConversationAnchor(entryID);
       this.conversationFollowLatest = true;
     }
 
@@ -371,7 +381,7 @@ class ConversationDrawerStore {
       if (detectFollowLatest) {
         this.conversationFollowLatest = conversationEntryIsLatest(stored, responseAnchorID);
       }
-      this.conversationAnchorID = responseAnchorID;
+      this._setConversationAnchor(responseAnchorID);
       const anchor = this.conversationEntries.find((entry) => entry.id === this.conversationAnchorID);
       if (anchor && anchor.session_id) this.conversationSessionID = String(anchor.session_id).trim();
       this.conversationTruncated = !!payload.truncated;
@@ -486,7 +496,7 @@ class ConversationDrawerStore {
           this._setConversationEntryIDs(
             mergedConversationEntryIDs(this.conversationEntryIDs, stored),
           );
-          this.conversationAnchorID = String(child.id);
+          this._setConversationAnchor(String(child.id));
           this.conversationFollowLatest = false;
           if (this.followUpRequestID === requestID) this.followUpRequestID = "";
           this.conversationTruncated = !!payload.truncated;

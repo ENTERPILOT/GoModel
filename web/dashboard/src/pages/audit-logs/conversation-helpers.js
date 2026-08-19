@@ -399,25 +399,23 @@ export function normalizedConversationRequestStep(entry, step) {
 
 // conversationRequestStepBody resolves the request body previewed at `step`.
 // REQUEST_STEP_FINAL (the default) is the last rewritten body — what went to
-// the provider — falling back to the original when nothing rewrote the
-// request or the rewritten body has not been captured/loaded (yet).
+// the provider. A step whose body has not been captured/loaded (yet) falls
+// back to the original client request, never to a different rewrite step:
+// showing another revision than the one selected would silently mislabel the
+// preview.
 export function conversationRequestStepBody(entry, step) {
     const original = entry && entry.data ? entry.data.request_body : null;
     if (original == null) return null;
     const wanted = String(step || REQUEST_STEP_FINAL);
     if (wanted === REQUEST_STEP_ORIGINAL) return original;
     const revisions = changedRequestRevisions(entry);
-    if (wanted !== REQUEST_STEP_FINAL) {
-        const match = revisions.find((revision) =>
+    const selected = wanted === REQUEST_STEP_FINAL
+        ? revisions[revisions.length - 1]
+        : revisions.find((revision) =>
             'revision-' + Number(revision.seq || 0) === wanted);
-        if (match && match.body != null && match.body !== '') return match.body;
-        // Unknown step or body not yet loaded: fall through to the final shape.
-    }
-    for (let i = revisions.length - 1; i >= 0; i--) {
-        const body = revisions[i].body;
-        if (body != null && body !== '') return body;
-    }
-    return original;
+    return selected && selected.body != null && selected.body !== ''
+        ? selected.body
+        : original;
 }
 
 function cloneJSON(value) {
