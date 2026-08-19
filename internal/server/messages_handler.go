@@ -163,6 +163,9 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 	}
 	attachPreparedWorkflow(c, ctx, workflow)
 
+	if s.canForwardMessagesNatively(workflow) {
+		return s.dispatchMessagesNative(c, prepared, workflow)
+	}
 	return handleWithCache(s, c, prepared, workflow, s.dispatchMessages)
 }
 

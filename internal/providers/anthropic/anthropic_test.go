@@ -5199,6 +5199,189 @@ func TestPassthrough(t *testing.T) {
 	}
 }
 
+func TestSetHeadersOAuthToken(t *testing.T) {
+	tests := []struct {
+		name       string
+		key        string
+		wantAPIKey string
+		wantAuth   string
+		wantBeta   string
+	}{
+		{
+			name:       "api key uses x-api-key",
+			key:        "sk-ant-api03-abc",
+			wantAPIKey: "sk-ant-api03-abc",
+		},
+		{
+			name:     "oauth token uses bearer and oauth beta",
+			key:      "sk-ant-oat01-abc",
+			wantAuth: "Bearer sk-ant-oat01-abc",
+			wantBeta: oauthBetaFlag,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Provider{keys: providers.NewKeyring(tt.key)}
+			req := httptest.NewRequest(http.MethodPost, "/messages", nil)
+			p.setHeaders(req)
+
+			if got := req.Header.Get("x-api-key"); got != tt.wantAPIKey {
+				t.Errorf("x-api-key = %q, want %q", got, tt.wantAPIKey)
+			}
+			if got := req.Header.Get("Authorization"); got != tt.wantAuth {
+				t.Errorf("Authorization = %q, want %q", got, tt.wantAuth)
+			}
+			if got := req.Header.Get(anthropicBetaHeader); got != tt.wantBeta {
+				t.Errorf("anthropic-beta = %q, want %q", got, tt.wantBeta)
+			}
+			if got := req.Header.Get("anthropic-version"); got != anthropicAPIVersion {
+				t.Errorf("anthropic-version = %q, want %q", got, anthropicAPIVersion)
+			}
+		})
+	}
+}
+
+func TestPassthroughOAuthToken(t *testing.T) {
+	tests := []struct {
+		name       string
+		clientBeta string
+		wantBeta   []string
+	}{
+		{
+			name:     "no client beta keeps provider oauth beta",
+			wantBeta: []string{oauthBetaFlag},
+		},
+		{
+			name:       "client beta merged with oauth flag",
+			clientBeta: "claude-code-20250219,interleaved-thinking-2025-05-14",
+			wantBeta:   []string{"claude-code-20250219,interleaved-thinking-2025-05-14", oauthBetaFlag},
+		},
+		{
+			name:       "client beta already containing oauth flag unchanged",
+			clientBeta: "claude-code-20250219," + oauthBetaFlag,
+			wantBeta:   []string{"claude-code-20250219," + oauthBetaFlag},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotAuth, gotAPIKey string
+			var gotBeta []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotAuth = r.Header.Get("Authorization")
+				gotAPIKey = r.Header.Get("x-api-key")
+				gotBeta = r.Header.Values(anthropicBetaHeader)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer server.Close()
+
+			provider := NewWithHTTPClient("sk-ant-oat01-abc", server.Client(), llmclient.Hooks{})
+			provider.SetBaseURL(server.URL)
+
+			headers := http.Header{"Content-Type": {"application/json"}}
+			if tt.clientBeta != "" {
+				headers.Set(anthropicBetaHeader, tt.clientBeta)
+			}
+			resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+				Method:   http.MethodPost,
+				Endpoint: "messages",
+				Body:     io.NopCloser(strings.NewReader(`{"model":"claude-sonnet-5"}`)),
+				Headers:  headers,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			defer func() {
+				_ = resp.Body.Close()
+			}()
+
+			if gotAuth != "Bearer sk-ant-oat01-abc" {
+				t.Errorf("Authorization = %q, want Bearer token", gotAuth)
+			}
+			if gotAPIKey != "" {
+				t.Errorf("x-api-key = %q, want empty", gotAPIKey)
+			}
+			if len(gotBeta) != len(tt.wantBeta) {
+				t.Fatalf("anthropic-beta values = %v, want %v", gotBeta, tt.wantBeta)
+			}
+			for i := range gotBeta {
+				if gotBeta[i] != tt.wantBeta[i] {
+					t.Errorf("anthropic-beta[%d] = %q, want %q", i, gotBeta[i], tt.wantBeta[i])
+				}
+			}
+		})
+	}
+}
+
+// A keyring mixing OAuth tokens and API keys must keep each request
+// self-consistent: the oauth beta merge and the auth header always describe
+// the credential actually dispatched.
+func TestPassthroughMixedKeyringConsistency(t *testing.T) {
+	type observed struct {
+		auth   string
+		apiKey string
+		beta   string
+	}
+	var got []observed
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, observed{
+			auth:   r.Header.Get("Authorization"),
+			apiKey: r.Header.Get("x-api-key"),
+			beta:   strings.Join(r.Header.Values(anthropicBetaHeader), ","),
+		})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	p := &Provider{
+		keys:                 providers.NewKeyring("sk-ant-oat01-a", "sk-ant-api03-b"),
+		batchResultEndpoints: make(map[string]map[string]string),
+	}
+	cfg := llmclient.DefaultConfig("anthropic", server.URL)
+	p.client = llmclient.NewWithHTTPClient(server.Client(), cfg, p.setHeaders)
+
+	for range 4 {
+		headers := http.Header{"Content-Type": {"application/json"}}
+		headers.Set(anthropicBetaHeader, "claude-code-20250219")
+		resp, err := p.Passthrough(context.Background(), &core.PassthroughRequest{
+			Method:   http.MethodPost,
+			Endpoint: "messages",
+			Body:     io.NopCloser(strings.NewReader(`{"model":"claude-sonnet-5"}`)),
+			Headers:  headers,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		_ = resp.Body.Close()
+	}
+
+	sawOAuth, sawAPIKey := false, false
+	for i, o := range got {
+		hasOAuthBeta := strings.Contains(o.beta, oauthBetaFlag)
+		switch {
+		case o.auth != "":
+			sawOAuth = true
+			if o.apiKey != "" {
+				t.Errorf("request %d: both Authorization and x-api-key set", i)
+			}
+			if !hasOAuthBeta {
+				t.Errorf("request %d: OAuth credential without oauth beta (beta = %q)", i, o.beta)
+			}
+		case o.apiKey != "":
+			sawAPIKey = true
+			if hasOAuthBeta {
+				t.Errorf("request %d: API key with oauth beta (beta = %q)", i, o.beta)
+			}
+		default:
+			t.Errorf("request %d: no credential sent", i)
+		}
+	}
+	if !sawOAuth || !sawAPIKey {
+		t.Fatalf("rotation did not cover both credentials (oauth=%v apiKey=%v)", sawOAuth, sawAPIKey)
+	}
+}
+
 func TestResolveDefaultMaxTokens(t *testing.T) {
 	tests := []struct {
 		name string

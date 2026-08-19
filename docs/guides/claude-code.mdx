@@ -22,10 +22,13 @@ Flow:
   Claude Code can be routed through GoModel whether or not you personally use a
   Claude Code subscription. For gateway mode, Claude Code talks to GoModel with
   `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`. GoModel still needs its own
-  `ANTHROPIC_API_KEY` to reach Anthropic upstream.
+  `ANTHROPIC_API_KEY` to reach Anthropic upstream — either a Console API key
+  or a Claude subscription OAuth token.
 </Note>
 
 ## How to get `ANTHROPIC_API_KEY`
+
+**Option A — Console API key (pay-as-you-go):**
 
 1. Open the Claude Console and sign in to your API account.
 2. Go to account settings in Console, then create an API key.
@@ -37,6 +40,24 @@ settings.
 <Warning>
   Claude paid plans (Pro, Max, Team, Enterprise) and Claude API Console billing
   are separate. API key usage is billed as API usage.
+</Warning>
+
+**Option B — Claude subscription token (Pro, Max, Team, or Enterprise):**
+
+1. Run `claude setup-token` on a machine where Claude Code is logged in to
+   your subscription.
+2. Copy the generated `sk-ant-oat01-...` token and set it for GoModel as
+   `ANTHROPIC_API_KEY`.
+
+GoModel detects the `sk-ant-oat` prefix and authenticates upstream with the
+OAuth Bearer scheme automatically. Usage is covered by your subscription's
+limits instead of API billing.
+
+<Warning>
+  Anthropic authorizes subscription tokens **only for Claude Code traffic**.
+  This setup works because Claude Code remains the client and GoModel relays
+  its requests unchanged; pointing other clients or tools at the same gateway
+  credential is rejected upstream and is against Anthropic's terms of service.
 </Warning>
 
 ## 1. Run GoModel
@@ -149,13 +170,23 @@ If the gateway is wired correctly, the response will contain `ok`.
 
 ## 3. Configure Claude Code to use GoModel
 
-Point Claude Code at GoModel's Anthropic passthrough:
+Point Claude Code at GoModel:
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic
+export ANTHROPIC_BASE_URL=http://localhost:8080
 export ANTHROPIC_AUTH_TOKEN=change-me
 export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 ```
+
+The managed base URL serves `/v1/messages` with
+[native forwarding](/advanced/anthropic-messages-api#native-forwarding-to-anthropic):
+requests that resolve to Anthropic are relayed unchanged apart from model
+alias resolution (preserving `cache_control`, thinking signatures, and beta
+headers) while rate limits,
+budgets, audit, and usage tracking apply — and model aliases or virtual models
+can route Claude Code to other providers. Alternatively,
+`ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic` uses raw passthrough
+pinned to the Anthropic upstream.
 
 Short Claude Code doc summary: for gateway mode, set `ANTHROPIC_BASE_URL` to
 your gateway URL and `ANTHROPIC_AUTH_TOKEN` to your gateway token, then run
