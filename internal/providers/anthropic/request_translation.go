@@ -357,15 +357,30 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		anthropicReq.ToolChoice = toolChoice
 	}
 
+	conversationStarted := false
 	for _, msg := range req.Messages {
 		if msg.Role == "system" {
 			systemContent, err := buildAnthropicSystemContent(msg.Content)
 			if err != nil {
 				return nil, err
 			}
+			// Leading system messages belong in the top-level system field.
+			// Mid-conversation ones stay in place on models that accept the
+			// role, preserving their position and cache_control breakpoints;
+			// older models get the historical hoist into the system prompt.
+			if conversationStarted && supportsSystemRoleMessages(req.Model) {
+				if !isEmptyAnthropicSystemContent(systemContent) {
+					anthropicReq.Messages = append(anthropicReq.Messages, anthropicMessage{
+						Role:    "system",
+						Content: systemContent,
+					})
+				}
+				continue
+			}
 			anthropicReq.System = appendAnthropicSystemContent(anthropicReq.System, systemContent)
 			continue
 		}
+		conversationStarted = true
 
 		content, err := buildAnthropicMessageContent(msg)
 		if err != nil {
@@ -815,4 +830,26 @@ func prefixAnthropicBatchItemError(index int, err error) error {
 		return &prefixed
 	}
 	return core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %v", index, err), err)
+}
+
+// supportsSystemRoleMessages reports whether the target model accepts
+// {"role": "system"} messages inside the messages array. Anthropic added
+// mid-conversation system messages with the Claude 4.8/5 generation so that
+// new instructions can be appended without invalidating cached prefixes;
+// older models reject any role other than "user" or "assistant". Extend the
+// list when new generations ship — unlisted models fall back to the lossy
+// system-prompt hoist rather than risking a provider rejection.
+func supportsSystemRoleMessages(model string) bool {
+	for _, prefix := range []string{
+		"claude-fable-5",
+		"claude-mythos-5",
+		"claude-opus-4-8",
+		"claude-opus-5",
+		"claude-sonnet-5",
+	} {
+		if strings.HasPrefix(model, prefix) {
+			return true
+		}
+	}
+	return false
 }

@@ -150,7 +150,8 @@ func TestToChatRequestSystemMessageInMessages(t *testing.T) {
 }
 
 func TestToChatRequestSystemMessageCombined(t *testing.T) {
-	// System messages in messages array should be combined with top-level system field
+	// A top-level system field becomes the leading system message; system
+	// messages in the messages array keep their own position and identity.
 	chat, err := ToChatRequest(mustDecode(t, `{
 		"model":"m","max_tokens":10,
 		"system":"top-level system",
@@ -162,25 +163,52 @@ func TestToChatRequestSystemMessageCombined(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToChatRequest: %v", err)
 	}
-	if len(chat.Messages) != 2 {
-		t.Fatalf("messages = %d, want 2 (system + user)", len(chat.Messages))
+	if len(chat.Messages) != 3 {
+		t.Fatalf("messages = %d, want 3 (system + system + user)", len(chat.Messages))
 	}
-	// System messages should be combined with top-level system
-	if chat.Messages[0].Role != "system" {
-		t.Errorf("first message role = %q, want system", chat.Messages[0].Role)
+	if chat.Messages[0].Role != "system" || chat.Messages[0].Content != "top-level system" {
+		t.Errorf("first message = %+v, want top-level system", chat.Messages[0])
 	}
-	systemContent, ok := chat.Messages[0].Content.(string)
+	if chat.Messages[1].Role != "system" || chat.Messages[1].Content != "message system" {
+		t.Errorf("second message = %+v, want message system", chat.Messages[1])
+	}
+	if chat.Messages[2].Role != "user" || chat.Messages[2].Content != "hello" {
+		t.Errorf("user message = %+v", chat.Messages[2])
+	}
+}
+
+func TestToChatRequestSystemMessageKeepsPositionAndCacheControl(t *testing.T) {
+	// Mid-conversation system messages (Claude Code system reminders) must
+	// keep their position and block-level cache_control breakpoints so
+	// provider prompt caching keeps working through the gateway.
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"system":[{"type":"text","text":"base","cache_control":{"type":"ephemeral"}}],
+		"messages":[
+			{"role":"user","content":"hi"},
+			{"role":"assistant","content":"hello"},
+			{"role":"system","content":[{"type":"text","text":"reminder","cache_control":{"type":"ephemeral"}}]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	if len(chat.Messages) != 4 {
+		t.Fatalf("messages = %d, want 4 (system + user + assistant + system)", len(chat.Messages))
+	}
+	last := chat.Messages[3]
+	if last.Role != "system" {
+		t.Fatalf("last message role = %q, want system", last.Role)
+	}
+	parts, ok := last.Content.([]core.ContentPart)
 	if !ok {
-		t.Fatalf("system content is not a string: %T", chat.Messages[0].Content)
+		t.Fatalf("last system content is %T, want []core.ContentPart", last.Content)
 	}
-	if !strings.Contains(systemContent, "top-level system") {
-		t.Errorf("system message should contain top-level system, got: %s", systemContent)
+	if len(parts) != 1 || parts[0].Text != "reminder" {
+		t.Fatalf("last system parts = %+v", parts)
 	}
-	if !strings.Contains(systemContent, "message system") {
-		t.Errorf("system message should contain message system, got: %s", systemContent)
-	}
-	if chat.Messages[1].Role != "user" || chat.Messages[1].Content != "hello" {
-		t.Errorf("user message = %+v", chat.Messages[1])
+	if got := string(parts[0].ExtraFields.Lookup("cache_control")); got != `{"type":"ephemeral"}` {
+		t.Errorf("last system cache_control = %q, want ephemeral marker", got)
 	}
 }
 
