@@ -226,8 +226,13 @@ class ConversationDrawerStore {
     if (!entryID || entry._detail_loaded) return;
     const steps = conversationRequestSteps(entry);
     if (!steps.some((step) => step.seq > 0 && !step.hasBody)) return;
-    if (this.revisionDetailRequested.has(entryID)) return;
-    this.revisionDetailRequested.add(entryID);
+    // Capture the guard set: openConversation replaces it per drawer
+    // session, and a request finishing after a reopen must not unpin the new
+    // session's guard for the same entry. The success path is session-safe
+    // as-is — it only enriches the shared, monotonic record cache.
+    const requested = this.revisionDetailRequested;
+    if (requested.has(entryID)) return;
+    requested.add(entryID);
     try {
       const result = await getJSON(
         "/admin/audit/detail?log_id=" + encodeURIComponent(entryID),
@@ -238,7 +243,7 @@ class ConversationDrawerStore {
       // until the drawer is reopened. The next record change or step
       // selection retries.
       if (!result.ok || result.stale || !result.data) {
-        this.revisionDetailRequested.delete(entryID);
+        requested.delete(entryID);
         return;
       }
       liveLogs.upsertAuditRecord(
@@ -246,7 +251,7 @@ class ConversationDrawerStore {
         "audit.detail",
       );
     } catch (e) {
-      this.revisionDetailRequested.delete(entryID);
+      requested.delete(entryID);
       console.error("Failed to fetch audit detail for request steps:", e);
     }
   }
