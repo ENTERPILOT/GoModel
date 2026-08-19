@@ -312,6 +312,30 @@
         </select>
       </label>
     {/if}
+    {#if drawer.conversationMessages.some((msg) =>
+      Number(msg.promptCacheRatio || 0) > 0
+    )}
+      <button
+        type="button"
+        class="conversation-cache-legend"
+        role="switch"
+        aria-checked={showPromptCache}
+        title={showPromptCache
+          ? m.interaction_hide_cache_fill()
+          : m.interaction_show_cache_fill()}
+        onclick={togglePromptCacheFill}
+      >
+        <span class="conversation-cache-switch" class:is-active={showPromptCache} aria-hidden="true">
+          <span class="conversation-cache-switch-thumb"></span>
+        </span>
+        <span
+          >{m.interaction_cache_legend()}
+          <span class="conversation-cache-estimate"
+            >{m.interaction_estimated()}</span
+          ></span
+        >
+      </button>
+    {/if}
   </div>
 
   <div id="interactions-drawer-content">
@@ -350,30 +374,6 @@
     {/if}
 
     {#if drawer.conversationMessages.length > 0}
-      {#if drawer.conversationMessages.some((msg) =>
-        Number(msg.promptCacheRatio || 0) > 0
-      )}
-        <button
-          type="button"
-          class="conversation-cache-legend"
-          role="switch"
-          aria-checked={showPromptCache}
-          title={showPromptCache
-            ? m.interaction_hide_cache_fill()
-            : m.interaction_show_cache_fill()}
-          onclick={togglePromptCacheFill}
-        >
-          <span class="conversation-cache-switch" class:is-active={showPromptCache} aria-hidden="true">
-            <span class="conversation-cache-switch-thumb"></span>
-          </span>
-          <span
-            >{m.interaction_cache_legend()}
-            <span class="conversation-cache-estimate"
-              >{m.interaction_estimated()}</span
-            ></span
-          >
-        </button>
-      {/if}
       <div class="conversation-thread" bind:this={drawer.conversationThreadEl}>
         {#each drawer.conversationMessages as msg (msg.uid)}
           <ChatMessage {msg} {showPromptCache} />
@@ -687,7 +687,6 @@
     display: flex;
     align-items: center;
     gap: 7px;
-    margin: 12px 16px 0;
     padding: 0;
     border: 0;
     background: transparent;

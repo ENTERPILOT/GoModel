@@ -7,7 +7,12 @@ import { findNestedErrorMessage, tryParseJSON } from "./error-text.js";
 // Re-exported so the drawer store keeps one import for its formatting.
 export { formatJSON };
 
-const sectionKeys = new Set(['instructions', 'messages', 'input', 'previous_response_id', 'choices', 'output']);
+// Body keys that render as clickable conversation highlights. `system` and
+// `content` cover Anthropic-compatible /v1/messages payloads: the request
+// system prompt and the response's top-level assistant content. Occurrences
+// nested inside another highlighted section are consumed by that section's
+// block and never match on their own.
+const sectionKeys = new Set(['instructions', 'system', 'messages', 'input', 'previous_response_id', 'choices', 'output', 'content']);
 
 function contentPartLabel(part) {
     if (!part || typeof part !== 'object') return '';
@@ -685,7 +690,7 @@ function findConversationSectionEnd(lines, startIdx, valuePart) {
 }
 
 function conversationHighlightRoleClass(key) {
-    if (key === 'instructions') return 'conversation-system';
+    if (key === 'instructions' || key === 'system') return 'conversation-system';
     if (key === 'messages' || key === 'input' || key === 'previous_response_id') return 'conversation-user';
     return 'conversation-assistant';
 }

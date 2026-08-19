@@ -1284,3 +1284,38 @@ test("opening from an audit pane maps its step onto selectable step ids", () => 
   assert.equal(normalizedConversationRequestStep(chained, "revision-1"), "revision-1");
   assert.equal(normalizedConversationRequestStep(chained, "revision-3"), "final");
 });
+
+test("anthropic /messages bodies get clickable highlights: system and top-level content", () => {
+  const deps = {
+    formatJSON: (value) => JSON.stringify(value, null, 2),
+    canShowConversation: () => true,
+  };
+  const entry = { id: "log-a", path: "/v1/messages" };
+
+  const requestRendered = renderBodyWithConversationHighlights(entry, {
+    model: "claude-sonnet-5",
+    system: [{ type: "text", text: "Be helpful" }],
+    messages: [{ role: "user", content: "Weekly update please" }],
+  }, deps);
+  assert.match(requestRendered, /conversation-body-highlight conversation-system[^>]*data-conversation-trigger="1"/);
+  assert.match(requestRendered, /conversation-body-highlight conversation-user/);
+
+  const responseRendered = renderBodyWithConversationHighlights(entry, {
+    id: "msg_1",
+    role: "assistant",
+    content: [{ type: "text", text: "Weekly update for /agents..." }],
+    stop_reason: "end_turn",
+  }, deps);
+  assert.match(responseRendered, /conversation-body-highlight conversation-assistant[^>]*data-conversation-trigger="1"/);
+  assert.ok(responseRendered.includes("Weekly update for /agents"));
+  // stop_reason after the content block stays outside the highlight.
+  const afterHighlight = responseRendered.split("</span>").pop();
+  assert.ok(afterHighlight.includes("stop_reason"));
+
+  // Nested content inside a highlighted messages block is consumed by that
+  // block: exactly one highlight span in the request's messages section.
+  const chatRendered = renderBodyWithConversationHighlights(entry, {
+    messages: [{ role: "user", content: "Hi" }],
+  }, deps);
+  assert.equal(chatRendered.match(/conversation-body-highlight/g).length, 1);
+});
