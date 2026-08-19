@@ -233,12 +233,20 @@ class ConversationDrawerStore {
         "/admin/audit/detail?log_id=" + encodeURIComponent(entryID),
         { label: "audit detail" },
       );
-      if (!result.ok || result.stale || !result.data) return;
+      // A request that produced no usable detail must not pin the guard, or
+      // a transient failure would lock the preview to the original request
+      // until the drawer is reopened. The next record change or step
+      // selection retries.
+      if (!result.ok || result.stale || !result.data) {
+        this.revisionDetailRequested.delete(entryID);
+        return;
+      }
       liveLogs.upsertAuditRecord(
         { ...result.data, _detail_loaded: true },
         "audit.detail",
       );
     } catch (e) {
+      this.revisionDetailRequested.delete(entryID);
       console.error("Failed to fetch audit detail for request steps:", e);
     }
   }
