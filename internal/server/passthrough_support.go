@@ -1,12 +1,16 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/labstack/echo/v5"
 
@@ -317,14 +321,8 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 				observers = append(observers, observer)
 			}
 		}
-		if usageLogger != nil && usageLogger.Config().Enabled && (workflow == nil || workflow.UsageEnabled()) {
-			if observer := usage.NewStreamUsageObserver(usageLogger, model, providerType, requestID, usagePath, pricingResolver, core.UserPathFromContext(c.Request().Context())); observer != nil {
-				observer.SetProviderName(providerName)
-				observer.SetSessionID(core.SessionIDFromContext(c.Request().Context()))
-				observer.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
-				observer.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
-				observers = append(observers, observer)
-			}
+		if observer := passthroughUsageObserver(c, usageLogger, pricingResolver, workflow, model, providerType, providerName, requestID, usagePath); observer != nil {
+			observers = append(observers, observer)
 		}
 		observers = append(observers, extraObservers...)
 		wrappedStream := streaming.NewObservedSSEStream(resp.Body, observers...)
@@ -342,14 +340,166 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		return nil
 	}
 
+	// Non-streaming JSON responses carry usage inside the response object
+	// itself (top-level "usage" for Anthropic messages and OpenAI chat
+	// completions). Tee the relay into a bounded buffer and feed the complete
+	// body to the same observers as a single synthetic event, so usage
+	// accounting and response feedback match the SSE behavior. The audit
+	// stream observer is deliberately absent: non-streaming responses are
+	// audited by the regular audit middleware.
+	var observers []streaming.Observer
+	if isObservablePassthroughStatus(resp.StatusCode) {
+		observers = passthroughJSONResponseObservers(c, usageLogger, pricingResolver, providerType, providerName, endpoint, info, extraObservers)
+	}
+	if len(observers) == 0 || !isJSONContentType(resp.Headers) {
+		c.Response().WriteHeader(resp.StatusCode)
+		if _, err := io.Copy(c.Response(), resp.Body); err != nil {
+			return err
+		}
+		if f, ok := c.Response().(http.Flusher); ok {
+			f.Flush()
+		}
+		return nil
+	}
+
+	capture := newCappedCaptureBuffer(maxObservedJSONResponseBytes)
 	c.Response().WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(c.Response(), resp.Body); err != nil {
+	if _, err := io.Copy(c.Response(), io.TeeReader(resp.Body, capture)); err != nil {
+		// The client received an incomplete body; do not account for it.
 		return err
 	}
 	if f, ok := c.Response().(http.Flusher); ok {
 		f.Flush()
 	}
+	if body, ok := capture.Captured(); ok {
+		notifyObserversWithJSONBody(body, observers)
+	}
 	return nil
+}
+
+// maxObservedJSONResponseBytes caps how much of a non-streaming JSON response
+// is buffered for usage extraction. Inference responses are bounded by
+// max_tokens and stay far below this; anything larger (e.g. a passthrough
+// file download with a JSON content type) skips observation rather than
+// holding the body in memory.
+const maxObservedJSONResponseBytes = 8 << 20
+
+// cappedCaptureBuffer records writes up to a fixed cap. Once the cap is
+// exceeded the capture is abandoned (Captured reports false) while writes
+// keep succeeding, so the client relay is never affected.
+type cappedCaptureBuffer struct {
+	buf      bytes.Buffer
+	max      int
+	overflow bool
+}
+
+func newCappedCaptureBuffer(maxBytes int) *cappedCaptureBuffer {
+	return &cappedCaptureBuffer{max: maxBytes}
+}
+
+func (b *cappedCaptureBuffer) Write(p []byte) (int, error) {
+	if !b.overflow {
+		if b.buf.Len()+len(p) > b.max {
+			b.overflow = true
+			b.buf.Reset()
+		} else {
+			b.buf.Write(p)
+		}
+	}
+	return len(p), nil
+}
+
+func (b *cappedCaptureBuffer) Captured() ([]byte, bool) {
+	if b.overflow || b.buf.Len() == 0 {
+		return nil, false
+	}
+	return b.buf.Bytes(), true
+}
+
+// passthroughUsageObserver builds the stream usage observer for a passthrough
+// response when usage logging is enabled for the workflow, or nil.
+func passthroughUsageObserver(c *echo.Context, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver, workflow *core.Workflow, model, providerType, providerName, requestID, usagePath string) *usage.StreamUsageObserver {
+	if usageLogger == nil || !usageLogger.Config().Enabled || (workflow != nil && !workflow.UsageEnabled()) {
+		return nil
+	}
+	observer := usage.NewStreamUsageObserver(usageLogger, model, providerType, requestID, usagePath, pricingResolver, core.UserPathFromContext(c.Request().Context()))
+	if observer == nil {
+		return nil
+	}
+	observer.SetProviderName(providerName)
+	observer.SetSessionID(core.SessionIDFromContext(c.Request().Context()))
+	observer.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
+	observer.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
+	return observer
+}
+
+// passthroughJSONResponseObservers assembles the observers interested in a
+// completed non-streaming JSON passthrough response: the usage accounting
+// observer plus any caller-supplied extras (response feedback).
+func passthroughJSONResponseObservers(c *echo.Context, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver, providerType, providerName, endpoint string, info *core.PassthroughRouteInfo, extraObservers []streaming.Observer) []streaming.Observer {
+	workflow := core.GetWorkflow(c.Request().Context())
+	requestID := requestIDFromContextOrHeader(c.Request())
+	usagePath := passthroughAuditPath(c, providerType, endpoint, info)
+	if requestPath := strings.TrimSpace(c.Request().URL.Path); requestPath != "" {
+		usagePath = requestPath
+	}
+	model := ""
+	if info != nil {
+		model = strings.TrimSpace(info.Model)
+	}
+	model = resolvedModelFromWorkflow(workflow, model)
+
+	observers := make([]streaming.Observer, 0, 1+len(extraObservers))
+	if observer := passthroughUsageObserver(c, usageLogger, pricingResolver, workflow, model, providerType, providerName, requestID, usagePath); observer != nil {
+		observers = append(observers, observer)
+	}
+	return append(observers, extraObservers...)
+}
+
+// notifyObserversWithJSONBody replays a complete JSON response body to stream
+// observers as one synthetic event followed by close, mirroring how the same
+// payload would reach them as the final event of an SSE stream. Bodies that
+// do not decode to a JSON object still close the observers out, so response
+// feedback fires exactly once per response.
+func notifyObserversWithJSONBody(body []byte, observers []streaming.Observer) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err == nil && payload != nil {
+		for _, observer := range observers {
+			if filter, ok := observer.(streaming.EventFilter); ok && !filter.WantsJSONEvent(body) {
+				continue
+			}
+			observer.OnJSONEvent(payload)
+		}
+	}
+	for _, observer := range observers {
+		observer.OnStreamClose()
+	}
+}
+
+// isObservablePassthroughStatus reports whether a passthrough response status
+// can carry a complete, accountable response body: any success status except
+// 206 Partial Content, whose body is by definition incomplete.
+func isObservablePassthroughStatus(status int) bool {
+	return status >= http.StatusOK && status < http.StatusMultipleChoices && status != http.StatusPartialContent
+}
+
+func isJSONContentType(headers map[string][]string) bool {
+	for key, values := range headers {
+		if !strings.EqualFold(key, "Content-Type") {
+			continue
+		}
+		for _, value := range values {
+			mediaType, _, err := mime.ParseMediaType(value)
+			if err != nil {
+				continue
+			}
+			mediaType = strings.ToLower(mediaType)
+			if mediaType == "application/json" || strings.HasSuffix(mediaType, "+json") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func passthroughErrorResponseHeaders(providerType string, statusCode int, src http.Header) http.Header {

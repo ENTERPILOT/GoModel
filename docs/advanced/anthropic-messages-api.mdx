@@ -31,7 +31,8 @@ different name), then relays the provider-native response or SSE stream
 unchanged. This preserves everything the canonical translation cannot —
 `cache_control` breakpoints, thinking-block signatures, `anthropic-beta`
 headers — which coding agents like Claude Code depend on. Rate limits,
-budgets, audit logging, and streaming usage tracking still apply.
+budgets, audit logging, and usage tracking still apply, for both streaming
+and non-streaming responses.
 
 Native forwarding is automatic. Requests fall back to the translated pipeline
 when a feature that operates on the canonical request is in play: guardrails
