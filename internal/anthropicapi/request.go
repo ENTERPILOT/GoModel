@@ -92,57 +92,35 @@ func ToChatRequest(req *MessagesRequest) (*core.ChatRequest, error) {
 // convertMessages flattens the Anthropic system prompt and messages into the
 // canonical message list. A single Anthropic message may expand into multiple
 // canonical messages: tool_result blocks become standalone role:"tool" messages.
-// Messages with role "system" in the messages array are extracted and prepended
-// to the system prompt, as the Anthropic Messages API requires system content
-// to be in the top-level system field, not in messages.
+// Messages with role "system" stay at their position in the conversation:
+// Claude 4.8+/5-family models accept them natively, and clients (notably
+// Claude Code) rely on their placement and block-level cache_control
+// breakpoints for prompt caching. The Anthropic egress translator hoists them
+// into the top-level system field only for models that reject the role.
 func convertMessages(req *MessagesRequest) ([]core.Message, error) {
 	out := make([]core.Message, 0, len(req.Messages)+1)
-
-	// Collect system messages from the messages array.
-	var systemMessages []string
-	filteredMessages := make([]Message, 0, len(req.Messages))
-	for _, msg := range req.Messages {
-		if msg.Role == "system" {
-			// Extract system content from message
-			text, err := systemText(msg.Content)
-			if err != nil {
-				return nil, core.NewInvalidRequestError("system message content: "+err.Error(), err)
-			}
-			if text != "" {
-				systemMessages = append(systemMessages, text)
-			}
-		} else {
-			filteredMessages = append(filteredMessages, msg)
-		}
-	}
 
 	// Build the system prompt while retaining block-level cache_control metadata.
 	system, err := systemContent(req.System)
 	if err != nil {
 		return nil, core.NewInvalidRequestError(err.Error(), err)
 	}
-	if len(systemMessages) > 0 {
-		appended := strings.TrimSpace(strings.Join(systemMessages, "\n\n"))
-		switch content := system.(type) {
-		case string:
-			if content != "" {
-				system = strings.TrimSpace(content + "\n\n" + appended)
-			} else {
-				system = appended
-			}
-		case []core.ContentPart:
-			if appended != "" {
-				system = append(content, core.ContentPart{Type: "text", Text: appended})
-			}
-		case nil:
-			system = appended
-		}
-	}
 	if system != nil && core.ExtractTextContent(system) != "" {
 		out = append(out, core.Message{Role: "system", Content: system})
 	}
 
-	for i, msg := range filteredMessages {
+	for i, msg := range req.Messages {
+		if msg.Role == "system" {
+			content, err := systemContent(msg.Content)
+			if err != nil {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("messages[%d]: %v", i, err), err)
+			}
+			if content == nil || core.ExtractTextContent(content) == "" {
+				continue
+			}
+			out = append(out, core.Message{Role: "system", Content: content})
+			continue
+		}
 		if msg.Role != "user" && msg.Role != "assistant" {
 			return nil, core.NewInvalidRequestError(
 				fmt.Sprintf("messages[%d].role must be \"user\" or \"assistant\"", i), nil)

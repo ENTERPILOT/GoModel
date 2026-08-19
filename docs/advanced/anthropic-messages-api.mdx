@@ -181,6 +181,11 @@ features that have no canonical equivalent are not preserved end to end:
 
 - **`cache_control`** is preserved on the request, system/content blocks,
   custom tools, and tool-use/tool-result history when routed to Anthropic.
+- **`{"role": "system"}` messages inside `messages`** keep their position and
+  `cache_control` breakpoints when routed to a Claude 4.8+/5-family model
+  (Claude Code appends system reminders this way, and its prompt caching
+  depends on them staying in place). On older Claude models, which reject the
+  role, their text is hoisted into the top-level system prompt instead.
 - **Extended-thinking signatures** and `thinking` blocks on input messages are dropped.
 - **Server/built-in tools** (web search, code execution, …) are rejected with a clear
   `400`; only custom tools (`type` absent or `"custom"`) translate.

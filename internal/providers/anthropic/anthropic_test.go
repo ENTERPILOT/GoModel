@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -5419,5 +5420,133 @@ func TestConvertToAnthropicRequest_HonoursDefaultMaxTokensEnv(t *testing.T) {
 	}
 	if got.MaxTokens != 32768 {
 		t.Errorf("MaxTokens = %d, want 32768", got.MaxTokens)
+	}
+}
+
+func TestConvertToAnthropicRequestSystemRoleMessages(t *testing.T) {
+	cacheMarker := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+	})
+	messages := []core.Message{
+		{Role: "system", Content: "leading instructions"},
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "hello"},
+		{Role: "system", Content: []core.ContentPart{
+			{Type: "text", Text: "mid-conversation reminder", ExtraFields: cacheMarker},
+		}},
+		{Role: "user", Content: "continue"},
+	}
+
+	t.Run("supported model keeps mid-conversation system in place", func(t *testing.T) {
+		out, err := convertToAnthropicRequest(&core.ChatRequest{
+			Model:    "claude-fable-5",
+			Messages: messages,
+		})
+		if err != nil {
+			t.Fatalf("convertToAnthropicRequest() error = %v", err)
+		}
+		if out.System != "leading instructions" {
+			t.Fatalf("System = %#v, want only the leading instructions", out.System)
+		}
+		if len(out.Messages) != 4 {
+			t.Fatalf("len(Messages) = %d, want 4 (user, assistant, system, user)", len(out.Messages))
+		}
+		if out.Messages[2].Role != "system" {
+			t.Fatalf("Messages[2].Role = %q, want system", out.Messages[2].Role)
+		}
+		blocks, ok := out.Messages[2].Content.([]anthropicContentBlock)
+		if !ok || len(blocks) != 1 {
+			t.Fatalf("Messages[2].Content = %#v, want one text block", out.Messages[2].Content)
+		}
+		if blocks[0].Text != "mid-conversation reminder" {
+			t.Fatalf("system block text = %q", blocks[0].Text)
+		}
+		if string(blocks[0].CacheControl) != `{"type":"ephemeral"}` {
+			t.Fatalf("system block cache_control = %q, want ephemeral marker", blocks[0].CacheControl)
+		}
+	})
+
+	t.Run("legacy model hoists mid-conversation system into the system prompt", func(t *testing.T) {
+		out, err := convertToAnthropicRequest(&core.ChatRequest{
+			Model:    "claude-sonnet-4-5-20250929",
+			Messages: messages,
+		})
+		if err != nil {
+			t.Fatalf("convertToAnthropicRequest() error = %v", err)
+		}
+		if len(out.Messages) != 3 {
+			t.Fatalf("len(Messages) = %d, want 3 (user, assistant, user)", len(out.Messages))
+		}
+		blocks, ok := out.System.([]anthropicContentBlock)
+		if !ok || len(blocks) != 2 {
+			t.Fatalf("System = %#v, want leading + hoisted blocks", out.System)
+		}
+		if blocks[1].Text != "mid-conversation reminder" || string(blocks[1].CacheControl) != `{"type":"ephemeral"}` {
+			t.Fatalf("hoisted block = %+v, want reminder with cache_control", blocks[1])
+		}
+	})
+}
+
+func TestSupportsSystemRoleMessages(t *testing.T) {
+	for model, want := range map[string]bool{
+		"claude-fable-5":             true,
+		"claude-mythos-5":            true,
+		"claude-opus-4-8-20260301":   true,
+		"claude-opus-5-20260115":     true,
+		"claude-sonnet-5-20250929":   true,
+		"claude-sonnet-4-5-20250929": false,
+		"claude-opus-4-6":            false,
+		"claude-haiku-4-5-20251001":  false,
+		"claude-3-5-haiku-20241022":  false,
+	} {
+		if got := supportsSystemRoleMessages(model); got != want {
+			t.Errorf("supportsSystemRoleMessages(%q) = %v, want %v", model, got, want)
+		}
+	}
+}
+
+// TestMessagesCacheBreakpointsSurviveTranslation pins the end-to-end invariant
+// that broke prompt caching for Claude Code sessions: a /v1/messages request
+// whose moving cache_control breakpoint rides on an interleaved system-role
+// message must reach the provider with all breakpoints intact and in place.
+func TestMessagesCacheBreakpointsSurviveTranslation(t *testing.T) {
+	decoded, err := anthropicapi.DecodeMessagesRequest([]byte(`{
+		"model": "claude-fable-5",
+		"max_tokens": 100,
+		"system": [
+			{"type":"text","text":"base prompt"},
+			{"type":"text","text":"stable context","cache_control":{"type":"ephemeral"}}
+		],
+		"messages": [
+			{"role":"user","content":[{"type":"text","text":"hi"}]},
+			{"role":"assistant","content":[{"type":"text","text":"hello"}]},
+			{"role":"system","content":[{"type":"text","text":"reminder","cache_control":{"type":"ephemeral"}}]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("DecodeMessagesRequest: %v", err)
+	}
+	chat, err := anthropicapi.ToChatRequest(decoded)
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	out, err := convertToAnthropicRequest(chat)
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest: %v", err)
+	}
+	wire, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got := strings.Count(string(wire), "cache_control"); got != 2 {
+		t.Fatalf("wire body carries %d cache_control markers, want 2: %s", got, wire)
+	}
+	last := out.Messages[len(out.Messages)-1]
+	if last.Role != "system" {
+		t.Fatalf("last wire message role = %q, want the trailing system reminder", last.Role)
+	}
+	blocks, ok := last.Content.([]anthropicContentBlock)
+	if !ok || len(blocks) != 1 || len(blocks[0].CacheControl) == 0 {
+		t.Fatalf("trailing system message = %#v, want one block with cache_control", last.Content)
 	}
 }
