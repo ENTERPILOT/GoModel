@@ -69,10 +69,10 @@ Because passthrough is provider-native, the response is also provider-native.
 For Anthropic messages, the response uses Anthropic's message schema, not an
 OpenAI chat completion schema.
 
-Passthrough inference requests are audited and recorded in usage tracking:
-token counts are read from SSE usage events on streaming responses and from
-the `usage` member of JSON responses, so costs and budgets account for
-passthrough traffic like any other route.
+When usage tracking is enabled, successful passthrough inference responses
+are recorded: token counts are read from SSE usage events on streaming
+responses and from the `usage` member of JSON responses, so costs and budgets
+account for passthrough traffic like any other route.
 
 ## Anthropic SDK example
 

@@ -81,8 +81,36 @@ func TestProxyPassthroughNonStreamingLogsUsage(t *testing.T) {
 	}
 }
 
-// Non-JSON and non-200 passthrough responses must relay untouched with no
-// usage entry: there is nothing trustworthy to account for.
+// Any complete-body success status must be accounted, not only 200: /p/ is
+// provider-generic and a 201/202 JSON response can carry usage too.
+func TestProxyPassthroughNonStreamingLogsUsageForNon200Success(t *testing.T) {
+	for _, status := range []int{http.StatusCreated, http.StatusAccepted} {
+		body := `{"id":"msg_p","model":"claude-fable-5","usage":{"input_tokens":42,"output_tokens":6}}`
+		resp := &core.PassthroughResponse{
+			StatusCode: status,
+			Headers:    map[string][]string{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+		usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
+
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/p/anthropic/messages", strings.NewReader(`{}`))
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+
+		info := &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "messages"}
+		if err := proxyPassthroughResponse(c, nil, usageLogger, nil, "anthropic", "anthropic", "messages", info, resp); err != nil {
+			t.Fatalf("status %d: proxyPassthroughResponse: %v", status, err)
+		}
+		if len(usageLogger.entries) != 1 {
+			t.Fatalf("status %d: usage entries = %d, want 1", status, len(usageLogger.entries))
+		}
+	}
+}
+
+// Non-JSON media types and incomplete-body statuses must relay untouched with
+// no usage entry: there is nothing trustworthy to account for. The media type
+// is parsed, so JSON-adjacent types and parameters must not slip through.
 func TestProxyPassthroughNonStreamingSkipsNonAccountableResponses(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -90,7 +118,9 @@ func TestProxyPassthroughNonStreamingSkipsNonAccountableResponses(t *testing.T) 
 		contentType string
 	}{
 		{name: "non-JSON content type", status: http.StatusOK, contentType: "application/x-jsonl"},
-		{name: "non-200 status", status: http.StatusAccepted, contentType: "application/json"},
+		{name: "JSON-adjacent media type", status: http.StatusOK, contentType: "application/json-seq"},
+		{name: "JSON only in a parameter", status: http.StatusOK, contentType: `text/plain; profile="application/json"`},
+		{name: "partial content", status: http.StatusPartialContent, contentType: "application/json"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

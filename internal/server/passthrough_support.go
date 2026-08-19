@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"sort"
 	"strings"
@@ -347,7 +348,7 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	// stream observer is deliberately absent: non-streaming responses are
 	// audited by the regular audit middleware.
 	var observers []streaming.Observer
-	if resp.StatusCode == http.StatusOK {
+	if isObservablePassthroughStatus(resp.StatusCode) {
 		observers = passthroughJSONResponseObservers(c, usageLogger, pricingResolver, providerType, providerName, endpoint, info, extraObservers)
 	}
 	if len(observers) == 0 || !isJSONContentType(resp.Headers) {
@@ -475,14 +476,25 @@ func notifyObserversWithJSONBody(body []byte, observers []streaming.Observer) {
 	}
 }
 
+// isObservablePassthroughStatus reports whether a passthrough response status
+// can carry a complete, accountable response body: any success status except
+// 206 Partial Content, whose body is by definition incomplete.
+func isObservablePassthroughStatus(status int) bool {
+	return status >= http.StatusOK && status < http.StatusMultipleChoices && status != http.StatusPartialContent
+}
+
 func isJSONContentType(headers map[string][]string) bool {
 	for key, values := range headers {
 		if !strings.EqualFold(key, "Content-Type") {
 			continue
 		}
 		for _, value := range values {
-			mediaType := strings.ToLower(value)
-			if strings.Contains(mediaType, "application/json") || strings.Contains(mediaType, "+json") {
+			mediaType, _, err := mime.ParseMediaType(value)
+			if err != nil {
+				continue
+			}
+			mediaType = strings.ToLower(mediaType)
+			if mediaType == "application/json" || strings.HasSuffix(mediaType, "+json") {
 				return true
 			}
 		}
