@@ -734,6 +734,9 @@ export function auditRequestRevisionPane(entry, revision) {
     title: m.audit_rewritten_title(),
     direction: "request",
     seq: single ? 0 : Number((revision && revision.seq) || 0),
+    // Opening the Interactions drawer from this pane previews this rewrite
+    // step (see conversationDrawer.openConversation).
+    requestStep: "revision-" + Number((revision && revision.seq) || 0),
     kind: revision && revision.rewriter ? String(revision.rewriter) : "",
     savingsLabel: auditRevisionPercentLabel(revision),
     layout: "split",
@@ -838,6 +841,9 @@ export function auditRequestPane(entry, extractSegments) {
   return {
     title: m.audit_request_title(),
     direction: "request",
+    // Opening the Interactions drawer from this pane previews the original
+    // client request (see conversationDrawer.openConversation).
+    requestStep: "original",
     layout: "split",
     entry,
     copyHeaders: data && data.request_headers,

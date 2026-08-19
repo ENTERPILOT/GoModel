@@ -14,10 +14,7 @@
   import * as m from "$lib/paraglide/messages.js";
   import ChatMessage from "./ChatMessage.svelte";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
-  import {
-    REQUEST_STEP_FINAL,
-    REQUEST_STEP_ORIGINAL,
-  } from "./conversation-helpers.js";
+  import { conversationRequestStepID } from "./conversation-helpers.js";
   import {
     DEFAULT_CONVERSATION_PANEL_WIDTH,
     clampConversationPanelWidth,
@@ -39,15 +36,6 @@
   let returningFromFullscreen = $state(false);
   let showPromptCache = $state(readStored(promptCacheFillStorageKey, "true") !== "false");
   let resizePointerID = null;
-
-  // The final step's option submits REQUEST_STEP_FINAL so the default
-  // selection ("final") matches it, and a later step list (e.g. a live entry
-  // gaining another rewrite) keeps the selection on the final shape.
-  function requestStepValue(step) {
-    return step.isFinal && step.id !== REQUEST_STEP_ORIGINAL
-      ? REQUEST_STEP_FINAL
-      : step.id;
-  }
 
   function requestStepLabel(step) {
     if (!step || step.seq === 0) return m.interaction_request_step_original();
@@ -266,6 +254,7 @@
     onkeydown={resizeWithKeyboard}
   ></div>
   <div class="conversation-drawer-header">
+    <div class="conversation-drawer-header-row">
     <div class="conversation-drawer-title">
       <h3 id="interactions-drawer-title">{m.interaction_title()}</h3>
       <span
@@ -306,6 +295,23 @@
         bind:el={drawer.conversationCloseBtnEl}
       />
     </div>
+    </div>
+    {#if drawer.conversationRequestSteps().length > 1}
+      <label
+        class="conversation-step-picker"
+        title={m.interaction_request_step_help()}
+      >
+        <span>{m.interaction_request_step()}</span>
+        <select
+          value={drawer.conversationRequestStep}
+          onchange={(event) => drawer.selectRequestStep(event.currentTarget.value)}
+        >
+          {#each drawer.conversationRequestSteps() as step (step.id)}
+            <option value={conversationRequestStepID(step)}>{requestStepLabel(step)}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
   </div>
 
   <div id="interactions-drawer-content">
@@ -343,22 +349,6 @@
       <p class="empty-state">{m.interaction_empty()}</p>
     {/if}
 
-    {#if drawer.conversationRequestSteps().length > 1}
-      <label
-        class="conversation-step-picker"
-        title={m.interaction_request_step_help()}
-      >
-        <span>{m.interaction_request_step()}</span>
-        <select
-          value={drawer.conversationRequestStep}
-          onchange={(event) => drawer.selectRequestStep(event.currentTarget.value)}
-        >
-          {#each drawer.conversationRequestSteps() as step (step.id)}
-            <option value={requestStepValue(step)}>{requestStepLabel(step)}</option>
-          {/each}
-        </select>
-      </label>
-    {/if}
     {#if drawer.conversationMessages.length > 0}
       {#if drawer.conversationMessages.some((msg) =>
         Number(msg.promptCacheRatio || 0) > 0
@@ -507,11 +497,17 @@
 
   .conversation-drawer-header {
     display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .conversation-drawer-header-row {
+    display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
   }
 
   .conversation-drawer-header-actions {
@@ -662,9 +658,12 @@
     display: flex;
     align-items: center;
     gap: 7px;
-    margin: 12px 16px 0;
     color: var(--text-muted);
     font-size: 11px;
+  }
+
+  .conversation-step-picker span {
+    flex: 0 0 auto;
   }
 
   .conversation-step-picker select {

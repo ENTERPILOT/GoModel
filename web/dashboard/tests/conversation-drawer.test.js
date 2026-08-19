@@ -13,6 +13,7 @@ import {
   conversationFollowUpEntry,
   conversationMessageCopyText,
   conversationRequestStepBody,
+  conversationRequestStepID,
   conversationRequestSteps,
   extractConversationErrorMessage,
   extractRequestPromptTextSegments,
@@ -24,6 +25,7 @@ import {
   latestRenderableConversationEntry,
   matchLiveConversationEntry,
   mergedConversationEntryIDs,
+  normalizedConversationRequestStep,
   renderBodyWithConversationHighlights,
   shouldHydrateConversation,
 } from "../src/pages/audit-logs/conversation-helpers.js";
@@ -1251,4 +1253,34 @@ test("step preview never changes branch membership: lineage stays on the origina
   // the branch even while the anchor previews its compressed shape.
   assert.deepEqual(view.entryIDs, ["audit-rev", "audit-rev-2"]);
   assert.ok(view.messages.some((msg) => msg.text === "Follow-up"));
+});
+
+test("opening from an audit pane maps its step onto selectable step ids", () => {
+  const entry = revisionedEntry();
+  const steps = conversationRequestSteps(entry);
+  // The final revision is addressed as "final" so a growing step list keeps
+  // the selection on the final shape.
+  assert.equal(conversationRequestStepID(steps[1]), "final");
+  assert.equal(conversationRequestStepID(steps[0]), "original");
+
+  assert.equal(normalizedConversationRequestStep(entry, "original"), "original");
+  assert.equal(normalizedConversationRequestStep(entry, "revision-1"), "final");
+  assert.equal(normalizedConversationRequestStep(entry, "final"), "final");
+  // Unknown steps (e.g. a no_change revision's pane never exists, but be
+  // safe) and missing steps default to the final provider shape.
+  assert.equal(normalizedConversationRequestStep(entry, "revision-9"), "final");
+  assert.equal(normalizedConversationRequestStep(entry, undefined), "final");
+
+  // A middle revision keeps its own id.
+  const chained = revisionedEntry();
+  chained.data = {
+    ...chained.data,
+    request_revisions: [
+      ...chained.data.request_revisions,
+      { seq: 3, rewriter: "trim", bytes_before: 100, bytes_after: 90,
+        body: { messages: [] } },
+    ],
+  };
+  assert.equal(normalizedConversationRequestStep(chained, "revision-1"), "revision-1");
+  assert.equal(normalizedConversationRequestStep(chained, "revision-3"), "final");
 });

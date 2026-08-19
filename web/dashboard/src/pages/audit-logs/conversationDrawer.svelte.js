@@ -26,6 +26,7 @@ import {
   latestRenderableConversationEntry,
   matchLiveConversationEntry,
   mergedConversationEntryIDs,
+  normalizedConversationRequestStep,
   renderBodyWithConversationHighlights,
   shouldHydrateConversation,
 } from "./conversation-helpers.js";
@@ -111,7 +112,7 @@ class ConversationDrawerStore {
     return String(selection.toString() || "").trim().length > 0;
   }
 
-  handleBodyConversationClick(event, entry) {
+  handleBodyConversationClick(event, entry, requestStep) {
     const wasDrag = this._isBodyDrag(event);
     this.bodyPointerStart = null;
     if (wasDrag) return;
@@ -121,7 +122,7 @@ class ConversationDrawerStore {
     if (!el) return;
     event.preventDefault();
     event.stopPropagation();
-    this.openConversation(entry, el);
+    this.openConversation(entry, el, requestStep);
   }
 
   handleErrorConversationClick(event, entry) {
@@ -147,7 +148,7 @@ class ConversationDrawerStore {
     });
   }
 
-  async openConversation(entry, triggerEl) {
+  async openConversation(entry, triggerEl, requestStep) {
     if (!entry || !entry.id || !this.canShowConversation(entry)) return;
 
     const activeEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -166,7 +167,11 @@ class ConversationDrawerStore {
     this._setConversationEntryIDs([]);
     this.conversationTruncated = false;
     this.conversationFollowLatest = false;
-    this.conversationRequestStep = REQUEST_STEP_FINAL;
+    // Opening from a specific audit pane (original request or one rewrite)
+    // previews that step; every other entry point defaults to the final
+    // shape sent to the provider.
+    this.conversationRequestStep =
+      normalizedConversationRequestStep(entry, requestStep);
     this.revisionDetailRequested = new Set();
     this.followUpText = "";
     this.followUpError = "";

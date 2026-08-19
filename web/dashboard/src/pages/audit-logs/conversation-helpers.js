@@ -371,6 +371,27 @@ export function conversationRequestSteps(entry) {
     return steps;
 }
 
+// conversationRequestStepID addresses one step for selection state. The final
+// step is addressed as REQUEST_STEP_FINAL so a step list that grows (a live
+// entry gaining another rewrite) keeps the selection on the final shape.
+export function conversationRequestStepID(step) {
+    if (!step) return REQUEST_STEP_FINAL;
+    return step.isFinal && step.id !== REQUEST_STEP_ORIGINAL
+        ? REQUEST_STEP_FINAL
+        : step.id;
+}
+
+// normalizedConversationRequestStep maps a requested step (e.g. the audit
+// pane the drawer was opened from) onto the entry's selectable step ids,
+// falling back to the final shape for unknown steps.
+export function normalizedConversationRequestStep(entry, step) {
+    const wanted = String(step || REQUEST_STEP_FINAL);
+    if (wanted === REQUEST_STEP_FINAL) return REQUEST_STEP_FINAL;
+    const match = conversationRequestSteps(entry)
+        .find((candidate) => candidate.id === wanted);
+    return match ? conversationRequestStepID(match) : REQUEST_STEP_FINAL;
+}
+
 // conversationRequestStepBody resolves the request body previewed at `step`.
 // REQUEST_STEP_FINAL (the default) is the last rewritten body — what went to
 // the provider — falling back to the original when nothing rewrote the
