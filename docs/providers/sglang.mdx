@@ -194,6 +194,10 @@ GoModel strips client authorization before forwarding and applies
 
 - Chat completions, streaming, model listing, Responses, and embeddings use
   SGLang's OpenAI-compatible API.
+- SGLang's native `/v1/responses` endpoint rejects tool-bearing requests on
+  some versions. Set `api_mode: chat_compatible` in YAML (or
+  `SGLANG_API_MODE=chat_compatible`) to translate Responses API calls through
+  chat completions instead, which keeps function calling working.
 - Embeddings and model-specific features depend on the model loaded by SGLang.
 - Native batch, file, and stored-response lifecycle interfaces are not yet
   exposed as typed GoModel provider capabilities; use passthrough where the
