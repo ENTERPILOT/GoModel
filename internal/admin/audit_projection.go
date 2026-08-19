@@ -126,8 +126,10 @@ func looksLikeResponsesOutput(v any) bool {
 // slimConversationEntry strips the fields the Interactions drawer never
 // reads from a conversation-thread entry. Request headers are retained because
 // the drawer uses the safe, redacted subset to continue the same session from
-// the original endpoint. Response headers, attempts, and request revisions
-// only inflate the response.
+// the original endpoint. Response headers and attempts only inflate the
+// response. Request revisions keep their metadata — the drawer's request-step
+// picker needs to know which rewrites ran — but drop the heavy per-revision
+// bodies and details; the drawer lazy-loads those from /admin/audit/detail.
 func slimConversationEntry(entry *auditlog.LogEntry) {
 	d := entry.Data
 	if d == nil {
@@ -138,7 +140,15 @@ func slimConversationEntry(entry *auditlog.LogEntry) {
 	}
 	slim := *d
 	slim.Attempts = nil
-	slim.RequestRevisions = nil
 	slim.ResponseHeaders = nil
+	if len(slim.RequestRevisions) > 0 {
+		revisions := make([]auditlog.RequestRevisionSnapshot, len(slim.RequestRevisions))
+		copy(revisions, slim.RequestRevisions)
+		for i := range revisions {
+			revisions[i].Body = nil
+			revisions[i].Detail = nil
+		}
+		slim.RequestRevisions = revisions
+	}
 	entry.Data = &slim
 }

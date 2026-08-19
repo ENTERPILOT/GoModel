@@ -12,6 +12,9 @@ import {
   conversationEntryIsLatest,
   conversationFollowUpEntry,
   conversationMessageCopyText,
+  conversationRequestStepBody,
+  conversationRequestStepID,
+  conversationRequestSteps,
   extractConversationErrorMessage,
   extractRequestPromptTextSegments,
   formatFunctionArguments,
@@ -22,6 +25,7 @@ import {
   latestRenderableConversationEntry,
   matchLiveConversationEntry,
   mergedConversationEntryIDs,
+  normalizedConversationRequestStep,
   renderBodyWithConversationHighlights,
   shouldHydrateConversation,
 } from "../src/pages/audit-logs/conversation-helpers.js";
@@ -1117,4 +1121,222 @@ test("follow-up headers replace a captured parent instead of duplicating it", ()
     name.toLowerCase() === "x-gomodel-interaction-parent");
   assert.deepEqual(parentNames, ["X-GoModel-Interaction-Parent"]);
   assert.equal(new Headers(headers).get("x-gomodel-interaction-parent"), "log-2");
+});
+
+// --- Request-step preview (ingress rewrites) --------------------------------
+
+function revisionedEntry(overrides = {}) {
+  return {
+    id: "audit-rev",
+    path: "/v1/chat/completions",
+    timestamp: "2026-07-06T12:00:00Z",
+    data: {
+      request_body: {
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "Be verbose" },
+          { role: "user", content: "Original long question" },
+        ],
+      },
+      response_body: {
+        choices: [{ message: { role: "assistant", content: "Answer" } }],
+      },
+      request_revisions: [
+        {
+          seq: 1,
+          rewriter: "compress",
+          bytes_before: 200,
+          bytes_after: 100,
+          body: {
+            model: "gpt-4o",
+            messages: [
+              { role: "system", content: "Be verbose" },
+              { role: "user", content: "Compressed question" },
+            ],
+          },
+        },
+        { seq: 2, rewriter: "guard", bytes_before: 100, bytes_after: 100, no_change: true },
+      ],
+    },
+    ...overrides,
+  };
+}
+
+test("request steps list the original plus every revision that changed the body", () => {
+  const steps = conversationRequestSteps(revisionedEntry());
+  assert.deepEqual(steps.map((step) => step.id), ["original", "revision-1"]);
+  assert.equal(steps[0].isFinal, false);
+  assert.equal(steps[1].isFinal, true);
+  assert.equal(steps[1].rewriter, "compress");
+  assert.equal(steps[1].hasBody, true);
+
+  // No rewrites: the original is the only, final step.
+  const plain = conversationRequestSteps({
+    id: "a",
+    data: { request_body: { messages: [] } },
+  });
+  assert.deepEqual(plain.map((step) => step.id), ["original"]);
+  assert.equal(plain[0].isFinal, true);
+});
+
+test("request-step bodies resolve final/original/explicit revisions with fallbacks", () => {
+  const entry = revisionedEntry();
+  assert.equal(
+    conversationRequestStepBody(entry, "final").messages[1].content,
+    "Compressed question",
+  );
+  assert.equal(
+    conversationRequestStepBody(entry, "original").messages[1].content,
+    "Original long question",
+  );
+  assert.equal(
+    conversationRequestStepBody(entry, "revision-1").messages[1].content,
+    "Compressed question",
+  );
+
+  // Metadata-only revisions (bodies stripped server-side) fall back to the
+  // original until the detail fetch fills them in.
+  const slim = revisionedEntry();
+  slim.data = {
+    ...slim.data,
+    request_revisions: [{ seq: 1, rewriter: "compress", bytes_before: 200, bytes_after: 100 }],
+  };
+  assert.equal(
+    conversationRequestStepBody(slim, "final").messages[1].content,
+    "Original long question",
+  );
+  assert.equal(
+    conversationRequestStepBody(slim, "revision-1").messages[1].content,
+    "Original long question",
+  );
+
+  // A step never falls back to a *different* revision: with only a later
+  // revision's body loaded, an earlier selection and an unloaded final step
+  // both show the original, not the other revision.
+  const partial = revisionedEntry();
+  partial.data = {
+    ...partial.data,
+    request_revisions: [
+      { seq: 1, rewriter: "compress", bytes_before: 200, bytes_after: 150,
+        body: { messages: [{ role: "user", content: "Mid rewrite" }] } },
+      { seq: 2, rewriter: "trim", bytes_before: 150, bytes_after: 100 },
+    ],
+  };
+  assert.equal(
+    conversationRequestStepBody(partial, "final").messages[1].content,
+    "Original long question",
+  );
+  assert.equal(
+    conversationRequestStepBody(partial, "revision-1").messages[0].content,
+    "Mid rewrite",
+  );
+});
+
+test("the drawer renders the anchor's selected request step, defaulting to the final provider shape", () => {
+  const entry = revisionedEntry();
+
+  // Legacy callers without options keep the original client request.
+  const legacy = buildConversationMessages([entry], entry.id);
+  assert.ok(legacy.some((msg) => msg.text === "Original long question"));
+
+  const finalView = buildConversationView([entry], entry.id, { anchorRequestStep: "final" });
+  assert.ok(finalView.messages.some((msg) => msg.text === "Compressed question"));
+  assert.ok(!finalView.messages.some((msg) => msg.text === "Original long question"));
+  // The response still renders after the rewritten request.
+  assert.equal(finalView.messages[finalView.messages.length - 1].text, "Answer");
+
+  const originalView = buildConversationView([entry], entry.id, { anchorRequestStep: "original" });
+  assert.ok(originalView.messages.some((msg) => msg.text === "Original long question"));
+});
+
+test("step preview never changes branch membership: lineage stays on the original body", () => {
+  const anchor = revisionedEntry();
+  const followUp = {
+    id: "audit-rev-2",
+    path: "/v1/chat/completions",
+    timestamp: "2026-07-06T12:01:00Z",
+    data: {
+      request_body: {
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "Be verbose" },
+          { role: "user", content: "Original long question" },
+          { role: "assistant", content: "Answer" },
+          { role: "user", content: "Follow-up" },
+        ],
+      },
+    },
+  };
+  const view = buildConversationView([anchor, followUp], anchor.id, {
+    anchorRequestStep: "final",
+  });
+  // The follow-up extends the anchor's original lineage, so it must stay in
+  // the branch even while the anchor previews its compressed shape.
+  assert.deepEqual(view.entryIDs, ["audit-rev", "audit-rev-2"]);
+  assert.ok(view.messages.some((msg) => msg.text === "Follow-up"));
+});
+
+test("opening from an audit pane maps its step onto selectable step ids", () => {
+  const entry = revisionedEntry();
+  const steps = conversationRequestSteps(entry);
+  // The final revision is addressed as "final" so a growing step list keeps
+  // the selection on the final shape.
+  assert.equal(conversationRequestStepID(steps[1]), "final");
+  assert.equal(conversationRequestStepID(steps[0]), "original");
+
+  assert.equal(normalizedConversationRequestStep(entry, "original"), "original");
+  assert.equal(normalizedConversationRequestStep(entry, "revision-1"), "final");
+  assert.equal(normalizedConversationRequestStep(entry, "final"), "final");
+  // Unknown steps (e.g. a no_change revision's pane never exists, but be
+  // safe) and missing steps default to the final provider shape.
+  assert.equal(normalizedConversationRequestStep(entry, "revision-9"), "final");
+  assert.equal(normalizedConversationRequestStep(entry, undefined), "final");
+
+  // A middle revision keeps its own id.
+  const chained = revisionedEntry();
+  chained.data = {
+    ...chained.data,
+    request_revisions: [
+      ...chained.data.request_revisions,
+      { seq: 3, rewriter: "trim", bytes_before: 100, bytes_after: 90,
+        body: { messages: [] } },
+    ],
+  };
+  assert.equal(normalizedConversationRequestStep(chained, "revision-1"), "revision-1");
+  assert.equal(normalizedConversationRequestStep(chained, "revision-3"), "final");
+});
+
+test("anthropic /messages bodies get clickable highlights: system and top-level content", () => {
+  const deps = {
+    formatJSON: (value) => JSON.stringify(value, null, 2),
+    canShowConversation: () => true,
+  };
+  const entry = { id: "log-a", path: "/v1/messages" };
+
+  const requestRendered = renderBodyWithConversationHighlights(entry, {
+    model: "claude-sonnet-5",
+    system: [{ type: "text", text: "Be helpful" }],
+    messages: [{ role: "user", content: "Weekly update please" }],
+  }, deps);
+  assert.match(requestRendered, /conversation-body-highlight conversation-system[^>]*data-conversation-trigger="1"/);
+  assert.match(requestRendered, /conversation-body-highlight conversation-user/);
+
+  const responseRendered = renderBodyWithConversationHighlights(entry, {
+    id: "msg_1",
+    role: "assistant",
+    content: [{ type: "text", text: "Weekly update for /agents..." }],
+    stop_reason: "end_turn",
+  }, deps);
+  assert.match(responseRendered, /conversation-body-highlight conversation-assistant[^>]*data-conversation-trigger="1"/);
+  assert.ok(responseRendered.includes("Weekly update for /agents"));
+  // stop_reason after the content block stays outside the highlight.
+  const afterHighlight = responseRendered.split("</span>").pop();
+  assert.ok(afterHighlight.includes("stop_reason"));
+
+  // Nested content inside a highlighted messages block is consumed by that
+  // block: exactly one highlight span in the request's messages section.
+  const chatRendered = renderBodyWithConversationHighlights(entry, {
+    messages: [{ role: "user", content: "Hi" }],
+  }, deps);
+  assert.equal(chatRendered.match(/conversation-body-highlight/g).length, 1);
 });

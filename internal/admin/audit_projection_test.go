@@ -224,8 +224,18 @@ func TestAuditConversationSlimsEntries(t *testing.T) {
 	if d.ErrorMessage != "boom" {
 		t.Error("error_message feeds the drawer's error rendering; it must survive")
 	}
-	if d.Attempts != nil || d.RequestRevisions != nil || d.ResponseHeaders != nil {
-		t.Errorf("attempts/revisions/response headers must be stripped from conversation entries, got %+v", d)
+	if d.Attempts != nil || d.ResponseHeaders != nil {
+		t.Errorf("attempts/response headers must be stripped from conversation entries, got %+v", d)
+	}
+	if len(d.RequestRevisions) != 1 {
+		t.Fatalf("revision metadata feeds the drawer's request-step picker; it must survive, got %+v", d.RequestRevisions)
+	}
+	rev := d.RequestRevisions[0]
+	if rev.Body != nil || rev.Detail != nil {
+		t.Errorf("revision bodies/details must be stripped from conversation entries, got %+v", rev)
+	}
+	if rev.Rewriter != "pro-token-compression" || rev.Seq != 1 || rev.BytesBefore != 2000 || rev.BytesAfter != 1000 {
+		t.Errorf("revision metadata must survive, got %+v", rev)
 	}
 	if d.RequestHeaders["content-type"] != "application/json" {
 		t.Errorf("redacted request headers are required for follow-ups, got %+v", d.RequestHeaders)

@@ -14,6 +14,7 @@
   import * as m from "$lib/paraglide/messages.js";
   import ChatMessage from "./ChatMessage.svelte";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
+  import { conversationRequestStepID } from "./conversation-helpers.js";
   import {
     DEFAULT_CONVERSATION_PANEL_WIDTH,
     clampConversationPanelWidth,
@@ -35,6 +36,14 @@
   let returningFromFullscreen = $state(false);
   let showPromptCache = $state(readStored(promptCacheFillStorageKey, "true") !== "false");
   let resizePointerID = null;
+
+  function requestStepLabel(step) {
+    if (!step || step.seq === 0) return m.interaction_request_step_original();
+    if (step.isFinal) {
+      return m.interaction_request_step_final({ rewriter: step.rewriter });
+    }
+    return m.interaction_request_step_after({ rewriter: step.rewriter });
+  }
 
   function interactionsTransition(node, { fullscreen: isFullscreen, revealWithoutSlide = false }) {
     const duration = motionDuration(180);
@@ -245,6 +254,7 @@
     onkeydown={resizeWithKeyboard}
   ></div>
   <div class="conversation-drawer-header">
+    <div class="conversation-drawer-header-row">
     <div class="conversation-drawer-title">
       <h3 id="interactions-drawer-title">{m.interaction_title()}</h3>
       <span
@@ -285,6 +295,47 @@
         bind:el={drawer.conversationCloseBtnEl}
       />
     </div>
+    </div>
+    {#if drawer.conversationRequestSteps().length > 1}
+      <label
+        class="conversation-step-picker"
+        title={m.interaction_request_step_help()}
+      >
+        <span>{m.interaction_request_step()}</span>
+        <select
+          value={drawer.conversationRequestStep}
+          onchange={(event) => drawer.selectRequestStep(event.currentTarget.value)}
+        >
+          {#each drawer.conversationRequestSteps() as step (step.id)}
+            <option value={conversationRequestStepID(step)}>{requestStepLabel(step)}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
+    {#if drawer.conversationMessages.some((msg) =>
+      Number(msg.promptCacheRatio || 0) > 0
+    )}
+      <button
+        type="button"
+        class="conversation-cache-legend"
+        role="switch"
+        aria-checked={showPromptCache}
+        title={showPromptCache
+          ? m.interaction_hide_cache_fill()
+          : m.interaction_show_cache_fill()}
+        onclick={togglePromptCacheFill}
+      >
+        <span class="conversation-cache-switch" class:is-active={showPromptCache} aria-hidden="true">
+          <span class="conversation-cache-switch-thumb"></span>
+        </span>
+        <span
+          >{m.interaction_cache_legend()}
+          <span class="conversation-cache-estimate"
+            >{m.interaction_estimated()}</span
+          ></span
+        >
+      </button>
+    {/if}
   </div>
 
   <div id="interactions-drawer-content">
@@ -323,30 +374,6 @@
     {/if}
 
     {#if drawer.conversationMessages.length > 0}
-      {#if drawer.conversationMessages.some((msg) =>
-        Number(msg.promptCacheRatio || 0) > 0
-      )}
-        <button
-          type="button"
-          class="conversation-cache-legend"
-          role="switch"
-          aria-checked={showPromptCache}
-          title={showPromptCache
-            ? m.interaction_hide_cache_fill()
-            : m.interaction_show_cache_fill()}
-          onclick={togglePromptCacheFill}
-        >
-          <span class="conversation-cache-switch" class:is-active={showPromptCache} aria-hidden="true">
-            <span class="conversation-cache-switch-thumb"></span>
-          </span>
-          <span
-            >{m.interaction_cache_legend()}
-            <span class="conversation-cache-estimate"
-              >{m.interaction_estimated()}</span
-            ></span
-          >
-        </button>
-      {/if}
       <div class="conversation-thread" bind:this={drawer.conversationThreadEl}>
         {#each drawer.conversationMessages as msg (msg.uid)}
           <ChatMessage {msg} {showPromptCache} />
@@ -470,11 +497,17 @@
 
   .conversation-drawer-header {
     display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .conversation-drawer-header-row {
+    display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
   }
 
   .conversation-drawer-header-actions {
@@ -621,11 +654,39 @@
     font-size: 12px;
   }
 
+  .conversation-step-picker {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .conversation-step-picker span {
+    flex: 0 0 auto;
+  }
+
+  .conversation-step-picker select {
+    min-width: 0;
+    max-width: 100%;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 11px;
+    font-family: inherit;
+  }
+
+  .conversation-step-picker select:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
+    outline-offset: 1px;
+  }
+
   .conversation-cache-legend {
     display: flex;
     align-items: center;
     gap: 7px;
-    margin: 12px 16px 0;
     padding: 0;
     border: 0;
     background: transparent;
