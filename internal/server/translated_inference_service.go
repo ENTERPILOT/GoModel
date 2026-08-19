@@ -3,12 +3,14 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/goccy/go-json"
 
@@ -47,6 +49,9 @@ type translatedInferenceService struct {
 	responseStoreMu          sync.RWMutex
 	conversationStore        conversationstore.Store
 	conversationStoreMu      sync.RWMutex
+	// snapshotWrites tracks background response snapshot writes so shutdown
+	// can drain them before closing the response store.
+	snapshotWrites sync.WaitGroup
 
 	orchestrator *gateway.InferenceOrchestrator
 
@@ -354,23 +359,35 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			))
 		}
 	}
-	if err := s.storeResponseSnapshot(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID); err != nil {
-		s.recordResponseSnapshotStoreFailure(workflow, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID, err)
-	}
+	s.storeResponseSnapshotAsync(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID)
 
 	return c.JSON(http.StatusOK, result.Response)
 }
 
-func (s *translatedInferenceService) storeResponseSnapshot(ctx context.Context, workflow *core.Workflow, req *core.ResponsesRequest, resp *core.ResponsesResponse, providerType, providerName, requestID string) error {
+// snapshotWriteTimeout bounds one background snapshot write. It covers the
+// Create plus the Update fallback, each of which can wait up to SQLite's 5s
+// busy timeout on the shared connection.
+const snapshotWriteTimeout = 15 * time.Second
+
+// storeResponseSnapshotAsync persists the response snapshot off the request
+// path so the client never waits on storage. A failed write is already
+// non-fatal on the synchronous path (metric plus warning), so deferring it
+// only changes when the failure is observed. The snapshot is deep-copied
+// before the goroutine starts: the background write must not share memory
+// with the response the handler is concurrently serializing to the client.
+// The write context is detached from request cancellation, which ends the
+// moment the response is sent. drainSnapshotWrites waits for in-flight
+// writes at shutdown.
+func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Context, workflow *core.Workflow, req *core.ResponsesRequest, resp *core.ResponsesResponse, providerType, providerName, requestID string) {
 	store := s.currentResponseStore()
 	if store == nil || resp == nil || resp.ID == "" {
-		return nil
+		return
 	}
 	if req != nil && req.Store != nil && !*req.Store {
-		return nil
+		return
 	}
 
-	stored := &responsestore.StoredResponse{
+	stored, err := responsestore.Clone(&responsestore.StoredResponse{
 		Response:           resp,
 		InputItems:         normalizedResponseInputItems(resp.ID, req),
 		Provider:           strings.TrimSpace(providerType),
@@ -379,15 +396,40 @@ func (s *translatedInferenceService) storeResponseSnapshot(ctx context.Context, 
 		RequestID:          requestID,
 		UserPath:           core.UserPathFromContext(ctx),
 		WorkflowVersionID:  workflow.WorkflowVersionID(),
+	})
+	if err != nil {
+		s.recordResponseSnapshotStoreFailure(workflow, resp, providerType, providerName, requestID, err)
+		return
 	}
+
+	writeCtx := context.WithoutCancel(ctx)
+	s.snapshotWrites.Go(func() {
+		writeCtx, cancel := context.WithTimeout(writeCtx, snapshotWriteTimeout)
+		defer cancel()
+		if err := writeResponseSnapshot(writeCtx, store, stored); err != nil {
+			s.recordResponseSnapshotStoreFailure(workflow, stored.Response, providerType, providerName, requestID, err)
+		}
+	})
+}
+
+// writeResponseSnapshot upserts one snapshot: Create first, falling back to
+// Update when the id already exists.
+func writeResponseSnapshot(ctx context.Context, store responsestore.Store, stored *responsestore.StoredResponse) error {
 	if createErr := store.Create(ctx, stored); createErr != nil {
 		updateErr := store.Update(ctx, stored)
 		if updateErr == nil {
 			return nil
 		}
-		return core.NewProviderError("response_store", http.StatusInternalServerError, "failed to persist response", errors.Join(createErr, updateErr))
+		return fmt.Errorf("persist response snapshot: %w", errors.Join(createErr, updateErr))
 	}
 	return nil
+}
+
+// drainSnapshotWrites blocks until every in-flight background snapshot write
+// finishes. The server calls it during shutdown, before the response store
+// closes.
+func (s *translatedInferenceService) drainSnapshotWrites() {
+	s.snapshotWrites.Wait()
 }
 
 func (s *translatedInferenceService) currentResponseStore() responsestore.Store {

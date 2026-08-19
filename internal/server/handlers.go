@@ -240,6 +240,17 @@ func (h *Handler) currentResponseStore() responsestore.Store {
 	return h.responseStore
 }
 
+// drainSnapshotWrites waits for in-flight background response snapshot writes.
+// Called during server shutdown before the response store closes.
+func (h *Handler) drainSnapshotWrites() {
+	h.storesMu.RLock()
+	svc := h.translatedSvc
+	h.storesMu.RUnlock()
+	if svc != nil {
+		svc.drainSnapshotWrites()
+	}
+}
+
 func (h *Handler) realtime() *realtimeService {
 	return &realtimeService{
 		provider:        h.provider,

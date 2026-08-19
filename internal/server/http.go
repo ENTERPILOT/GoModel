@@ -559,8 +559,8 @@ func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) e
 
 // Shutdown releases server resources. The HTTP server itself is stopped by
 // cancelling the context passed to Start; this method drains any in-flight
-// response cache writes, closes the cache store, and closes the response and
-// conversation stores.
+// response cache and snapshot writes, closes the cache store, and closes the
+// response and conversation stores.
 func (s *Server) Shutdown(_ context.Context) error {
 	var firstErr error
 	if s.responseCacheMiddleware != nil {
@@ -568,6 +568,7 @@ func (s *Server) Shutdown(_ context.Context) error {
 			firstErr = err
 		}
 	}
+	s.handler.drainSnapshotWrites()
 	if s.responseStore != nil {
 		if err := s.responseStore.Close(); err != nil {
 			if firstErr == nil {
