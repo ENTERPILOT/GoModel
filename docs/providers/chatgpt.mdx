@@ -88,12 +88,33 @@ Platform, so GoModel's model registry attaches their per-token API prices.
 Usage records and dashboard totals for `chatgpt` therefore show a dollar figure
 that corresponds to no actual charge.
 
+The same collision makes `/v1/models` advertise `modes: ["chat", "responses"]`
+for these models, though chat completions return 501 here. Declare the models
+explicitly to correct both:
+
+```yaml
+providers:
+  chatgpt:
+    type: chatgpt
+    api_key: "${CHATGPT_API_KEY}"
+    models:
+      - id: gpt-5.6-sol
+        metadata:
+          modes: ["responses"]
+          pricing:
+            input_per_mtok: 0
+            output_per_mtok: 0
+            cached_input_per_mtok: 0
+```
+
 <Warning>
-  Anything that consumes those figures acts on them: a **budget** can reject
-  `chatgpt` traffic for "spending" money the subscription never charges, and
-  `cost`-based load balancing will price it as API traffic. Scope budgets to a
-  [user path](/features/user-path) that excludes subscription traffic, or leave
-  budgets off for it.
+  That override corrects what `/v1/models` advertises, but **not** what usage
+  records: cost tracking resolves pricing separately and still bills at
+  registry rates. Anything consuming those figures acts on them — a **budget**
+  can reject `chatgpt` traffic for "spending" money the subscription never
+  charges, and `cost`-based load balancing will price it as API traffic. Scope
+  budgets to a [user path](/features/user-path) that excludes subscription
+  traffic, or leave budgets off for it.
 </Warning>
 
 ## Limits
