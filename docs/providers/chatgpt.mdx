@@ -103,7 +103,9 @@ load balancing.
   [user path](/features/user-path) that excludes subscription traffic, or leave
   budgets off for it. Declaring per-model `pricing` and `modes: ["responses"]`
   in [model metadata](/advanced/model-metadata) corrects what `/v1/models`
-  advertises, but usage records still price at catalog rates.
+  advertises, but usage records still price at catalog rates. Declare every
+  model you want served: the list replaces the default inventory rather than
+  adding to it.
 </Warning>
 
 ## Limits
