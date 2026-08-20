@@ -3,6 +3,7 @@ package chatgpt
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -128,6 +129,16 @@ func TestStreamResponses_SendsCodexDialect(t *testing.T) {
 	msg, _ := input[0].(map[string]any)
 	if msg["role"] != "user" || msg["type"] != "message" {
 		t.Errorf("input[0] = %#v, want a user message", msg)
+	}
+	// The Responses API spells input content "input_text"; core.ContentPart
+	// would have rewritten it to the Chat Completions "text".
+	parts, ok := msg["content"].([]any)
+	if !ok || len(parts) != 1 {
+		t.Fatalf("content = %#v, want one part", msg["content"])
+	}
+	part, _ := parts[0].(map[string]any)
+	if part["type"] != "input_text" || part["text"] != "Reply with exactly ok" {
+		t.Errorf("content[0] = %#v, want an input_text part", part)
 	}
 }
 
@@ -300,16 +311,38 @@ func TestListModels(t *testing.T) {
 	}
 }
 
+// TestUnsupportedSurfaces checks that surfaces the Codex backend does not
+// implement report a capability gap (501) rather than a malformed request.
 func TestUnsupportedSurfaces(t *testing.T) {
 	provider := New(providers.ProviderConfig{APIKey: "token"}, providers.ProviderOptions{})
-	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-terra"}); err == nil {
-		t.Error("ChatCompletion should be unsupported")
+	calls := map[string]func() error{
+		"ChatCompletion": func() error {
+			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-terra"})
+			return err
+		},
+		"StreamChatCompletion": func() error {
+			_, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-terra"})
+			return err
+		},
+		"Embeddings": func() error {
+			_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "gpt-5.6-terra"})
+			return err
+		},
 	}
-	if _, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-terra"}); err == nil {
-		t.Error("StreamChatCompletion should be unsupported")
-	}
-	if _, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "gpt-5.6-terra"}); err == nil {
-		t.Error("Embeddings should be unsupported")
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			if err == nil {
+				t.Fatal("expected an unsupported-surface error")
+			}
+			var gatewayErr *core.GatewayError
+			if !errors.As(err, &gatewayErr) {
+				t.Fatalf("error = %T, want *core.GatewayError", err)
+			}
+			if gatewayErr.StatusCode != http.StatusNotImplemented {
+				t.Errorf("status = %d, want %d", gatewayErr.StatusCode, http.StatusNotImplemented)
+			}
+		})
 	}
 }
 

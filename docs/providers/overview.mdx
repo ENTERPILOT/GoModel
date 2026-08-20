@@ -132,7 +132,10 @@ support, not every individual model capability exposed by an upstream provider.
   ChatGPT plan's quota rather than API credit. The upstream accepts a strict
   parameter allowlist and streams only; GoModel adapts requests and collapses
   the stream for non-streaming callers. Set `CHATGPT_API_KEY` to the access
-  token from `codex login`.
+  token from `codex login`. Reported cost is not real spend: these model IDs
+  also exist on the OpenAI Platform, so the registry attaches their per-token
+  prices to flat-rate subscription traffic — keep budgets and `cost` load
+  balancing off it.
 - **Kimi Code** — no per-token pricing; quota refreshes weekly and is also
   constrained by a rolling 5-hour window. Usage-cost tracking reports zero for
   Kimi Code, so `cost` load-balancing cannot price it; prefer conservative

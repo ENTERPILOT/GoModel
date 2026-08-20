@@ -81,6 +81,21 @@ Because the backend streams only, a non-streaming `POST /v1/responses` is
 served by streaming upstream and returning the final response object. Clients
 see a normal non-streaming response.
 
+## Reported cost is not real spend
+
+Subscription usage is flat-rate, but these model IDs also exist on the OpenAI
+Platform, so GoModel's model registry attaches their per-token API prices.
+Usage records and dashboard totals for `chatgpt` therefore show a dollar figure
+that corresponds to no actual charge.
+
+<Warning>
+  Anything that consumes those figures acts on them: a **budget** can reject
+  `chatgpt` traffic for "spending" money the subscription never charges, and
+  `cost`-based load balancing will price it as API traffic. Scope budgets to a
+  [user path](/features/user-path) that excludes subscription traffic, or leave
+  budgets off for it.
+</Warning>
+
 ## Limits
 
 Subscription quota is separate from API credit. When it is exhausted the

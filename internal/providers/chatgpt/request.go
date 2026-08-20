@@ -52,6 +52,10 @@ func newUpstreamRequest(req *core.ResponsesRequest) (*upstreamRequest, error) {
 
 // normalizeInput wraps a bare string prompt in the message list the backend
 // requires; array inputs pass through untouched.
+//
+// The content part is a literal rather than a core.ContentPart: that type
+// marshals to the Chat Completions shape, rewriting "input_text" to "text",
+// which is not how the Responses API spells input content.
 func normalizeInput(input any) (any, error) {
 	switch v := input.(type) {
 	case nil:
@@ -60,7 +64,7 @@ func normalizeInput(input any) (any, error) {
 		return []core.ResponsesInputElement{{
 			Type:    "message",
 			Role:    "user",
-			Content: []core.ContentPart{{Type: "input_text", Text: v}},
+			Content: []map[string]string{{"type": "input_text", "text": v}},
 		}}, nil
 	default:
 		return v, nil
