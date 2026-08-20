@@ -46,10 +46,68 @@ func cloneResponse(src *StoredResponse) (*StoredResponse, error) {
 	return dst, err
 }
 
-// Clone deep-copies a snapshot. Callers that hand a snapshot to another
-// goroutine use it to detach from later mutations of the source response.
-func Clone(src *StoredResponse) (*StoredResponse, error) {
-	return cloneResponse(src)
+// DetachedSnapshot is a snapshot captured as its serialized form. Detaching
+// serializes exactly once, so a caller that hands the snapshot to another
+// goroutine pays no second marshal when the store can persist the bytes
+// directly, and no copy of the source can race later mutations.
+type DetachedSnapshot struct {
+	id   string
+	data []byte
+}
+
+// serializedWriter is implemented by stores that can persist an
+// already-serialized snapshot without re-marshaling it.
+type serializedWriter interface {
+	createSerialized(ctx context.Context, id string, data []byte) error
+	updateSerialized(ctx context.Context, id string, data []byte) error
+}
+
+// Detach normalizes and serializes a snapshot for a later Persist. The result
+// shares no memory with src, so src may be mutated freely afterwards.
+func Detach(src *StoredResponse) (*DetachedSnapshot, error) {
+	if src == nil || src.Response == nil || src.Response.ID == "" {
+		return nil, fmt.Errorf("response id is required")
+	}
+	normalized := normalizeStoredResponse(src)
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, fmt.Errorf("marshal response: %w", err)
+	}
+	return &DetachedSnapshot{id: normalized.Response.ID, data: data}, nil
+}
+
+// ID returns the response id the snapshot persists under.
+func (d *DetachedSnapshot) ID() string {
+	return d.id
+}
+
+// Persist upserts the snapshot: Create first, falling back to Update when the
+// id already holds a live row. Stores that support serialized writes receive
+// the detached bytes directly; other stores decode the snapshot once and take
+// the regular Create/Update path.
+func (d *DetachedSnapshot) Persist(ctx context.Context, store Store) error {
+	var createErr error
+	if sw, ok := store.(serializedWriter); ok {
+		if createErr = sw.createSerialized(ctx, d.id, d.data); createErr == nil {
+			return nil
+		}
+		if updateErr := sw.updateSerialized(ctx, d.id, d.data); updateErr != nil {
+			return fmt.Errorf("persist response snapshot: %w", errors.Join(createErr, updateErr))
+		}
+		return nil
+	}
+
+	var stored StoredResponse
+	if err := json.Unmarshal(d.data, &stored); err != nil {
+		return fmt.Errorf("unmarshal detached snapshot: %w", err)
+	}
+	if createErr = store.Create(ctx, &stored); createErr == nil {
+		return nil
+	}
+	if updateErr := store.Update(ctx, &stored); updateErr != nil {
+		return fmt.Errorf("persist response snapshot: %w", errors.Join(createErr, updateErr))
+	}
+	return nil
 }
 
 // cloneResponseWithSize deep-copies a snapshot and reports its serialized size,

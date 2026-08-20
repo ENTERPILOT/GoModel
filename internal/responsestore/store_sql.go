@@ -59,6 +59,13 @@ func (s *SQLStore) Create(ctx context.Context, response *StoredResponse) error {
 	if responseExpired(normalized, now) {
 		return nil
 	}
+	return s.createRow(ctx, normalized.Response.ID, data,
+		storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt), now)
+}
+
+// createRow inserts one snapshot row, replacing an existing row only when it
+// has already expired.
+func (s *SQLStore) createRow(ctx context.Context, id string, data []byte, storedAt, expiresAt int64, now time.Time) error {
 	affected, err := s.db.Exec(ctx, `
 		INSERT INTO response_snapshots (id, data, stored_at, expires_at)
 		VALUES (?, ?, ?, ?)
@@ -67,13 +74,41 @@ func (s *SQLStore) Create(ctx context.Context, response *StoredResponse) error {
 			stored_at = excluded.stored_at,
 			expires_at = excluded.expires_at
 		WHERE response_snapshots.expires_at > 0 AND response_snapshots.expires_at <= ?
-	`, normalized.Response.ID, string(data), storage.UnixOrZero(normalized.StoredAt),
-		storage.UnixOrZero(normalized.ExpiresAt), now.Unix())
+	`, id, string(data), storedAt, expiresAt, now.Unix())
 	if err != nil {
 		return fmt.Errorf("create response snapshot: %w", err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("response already exists: %s", normalized.Response.ID)
+		return fmt.Errorf("response already exists: %s", id)
+	}
+	return nil
+}
+
+// createSerialized stores an already-serialized snapshot, stamping retention
+// into the columns only. Reads take StoredAt/ExpiresAt from the columns, so
+// the serialized data does not need to carry them.
+func (s *SQLStore) createSerialized(ctx context.Context, id string, data []byte) error {
+	now := time.Now().UTC()
+	var expiresAt int64
+	if s.ttl > 0 {
+		expiresAt = now.Add(s.ttl).Unix()
+	}
+	return s.createRow(ctx, id, data, now.Unix(), expiresAt, now)
+}
+
+// updateSerialized replaces the data of an existing, unexpired snapshot while
+// preserving its retention columns, mirroring Update with zero retention
+// fields.
+func (s *SQLStore) updateSerialized(ctx context.Context, id string, data []byte) error {
+	affected, err := s.db.Exec(ctx, `
+		UPDATE response_snapshots SET data = ?
+		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
+	`, string(data), id, time.Now().Unix())
+	if err != nil {
+		return fmt.Errorf("update response snapshot: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
