@@ -2,6 +2,7 @@ package responsestore
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -96,6 +97,121 @@ func TestDetachedPersistSuite(t *testing.T) {
 		}
 		if got.Response.Model != "gpt-updated" {
 			t.Fatalf("model = %q, want gpt-updated", got.Response.Model)
+		}
+	})
+}
+
+func TestDetachNormalizesMetadata(t *testing.T) {
+	src := testStoredResponse("resp-normalize")
+	src.Provider = "  openai  "
+	src.RequestID = " req-9 "
+	src.ProviderResponseID = ""
+
+	snapshot, err := Detach(src)
+	if err != nil {
+		t.Fatalf("Detach: %v", err)
+	}
+	store := NewMemoryStore(WithUnboundedRetention())
+	t.Cleanup(func() { _ = store.Close() })
+	if err := snapshot.Persist(context.Background(), store); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+	got, err := store.Get(context.Background(), "resp-normalize")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Provider != "openai" || got.RequestID != "req-9" {
+		t.Fatalf("metadata = (%q, %q), want trimmed (openai, req-9)", got.Provider, got.RequestID)
+	}
+	if got.ProviderResponseID != "resp-normalize" {
+		t.Fatalf("provider response id = %q, want defaulted resp-normalize", got.ProviderResponseID)
+	}
+}
+
+// erroringStore fails Create and Update with distinct errors, exercising the
+// regular-store fallback failure path.
+type erroringStore struct {
+	Store
+	createErr error
+	updateErr error
+}
+
+func (s *erroringStore) Create(context.Context, *StoredResponse) error { return s.createErr }
+func (s *erroringStore) Update(context.Context, *StoredResponse) error { return s.updateErr }
+
+// erroringSerializedStore fails both serialized write paths with distinct
+// errors.
+type erroringSerializedStore struct {
+	Store
+	createErr error
+	updateErr error
+}
+
+func (s *erroringSerializedStore) createSerialized(context.Context, string, []byte, time.Time, time.Time) error {
+	return s.createErr
+}
+
+func (s *erroringSerializedStore) updateSerialized(context.Context, string, []byte, time.Time, time.Time) error {
+	return s.updateErr
+}
+
+func TestDetachedPersistJoinsCreateAndUpdateErrors(t *testing.T) {
+	createErr := errors.New("create boom")
+	updateErr := errors.New("update boom")
+	snapshot, err := Detach(testStoredResponse("resp-fail"))
+	if err != nil {
+		t.Fatalf("Detach: %v", err)
+	}
+
+	for name, store := range map[string]Store{
+		"regular":    &erroringStore{createErr: createErr, updateErr: updateErr},
+		"serialized": &erroringSerializedStore{createErr: createErr, updateErr: updateErr},
+	} {
+		err := snapshot.Persist(context.Background(), store)
+		if err == nil {
+			t.Fatalf("%s: Persist error = nil, want joined errors", name)
+		}
+		if !errors.Is(err, createErr) || !errors.Is(err, updateErr) {
+			t.Fatalf("%s: Persist error = %v, want both create and update errors", name, err)
+		}
+	}
+}
+
+func TestSQLStorePersistPreservesExplicitRetention(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		ctx := context.Background()
+
+		src := testStoredResponse("resp-explicit")
+		src.StoredAt = time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+		src.ExpiresAt = time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+		snapshot, err := Detach(src)
+		if err != nil {
+			t.Fatalf("Detach: %v", err)
+		}
+		if err := snapshot.Persist(ctx, store); err != nil {
+			t.Fatalf("Persist: %v", err)
+		}
+		got, err := store.Get(ctx, "resp-explicit")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.StoredAt.Unix() != src.StoredAt.Unix() || got.ExpiresAt.Unix() != src.ExpiresAt.Unix() {
+			t.Fatalf("retention = (%v, %v), want explicit (%v, %v)",
+				got.StoredAt, got.ExpiresAt, src.StoredAt, src.ExpiresAt)
+		}
+
+		// An already-expired snapshot is silently skipped, mirroring Create.
+		expired := testStoredResponse("resp-expired")
+		expired.ExpiresAt = time.Now().UTC().Add(-time.Minute)
+		expiredSnapshot, err := Detach(expired)
+		if err != nil {
+			t.Fatalf("Detach expired: %v", err)
+		}
+		if err := expiredSnapshot.Persist(ctx, store); err != nil {
+			t.Fatalf("Persist expired: %v", err)
+		}
+		if _, err := store.Get(ctx, "resp-expired"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("Get expired error = %v, want ErrNotFound", err)
 		}
 	})
 }

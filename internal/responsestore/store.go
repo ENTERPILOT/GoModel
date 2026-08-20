@@ -49,17 +49,22 @@ func cloneResponse(src *StoredResponse) (*StoredResponse, error) {
 // DetachedSnapshot is a snapshot captured as its serialized form. Detaching
 // serializes exactly once, so a caller that hands the snapshot to another
 // goroutine pays no second marshal when the store can persist the bytes
-// directly, and no copy of the source can race later mutations.
+// directly, and no copy of the source can race later mutations. Explicit
+// retention values from the source are kept alongside the bytes because
+// serialized writes track retention outside the serialized data.
 type DetachedSnapshot struct {
-	id   string
-	data []byte
+	id        string
+	data      []byte
+	storedAt  time.Time
+	expiresAt time.Time
 }
 
 // serializedWriter is implemented by stores that can persist an
-// already-serialized snapshot without re-marshaling it.
+// already-serialized snapshot without re-marshaling it. Zero retention values
+// receive the same defaults the regular Create/Update paths apply.
 type serializedWriter interface {
-	createSerialized(ctx context.Context, id string, data []byte) error
-	updateSerialized(ctx context.Context, id string, data []byte) error
+	createSerialized(ctx context.Context, id string, data []byte, storedAt, expiresAt time.Time) error
+	updateSerialized(ctx context.Context, id string, data []byte, storedAt, expiresAt time.Time) error
 }
 
 // Detach normalizes and serializes a snapshot for a later Persist. The result
@@ -73,7 +78,12 @@ func Detach(src *StoredResponse) (*DetachedSnapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal response: %w", err)
 	}
-	return &DetachedSnapshot{id: normalized.Response.ID, data: data}, nil
+	return &DetachedSnapshot{
+		id:        normalized.Response.ID,
+		data:      data,
+		storedAt:  normalized.StoredAt,
+		expiresAt: normalized.ExpiresAt,
+	}, nil
 }
 
 // ID returns the response id the snapshot persists under.
@@ -88,10 +98,10 @@ func (d *DetachedSnapshot) ID() string {
 func (d *DetachedSnapshot) Persist(ctx context.Context, store Store) error {
 	var createErr error
 	if sw, ok := store.(serializedWriter); ok {
-		if createErr = sw.createSerialized(ctx, d.id, d.data); createErr == nil {
+		if createErr = sw.createSerialized(ctx, d.id, d.data, d.storedAt, d.expiresAt); createErr == nil {
 			return nil
 		}
-		if updateErr := sw.updateSerialized(ctx, d.id, d.data); updateErr != nil {
+		if updateErr := sw.updateSerialized(ctx, d.id, d.data, d.storedAt, d.expiresAt); updateErr != nil {
 			return fmt.Errorf("persist response snapshot: %w", errors.Join(createErr, updateErr))
 		}
 		return nil

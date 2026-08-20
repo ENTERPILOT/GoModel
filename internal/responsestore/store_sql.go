@@ -86,24 +86,36 @@ func (s *SQLStore) createRow(ctx context.Context, id string, data []byte, stored
 
 // createSerialized stores an already-serialized snapshot, stamping retention
 // into the columns only. Reads take StoredAt/ExpiresAt from the columns, so
-// the serialized data does not need to carry them.
-func (s *SQLStore) createSerialized(ctx context.Context, id string, data []byte) error {
+// the serialized data does not need to carry them. Explicit retention values
+// are preserved and zero values receive the same defaults Create applies; an
+// already-expired snapshot is silently skipped, also mirroring Create.
+func (s *SQLStore) createSerialized(ctx context.Context, id string, data []byte, storedAt, expiresAt time.Time) error {
 	now := time.Now().UTC()
-	var expiresAt int64
-	if s.ttl > 0 {
-		expiresAt = now.Add(s.ttl).Unix()
+	if storedAt.IsZero() {
+		storedAt = now
 	}
-	return s.createRow(ctx, id, data, now.Unix(), expiresAt, now)
+	if s.ttl > 0 && expiresAt.IsZero() {
+		expiresAt = storedAt.Add(s.ttl)
+	}
+	if !expiresAt.IsZero() && !expiresAt.After(now) {
+		return nil
+	}
+	return s.createRow(ctx, id, data, storedAt.Unix(), storage.UnixOrZero(expiresAt), now)
 }
 
-// updateSerialized replaces the data of an existing, unexpired snapshot while
-// preserving its retention columns, mirroring Update with zero retention
-// fields.
-func (s *SQLStore) updateSerialized(ctx context.Context, id string, data []byte) error {
+// updateSerialized replaces an existing, unexpired snapshot, mirroring Update:
+// zero retention values preserve the stored columns, non-zero values replace
+// them.
+func (s *SQLStore) updateSerialized(ctx context.Context, id string, data []byte, storedAt, expiresAt time.Time) error {
+	storedAtUnix := storage.UnixOrZero(storedAt)
+	expiresAtUnix := storage.UnixOrZero(expiresAt)
 	affected, err := s.db.Exec(ctx, `
-		UPDATE response_snapshots SET data = ?
+		UPDATE response_snapshots SET
+			data = ?,
+			stored_at = CASE WHEN ? = 0 THEN stored_at ELSE ? END,
+			expires_at = CASE WHEN ? = 0 THEN expires_at ELSE ? END
 		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
-	`, string(data), id, time.Now().Unix())
+	`, string(data), storedAtUnix, storedAtUnix, expiresAtUnix, expiresAtUnix, id, time.Now().Unix())
 	if err != nil {
 		return fmt.Errorf("update response snapshot: %w", err)
 	}
