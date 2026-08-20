@@ -159,10 +159,11 @@ func TestResponses_CollapsesUpstreamStream(t *testing.T) {
 	}
 }
 
-// TestResponses_IncompleteStreamIsAnError guards the non-streaming path against
-// serving a truncated stream as an empty but successful answer: only a terminal
-// lifecycle event may produce a response.
-func TestResponses_IncompleteStreamIsAnError(t *testing.T) {
+// TestResponses_TruncatedStreamIsAnError guards the non-streaming path against
+// serving a stream that stopped early as an empty but successful answer: only a
+// terminal lifecycle event may produce a response. Not to be confused with the
+// response.incomplete terminal event, which is a legitimate response.
+func TestResponses_TruncatedStreamIsAnError(t *testing.T) {
 	created := "event: response.created\n" +
 		`data: {"type":"response.created","response":{"id":"resp_1","object":"response","status":"in_progress","model":"gpt-5.6-terra"}}` + "\n\n"
 
@@ -200,25 +201,64 @@ func TestResponses_IncompleteStreamIsAnError(t *testing.T) {
 	}
 }
 
-// TestResponses_TerminalFailureIsReturnedAsAResponse mirrors what the Responses
-// API returns for a non-streaming call: a failed generation is a response whose
-// status says so, not a transport error.
-func TestResponses_TerminalFailureIsReturnedAsAResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "event: response.failed\n"+
-			`data: {"type":"response.failed","response":{"id":"resp_1","object":"response","status":"failed","model":"gpt-5.6-terra","error":{"code":"server_error","message":"boom"}}}`+"\n\n")
-	}))
-	defer srv.Close()
+// TestResponses_NonSuccessTerminalIsReturnedAsAResponse mirrors what the
+// Responses API returns for a non-streaming call: a generation that failed or
+// stopped short is a response whose status says so, not a transport error.
+func TestResponses_NonSuccessTerminalIsReturnedAsAResponse(t *testing.T) {
+	tests := []struct {
+		name       string
+		event      string
+		payload    string
+		wantStatus string
+	}{
+		{
+			name:       "failed",
+			event:      "response.failed",
+			payload:    `{"type":"response.failed","response":{"id":"resp_1","object":"response","status":"failed","model":"gpt-5.6-terra","error":{"code":"server_error","message":"boom"}}}`,
+			wantStatus: "failed",
+		},
+		{
+			name:       "incomplete",
+			event:      "response.incomplete",
+			payload:    `{"type":"response.incomplete","response":{"id":"resp_1","object":"response","status":"incomplete","model":"gpt-5.6-terra","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`,
+			wantStatus: "incomplete",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "event: "+tc.event+"\ndata: "+tc.payload+"\n\n")
+			}))
+			defer srv.Close()
 
-	provider := NewWithHTTPClient("token", srv.URL, srv.Client(), llmclient.Hooks{})
-	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-terra", Input: "hi"})
-	if err != nil {
-		t.Fatalf("Responses: %v", err)
+			provider := NewWithHTTPClient("token", srv.URL, srv.Client(), llmclient.Hooks{})
+			resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-terra", Input: "hi"})
+			if err != nil {
+				t.Fatalf("Responses: %v", err)
+			}
+			if resp.Status != tc.wantStatus {
+				t.Errorf("status = %q, want %q", resp.Status, tc.wantStatus)
+			}
+		})
 	}
-	if resp.Status != "failed" || resp.Error == nil || resp.Error.Message != "boom" {
-		t.Errorf("resp = %+v, want a failed response carrying the upstream error", resp)
-	}
+	t.Run("failed carries the upstream error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "event: response.failed\n"+
+				`data: {"type":"response.failed","response":{"id":"resp_1","object":"response","status":"failed","model":"gpt-5.6-terra","error":{"code":"server_error","message":"boom"}}}`+"\n\n")
+		}))
+		defer srv.Close()
+
+		provider := NewWithHTTPClient("token", srv.URL, srv.Client(), llmclient.Hooks{})
+		resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-terra", Input: "hi"})
+		if err != nil {
+			t.Fatalf("Responses: %v", err)
+		}
+		if resp.Error == nil || resp.Error.Message != "boom" {
+			t.Errorf("resp.Error = %+v, want the upstream error", resp.Error)
+		}
+	})
 }
 
 func TestStreamResponses_RequiresToken(t *testing.T) {

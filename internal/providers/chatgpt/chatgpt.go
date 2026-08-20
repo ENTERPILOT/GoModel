@@ -28,7 +28,7 @@ const defaultBaseURL = "https://chatgpt.com/backend-api/codex"
 // Codex backend. The backend exposes no /models endpoint, so the inventory is
 // declared here and overridden with CHATGPT_MODELS when a plan serves a
 // different set. gpt-5.4 and gpt-5.4-mini are deliberately absent: OpenAI
-// withdrew them from ChatGPT-authenticated Codex on 2026-08-31.
+// withdraws them from ChatGPT-authenticated Codex on 2026-08-31.
 var defaultModels = []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"}
 
 // Registration provides factory registration for the ChatGPT subscription
