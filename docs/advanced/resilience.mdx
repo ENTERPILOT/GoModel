@@ -189,15 +189,22 @@ Model discovery is re-checked:
 
 ## What happens while a provider is down
 
-When a provider's refresh fails, its previously discovered models are kept
-and marked stale, and the dashboard shows the provider as Degraded
-("previous inventory is still available"):
+When a provider's refresh fails, its previously discovered models are marked
+stale, and the dashboard shows the provider as Offline:
 
-- **Direct requests** to its models still resolve and are sent to the
-  provider, so callers get an honest `502`/`503` (and manual failover rules
-  can fire) instead of a misleading "model not found".
+- **Model listings** (`GET /v1/models` and the dashboard model list) hide the
+  provider's models until it recovers, so clients are not offered models that
+  cannot currently be served.
+- **Direct requests** to its models (`provider/model`) still resolve and are
+  sent to the provider, so callers get an honest `502`/`503` (and manual
+  failover rules can fire) instead of a misleading "model not found".
 - **Virtual-model redirects** skip the provider's targets, so a
   load-balanced redirect keeps working through its healthy targets.
+
+Exception: when **every** provider is failing at once (for example, a
+control-plane-only outage where model discovery is unreachable but inference
+still works), the previous inventory is kept as-is and stays listed — hiding
+everything would only turn provider errors into "model not found".
 
 The fast recheck loop re-probes the provider every
 `PROVIDER_RECHECK_INTERVAL` seconds, updating "Last checked" and restoring

@@ -63,8 +63,10 @@
   <div class="provider-status-meta">
     <div class="provider-status-meta-item">
       <span class="provider-status-meta-label">{m.overview_models_available()}</span>
+      <!-- A stale inventory is carried for direct requests only; the models
+           are hidden from the model list, so advertise 0 here. -->
       <span class="provider-status-meta-value mono"
-      >{formatNumber(provider.runtime?.discovered_model_count)}</span>
+      >{formatNumber(provider.runtime?.inventory_stale ? 0 : provider.runtime?.discovered_model_count)}</span>
     </div>
     <div class="provider-status-meta-item">
       <span class="provider-status-meta-label">{m.overview_last_checked()}</span>

@@ -37,8 +37,8 @@ func TestClassifyProviderStatus_HealthyForAllowlistInventory(t *testing.T) {
 
 // A provider retired from load balancing by a failed availability probe has a
 // clean model-fetch record but must not be reported healthy: the routing layer
-// is actively skipping it.
-func TestClassifyProviderStatus_StaleInventoryIsDegraded(t *testing.T) {
+// is actively skipping it and its models are hidden from the model list.
+func TestClassifyProviderStatus_StaleInventoryIsUnhealthy(t *testing.T) {
 	now := time.Now().UTC()
 	cfg := providers.SanitizedProviderConfig{Name: "openai", Type: "openai"}
 	runtime := providers.ProviderRuntimeSnapshot{
@@ -55,11 +55,11 @@ func TestClassifyProviderStatus_StaleInventoryIsDegraded(t *testing.T) {
 	}
 
 	status, label, reason, lastError := classifyProviderStatus(cfg, runtime)
-	if status != "degraded" {
-		t.Fatalf("status = %q, want degraded", status)
+	if status != "unhealthy" {
+		t.Fatalf("status = %q, want unhealthy", status)
 	}
-	if label != "Degraded" {
-		t.Fatalf("label = %q, want Degraded", label)
+	if label != "Offline" {
+		t.Fatalf("label = %q, want Offline", label)
 	}
 	if reason == "" {
 		t.Fatal("reason empty, want stale-inventory explanation")
