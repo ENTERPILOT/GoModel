@@ -1213,11 +1213,23 @@ func TestStaleProviderModelsAreNotAdvertised(t *testing.T) {
 		return ids
 	}
 
+	categorySelectors := func(t *testing.T) map[string]bool {
+		t.Helper()
+		selectors := make(map[string]bool)
+		for _, entry := range registry.ListModelsWithProviderByCategory(core.CategoryEmbedding) {
+			selectors[entry.Selector] = true
+		}
+		return selectors
+	}
+
 	before := listedIDs(t)
 	for _, key := range []string{"public:beta/beta-model", "provider:beta/beta-model", "bare:beta-model"} {
 		if !before[key] {
 			t.Fatalf("%s missing from listings while beta is healthy", key)
 		}
+	}
+	if !categorySelectors(t)["beta/beta-model"] {
+		t.Fatal("beta/beta-model missing from embedding category while beta is healthy")
 	}
 
 	beta.err = errors.New("connection refused")
@@ -1241,10 +1253,12 @@ func TestStaleProviderModelsAreNotAdvertised(t *testing.T) {
 			t.Errorf("GetCategoryCounts()[all] = %d with beta offline, want 1", counts.Count)
 		}
 	}
-	for _, entry := range registry.ListModelsWithProviderByCategory(core.CategoryEmbedding) {
-		if entry.ProviderName == "beta" {
-			t.Errorf("ListModelsWithProviderByCategory listed %s from offline provider, want hidden", entry.Selector)
-		}
+	afterCategory := categorySelectors(t)
+	if afterCategory["beta/beta-model"] {
+		t.Error("beta/beta-model still in embedding category after beta went offline, want hidden")
+	}
+	if !afterCategory["alpha/alpha-model"] {
+		t.Error("alpha/alpha-model missing from embedding category, want healthy provider unaffected")
 	}
 	// Direct requests must still resolve the carried inventory (honest 502 at
 	// the provider instead of "model not found").
@@ -1318,7 +1332,13 @@ func registerTwoProviderRegistry(t *testing.T) (*ModelRegistry, *registryMockPro
 	singleModel := func(owner string) *core.ModelsResponse {
 		return &core.ModelsResponse{
 			Object: "list",
-			Data:   []core.Model{{ID: owner + "-model", Object: "model", OwnedBy: owner}},
+			Data: []core.Model{{
+				ID: owner + "-model", Object: "model", OwnedBy: owner,
+				Metadata: &core.ModelMetadata{
+					Modes:      []string{"embedding"},
+					Categories: []core.ModelCategory{core.CategoryEmbedding},
+				},
+			}},
 		}
 	}
 	alpha := &registryMockProvider{name: "alpha", modelsResponse: singleModel("alpha")}
