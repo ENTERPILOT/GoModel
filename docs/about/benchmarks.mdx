@@ -64,30 +64,32 @@ pull size.
 
 ## Reproduce it yourself
 
-The whole thing is one command. It provisions a small AWS box, runs all four
-gateways against the same mock backend, prints the tables, and tears the
-infrastructure back down on its own.
+The benchmark lives in its own repository,
+[ENTERPILOT/ai-gateway-reproducible-benchmark](https://github.com/ENTERPILOT/ai-gateway-reproducible-benchmark),
+together with every recorded run and a chart of how the numbers move over time.
+One command provisions a small AWS box, runs all four gateways from their latest
+public Docker images against the same mock backend, records the results, and
+tears the infrastructure back down on its own.
 
 <Warning>
   This runs on **paid** AWS infrastructure, not the free tier. A `c7i.large` is
-  about $0.09/hour and the run self-destructs within an hour or two, so budget
+  about $0.09/hour and the run self-destructs within an hour, so budget
   **under $1** per run to be safe. If you pass `KEEP=1` or a teardown fails, you
   keep paying until you destroy the box - so confirm it is gone.
 </Warning>
 
-The harness lives in the repo at
-[`docs/2026-06-25_aws_gateway_benchmark/`](https://github.com/ENTERPILOT/GoModel/tree/main/docs/2026-06-25_aws_gateway_benchmark):
-
 ```bash
-# Needs Docker, Terraform, and AWS credentials
-git clone https://github.com/ENTERPILOT/GoModel.git
-cd gomodel/docs/2026-06-25_aws_gateway_benchmark
+# Needs Terraform and AWS credentials
+git clone https://github.com/ENTERPILOT/ai-gateway-reproducible-benchmark.git
+cd ai-gateway-reproducible-benchmark
 ./run.sh
 ```
 
 Knobs like `N` (requests per workload) and `REPEATS` (trials) are env vars, e.g.
-`N=20000 REPEATS=5 ./run.sh` for a heavier run. For a quick local check against
-just LiteLLM, the older localhost harness is still in
+`N=20000 REPEATS=5 ./run.sh` for a heavier run, and `GOMODEL_SOURCE=../gomodel`
+benchmarks a local checkout instead of the published image. The repository README
+also shows how to run the harness on any Docker host without AWS. For a quick
+local check against just LiteLLM, the older localhost harness is still in
 [`docs/about/benchmark-tools/`](https://github.com/ENTERPILOT/GoModel/tree/main/docs/about/benchmark-tools).
 
 ## Why this page is short
