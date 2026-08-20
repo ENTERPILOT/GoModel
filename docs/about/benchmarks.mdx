@@ -11,25 +11,30 @@ This page is a short reference for our latest public benchmark: GoModel against
 **LiteLLM, Portkey, and Bifrost**, all pointed at the same instant mock backend so
 the numbers reflect gateway overhead, not model latency.
 
-The full article has the complete write-up, all the context, and the charts:
+The benchmark is rerun periodically from the
+[ai-gateway-reproducible-benchmark](https://github.com/ENTERPILOT/ai-gateway-reproducible-benchmark)
+repository, which keeps every recorded run and a chart of how the numbers move
+over time. The full narrative write-up is the June 2026 article:
 [AI Gateway Benchmark 2026: GoModel vs LiteLLM, Portkey & Bifrost](https://enterpilot.io/blog/benchmarking-ai-gateways-gomodel-litellm-portkey-bifrost-june-2026/?utm_source=gomodel_docs).
 
 <Note>
-  This is a point-in-time snapshot from a June 2026 run on AWS. Treat it as data,
-  not dogma. Gateway performance depends on your workload, provider mix, deployment
-  setup, and tuning. Older runs (March 2026, LiteLLM only, on localhost) are still
-  on the blog for history.
+  The table below is the August 20, 2026 run on AWS. Treat it as data, not
+  dogma. Gateway performance depends on your workload, provider mix, deployment
+  setup, and tuning. Older runs (June and July 2026 on the same hardware, March
+  2026 LiteLLM-only on localhost) are in the repository's history and on the blog.
 </Note>
 
 ## What we tested
 
 A simple, like-for-like setup:
 
-- One gateway at a time, in Docker, on an AWS `c7i.large` (2 vCPU, 4 GiB).
+- One gateway at a time, in Docker, on an AWS `c7i.large` (2 vCPU, 4 GiB), each
+  from its latest public image (`enterpilot/gomodel`, `litellm/litellm:main-stable`,
+  `portkeyai/gateway`, `maximhq/bifrost`).
 - The same shared mock backend for everyone, so we measure only gateway overhead.
 - Six workloads: chat completions, the Responses API, and Anthropic messages -
   each streaming and non-streaming.
-- `8,000` requests per workload at concurrency `10`, across two randomized-order
+- `20,000` requests per workload at concurrency `10`, across five randomized-order
   trials (latency is the median across them).
 - Fair config: retries off for everyone, GoModel's circuit breaker off, and
   LiteLLM run at its recommended one worker per CPU core.
@@ -42,10 +47,10 @@ and memory, and the fastest cold start.
 
 | Gateway | p50 (ms) | p99 (ms) | Throughput (req/s) | Peak RAM | Image (compressed) | Cold start |
 | --- | --- | --- | --- | --- | --- | --- |
-| **GoModel** | **`1.8`** | **`6.9`** | **`4,900`** | **`37 MB`** | **`16 MB`** | **`0.56 s`** |
-| Bifrost | `2.5` | `18.3` | `3,100` | `143 MB` | `77 MB` | `7.1 s` |
-| Portkey | `9.7` | `30.5` | `950` | `112 MB` | `59 MB` | `1.1 s` |
-| LiteLLM | `30.6` | `39.3` | `324` | `2.3 GB` | `372 MB` | `25.5 s` |
+| **GoModel** | **`2.1`** | **`7.8`** | **`4,200`** | **`60 MB`** | **`14 MB`** | **`0.76 s`** |
+| Bifrost | `3.0` | `19.2` | `2,600` | `180 MB` | `80 MB` | `6.7 s` |
+| Portkey | `9.1` | `29.4` | `980` | `110 MB` | `58 MB` | `0.99 s` |
+| LiteLLM | `35.9` | `53.3` | `276` | `2.1 GB` | `354 MB` | `26.5 s` |
 
 Latency is chat completions, non-streaming (representative). Throughput is the
 sustained rate from a separate concurrency sweep. Image size is the compressed
@@ -53,12 +58,12 @@ pull size.
 
 ## Key readouts
 
-- GoModel has both the lowest median (`1.8 ms`) and the tightest tail (`6.9 ms`).
-- It pushes the most traffic per box (`~4,900 req/s`) and the most per CPU core.
-- It is the smallest to ship and run: a `16 MB` compressed image and `37 MB` of
-  RAM under load, ready to serve `0.56 s` after launch.
-- LiteLLM, even at its recommended multi-worker config, uses `~2.3 GB` of RAM and
-  takes `~25 s` to start - the cost of Python on the hot path.
+- GoModel has both the lowest median (`2.1 ms`) and the tightest tail (`7.8 ms`).
+- It pushes the most traffic per box (`~4,200 req/s`) and the most per CPU core.
+- It is the smallest to ship and run: a `14 MB` compressed image and `60 MB` of
+  RAM under load, ready to serve `0.76 s` after launch.
+- LiteLLM, even at its recommended multi-worker config, uses `~2.1 GB` of RAM and
+  takes `~26 s` to start - the cost of Python on the hot path.
 - Portkey did not serve the Anthropic messages dialect in this single-provider
   setup, so it covers 4 of the 6 workloads.
 
