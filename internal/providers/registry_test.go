@@ -1241,6 +1241,11 @@ func TestStaleProviderModelsAreNotAdvertised(t *testing.T) {
 			t.Errorf("GetCategoryCounts()[all] = %d with beta offline, want 1", counts.Count)
 		}
 	}
+	for _, entry := range registry.ListModelsWithProviderByCategory(core.CategoryEmbedding) {
+		if entry.ProviderName == "beta" {
+			t.Errorf("ListModelsWithProviderByCategory listed %s from offline provider, want hidden", entry.Selector)
+		}
+	}
 	// Direct requests must still resolve the carried inventory (honest 502 at
 	// the provider instead of "model not found").
 	if !registry.Supports("beta/beta-model") {
