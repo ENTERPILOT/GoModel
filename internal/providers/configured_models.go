@@ -160,12 +160,7 @@ func modelInfoMapFromResponse(resp *core.ModelsResponse, provider core.Provider,
 			continue
 		}
 		model.ID = modelID
-		out[modelID] = &ModelInfo{
-			Model:        model,
-			Provider:     provider,
-			ProviderName: providerName,
-			ProviderType: providerType,
-		}
+		out[modelID] = newModelInfo(model, provider, providerName, providerType)
 	}
 	return out
 }

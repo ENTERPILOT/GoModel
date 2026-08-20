@@ -487,3 +487,12 @@ func (a *registryAccessor) SetMetadata(modelID string, meta *core.ModelMetadata)
 		info.Model.Metadata = meta
 	}
 }
+
+// DiscoveredMetadata returns the metadata the provider reported for a model at
+// registration, which Enrich merges on top of the catalog's.
+func (a *registryAccessor) DiscoveredMetadata(modelID string) *core.ModelMetadata {
+	if info, ok := a.models[modelID]; ok {
+		return info.Discovered
+	}
+	return nil
+}

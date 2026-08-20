@@ -23,6 +23,25 @@ type ModelInfo struct {
 	Provider     core.Provider
 	ProviderName string
 	ProviderType string
+	// Discovered is the metadata the provider itself reported for this model,
+	// held apart from Model.Metadata because enrichment rewrites that field on
+	// every catalog refresh. Keeping the pristine value lets each refresh
+	// recompute the merge from the same inputs rather than layering onto its own
+	// previous output, which would otherwise pin stale catalog data in place.
+	Discovered *core.ModelMetadata
+}
+
+// newModelInfo registers a model together with the metadata its provider
+// reported for it. Always build ModelInfo through this so Discovered is
+// captured before enrichment has a chance to overwrite Model.Metadata.
+func newModelInfo(model core.Model, provider core.Provider, providerName, providerType string) *ModelInfo {
+	return &ModelInfo{
+		Model:        model,
+		Provider:     provider,
+		ProviderName: providerName,
+		ProviderType: providerType,
+		Discovered:   model.Metadata.Clone(),
+	}
 }
 
 // ModelRegistry manages the mapping of models to their providers.

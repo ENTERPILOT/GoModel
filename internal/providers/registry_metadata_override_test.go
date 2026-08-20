@@ -455,3 +455,71 @@ func TestSetProviderMetadataOverrides_DeepClonesExternalInput(t *testing.T) {
 		t.Errorf("stored Pricing mutated via caller: %+v", stored.Pricing)
 	}
 }
+
+// TestEnrichModels_KeepsProviderDiscoveredMetadataOverCatalog covers the local
+// server case: a llama.cpp alias that collides with a catalog ID must not lose
+// the context window the running server actually reported.
+func TestEnrichModels_KeepsProviderDiscoveredMetadataOverCatalog(t *testing.T) {
+	registry := NewModelRegistry()
+
+	runtimeContext := 4096
+	mock := &registryMockProvider{
+		name: "llamacpp",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{
+					ID:      "gemma-3-4b-it",
+					Object:  "model",
+					OwnedBy: "llamacpp",
+					Metadata: &core.ModelMetadata{
+						ContextWindow: &runtimeContext,
+						Capabilities:  map[string]bool{"vision": true},
+					},
+				},
+			},
+		},
+	}
+	registry.RegisterProviderWithType(mock, "llamacpp")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	// The catalog knows the bare model ID and has no llamacpp entry at all.
+	raw := []byte(`{
+		"version": 1,
+		"updated_at": "2025-01-01T00:00:00Z",
+		"models": {
+			"gemma-3-4b-it": {
+				"display_name": "Gemma 3 4B IT",
+				"modes": ["chat"],
+				"context_window": 131072
+			}
+		}
+	}`)
+	list, err := modeldata.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	registry.SetModelList(list, raw)
+	registry.EnrichModels()
+
+	info := registry.GetModel("gemma-3-4b-it")
+	if info == nil || info.Model.Metadata == nil {
+		t.Fatal("expected the model to stay registered with metadata")
+	}
+	meta := info.Model.Metadata
+	if meta.ContextWindow == nil || *meta.ContextWindow != runtimeContext {
+		t.Fatalf("ContextWindow = %v, want the server-reported %d", meta.ContextWindow, runtimeContext)
+	}
+	if !meta.Capabilities["vision"] {
+		t.Fatal("discovered vision capability was dropped by enrichment")
+	}
+	// The catalog still fills in what the server never reports.
+	if meta.DisplayName != "Gemma 3 4B IT" {
+		t.Fatalf("DisplayName = %q, want the catalog's", meta.DisplayName)
+	}
+	if len(meta.Modes) != 1 || meta.Modes[0] != "chat" {
+		t.Fatalf("Modes = %v, want [chat] from the catalog", meta.Modes)
+	}
+}
