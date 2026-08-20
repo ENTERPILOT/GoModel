@@ -120,6 +120,7 @@
           conversationDrawer.handleBodyConversationClick(
             event,
             pane.entry,
+            pane.requestStep,
           )}>{@html renderedBody}</pre>
     </div>
   {/if}

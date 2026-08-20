@@ -65,3 +65,31 @@ test("batched record changes are consumed without dropping intermediate events",
   assert.equal(isLiveAuditRecordChange(changes[1]), true);
   assert.equal(isLiveAuditRecordChange({ eventType: "audit.list" }), false);
 });
+
+test("slim revision metadata cannot erase loaded rewrite bodies", () => {
+  const detailed = mergeAuditRecord(null, {
+    id: "audit-9",
+    data: {
+      request_revisions: [
+        { seq: 1, rewriter: "compress", bytes_before: 200, bytes_after: 100,
+          body: { messages: [] }, detail: { blocks: 3 } },
+      ],
+    },
+  });
+
+  // A later conversation/list refresh ships metadata-only revisions.
+  const merged = mergeAuditRecord(detailed, {
+    id: "audit-9",
+    data: {
+      request_revisions: [
+        { seq: 1, rewriter: "compress", bytes_before: 200, bytes_after: 100 },
+        { seq: 2, rewriter: "guard", bytes_before: 100, bytes_after: 100, no_change: true },
+      ],
+    },
+  });
+
+  assert.equal(merged.data.request_revisions.length, 2);
+  assert.deepEqual(merged.data.request_revisions[0].body, { messages: [] });
+  assert.deepEqual(merged.data.request_revisions[0].detail, { blocks: 3 });
+  assert.equal(merged.data.request_revisions[1].no_change, true);
+});
