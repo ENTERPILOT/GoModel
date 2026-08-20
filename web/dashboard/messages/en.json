@@ -13,7 +13,7 @@
   "navigation_rate_limits": "Rate Limits",
   "navigation_api_keys": "API Keys",
   "navigation_workflows": "Workflows",
-  "navigation_guardrails_experimental": "Guardrails (experimental)",
+  "navigation_guardrails_beta": "Guardrails (beta)",
   "navigation_mcp_servers": "MCP Servers",
   "navigation_settings": "Settings",
   "overview_usage_title": "Usage Overview",

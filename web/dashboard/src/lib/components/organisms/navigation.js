@@ -46,7 +46,7 @@ export const NAV_ITEMS = [
   { page: "workflows", label: m.navigation_workflows, icon: Workflow },
   {
     page: "guardrails",
-    label: m.navigation_guardrails_experimental,
+    label: m.navigation_guardrails_beta,
     icon: ShieldCheck,
     visible: () => runtimeConfig.guardrailsVisible(),
   },
