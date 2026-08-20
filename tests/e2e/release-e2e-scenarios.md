@@ -843,7 +843,7 @@ Checks translated chat on Groq.
 RESP_FILE="$QA_RUN_DIR/s21.chat.json"
 curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"llama-3.1-8b-instant","messages":[{"role":"user","content":"Reply with exactly QA_GROQ_OK"}],"max_tokens":20}' \
+  -d '{"model":"groq/compound-mini","messages":[{"role":"user","content":"Reply with exactly QA_GROQ_OK"}],"max_tokens":20}' \
   > "$RESP_FILE"
 jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
 assert_chat_response_contains "$RESP_FILE" "groq" "QA_GROQ_OK"
@@ -2647,11 +2647,11 @@ Creates a two-target round-robin redirect and verifies the admin view shape.
 SRC="qa-lb-rr-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/llama-3.1-8b-instant\"}],\"description\":\"qa lb rr\"}" \
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/groq/compound-mini\"}],\"description\":\"qa lb rr\"}" \
   | jq -e --arg s "$SRC" '
       .source == $s and .kind == "redirect" and .strategy == "round_robin"
       and (.targets | length) == 2
-      and .targets[0].model == "gpt-4.1-nano" and .targets[1].model == "llama-3.1-8b-instant"
+      and .targets[0].model == "gpt-4.1-nano" and .targets[1].model == "groq/compound-mini"
       and .enabled == true
     ' >/dev/null
 curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
@@ -2668,8 +2668,8 @@ requests resolve to each provider three times.
 SRC="qa-lb-rrd-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/llama-3.1-8b-instant\"}]}" >/dev/null
-for M in openai/gpt-4.1-nano groq/llama-3.1-8b-instant; do
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/groq/compound-mini\"}]}" >/dev/null
+for M in openai/gpt-4.1-nano groq/groq/compound-mini; do
   curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
     -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" >/dev/null
 done
@@ -2695,8 +2695,8 @@ requests split 6:3 in favor of the weighted target.
 SRC="qa-lb-w-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\",\"weight\":2},{\"model\":\"groq/llama-3.1-8b-instant\",\"weight\":1}]}" >/dev/null
-for M in openai/gpt-4.1-nano groq/llama-3.1-8b-instant; do
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\",\"weight\":2},{\"model\":\"groq/groq/compound-mini\",\"weight\":1}]}" >/dev/null
+for M in openai/gpt-4.1-nano groq/groq/compound-mini; do
   curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
     -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" >/dev/null
 done
@@ -2772,7 +2772,7 @@ HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s123.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s123.body.XXXXXX")
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"qa-lb-bad-$QA_SUFFIX\",\"strategy\":\"weighted\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/llama-3.1-8b-instant\"}]}"
+  -d "{\"source\":\"qa-lb-bad-$QA_SUFFIX\",\"strategy\":\"weighted\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/groq/compound-mini\"}]}"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error" and (.error.message | test("strategy"))' "$BODY_FILE" >/dev/null
 ```
@@ -2987,11 +2987,11 @@ Creates a two-target dashboard mapping and verifies the admin view shape.
 SRC="qa-fo-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/failover" \
   -H 'Content-Type: application/json' \
-  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"groq/llama-3.1-8b-instant\",\"gemini/gemini-2.5-flash-lite\"]}" \
+  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"groq/groq/compound-mini\",\"gemini/gemini-2.5-flash-lite\"]}" \
   | jq -e --arg s "$SRC" '
       .primary_model == $s
       and (.fallback_models | length) == 2
-      and .fallback_models[0] == "groq/llama-3.1-8b-instant"
+      and .fallback_models[0] == "groq/groq/compound-mini"
       and .fallback_models[1] == "gemini/gemini-2.5-flash-lite"
       and .enabled == true
       and .managed == false
@@ -3012,9 +3012,9 @@ and toggles it disabled, confirming the change is persisted.
 ```bash
 SRC="qa-fo-upd-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
-  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"groq/llama-3.1-8b-instant\"]}" >/dev/null
+  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"groq/groq/compound-mini\"]}" >/dev/null
 curl -fsS "$BASE_URL/admin/failover" \
-  | jq -e --arg s "$SRC" 'any(.[]; .primary_model == $s and .enabled == true and (.fallback_models | index("groq/llama-3.1-8b-instant")))' >/dev/null
+  | jq -e --arg s "$SRC" 'any(.[]; .primary_model == $s and .enabled == true and (.fallback_models | index("groq/groq/compound-mini")))' >/dev/null
 curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
   -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"openai/gpt-4.1-mini\",\"xai/grok-4.3\"],\"enabled\":false}" \
   | jq -e --arg s "$SRC" '
@@ -3082,7 +3082,7 @@ SRC1="qa-fo-rst1-$QA_SUFFIX"
 SRC2="qa-fo-rst2-$QA_SUFFIX"
 for S in "$SRC1" "$SRC2"; do
   curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
-    -d "{\"primary_model\":\"$S\",\"fallback_models\":[\"groq/llama-3.1-8b-instant\"]}" >/dev/null
+    -d "{\"primary_model\":\"$S\",\"fallback_models\":[\"groq/groq/compound-mini\"]}" >/dev/null
 done
 curl -fsS "$BASE_URL/admin/failover" \
   | jq -e --arg a "$SRC1" --arg b "$SRC2" 'any(.[]; .primary_model == $a) and any(.[]; .primary_model == $b)' >/dev/null
@@ -3101,7 +3101,7 @@ HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s138.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s138.body.XXXXXX")
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/failover" \
   -H 'Content-Type: application/json' \
-  -d '{"fallback_models":["groq/llama-3.1-8b-instant"]}'
+  -d '{"fallback_models":["groq/groq/compound-mini"]}'
 sed -n '1,20p' "$HEADERS_FILE"
 jq '.' "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
