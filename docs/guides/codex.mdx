@@ -10,32 +10,29 @@ Responses API.
 
 `Codex -> GoModel -> upstream`
 
-Two ways to run it:
+Codex talks to GoModel with a GoModel master key, so every request shows up in
+the dashboard. The one choice to make is which provider serves the model,
+because that decides what pays for it:
 
-| Mode | Upstream | Billing |
-| ---- | -------- | ------- |
-| **Subscription** | The Codex backend behind your ChatGPT plan | ChatGPT subscription quota |
-| **Bring your own provider** | OpenAI, DeepSeek, Anthropic, … | That provider's API credit |
+| Provider | Upstream | Billing |
+| -------- | -------- | ------- |
+| `chatgpt` | The Codex backend behind your ChatGPT plan | ChatGPT subscription quota |
+| `openai`, `deepseek`, `anthropic`, … | That provider's API | That provider's API credit |
 
-Either way Codex talks to GoModel with a GoModel master key, so every request
-shows up in the dashboard.
+Everything after this point is the same either way.
 
 ## Before you start
 
 - Install Codex on your machine.
 - Choose a GoModel master key, for example `change-me`.
 
-<Tabs>
-<Tab title="Subscription">
-
-Sign in once so Codex writes its token file, then hand that token to GoModel:
+To bill Codex to your ChatGPT plan, sign in once so Codex writes its token
+file, then hand that token to GoModel:
 
 ```bash
 codex login
 export CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json)
 ```
-
-Run GoModel with it:
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -44,30 +41,11 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-Usage is billed against your ChatGPT plan. See the
-[ChatGPT provider page](/providers/chatgpt) for the model list, the token's
-~10-day lifetime, and which Responses parameters the backend accepts.
+See the [ChatGPT provider page](/providers/chatgpt) for the model list, the
+token's ~10-day lifetime, and which Responses parameters that backend accepts.
 
-</Tab>
-<Tab title="Bring your own provider">
-
-Make sure GoModel has the upstream provider key for the models you want:
-
-```bash
-docker run --rm -p 8080:8080 \
-  -e GOMODEL_MASTER_KEY="change-me" \
-  -e OPENAI_API_KEY="sk-..." \
-  enterpilot/gomodel
-```
-
-<Note>
-  You can stay signed into Codex with ChatGPT while using this mode, but the
-  custom provider still needs its own gateway credential and GoModel still needs
-  an upstream provider key.
-</Note>
-
-</Tab>
-</Tabs>
+To bill it to API credit instead, configure any other provider as usual — for
+example `-e OPENAI_API_KEY="sk-..."` — and use one of its models in step 2.
 
 ## 1. Confirm the Responses API
 
@@ -148,6 +126,12 @@ Then export the GoModel master key for that provider:
 export GOMODEL_API_KEY=change-me
 ```
 
+<Note>
+  Codex requires this variable even when you are signed in with ChatGPT, and it
+  carries the GoModel master key — not an OpenAI key. Without it the provider
+  fails to start.
+</Note>
+
 To try it without editing your config, pass the same settings inline:
 
 ```bash
@@ -184,6 +168,16 @@ ok
   answers with the standard OpenAI `/v1/models` shape. The message is cosmetic
   — Codex falls back and the session works.
 </Note>
+
+## 4. Check the traffic in GoModel
+
+Open the GoModel dashboard audit logs:
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+This lets you confirm that Codex is reaching GoModel and inspect the full
+request and response trail. From the same dashboard, you can keep following
+your GoModel traffic and usage.
 
 ## DeepSeek V4
 
@@ -227,24 +221,12 @@ env_key = "GOMODEL_API_KEY"
 wire_api = "responses"
 ```
 
-## 4. Check the traffic in GoModel
-
-Open the GoModel dashboard audit logs:
-
-[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
-
-This lets you confirm that Codex is reaching GoModel and inspect the full
-request and response trail. From the same dashboard, you can keep following
-your GoModel traffic and usage.
-
 ## Current status
 
 - the recommended integration path is Codex custom provider -> standard
   `http://localhost:8080/v1`
 - Codex custom provider mode sends `POST /v1/responses` as plain JSON, so the
   old `--disable enable_request_compression` workaround is no longer required
-- Codex still requires the provider's `env_key`, even when signed in with
-  ChatGPT — that variable carries the GoModel master key, not an OpenAI key
 
 ## References
 
