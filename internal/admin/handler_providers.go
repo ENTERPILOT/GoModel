@@ -236,19 +236,20 @@ func classifyProviderStatus(cfg providers.SanitizedProviderConfig, runtime provi
 	}
 
 	switch {
+	case runtime.InventoryStale && runtime.DiscoveredModelCount > 0:
+		// The latest refresh or availability probe failed: load balancing
+		// skips the provider and its models are no longer advertised. Only
+		// provider-qualified direct requests still reach it.
+		return "unhealthy", "Offline", "latest check failed; models are hidden from the model list until the provider recovers", lastError
 	case runtime.DiscoveredModelCount > 0 && modelFetchError == "":
-		if runtime.InventoryStale {
-			// An availability probe failed without a model fetch running, so
-			// the inventory was retired from load balancing while the fetch
-			// error stayed empty. Surfacing "healthy" here would contradict
-			// the routing behavior.
-			return "degraded", "Degraded", "latest availability probe failed; previous inventory is still available", lastError
-		}
 		if usingCachedModels {
 			return "degraded", "Starting", "serving cached model inventory while live refresh finishes", lastError
 		}
 		return "healthy", "Healthy", "configured and model discovery succeeded", lastError
 	case modelFetchError != "" && runtime.DiscoveredModelCount > 0:
+		// Refresh failed but the inventory was deliberately kept fresh (no
+		// healthy alternative exists, e.g. a total sweep failure), so models
+		// are still advertised and routable.
 		return "degraded", "Degraded", "latest model refresh failed; previous inventory is still available", lastError
 	case modelFetchError != "":
 		return "unhealthy", "Unhealthy", "model discovery failed and no provider models are currently available", lastError

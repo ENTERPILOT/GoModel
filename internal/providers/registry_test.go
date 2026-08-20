@@ -1191,6 +1191,93 @@ func TestInitialize_StaleProviderLosesBareModelIDToHealthyDuplicate(t *testing.T
 	}
 }
 
+// A provider that goes offline must disappear from every model listing
+// (GET /v1/models, dashboard model list, category counts) while its
+// carried-forward inventory stays resolvable for direct requests, and it must
+// reappear once the provider recovers (issue #705).
+func TestStaleProviderModelsAreNotAdvertised(t *testing.T) {
+	registry, _, beta := registerTwoProviderRegistry(t)
+
+	listedIDs := func(t *testing.T) map[string]bool {
+		t.Helper()
+		ids := make(map[string]bool)
+		for _, model := range registry.ListPublicModels() {
+			ids["public:"+model.ID] = true
+		}
+		for _, entry := range registry.ListModelsWithProvider() {
+			ids["provider:"+entry.Selector] = true
+		}
+		for _, model := range registry.ListModels() {
+			ids["bare:"+model.ID] = true
+		}
+		return ids
+	}
+
+	categorySelectors := func(t *testing.T) map[string]bool {
+		t.Helper()
+		selectors := make(map[string]bool)
+		for _, entry := range registry.ListModelsWithProviderByCategory(core.CategoryEmbedding) {
+			selectors[entry.Selector] = true
+		}
+		return selectors
+	}
+
+	before := listedIDs(t)
+	for _, key := range []string{"public:beta/beta-model", "provider:beta/beta-model", "bare:beta-model"} {
+		if !before[key] {
+			t.Fatalf("%s missing from listings while beta is healthy", key)
+		}
+	}
+	if !categorySelectors(t)["beta/beta-model"] {
+		t.Fatal("beta/beta-model missing from embedding category while beta is healthy")
+	}
+
+	beta.err = errors.New("connection refused")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("refresh Initialize() error = %v", err)
+	}
+
+	after := listedIDs(t)
+	for _, key := range []string{"public:beta/beta-model", "provider:beta/beta-model", "bare:beta-model"} {
+		if after[key] {
+			t.Errorf("%s still advertised after beta went offline, want hidden", key)
+		}
+	}
+	for _, key := range []string{"public:alpha/alpha-model", "provider:alpha/alpha-model", "bare:alpha-model"} {
+		if !after[key] {
+			t.Errorf("%s missing from listings, want healthy provider unaffected", key)
+		}
+	}
+	for _, counts := range registry.GetCategoryCounts() {
+		if counts.Category == core.CategoryAll && counts.Count != 1 {
+			t.Errorf("GetCategoryCounts()[all] = %d with beta offline, want 1", counts.Count)
+		}
+	}
+	afterCategory := categorySelectors(t)
+	if afterCategory["beta/beta-model"] {
+		t.Error("beta/beta-model still in embedding category after beta went offline, want hidden")
+	}
+	if !afterCategory["alpha/alpha-model"] {
+		t.Error("alpha/alpha-model missing from embedding category, want healthy provider unaffected")
+	}
+	// Direct requests must still resolve the carried inventory (honest 502 at
+	// the provider instead of "model not found").
+	if !registry.Supports("beta/beta-model") {
+		t.Error("Supports(beta/beta-model) = false, want carried inventory still resolvable")
+	}
+
+	beta.err = nil
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("recovery Initialize() error = %v", err)
+	}
+	recovered := listedIDs(t)
+	for _, key := range []string{"public:beta/beta-model", "provider:beta/beta-model", "bare:beta-model"} {
+		if !recovered[key] {
+			t.Errorf("%s missing from listings after recovery, want advertised again", key)
+		}
+	}
+}
+
 // The fast recheck loop re-probes only providers whose latest refresh failed,
 // so a recovered provider is picked up within the recheck interval instead of
 // waiting for the next full refresh.
@@ -1245,7 +1332,13 @@ func registerTwoProviderRegistry(t *testing.T) (*ModelRegistry, *registryMockPro
 	singleModel := func(owner string) *core.ModelsResponse {
 		return &core.ModelsResponse{
 			Object: "list",
-			Data:   []core.Model{{ID: owner + "-model", Object: "model", OwnedBy: owner}},
+			Data: []core.Model{{
+				ID: owner + "-model", Object: "model", OwnedBy: owner,
+				Metadata: &core.ModelMetadata{
+					Modes:      []string{"embedding"},
+					Categories: []core.ModelCategory{core.CategoryEmbedding},
+				},
+			}},
 		}
 	}
 	alpha := &registryMockProvider{name: "alpha", modelsResponse: singleModel("alpha")}

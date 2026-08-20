@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -830,5 +831,58 @@ func TestRegisterProviderWithType(t *testing.T) {
 
 	if registry.ProviderCount() != 1 {
 		t.Errorf("expected 1 provider, got %d", registry.ProviderCount())
+	}
+}
+
+// SaveToCache must not persist a stale (carried-forward) inventory: an
+// offline provider's models would otherwise resurrect from the cache on every
+// restart and stay advertised forever (issue #705).
+func TestSaveToCache_SkipsStaleProviderInventory(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheFile := filepath.Join(tmpDir, "models.json")
+
+	registry, _, beta := registerTwoProviderRegistry(t)
+	registry.SetCache(modelcache.NewLocalCache(cacheFile))
+
+	beta.err = errors.New("connection refused")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("refresh Initialize() error = %v", err)
+	}
+	if err := registry.SaveToCache(context.Background()); err != nil {
+		t.Fatalf("SaveToCache() error = %v", err)
+	}
+
+	data, err := os.ReadFile(cacheFile)
+	if err != nil {
+		t.Fatalf("failed to read cache file: %v", err)
+	}
+	var modelCache modelcache.ModelCache
+	if err := json.Unmarshal(data, &modelCache); err != nil {
+		t.Fatalf("failed to unmarshal cache: %v", err)
+	}
+	if _, ok := modelCache.Providers["beta"]; ok {
+		t.Error("stale provider beta persisted to cache, want skipped")
+	}
+	if _, ok := modelCache.Providers["alpha"]; !ok {
+		t.Error("healthy provider alpha missing from cache")
+	}
+
+	// After recovery the provider re-enters the cache.
+	beta.err = nil
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("recovery Initialize() error = %v", err)
+	}
+	if err := registry.SaveToCache(context.Background()); err != nil {
+		t.Fatalf("SaveToCache() after recovery error = %v", err)
+	}
+	data, err = os.ReadFile(cacheFile)
+	if err != nil {
+		t.Fatalf("failed to re-read cache file: %v", err)
+	}
+	if err := json.Unmarshal(data, &modelCache); err != nil {
+		t.Fatalf("failed to unmarshal refreshed cache: %v", err)
+	}
+	if _, ok := modelCache.Providers["beta"]; !ok {
+		t.Error("recovered provider beta missing from cache, want persisted again")
 	}
 }

@@ -255,9 +255,10 @@ classification reason and the most recent error.
 | `Healthy` | Model discovery succeeded and recent traffic (if any) looks fine |
 | `Starting` | Configured and awaiting first model discovery |
 | `Configured` | Configured but no models exposed yet |
-| `Degraded` | The latest refresh failed (previous inventory still serves), **or** a specific model's recent requests keep failing |
+| `Degraded` | A specific model's recent requests keep failing, **or** every provider is failing at once and the previous inventory still serves |
 | `Recovering` | The circuit breaker is half-open and probing whether the provider recovered |
 | `Circuit Open` | The circuit breaker is open; traffic to the provider is paused |
+| `Offline` | The latest refresh or availability check failed; the provider's models are hidden from the model list until it recovers |
 | `Unhealthy` | Model discovery failed and no models are available |
 
 Expand a card (the arrow strip at the bottom, or the section-wide

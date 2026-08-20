@@ -444,7 +444,19 @@ func (r *ModelRegistry) ModelAvailable(model string) bool {
 	return false
 }
 
-// ListModels returns all models in the registry, sorted by model ID for consistent ordering.
+// providerAdvertisedLocked reports whether providerName's models belong in
+// model listings. A provider whose latest refresh or availability probe
+// failed (inventoryStale) keeps its carried-forward inventory resolvable for
+// direct requests, but offline providers must not advertise models in
+// GET /v1/models, the dashboard, or failover candidate selection.
+// Caller must hold r.mu.
+func (r *ModelRegistry) providerAdvertisedLocked(providerName string) bool {
+	return !r.providerRuntime[providerName].inventoryStale
+}
+
+// ListModels returns all advertised models in the registry, sorted by model ID
+// for consistent ordering. Models whose owning provider's inventory is stale
+// are excluded (see providerAdvertisedLocked).
 // The sorted slice is cached and rebuilt only when the underlying models change.
 // Returns a defensive copy so callers cannot mutate the internal cache.
 func (r *ModelRegistry) ListModels() []core.Model {
@@ -464,6 +476,9 @@ func (r *ModelRegistry) ListModels() []core.Model {
 
 	models := make([]core.Model, 0, len(r.models))
 	for _, info := range r.models {
+		if !r.providerAdvertisedLocked(info.ProviderName) {
+			continue
+		}
 		models = append(models, info.Model)
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
@@ -475,7 +490,7 @@ func (r *ModelRegistry) ListModels() []core.Model {
 // ListPublicModels returns all provider-backed models as public selectors in
 // providerName/modelID form, sorted by public model ID. Models the owning
 // provider cannot actually serve (audio-only models on providers without audio
-// support) are not advertised.
+// support) and models from providers with stale inventory are not advertised.
 func (r *ModelRegistry) ListPublicModels() []core.Model {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -487,6 +502,9 @@ func (r *ModelRegistry) ListPublicModels() []core.Model {
 
 	result := make([]core.Model, 0, total)
 	for providerName, models := range r.modelsByProvider {
+		if !r.providerAdvertisedLocked(providerName) {
+			continue
+		}
 		for modelID, info := range models {
 			if !providerCanServeModel(info) {
 				continue
@@ -788,6 +806,9 @@ func (r *ModelRegistry) ListModelsWithProvider() []ModelWithProvider {
 
 	result := make([]ModelWithProvider, 0, total)
 	for providerName, providerModels := range r.modelsByProvider {
+		if !r.providerAdvertisedLocked(providerName) {
+			continue
+		}
 		for modelID, info := range providerModels {
 			publicProviderName := providerName
 			if info.ProviderName != "" {
@@ -850,7 +871,10 @@ func (r *ModelRegistry) ListModelsWithProviderByCategory(category core.ModelCate
 	}
 
 	result := make([]ModelWithProvider, 0)
-	for _, providerModels := range r.modelsByProvider {
+	for providerName, providerModels := range r.modelsByProvider {
+		if !r.providerAdvertisedLocked(providerName) {
+			continue
+		}
 		for modelID, info := range providerModels {
 			if info.Model.Metadata == nil || !hasCategory(info.Model.Metadata.Categories, category) {
 				continue
@@ -905,7 +929,10 @@ func (r *ModelRegistry) GetCategoryCounts() []CategoryCount {
 
 	counts := make(map[core.ModelCategory]int)
 	total := 0
-	for _, providerModels := range r.modelsByProvider {
+	for providerName, providerModels := range r.modelsByProvider {
+		if !r.providerAdvertisedLocked(providerName) {
+			continue
+		}
 		for _, info := range providerModels {
 			total++
 			if info.Model.Metadata != nil {

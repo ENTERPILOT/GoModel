@@ -156,6 +156,13 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 	cacheBackend := r.cache
 	modelsByProvider := make(map[string]map[string]*ModelInfo, len(r.modelsByProvider))
 	for providerName, models := range r.modelsByProvider {
+		// A stale inventory was carried forward from before the provider went
+		// offline; persisting it would resurrect the offline provider's models
+		// on every restart. The provider re-enters the cache once a refresh
+		// succeeds again.
+		if r.providerRuntime[providerName].inventoryStale {
+			continue
+		}
 		modelsByProvider[providerName] = make(map[string]*ModelInfo, len(models))
 		maps.Copy(modelsByProvider[providerName], models)
 	}
