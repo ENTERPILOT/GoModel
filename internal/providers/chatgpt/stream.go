@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"net/http"
 
 	"github.com/goccy/go-json"
 
@@ -17,11 +18,15 @@ const maxSSELineBytes = 8 << 20
 // collapseResponsesStream reads a Responses SSE stream and returns the response
 // object carried by its terminal event. The Codex backend streams only, so this
 // is how GoModel answers a non-streaming /v1/responses call against it.
+//
+// Only a terminal lifecycle event produces a response. A stream that stops
+// early — a dropped connection, or an `error` event — is an error rather than
+// the last in-progress envelope, which would otherwise be served as an empty
+// but successful answer.
 func collapseResponsesStream(stream io.Reader) (*core.ResponsesResponse, error) {
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, 0, 64<<10), maxSSELineBytes)
 
-	var final *core.ResponsesResponse
 	for scanner.Scan() {
 		data, ok := bytes.CutPrefix(bytes.TrimSpace(scanner.Bytes()), []byte("data:"))
 		if !ok {
@@ -33,26 +38,34 @@ func collapseResponsesStream(stream io.Reader) (*core.ResponsesResponse, error) 
 		}
 		var event struct {
 			Type     string                  `json:"type"`
+			Message  string                  `json:"message"`
 			Response *core.ResponsesResponse `json:"response"`
 		}
 		if err := json.Unmarshal(data, &event); err != nil {
 			continue
 		}
-		// Keep the last response envelope seen: completed and failed both carry
-		// the full object, and an incomplete stream should still report what
-		// the upstream last knew.
-		if event.Response != nil {
-			final = event.Response
-		}
-		if event.Type == "response.completed" || event.Type == "response.failed" {
-			break
+		switch event.Type {
+		// The three terminal lifecycle events all carry the full object.
+		// failed and incomplete are reported to the caller as a normal
+		// response whose status says so, matching what the Responses API
+		// returns for a non-streaming call.
+		case "response.completed", "response.failed", "response.incomplete":
+			if event.Response == nil {
+				return nil, core.NewEmptyProviderResponseError("chatgpt")
+			}
+			return event.Response, nil
+		case "error":
+			message := event.Message
+			if message == "" {
+				message = "upstream reported a stream error"
+			}
+			return nil, core.NewProviderError("chatgpt", http.StatusBadGateway, message, nil)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, core.NewProviderError("chatgpt", 502, "failed to read response stream: "+err.Error(), err)
+		return nil, core.NewProviderError("chatgpt", http.StatusBadGateway,
+			"failed to read response stream: "+err.Error(), err)
 	}
-	if final == nil {
-		return nil, core.NewEmptyProviderResponseError("chatgpt")
-	}
-	return final, nil
+	return nil, core.NewProviderError("chatgpt", http.StatusBadGateway,
+		"response stream ended before completion", nil)
 }

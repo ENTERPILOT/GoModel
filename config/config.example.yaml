@@ -343,7 +343,7 @@ providers:
   chatgpt:
     type: chatgpt
     api_key: "${CHATGPT_API_KEY}"
-    # models: [gpt-5.6-sol, gpt-5.5, gpt-5.4]
+    # models: [gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5]
 
   cohere:
     type: cohere

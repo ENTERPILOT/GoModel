@@ -153,6 +153,7 @@ To try it without editing your config, pass the same settings inline:
 ```bash
 GOMODEL_API_KEY=change-me codex exec \
   -c model_provider=gomodel \
+  -c 'model_providers.gomodel.name="GoModel"' \
   -c 'model_providers.gomodel.base_url="http://localhost:8080/v1"' \
   -c 'model_providers.gomodel.env_key="GOMODEL_API_KEY"' \
   -c 'model_providers.gomodel.wire_api="responses"' \

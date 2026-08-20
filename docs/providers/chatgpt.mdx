@@ -45,17 +45,20 @@ The Codex backend has no model-listing endpoint, so GoModel ships the
 inventory a ChatGPT subscription can call:
 
 ```text
-gpt-5.6-sol, gpt-5.5, gpt-5.4
+gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5
 ```
 
 Override it when your plan serves a different set:
 
 ```bash
-CHATGPT_MODELS=gpt-5.6-sol,gpt-5.4
+CHATGPT_MODELS=gpt-5.6-sol,gpt-5.6-terra
 ```
 
 A model outside the plan's set is rejected upstream with `The '<model>' model
-is not supported when using Codex with a ChatGPT account`.
+is not supported when using Codex with a ChatGPT account`. `gpt-5.4` and
+`gpt-5.4-mini` left ChatGPT-authenticated Codex on 2026-08-31 — use
+`gpt-5.6-terra` and `gpt-5.6-luna` instead. Both remain available to Codex
+sessions authenticated with an OpenAI API key, through the `openai` provider.
 
 ## Responses API only
 

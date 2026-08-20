@@ -19,11 +19,11 @@ import (
 // codexSSE is a minimal Codex-backend stream: one text delta and the terminal
 // response.completed envelope.
 const codexSSE = "event: response.created\n" +
-	`data: {"type":"response.created","response":{"id":"resp_1","object":"response","status":"in_progress","model":"gpt-5.4"}}` + "\n\n" +
+	`data: {"type":"response.created","response":{"id":"resp_1","object":"response","status":"in_progress","model":"gpt-5.6-terra"}}` + "\n\n" +
 	"event: response.output_text.delta\n" +
 	`data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n" +
 	"event: response.completed\n" +
-	`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","model":"gpt-5.4","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":4,"output_tokens":1,"total_tokens":5}}}` + "\n\n" +
+	`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","model":"gpt-5.6-terra","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":4,"output_tokens":1,"total_tokens":5}}}` + "\n\n" +
 	"data: [DONE]\n\n"
 
 // tokenWithAccount builds an unsigned JWT carrying the ChatGPT account claim.
@@ -77,7 +77,7 @@ func TestStreamResponses_SendsCodexDialect(t *testing.T) {
 	temperature := 0.7
 	maxTokens := 128
 	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
-		Model:              "gpt-5.4",
+		Model:              "gpt-5.6-terra",
 		Input:              "Reply with exactly ok",
 		Instructions:       "You are Codex.",
 		Temperature:        &temperature,
@@ -142,7 +142,7 @@ func TestResponses_CollapsesUpstreamStream(t *testing.T) {
 
 	provider := NewWithHTTPClient("token", srv.URL, srv.Client(), llmclient.Hooks{})
 	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
-		Model: "gpt-5.4",
+		Model: "gpt-5.6-terra",
 		Input: []core.ResponsesInputElement{{Type: "message", Role: "user", Content: "hi"}},
 	})
 	if err != nil {
@@ -159,22 +159,71 @@ func TestResponses_CollapsesUpstreamStream(t *testing.T) {
 	}
 }
 
-func TestResponses_EmptyStreamIsAnError(t *testing.T) {
+// TestResponses_IncompleteStreamIsAnError guards the non-streaming path against
+// serving a truncated stream as an empty but successful answer: only a terminal
+// lifecycle event may produce a response.
+func TestResponses_IncompleteStreamIsAnError(t *testing.T) {
+	created := "event: response.created\n" +
+		`data: {"type":"response.created","response":{"id":"resp_1","object":"response","status":"in_progress","model":"gpt-5.6-terra"}}` + "\n\n"
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "no events at all", body: "data: [DONE]\n\n", want: "ended before completion"},
+		{name: "stream cut after response.created", body: created, want: "ended before completion"},
+		{
+			name: "upstream error event",
+			body: created + "event: error\n" +
+				`data: {"type":"error","code":"server_error","message":"upstream exploded"}` + "\n\n",
+			want: "upstream exploded",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+
+			provider := NewWithHTTPClient("token", srv.URL, srv.Client(), llmclient.Hooks{})
+			resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-terra", Input: "hi"})
+			if err == nil {
+				t.Fatalf("expected an error, got response %+v", resp)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestResponses_TerminalFailureIsReturnedAsAResponse mirrors what the Responses
+// API returns for a non-streaming call: a failed generation is a response whose
+// status says so, not a transport error.
+func TestResponses_TerminalFailureIsReturnedAsAResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		_, _ = io.WriteString(w, "event: response.failed\n"+
+			`data: {"type":"response.failed","response":{"id":"resp_1","object":"response","status":"failed","model":"gpt-5.6-terra","error":{"code":"server_error","message":"boom"}}}`+"\n\n")
 	}))
 	defer srv.Close()
 
 	provider := NewWithHTTPClient("token", srv.URL, srv.Client(), llmclient.Hooks{})
-	if _, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.4", Input: "hi"}); err == nil {
-		t.Fatal("expected an error for a stream with no response envelope")
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-terra", Input: "hi"})
+	if err != nil {
+		t.Fatalf("Responses: %v", err)
+	}
+	if resp.Status != "failed" || resp.Error == nil || resp.Error.Message != "boom" {
+		t.Errorf("resp = %+v, want a failed response carrying the upstream error", resp)
 	}
 }
 
 func TestStreamResponses_RequiresToken(t *testing.T) {
 	provider := NewWithHTTPClient("", "http://example.invalid", http.DefaultClient, llmclient.Hooks{})
-	_, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.4", Input: "hi"})
+	_, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-terra", Input: "hi"})
 	if err == nil {
 		t.Fatal("expected an authentication error without a token")
 	}
@@ -190,7 +239,7 @@ func TestListModels(t *testing.T) {
 		want       []string
 	}{
 		{name: "defaults", want: defaultModels},
-		{name: "configured override", configured: []string{"gpt-5.4"}, want: []string{"gpt-5.4"}},
+		{name: "configured override", configured: []string{"gpt-5.6-terra"}, want: []string{"gpt-5.6-terra"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -213,13 +262,13 @@ func TestListModels(t *testing.T) {
 
 func TestUnsupportedSurfaces(t *testing.T) {
 	provider := New(providers.ProviderConfig{APIKey: "token"}, providers.ProviderOptions{})
-	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.4"}); err == nil {
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-terra"}); err == nil {
 		t.Error("ChatCompletion should be unsupported")
 	}
-	if _, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.4"}); err == nil {
+	if _, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-terra"}); err == nil {
 		t.Error("StreamChatCompletion should be unsupported")
 	}
-	if _, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "gpt-5.4"}); err == nil {
+	if _, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "gpt-5.6-terra"}); err == nil {
 		t.Error("Embeddings should be unsupported")
 	}
 }
