@@ -200,6 +200,27 @@ func TestSQLStorePersistPreservesExplicitRetention(t *testing.T) {
 				got.StoredAt, got.ExpiresAt, src.StoredAt, src.ExpiresAt)
 		}
 
+		// A same-id persist with different explicit retention replaces both
+		// columns through the update fallback.
+		replaced := testStoredResponse("resp-explicit")
+		replaced.StoredAt = time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Second)
+		replaced.ExpiresAt = time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+		replacedSnapshot, err := Detach(replaced)
+		if err != nil {
+			t.Fatalf("Detach replacement: %v", err)
+		}
+		if err := replacedSnapshot.Persist(ctx, store); err != nil {
+			t.Fatalf("Persist replacement: %v", err)
+		}
+		got, err = store.Get(ctx, "resp-explicit")
+		if err != nil {
+			t.Fatalf("Get after replacement: %v", err)
+		}
+		if got.StoredAt.Unix() != replaced.StoredAt.Unix() || got.ExpiresAt.Unix() != replaced.ExpiresAt.Unix() {
+			t.Fatalf("retention = (%v, %v), want replaced (%v, %v)",
+				got.StoredAt, got.ExpiresAt, replaced.StoredAt, replaced.ExpiresAt)
+		}
+
 		// An already-expired snapshot is silently skipped, mirroring Create.
 		expired := testStoredResponse("resp-expired")
 		expired.ExpiresAt = time.Now().UTC().Add(-time.Minute)

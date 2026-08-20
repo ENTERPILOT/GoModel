@@ -91,31 +91,30 @@ func (s *SQLStore) createRow(ctx context.Context, id string, data []byte, stored
 // already-expired snapshot is silently skipped, also mirroring Create.
 func (s *SQLStore) createSerialized(ctx context.Context, id string, data []byte, storedAt, expiresAt time.Time) error {
 	now := time.Now().UTC()
-	if storedAt.IsZero() {
-		storedAt = now
-	}
-	if s.ttl > 0 && expiresAt.IsZero() {
-		expiresAt = storedAt.Add(s.ttl)
-	}
+	storedAt, expiresAt = stampRetention(storedAt, expiresAt, now, s.ttl)
 	if !expiresAt.IsZero() && !expiresAt.After(now) {
 		return nil
 	}
 	return s.createRow(ctx, id, data, storedAt.Unix(), storage.UnixOrZero(expiresAt), now)
 }
 
-// updateSerialized replaces an existing, unexpired snapshot, mirroring Update:
-// zero retention values preserve the stored columns, non-zero values replace
-// them.
+// updateSerialized replaces an existing, unexpired snapshot with the same
+// semantics as Update: zero retention values preserve the stored columns,
+// non-zero values replace them.
 func (s *SQLStore) updateSerialized(ctx context.Context, id string, data []byte, storedAt, expiresAt time.Time) error {
-	storedAtUnix := storage.UnixOrZero(storedAt)
-	expiresAtUnix := storage.UnixOrZero(expiresAt)
+	return s.updateRow(ctx, id, data, storage.UnixOrZero(storedAt), storage.UnixOrZero(expiresAt))
+}
+
+// updateRow rewrites one unexpired snapshot row. Zero retention values keep
+// the existing column values.
+func (s *SQLStore) updateRow(ctx context.Context, id string, data []byte, storedAt, expiresAt int64) error {
 	affected, err := s.db.Exec(ctx, `
 		UPDATE response_snapshots SET
 			data = ?,
 			stored_at = CASE WHEN ? = 0 THEN stored_at ELSE ? END,
 			expires_at = CASE WHEN ? = 0 THEN expires_at ELSE ? END
 		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
-	`, string(data), storedAtUnix, storedAtUnix, expiresAtUnix, expiresAtUnix, id, time.Now().Unix())
+	`, string(data), storedAt, storedAt, expiresAt, expiresAt, id, time.Now().Unix())
 	if err != nil {
 		return fmt.Errorf("update response snapshot: %w", err)
 	}
@@ -140,22 +139,8 @@ func (s *SQLStore) Update(ctx context.Context, response *StoredResponse) error {
 	if err != nil {
 		return err
 	}
-	storedAt := storage.UnixOrZero(normalized.StoredAt)
-	expiresAt := storage.UnixOrZero(normalized.ExpiresAt)
-	affected, err := s.db.Exec(ctx, `
-		UPDATE response_snapshots SET
-			data = ?,
-			stored_at = CASE WHEN ? = 0 THEN stored_at ELSE ? END,
-			expires_at = CASE WHEN ? = 0 THEN expires_at ELSE ? END
-		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
-	`, string(data), storedAt, storedAt, expiresAt, expiresAt, normalized.Response.ID, now.Unix())
-	if err != nil {
-		return fmt.Errorf("update response snapshot: %w", err)
-	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.updateRow(ctx, normalized.Response.ID, data,
+		storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt))
 }
 
 // Delete removes one unexpired response snapshot by id.
