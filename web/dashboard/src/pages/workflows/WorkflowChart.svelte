@@ -41,7 +41,7 @@
   </div>
 {/snippet}
 
-<div class="workflow-pipeline" class:workflow-pipeline-has-meta={chart.workflowID}>
+<div class="workflow-pipeline">
   {#if chart.workflowID}
     <WorkflowIdBadge workflowID={chart.workflowID} />
   {/if}
@@ -115,7 +115,7 @@
   </div>
 
   {#if chart.showAsync}
-    <div class="workflow-async-section">
+    <div class="workflow-pipeline-row workflow-async-section">
       {#if chart.showUsage}
         {@render node({
           icon: ChartColumnIncreasing,
@@ -150,15 +150,11 @@
     display: flex;
     flex-direction: column;
     gap: 0;
-    padding: 18px 20px 20px;
+    padding: 18px 20px 4px;
     margin-bottom: 12px;
     border-radius: var(--radius);
     border: 1px solid var(--border);
     background: var(--bg);
-  }
-
-  .workflow-pipeline-has-meta {
-    padding-top: 42px;
   }
 
   /* ─── Main pipeline row ─── */
@@ -169,6 +165,10 @@
     min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
+  }
+
+  .workflow-pipeline > .workflow-pipeline-row {
+    padding-bottom: 16px;
   }
 
   .workflow-node-icon {
@@ -300,20 +300,8 @@
    *                                               │
    *                         [Usage] ← ─ ─ [Audit Log]
    */
-  /* Container — full-width branch lane below the main row.
-     margin-left: auto on the first child keeps the branch right-aligned when
-     it fits, and collapses when it overflows so overflow-x can scroll. */
-  .workflow-async-section {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 0;
-    min-width: 0;
-    margin-top: 10px;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
+  /* Right-align when the branch fits; auto margin collapses on overflow so
+     the shared pipeline-row overflow-x can scroll. */
   .workflow-async-section > :first-child {
     margin-left: auto;
   }
