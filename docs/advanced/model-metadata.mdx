@@ -13,8 +13,8 @@ strongest first:
 ```mermaid
 flowchart LR
     A[Pricing overrides] -->|pricing fields only| B[config.yaml metadata]
-    B -->|declared fields win| C[ai-model-list catalog]
-    C -->|when it knows the model| D[Provider discovery]
+    B -->|declared fields win| C[Provider discovery]
+    C -->|fields the provider reports| D[ai-model-list catalog]
     D -.->|modes still missing| E[ID heuristic]
 ```
 
@@ -28,20 +28,25 @@ flowchart LR
    fields win field-by-field over everything below; omitted fields inherit. This
    is the escape hatch for local models: declaring `modes: [embedding]` also
    derives the model's category.
-3. **The model catalog** — the
+3. **Provider discovery** — some providers report metadata in their own model
+   listings, and what a provider says about its own deployment wins over the
+   catalog field by field: Gemini's `supportedGenerationMethods`, Cohere's
+   per-model `endpoints` and context length, OpenRouter's architecture
+   modalities and context length, Chutes' context length, max output,
+   capabilities, and pricing, Ollama's `/api/show` capabilities, and llama.cpp's
+   context window and modalities (see [llama.cpp](/providers/llamacpp)). This
+   matters most for self-hosted servers, where the running process is the only
+   source that can know the real context window. Models declared via configured
+   model lists skip this step.
+4. **The model catalog** — the
    [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) registry,
    fetched from `MODEL_LIST_URL` (default: the registry's `models.min.json` on
    GitHub) at startup and on every catalog refresh. It supplies the rich
    defaults — pricing, context windows, capabilities, modes — for most hosted
    models, matching IDs directly, through aliases, and with release-date
-   suffixes stripped. Wrong or missing data is best fixed by contributing to the
-   registry; use an override for an immediate fix.
-4. **Provider discovery** — some providers report capabilities in their own
-   model listings, and GoModel keeps them for the models it discovers there:
-   Gemini's `supportedGenerationMethods`, Cohere's per-model `endpoints` and
-   context length, OpenRouter's architecture modalities and context length, and
-   Ollama's `/api/show` capabilities. Models declared via configured model
-   lists skip this step.
+   suffixes stripped, and it fills in every field the provider above did not
+   report. Wrong or missing data is best fixed by contributing to the registry;
+   use an override for an immediate fix.
 5. **ID heuristic** — a last-resort name check for models that end up with no
    modes at all (typical for llama.cpp and LM Studio): IDs containing `embed` or
    matching well-known embedding families (`bge`, `e5`, `gte`, `minilm`) become

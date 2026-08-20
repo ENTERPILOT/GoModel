@@ -69,17 +69,14 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 		}
 		providerModels := make(map[string]*ModelInfo, len(cachedProv.Models))
 		for _, cached := range cachedProv.Models {
-			info := &ModelInfo{
-				Model: core.Model{
-					ID:      cached.ID,
-					Object:  "model",
-					OwnedBy: cachedProv.OwnedBy,
-					Created: cached.Created,
-				},
-				Provider:     provider,
-				ProviderName: providerName,
-				ProviderType: providerType,
-			}
+			// The cache stores no metadata, so nothing was discovered yet; the
+			// next live refresh supplies it.
+			info := newModelInfo(core.Model{
+				ID:      cached.ID,
+				Object:  "model",
+				OwnedBy: cachedProv.OwnedBy,
+				Created: cached.Created,
+			}, provider, providerName, providerType)
 			providerModels[cached.ID] = info
 			if _, exists := newModels[cached.ID]; !exists {
 				newModels[cached.ID] = info

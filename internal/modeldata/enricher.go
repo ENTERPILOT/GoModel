@@ -14,6 +14,11 @@ type ModelInfoAccessor interface {
 	GetProviderType(modelID string) string
 	// SetMetadata sets the metadata for a model ID.
 	SetMetadata(modelID string, meta *core.ModelMetadata)
+	// DiscoveredMetadata returns the metadata the provider itself reported for
+	// a model, or nil when it reported none. It must keep returning the same
+	// value across enrichment passes: Enrich merges onto it rather than onto
+	// its own previous result, which is what keeps repeated passes idempotent.
+	DiscoveredMetadata(modelID string) *core.ModelMetadata
 }
 
 // EnrichStats summarizes one metadata enrichment pass.
@@ -22,8 +27,15 @@ type EnrichStats struct {
 	Total    int
 }
 
-// Enrich iterates all models accessible via the accessor and attaches resolved
-// metadata from the model list. Models not found in the list are left unchanged.
+// Enrich iterates all models accessible via the accessor and merges resolved
+// catalog metadata into each one. Models the catalog does not know are left
+// unchanged.
+//
+// The catalog is the base and the provider's own report the override, field by
+// field: a running provider describes its actual deployment (a local server's
+// real context window, an API's live capability flags) better than a static
+// registry can, while the catalog still supplies everything the provider never
+// reports — display names, pricing, rankings.
 func Enrich(accessor ModelInfoAccessor, list *ModelList) EnrichStats {
 	if list == nil || accessor == nil {
 		return EnrichStats{}
@@ -34,11 +46,17 @@ func Enrich(accessor ModelInfoAccessor, list *ModelList) EnrichStats {
 
 	for _, modelID := range ids {
 		providerType := accessor.GetProviderType(modelID)
-		meta := Resolve(list, providerType, modelID)
-		if meta != nil {
-			accessor.SetMetadata(modelID, meta)
-			enriched++
+		discovered := accessor.DiscoveredMetadata(modelID)
+		catalog := Resolve(list, providerType, modelID)
+		if catalog == nil {
+			// The catalog does not know this model. Fall back to the provider's
+			// own report rather than leaving whatever a previous pass merged in:
+			// a refresh that drops an entry must drop its fields too.
+			accessor.SetMetadata(modelID, discovered.Clone())
+			continue
 		}
+		accessor.SetMetadata(modelID, MergeMetadata(catalog, discovered))
+		enriched++
 	}
 
 	return EnrichStats{

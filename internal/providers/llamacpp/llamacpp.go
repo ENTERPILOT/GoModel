@@ -33,6 +33,12 @@ var Registration = providers.Registration{
 type Provider struct {
 	compatible *openai.CompatibleProvider
 	rootClient *llmclient.Client
+	// propsClient issues the optional /props metadata call. It is deliberately
+	// separate from rootClient: /props is best-effort enrichment, so it must not
+	// spend the retry budget or trip the circuit breaker that native passthrough
+	// routes share. A server that fails /props with a retryable status would
+	// otherwise take /health, /rerank and /tokenize down with it.
+	propsClient *llmclient.Client
 }
 
 var (
@@ -63,7 +69,21 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		}, func(req *http.Request) {
 			setHeaders(req, keys.NextForContext(req.Context()))
 		}),
+		propsClient: newPropsClient(baseURL, opts.Hooks, func(req *http.Request) {
+			setHeaders(req, keys.NextForContext(req.Context()))
+		}),
 	}
+}
+
+// newPropsClient builds the client used for optional /props enrichment: no
+// retries and no circuit breaker, so a failing /props costs one request and
+// leaves the shared native-route budget untouched.
+func newPropsClient(baseURL string, hooks llmclient.Hooks, setHeader llmclient.HeaderSetter) *llmclient.Client {
+	return llmclient.New(llmclient.Config{
+		ProviderName: "llamacpp",
+		BaseURL:      passthroughBaseURL(baseURL),
+		Hooks:        hooks,
+	}, setHeader)
 }
 
 // NewWithHTTPClient creates a new llama.cpp provider with a custom HTTP client.
@@ -81,6 +101,13 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 		rootClient: llmclient.NewWithHTTPClient(httpClient, rootClientCfg, func(req *http.Request) {
 			setHeaders(req, apiKey)
 		}),
+		propsClient: llmclient.NewWithHTTPClient(httpClient, llmclient.Config{
+			ProviderName: "llamacpp",
+			BaseURL:      passthroughBaseURL(resolvedBaseURL),
+			Hooks:        hooks,
+		}, func(req *http.Request) {
+			setHeaders(req, apiKey)
+		}),
 	}
 }
 
@@ -88,6 +115,7 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 func (p *Provider) SetBaseURL(url string) {
 	p.compatible.SetBaseURL(url)
 	p.rootClient.SetBaseURL(passthroughBaseURL(url))
+	p.propsClient.SetBaseURL(passthroughBaseURL(url))
 }
 
 func setHeaders(req *http.Request, apiKey string) {
@@ -106,11 +134,6 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 // StreamChatCompletion returns a raw response body for streaming.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
 	return p.compatible.StreamChatCompletion(ctx, req)
-}
-
-// ListModels retrieves the list of available models from llama-server.
-func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compatible.ListModels(ctx)
 }
 
 // Responses sends a Responses API request to llama-server.

@@ -75,17 +75,41 @@ curl -s http://localhost:8080/v1/embeddings \
   -d '{"model": "llamacpp/nomic-embed-text-v1.5", "input": "hello"}'
 ```
 
+## Model metadata
+
+Local GGUFs are not in the upstream model catalog, so GoModel reads what it can
+from llama-server itself and reports it on `GET /v1/models`:
+
+- **Context window** — the per-slot `n_ctx` llama-server reports for the model,
+  which is the context it is *running* with (`--ctx-size`, divided across
+  `--parallel` slots) rather than the one the GGUF was trained for. Recent
+  builds report it as `meta.n_ctx` in the listing itself; older ones are asked
+  for it via `/props`. If neither answers — LM Studio, or a proxy that hides
+  `/props` — the model's trained `n_ctx_train` is used instead, which is only an
+  upper bound and may exceed what the server will accept.
+- **Modalities** — a multimodal server (started with `--mmproj`) reports
+  `vision`, `video`, and `audio` on `/props`; the supported ones become model
+  capabilities.
+
+`/props` describes the one model the server has loaded, so it is only consulted
+for a single-entry listing. In [router
+mode](https://github.com/ggml-org/llama.cpp/tree/master/tools/server), where one
+process serves several models, each model carries its own `meta.n_ctx` and needs
+no `/props` at all.
+
+Both are defaults, not decisions: anything you declare under the provider's
+model metadata wins — see [Model metadata](/advanced/model-metadata).
+
 ## Model classification
 
-llama-server's `/v1/models` listing carries no capability metadata, so GoModel
-classifies its models by ID: names containing `embed` or matching well-known
-embedding families (`bge`, `e5`, `gte`, `minilm`) are categorized as embedding
-models, and names containing `rerank` as reranking models — namespaced IDs are
-checked by their final path segment. For anything that stays unclassified,
-declare `modes` (and context window or pricing) under the provider's model
-metadata — see [Model metadata](/advanced/model-metadata). Categories only
-affect dashboard grouping and failover suggestions; `/v1/embeddings` routes to
-any model the provider serves regardless of category.
+llama-server reports nothing that separates a chat model from an embedding one,
+so GoModel classifies its models by ID: names containing `embed` or matching
+well-known embedding families (`bge`, `e5`, `gte`, `minilm`) are categorized as
+embedding models, and names containing `rerank` as reranking models — namespaced
+IDs are checked by their final path segment. For anything that stays
+unclassified, declare `modes` under the provider's model metadata. Categories
+only affect dashboard grouping and failover suggestions; `/v1/embeddings` routes
+to any model the provider serves regardless of category.
 
 ## Beyond chat and embeddings
 

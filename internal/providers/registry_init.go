@@ -260,12 +260,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		}
 
 		for _, model := range resp.Data {
-			info := &ModelInfo{
-				Model:        model,
-				Provider:     provider,
-				ProviderName: providerName,
-				ProviderType: providerTypes[provider],
-			}
+			info := newModelInfo(model, provider, providerName, providerTypes[provider])
 			out.modelsByProvider[providerName][model.ID] = info
 
 			if _, exists := out.models[model.ID]; exists {
