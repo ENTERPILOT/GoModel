@@ -98,7 +98,18 @@ cd ai-gateway-reproducible-benchmark
 The defaults are `N=20000` requests per workload, `REPEATS=5` trials, and
 concurrency `C=10`; override them as env vars, e.g. `N=5000 REPEATS=2 ./run.sh`
 for a quicker, noisier run. `GOMODEL_SOURCE=../gomodel` benchmarks a local
-checkout instead of the published image. The repository README
+checkout instead of the published image.
+
+That measures whatever the four images resolve to today. To repeat the exact
+August 20, 2026 snapshot instead, pin the digests the run recorded:
+
+```bash
+GOMODEL_IMAGE=enterpilot/gomodel@sha256:395097b75c6f1bcff5d732da328825507e93355daaac6d32874691fc9fbc2a82 \
+LITELLM_IMAGE=litellm/litellm@sha256:468c25f35f3e5ec4e414974f00deab93337b1b4d9953cabcfd3722e59415f834 \
+PORTKEY_IMAGE=portkeyai/gateway@sha256:97f094d9c8a764cbfaa2a7138c0017b247ca923bb06db1b4c13b7f8a33b5200d \
+BIFROST_IMAGE=maximhq/bifrost@sha256:ef8e686b3588884066ec3d0e57f3fc15136b11047ad94678adefe5a9573539af \
+./run.sh
+``` The repository README
 also shows how to run the harness on any Docker host without AWS. For a quick
 local check against just LiteLLM, the older localhost harness is still in
 [`docs/about/benchmark-tools/`](https://github.com/ENTERPILOT/GoModel/tree/main/docs/about/benchmark-tools).
