@@ -46,12 +46,16 @@ func Enrich(accessor ModelInfoAccessor, list *ModelList) EnrichStats {
 
 	for _, modelID := range ids {
 		providerType := accessor.GetProviderType(modelID)
+		discovered := accessor.DiscoveredMetadata(modelID)
 		catalog := Resolve(list, providerType, modelID)
 		if catalog == nil {
-			// Nothing in the catalog: whatever the provider discovered stands.
+			// The catalog does not know this model. Fall back to the provider's
+			// own report rather than leaving whatever a previous pass merged in:
+			// a refresh that drops an entry must drop its fields too.
+			accessor.SetMetadata(modelID, discovered.Clone())
 			continue
 		}
-		accessor.SetMetadata(modelID, MergeMetadata(catalog, accessor.DiscoveredMetadata(modelID)))
+		accessor.SetMetadata(modelID, MergeMetadata(catalog, discovered))
 		enriched++
 	}
 

@@ -5,8 +5,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // legacyListing is the /v1/models payload of builds whose meta object predates
@@ -85,10 +89,21 @@ func TestListModels_SurfacesServerReportedMetadata(t *testing.T) {
 			wantPropsFetched:  true,
 		},
 		{
-			name:              "supported modalities become capabilities",
+			// A truncated or non-JSON body must not be read as a zero context.
+			name:              "props answered with malformed json",
 			listing:           legacyListing,
 			propsStatus:       http.StatusOK,
-			props:             `{"default_generation_settings":{"n_ctx":4096},"modalities":{"vision":true,"video":true,"audio":false}}`,
+			props:             `{"default_generation_settings":{"n_ctx":`,
+			wantContextWindow: 131072,
+			wantPropsFetched:  true,
+		},
+		{
+			name:        "supported modalities become capabilities",
+			listing:     legacyListing,
+			propsStatus: http.StatusOK,
+			// "telepathy" stands in for a modality a future llama.cpp adds: it
+			// must not become a public capability on its own.
+			props:             `{"default_generation_settings":{"n_ctx":4096},"modalities":{"vision":true,"video":true,"audio":false,"telepathy":true}}`,
 			wantContextWindow: 4096,
 			wantCapabilities:  map[string]bool{"vision": true, "video": true},
 			wantPropsFetched:  true,
@@ -233,5 +248,66 @@ func TestListModels_LeavesMetadataUnsetWhenServerReportsNothing(t *testing.T) {
 	}
 	if resp.Data[0].Metadata != nil {
 		t.Fatalf("model.Metadata = %+v, want nil so lower metadata layers still apply", resp.Data[0].Metadata)
+	}
+}
+
+// TestListModels_FailingPropsLeavesNativeRoutesUsable pins the isolation of the
+// optional /props call: it must not retry against the shared native-route
+// budget, nor trip the circuit breaker those routes depend on. Sharing
+// rootClient here cost four attempts per listing and locked /health out
+// entirely after six discovery cycles.
+func TestListModels_FailingPropsLeavesNativeRoutesUsable(t *testing.T) {
+	var propsAttempts, healthUpstream int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"m","object":"model","meta":{"n_ctx_train":8192}}]}`))
+		case "/props":
+			propsAttempts++
+			w.WriteHeader(http.StatusServiceUnavailable) // retryable status
+			_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+		case "/health":
+			healthUpstream++
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	retry := config.DefaultRetryConfig()
+	retry.InitialBackoff = time.Millisecond // the attempt count is what matters
+	provider := New(providers.ProviderConfig{BaseURL: server.URL + "/v1"}, providers.ProviderOptions{
+		Resilience: config.ResilienceConfig{
+			Retry:          retry,
+			CircuitBreaker: config.DefaultCircuitBreakerConfig(),
+		},
+	}).(*Provider)
+
+	const listings = 6
+	for i := range listings {
+		resp, err := provider.ListModels(context.Background())
+		if err != nil {
+			t.Fatalf("ListModels() #%d error = %v", i, err)
+		}
+		// The listing still succeeds on meta.n_ctx_train despite /props failing.
+		if resp.Data[0].Metadata == nil || *resp.Data[0].Metadata.ContextWindow != 8192 {
+			t.Fatalf("listing #%d lost its fallback context window", i)
+		}
+	}
+	if propsAttempts != listings {
+		t.Fatalf("props attempts = %d, want %d (one per listing, no retries)", propsAttempts, listings)
+	}
+
+	if _, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodGet,
+		Endpoint: "health",
+		Headers:  http.Header{},
+	}); err != nil {
+		t.Fatalf("native /health rejected after failing /props calls: %v", err)
+	}
+	if healthUpstream != 1 {
+		t.Fatalf("health upstream hits = %d, want 1", healthUpstream)
 	}
 }

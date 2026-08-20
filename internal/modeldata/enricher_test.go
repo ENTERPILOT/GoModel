@@ -70,14 +70,13 @@ func TestEnrich_MatchedAndUnmatched(t *testing.T) {
 		}
 	}
 
-	// unknown-model should NOT be enriched
-	if _, ok := accessor.metadata["unknown-model"]; ok {
-		t.Error("expected unknown-model to NOT be enriched")
+	// Models the catalog does not know keep only what their provider reported,
+	// which here is nothing.
+	if meta := accessor.metadata["unknown-model"]; meta != nil {
+		t.Errorf("expected unknown-model to carry no catalog metadata, got %+v", meta)
 	}
-
-	// custom-finetune should NOT be enriched
-	if _, ok := accessor.metadata["custom-finetune"]; ok {
-		t.Error("expected custom-finetune to NOT be enriched")
+	if meta := accessor.metadata["custom-finetune"]; meta != nil {
+		t.Errorf("expected custom-finetune to carry no catalog metadata, got %+v", meta)
 	}
 }
 
@@ -228,5 +227,34 @@ func TestEnrich_RepeatedPassesTrackCatalogUpdates(t *testing.T) {
 
 	if got := accessor.metadata["gpt-4o"]; got.ContextWindow == nil || *got.ContextWindow != 200000 {
 		t.Fatalf("second pass context window = %v, want the refreshed 200000", got.ContextWindow)
+	}
+}
+
+func TestEnrich_DropsCatalogFieldsWhenEntryDisappears(t *testing.T) {
+	accessor := newMockAccessor(map[string]string{"gemma-3-4b-it": "llamacpp"})
+	accessor.discovered["gemma-3-4b-it"] = &core.ModelMetadata{ContextWindow: new(4096)}
+	list := &ModelList{Models: map[string]ModelEntry{
+		"gemma-3-4b-it": {DisplayName: "Gemma 3 4B IT", ContextWindow: new(131072)},
+	}}
+
+	Enrich(accessor, list)
+	if got := accessor.metadata["gemma-3-4b-it"]; got.DisplayName != "Gemma 3 4B IT" {
+		t.Fatalf("first pass display name = %q, want the catalog's", got.DisplayName)
+	}
+
+	// The catalog drops the entry on a later refresh; its fields must go with
+	// it, leaving only what the provider itself reported.
+	delete(list.Models, "gemma-3-4b-it")
+	Enrich(accessor, list)
+
+	got := accessor.metadata["gemma-3-4b-it"]
+	if got == nil {
+		t.Fatal("metadata = nil, want the provider's own report to survive")
+	}
+	if got.DisplayName != "" {
+		t.Fatalf("display name = %q, want it dropped with the catalog entry", got.DisplayName)
+	}
+	if got.ContextWindow == nil || *got.ContextWindow != 4096 {
+		t.Fatalf("context window = %v, want the provider's 4096", got.ContextWindow)
 	}
 }

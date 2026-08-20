@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -40,6 +41,9 @@ type modelMeta struct {
 // serverProps is the subset of llama-server's /props response we surface.
 // default_generation_settings.n_ctx is the per-slot context the server was
 // actually started with — the limit a request is measured against.
+// propsTimeout bounds the optional /props enrichment call.
+const propsTimeout = 5 * time.Second
+
 type serverProps struct {
 	DefaultGenerationSettings struct {
 		NCtx int `json:"n_ctx"`
@@ -72,8 +76,13 @@ func (p *Provider) fetchServerProps(ctx context.Context, modelCount int) *server
 	if modelCount != 1 {
 		return nil
 	}
+	// Bounded so a server that accepts the connection but never answers cannot
+	// stall discovery on an optional call.
+	ctx, cancel := context.WithTimeout(ctx, propsTimeout)
+	defer cancel()
+
 	var props serverProps
-	if err := p.rootClient.Do(ctx, llmclient.Request{
+	if err := p.propsClient.Do(ctx, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/props",
 	}, &props); err != nil {
@@ -148,16 +157,22 @@ func (e modelEntry) contextWindow(props *serverProps) int {
 }
 
 // modalityCapabilities maps llama-server's multimodal flags onto GoModel
-// capability keys. Unsupported modalities are omitted rather than recorded as
-// false, so a later metadata layer can still claim them.
+// capability keys. Only the modalities that have an established capability name
+// are published — an unrecognized key llama.cpp adds later would otherwise
+// become a public capability nobody can interpret. Unsupported modalities are
+// omitted rather than recorded as false, so a later metadata layer can still
+// claim them.
 func modalityCapabilities(modalities map[string]bool) map[string]bool {
 	capabilities := make(map[string]bool, len(modalities))
 	for modality, supported := range modalities {
 		name := strings.ToLower(strings.TrimSpace(modality))
-		if !supported || name == "" {
+		if !supported {
 			continue
 		}
-		capabilities[name] = true
+		switch name {
+		case "vision", "video", "audio":
+			capabilities[name] = true
+		}
 	}
 	if len(capabilities) == 0 {
 		return nil
