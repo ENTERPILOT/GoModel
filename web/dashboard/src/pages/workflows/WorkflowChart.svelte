@@ -41,7 +41,7 @@
   </div>
 {/snippet}
 
-<div class="workflow-pipeline" class:workflow-pipeline-has-meta={chart.workflowID}>
+<div class="workflow-pipeline">
   {#if chart.workflowID}
     <WorkflowIdBadge workflowID={chart.workflowID} />
   {/if}
@@ -115,28 +115,26 @@
   </div>
 
   {#if chart.showAsync}
-    <div class="workflow-async-section">
-      <div class="workflow-async-row">
-        {#if chart.showUsage}
-          {@render node({
-            icon: ChartColumnIncreasing,
-            label: m.workflows_usage(),
-            variant: "workflow-node-feature workflow-node-async",
-            state: chart.usageNodeClass,
-          })}
-        {/if}
-        {#if chart.showUsage && chart.showAudit}
-          <div class="workflow-conn workflow-conn-async"></div>
-        {/if}
-        {#if chart.showAudit}
-          {@render node({
-            icon: FileText,
-            label: m.workflows_audit_log(),
-            variant: "workflow-node-feature workflow-node-async",
-            state: chart.auditNodeClass,
-          })}
-        {/if}
-      </div>
+    <div class="workflow-pipeline-row workflow-async-section">
+      {#if chart.showUsage}
+        {@render node({
+          icon: ChartColumnIncreasing,
+          label: m.workflows_usage(),
+          variant: "workflow-node-feature workflow-node-async",
+          state: chart.usageNodeClass,
+        })}
+      {/if}
+      {#if chart.showUsage && chart.showAudit}
+        <div class="workflow-conn workflow-conn-async"></div>
+      {/if}
+      {#if chart.showAudit}
+        {@render node({
+          icon: FileText,
+          label: m.workflows_audit_log(),
+          variant: "workflow-node-feature workflow-node-async",
+          state: chart.auditNodeClass,
+        })}
+      {/if}
       <div class="workflow-async-turn"></div>
       <span class="workflow-async-label">{m.workflows_async()}</span>
     </div>
@@ -152,15 +150,11 @@
     display: flex;
     flex-direction: column;
     gap: 0;
-    padding: 18px 20px 20px;
+    padding: 18px 20px 4px;
     margin-bottom: 12px;
     border-radius: var(--radius);
     border: 1px solid var(--border);
     background: var(--bg);
-  }
-
-  .workflow-pipeline-has-meta {
-    padding-top: 42px;
   }
 
   /* ─── Main pipeline row ─── */
@@ -170,6 +164,11 @@
     width: 100%;
     min-width: 0;
     overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .workflow-pipeline > .workflow-pipeline-row {
+    padding-bottom: 16px;
   }
 
   .workflow-node-icon {
@@ -301,20 +300,16 @@
    *                                               │
    *                         [Usage] ← ─ ─ [Audit Log]
    */
-  /* Container — full-width branch lane below the main row */
-  .workflow-async-section {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0;
-    min-width: 0;
-    margin-top: 10px;
+  /* Right-align when the branch fits; auto margin collapses on overflow so
+     the shared pipeline-row overflow-x can scroll. */
+  .workflow-async-section > :first-child {
+    margin-left: auto;
   }
 
   /* L-turn connector: centered horizontal leg plus vertical rise back to Response */
   .workflow-async-turn {
     flex: 0 0 60px;
+    margin-left: 7px;
     position: relative; /* for arrowhead + vertical rise */
     height: 2px;
     background: repeating-linear-gradient(
@@ -348,14 +343,6 @@
     height: 16px;
     border-right: 2px dashed
       color-mix(in srgb, var(--text-muted) 40%, var(--border));
-  }
-
-  /* RTL async row — Audit Log right, Usage left */
-  .workflow-async-row {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    margin-right: 7px;
   }
 
   /* Dashed left-pointing connector between async nodes */
