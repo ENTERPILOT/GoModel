@@ -25,6 +25,7 @@
     const tablist = event.currentTarget?.closest?.(".audit-pane-tablist");
     const target = tablist?.querySelectorAll(".audit-pane-tab")[ids.indexOf(next)];
     target?.focus?.();
+    target?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
     activeTab = next;
   }
 </script>
@@ -111,8 +112,10 @@
 
   .audit-pane-tab {
     display: inline-flex;
+    flex: 0 0 auto;
     align-items: center;
     gap: 8px;
+    white-space: nowrap;
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-bottom-color: transparent;

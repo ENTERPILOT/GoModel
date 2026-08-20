@@ -116,27 +116,25 @@
 
   {#if chart.showAsync}
     <div class="workflow-async-section">
-      <div class="workflow-async-row">
-        {#if chart.showUsage}
-          {@render node({
-            icon: ChartColumnIncreasing,
-            label: m.workflows_usage(),
-            variant: "workflow-node-feature workflow-node-async",
-            state: chart.usageNodeClass,
-          })}
-        {/if}
-        {#if chart.showUsage && chart.showAudit}
-          <div class="workflow-conn workflow-conn-async"></div>
-        {/if}
-        {#if chart.showAudit}
-          {@render node({
-            icon: FileText,
-            label: m.workflows_audit_log(),
-            variant: "workflow-node-feature workflow-node-async",
-            state: chart.auditNodeClass,
-          })}
-        {/if}
-      </div>
+      {#if chart.showUsage}
+        {@render node({
+          icon: ChartColumnIncreasing,
+          label: m.workflows_usage(),
+          variant: "workflow-node-feature workflow-node-async",
+          state: chart.usageNodeClass,
+        })}
+      {/if}
+      {#if chart.showUsage && chart.showAudit}
+        <div class="workflow-conn workflow-conn-async"></div>
+      {/if}
+      {#if chart.showAudit}
+        {@render node({
+          icon: FileText,
+          label: m.workflows_audit_log(),
+          variant: "workflow-node-feature workflow-node-async",
+          state: chart.auditNodeClass,
+        })}
+      {/if}
       <div class="workflow-async-turn"></div>
       <span class="workflow-async-label">{m.workflows_async()}</span>
     </div>
@@ -170,6 +168,7 @@
     width: 100%;
     min-width: 0;
     overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .workflow-node-icon {
@@ -301,20 +300,28 @@
    *                                               │
    *                         [Usage] ← ─ ─ [Audit Log]
    */
-  /* Container — full-width branch lane below the main row */
+  /* Container — full-width branch lane below the main row.
+     margin-left: auto on the first child keeps the branch right-aligned when
+     it fits, and collapses when it overflows so overflow-x can scroll. */
   .workflow-async-section {
     width: 100%;
     display: flex;
     align-items: center;
-    justify-content: flex-end;
     gap: 0;
     min-width: 0;
     margin-top: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .workflow-async-section > :first-child {
+    margin-left: auto;
   }
 
   /* L-turn connector: centered horizontal leg plus vertical rise back to Response */
   .workflow-async-turn {
     flex: 0 0 60px;
+    margin-left: 7px;
     position: relative; /* for arrowhead + vertical rise */
     height: 2px;
     background: repeating-linear-gradient(
@@ -348,14 +355,6 @@
     height: 16px;
     border-right: 2px dashed
       color-mix(in srgb, var(--text-muted) 40%, var(--border));
-  }
-
-  /* RTL async row — Audit Log right, Usage left */
-  .workflow-async-row {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    margin-right: 7px;
   }
 
   /* Dashed left-pointing connector between async nodes */
