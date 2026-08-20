@@ -55,10 +55,12 @@ CHATGPT_MODELS=gpt-5.6-sol,gpt-5.6-terra
 ```
 
 A model outside the plan's set is rejected upstream with `The '<model>' model
-is not supported when using Codex with a ChatGPT account`. `gpt-5.4` and
-`gpt-5.4-mini` leave ChatGPT-authenticated Codex on August 31, 2026 — use
-`gpt-5.6-terra` and `gpt-5.6-luna` instead. Both remain available to Codex
-sessions authenticated with an OpenAI API key, through the `openai` provider.
+is not supported when using Codex with a ChatGPT account`.
+
+`gpt-5.4` and `gpt-5.4-mini` leave ChatGPT-authenticated Codex on August 31,
+2026; use `gpt-5.6-terra` and `gpt-5.6-luna` instead. Both stay available to
+Codex sessions authenticated with an OpenAI API key, through the `openai`
+provider.
 
 ## Responses API only
 
@@ -79,42 +81,29 @@ Responses API:
 
 Because the backend streams only, a non-streaming `POST /v1/responses` is
 served by streaming upstream and returning the final response object. Clients
-see a normal non-streaming response.
+see a normal non-streaming response. See
+[Responses compatibility](/advanced/responses-compatibility) for how the
+gateway's Responses surface behaves across providers.
 
 ## Reported cost is not real spend
 
 Subscription usage is flat-rate, but these model IDs also exist on the OpenAI
-Platform, so GoModel's model registry attaches their per-token API prices.
-Usage records and dashboard totals for `chatgpt` therefore show a dollar figure
-that corresponds to no actual charge.
+Platform, so the model catalog attaches their per-token API prices. Usage
+records and dashboard totals for `chatgpt` show a figure that corresponds to no
+actual charge, and the same collision makes `GET /v1/models` advertise
+`modes: ["chat", "responses"]`.
 
-The same collision makes `/v1/models` advertise `modes: ["chat", "responses"]`
-for these models, though chat completions return 501 here. Declare the models
-explicitly to correct both:
-
-```yaml
-providers:
-  chatgpt:
-    type: chatgpt
-    api_key: "${CHATGPT_API_KEY}"
-    models:
-      - id: gpt-5.6-sol
-        metadata:
-          modes: ["responses"]
-          pricing:
-            input_per_mtok: 0
-            output_per_mtok: 0
-            cached_input_per_mtok: 0
-```
+The modes are cosmetic — they drive dashboard grouping, not routing. Pricing is
+not: it feeds [cost tracking](/features/cost-tracking), budgets, and `cost`
+load balancing.
 
 <Warning>
-  That override corrects what `/v1/models` advertises, but **not** what usage
-  records: cost tracking resolves pricing separately and still bills at
-  registry rates. Anything consuming those figures acts on them — a **budget**
-  can reject `chatgpt` traffic for "spending" money the subscription never
-  charges, and `cost`-based load balancing will price it as API traffic. Scope
-  budgets to a [user path](/features/user-path) that excludes subscription
-  traffic, or leave budgets off for it.
+  A **budget** can therefore reject `chatgpt` traffic for "spending" money the
+  subscription never charges. Scope budgets to a
+  [user path](/features/user-path) that excludes subscription traffic, or leave
+  budgets off for it. Declaring per-model `pricing` and `modes: ["responses"]`
+  in [model metadata](/advanced/model-metadata) corrects what `/v1/models`
+  advertises, but usage records still price at catalog rates.
 </Warning>
 
 ## Limits
