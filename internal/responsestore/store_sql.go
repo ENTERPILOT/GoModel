@@ -59,6 +59,13 @@ func (s *SQLStore) Create(ctx context.Context, response *StoredResponse) error {
 	if responseExpired(normalized, now) {
 		return nil
 	}
+	return s.createRow(ctx, normalized.Response.ID, data,
+		storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt), now)
+}
+
+// createRow inserts one snapshot row, replacing an existing row only when it
+// has already expired.
+func (s *SQLStore) createRow(ctx context.Context, id string, data []byte, storedAt, expiresAt int64, now time.Time) error {
 	affected, err := s.db.Exec(ctx, `
 		INSERT INTO response_snapshots (id, data, stored_at, expires_at)
 		VALUES (?, ?, ?, ?)
@@ -67,13 +74,52 @@ func (s *SQLStore) Create(ctx context.Context, response *StoredResponse) error {
 			stored_at = excluded.stored_at,
 			expires_at = excluded.expires_at
 		WHERE response_snapshots.expires_at > 0 AND response_snapshots.expires_at <= ?
-	`, normalized.Response.ID, string(data), storage.UnixOrZero(normalized.StoredAt),
-		storage.UnixOrZero(normalized.ExpiresAt), now.Unix())
+	`, id, string(data), storedAt, expiresAt, now.Unix())
 	if err != nil {
 		return fmt.Errorf("create response snapshot: %w", err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("response already exists: %s", normalized.Response.ID)
+		return fmt.Errorf("response already exists: %s", id)
+	}
+	return nil
+}
+
+// createSerialized stores an already-serialized snapshot, stamping retention
+// into the columns only. Reads take StoredAt/ExpiresAt from the columns, so
+// the serialized data does not need to carry them. Explicit retention values
+// are preserved and zero values receive the same defaults Create applies; an
+// already-expired snapshot is silently skipped, also mirroring Create.
+func (s *SQLStore) createSerialized(ctx context.Context, id string, data []byte, storedAt, expiresAt time.Time) error {
+	now := time.Now().UTC()
+	storedAt, expiresAt = stampRetention(storedAt, expiresAt, now, s.ttl)
+	if !expiresAt.IsZero() && !expiresAt.After(now) {
+		return nil
+	}
+	return s.createRow(ctx, id, data, storedAt.Unix(), storage.UnixOrZero(expiresAt), now)
+}
+
+// updateSerialized replaces an existing, unexpired snapshot with the same
+// semantics as Update: zero retention values preserve the stored columns,
+// non-zero values replace them.
+func (s *SQLStore) updateSerialized(ctx context.Context, id string, data []byte, storedAt, expiresAt time.Time) error {
+	return s.updateRow(ctx, id, data, storage.UnixOrZero(storedAt), storage.UnixOrZero(expiresAt))
+}
+
+// updateRow rewrites one unexpired snapshot row. Zero retention values keep
+// the existing column values.
+func (s *SQLStore) updateRow(ctx context.Context, id string, data []byte, storedAt, expiresAt int64) error {
+	affected, err := s.db.Exec(ctx, `
+		UPDATE response_snapshots SET
+			data = ?,
+			stored_at = CASE WHEN ? = 0 THEN stored_at ELSE ? END,
+			expires_at = CASE WHEN ? = 0 THEN expires_at ELSE ? END
+		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
+	`, string(data), storedAt, storedAt, expiresAt, expiresAt, id, time.Now().Unix())
+	if err != nil {
+		return fmt.Errorf("update response snapshot: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -93,22 +139,8 @@ func (s *SQLStore) Update(ctx context.Context, response *StoredResponse) error {
 	if err != nil {
 		return err
 	}
-	storedAt := storage.UnixOrZero(normalized.StoredAt)
-	expiresAt := storage.UnixOrZero(normalized.ExpiresAt)
-	affected, err := s.db.Exec(ctx, `
-		UPDATE response_snapshots SET
-			data = ?,
-			stored_at = CASE WHEN ? = 0 THEN stored_at ELSE ? END,
-			expires_at = CASE WHEN ? = 0 THEN expires_at ELSE ? END
-		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
-	`, string(data), storedAt, storedAt, expiresAt, expiresAt, normalized.Response.ID, now.Unix())
-	if err != nil {
-		return fmt.Errorf("update response snapshot: %w", err)
-	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.updateRow(ctx, normalized.Response.ID, data,
+		storage.UnixOrZero(normalized.StoredAt), storage.UnixOrZero(normalized.ExpiresAt))
 }
 
 // Delete removes one unexpired response snapshot by id.

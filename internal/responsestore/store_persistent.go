@@ -31,18 +31,28 @@ func prepareStoredResponseForStorage(response *StoredResponse, now time.Time, tt
 	}
 	normalized := normalizeStoredResponse(response)
 	if stamp {
-		if normalized.StoredAt.IsZero() {
-			normalized.StoredAt = now
-		}
-		if ttl > 0 && normalized.ExpiresAt.IsZero() {
-			normalized.ExpiresAt = normalized.StoredAt.Add(ttl)
-		}
+		normalized.StoredAt, normalized.ExpiresAt = stampRetention(normalized.StoredAt, normalized.ExpiresAt, now, ttl)
 	}
 	data, err := json.Marshal(normalized)
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal response: %w", err)
 	}
 	return normalized, data, nil
+}
+
+// stampRetention applies the create-path retention defaults: a zero StoredAt
+// becomes now, and a zero ExpiresAt becomes StoredAt plus the store TTL.
+// Explicit non-zero values pass through unchanged. Both the struct-based and
+// the serialized write paths stamp through this one helper so their semantics
+// cannot drift apart.
+func stampRetention(storedAt, expiresAt, now time.Time, ttl time.Duration) (time.Time, time.Time) {
+	if storedAt.IsZero() {
+		storedAt = now
+	}
+	if ttl > 0 && expiresAt.IsZero() {
+		expiresAt = storedAt.Add(ttl)
+	}
+	return storedAt, expiresAt
 }
 
 // scanStoredResponseRow converts one (data, stored_at, expires_at) row into a

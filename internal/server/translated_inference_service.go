@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -376,12 +375,12 @@ const snapshotWriteTimeout = 15 * time.Second
 // storeResponseSnapshotAsync persists the response snapshot off the request
 // path so the client never waits on storage. A failed write is already
 // non-fatal on the synchronous path (metric plus warning), so deferring it
-// only changes when the failure is observed. The snapshot is deep-copied
-// before the goroutine starts: the background write must not share memory
-// with the response the handler is concurrently serializing to the client.
-// The write context is detached from request cancellation, which ends the
-// moment the response is sent. drainSnapshotWrites waits for in-flight
-// writes at shutdown.
+// only changes when the failure is observed. The snapshot is detached
+// (serialized) before the goroutine starts: the background write must not
+// share memory with the response the handler is concurrently serializing to
+// the client. The write context is detached from request cancellation, which
+// ends the moment the response is sent. drainSnapshotWrites waits for
+// in-flight writes at shutdown.
 func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Context, workflow *core.Workflow, req *core.ResponsesRequest, resp *core.ResponsesResponse, providerType, providerName, requestID string) {
 	store := s.currentResponseStore()
 	if store == nil || resp == nil || resp.ID == "" {
@@ -391,7 +390,14 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 		return
 	}
 
-	stored, err := responsestore.Clone(&responsestore.StoredResponse{
+	failure := snapshotFailureRecord{
+		providerType:      providerType,
+		providerName:      providerName,
+		requestID:         requestID,
+		workflowVersionID: workflow.WorkflowVersionID(),
+		responseID:        resp.ID,
+	}
+	snapshot, err := responsestore.Detach(&responsestore.StoredResponse{
 		Response:           resp,
 		InputItems:         normalizedResponseInputItems(resp.ID, req),
 		Provider:           strings.TrimSpace(providerType),
@@ -402,7 +408,7 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 		WorkflowVersionID:  workflow.WorkflowVersionID(),
 	})
 	if err != nil {
-		s.recordResponseSnapshotStoreFailure(workflow, resp, providerType, providerName, requestID, err)
+		s.recordResponseSnapshotStoreFailure(failure, err)
 		return
 	}
 
@@ -410,13 +416,12 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 	scheduled := s.goSnapshotWrite(func() {
 		writeCtx, cancel := context.WithTimeout(writeCtx, snapshotWriteTimeout)
 		defer cancel()
-		if err := writeResponseSnapshot(writeCtx, store, stored); err != nil {
-			s.recordResponseSnapshotStoreFailure(workflow, stored.Response, providerType, providerName, requestID, err)
+		if err := snapshot.Persist(writeCtx, store); err != nil {
+			s.recordResponseSnapshotStoreFailure(failure, err)
 		}
 	})
 	if !scheduled {
-		s.recordResponseSnapshotStoreFailure(workflow, stored.Response, providerType, providerName, requestID,
-			errors.New("server shutting down, snapshot write skipped"))
+		s.recordResponseSnapshotStoreFailure(failure, errors.New("server shutting down, snapshot write skipped"))
 	}
 }
 
@@ -433,19 +438,6 @@ func (s *translatedInferenceService) goSnapshotWrite(fn func()) bool {
 	}
 	s.snapshotWrites.Go(fn)
 	return true
-}
-
-// writeResponseSnapshot upserts one snapshot: Create first, falling back to
-// Update when the id already exists.
-func writeResponseSnapshot(ctx context.Context, store responsestore.Store, stored *responsestore.StoredResponse) error {
-	if createErr := store.Create(ctx, stored); createErr != nil {
-		updateErr := store.Update(ctx, stored)
-		if updateErr == nil {
-			return nil
-		}
-		return fmt.Errorf("persist response snapshot: %w", errors.Join(createErr, updateErr))
-	}
-	return nil
 }
 
 // drainSnapshotWrites stops accepting new background snapshot writes and
@@ -483,28 +475,32 @@ func (s *translatedInferenceService) setConversationStore(store conversationstor
 	s.conversationStore = store
 }
 
-func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(workflow *core.Workflow, resp *core.ResponsesResponse, providerType, providerName, requestID string, err error) {
+// snapshotFailureRecord carries the identifiers a snapshot-write failure is
+// reported with. All fields are plain strings captured on the request path so
+// the background goroutine never touches request-owned structs.
+type snapshotFailureRecord struct {
+	providerType      string
+	providerName      string
+	requestID         string
+	workflowVersionID string
+	responseID        string
+}
+
+func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(rec snapshotFailureRecord, err error) {
 	observability.ResponseSnapshotStoreFailures.WithLabelValues(
-		strings.TrimSpace(providerType),
-		strings.TrimSpace(providerName),
+		strings.TrimSpace(rec.providerType),
+		strings.TrimSpace(rec.providerName),
 		"store",
 	).Inc()
 
 	slog.Warn("response snapshot store failed",
-		"request_id", requestID,
-		"provider_type", providerType,
-		"provider_name", providerName,
-		"workflow_version_id", workflow.WorkflowVersionID(),
-		"response_id", responseIDForLog(resp),
+		"request_id", rec.requestID,
+		"provider_type", rec.providerType,
+		"provider_name", rec.providerName,
+		"workflow_version_id", rec.workflowVersionID,
+		"response_id", strings.TrimSpace(rec.responseID),
 		"error", err,
 	)
-}
-
-func responseIDForLog(resp *core.ResponsesResponse) string {
-	if resp == nil {
-		return ""
-	}
-	return strings.TrimSpace(resp.ID)
 }
 
 func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo.Context, workflow *core.Workflow, req *core.ChatRequest) (bool, error) {
