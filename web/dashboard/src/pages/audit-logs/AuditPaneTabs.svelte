@@ -103,8 +103,9 @@
      the active panel shows that pane's content. */
   .audit-pane-tablist {
     display: flex;
-    flex-wrap: wrap;
     gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
     border-bottom: 1px solid var(--border);
   }
 
