@@ -39,9 +39,11 @@ flowchart LR
 4. **Provider discovery** — some providers report capabilities in their own
    model listings, and GoModel keeps them for the models it discovers there:
    Gemini's `supportedGenerationMethods`, Cohere's per-model `endpoints` and
-   context length, OpenRouter's architecture modalities and context length, and
-   Ollama's `/api/show` capabilities. Models declared via configured model
-   lists skip this step.
+   context length, OpenRouter's architecture modalities and context length,
+   Chutes' context length, max output, capabilities, and pricing, Ollama's
+   `/api/show` capabilities, and llama.cpp's context window and modalities (see
+   [llama.cpp](/providers/llamacpp)). Models declared via configured model lists
+   skip this step.
 5. **ID heuristic** — a last-resort name check for models that end up with no
    modes at all (typical for llama.cpp and LM Studio): IDs containing `embed` or
    matching well-known embedding families (`bge`, `e5`, `gte`, `minilm`) become

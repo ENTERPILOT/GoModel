@@ -108,11 +108,6 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	return p.compatible.StreamChatCompletion(ctx, req)
 }
 
-// ListModels retrieves the list of available models from llama-server.
-func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compatible.ListModels(ctx)
-}
-
 // Responses sends a Responses API request to llama-server.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
 	return p.compatible.Responses(ctx, req)
