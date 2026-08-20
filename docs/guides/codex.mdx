@@ -16,8 +16,8 @@ because that decides what pays for it:
 
 | Provider | Upstream | Billing |
 | -------- | -------- | ------- |
-| `chatgpt` | The Codex backend behind your ChatGPT plan | ChatGPT subscription quota |
-| `openai`, `deepseek`, `anthropic`, … | That provider's API | That provider's API credit |
+| [`chatgpt`](/providers/chatgpt) | The Codex backend behind your ChatGPT plan | ChatGPT subscription quota |
+| `openai`, [`deepseek`](/providers/deepseek), [`anthropic`](/providers/anthropic), [any other](/providers/overview) | That provider's API | That provider's API credit |
 
 Everything after this point is the same either way.
 
@@ -49,61 +49,18 @@ example `-e OPENAI_API_KEY="sk-..."` — and use one of its models in step 2.
 
 ## 1. Confirm the Responses API
 
-Before testing Codex itself, you can optionally verify that GoModel answers a
-normal Responses API request:
+Optional: check that GoModel answers a plain Responses request before involving
+Codex. Use a model your configured provider actually serves.
 
-This step is optional. If you are sure GoModel has a working credential, skip
-it and go straight to [step 2](#2-configure-codex-to-use-gomodel).
-
-<CodeGroup>
-
-```bash curl
+```bash
 curl -s http://localhost:8080/v1/responses \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-5.6-sol",
-    "input": "Reply with exactly ok",
-    "max_output_tokens": 16
-  }'
+  -d '{"model": "gpt-5.6-sol", "input": "Reply with exactly ok"}'
 ```
 
-```python Python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
-
-response = client.responses.create(
-    model="gpt-5.6-sol",
-    input="Reply with exactly ok",
-    max_output_tokens=16,
-)
-
-print(response.output_text)
-```
-
-```javascript JavaScript
-import OpenAI from "openai";
-
-const client = new OpenAI({
-  baseURL: "http://localhost:8080/v1",
-  apiKey: "change-me",
-});
-
-const response = await client.responses.create({
-  model: "gpt-5.6-sol",
-  input: "Reply with exactly ok",
-  max_output_tokens: 16,
-});
-
-console.log(response.output_text);
-```
-
-</CodeGroup>
-
-If the gateway is wired correctly, the response will contain `ok`. Use a model
-your configured provider actually serves — `gpt-5.6-sol` on a ChatGPT
-subscription, or e.g. `gpt-4.1-mini` on an OpenAI Platform key.
+The response contains `ok`. For the Python and JavaScript equivalents, see the
+[Responses API reference](/advanced/responses-api).
 
 ## 2. Configure Codex to use GoModel
 
@@ -181,45 +138,23 @@ your GoModel traffic and usage.
 
 ## DeepSeek V4
 
-Codex sends `POST /v1/responses`. DeepSeek exposes chat completions instead of
-a native Responses API, so configure the first-class DeepSeek provider and let
-GoModel translate the request.
+Codex sends `POST /v1/responses`, which DeepSeek does not serve natively. Use
+`type: deepseek` rather than `type: openai`: the DeepSeek provider translates
+`/responses` to `/chat/completions`, while the generic OpenAI provider forwards
+it upstream unchanged.
 
 ```yaml
 providers:
   deepseek:
     type: deepseek
-    base_url: "https://api.deepseek.com"
     api_key: "${DEEPSEEK_API_KEY}"
 ```
 
-If you previously configured DeepSeek as `type: openai`, change it to
-`type: deepseek` for Codex. The generic OpenAI provider forwards `/responses`
-upstream, while the DeepSeek provider translates `/responses` to
-`/chat/completions`.
-
-See the [DeepSeek guide](/providers/deepseek) for the full reasoning effort
-mapping table (DeepSeek V4 only accepts `high` and `max`, so GoModel maps
-`low` and `medium` up to `high`).
-
-Codex attaches `include: ["reasoning.encrypted_content"]` to every Responses
-request. GoModel ignores it on chat-translated providers, so the response
-carries no encrypted reasoning items. See
-[Responses compatibility](/advanced/responses-compatibility) for the full
-feature matrix.
-
-Then use the DeepSeek model name in Codex:
-
-```toml
-model_provider = "gomodel"
-model = "deepseek-v4-pro"
-
-[model_providers.gomodel]
-name = "GoModel"
-base_url = "http://localhost:8080/v1"
-env_key = "GOMODEL_API_KEY"
-wire_api = "responses"
-```
+Then set `model = "deepseek-v4-pro"` in the Codex config from step 2. See the
+[DeepSeek page](/providers/deepseek) for the reasoning-effort mapping, and
+[Responses compatibility](/advanced/responses-compatibility) for what
+chat-translated providers drop — including the `reasoning.encrypted_content`
+Codex asks for on every request.
 
 ## Current status
 
