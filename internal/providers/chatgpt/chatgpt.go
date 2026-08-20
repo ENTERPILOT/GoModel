@@ -170,14 +170,17 @@ func (p *Provider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*cor
 	return nil, unsupported("embeddings")
 }
 
-// unsupported reports a surface the upstream does not implement. It mirrors the
-// 501 unsupported_response_operation shape the router already uses for provider
-// capability gaps, so callers can tell "this provider cannot do that" apart
-// from "your request was malformed".
+// unsupportedOperationCode marks a surface the upstream does not implement. It
+// mirrors the router's unsupported_response_operation code, which covers
+// response operations specifically, so callers can tell "this provider cannot
+// do that" apart from "your request was malformed".
+const unsupportedOperationCode = "unsupported_provider_operation"
+
+// unsupported reports a surface the Codex backend does not serve.
 func unsupported(surface string) error {
 	return core.NewInvalidRequestErrorWithStatus(http.StatusNotImplemented,
 		"chatgpt serves only the Responses API; "+surface+" are not available on a ChatGPT subscription",
-		nil).WithCode("unsupported_provider_operation")
+		nil).WithCode(unsupportedOperationCode)
 }
 
 // authHeaders builds the per-request credential headers. The account ID is

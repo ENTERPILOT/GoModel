@@ -342,6 +342,11 @@ func TestUnsupportedSurfaces(t *testing.T) {
 			if gatewayErr.StatusCode != http.StatusNotImplemented {
 				t.Errorf("status = %d, want %d", gatewayErr.StatusCode, http.StatusNotImplemented)
 			}
+			// The code is the programmatic half of the contract: callers
+			// branch on it to tell a capability gap from a bad request.
+			if gatewayErr.Code == nil || *gatewayErr.Code != unsupportedOperationCode {
+				t.Errorf("code = %v, want %q", gatewayErr.Code, unsupportedOperationCode)
+			}
 		})
 	}
 }
