@@ -1,0 +1,93 @@
+---
+title: "ChatGPT subscription"
+description: "Route Responses API traffic through a ChatGPT subscription instead of an OpenAI Platform API key."
+icon: "message-circle"
+keywords: ["ChatGPT", "Codex", "subscription", "OAuth", "Responses API", "provider setup"]
+---
+
+The `chatgpt` provider calls the Codex backend that ships with a ChatGPT
+subscription (Plus, Pro, Business, or Enterprise). Usage is billed against the
+subscription's quota, not an OpenAI Platform API key.
+
+Pair it with the [Codex guide](/guides/codex) to run
+`Codex -> GoModel -> ChatGPT subscription`.
+
+## Configure
+
+The credential is the access token from your Codex sign-in:
+
+```bash
+CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json)
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  chatgpt:
+    type: chatgpt
+    api_key: "${CHATGPT_API_KEY}"
+```
+
+Run `codex login` first if `~/.codex/auth.json` does not exist yet. GoModel
+derives the ChatGPT account ID from the token itself, so nothing else is
+needed.
+
+<Warning>
+  The token expires roughly every 10 days. Re-export it (the Codex CLI
+  refreshes the file whenever it runs) or run `codex login` again when requests
+  start returning 401.
+</Warning>
+
+## Models
+
+The Codex backend has no model-listing endpoint, so GoModel ships the
+inventory a ChatGPT subscription can call:
+
+```text
+gpt-5.6-sol, gpt-5.5, gpt-5.4
+```
+
+Override it when your plan serves a different set:
+
+```bash
+CHATGPT_MODELS=gpt-5.6-sol,gpt-5.4
+```
+
+A model outside the plan's set is rejected upstream with `The '<model>' model
+is not supported when using Codex with a ChatGPT account`.
+
+## Responses API only
+
+The Codex backend serves `/responses` and nothing else. `/v1/chat/completions`
+and `/v1/embeddings` return an error for `chatgpt` models — use
+`/v1/responses`, which is what Codex and the OpenAI SDKs send anyway.
+
+The backend also validates against a strict parameter allowlist. GoModel
+adapts requests rather than failing them, so callers keep using the standard
+Responses API:
+
+| Request field | Behavior |
+| ------------- | -------- |
+| `stream`, `store` | Pinned to `true` / `false` — the backend rejects anything else |
+| `input` as a string | Wrapped into the message list the backend requires |
+| `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `reasoning`, `text`, `include` | Forwarded |
+| `temperature`, `top_p`, `max_output_tokens`, `previous_response_id`, `truncation`, `metadata`, `user`, `service_tier`, `top_logprobs` | Dropped — unsupported upstream |
+
+Because the backend streams only, a non-streaming `POST /v1/responses` is
+served by streaming upstream and returning the final response object. Clients
+see a normal non-streaming response.
+
+## Limits
+
+Subscription quota is separate from API credit. When it is exhausted the
+gateway relays a `429`:
+
+```json
+{"error":{"message":"The usage limit has been reached","type":"rate_limit_error"}}
+```
+
+<Warning>
+  OpenAI authorizes these tokens for Codex traffic. Use this provider to route
+  your own Codex usage through GoModel, not as a general-purpose inference API.
+</Warning>

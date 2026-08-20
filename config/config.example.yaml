@@ -337,6 +337,14 @@ providers:
     type: anthropic
     api_key: "sk-ant-..."
 
+  # ChatGPT subscription (Codex backend). Serves /v1/responses only and is
+  # billed against your ChatGPT plan. The key is the access token from
+  # `codex login`: jq -r .tokens.access_token ~/.codex/auth.json
+  chatgpt:
+    type: chatgpt
+    api_key: "${CHATGPT_API_KEY}"
+    # models: [gpt-5.6-sol, gpt-5.5, gpt-5.4]
+
   cohere:
     type: cohere
     api_key: "${COHERE_API_KEY}"
