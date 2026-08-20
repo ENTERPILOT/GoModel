@@ -166,6 +166,7 @@
                     "providers/overview",
                     "providers/key-rotation",
                     "providers/anthropic",
+                    "providers/chatgpt",
                     "providers/cohere",
                     "providers/gemini",
                     "providers/deepseek",

@@ -1,0 +1,123 @@
+---
+title: "ChatGPT subscription"
+description: "Route Responses API traffic through a ChatGPT subscription instead of an OpenAI Platform API key."
+icon: "message-circle"
+keywords: ["ChatGPT", "Codex", "subscription", "OAuth", "Responses API", "provider setup"]
+---
+
+The `chatgpt` provider calls the Codex backend that ships with a ChatGPT
+subscription (Plus, Pro, Business, or Enterprise). Usage is billed against the
+subscription's quota, not an OpenAI Platform API key.
+
+Pair it with the [Codex guide](/guides/codex) to run
+`Codex -> GoModel -> ChatGPT subscription`.
+
+## Configure
+
+The credential is the access token from your Codex sign-in:
+
+```bash
+CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json)
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  chatgpt:
+    type: chatgpt
+    api_key: "${CHATGPT_API_KEY}"
+```
+
+Run `codex login` first if `~/.codex/auth.json` does not exist yet. GoModel
+derives the ChatGPT account ID from the token itself, so nothing else is
+needed.
+
+<Warning>
+  The token expires roughly every 10 days. Re-export it (the Codex CLI
+  refreshes the file whenever it runs) or run `codex login` again when requests
+  start returning 401.
+</Warning>
+
+## Models
+
+The Codex backend has no model-listing endpoint, so GoModel ships the
+inventory a ChatGPT subscription can call:
+
+```text
+gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5
+```
+
+Override it when your plan serves a different set:
+
+```bash
+CHATGPT_MODELS=gpt-5.6-sol,gpt-5.6-terra
+```
+
+A model outside the plan's set is rejected upstream with `The '<model>' model
+is not supported when using Codex with a ChatGPT account`.
+
+`gpt-5.4` and `gpt-5.4-mini` leave ChatGPT-authenticated Codex on August 31,
+2026; use `gpt-5.6-terra` and `gpt-5.6-luna` instead. Both stay available to
+Codex sessions authenticated with an OpenAI API key, through the `openai`
+provider.
+
+## Responses API only
+
+The Codex backend serves `/responses` and nothing else, so
+`/v1/chat/completions` and `/v1/embeddings` answer `501` for `chatgpt` models.
+Use `/v1/responses`, which is what Codex sends anyway.
+
+The backend also validates against a strict parameter allowlist. GoModel
+adapts requests rather than failing them, so callers keep using the standard
+Responses API:
+
+| Request field | Behavior |
+| ------------- | -------- |
+| `stream`, `store` | Pinned to `true` / `false` — the backend rejects anything else |
+| `input` as a string | Wrapped into the message list the backend requires |
+| `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `reasoning`, `text`, `include` | Forwarded |
+| `temperature`, `top_p`, `max_output_tokens`, `previous_response_id`, `truncation`, `metadata`, `user`, `service_tier`, `top_logprobs` | Dropped — unsupported upstream |
+
+Because the backend streams only, a non-streaming `POST /v1/responses` is
+served by streaming upstream and returning the final response object. Clients
+see a normal non-streaming response. See
+[Responses compatibility](/advanced/responses-compatibility) for how the
+gateway's Responses surface behaves across providers.
+
+## Reported cost is not real spend
+
+Subscription usage is flat-rate, but these model IDs also exist on the OpenAI
+Platform, so the model catalog attaches their per-token API prices. Usage
+records and dashboard totals for `chatgpt` show a figure that corresponds to no
+actual charge, and the same collision makes `GET /v1/models` advertise
+`modes: ["chat", "responses"]`.
+
+The modes are cosmetic — they drive dashboard grouping, not routing. Pricing is
+not: it feeds [cost tracking](/features/cost-tracking), budgets, and `cost`
+load balancing.
+
+<Warning>
+  A **budget** can therefore reject `chatgpt` traffic for "spending" money the
+  subscription never charges. Scope budgets to a
+  [user path](/features/user-path) that excludes subscription traffic, or leave
+  budgets off for it. Declaring per-model `pricing` and `modes: ["responses"]`
+  in [model metadata](/advanced/model-metadata) corrects what `/v1/models`
+  advertises, but usage records still price at catalog rates. Declare every
+  model you want served: the list replaces the default inventory rather than
+  adding to it.
+</Warning>
+
+## Limits
+
+Subscription quota is separate from API credit. When it is exhausted the
+gateway relays a `429`:
+
+```json
+{"error":{"message":"The usage limit has been reached","type":"rate_limit_error"}}
+```
+
+<Warning>
+  OpenAI authorizes these tokens for Codex traffic. Use this provider to route
+  your own Codex usage through GoModel, not as a general-purpose inference API.
+</Warning>

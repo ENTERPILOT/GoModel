@@ -41,6 +41,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Provider | Credential | Example Model | Chat | `/responses` | Embed | Files | Batches | Passthru | Guide |
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| ChatGPT subscription | `CHATGPT_API_KEY` (Codex sign-in token) | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT subscription](/providers/chatgpt) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/providers/cohere) |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/providers/gemini) |
@@ -127,6 +128,14 @@ support, not every individual model capability exposed by an upstream provider.
   `qwen3.7-max`, override with `OPENCODE_GO_MESSAGES_MODELS`) are sent to the
   Anthropic-native endpoint. Set `OPENCODE_GO_API_KEY`; the base URL defaults to
   `https://opencode.ai/zen/go/v1`.
+- **ChatGPT subscription** — serves `/v1/responses` only, billed against the
+  ChatGPT plan's quota rather than API credit. The upstream accepts a strict
+  parameter allowlist and streams only; GoModel adapts requests and collapses
+  the stream for non-streaming callers. Set `CHATGPT_API_KEY` to the access
+  token from `codex login`. Reported cost is not real spend: these model IDs
+  also exist on the OpenAI Platform, so the registry attaches their per-token
+  prices to flat-rate subscription traffic — keep budgets and `cost` load
+  balancing off it.
 - **Kimi Code** — no per-token pricing; quota refreshes weekly and is also
   constrained by a rolling 5-hour window. Usage-cost tracking reports zero for
   Kimi Code, so `cost` load-balancing cannot price it; prefer conservative
@@ -217,6 +226,8 @@ These are the providers most users hit friction on:
 - **OpenCode Go** — OpenCode Zen splits models across OpenAI-style
   `/chat/completions` and Anthropic-native `/messages`; GoModel routes per model
   (the `/messages`-only set is maintained manually, default `qwen3.7-max`).
+- **ChatGPT subscription** — a Responses-only upstream with a strict parameter
+  allowlist, used to put GoModel between Codex and a ChatGPT plan.
 
 <Tip>
   Every provider page shows three launch forms in one CodeGroup: Docker with

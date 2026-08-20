@@ -1,130 +1,116 @@
 ---
 title: "GoModel & Codex"
-description: "Route OpenAI Codex through GoModel's Responses API: run the gateway with Docker, point Codex at it with a master key, and verify the setup."
+description: "Put GoModel between Codex and your models: keep billing on your ChatGPT subscription, or route Codex to any other provider."
 icon: "code-xml"
-keywords: ["Codex", "OpenAI Codex", "coding agent", "setup guide"]
+keywords: ["Codex", "OpenAI Codex", "ChatGPT subscription", "coding agent", "setup guide"]
 ---
 
 GoModel is a good fit for Codex because Codex already targets the OpenAI
 Responses API.
 
-Flow:
+`Codex -> GoModel -> upstream`
 
-`Codex -> GoModel -> upstream model provider`
+Codex talks to GoModel with a GoModel master key, so every request shows up in
+the dashboard. The one choice to make is which provider serves the model,
+because that decides what pays for it:
+
+| Provider | Upstream | Billing |
+| -------- | -------- | ------- |
+| [`chatgpt`](/providers/chatgpt) | The Codex backend behind your ChatGPT plan | ChatGPT subscription quota |
+| `openai`, [`deepseek`](/providers/deepseek), [`anthropic`](/providers/anthropic), [any other](/providers/overview) | That provider's API | That provider's API credit |
+
+Everything after this point is the same either way.
 
 ## Before you start
 
 - Install Codex on your machine.
 - Choose a GoModel master key, for example `change-me`.
-- Make sure GoModel has the upstream provider key for the models you want to use.
 
-<Note>
-  You can keep using Codex with a ChatGPT subscription sign-in, but GoModel
-  still needs a gateway credential from Codex and an upstream provider key of
-  its own. In this guide, `OPENAI_API_KEY=change-me` is the GoModel master key
-  that Codex sends to GoModel, not your OpenAI Platform key.
-</Note>
+To bill Codex to your ChatGPT plan, sign in once so Codex writes its token
+file, then hand that token to GoModel:
 
-## 1. Run GoModel
-
-Start GoModel with a master key and an OpenAI provider key:
+```bash
+codex login
+export CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json)
+```
 
 ```bash
 docker run --rm -p 8080:8080 \
   -e GOMODEL_MASTER_KEY="change-me" \
-  -e OPENAI_API_KEY="sk-..." \
+  -e CHATGPT_API_KEY="$CHATGPT_API_KEY" \
   enterpilot/gomodel
 ```
 
-## 2. Confirm the Responses API
+See the [ChatGPT provider page](/providers/chatgpt) for the model list, the
+token's ~10-day lifetime, and which Responses parameters that backend accepts.
 
-Before testing Codex itself, you can optionally verify that GoModel answers a
-normal Responses API request:
+To bill it to API credit instead, configure any other provider as usual — for
+example `-e OPENAI_API_KEY="sk-..."` — and use one of its models in step 2.
 
-This step is optional. If you are sure you have configured a valid
-`OPENAI_API_KEY` in GoModel, you can skip it and go straight to
-[step 3](#3-configure-codex-to-use-gomodel).
+## 1. Confirm the Responses API
 
-<CodeGroup>
+Optional: check that GoModel answers a plain Responses request before involving
+Codex. Use a model your configured provider actually serves.
 
-```bash curl
+```bash
 curl -s http://localhost:8080/v1/responses \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-4.1-mini",
-    "input": "Reply with exactly ok",
-    "max_output_tokens": 16
-  }'
+  -d '{"model": "gpt-5.6-sol", "input": "Reply with exactly ok"}'
 ```
 
-```python Python
-from openai import OpenAI
+The response contains `ok`. For the Python and JavaScript equivalents, see the
+[Responses API reference](/advanced/responses-api).
 
-client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+## 2. Configure Codex to use GoModel
 
-response = client.responses.create(
-    model="gpt-4.1-mini",
-    input="Reply with exactly ok",
-    max_output_tokens=16,
-)
-
-print(response.output_text)
-```
-
-```javascript JavaScript
-import OpenAI from "openai";
-
-const client = new OpenAI({
-  baseURL: "http://localhost:8080/v1",
-  apiKey: "change-me",
-});
-
-const response = await client.responses.create({
-  model: "gpt-4.1-mini",
-  input: "Reply with exactly ok",
-  max_output_tokens: 16,
-});
-
-console.log(response.output_text);
-```
-
-</CodeGroup>
-
-If the gateway is wired correctly, the response will contain `ok`.
-
-## 3. Configure Codex to use GoModel
-
-Use a Responses-based provider in your Codex config file:
+Add a Responses-based provider to `~/.codex/config.toml`:
 
 ```toml
 model_provider = "gomodel"
-model = "gpt-4.1-mini"
+model = "gpt-5.6-sol"   # or any model your GoModel serves
 
 [model_providers.gomodel]
 name = "GoModel"
 base_url = "http://localhost:8080/v1"
-env_key = "OPENAI_API_KEY"
+env_key = "GOMODEL_API_KEY"
 wire_api = "responses"
 ```
 
 Then export the GoModel master key for that provider:
 
 ```bash
-export OPENAI_API_KEY=change-me
+export GOMODEL_API_KEY=change-me
 ```
 
 <Note>
-  Codex `0.122.0` did not use the `OPENAI_BASE_URL` environment variable in
-  local validation. Use the provider config above, or set `openai_base_url` in
-  Codex config if you intentionally want to override the built-in OpenAI
-  provider.
+  Codex requires this variable even when you are signed in with ChatGPT, and it
+  carries the GoModel master key — not an OpenAI key. Without it the provider
+  fails to start.
 </Note>
 
-## 4. Run a Codex test prompt
+To try it without editing your config, pass the same settings inline:
 
 ```bash
-codex exec -m gpt-4.1-mini 'Reply with exactly ok and no punctuation.'
+GOMODEL_API_KEY=change-me codex exec \
+  -c model_provider=gomodel \
+  -c 'model_providers.gomodel.name="GoModel"' \
+  -c 'model_providers.gomodel.base_url="http://localhost:8080/v1"' \
+  -c 'model_providers.gomodel.env_key="GOMODEL_API_KEY"' \
+  -c 'model_providers.gomodel.wire_api="responses"' \
+  -m gpt-5.6-sol 'Reply with exactly ok and no punctuation.'
+```
+
+<Note>
+  Codex ignores `OPENAI_BASE_URL`. Use the provider config above, or set
+  `openai_base_url` in Codex config if you intentionally want to override the
+  built-in OpenAI provider.
+</Note>
+
+## 3. Run a Codex test prompt
+
+```bash
+codex exec -m gpt-5.6-sol 'Reply with exactly ok and no punctuation.'
 ```
 
 The validated result was:
@@ -133,49 +119,14 @@ The validated result was:
 ok
 ```
 
-## DeepSeek V4
+<Note>
+  Codex 0.147.0 logs `failed to refresh available models: missing field
+  "models"` at startup. It calls its own catalogue endpoint, which GoModel
+  answers with the standard OpenAI `/v1/models` shape. The message is cosmetic
+  — Codex falls back and the session works.
+</Note>
 
-Codex sends `POST /v1/responses`. DeepSeek exposes chat completions instead of
-a native Responses API, so configure the first-class DeepSeek provider and let
-GoModel translate the request.
-
-```yaml
-providers:
-  deepseek:
-    type: deepseek
-    base_url: "https://api.deepseek.com"
-    api_key: "${DEEPSEEK_API_KEY}"
-```
-
-If you previously configured DeepSeek as `type: openai`, change it to
-`type: deepseek` for Codex. The generic OpenAI provider forwards `/responses`
-upstream, while the DeepSeek provider translates `/responses` to
-`/chat/completions`.
-
-See the [DeepSeek guide](/providers/deepseek) for the full reasoning effort
-mapping table (DeepSeek V4 only accepts `high` and `max`, so GoModel maps
-`low` and `medium` up to `high`).
-
-Codex attaches `include: ["reasoning.encrypted_content"]` to every Responses
-request. GoModel ignores it on chat-translated providers, so the response
-carries no encrypted reasoning items. See
-[Responses compatibility](/advanced/responses-compatibility) for the full
-feature matrix.
-
-Then use the DeepSeek model name in Codex:
-
-```toml
-model_provider = "gomodel"
-model = "deepseek-v4-pro"
-
-[model_providers.gomodel]
-name = "GoModel"
-base_url = "http://localhost:8080/v1"
-env_key = "OPENAI_API_KEY"
-wire_api = "responses"
-```
-
-## 5. Check the traffic in GoModel
+## 4. Check the traffic in GoModel
 
 Open the GoModel dashboard audit logs:
 
@@ -185,35 +136,46 @@ This lets you confirm that Codex is reaching GoModel and inspect the full
 request and response trail. From the same dashboard, you can keep following
 your GoModel traffic and usage.
 
+## DeepSeek V4
+
+Codex sends `POST /v1/responses`, which DeepSeek does not serve natively. Use
+`type: deepseek` rather than `type: openai`: the DeepSeek provider translates
+`/responses` to `/chat/completions`, while the generic OpenAI provider forwards
+it upstream unchanged.
+
+```yaml
+providers:
+  deepseek:
+    type: deepseek
+    api_key: "${DEEPSEEK_API_KEY}"
+```
+
+Then set `model = "deepseek-v4-pro"` in the Codex config from step 2. See the
+[DeepSeek page](/providers/deepseek) for the reasoning-effort mapping, and
+[Responses compatibility](/advanced/responses-compatibility) for what
+chat-translated providers drop — including the `reasoning.encrypted_content`
+Codex asks for on every request.
+
 ## Current status
 
 - the recommended integration path is Codex custom provider -> standard
   `http://localhost:8080/v1`
-- Codex custom provider mode sends `POST /v1/responses`
-- Codex `0.122.0` sends an uncompressed JSON request body in this path, so the
+- Codex custom provider mode sends `POST /v1/responses` as plain JSON, so the
   old `--disable enable_request_compression` workaround is no longer required
-- ChatGPT subscription sign-in can coexist with the custom provider, but the
-  custom provider still requires the configured `env_key`
 
 ## References
 
 - OpenAI Codex discussion: [Deprecating `chat/completions` support in Codex](https://github.com/openai/codex/discussions/7782)
 - OpenAI Codex repository: [openai/codex](https://github.com/openai/codex)
 
-## Validated on April 21, 2026
+## Validated on August 20, 2026
 
-This guide was validated against:
+This guide was validated against a local GoModel instance and Codex CLI
+`0.147.0`. Local validation confirmed:
 
-- a local GoModel instance on `http://localhost:8080`
-- Codex CLI `0.122.0`
-
-Local validation confirmed:
-
-- `POST /v1/responses` returned `200 OK` with `curl`
-- `codex exec` returned `ok` through `Codex -> GoModel -> OpenAI-compatible upstream`
-- Codex sent plain JSON to `POST /v1/responses`; no `Content-Encoding: zstd`
-  header was present
-- a ChatGPT-signed-in Codex session worked with the custom `gomodel` provider
-  when `OPENAI_API_KEY` was set to the GoModel master key
-- the same custom provider failed without `OPENAI_API_KEY`, because the provider
-  `env_key` is still required
+- `codex exec` returned `ok` through `Codex -> GoModel -> ChatGPT subscription`
+- `POST /v1/responses` returned `200 OK` for both streaming and non-streaming
+  callers
+- Codex sent plain JSON; no `Content-Encoding: zstd` header was present
+- the custom `gomodel` provider failed without its `env_key`, because Codex
+  still requires that variable when signed in with ChatGPT
