@@ -910,6 +910,9 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 	}
 
 	if cb := raw.Resilience.CircuitBreaker; cb != nil {
+		if cb.Enabled != nil {
+			resolved.Resilience.CircuitBreaker.Enabled = *cb.Enabled
+		}
 		if cb.FailureThreshold != nil {
 			resolved.Resilience.CircuitBreaker.FailureThreshold = *cb.FailureThreshold
 		}

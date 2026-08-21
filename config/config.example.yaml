@@ -258,6 +258,12 @@ resilience:
     max_backoff: 30s
     backoff_factor: 2.0
     jitter_factor: 0.1
+  circuit_breaker:
+    # Set false to never fail fast on a struggling provider (default: true).
+    enabled: true
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 30s
 
 guardrails:
   enabled: false
@@ -337,6 +343,8 @@ providers:
     # resilience:
     #   retry:
     #     max_retries: 5
+    #   circuit_breaker:
+    #     enabled: false
 
   anthropic:
     type: anthropic

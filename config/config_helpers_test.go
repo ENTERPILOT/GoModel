@@ -387,6 +387,30 @@ func TestApplyEnvOverrides(t *testing.T) {
 			},
 		},
 		{
+			name: "circuit breaker enabled by default",
+			// Empty value clears any CIRCUIT_BREAKER_ENABLED inherited from the
+			// test process (t.Setenv restores it) so the default is isolated.
+			envVars: map[string]string{"CIRCUIT_BREAKER_ENABLED": ""},
+			check: func(t *testing.T, cfg *Config) {
+				if !cfg.Resilience.CircuitBreaker.Enabled {
+					t.Error("CircuitBreaker.Enabled = false, want true by default")
+				}
+			},
+		},
+		{
+			name:    "circuit breaker enabled override",
+			envVars: map[string]string{"CIRCUIT_BREAKER_ENABLED": "false"},
+			check: func(t *testing.T, cfg *Config) {
+				if cfg.Resilience.CircuitBreaker.Enabled {
+					t.Error("CircuitBreaker.Enabled = true, want false")
+				}
+				// Disabling must not clobber the tuning values.
+				if cfg.Resilience.CircuitBreaker.FailureThreshold != 5 {
+					t.Errorf("FailureThreshold = %d, want 5", cfg.Resilience.CircuitBreaker.FailureThreshold)
+				}
+			},
+		},
+		{
 			name:    "circuit breaker timeout override",
 			envVars: map[string]string{"CIRCUIT_BREAKER_TIMEOUT": "10s"},
 			check: func(t *testing.T, cfg *Config) {

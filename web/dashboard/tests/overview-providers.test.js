@@ -127,6 +127,12 @@ test("provider helper methods format configured models and resilience summaries"
   assert.equal(providerModelsSummary({ config: { models: [] } }), "Automatic");
   assert.equal(providerRetrySummary({}), "-");
   assert.equal(providerCircuitBreakerSummary({}), "-");
+  assert.equal(
+    providerCircuitBreakerSummary({
+      config: { resilience: { circuit_breaker: { enabled: false, failure_threshold: 5 } } },
+    }),
+    "Disabled",
+  );
 });
 
 test("providerDocUrl links provider types with docs and stays empty otherwise", () => {

@@ -121,7 +121,8 @@ func New(cfg Config, headerSetter HeaderSetter) *Client {
 		headerSetter: headerSetter,
 	}
 
-	if cfg.CircuitBreaker.FailureThreshold > 0 {
+	// The breaker is off when explicitly disabled or when it can never trip.
+	if cfg.CircuitBreaker.Enabled && cfg.CircuitBreaker.FailureThreshold > 0 {
 		c.circuitBreaker = newCircuitBreaker(
 			cfg.CircuitBreaker.FailureThreshold,
 			cfg.CircuitBreaker.SuccessThreshold,
