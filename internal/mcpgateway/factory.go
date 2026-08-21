@@ -79,6 +79,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		HTTPClient:     httpClient,
 		UsageLogger:    usageLogger,
 		UserPathHeader: cfg.Server.UserPathHeader,
+		AllowedOrigins: cfg.MCP.AllowedOrigins,
 	})
 	if err != nil {
 		return nil, err

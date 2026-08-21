@@ -70,6 +70,7 @@ See [MCP Gateway](/features/mcp-gateway) for the full feature guide.
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | `MCP_ENABLED` | Expose the MCP endpoints `/mcp` and `/mcp/{server}`                                                                              | `true`             |
 | `MCP_SERVERS` | JSON object of upstream MCP servers, merged over the `mcp.servers` YAML map per name (entries are read-only in the dashboard)     | _(none)_           |
+| `MCP_ALLOWED_ORIGINS` | Comma-separated browser origins (`scheme://host[:port]`) allowed to call `/mcp`; the default trusts none, which is what blocks DNS rebinding. `*` disables the check | _(none)_           |
 
 #### Logging
 

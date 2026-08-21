@@ -166,8 +166,20 @@ resource templates with their descriptions, after your `allowed_tools` /
   terminates the client's bearer token and injects per-server credentials
   from configuration. Client keys never reach an upstream, and configured
   upstream headers are not sent across cross-origin redirects.
-- **Streamable HTTP origin checks.** Requests carrying an `Origin` header must
-  match the GoModel host, preventing browser-based DNS rebinding attacks.
+- **Browser origins are denied by default.** MCP clients are not web pages, so
+  `/mcp` refuses any request carrying browser fetch metadata (`Origin` or
+  `Sec-Fetch-Site`) unless it comes from an origin listed in
+  `mcp.allowed_origins` (`MCP_ALLOWED_ORIGINS`). Write entries as a browser
+  serializes them — `https://console.example.com`, no trailing slash, default
+  ports optional. An allowlisted origin gets a whole session, including the
+  `GET` notification stream, which browsers send without an `Origin` header. This is what blocks browser-based DNS rebinding:
+  rebinding changes only which address a hostname resolves to, so a rebound
+  page's `Origin` and `Host` still agree with each other and the browser still
+  reports `Sec-Fetch-Site: same-origin` — comparing them proves nothing, and
+  only an explicit allowlist tells your origin apart from an attacker's. Set
+  `allowed_origins` only if you serve an MCP web client from a known origin;
+  `"*"` trusts every origin, disables the defense, and is warned about at
+  startup.
 - **stdio is declarative-only.** stdio servers spawn subprocesses on the
   gateway host, so they can only be declared in `config.yaml` / `MCP_SERVERS`.
   The admin API and dashboard reject them — a dashboard login must never be

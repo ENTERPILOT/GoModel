@@ -219,3 +219,75 @@ func TestMCPServerEnabledDefaultsTrue(t *testing.T) {
 		t.Fatalf("MCPServerEnabled(disabled) = true, want false")
 	}
 }
+
+func TestNormalizeMCPAllowedOrigins(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []string
+		want    []string
+		wantErr bool
+	}{
+		{
+			name:  "canonicalizes case and drops blanks and duplicates",
+			input: []string{"HTTPS://Console.Example.com", "  ", "https://console.example.com"},
+			want:  []string{"https://console.example.com"},
+		},
+		{
+			name:  "preserves the port and the wildcard",
+			input: []string{"http://localhost:3000", "*"},
+			want:  []string{"http://localhost:3000", "*"},
+		},
+		{
+			// Browsers serialize an origin without its default port, so an
+			// explicitly configured one has to canonicalize away or it would
+			// silently never match.
+			name:  "drops a default port so it matches what a browser sends",
+			input: []string{"https://console.example.com:443", "http://intranet.example:80"},
+			want:  []string{"https://console.example.com", "http://intranet.example"},
+		},
+		{
+			name:  "collapses an origin written both with and without its default port",
+			input: []string{"https://console.example.com:443", "https://console.example.com"},
+			want:  []string{"https://console.example.com"},
+		},
+		{
+			name:  "keeps a port that is not the default for the scheme",
+			input: []string{"https://console.example.com:80", "http://console.example.com:443"},
+			want:  []string{"https://console.example.com:80", "http://console.example.com:443"},
+		},
+		{
+			name:  "drops a default port from a bracketed IPv6 host",
+			input: []string{"https://[::1]:443"},
+			want:  []string{"https://[::1]"},
+		},
+		{
+			name:    "rejects an origin with no scheme",
+			input:   []string{"console.example.com"},
+			wantErr: true,
+		},
+		{
+			name:    "rejects an origin carrying a path",
+			input:   []string{"https://console.example.com/mcp"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &MCPConfig{AllowedOrigins: tt.input}
+			err := normalizeMCPConfig(cfg)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeMCPConfig(%v) = nil error, want a rejection", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeMCPConfig(%v) error = %v", tt.input, err)
+			}
+			if !slices.Equal(cfg.AllowedOrigins, tt.want) {
+				t.Fatalf("AllowedOrigins = %v, want %v", cfg.AllowedOrigins, tt.want)
+			}
+		})
+	}
+}
