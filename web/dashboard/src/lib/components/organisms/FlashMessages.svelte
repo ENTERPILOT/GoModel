@@ -4,6 +4,8 @@
   // own notice/error banners.
   import { fly, fade } from "svelte/transition";
   import { backOut } from "svelte/easing";
+  import { CircleCheck, TriangleAlert } from "lucide";
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import { flash } from "$lib/stores/flash.svelte.js";
   import * as m from "$lib/paraglide/messages.js";
 </script>
@@ -19,6 +21,10 @@
       in:fly={{ y: -24, duration: 360, easing: backOut }}
       out:fade={{ duration: 150 }}
     >
+      <Icon
+        icon={toast.kind === "success" ? CircleCheck : TriangleAlert}
+        class="flash-toast-icon"
+      />
       <span class="flash-toast-text">{toast.text}</span>
       <button
         type="button"
@@ -111,6 +117,12 @@
     flex: 1;
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  :global(.flash-toast-icon) {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
   }
 
   .flash-toast-dismiss {
