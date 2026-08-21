@@ -895,66 +895,113 @@ func TestCachePointFallbackIsNarrowAndLossless(t *testing.T) {
 }
 
 func TestStreamConverter_FormatChunkForwardsCacheUsage(t *testing.T) {
-	sc := newOpenAIStream(nil, "test-model")
-	chunk := sc.formatChunk(map[string]any{}, "stop", &brtypes.TokenUsage{
-		InputTokens:           awssdk.Int32(3),
-		OutputTokens:          awssdk.Int32(7),
-		TotalTokens:           awssdk.Int32(10),
-		CacheReadInputTokens:  awssdk.Int32(5000),
-		CacheWriteInputTokens: awssdk.Int32(1200),
-	})
-	payload := strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatalf("payload not JSON: %v", err)
+	cases := []struct {
+		name       string
+		read       *int32
+		write      *int32
+		wantRead   int // -1 means the key must be absent
+		wantCreate int
+	}{
+		{"both present", awssdk.Int32(5000), awssdk.Int32(1200), 5000, 1200},
+		{"read only", awssdk.Int32(5000), nil, 5000, -1},
+		{"write only", nil, awssdk.Int32(1200), -1, 1200},
+		{"both absent", nil, nil, -1, -1},
 	}
-	usage, ok := parsed["usage"].(map[string]any)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := newOpenAIStream(nil, "test-model")
+			chunk := sc.formatChunk(map[string]any{}, "stop", &brtypes.TokenUsage{
+				InputTokens:           awssdk.Int32(3),
+				OutputTokens:          awssdk.Int32(7),
+				TotalTokens:           awssdk.Int32(10),
+				CacheReadInputTokens:  tc.read,
+				CacheWriteInputTokens: tc.write,
+			})
+			payload := strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+				t.Fatalf("payload not JSON: %v", err)
+			}
+			usage, ok := parsed["usage"].(map[string]any)
+			if !ok {
+				t.Fatalf("usage missing: %v", parsed)
+			}
+			assertCacheKey(t, usage, "cache_read_input_tokens", tc.wantRead)
+			assertCacheKey(t, usage, "cache_creation_input_tokens", tc.wantCreate)
+		})
+	}
+}
+
+// assertCacheKey checks a JSON-decoded usage map: want < 0 asserts the key is
+// absent, otherwise the key must be present with that value.
+func assertCacheKey(t *testing.T, usage map[string]any, key string, want int) {
+	t.Helper()
+	got, ok := usage[key]
+	if want < 0 {
+		if ok {
+			t.Errorf("%s = %v, want absent", key, got)
+		}
+		return
+	}
 	if !ok {
-		t.Fatalf("usage missing: %v", parsed)
+		t.Errorf("%s missing, want %d", key, want)
+		return
 	}
-	if usage["cache_read_input_tokens"].(float64) != 5000 {
-		t.Errorf("cache_read_input_tokens = %v, want 5000", usage["cache_read_input_tokens"])
-	}
-	if usage["cache_creation_input_tokens"].(float64) != 1200 {
-		t.Errorf("cache_creation_input_tokens = %v, want 1200", usage["cache_creation_input_tokens"])
+	if got.(float64) != float64(want) {
+		t.Errorf("%s = %v, want %d", key, got, want)
 	}
 }
 
-func TestStreamConverter_FormatChunkOmitsAbsentCacheUsage(t *testing.T) {
-	sc := newOpenAIStream(nil, "test-model")
-	chunk := sc.formatChunk(map[string]any{}, "stop", &brtypes.TokenUsage{
-		InputTokens:  awssdk.Int32(3),
-		OutputTokens: awssdk.Int32(7),
-		TotalTokens:  awssdk.Int32(10),
-	})
-	payload := strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatalf("payload not JSON: %v", err)
+func TestBedrockUsageExtrasCacheKeys(t *testing.T) {
+	cases := []struct {
+		name       string
+		read       *int32
+		write      *int32
+		wantKeys   map[string]int
+		absentKeys []string
+	}{
+		{
+			name:     "both present",
+			read:     awssdk.Int32(5000),
+			write:    awssdk.Int32(1200),
+			wantKeys: map[string]int{"cache_read_input_tokens": 5000, "cache_creation_input_tokens": 1200, "cache_write_input_tokens": 1200},
+		},
+		{
+			name:       "read only",
+			read:       awssdk.Int32(5000),
+			wantKeys:   map[string]int{"cache_read_input_tokens": 5000},
+			absentKeys: []string{"cache_creation_input_tokens", "cache_write_input_tokens"},
+		},
+		{
+			name:       "write only",
+			write:      awssdk.Int32(1200),
+			wantKeys:   map[string]int{"cache_creation_input_tokens": 1200, "cache_write_input_tokens": 1200},
+			absentKeys: []string{"cache_read_input_tokens"},
+		},
+		{name: "both absent"},
 	}
-	usage := parsed["usage"].(map[string]any)
-	if _, ok := usage["cache_read_input_tokens"]; ok {
-		t.Errorf("cache_read_input_tokens should be absent when Bedrock reports none")
-	}
-	if _, ok := usage["cache_creation_input_tokens"]; ok {
-		t.Errorf("cache_creation_input_tokens should be absent when Bedrock reports none")
-	}
-}
-
-func TestBedrockUsageExtrasEmitsCanonicalCacheCreationKey(t *testing.T) {
-	read := int32(5000)
-	write := int32(1200)
-	out := bedrockUsageExtras(&brtypes.TokenUsage{
-		CacheReadInputTokens:  &read,
-		CacheWriteInputTokens: &write,
-	})
-	if out["cache_read_input_tokens"] != 5000 {
-		t.Errorf("cache_read_input_tokens = %v, want 5000", out["cache_read_input_tokens"])
-	}
-	if out["cache_creation_input_tokens"] != 1200 {
-		t.Errorf("cache_creation_input_tokens = %v, want 1200 (canonical key read by the Anthropic mappers)", out["cache_creation_input_tokens"])
-	}
-	if out["cache_write_input_tokens"] != 1200 {
-		t.Errorf("cache_write_input_tokens = %v, want 1200 (legacy key preserved)", out["cache_write_input_tokens"])
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := bedrockUsageExtras(&brtypes.TokenUsage{
+				CacheReadInputTokens:  tc.read,
+				CacheWriteInputTokens: tc.write,
+			})
+			if len(tc.wantKeys) == 0 {
+				if out != nil {
+					t.Fatalf("extras = %v, want nil when no cache counters are set", out)
+				}
+				return
+			}
+			for key, want := range tc.wantKeys {
+				if out[key] != want {
+					t.Errorf("%s = %v, want %d", key, out[key], want)
+				}
+			}
+			for _, key := range tc.absentKeys {
+				if got, ok := out[key]; ok {
+					t.Errorf("%s = %v, want absent", key, got)
+				}
+			}
+		})
 	}
 }
