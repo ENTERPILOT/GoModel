@@ -214,6 +214,26 @@ test("responses stream accumulator assembles output when the final event omits i
   });
   assert.equal(extractResponseText("responses", acc.result()), "Hello");
 
+  // Unindexed deltas keep appending to the latest assistant message even
+  // after a function_call item was added behind it.
+  const interleaved = createStreamAccumulator("responses");
+  interleaved.push({
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { id: "msg_1", type: "message", role: "assistant", content: [] },
+  });
+  assert.equal(interleaved.push({ type: "response.output_text.delta", delta: "first " }), "first ");
+  interleaved.push({
+    type: "response.output_item.added",
+    output_index: 1,
+    item: { id: "fc_1", type: "function_call", name: "lookup", arguments: "{}" },
+  });
+  assert.equal(interleaved.push({ type: "response.output_text.delta", delta: "second" }), "second");
+  assert.deepEqual(interleaved.result().output, [
+    { id: "msg_1", type: "message", role: "assistant", content: [{ type: "output_text", text: "first second" }] },
+    { id: "fc_1", type: "function_call", name: "lookup", arguments: "{}" },
+  ]);
+
   // Deltas before any output item still land in a synthesized message.
   const bare = createStreamAccumulator("responses");
   bare.push({ type: "response.output_text.delta", delta: "x" });

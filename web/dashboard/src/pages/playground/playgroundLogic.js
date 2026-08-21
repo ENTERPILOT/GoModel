@@ -201,7 +201,12 @@ export function createStreamAccumulator(endpointID) {
         }
         case "response.output_text.delta": {
           const text = String(event.delta ?? "");
-          let item = output[event.output_index ?? output.length - 1];
+          // Converted providers stream deltas without output_index; those
+          // belong to the latest assistant message even when a function_call
+          // item was added after it.
+          let item = event.output_index === undefined || event.output_index === null
+            ? output.findLast((candidate) => candidate && candidate.type === "message")
+            : output[event.output_index];
           if (!item || item.type !== "message") {
             item = { type: "message", role: "assistant", content: [] };
             output.push(item);
