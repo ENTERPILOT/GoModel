@@ -47,6 +47,7 @@ type Service struct {
 	configSpecs    map[string]ServerSpec
 
 	handler http.Handler
+	origins *originGuard
 
 	bindMu   sync.Mutex
 	bindings map[string]sessionBinding
@@ -83,6 +84,9 @@ type Options struct {
 	UsageLogger usage.LoggerInterface
 	// UserPathHeader is the configured user-path header name.
 	UserPathHeader string
+	// AllowedOrigins are the browser origins permitted to reach the endpoint.
+	// Empty trusts none, which is the default; see originGuard.
+	AllowedOrigins []string
 }
 
 // NewService builds the gateway service and starts connecting to the merged
@@ -98,11 +102,18 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		requestCancels: make(map[uint64]context.CancelFunc),
 		stop:           make(chan struct{}),
 	}
-	streamable := mcp.NewStreamableHTTPHandler(s.getServer, &mcp.StreamableHTTPOptions{
+	guard, err := newOriginGuard(opts.AllowedOrigins)
+	if err != nil {
+		return nil, fmt.Errorf("mcp allowed origins: %w", err)
+	}
+	s.origins = guard
+	// The SDK's own DNS-rebinding guard stays enabled, but it only fires on
+	// loopback connections by design, so originGuard — applied in ServeHTTP
+	// ahead of this handler — is what defends every other bind address.
+	s.handler = mcp.NewStreamableHTTPHandler(s.getServer, &mcp.StreamableHTTPOptions{
 		SessionTimeout: sessionIdleTimeout,
 		Logger:         slog.Default(),
 	})
-	s.handler = http.NewCrossOriginProtection().Handler(streamable)
 	if err := s.Reload(ctx); err != nil {
 		s.Close()
 		return nil, err
@@ -233,6 +244,12 @@ func (s *Service) Close() {
 // authentication has already run; this layer enforces session-to-principal
 // binding and stamps the internal identity headers tool handlers read.
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer string) error {
+	// Rebinding check first: a rejected request must not touch a session, an
+	// upstream, or the request registry.
+	if err := s.origins.check(r); err != nil {
+		return err
+	}
+
 	requestCtx, cancel := context.WithCancel(r.Context())
 	s.requestMu.Lock()
 	if s.closing {

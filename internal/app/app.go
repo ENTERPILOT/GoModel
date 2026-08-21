@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -1123,8 +1124,25 @@ func (a *App) logStartupInfo() {
 		slog.Warn("SECURITY WARNING: GOMODEL_MASTER_KEY not set - server running in UNSAFE MODE",
 			"security_risk", "unauthenticated access allowed",
 			"recommendation", "set GOMODEL_MASTER_KEY environment variable to secure this gateway")
+		if cfg.MCP.Enabled && len(cfg.MCP.Servers) > 0 {
+			// Worth calling out separately: an unauthenticated /mcp hands any
+			// caller that can reach the port every aggregated tool, together
+			// with the upstream credentials configured behind them.
+			slog.Warn("SECURITY WARNING: the MCP gateway is serving aggregated tools without authentication",
+				"security_risk", "any caller that can reach this port can invoke every configured MCP tool",
+				"configured_servers", len(cfg.MCP.Servers),
+				"recommendation", "set GOMODEL_MASTER_KEY, or set MCP_ENABLED=false")
+		}
 	default:
 		slog.Info("authentication enabled", "mode", "master_key")
+	}
+
+	// A wildcard origin allowlist turns off the MCP gateway's DNS-rebinding
+	// defense, so it is never silent.
+	if cfg.MCP.Enabled && slices.Contains(cfg.MCP.AllowedOrigins, config.TrustAnyOrigin) {
+		slog.Warn("SECURITY WARNING: mcp.allowed_origins trusts every browser origin",
+			"security_risk", "browser-based DNS rebinding attacks against the MCP gateway are not blocked",
+			"recommendation", "list the specific origins you serve an MCP web client from instead of \"*\"")
 	}
 
 	// Metrics configuration

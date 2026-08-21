@@ -83,6 +83,11 @@ models:
 # can even discover a server (subtree match, like virtual models).
 # mcp:
 #   enabled: true # env: MCP_ENABLED (default: true; a no-op with no servers)
+#   # Browser origins allowed to call /mcp. Default: none — MCP clients are not
+#   # web pages, and refusing browsers is what blocks DNS rebinding (a rebound
+#   # page's Origin and Host agree with each other, so comparing them proves
+#   # nothing). Add an origin only if you serve an MCP web client from it.
+#   allowed_origins: [] # env: MCP_ALLOWED_ORIGINS; "*" disables the check
 #   servers:
 #     github:
 #       url: https://api.githubcopilot.com/mcp

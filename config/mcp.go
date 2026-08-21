@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"slices"
@@ -33,9 +34,66 @@ type MCPConfig struct {
 	// Enabled gates the /mcp routes. Default: true (a no-op without servers).
 	Enabled bool `yaml:"enabled" env:"MCP_ENABLED"`
 
+	// AllowedOrigins lists the browser origins ("scheme://host[:port]") that
+	// may reach /mcp. Empty — the default — trusts none, which is right for
+	// the MCP clients this endpoint serves, since none of them are web pages.
+	// It is what stops a DNS-rebound page from driving the gateway; only add
+	// an origin you actually serve an MCP web client from. TrustAnyOrigin
+	// ("*") turns the check off and is logged as a warning at startup.
+	AllowedOrigins []string `yaml:"allowed_origins" env:"MCP_ALLOWED_ORIGINS"`
+
 	// Servers maps stable server slugs to upstream definitions. Slugs become
 	// tool namespaces and URL segments, so they are restricted to [a-z0-9_-].
 	Servers map[string]MCPServerConfig `yaml:"servers"`
+}
+
+// TrustAnyOrigin is the mcp.allowed_origins entry that trusts every browser
+// origin. It exists for deployments that enforce their own origin checks in
+// front of the gateway, and disables the gateway's DNS-rebinding defense.
+const TrustAnyOrigin = "*"
+
+// NormalizeAllowedOrigin canonicalizes one origin for comparison against an
+// Origin header: scheme and host lowercased, port preserved. Origins are
+// compared exactly, so anything that is not a bare "scheme://host[:port]" is
+// rejected rather than silently widened.
+func NormalizeAllowedOrigin(origin string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(origin))
+	if err != nil {
+		return "", fmt.Errorf("invalid origin %q: %w", origin, err)
+	}
+	switch {
+	case parsed.Scheme == "":
+		return "", fmt.Errorf("invalid origin %q: scheme is required (want scheme://host[:port])", origin)
+	case parsed.Host == "":
+		return "", fmt.Errorf("invalid origin %q: host is required (want scheme://host[:port])", origin)
+	case parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "":
+		return "", fmt.Errorf("invalid origin %q: userinfo, path, query, and fragment are not allowed", origin)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	return scheme + "://" + canonicalOriginHost(scheme, parsed.Host), nil
+}
+
+// canonicalOriginHost drops a port that is the default for the scheme.
+// Browsers serialize an origin without its default port, so a configured
+// "https://console.example.com:443" would otherwise never match the
+// "https://console.example.com" they actually send. Trimming a suffix is
+// safe for bracketed IPv6 hosts ("[::1]:443") too.
+func canonicalOriginHost(scheme, host string) string {
+	host = strings.ToLower(host)
+	switch scheme {
+	case "http":
+		return strings.TrimSuffix(host, ":80")
+	case "https":
+		return strings.TrimSuffix(host, ":443")
+	}
+	return host
+}
+
+// OriginHost returns the "host[:port]" of an origin already canonicalized by
+// NormalizeAllowedOrigin, which is the form a Host header carries.
+func OriginHost(normalizedOrigin string) string {
+	_, host, _ := strings.Cut(normalizedOrigin, "://")
+	return host
 }
 
 // MCPServerConfig declares one upstream MCP server.
@@ -159,6 +217,26 @@ func expandMCPServerEnv(server *MCPServerConfig) {
 // invalid entries. It runs at load time so a bad declaration fails startup
 // loudly instead of silently dropping the server.
 func normalizeMCPConfig(cfg *MCPConfig) error {
+	if len(cfg.AllowedOrigins) > 0 {
+		normalized := make([]string, 0, len(cfg.AllowedOrigins))
+		for _, raw := range cfg.AllowedOrigins {
+			entry := strings.TrimSpace(raw)
+			if entry == "" {
+				continue
+			}
+			if entry != TrustAnyOrigin {
+				canonical, err := NormalizeAllowedOrigin(entry)
+				if err != nil {
+					return fmt.Errorf("mcp.allowed_origins: %w", err)
+				}
+				entry = canonical
+			}
+			if !slices.Contains(normalized, entry) {
+				normalized = append(normalized, entry)
+			}
+		}
+		cfg.AllowedOrigins = normalized
+	}
 	if len(cfg.Servers) == 0 {
 		return nil
 	}
