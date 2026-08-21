@@ -893,3 +893,68 @@ func TestCachePointFallbackIsNarrowAndLossless(t *testing.T) {
 		t.Fatal("cache-point removal mutated original parts")
 	}
 }
+
+func TestStreamConverter_FormatChunkForwardsCacheUsage(t *testing.T) {
+	sc := newOpenAIStream(nil, "test-model")
+	chunk := sc.formatChunk(map[string]any{}, "stop", &brtypes.TokenUsage{
+		InputTokens:           awssdk.Int32(3),
+		OutputTokens:          awssdk.Int32(7),
+		TotalTokens:           awssdk.Int32(10),
+		CacheReadInputTokens:  awssdk.Int32(5000),
+		CacheWriteInputTokens: awssdk.Int32(1200),
+	})
+	payload := strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+		t.Fatalf("payload not JSON: %v", err)
+	}
+	usage, ok := parsed["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("usage missing: %v", parsed)
+	}
+	if usage["cache_read_input_tokens"].(float64) != 5000 {
+		t.Errorf("cache_read_input_tokens = %v, want 5000", usage["cache_read_input_tokens"])
+	}
+	if usage["cache_creation_input_tokens"].(float64) != 1200 {
+		t.Errorf("cache_creation_input_tokens = %v, want 1200", usage["cache_creation_input_tokens"])
+	}
+}
+
+func TestStreamConverter_FormatChunkOmitsAbsentCacheUsage(t *testing.T) {
+	sc := newOpenAIStream(nil, "test-model")
+	chunk := sc.formatChunk(map[string]any{}, "stop", &brtypes.TokenUsage{
+		InputTokens:  awssdk.Int32(3),
+		OutputTokens: awssdk.Int32(7),
+		TotalTokens:  awssdk.Int32(10),
+	})
+	payload := strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+		t.Fatalf("payload not JSON: %v", err)
+	}
+	usage := parsed["usage"].(map[string]any)
+	if _, ok := usage["cache_read_input_tokens"]; ok {
+		t.Errorf("cache_read_input_tokens should be absent when Bedrock reports none")
+	}
+	if _, ok := usage["cache_creation_input_tokens"]; ok {
+		t.Errorf("cache_creation_input_tokens should be absent when Bedrock reports none")
+	}
+}
+
+func TestBedrockUsageExtrasEmitsCanonicalCacheCreationKey(t *testing.T) {
+	read := int32(5000)
+	write := int32(1200)
+	out := bedrockUsageExtras(&brtypes.TokenUsage{
+		CacheReadInputTokens:  &read,
+		CacheWriteInputTokens: &write,
+	})
+	if out["cache_read_input_tokens"] != 5000 {
+		t.Errorf("cache_read_input_tokens = %v, want 5000", out["cache_read_input_tokens"])
+	}
+	if out["cache_creation_input_tokens"] != 1200 {
+		t.Errorf("cache_creation_input_tokens = %v, want 1200 (canonical key read by the Anthropic mappers)", out["cache_creation_input_tokens"])
+	}
+	if out["cache_write_input_tokens"] != 1200 {
+		t.Errorf("cache_write_input_tokens = %v, want 1200 (legacy key preserved)", out["cache_write_input_tokens"])
+	}
+}
