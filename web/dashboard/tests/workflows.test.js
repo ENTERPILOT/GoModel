@@ -1352,3 +1352,23 @@ test("canDeactivateWorkflow blocks only the global workflow", () => {
   assert.equal(canDeactivateWorkflow({ scope_type: "provider" }), true);
   assert.equal(canDeactivateWorkflow({ scope_type: "provider_model_path" }), true);
 });
+
+test("a provider's authentication error leaves the gateway auth node green", () => {
+  const providerRejectedKey = workflowRuntimeFromEntry({
+    auth_method: "master_key",
+    provider: "openai",
+    status_code: 401,
+    error_type: "authentication_error",
+    data: { error_provider: "openai", error_message: "Incorrect API key provided" },
+  });
+  assert.equal(providerRejectedKey.authError, false);
+  assert.equal(workflowAuthNodeClass(providerRejectedKey), "workflow-node-success");
+
+  const gatewayRejectedKey = workflowRuntimeFromEntry({
+    status_code: 401,
+    error_type: "authentication_error",
+    data: { error_message: "invalid API key" },
+  });
+  assert.equal(gatewayRejectedKey.authError, true);
+  assert.equal(workflowAuthNodeClass(gatewayRejectedKey), "workflow-node-error");
+});

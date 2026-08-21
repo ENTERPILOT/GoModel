@@ -1,0 +1,59 @@
+---
+title: "Playground"
+description: "Try any model through the gateway from the dashboard: pick an endpoint, edit the conversation, send a prompt, and inspect the exact request and response JSON."
+icon: "flask"
+keywords: ["playground", "dashboard", "chat completions", "responses", "messages", "streaming"]
+---
+
+## Overview
+
+The **Playground** page in the dashboard (`/admin/dashboard/playground`) sends
+requests through the gateway's public API with your dashboard key, so every
+call is routed, logged, and metered exactly like a client's request. It is the
+quickest way to check that a provider, a virtual model, or a failover chain
+behaves as expected.
+
+## Layout
+
+- **Top bar** — choose the endpoint, the model, and whether to stream:
+  - `Chat Completions` → `POST /v1/chat/completions`
+  - `Responses` → `POST /v1/responses`
+  - `Messages` → `POST /v1/messages`
+
+  The model picker is a searchable dropdown over the Models inventory (only
+  enabled, text-capable models, labelled with their provider); typing a name
+  that is not listed offers **Use “…”**, so aliases, virtual models, and
+  failover models work too.
+- **Add message** buttons insert a **System**, **User**, or **Assistant** message
+  into the conversation. Every message is editable in place — change its role,
+  rewrite its content, remove it, or drag it by the grip handle to reorder
+  (the grip also accepts **↑/↓** arrow keys) — so you can shape the history the
+  model sees before sending.
+- **Composer** at the bottom — type a prompt and press **Enter** (or **Send**).
+  The prompt is appended as a user message and the reply is appended as an
+  assistant message. Sending with an empty prompt re-runs the conversation as
+  it stands. **Stop** aborts a request in flight.
+- **JSON panel** on the right — slides in and out with **Show JSON** and can be
+  dragged to resize. The **Request** tab shows the body exactly as it will be
+  sent (updated live as you edit); the **Response** tab shows the last response
+  with its HTTP status, latency, and token usage. Streamed responses are
+  assembled into the same shape a non-streaming call would return.
+
+## Endpoint mapping
+
+The conversation is translated to each API's shape:
+
+| Endpoint | System messages | Other messages | Extra fields |
+|---|---|---|---|
+| Chat Completions | `messages[]` with `role: system` | `messages[]` | `stream` |
+| Responses | joined into `instructions` | `input[]` | `stream` |
+| Messages | joined into `system` | `messages[]` | `max_tokens: 1024`, `stream` |
+
+Blank messages are left out of the request. Streaming is on by default; turn
+it off to see the provider's full JSON response as a single object.
+
+<Note>
+  The playground uses the key you signed in to the dashboard with. Requests are
+  subject to the same budgets, rate limits, guardrails, and audit logging as any
+  other client of the gateway.
+</Note>

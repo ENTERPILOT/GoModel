@@ -22,7 +22,7 @@ func handleError(c *echo.Context, err error) error {
 	}
 	logHandledError(c, gatewayErr)
 	enrichAuditEntryWithProviderAttempts(c)
-	auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message, gatewayErrorCode(gatewayErr))
+	auditlog.EnrichEntryWithGatewayError(c, gatewayErr)
 	applyErrorResponseHeaders(c, err)
 	return writeGatewayError(c, gatewayErr)
 }
@@ -82,13 +82,6 @@ func applyErrorResponseHeaders(c *echo.Context, err error) {
 			c.Response().Header().Add(key, value)
 		}
 	}
-}
-
-func gatewayErrorCode(err *core.GatewayError) string {
-	if err == nil || err.Code == nil {
-		return ""
-	}
-	return *err.Code
 }
 
 func logHandledError(c *echo.Context, gatewayErr *core.GatewayError) {

@@ -159,6 +159,10 @@ type LogData struct {
 	// Error details (message can be long, so kept in JSON)
 	ErrorMessage string `json:"error_message,omitempty" bson:"error_message,omitempty"`
 	ErrorCode    string `json:"error_code,omitempty" bson:"error_code,omitempty"`
+	// ErrorProvider names the upstream provider an error came from; empty when
+	// the gateway itself raised the error (authentication, validation, budget,
+	// ...), which tells a provider's 401 apart from a rejected gateway key.
+	ErrorProvider string `json:"error_provider,omitempty" bson:"error_provider,omitempty"`
 
 	// Optional headers (when LOGGING_LOG_HEADERS=true)
 	// Sensitive headers are auto-redacted

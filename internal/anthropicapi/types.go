@@ -137,4 +137,7 @@ type ErrorResponse struct {
 type ErrorObject struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
+	// Provider names the upstream provider that produced the error; empty
+	// for errors raised by the gateway itself.
+	Provider string `json:"provider,omitempty"`
 }

@@ -119,14 +119,19 @@ func (e *GatewayError) ToJSON() map[string]any {
 		code = *e.Code
 	}
 
-	return map[string]any{
-		"error": map[string]any{
-			"type":    e.Type,
-			"message": e.Message,
-			"param":   param,
-			"code":    code,
-		},
+	errorData := map[string]any{
+		"type":    e.Type,
+		"message": e.Message,
+		"param":   param,
+		"code":    code,
 	}
+	// Names the upstream provider that produced the error, so clients can
+	// tell a provider rejection (e.g. the provider refused its own key) from
+	// an error raised by the gateway itself (absent).
+	if e.Provider != "" {
+		errorData["provider"] = e.Provider
+	}
+	return map[string]any{"error": errorData}
 }
 
 // WithParam annotates the error with the offending parameter name.

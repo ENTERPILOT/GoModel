@@ -8098,6 +8098,10 @@ const docTemplate = `{
                 "message": {
                     "type": "string"
                 },
+                "provider": {
+                    "description": "Provider names the upstream provider that produced the error; empty\nfor errors raised by the gateway itself.",
+                    "type": "string"
+                },
                 "type": {
                     "type": "string"
                 }
@@ -8479,6 +8483,10 @@ const docTemplate = `{
                 },
                 "error_message": {
                     "description": "Error details (message can be long, so kept in JSON)",
+                    "type": "string"
+                },
+                "error_provider": {
+                    "description": "ErrorProvider names the upstream provider an error came from; empty when\nthe gateway itself raised the error (authentication, validation, budget,\n...), which tells a provider's 401 apart from a rejected gateway key.",
                     "type": "string"
                 },
                 "event_type": {
