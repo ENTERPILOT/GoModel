@@ -387,8 +387,10 @@ func TestApplyEnvOverrides(t *testing.T) {
 			},
 		},
 		{
-			name:    "circuit breaker enabled by default",
-			envVars: map[string]string{},
+			name: "circuit breaker enabled by default",
+			// Empty value clears any CIRCUIT_BREAKER_ENABLED inherited from the
+			// test process (t.Setenv restores it) so the default is isolated.
+			envVars: map[string]string{"CIRCUIT_BREAKER_ENABLED": ""},
 			check: func(t *testing.T, cfg *Config) {
 				if !cfg.Resilience.CircuitBreaker.Enabled {
 					t.Error("CircuitBreaker.Enabled = false, want true by default")
