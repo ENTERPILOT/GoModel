@@ -1760,6 +1760,38 @@ func TestBuildProviderConfig_CircuitBreaker_ZeroValueOverride(t *testing.T) {
 	}
 }
 
+func TestBuildProviderConfig_CircuitBreaker_EnabledOverride(t *testing.T) {
+	global := globalResilience
+	global.CircuitBreaker = config.DefaultCircuitBreakerConfig()
+
+	disabled := false
+	raw := config.RawProviderConfig{
+		Type:   "openai",
+		APIKey: "sk",
+		Resilience: &config.RawResilienceConfig{
+			CircuitBreaker: &config.RawCircuitBreakerConfig{
+				Enabled: &disabled,
+			},
+		},
+	}
+	got := buildProviderConfig(raw, global)
+
+	if got.Resilience.CircuitBreaker.Enabled {
+		t.Error("explicit enabled: false should override global")
+	}
+	if got.Resilience.CircuitBreaker.FailureThreshold != global.CircuitBreaker.FailureThreshold {
+		t.Errorf("FailureThreshold should be inherited, got %d", got.Resilience.CircuitBreaker.FailureThreshold)
+	}
+
+	// A globally disabled breaker can be re-enabled for one provider.
+	global.CircuitBreaker.Enabled = false
+	enabled := true
+	raw.Resilience.CircuitBreaker.Enabled = &enabled
+	if got := buildProviderConfig(raw, global); !got.Resilience.CircuitBreaker.Enabled {
+		t.Error("explicit enabled: true should override a disabled global")
+	}
+}
+
 // --- resolveProviders (integration of all three stages) ---
 
 func TestResolveProviders_EndToEnd(t *testing.T) {
