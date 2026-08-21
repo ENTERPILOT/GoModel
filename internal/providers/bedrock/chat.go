@@ -570,9 +570,9 @@ func bedrockUsageExtras(u *brtypes.TokenUsage) map[string]any {
 		out["cache_read_input_tokens"] = int(*u.CacheReadInputTokens)
 	}
 	if u.CacheWriteInputTokens != nil {
-		// Emit the canonical key the Anthropic response/stream mappers read
-		// (matching the anthropic provider); keep the legacy key for any
-		// dashboards that learned it.
+		// cache_creation_input_tokens is the canonical key the Anthropic
+		// mappers read (and what the anthropic provider emits); keep the
+		// legacy write key for external consumers of RawUsage.
 		out["cache_creation_input_tokens"] = int(*u.CacheWriteInputTokens)
 		out["cache_write_input_tokens"] = int(*u.CacheWriteInputTokens)
 	}

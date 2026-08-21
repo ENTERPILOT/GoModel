@@ -255,10 +255,7 @@ func (s *streamConverter) formatChunk(delta map[string]any, finishReason any, us
 			"completion_tokens": int(awssdk.ToInt32(usage.OutputTokens)),
 			"total_tokens":      int(awssdk.ToInt32(usage.TotalTokens)),
 		}
-		// Converse metadata carries prompt-cache counters; forward them under
-		// the canonical keys so Anthropic-format clients see cache usage on
-		// streamed responses too (non-streaming already does via
-		// bedrockUsageExtras).
+		// Bedrock's CacheWriteInputTokens is Anthropic's cache_creation_input_tokens.
 		if usage.CacheReadInputTokens != nil {
 			usagePayload["cache_read_input_tokens"] = int(awssdk.ToInt32(usage.CacheReadInputTokens))
 		}
