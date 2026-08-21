@@ -1563,41 +1563,65 @@ func TestCircuitBreaker_StateReportedToHooks(t *testing.T) {
 }
 
 func TestCircuitBreakerDisabledNeverShortCircuits(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	config := DefaultConfig("test", server.URL)
-	config.Retry.MaxRetries = 0
-	config.CircuitBreaker = goconfig.CircuitBreakerConfig{
-		Enabled:          false,
-		FailureThreshold: 1,
-		SuccessThreshold: 1,
-		Timeout:          time.Minute,
+	tests := []struct {
+		name string
+		cb   goconfig.CircuitBreakerConfig
+	}{
+		{
+			name: "enabled false",
+			cb: goconfig.CircuitBreakerConfig{
+				Enabled:          false,
+				FailureThreshold: 1,
+				SuccessThreshold: 1,
+				Timeout:          time.Minute,
+			},
+		},
+		{
+			// Legacy disable path, kept for backward compatibility.
+			name: "zero failure threshold",
+			cb: goconfig.CircuitBreakerConfig{
+				Enabled:          true,
+				FailureThreshold: 0,
+				SuccessThreshold: 1,
+				Timeout:          time.Minute,
+			},
+		},
 	}
-	client := New(config, nil)
 
-	if client.circuitBreaker != nil {
-		t.Fatal("expected no circuit breaker when Enabled=false")
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer server.Close()
 
-	// Every request must reach the upstream: an enabled breaker with
-	// FailureThreshold=1 would fail fast from the second request onwards.
-	const attempts = 3
-	for i := range attempts {
-		_, err := client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
-		if err == nil {
-			t.Fatalf("attempt %d: expected upstream 500 error", i+1)
-		}
-		if strings.Contains(err.Error(), "circuit breaker is open") {
-			t.Fatalf("attempt %d: request was short-circuited by a disabled breaker: %v", i+1, err)
-		}
-	}
-	if got := requests.Load(); got != attempts {
-		t.Fatalf("upstream requests = %d, want %d", got, attempts)
+			config := DefaultConfig("test", server.URL)
+			config.Retry.MaxRetries = 0
+			config.CircuitBreaker = tt.cb
+			client := New(config, nil)
+
+			if client.circuitBreaker != nil {
+				t.Fatal("expected no circuit breaker")
+			}
+
+			// Every request must reach the upstream: an active breaker with
+			// FailureThreshold=1 would fail fast from the second request onwards.
+			const attempts = 3
+			for i := range attempts {
+				_, err := client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
+				if err == nil {
+					t.Fatalf("attempt %d: expected upstream 500 error", i+1)
+				}
+				if strings.Contains(err.Error(), "circuit breaker is open") {
+					t.Fatalf("attempt %d: request was short-circuited by a disabled breaker: %v", i+1, err)
+				}
+			}
+			if got := requests.Load(); got != attempts {
+				t.Fatalf("upstream requests = %d, want %d", got, attempts)
+			}
+		})
 	}
 }
 
