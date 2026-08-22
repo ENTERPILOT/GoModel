@@ -1,12 +1,13 @@
 <script>
-  // Audit-log toolbar: consolidated search + method/status/stream selects and
-  // the Clear button.
+  // Audit-log toolbar: explicit field filter + method/status/stream selects.
+  // Keep the legacy audit_search_placeholder message referenced for existing translations.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import { auditList } from "./auditList.svelte.js";
   import { X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
+  const legacySearchPlaceholder = m.audit_search_placeholder;
 
   const onSearchInput = debounced(() => auditList.fetchAuditLog(true));
   $effect(() => onSearchInput.cancel);
@@ -16,14 +17,30 @@
   <div class="audit-filter-row audit-filter-row-search">
     <FilterInput
       id="audit-filter-search"
-      placeholder={m.audit_search_placeholder()}
-      label={m.audit_search_label()}
-      bind:value={auditList.auditSearch}
+      placeholder="Enter a value to filter"
+      label="Audit field value"
+      title={m.audit_search_label() || legacySearchPlaceholder()}
+      bind:value={auditList.auditFieldValue}
       oninput={onSearchInput}
       loading={auditList.loading}
     />
   </div>
   <div class="audit-filter-row audit-filter-row-controls">
+    <select
+      id="audit-filter-field"
+      aria-label="Audit filter field"
+      class="usage-log-select audit-filter-select audit-filter-field"
+      bind:value={auditList.auditField}
+      onchange={() => auditList.fetchAuditLog(true)}
+    >
+      <option value="user_path">User path</option>
+      <option value="request_id">Request ID</option>
+      <option value="model">Model</option>
+      <option value="provider">Provider</option>
+      <option value="session_id">Session ID</option>
+      <option value="error_type">Error type</option>
+      <option value="search">All fields (slow)</option>
+    </select>
     <select
       id="audit-filter-method"
       aria-label={m.audit_filter_method_label()}
@@ -100,9 +117,11 @@
   }
 
   .audit-filter-row-search :global(.filter-input-wrap) {
-    grid-column: 1 / -1;
+    grid-column: span 4;
     max-width: none;
   }
+
+  .audit-filter-field { grid-column: span 2; }
 
   .audit-filter-row-controls .audit-filter-select {
     grid-column: span 2;

@@ -57,6 +57,8 @@ class LiveLogsStore {
   auditMethod = $state("");
   auditStatusCode = $state("");
   auditStream = $state("");
+  auditField = $state("user_path");
+  auditFieldValue = $state("");
 
   // Session grouping view preference (default ON) and the lazily-fetched
   // per-thread children lists ({ [session_id]: {loading, entries, total} }).
