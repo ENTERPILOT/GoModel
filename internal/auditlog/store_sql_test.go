@@ -200,3 +200,30 @@ func TestNewSQLStoreRenamesLegacyModelColumn(t *testing.T) {
 		}
 	})
 }
+
+func TestNewSQLStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		// Databases created before v0.1.17 carry the pre-rename column and index.
+		if err := db.Schema(ctx, `
+			CREATE TABLE audit_logs (
+				id TEXT PRIMARY KEY,
+				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
+				execution_plan_version_id TEXT,
+				status_code INTEGER DEFAULT 0
+			)`,
+			`CREATE INDEX idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)`,
+		); err != nil {
+			t.Fatalf("create legacy table: %v", err)
+		}
+
+		if _, err := NewSQLStore(ctx, db, 0); err != nil {
+			t.Fatalf("NewSQLStore: %v", err)
+		}
+
+		// Recreating the index must succeed, proving the startup drop removed it.
+		if _, err := db.Exec(ctx, `CREATE INDEX idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)`); err != nil {
+			t.Fatalf("legacy index still present after NewSQLStore: %v", err)
+		}
+	})
+}
