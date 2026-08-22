@@ -17,6 +17,7 @@ type SanitizedRetryConfig struct {
 
 // SanitizedCircuitBreakerConfig exposes effective circuit-breaker settings.
 type SanitizedCircuitBreakerConfig struct {
+	Enabled          bool   `json:"enabled"`
 	FailureThreshold int    `json:"failure_threshold"`
 	SuccessThreshold int    `json:"success_threshold"`
 	Timeout          string `json:"timeout"`
@@ -113,6 +114,7 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 					JitterFactor:   cfg.Resilience.Retry.JitterFactor,
 				},
 				CircuitBreaker: SanitizedCircuitBreakerConfig{
+					Enabled:          cfg.Resilience.CircuitBreaker.Enabled,
 					FailureThreshold: cfg.Resilience.CircuitBreaker.FailureThreshold,
 					SuccessThreshold: cfg.Resilience.CircuitBreaker.SuccessThreshold,
 					Timeout:          cfg.Resilience.CircuitBreaker.Timeout.String(),

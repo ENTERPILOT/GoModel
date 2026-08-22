@@ -28,13 +28,24 @@ you need.
 | `max_backoff`       | `30s`   | Upper cap on retry wait                        |
 | `backoff_factor`    | `2.0`   | Exponential multiplier between retries         |
 | `jitter_factor`     | `0.1`   | Random jitter as a fraction of the backoff     |
+| `enabled`           | `true`  | Switches the circuit breaker on or off         |
 | `failure_threshold` | `5`     | Consecutive failures before the circuit opens  |
 | `success_threshold` | `2`     | Consecutive successes to close it again        |
 | `timeout`           | `30s`   | How long the circuit stays open before probing |
 
-To disable a layer, zero out its trigger: `max_retries: 0` gives every
-request exactly one attempt, and `failure_threshold: 0` disables the
-circuit breaker entirely. Both work globally or per provider.
+To disable retries, set `max_retries: 0` — every request gets exactly one
+attempt. To disable the circuit breaker, set `circuit_breaker.enabled: false`
+(or `CIRCUIT_BREAKER_ENABLED=false`); the thresholds are kept but never
+consulted, so flipping it back on restores your tuning. Setting
+`failure_threshold: 0` also disables the breaker. Both switches work globally
+or per provider, and a per-provider `enabled: true` re-enables the breaker for
+that provider when it is off globally.
+
+Turn the breaker off when something in front of the provider already sheds
+load (a provider-side load balancer, a service mesh) or when a short burst of
+`5xx` responses must never pause traffic to that provider. Keep it on
+otherwise: it is what stops a dead upstream from tying up every request for
+the full timeout.
 
 ## What counts as a failure
 
@@ -88,6 +99,7 @@ in YAML.
 
 | Variable                            | Type     | Default | Description                                   |
 | ----------------------------------- | -------- | ------- | --------------------------------------------- |
+| `CIRCUIT_BREAKER_ENABLED`           | bool     | `true`  | Set `false` to turn the circuit breaker off    |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int      | `5`     | Consecutive failures before opening           |
 | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | int      | `2`     | Consecutive successes to close again          |
 | `CIRCUIT_BREAKER_TIMEOUT`           | duration | `30s`   | How long the circuit stays open before probing |
@@ -106,6 +118,7 @@ resilience:
     backoff_factor: 1.5
     jitter_factor: 0.05
   circuit_breaker:
+    enabled: true
     failure_threshold: 3
     success_threshold: 1
     timeout: 15s
@@ -125,6 +138,13 @@ providers:
       circuit_breaker:
         failure_threshold: 10 # local service — tolerate more transient failures
         timeout: 5s
+
+  vllm:
+    type: vllm
+    base_url: ${VLLM_BASE_URL:-http://localhost:8000/v1}
+    resilience:
+      circuit_breaker:
+        enabled: false # fronted by its own load balancer — never fail fast
 ```
 
 Only fields explicitly listed under a provider's `resilience:` block are
@@ -141,13 +161,16 @@ inherits from the built-in defaults.
 
 Given the YAML above, the effective per-provider settings are:
 
-| Provider  | max_retries      | failure_threshold | cb timeout        |
-| --------- | ---------------- | ----------------- | ----------------- |
-| openai    | 2 (global)       | 3 (global)        | 15s (global)      |
-| anthropic | **5** (override) | 3 (global)        | 15s (global)      |
-| ollama    | 2 (global)       | **10** (override) | **5s** (override) |
+| Provider  | max_retries      | cb enabled           | failure_threshold | cb timeout        |
+| --------- | ---------------- | -------------------- | ----------------- | ----------------- |
+| openai    | 2 (global)       | true (global)        | 3 (global)        | 15s (global)      |
+| anthropic | **5** (override) | true (global)        | 3 (global)        | 15s (global)      |
+| ollama    | 2 (global)       | true (global)        | **10** (override) | **5s** (override) |
+| vllm      | 2 (global)       | **false** (override) | 3 (global, unused)| 15s (global, unused) |
 
-`anthropic` and `ollama` inherit every field they did not explicitly override.
+`anthropic`, `ollama`, and `vllm` inherit every field they did not explicitly
+override. With the breaker disabled, `vllm` also reports no breaker state on
+the dashboard or in the `gomodel_circuit_breaker_state` metric.
 
 ## Circuit breaker and dashboard provider health
 

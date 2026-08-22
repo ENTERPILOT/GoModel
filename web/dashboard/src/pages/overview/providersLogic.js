@@ -248,6 +248,7 @@ export function providerCircuitBreakerSummary(provider) {
       ? provider.config.resilience.circuit_breaker
       : null;
   if (!breaker) return "-";
+  if (breaker.enabled === false) return m.common_disabled();
   return (
     String(breaker.failure_threshold) +
     " fail, " +

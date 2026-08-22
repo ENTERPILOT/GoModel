@@ -26,6 +26,10 @@ func DefaultRetryConfig() RetryConfig {
 // CircuitBreakerConfig holds resolved circuit breaker settings.
 // This is the canonical type shared between config and llmclient.
 type CircuitBreakerConfig struct {
+	// Enabled switches the circuit breaker on or off. When false, requests are
+	// never short-circuited regardless of the thresholds below.
+	// Default: true
+	Enabled          bool          `yaml:"enabled"           env:"CIRCUIT_BREAKER_ENABLED"`
 	FailureThreshold int           `yaml:"failure_threshold" env:"CIRCUIT_BREAKER_FAILURE_THRESHOLD"`
 	SuccessThreshold int           `yaml:"success_threshold" env:"CIRCUIT_BREAKER_SUCCESS_THRESHOLD"`
 	Timeout          time.Duration `yaml:"timeout"           env:"CIRCUIT_BREAKER_TIMEOUT"`
@@ -34,6 +38,7 @@ type CircuitBreakerConfig struct {
 // DefaultCircuitBreakerConfig returns the default circuit breaker settings.
 func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
 	return CircuitBreakerConfig{
+		Enabled:          true,
 		FailureThreshold: 5,
 		SuccessThreshold: 2,
 		Timeout:          30 * time.Second,
@@ -56,6 +61,7 @@ type RawResilienceConfig struct {
 // RawCircuitBreakerConfig holds optional per-provider circuit breaker overrides from YAML.
 // Nil fields inherit from the global CircuitBreakerConfig.
 type RawCircuitBreakerConfig struct {
+	Enabled          *bool          `yaml:"enabled"`
 	FailureThreshold *int           `yaml:"failure_threshold"`
 	SuccessThreshold *int           `yaml:"success_threshold"`
 	Timeout          *time.Duration `yaml:"timeout"`
