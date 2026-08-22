@@ -89,6 +89,8 @@
       panelMax = maxJsonPanelWidth(window.innerWidth);
       panelWidth = clampJsonPanelWidth(panelWidth, window.innerWidth);
     };
+    // The viewport may have changed while the panel was closed (no listener).
+    onResize();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   });

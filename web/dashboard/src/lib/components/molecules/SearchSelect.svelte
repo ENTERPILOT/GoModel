@@ -90,7 +90,7 @@
   }
 
   function scrollActiveIntoView() {
-    const row = listEl?.querySelector('[aria-selected="true"]');
+    const row = listEl?.querySelector(".search-select-option-active");
     row?.scrollIntoView?.({ block: "nearest" });
   }
 
@@ -193,7 +193,8 @@
             class="search-select-option search-select-option-custom"
             class:mono
             role="option"
-            aria-selected={activeIndex === 0}
+            class:search-select-option-active={activeIndex === 0}
+            aria-selected="false"
             onmouseenter={() => (activeIndex = 0)}
             onclick={() => choose(customValue)}
           >
@@ -210,8 +211,9 @@
             class="search-select-option"
             class:mono
             class:search-select-option-current={option.value === value}
+            class:search-select-option-active={activeIndex === row}
             role="option"
-            aria-selected={activeIndex === row}
+            aria-selected={option.value === value}
             onmouseenter={() => (activeIndex = row)}
             onclick={() => choose(option.value)}
           >
@@ -412,7 +414,9 @@
     font-family: 'SF Mono', Menlo, Consolas, monospace;
   }
 
-  .search-select-option[aria-selected="true"] {
+  /* Keyboard/hover highlight; the committed value is aria-selected and
+     announced through aria-activedescendant on the search input. */
+  .search-select-option-active {
     background: var(--bg-surface-hover);
   }
 
