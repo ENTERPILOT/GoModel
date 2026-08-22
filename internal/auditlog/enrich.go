@@ -395,6 +395,31 @@ func EnrichEntryWithError(c *echo.Context, errorType, errorMessage string, error
 	publishLiveAuditUpdate(c, entry)
 }
 
+// EnrichEntryWithGatewayError records a gateway error on the log entry:
+// type, message and code as EnrichEntryWithError does, plus the upstream
+// provider the error originated from (empty for gateway-raised errors).
+func EnrichEntryWithGatewayError(c *echo.Context, gatewayErr *core.GatewayError) {
+	if gatewayErr == nil {
+		return
+	}
+	entry := entryFromContext(c)
+	if entry == nil {
+		return
+	}
+	code := ""
+	if gatewayErr.Code != nil {
+		code = *gatewayErr.Code
+	}
+	entry.ErrorType = string(gatewayErr.Type)
+	data := ensureLogData(entry)
+	data.ErrorMessage = gatewayErr.Message
+	if code = strings.TrimSpace(code); code != "" {
+		data.ErrorCode = code
+	}
+	data.ErrorProvider = strings.TrimSpace(gatewayErr.Provider)
+	publishLiveAuditUpdate(c, entry)
+}
+
 // EnrichEntryWithStream marks the log entry as a streaming request.
 func EnrichEntryWithStream(c *echo.Context, stream bool) {
 	entry := entryFromContext(c)

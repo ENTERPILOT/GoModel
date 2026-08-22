@@ -15,6 +15,7 @@ var responseSideLogDataFields = map[string]bool{
 	"ResponseBodyTooBigToHandle": true,
 	"ErrorMessage":               true,
 	"ErrorCode":                  true,
+	"ErrorProvider":              true,
 }
 
 // A streamed request is persisted from the CreateStreamEntry copy — the base

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 type sessionUpdatePublisher struct {
@@ -54,6 +56,76 @@ func TestEnrichEntryWithSessionID(t *testing.T) {
 			}
 			if tc.wantEvents == 1 && publisher.events[0] != LiveEventAuditUpdated {
 				t.Fatalf("event = %q, want %q", publisher.events[0], LiveEventAuditUpdated)
+			}
+		})
+	}
+}
+
+func TestEnrichEntryWithGatewayError(t *testing.T) {
+	upstream := core.ParseProviderError("openai", http.StatusUnauthorized, []byte(`{"error":{"message":"Incorrect API key provided"}}`), nil)
+	gateway := core.NewAuthenticationError("", "invalid API key").WithCode("extension_authentication_failed")
+
+	tests := []struct {
+		name         string
+		context      bool
+		entry        *LogEntry
+		err          *core.GatewayError
+		wantType     string
+		wantMessage  string
+		wantCode     string
+		wantProvider string
+		wantEvents   int
+	}{
+		{name: "nil context", err: upstream},
+		{name: "nil error", context: true, entry: &LogEntry{}},
+		{name: "missing entry", context: true, err: upstream},
+		{
+			name: "upstream provider error", context: true, entry: &LogEntry{}, err: upstream,
+			wantType: string(core.ErrorTypeAuthentication), wantMessage: "Incorrect API key provided",
+			wantProvider: "openai", wantEvents: 1,
+		},
+		{
+			name: "gateway error keeps provider empty", context: true,
+			entry: &LogEntry{Data: &LogData{ErrorCode: "stale"}}, err: gateway,
+			wantType: string(core.ErrorTypeAuthentication), wantMessage: "invalid API key",
+			wantCode: "extension_authentication_failed", wantEvents: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var c *echo.Context
+			publisher := &sessionUpdatePublisher{}
+			if tc.context {
+				e := echo.New()
+				c = e.NewContext(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), httptest.NewRecorder())
+				if tc.entry != nil {
+					c.Set(string(LogEntryKey), tc.entry)
+				}
+				c.Set(string(LogEntryLivePublisherKey), publisher)
+			}
+
+			EnrichEntryWithGatewayError(c, tc.err)
+			if len(publisher.events) != tc.wantEvents {
+				t.Fatalf("events = %v, want %d", publisher.events, tc.wantEvents)
+			}
+			if tc.entry == nil || tc.err == nil {
+				return
+			}
+			if tc.entry.ErrorType != tc.wantType {
+				t.Fatalf("ErrorType = %q, want %q", tc.entry.ErrorType, tc.wantType)
+			}
+			if tc.entry.Data == nil {
+				t.Fatal("expected log data to be allocated")
+			}
+			if tc.entry.Data.ErrorMessage != tc.wantMessage {
+				t.Fatalf("ErrorMessage = %q, want %q", tc.entry.Data.ErrorMessage, tc.wantMessage)
+			}
+			if tc.entry.Data.ErrorCode != tc.wantCode {
+				t.Fatalf("ErrorCode = %q, want %q", tc.entry.Data.ErrorCode, tc.wantCode)
+			}
+			if tc.entry.Data.ErrorProvider != tc.wantProvider {
+				t.Fatalf("ErrorProvider = %q, want %q", tc.entry.Data.ErrorProvider, tc.wantProvider)
 			}
 		})
 	}

@@ -221,3 +221,50 @@ func TestHandleRouteNotFound_OpenAIDialect(t *testing.T) {
 		t.Errorf("envelope = %s, want OpenAI error envelope with not_found_error", rec.Body.String())
 	}
 }
+
+func TestHandleError_RecordsUpstreamProviderOfError(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	upstream := core.ParseProviderError("openai", http.StatusUnauthorized, []byte(`{"error":{"message":"Incorrect API key provided"}}`), nil)
+	if handleErr := handleError(c, upstream); handleErr != nil {
+		t.Fatalf("handleError() error = %v", handleErr)
+	}
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if entry.ErrorType != string(core.ErrorTypeAuthentication) {
+		t.Fatalf("entry.ErrorType = %q, want %q", entry.ErrorType, core.ErrorTypeAuthentication)
+	}
+	if entry.Data.ErrorProvider != "openai" {
+		t.Fatalf("entry.Data.ErrorProvider = %q, want openai", entry.Data.ErrorProvider)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	errorData, _ := body["error"].(map[string]any)
+	if errorData["provider"] != "openai" {
+		t.Fatalf("body.error.provider = %v, want openai", errorData["provider"])
+	}
+
+	// The gateway's own authentication failure names no provider.
+	rec = httptest.NewRecorder()
+	c = e.NewContext(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), rec)
+	entry = &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+	if handleErr := handleError(c, core.NewAuthenticationError("", "invalid API key")); handleErr != nil {
+		t.Fatalf("handleError() error = %v", handleErr)
+	}
+	if entry.Data.ErrorProvider != "" {
+		t.Fatalf("entry.Data.ErrorProvider = %q, want empty", entry.Data.ErrorProvider)
+	}
+	if strings.Contains(rec.Body.String(), `"provider"`) {
+		t.Fatalf("gateway auth error body should omit provider: %s", rec.Body.String())
+	}
+}

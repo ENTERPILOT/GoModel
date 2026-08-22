@@ -2,6 +2,8 @@
 // conversation-helpers.js.
 
 import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
+import { isGatewayAuthError } from "$lib/api/errors.js";
+import { auth } from "$lib/stores/auth.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { untrack } from "svelte";
 import { liveLogs } from "./liveLogs.svelte.js";
@@ -432,6 +434,7 @@ class ConversationDrawerStore {
     this.followUpError = "";
     this.followUpRequestID = requestID;
     this.followUpAbort = controller;
+    const generation = auth.generation;
     try {
       const headers = buildFollowUpHeaders(entry, parentID, requestID);
       const response = await apiFetch(entry.path, {
@@ -443,12 +446,17 @@ class ConversationDrawerStore {
       const responseRequestID = String(response.headers.get("X-Request-ID") || "").trim();
       if (responseRequestID && this.followUpRequestID) this.followUpRequestID = responseRequestID;
       if (!response.ok) {
-        let message = m.interaction_send_unavailable();
+        let payload = null;
         try {
-          const payload = await response.json();
-          message = payload && payload.error && payload.error.message || message;
+          payload = await response.json();
         } catch { /* keep the generic message */ }
-        this.followUpError = message;
+        // The gateway rejecting the dashboard key reopens the key dialog; a
+        // provider rejecting its own key reads as a failed follow-up.
+        if (response.status === 401 && isGatewayAuthError(payload)) {
+          auth.handleUnauthorized(generation);
+        }
+        this.followUpError =
+          (payload && payload.error && payload.error.message) || m.interaction_send_unavailable();
         if (this.followUpRequestID === requestID || this.followUpRequestID === responseRequestID) {
           this.followUpRequestID = "";
         }

@@ -18,6 +18,7 @@
   import BudgetsPage from "$pages/budgets/BudgetsPage.svelte";
   import RateLimitsPage from "$pages/rate-limits/RateLimitsPage.svelte";
   import ModelsPage from "$pages/models/ModelsPage.svelte";
+  import PlaygroundPage from "$pages/playground/PlaygroundPage.svelte";
   import WorkflowsPage from "$pages/workflows/WorkflowsPage.svelte";
   import AuditLogsPage from "$pages/audit-logs/AuditLogsPage.svelte";
   import GuardrailsPage from "$pages/guardrails/GuardrailsPage.svelte";
@@ -34,6 +35,7 @@
     budgets: BudgetsPage,
     "rate-limits": RateLimitsPage,
     models: ModelsPage,
+    playground: PlaygroundPage,
     workflows: WorkflowsPage,
     "audit-logs": AuditLogsPage,
     guardrails: GuardrailsPage,

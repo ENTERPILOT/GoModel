@@ -10,6 +10,7 @@ export const PAGES = [
   "budgets",
   "rate-limits",
   "models",
+  "playground",
   "workflows",
   "audit-logs",
   "guardrails",

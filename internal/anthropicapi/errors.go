@@ -12,7 +12,9 @@ func ErrorFromGateway(err *core.GatewayError) (int, ErrorResponse) {
 	if err == nil {
 		return http.StatusInternalServerError, newErrorResponse("api_error", "an unexpected error occurred")
 	}
-	return err.HTTPStatusCode(), newErrorResponse(anthropicErrorType(err), err.Message)
+	response := newErrorResponse(anthropicErrorType(err), err.Message)
+	response.Error.Provider = err.Provider
+	return err.HTTPStatusCode(), response
 }
 
 func newErrorResponse(errType, message string) ErrorResponse {

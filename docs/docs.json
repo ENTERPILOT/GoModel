@@ -89,6 +89,7 @@
                         "icon": "sparkles",
                         "pages": [
                             "features/virtual-models",
+                            "features/playground",
                             "features/session-keeping",
                             "features/user-path",
                             "features/passthrough-api",

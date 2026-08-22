@@ -91,3 +91,15 @@ func TestErrorFromGatewayNil(t *testing.T) {
 		t.Errorf("error type = %q", body.Error.Type)
 	}
 }
+
+func TestErrorFromGateway_ProviderOnlyWhenUpstream(t *testing.T) {
+	_, upstream := ErrorFromGateway(core.ParseProviderError("anthropic", http.StatusUnauthorized, []byte("bad key"), nil))
+	if upstream.Error.Provider != "anthropic" {
+		t.Fatalf("Error.Provider = %q, want anthropic", upstream.Error.Provider)
+	}
+
+	_, gateway := ErrorFromGateway(core.NewAuthenticationError("", "invalid API key"))
+	if gateway.Error.Provider != "" {
+		t.Fatalf("Error.Provider = %q, want empty for gateway-originated errors", gateway.Error.Provider)
+	}
+}
