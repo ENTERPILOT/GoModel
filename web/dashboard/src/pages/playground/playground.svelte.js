@@ -35,6 +35,9 @@ class PlaygroundStore {
   messages = $state([]);
   draft = $state("");
   sending = $state(false);
+  // Whether the in-flight request asked for a stream (the toggle may change
+  // while it runs).
+  sendingStream = $state(false);
   error = $state("");
   // Last response body (assembled from events when streaming) and its
   // {status, durationMs, streamed, events, usage} summary.
@@ -139,6 +142,7 @@ class PlaygroundStore {
     const controller = new AbortController();
     this.#abort = controller;
     this.sending = true;
+    this.sendingStream = body.stream === true;
     this.error = "";
     this.response = null;
     this.responseMeta = null;

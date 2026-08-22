@@ -7,7 +7,6 @@
   import { createCopyState } from "$lib/utils/clipboard.svelte.js";
   import { motionDuration } from "$lib/utils/motion.js";
   import { readStored, writeStored } from "$lib/utils/storage.js";
-  import { untrack } from "svelte";
   import { cubicOut } from "svelte/easing";
   import { slide } from "svelte/transition";
   import * as m from "$lib/paraglide/messages.js";
@@ -23,9 +22,11 @@
   const WIDTH_KEY = "gomodel_playground_json_panel_width";
 
   const initialViewport = typeof window === "undefined" ? 1280 : window.innerWidth;
-  let panelWidth = $state(
-    clampJsonPanelWidth(readStored(WIDTH_KEY, DEFAULT_JSON_PANEL_WIDTH), initialViewport),
-  );
+  // preferredWidth is the width the user chose (persisted); panelWidth is
+  // that width clamped to the current viewport, so a narrow window does not
+  // permanently shrink the preference.
+  let preferredWidth = Number(readStored(WIDTH_KEY, DEFAULT_JSON_PANEL_WIDTH)) || DEFAULT_JSON_PANEL_WIDTH;
+  let panelWidth = $state(clampJsonPanelWidth(preferredWidth, initialViewport));
   let panelMax = $state(maxJsonPanelWidth(initialViewport));
   let resizePointerID = null;
   const copyState = createCopyState({ logPrefix: "Failed to copy playground JSON:" });
@@ -53,6 +54,7 @@
 
   function resizeFromPointer(clientX) {
     panelWidth = clampJsonPanelWidth(window.innerWidth - clientX, window.innerWidth);
+    preferredWidth = panelWidth;
   }
 
   function startResize(event) {
@@ -71,7 +73,7 @@
   function finishResize(event) {
     if (resizePointerID === null || event.pointerId !== resizePointerID) return;
     resizePointerID = null;
-    writeStored(WIDTH_KEY, panelWidth);
+    writeStored(WIDTH_KEY, preferredWidth);
   }
 
   function resizeWithKeyboard(event) {
@@ -81,19 +83,20 @@
       panelWidth + (event.key === "ArrowLeft" ? 24 : -24),
       window.innerWidth,
     );
-    writeStored(WIDTH_KEY, panelWidth);
+    preferredWidth = panelWidth;
+    writeStored(WIDTH_KEY, preferredWidth);
   }
 
   $effect(() => {
     if (!store.panelOpen) return;
+    // Re-clamps the committed preference (a plain variable, so this effect
+    // depends on panelOpen only) whenever the viewport changes.
     const onResize = () => {
       panelMax = maxJsonPanelWidth(window.innerWidth);
-      panelWidth = clampJsonPanelWidth(panelWidth, window.innerWidth);
+      panelWidth = clampJsonPanelWidth(preferredWidth, window.innerWidth);
     };
     // The viewport may have changed while the panel was closed (no listener).
-    // untrack: the initial clamp reads panelWidth, which must not make this
-    // effect re-run (and re-register the listener) on every resize drag.
-    untrack(onResize);
+    onResize();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   });
@@ -144,12 +147,21 @@
         <DialogCloseButton label={m.playground_json_hide()} onclick={() => store.togglePanel()} />
       </div>
     </div>
-    <div class="playground-json-body">
+    <!-- A scrollable region needs a tab stop so keyboard users can scroll it. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div
+      class="playground-json-body"
+      role="region"
+      tabindex="0"
+      aria-label={store.panelTab === "request" ? m.playground_json_request() : m.playground_json_response()}
+    >
       {#if store.panelTab === "request"}
         <p class="playground-json-meta mono">POST {store.endpointPath}</p>
         <pre class="playground-json-code mono">{requestText}</pre>
       {:else if store.sending && store.response === null}
-        <p class="playground-json-placeholder">{m.playground_json_streaming()}</p>
+        <p class="playground-json-placeholder">
+          {store.sendingStream ? m.playground_json_streaming() : m.playground_sending()}
+        </p>
       {:else if store.response === null}
         <p class="playground-json-placeholder">{m.playground_json_empty_response()}</p>
       {:else}
