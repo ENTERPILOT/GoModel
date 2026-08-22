@@ -200,3 +200,34 @@ func TestNewSQLStoreRenamesLegacyModelColumn(t *testing.T) {
 		}
 	})
 }
+
+func TestNewSQLStoreReplacesSingleColumnUserPathIndex(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		// Databases created before the composite index carry the single-column one.
+		if err := db.Schema(ctx, `
+			CREATE TABLE audit_logs (
+				id TEXT PRIMARY KEY,
+				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
+				user_path TEXT,
+				status_code INTEGER DEFAULT 0
+			)`,
+			`CREATE INDEX idx_audit_user_path ON audit_logs(user_path)`,
+		); err != nil {
+			t.Fatalf("create legacy table: %v", err)
+		}
+
+		if _, err := NewSQLStore(ctx, db, 0); err != nil {
+			t.Fatalf("NewSQLStore: %v", err)
+		}
+
+		// Recreating the old index must succeed, proving the startup drop removed it.
+		if _, err := db.Exec(ctx, `CREATE INDEX idx_audit_user_path ON audit_logs(user_path)`); err != nil {
+			t.Fatalf("single-column index still present after NewSQLStore: %v", err)
+		}
+		// And the composite replacement must now exist.
+		if _, err := db.Exec(ctx, `CREATE INDEX idx_audit_user_path_timestamp ON audit_logs(user_path, timestamp)`); err == nil {
+			t.Fatal("composite user_path index missing after NewSQLStore")
+		}
+	})
+}

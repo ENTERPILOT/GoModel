@@ -112,7 +112,6 @@ var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON audit_logs(auth_key_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_user_path ON audit_logs(user_path)",
 	// Composite: serves both the session_id equality filter and its per-thread
 	// timestamp ordering (thread detail and the sessions grouping query). The
 	// drop retires the single-column predecessor, which IF NOT EXISTS would
@@ -156,7 +155,8 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
 		return nil, err
 	}
-	for _, statement := range append(sqlIndexes, jsonPathIndexes(db.Dialect())...) {
+	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
+	for _, statement := range indexes {
 		if _, err := db.Exec(ctx, statement); err != nil {
 			slog.Warn("failed to create index", "error", err)
 		}
@@ -171,6 +171,24 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
 	}
 	return store, nil
+}
+
+// userPathIndexes serve the user-path filter: the exact-match term and the
+// subtree range both probe the leading column, and the trailing timestamp
+// lets an exact match stream the page in order without a sort. The column is
+// indexed under byte-wise ordering, matching the expression the reader
+// compares against (readerDialect.userPath) — on PostgreSQL the default
+// collation is locale-aware, so a plain index could not serve a range that
+// means "prefix". The drop retires the single-column predecessor.
+func userPathIndexes(dialect sqlx.Dialect) []string {
+	column := "user_path"
+	if dialect == sqlx.PostgreSQL {
+		column = `user_path COLLATE "C"`
+	}
+	return []string{
+		`DROP INDEX IF EXISTS idx_audit_user_path`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON audit_logs(` + column + `, timestamp)`,
+	}
 }
 
 // jsonPathIndexes index the two JSON fields the Responses lookups filter on.
