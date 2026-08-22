@@ -317,6 +317,7 @@ export function auditLogAllowsLiveEntries(payload, filters) {
     !(filters && filters.method) &&
     !(filters && filters.statusCode) &&
     !(filters && filters.stream) &&
+    !(filters && filters.fieldValue) &&
     auditLiveDateRangeAllowsNow(filters)
   );
 }

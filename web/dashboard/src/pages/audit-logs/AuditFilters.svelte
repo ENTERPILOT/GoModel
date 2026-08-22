@@ -1,13 +1,11 @@
 <script>
   // Audit-log toolbar: explicit field filter + method/status/stream selects.
-  // Keep the legacy audit_search_placeholder message referenced for existing translations.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import { auditList } from "./auditList.svelte.js";
   import { X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
-  const legacySearchPlaceholder = m.audit_search_placeholder;
 
   const onSearchInput = debounced(() => auditList.fetchAuditLog(true));
   $effect(() => onSearchInput.cancel);
@@ -17,9 +15,9 @@
   <div class="audit-filter-row audit-filter-row-search">
     <FilterInput
       id="audit-filter-search"
-      placeholder="Enter a value to filter"
-      label="Audit field value"
-      title={m.audit_search_label() || legacySearchPlaceholder()}
+      placeholder={m.audit_field_value_placeholder()}
+      label={m.audit_field_value_label()}
+      title={m.audit_search_label() || m.audit_search_placeholder()}
       bind:value={auditList.auditFieldValue}
       oninput={onSearchInput}
       loading={auditList.loading}
@@ -28,18 +26,18 @@
   <div class="audit-filter-row audit-filter-row-controls">
     <select
       id="audit-filter-field"
-      aria-label="Audit filter field"
+      aria-label={m.audit_filter_field_label()}
       class="usage-log-select audit-filter-select audit-filter-field"
       bind:value={auditList.auditField}
       onchange={() => auditList.fetchAuditLog(true)}
     >
-      <option value="user_path">User path</option>
-      <option value="request_id">Request ID</option>
-      <option value="model">Model</option>
-      <option value="provider">Provider</option>
-      <option value="session_id">Session ID</option>
-      <option value="error_type">Error type</option>
-      <option value="search">All fields (slow)</option>
+      <option value="user_path">{m.audit_filter_field_user_path()}</option>
+      <option value="request_id">{m.audit_filter_field_request_id()}</option>
+      <option value="model">{m.audit_filter_field_model()}</option>
+      <option value="provider">{m.audit_filter_field_provider()}</option>
+      <option value="session_id">{m.audit_filter_field_session_id()}</option>
+      <option value="error_type">{m.audit_filter_field_error_type()}</option>
+      <option value="search">{m.audit_filter_field_search()}</option>
     </select>
     <select
       id="audit-filter-method"

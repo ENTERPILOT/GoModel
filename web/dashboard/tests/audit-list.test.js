@@ -47,6 +47,10 @@ test("buildAuditLogQuery maps explicit audit fields to indexed API filters", () 
   assert.match(buildAuditLogQuery({ ...base, field: "user_path", fieldValue: "/team" }), /&user_path=%2Fteam/);
   assert.match(buildAuditLogQuery({ ...base, field: "model", fieldValue: "gpt-5" }), /&requested_model=gpt-5/);
   assert.match(buildAuditLogQuery({ ...base, field: "request_id", fieldValue: "abc" }), /&search=abc/);
+  assert.match(buildAuditLogQuery({ ...base, field: "provider", fieldValue: "Azure OpenAI & test" }), /&provider=Azure%20OpenAI%20%26%20test/);
+  assert.match(buildAuditLogQuery({ ...base, field: "session_id", fieldValue: "session 123" }), /&session_id=session%20123/);
+  assert.match(buildAuditLogQuery({ ...base, field: "error_type", fieldValue: "timeout" }), /&error_type=timeout/);
+  assert.match(buildAuditLogQuery({ ...base, field: "search", fieldValue: "error & path" }), /&search=error%20%26%20path/);
 });
 
 const noFilters = {
@@ -54,6 +58,7 @@ const noFilters = {
   method: "",
   statusCode: "",
   stream: "",
+  fieldValue: "",
   customStartDate: null,
   customEndDate: null,
 };
@@ -432,6 +437,10 @@ test("auditLogAllowsLiveEntries respects filters and custom date ranges", () => 
   assert.equal(auditLogAllowsLiveEntries({ offset: 25 }, noFilters), false);
   assert.equal(
     auditLogAllowsLiveEntries({ offset: 0 }, { ...noFilters, search: "x" }),
+    false,
+  );
+  assert.equal(
+    auditLogAllowsLiveEntries({ offset: 0 }, { ...noFilters, fieldValue: "team" }),
     false,
   );
 
