@@ -59,11 +59,13 @@ resolver ignores it.
 
 ## Migration
 
-A one-time, idempotent seed copies existing `aliases` rows (as redirects) and
+A one-time, idempotent seed copied existing `aliases` rows (as redirects) and
 `model_overrides` rows (as policies) into `virtual_models` on first start when
-the table is empty. The legacy tables are left intact for one release for
-rollback; a later cleanup milestone removes the seed, the legacy packages, and
-the legacy tables.
+the table was empty. The seed shipped in v0.1.44 and was removed in v0.1.81;
+upgrading from a release older than v0.1.44 must pass through a version in that
+range so the seed runs once. The legacy `aliases` and `model_overrides`
+tables/collections are never read or written anymore and are left in place;
+operators may drop them.
 
 ## Consequences
 
@@ -93,9 +95,7 @@ A follow-up change completed the unification the first version staged:
   `modeloverrides` services was replaced by native redirect + policy matching
   inside `virtualmodels`, operating directly on `VirtualModel` rows behind a
   single in-memory snapshot. The `internal/aliases` and `internal/modeloverrides`
-  packages were removed; their tested matching logic was ported. (The legacy
-  `aliases` / `model_overrides` tables remain for one release as a rollback
-  net, read only by the one-time seed.)
+  packages were removed; their tested matching logic was ported.
 - **`Enabled` is authoritative.** A policy row's `Enabled` now governs access: a
   disabled policy turns its selector off for everyone, an enabled policy with
   `user_paths` restricts, and a selector with no row follows
