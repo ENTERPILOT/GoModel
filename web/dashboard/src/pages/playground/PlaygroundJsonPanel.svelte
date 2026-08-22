@@ -7,6 +7,7 @@
   import { createCopyState } from "$lib/utils/clipboard.svelte.js";
   import { motionDuration } from "$lib/utils/motion.js";
   import { readStored, writeStored } from "$lib/utils/storage.js";
+  import { untrack } from "svelte";
   import { cubicOut } from "svelte/easing";
   import { slide } from "svelte/transition";
   import * as m from "$lib/paraglide/messages.js";
@@ -90,7 +91,9 @@
       panelWidth = clampJsonPanelWidth(panelWidth, window.innerWidth);
     };
     // The viewport may have changed while the panel was closed (no listener).
-    onResize();
+    // untrack: the initial clamp reads panelWidth, which must not make this
+    // effect re-run (and re-register the listener) on every resize drag.
+    untrack(onResize);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   });
