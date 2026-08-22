@@ -125,6 +125,8 @@ export function buildAuditLogQuery({
   method,
   statusCode,
   stream,
+  field,
+  fieldValue,
 }) {
   let qs = dateQuery;
   qs += "&limit=" + limit + "&offset=" + offset;
@@ -132,6 +134,18 @@ export function buildAuditLogQuery({
   if (method) qs += "&method=" + encodeURIComponent(method);
   if (statusCode) qs += "&status_code=" + encodeURIComponent(statusCode);
   if (stream) qs += "&stream=" + encodeURIComponent(stream);
+  if (fieldValue) {
+    const param = {
+      user_path: "user_path",
+      request_id: "search",
+      model: "requested_model",
+      provider: "provider",
+      session_id: "session_id",
+      error_type: "error_type",
+      search: "search",
+    }[field] || "search";
+    qs += "&" + param + "=" + encodeURIComponent(fieldValue);
+  }
   return qs;
 }
 

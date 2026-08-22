@@ -101,7 +101,7 @@ export function liveLogsMethods() {
         // 'date_range', or null while inserts flow.
         auditLivePauseReason() {
             if (!this.auditLog || this.auditLog.offset !== 0) return 'pagination';
-            if (this.auditSearch || this.auditMethod || this.auditStatusCode || this.auditStream) {
+            if (this.auditSearch || this.auditFieldValue || this.auditMethod || this.auditStatusCode || this.auditStream) {
                 return 'filters';
             }
             // A custom date range pauses live inserts — except a range that

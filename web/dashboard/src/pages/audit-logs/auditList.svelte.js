@@ -80,6 +80,10 @@ class AuditListStore {
   set auditStream(value) {
     liveLogs.auditStream = value;
   }
+  get auditField() { return liveLogs.auditField; }
+  set auditField(value) { liveLogs.auditField = value; }
+  get auditFieldValue() { return liveLogs.auditFieldValue; }
+  set auditFieldValue(value) { liveLogs.auditFieldValue = value; }
   get auditGroupSessions() {
     return liveLogs.auditGroupSessions;
   }
@@ -92,6 +96,7 @@ class AuditListStore {
       method: this.auditMethod,
       statusCode: this.auditStatusCode,
       stream: this.auditStream,
+      fieldValue: this.auditFieldValue,
       customStartDate: dateRange.customStartDate,
       customEndDate: dateRange.customEndDate,
     };
@@ -121,6 +126,8 @@ class AuditListStore {
         method: this.auditMethod,
         statusCode: this.auditStatusCode,
         stream: this.auditStream,
+        field: this.auditField,
+        fieldValue: this.auditFieldValue,
       });
 
       const path = grouped ? "/admin/audit/sessions?" : "/admin/audit/log?";
@@ -303,6 +310,8 @@ class AuditListStore {
     this.auditMethod = "";
     this.auditStatusCode = "";
     this.auditStream = "";
+    this.auditField = "user_path";
+    this.auditFieldValue = "";
     this.fetchAuditLog(true);
   }
 
