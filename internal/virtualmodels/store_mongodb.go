@@ -13,17 +13,18 @@ import (
 )
 
 type mongoVirtualModelDocument struct {
-	ID           string    `bson:"_id"`
-	Targets      []Target  `bson:"targets,omitempty"`
-	Strategy     string    `bson:"strategy,omitempty"`
-	ProviderName string    `bson:"provider_name,omitempty"`
-	Model        string    `bson:"model,omitempty"`
-	UserPaths    []string  `bson:"user_paths,omitempty"`
-	Description  string    `bson:"description,omitempty"`
-	Slowdown     *float64  `bson:"slowdown,omitempty"`
-	Enabled      bool      `bson:"enabled"`
-	CreatedAt    time.Time `bson:"created_at"`
-	UpdatedAt    time.Time `bson:"updated_at"`
+	ID              string    `bson:"_id"`
+	Targets         []Target  `bson:"targets,omitempty"`
+	Strategy        string    `bson:"strategy,omitempty"`
+	SessionAffinity *bool     `bson:"session_affinity,omitempty"`
+	ProviderName    string    `bson:"provider_name,omitempty"`
+	Model           string    `bson:"model,omitempty"`
+	UserPaths       []string  `bson:"user_paths,omitempty"`
+	Description     string    `bson:"description,omitempty"`
+	Slowdown        *float64  `bson:"slowdown,omitempty"`
+	Enabled         bool      `bson:"enabled"`
+	CreatedAt       time.Time `bson:"created_at"`
+	UpdatedAt       time.Time `bson:"updated_at"`
 }
 
 type mongoVirtualModelIDFilter struct {
@@ -94,15 +95,16 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 	stampUpsert(&vm)
 	update := bson.M{
 		"$set": bson.M{
-			"targets":       vm.Targets,
-			"strategy":      vm.Strategy,
-			"provider_name": vm.ProviderName,
-			"model":         vm.Model,
-			"user_paths":    vm.UserPaths,
-			"description":   vm.Description,
-			"slowdown":      vm.Slowdown,
-			"enabled":       vm.Enabled,
-			"updated_at":    vm.UpdatedAt,
+			"targets":          vm.Targets,
+			"strategy":         vm.Strategy,
+			"session_affinity": vm.SessionAffinity,
+			"provider_name":    vm.ProviderName,
+			"model":            vm.Model,
+			"user_paths":       vm.UserPaths,
+			"description":      vm.Description,
+			"slowdown":         vm.Slowdown,
+			"enabled":          vm.Enabled,
+			"updated_at":       vm.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{
 			"created_at": vm.CreatedAt,
@@ -132,15 +134,16 @@ func (s *MongoDBStore) Close() error {
 
 func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 	vm := VirtualModel{
-		Source:       doc.ID,
-		Strategy:     doc.Strategy,
-		ProviderName: doc.ProviderName,
-		Model:        doc.Model,
-		Description:  doc.Description,
-		Slowdown:     doc.Slowdown,
-		Enabled:      doc.Enabled,
-		CreatedAt:    doc.CreatedAt.UTC(),
-		UpdatedAt:    doc.UpdatedAt.UTC(),
+		Source:          doc.ID,
+		Strategy:        doc.Strategy,
+		SessionAffinity: doc.SessionAffinity,
+		ProviderName:    doc.ProviderName,
+		Model:           doc.Model,
+		Description:     doc.Description,
+		Slowdown:        doc.Slowdown,
+		Enabled:         doc.Enabled,
+		CreatedAt:       doc.CreatedAt.UTC(),
+		UpdatedAt:       doc.UpdatedAt.UTC(),
 	}
 	if len(doc.Targets) > 0 {
 		vm.Targets = append([]Target(nil), doc.Targets...)
