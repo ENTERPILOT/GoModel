@@ -50,6 +50,8 @@ test("isGatewayAuthError separates gateway credential failures from provider 401
   assert.equal(isGatewayAuthError({ error: { type: "authentication_error", message: "invalid API key" } }), true);
   assert.equal(isGatewayAuthError(null), true);
   assert.equal(isGatewayAuthError("not json"), true);
+  assert.equal(isGatewayAuthError({ error: "invalid API key" }), true);
+  assert.equal(isGatewayAuthError({ error: ["x"] }), true);
   assert.equal(
     isGatewayAuthError({ error: { type: "authentication_error", message: "Incorrect API key", provider: "openai" } }),
     false,

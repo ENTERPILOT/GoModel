@@ -4,7 +4,7 @@
 // so they show up in Audit Logs and Usage like any other client's traffic.
 
 import { apiFetch, isAbortError } from "$lib/api/client.js";
-import { isGatewayAuthError } from "$lib/api/errors.js";
+import { errorPayloadMessage, isGatewayAuthError } from "$lib/api/errors.js";
 import { consumeEventStream } from "$lib/api/eventStream.js";
 import { auth } from "$lib/stores/auth.svelte.js";
 import { readStored, writeStored } from "$lib/utils/storage.js";
@@ -18,7 +18,6 @@ import {
   extractUsage,
   normalizeEndpoint,
   normalizeRole,
-  streamErrorMessage,
 } from "./playgroundLogic.js";
 
 const STORAGE = {
@@ -171,7 +170,7 @@ class PlaygroundStore {
           this.error = m.common_authentication_required();
           return;
         }
-        this.error = streamErrorMessage(payload) || m.playground_request_failed();
+        this.error = errorPayloadMessage(payload, m.playground_request_failed());
         return;
       }
       const streamed = body.stream === true && res.body &&

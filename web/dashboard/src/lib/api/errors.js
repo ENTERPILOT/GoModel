@@ -21,9 +21,9 @@ export function errorPayloadProvider(data) {
 // provider rejecting its own key (report it like any other request error).
 // A 401 with no readable payload is treated as the gateway's.
 export function isGatewayAuthError(data) {
-  if (!data || typeof data !== "object" || !data.error) return true;
-  const type = typeof data.error === "object" ? String(data.error.type || "") : "";
-  return type === "authentication_error" && !errorPayloadProvider(data);
+  const error = data && typeof data === "object" ? data.error : null;
+  if (!error || typeof error !== "object" || Array.isArray(error)) return true;
+  return String(error.type || "") === "authentication_error" && !errorPayloadProvider(data);
 }
 
 // errorMessage does the same for a getJSON/sendJSON result envelope, also

@@ -244,17 +244,13 @@ func TestHandleError_RecordsUpstreamProviderOfError(t *testing.T) {
 	if entry.Data.ErrorProvider != "openai" {
 		t.Fatalf("entry.Data.ErrorProvider = %q, want openai", entry.Data.ErrorProvider)
 	}
-	var body struct {
-		Error struct {
-			Type     string `json:"type"`
-			Provider string `json:"provider"`
-		} `json:"error"`
-	}
+	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if body.Error.Provider != "openai" {
-		t.Fatalf("body.error.provider = %q, want openai", body.Error.Provider)
+	errorData, _ := body["error"].(map[string]any)
+	if errorData["provider"] != "openai" {
+		t.Fatalf("body.error.provider = %v, want openai", errorData["provider"])
 	}
 
 	// The gateway's own authentication failure names no provider.

@@ -45,15 +45,24 @@ test("filterSearchOptions matches value, label and description, prefix first", (
     filterSearchOptions(options, "OLLAMA").map((o) => o.value),
     ["ollama/qwen2.5:0.5b"],
   );
-  // "an" is a prefix of "anthropic" but only a substring of "pl-ai-n"? no:
-  // it prefixes anthropic and appears inside "openai"? It does not; keep the
-  // ranking assertion on a query that hits both tiers.
+  // "o" prefixes two options and only appears inside "anthropic/…", so the
+  // prefix tier must come first.
   assert.deepEqual(
     filterSearchOptions(options, "o").map((o) => o.value),
     ["openai/gpt-4o", "ollama/qwen2.5:0.5b", "anthropic/claude-sonnet"],
   );
   assert.deepEqual(filterSearchOptions(options, "zzz"), []);
   assert.deepEqual(filterSearchOptions(undefined, "x"), []);
+});
+
+test("filterSearchOptions drops options that repeat a value", () => {
+  const duplicated = [
+    { value: "gpt-4o", description: "openai" },
+    { value: "gpt-4o", description: "azure" },
+    "gpt-4o",
+  ];
+  assert.deepEqual(filterSearchOptions(duplicated, ""), [{ value: "gpt-4o", label: "gpt-4o", description: "openai" }]);
+  assert.equal(filterSearchOptions(duplicated, "gpt").length, 1);
 });
 
 test("customSearchValue offers typed text only when allowed and new", () => {

@@ -30,7 +30,7 @@
   "playground_remove_message": "Usuń wiadomość",
   "playground_reorder_message": "Przeciągnij, aby zmienić kolejność (lub użyj strzałek)",
   "playground_clear": "Wyczyść",
-  "playground_empty": "Brak wiadomości. Dodaj powyżej wiadomości system, użytkownik lub asystent, aby zbudować rozmowę, albo wpisz prompt poniżej.",
+  "playground_empty": "Brak wiadomości. Dodaj powyżej wiadomość systemową, użytkownika lub asystenta, aby zbudować rozmowę, albo wpisz prompt poniżej.",
   "playground_composer_label": "Prompt",
   "playground_composer_placeholder": "Wyślij wiadomość…",
   "playground_stop": "Zatrzymaj",

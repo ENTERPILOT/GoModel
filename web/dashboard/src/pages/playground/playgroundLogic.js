@@ -333,8 +333,13 @@ export function playgroundModelOptions(inventory) {
 export const DEFAULT_JSON_PANEL_WIDTH = 420;
 export const MIN_JSON_PANEL_WIDTH = 280;
 
+// Widest the panel may get at a viewport width: 60% of it, capped at 760px.
+export function maxJsonPanelWidth(viewportWidth) {
+  return Math.max(MIN_JSON_PANEL_WIDTH, Math.min(760, Math.floor(Number(viewportWidth || 0) * 0.6)));
+}
+
 export function clampJsonPanelWidth(width, viewportWidth) {
-  const max = Math.max(MIN_JSON_PANEL_WIDTH, Math.min(760, Math.floor(Number(viewportWidth || 0) * 0.6)));
+  const max = maxJsonPanelWidth(viewportWidth);
   const value = Number(width);
   if (!Number.isFinite(value)) return Math.min(DEFAULT_JSON_PANEL_WIDTH, max);
   return Math.min(max, Math.max(MIN_JSON_PANEL_WIDTH, Math.round(value)));

@@ -8099,7 +8099,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
-                    "description": "Provider names the upstream provider that produced the error; empty\nfor errors raised by the gateway itself.",
+                    "description": "Provider names the upstream provider that produced the error. It is\nomitted for errors raised by the gateway itself.",
                     "type": "string"
                 },
                 "type": {
@@ -9717,6 +9717,10 @@ const docTemplate = `{
                 "param": {
                     "type": "string",
                     "x-nullable": true
+                },
+                "provider": {
+                    "description": "Provider names the upstream provider that produced the error. It is\nomitted for errors raised by the gateway itself.",
+                    "type": "string"
                 },
                 "type": {
                     "$ref": "#/definitions/core.ErrorType"

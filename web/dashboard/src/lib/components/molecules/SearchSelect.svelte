@@ -111,6 +111,13 @@
       case "Tab":
         close();
         break;
+      case "Escape":
+        // Dismiss only the listbox; a parent dialog must not treat this
+        // Escape as its own.
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        break;
       default:
         break;
     }

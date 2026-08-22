@@ -70,6 +70,9 @@ type OpenAIErrorObject struct {
 	Message string    `json:"message" binding:"required"`
 	Param   *string   `json:"param" binding:"required" extensions:"x-nullable"`
 	Code    *string   `json:"code" binding:"required" extensions:"x-nullable"`
+	// Provider names the upstream provider that produced the error. It is
+	// omitted for errors raised by the gateway itself.
+	Provider string `json:"provider,omitempty"`
 }
 
 // Error implements the error interface

@@ -9,6 +9,7 @@ import {
   createStreamAccumulator,
   extractResponseText,
   extractUsage,
+  maxJsonPanelWidth,
   normalizeEndpoint,
   playgroundModelOptions,
   sendableMessages,
@@ -311,4 +312,7 @@ test("clampJsonPanelWidth keeps the panel inside the viewport", () => {
   assert.equal(clampJsonPanelWidth(500, 600), 360);
   assert.equal(clampJsonPanelWidth("nope", 1440), 420);
   assert.equal(clampJsonPanelWidth(400, 0), 280);
+  assert.equal(maxJsonPanelWidth(1440), 760);
+  assert.equal(maxJsonPanelWidth(600), 360);
+  assert.equal(maxJsonPanelWidth(0), 280);
 });

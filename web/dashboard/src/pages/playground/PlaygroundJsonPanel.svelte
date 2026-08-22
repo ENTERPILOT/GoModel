@@ -16,16 +16,16 @@
     MIN_JSON_PANEL_WIDTH,
     clampJsonPanelWidth,
     formatJSON,
+    maxJsonPanelWidth,
   } from "./playgroundLogic.js";
 
   const WIDTH_KEY = "gomodel_playground_json_panel_width";
 
+  const initialViewport = typeof window === "undefined" ? 1280 : window.innerWidth;
   let panelWidth = $state(
-    clampJsonPanelWidth(
-      readStored(WIDTH_KEY, DEFAULT_JSON_PANEL_WIDTH),
-      typeof window === "undefined" ? 1280 : window.innerWidth,
-    ),
+    clampJsonPanelWidth(readStored(WIDTH_KEY, DEFAULT_JSON_PANEL_WIDTH), initialViewport),
   );
+  let panelMax = $state(maxJsonPanelWidth(initialViewport));
   let resizePointerID = null;
   const copyState = createCopyState({ logPrefix: "Failed to copy playground JSON:" });
 
@@ -86,6 +86,7 @@
   $effect(() => {
     if (!store.panelOpen) return;
     const onResize = () => {
+      panelMax = maxJsonPanelWidth(window.innerWidth);
       panelWidth = clampJsonPanelWidth(panelWidth, window.innerWidth);
     };
     window.addEventListener("resize", onResize);
@@ -108,6 +109,7 @@
       aria-label={m.playground_resize_label()}
       aria-orientation="vertical"
       aria-valuemin={MIN_JSON_PANEL_WIDTH}
+      aria-valuemax={panelMax}
       aria-valuenow={panelWidth}
       tabindex="0"
       onpointerdown={startResize}

@@ -94,6 +94,10 @@ export function sortableList({
       if (!drag) return;
       const { handle, pointerId, items: list, from, to } = drag;
       drag = null;
+      handle.removeEventListener("lostpointercapture", onLostCapture);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerCancel);
       for (const item of list) {
         item.style.transform = "";
         item.style.transition = "";
@@ -140,6 +144,13 @@ export function sortableList({
         height: list[from].getBoundingClientRect().height + gapBetween(list),
       };
       handle.setPointerCapture(event.pointerId);
+      // Capture routes the move/up events through the handle, but if the
+      // handle leaves the DOM mid-drag the capture is lost silently and the
+      // up event may land anywhere — hear both directly and cancel.
+      handle.addEventListener("lostpointercapture", onLostCapture);
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", onPointerUp);
+      window.addEventListener("pointercancel", onPointerCancel);
       list[from].classList.add("is-dragging");
       list[from].style.zIndex = "2";
       for (const el of list) {
@@ -179,21 +190,24 @@ export function sortableList({
       cleanup(true);
     }
 
+    // Fires after a normal pointerup too (cleanup already ran, so this is a
+    // no-op then); a capture lost while dragging is a cancellation.
+    function onLostCapture(/** @type {PointerEvent} */ event) {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      cleanup(true);
+    }
+
     function onKeydown(/** @type {KeyboardEvent} */ event) {
       if (drag && event.key === "Escape") cleanup(true);
     }
 
+    // Only the grab is heard on the container; the drag itself registers its
+    // move/up/cancel listeners on window for its duration (see onPointerDown).
     container.addEventListener("pointerdown", onPointerDown);
-    container.addEventListener("pointermove", onPointerMove);
-    container.addEventListener("pointerup", onPointerUp);
-    container.addEventListener("pointercancel", onPointerCancel);
     window.addEventListener("keydown", onKeydown);
     return () => {
       cleanup(true);
       container.removeEventListener("pointerdown", onPointerDown);
-      container.removeEventListener("pointermove", onPointerMove);
-      container.removeEventListener("pointerup", onPointerUp);
-      container.removeEventListener("pointercancel", onPointerCancel);
       window.removeEventListener("keydown", onKeydown);
     };
   };

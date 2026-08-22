@@ -23,14 +23,21 @@ export function normalizeSearchOption(option) {
  * Filter options by a free-text query, matching value, label and
  * description case-insensitively. Matches that start with the query rank
  * first (stable within each tier). An empty query returns every option.
+ * Options sharing a value collapse to the first one, so the keyed list the
+ * component renders never sees a duplicate key.
  *
  * @param {Array<unknown>} options
  * @param {string} query
  */
 export function filterSearchOptions(options, query) {
+  const seen = new Set();
   const normalized = (Array.isArray(options) ? options : [])
     .map(normalizeSearchOption)
-    .filter(Boolean);
+    .filter((option) => {
+      if (!option || seen.has(option.value)) return false;
+      seen.add(option.value);
+      return true;
+    });
   const needle = String(query || "").trim().toLowerCase();
   if (!needle) return normalized;
   const prefix = [];
