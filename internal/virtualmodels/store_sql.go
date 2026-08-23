@@ -86,13 +86,19 @@ func (s *SQLStore) List(ctx context.Context) ([]VirtualModel, error) {
 		return nil, fmt.Errorf("list virtual models: %w", err)
 	}
 	defer rows.Close()
-	return collectVirtualModels(func() (VirtualModel, bool, error) {
-		if !rows.Next() {
-			return VirtualModel{}, false, nil
-		}
+
+	result := make([]VirtualModel, 0)
+	for rows.Next() {
 		vm, err := scanSQLVirtualModel(rows)
-		return vm, true, err
-	}, rows.Err)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, vm)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate virtual models: %w", err)
+	}
+	return result, nil
 }
 
 func (s *SQLStore) Get(ctx context.Context, source string) (*VirtualModel, error) {
@@ -116,27 +122,6 @@ func (s *SQLStore) Upsert(ctx context.Context, vm VirtualModel) error {
 		return fmt.Errorf("upsert virtual model: %w", err)
 	}
 	return nil
-}
-
-// UpsertAll writes every row in a single transaction, so a failed seed leaves the
-// table untouched rather than partially populated (which would otherwise trip the
-// "already populated" guard and suppress a re-import on the next start).
-func (s *SQLStore) UpsertAll(ctx context.Context, vms []VirtualModel) error {
-	if len(vms) == 0 {
-		return nil
-	}
-	return s.db.InTx(ctx, func(q sqlx.Querier) error {
-		for _, vm := range vms {
-			args, err := virtualModelUpsertArgs(vm)
-			if err != nil {
-				return err
-			}
-			if _, err := q.Exec(ctx, upsertVirtualModelSQL, args...); err != nil {
-				return fmt.Errorf("upsert virtual model: %w", err)
-			}
-		}
-		return nil
-	})
 }
 
 func (s *SQLStore) Delete(ctx context.Context, source string) error {

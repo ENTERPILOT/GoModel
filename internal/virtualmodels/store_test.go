@@ -3,8 +3,11 @@ package virtualmodels
 import (
 	"context"
 	"errors"
-	"math"
+	"strings"
 	"testing"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
 func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
@@ -118,48 +121,23 @@ func TestStore_GetMissingAndDelete(t *testing.T) {
 	})
 }
 
-func TestSQLStore_UpsertAllCommitsWholeBatch(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+func TestSQLStore_ListSurfacesUndecodableRow(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		vms := []VirtualModel{
-			{Source: "fast", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true},
-			{Source: "openai/gpt-4o", Enabled: false},
-		}
-
-		if err := store.UpsertAll(ctx, vms); err != nil {
-			t.Fatalf("UpsertAll() error = %v", err)
-		}
-		got, err := store.List(ctx)
+		store, err := NewSQLStore(ctx, db)
 		if err != nil {
-			t.Fatalf("List() error = %v", err)
+			t.Fatalf("NewSQLStore: %v", err)
 		}
-		if len(got) != 2 {
-			t.Fatalf("len(List()) = %d, want 2", len(got))
+		if err := store.Upsert(ctx, VirtualModel{Source: "ok", Targets: []Target{{Model: "openai/gpt-4o"}}, Enabled: true}); err != nil {
+			t.Fatalf("Upsert: %v", err)
 		}
-	})
-}
-
-func TestSQLStore_UpsertAllRollsBackMidBatchFailure(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
-		ctx := context.Background()
-
-		// The first row is written inside the transaction, then the second row
-		// fails to encode (a non-finite Weight cannot be JSON-marshalled). The
-		// whole batch must roll back — the first row must not survive, or the
-		// "already populated" guard would suppress a re-import next start.
-		err := store.UpsertAll(ctx, []VirtualModel{
-			{Source: "good", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true},
-			{Source: "bad", Targets: []Target{{Provider: "openai", Model: "gpt-4o", Weight: math.Inf(1)}}, Enabled: true},
-		})
-		if err == nil {
-			t.Fatal("UpsertAll(mid-batch failure) error = nil, want error")
+		// A row whose targets column is not JSON cannot be scanned; List must
+		// report it rather than return a partial list.
+		if _, err := db.Exec(ctx, `INSERT INTO virtual_models (source, targets, created_at, updated_at) VALUES ('broken', 'not-json', 0, 0)`); err != nil {
+			t.Fatalf("insert broken row: %v", err)
 		}
-		got, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List() error = %v", err)
-		}
-		if len(got) != 0 {
-			t.Fatalf("len(List()) = %d after mid-batch failure, want 0 (atomic rollback)", len(got))
+		if _, err := store.List(ctx); err == nil || !strings.Contains(err.Error(), "decode targets") {
+			t.Fatalf("List() error = %v, want decode targets failure", err)
 		}
 	})
 }

@@ -2,7 +2,6 @@ package virtualmodels
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -34,15 +33,10 @@ func (r *Result) Close() error {
 			r.stopRefresh()
 			r.stopRefresh = nil
 		}
-
-		var errs []error
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("store close: %w", err))
+				r.closeErr = fmt.Errorf("store close: %w", err)
 			}
-		}
-		if len(errs) > 0 {
-			r.closeErr = fmt.Errorf("close errors: %w", errors.Join(errs...))
 		}
 	})
 	return r.closeErr
@@ -56,16 +50,12 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	return newResult(ctx, cfg, shared, catalog, declaredProviders)
-}
-
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, catalog Catalog, declaredProviders []string) (*Result, error) {
-	store, err := createStore(ctx, storeConn)
+	store, err := createStore(ctx, shared)
 	if err != nil {
 		return nil, err
 	}
-	if err := seedFromLegacy(ctx, store, storeConn); err != nil {
-		return nil, fmt.Errorf("seed virtual models: %w", err)
+	if err := rejectUnmigratedLegacyData(ctx, store, shared); err != nil {
+		return nil, err
 	}
 
 	service, err := NewService(store, catalog, cfg.Models.EnabledByDefault)

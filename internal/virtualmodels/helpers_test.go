@@ -12,17 +12,6 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
-func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore)) {
-	t.Helper()
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-		store, err := NewSQLStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
-		body(t, store)
-	})
-}
-
 // runStoreSuite exercises behaviour every Store implementation owes its
 // callers, against each backend available in this environment.
 func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {

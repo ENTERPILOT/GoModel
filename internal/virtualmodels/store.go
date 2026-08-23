@@ -71,29 +71,7 @@ func decodeUserPaths(data []byte) ([]string, error) {
 	return paths, nil
 }
 
-// collectVirtualModels drains a row iterator into a slice. It mirrors the
-// shared collector used by the legacy stores so the SQL backends do not inline
-// near-identical loops.
-func collectVirtualModels(next func() (VirtualModel, bool, error), rowsErr func() error) ([]VirtualModel, error) {
-	result := make([]VirtualModel, 0)
-	for {
-		vm, ok, err := next()
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			break
-		}
-		result = append(result, vm)
-	}
-	if err := rowsErr(); err != nil {
-		return nil, fmt.Errorf("iterate virtual models: %w", err)
-	}
-	return result, nil
-}
-
-// stampUpsert sets timestamps the way the legacy stores did: CreatedAt on
-// insert, UpdatedAt always.
+// stampUpsert sets CreatedAt on insert and UpdatedAt on every write.
 func stampUpsert(vm *VirtualModel) {
 	now := time.Now().UTC()
 	if vm.CreatedAt.IsZero() {
