@@ -583,3 +583,41 @@ func TestCreateStreamEntryFinalizesContextIdentity(t *testing.T) {
 		t.Fatalf("managed-key labels lost on the stream copy: %#v", streamEntry.Data.Labels)
 	}
 }
+
+// The page query yields the thread total on every row, so an empty page has
+// to find it another way: zero when the window holds no threads, the real
+// count when the offset merely ran past the last page.
+func TestSQLReader_GetSessionsTotalOnEmptyPage(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+		defer store.Close()
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
+		ctx := context.Background()
+
+		empty, err := reader.GetSessions(ctx, LogQueryParams{Limit: 10})
+		if err != nil {
+			t.Fatalf("GetSessions(empty) failed: %v", err)
+		}
+		if empty.Total != 0 || len(empty.Sessions) != 0 {
+			t.Fatalf("empty window: total=%d sessions=%d, want 0/0", empty.Total, len(empty.Sessions))
+		}
+
+		base := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+		if err := store.WriteBatch(ctx, sessionThreadFixture(base)); err != nil {
+			t.Fatalf("WriteBatch failed: %v", err)
+		}
+		past, err := reader.GetSessions(ctx, LogQueryParams{Limit: 10, Offset: 50})
+		if err != nil {
+			t.Fatalf("GetSessions(past end) failed: %v", err)
+		}
+		if past.Total != 3 || len(past.Sessions) != 0 {
+			t.Fatalf("past last page: total=%d sessions=%d, want 3/0", past.Total, len(past.Sessions))
+		}
+	})
+}
