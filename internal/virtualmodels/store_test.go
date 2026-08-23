@@ -3,7 +3,11 @@ package virtualmodels
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
 func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
@@ -106,6 +110,27 @@ func TestStore_GetMissingAndDelete(t *testing.T) {
 		}
 		if _, err := store.Get(ctx, "x"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("Get(deleted) error = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+func TestSQLStore_ListSurfacesUndecodableRow(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		store, err := NewSQLStore(ctx, db)
+		if err != nil {
+			t.Fatalf("NewSQLStore: %v", err)
+		}
+		if err := store.Upsert(ctx, VirtualModel{Source: "ok", Targets: []Target{{Model: "openai/gpt-4o"}}, Enabled: true}); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		// A row whose targets column is not JSON cannot be scanned; List must
+		// report it rather than return a partial list.
+		if _, err := db.Exec(ctx, `INSERT INTO virtual_models (source, targets, created_at, updated_at) VALUES ('broken', 'not-json', 0, 0)`); err != nil {
+			t.Fatalf("insert broken row: %v", err)
+		}
+		if _, err := store.List(ctx); err == nil || !strings.Contains(err.Error(), "decode targets") {
+			t.Fatalf("List() error = %v, want decode targets failure", err)
 		}
 	})
 }

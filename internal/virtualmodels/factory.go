@@ -54,6 +54,9 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectUnmigratedLegacyData(ctx, store, shared); err != nil {
+		return nil, err
+	}
 
 	service, err := NewService(store, catalog, cfg.Models.EnabledByDefault)
 	if err != nil {
