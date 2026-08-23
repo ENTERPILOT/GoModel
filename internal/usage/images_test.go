@@ -81,3 +81,36 @@ func TestExtractFromImageResponse_NoPricing(t *testing.T) {
 		t.Errorf("images = %v, want 1", got)
 	}
 }
+
+func TestExtractFromImageEditResponse(t *testing.T) {
+	if entry := ExtractFromImageEditResponse(nil, "req", "gpt-image-1", "openai"); entry != nil {
+		t.Fatalf("expected nil entry for nil response, got %+v", entry)
+	}
+
+	resp := &core.ImageGenerationResponse{
+		Data: []core.ImageData{{B64JSON: "aGk="}},
+		Usage: &core.ImageUsage{
+			InputTokens: 50, OutputTokens: 1000, TotalTokens: 1050,
+			InputTokensDetails: &core.ImageTokenDetails{TextTokens: 10, ImageTokens: 40},
+		},
+	}
+	pricing := &core.ModelPricing{PerImage: new(0.04)}
+
+	entry := ExtractFromImageEditResponse(resp, "req-2", "gpt-image-1", "openai", pricing)
+
+	if entry.Endpoint != endpointImageEdits {
+		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointImageEdits)
+	}
+	if entry.Model != "gpt-image-1" || entry.Provider != "openai" || entry.RequestID != "req-2" {
+		t.Errorf("identity = %q/%q/%q", entry.Provider, entry.Model, entry.RequestID)
+	}
+	if entry.InputTokens != 50 || entry.OutputTokens != 1000 || entry.TotalTokens != 1050 {
+		t.Errorf("tokens = %d/%d/%d", entry.InputTokens, entry.OutputTokens, entry.TotalTokens)
+	}
+	if entry.RawData[rawKeyImages] != 1 || entry.RawData["prompt_image_tokens"] != 40 || entry.RawData["prompt_text_tokens"] != 10 {
+		t.Errorf("raw data = %v", entry.RawData)
+	}
+	if entry.OutputCost == nil || !costsNearlyEqual(*entry.OutputCost, 0.04) {
+		t.Errorf("output cost = %v, want 0.04 per-image", entry.OutputCost)
+	}
+}

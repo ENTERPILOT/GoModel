@@ -8516,6 +8516,144 @@
         }
       }
     },
+    "/v1/images/edits": {
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Create image edit (inpainting / image-to-image)",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "image": {
+                    "description": "Source image to edit; repeat as image[] to send several (gpt-image-1)",
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "prompt": {
+                    "description": "Text description of the desired edit",
+                    "type": "string"
+                  },
+                  "model": {
+                    "description": "Model ID",
+                    "type": "string"
+                  },
+                  "mask": {
+                    "description": "PNG whose transparent areas mark where the image should be edited",
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "n": {
+                    "description": "Number of images to generate",
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "size": {
+                    "description": "Output size, e.g. 1024x1024",
+                    "type": "string"
+                  },
+                  "quality": {
+                    "description": "Output quality (model-specific)",
+                    "type": "string"
+                  },
+                  "response_format": {
+                    "description": "url or b64_json (DALL·E 2 only; gpt-image-1 always returns b64_json)",
+                    "type": "string"
+                  },
+                  "user": {
+                    "description": "End-user identifier forwarded to the provider",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "image",
+                  "prompt",
+                  "model"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.ImageGenerationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/images/edits",
+            "title": "Create image edit (inpainting / image-to-image)",
+            "description": "GoModel API reference for POST /v1/images/edits: Create image edit (inpainting / image-to-image)."
+          }
+        }
+      }
+    },
     "/v1/images/generations": {
       "post": {
         "tags": [

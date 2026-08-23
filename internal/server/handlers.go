@@ -733,6 +733,33 @@ func (h *Handler) ImageGenerations(c *echo.Context) error {
 	return h.images().CreateImage(c)
 }
 
+// ImageEdits handles POST /v1/images/edits.
+//
+// @Summary      Create image edit (inpainting / image-to-image)
+// @Tags         images
+// @Accept       mpfd
+// @Produce      json
+// @Security     BearerAuth
+// @Param        image            formData  file    true   "Source image to edit; repeat as image[] to send several (gpt-image-1)"
+// @Param        prompt           formData  string  true   "Text description of the desired edit"
+// @Param        model            formData  string  true   "Model ID"
+// @Param        mask             formData  file    false  "PNG whose transparent areas mark where the image should be edited"
+// @Param        n                formData  integer false  "Number of images to generate"  minimum(1)
+// @Param        size             formData  string  false  "Output size, e.g. 1024x1024"
+// @Param        quality          formData  string  false  "Output quality (model-specific)"
+// @Param        response_format  formData  string  false  "url or b64_json (DALL·E 2 only; gpt-image-1 always returns b64_json)"
+// @Param        user             formData  string  false  "End-user identifier forwarded to the provider"
+// @Success      200      {object}  core.ImageGenerationResponse
+// @Failure      400      {object}  core.OpenAIErrorEnvelope
+// @Failure      401      {object}  core.OpenAIErrorEnvelope
+// @Failure      404      {object}  core.OpenAIErrorEnvelope
+// @Failure      429      {object}  core.OpenAIErrorEnvelope
+// @Failure      502      {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/images/edits [post]
+func (h *Handler) ImageEdits(c *echo.Context) error {
+	return h.images().CreateImageEdit(c)
+}
+
 // AudioTranslations handles POST /v1/audio/translations.
 //
 // @Summary      Translate audio into English

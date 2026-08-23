@@ -29,6 +29,7 @@ const (
 	OperationAudioTranscriptions Operation = "audio_transcriptions"
 	OperationAudioTranslations   Operation = "audio_translations"
 	OperationImageGenerations    Operation = "image_generations"
+	OperationImageEdits          Operation = "image_edits"
 	OperationRealtime            Operation = "realtime"
 	OperationProviderPassthrough Operation = "provider_passthrough"
 	OperationMCP                 Operation = "mcp"
@@ -160,6 +161,14 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationImageGenerations,
 		}
+	case path == "/v1/images/edits":
+		// Image edits upload the source image(s) as multipart/form-data; the
+		// handler parses the form itself.
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			Dialect:          "openai_compat",
+			Operation:        OperationImageEdits,
+		}
 	case path == "/v1/realtime" || path == "/v1/realtime/calls" || path == "/v1/realtime/client_secrets":
 		// The realtime endpoints relay the provider's schema verbatim: /v1/realtime
 		// upgrades to a websocket, /v1/realtime/calls exchanges WebRTC SDP, and
@@ -230,7 +239,7 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 		return BodyModeNone
 	case OperationAudioSpeech, OperationImageGenerations:
 		return BodyModeJSON
-	case OperationAudioTranscriptions, OperationAudioTranslations:
+	case OperationAudioTranscriptions, OperationAudioTranslations, OperationImageEdits:
 		return BodyModeMultipart
 	case OperationRealtime:
 		if method == http.MethodPost && path == "/v1/realtime/client_secrets" {

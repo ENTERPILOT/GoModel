@@ -5665,6 +5665,123 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1/images/edits": {
+            "post": {
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "images"
+                ],
+                "summary": "Create image edit (inpainting / image-to-image)",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Source image to edit; repeat as image[] to send several (gpt-image-1)",
+                        "name": "image",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Text description of the desired edit",
+                        "name": "prompt",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "model",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "PNG whose transparent areas mark where the image should be edited",
+                        "name": "mask",
+                        "in": "formData"
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Number of images to generate",
+                        "name": "n",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Output size, e.g. 1024x1024",
+                        "name": "size",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Output quality (model-specific)",
+                        "name": "quality",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "url or b64_json (DALL·E 2 only; gpt-image-1 always returns b64_json)",
+                        "name": "response_format",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End-user identifier forwarded to the provider",
+                        "name": "user",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/core.ImageGenerationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/images/generations": {
             "post": {
                 "consumes": [
