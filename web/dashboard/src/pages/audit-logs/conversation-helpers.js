@@ -778,6 +778,77 @@ export function renderAudioBody(value) {
         + '</div>';
 }
 
+// isImageBody detects the audit value produced for image endpoint bodies
+// (see auditlog.ImageBodyLog): an object carrying the "__images__" marker.
+export function isImageBody(value) {
+    return !!(value && typeof value === 'object' && value.__images__ === true);
+}
+
+function sanitizeImageContentType(value) {
+    const ct = String(value || '').trim();
+    return /^image\/[a-zA-Z0-9.+-]+$/.test(ct) ? ct : 'image/png';
+}
+
+function imageRoleLabel(role) {
+    switch (role) {
+        case 'input':
+            return m.audit_image_role_input();
+        case 'mask':
+            return m.audit_image_role_mask();
+        default:
+            return m.audit_image_role_output();
+    }
+}
+
+// renderImageItem renders one image: an inline preview when the bytes were
+// captured (base64), a link when the provider returned a hosted URL, or a
+// labeled placeholder explaining why no pixels are available.
+function renderImageItem(item) {
+    const role = escapeHTML(imageRoleLabel(item.role));
+    const details = [item.filename, item.content_type, item.bytes ? formatByteSize(item.bytes) : '']
+        .filter(Boolean)
+        .map((part) => escapeHTML(String(part)))
+        .join(' · ');
+    const revised = item.revised_prompt
+        ? '<div class="audit-image-note">' + escapeHTML(String(item.revised_prompt)) + '</div>'
+        : '';
+    const caption = '<div class="audit-image-caption mono">' + role + (details ? ' · ' + details : '') + '</div>';
+    if (item.stored && item.encoding === 'base64' && item.data) {
+        const contentType = sanitizeImageContentType(item.content_type);
+        const b64 = String(item.data).replace(/[^A-Za-z0-9+/=]/g, '');
+        const src = 'data:' + contentType + ';base64,' + b64;
+        return '<figure class="audit-image">'
+            + '<a href="' + src + '" target="_blank" rel="noopener">'
+            + '<img class="audit-image-preview" src="' + src + '" alt="' + role + '" loading="lazy" />'
+            + '</a>' + caption + revised + '</figure>';
+    }
+    if (item.url) {
+        const url = String(item.url);
+        const safeHref = /^https?:\/\//i.test(url) ? escapeHTML(url) : '';
+        const link = safeHref
+            ? '<a class="audit-image-link mono" href="' + safeHref + '" target="_blank" rel="noopener">' + safeHref + '</a>'
+            : '<span class="mono">' + escapeHTML(url) + '</span>';
+        return '<figure class="audit-image audit-image-empty">'
+            + '<div class="audit-image-icon" aria-hidden="true">🔗</div>' + link + caption + revised + '</figure>';
+    }
+    const reason = item.too_large ? m.audit_image_too_large() : m.audit_image_not_logged();
+    return '<figure class="audit-image audit-image-empty">'
+        + '<div class="audit-image-icon" aria-hidden="true">🖼️</div>'
+        + caption
+        + '<div class="audit-image-note">' + escapeHTML(reason) + '</div>'
+        + revised + '</figure>';
+}
+
+// renderImageBody renders an image body as a gallery of inputs/outputs with
+// the request parameters or response envelope listed below.
+export function renderImageBody(value) {
+    const items = Array.isArray(value.images) ? value.images : [];
+    const gallery = items.length
+        ? '<div class="audit-image-gallery">' + items.map(renderImageItem).join('') + '</div>'
+        : '';
+    return '<div class="audit-images">' + gallery + renderAudioMeta(value.meta) + '</div>';
+}
+
 function jsonStringContent(value) {
     try {
         return JSON.stringify(String(value)).slice(1, -1);

@@ -347,3 +347,67 @@ func TestImageGenerations_AuditsRequestBody(t *testing.T) {
 		})
 	}
 }
+
+// TestImageGenerations_AuditsResponseImages verifies the response is recorded
+// as an image body (envelope metadata plus per-image items) and that base64
+// output is embedded only when output logging is enabled, so a large b64_json
+// payload never trips the generic capture limit.
+func TestImageGenerations_AuditsResponseImages(t *testing.T) {
+	tests := []struct {
+		name            string
+		logBodies       bool
+		logImageOutputs bool
+	}{
+		{name: "bodies off", logBodies: false},
+		{name: "metadata only", logBodies: true},
+		{name: "outputs stored", logBodies: true, logImageOutputs: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newImageMock()
+			mock.imageResp = &core.ImageGenerationResponse{
+				Created: 1713833628,
+				Size:    "1024x1024",
+				Data:    []core.ImageData{{B64JSON: "aGVsbG8="}, {URL: "https://img/2.png"}},
+				Usage:   &core.ImageUsage{TotalTokens: 300},
+			}
+			svc := &imageService{modelCallService: modelCallService{provider: mock}, logBodies: tt.logBodies, logImageOutputs: tt.logImageOutputs}
+			c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
+			entry := &auditlog.LogEntry{}
+			c.Set(string(auditlog.LogEntryKey), entry)
+
+			if err := svc.CreateImage(c); err != nil {
+				t.Fatalf("CreateImage returned error: %v", err)
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+			}
+			if !tt.logBodies {
+				if entry.Data != nil && entry.Data.ResponseBody != nil {
+					t.Fatalf("response body captured although body logging is off: %v", entry.Data.ResponseBody)
+				}
+				return
+			}
+			if !auditlog.IsResponseBodyCapturedByHandler(c) {
+				t.Error("handler must mark the response body as captured so the middleware leaves it alone")
+			}
+			body, ok := entry.Data.ResponseBody.(auditlog.ImageBodyLog)
+			if !ok {
+				t.Fatalf("response body = %T, want auditlog.ImageBodyLog", entry.Data.ResponseBody)
+			}
+			if body.Meta["size"] != "1024x1024" || body.Meta["created"] != int64(1713833628) {
+				t.Errorf("response meta = %v", body.Meta)
+			}
+			if len(body.Items) != 2 {
+				t.Fatalf("items = %+v, want base64 and url outputs", body.Items)
+			}
+			b64, hosted := body.Items[0], body.Items[1]
+			if b64.Bytes != 5 || b64.Stored != tt.logImageOutputs || (tt.logImageOutputs && b64.Data != "aGVsbG8=") {
+				t.Errorf("base64 item = %+v, want stored=%v", b64, tt.logImageOutputs)
+			}
+			if hosted.URL != "https://img/2.png" {
+				t.Errorf("url item = %+v", hosted)
+			}
+		})
+	}
+}

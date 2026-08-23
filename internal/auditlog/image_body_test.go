@@ -1,0 +1,219 @@
+package auditlog
+
+import (
+	"bytes"
+	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/labstack/echo/v5"
+
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
+)
+
+func TestBuildImageUploadBody(t *testing.T) {
+	images := []core.ImageFile{{Filename: "cat.png", ContentType: "image/png; charset=binary", Data: []byte("cat")}}
+	mask := &core.ImageFile{Filename: "mask.png", ContentType: "image/png", Data: []byte("mask")}
+	meta := map[string]any{"model": "gpt-image-1", "prompt": "add a hat"}
+
+	t.Run("stores base64 when enabled", func(t *testing.T) {
+		body := BuildImageUploadBody(images, mask, true, meta)
+		if !body.Images || len(body.Items) != 2 || body.Meta["prompt"] != "add a hat" {
+			t.Fatalf("body = %+v", body)
+		}
+		src, msk := body.Items[0], body.Items[1]
+		if src.Role != "input" || src.Filename != "cat.png" || src.ContentType != "image/png" || src.Bytes != 3 {
+			t.Errorf("input item = %+v", src)
+		}
+		if !src.Stored || src.Encoding != "base64" {
+			t.Errorf("input item should be stored: %+v", src)
+		}
+		if decoded, err := base64.StdEncoding.DecodeString(src.Data); err != nil || string(decoded) != "cat" {
+			t.Errorf("base64 did not round-trip: %q %v", decoded, err)
+		}
+		if msk.Role != "mask" || !msk.Stored || msk.Bytes != 4 {
+			t.Errorf("mask item = %+v", msk)
+		}
+	})
+
+	t.Run("keeps metadata only when disabled", func(t *testing.T) {
+		body := BuildImageUploadBody(images, mask, false, meta)
+		for _, item := range body.Items {
+			if item.Stored || item.Data != "" || item.TooLarge {
+				t.Errorf("item should be a placeholder: %+v", item)
+			}
+			if item.Bytes == 0 || item.Filename == "" {
+				t.Errorf("placeholder must keep size and filename: %+v", item)
+			}
+		}
+		if body.Meta["model"] != "gpt-image-1" {
+			t.Errorf("meta should be kept on placeholders: %+v", body.Meta)
+		}
+	})
+
+	t.Run("no mask", func(t *testing.T) {
+		body := BuildImageUploadBody(images, nil, true, nil)
+		if len(body.Items) != 1 {
+			t.Fatalf("items = %+v, want only the source image", body.Items)
+		}
+	})
+}
+
+func TestBuildImageResponseBody(t *testing.T) {
+	png := []byte("generated-png-bytes")
+	resp := &core.ImageGenerationResponse{
+		Created:      1713833628,
+		OutputFormat: "jpeg",
+		Quality:      "high",
+		Size:         "1024x1024",
+		Provider:     "openai",
+		Usage:        &core.ImageUsage{InputTokens: 10, OutputTokens: 272, TotalTokens: 282},
+		Data: []core.ImageData{
+			{B64JSON: base64.StdEncoding.EncodeToString(png), RevisedPrompt: "a fluffy cat"},
+			{URL: "https://img/1.png"},
+		},
+	}
+
+	t.Run("stores base64 outputs and keeps urls", func(t *testing.T) {
+		body := BuildImageResponseBody(resp, true)
+		if !body.Images || len(body.Items) != 2 {
+			t.Fatalf("body = %+v", body)
+		}
+		b64 := body.Items[0]
+		if b64.Role != "output" || b64.ContentType != "image/jpeg" || b64.Bytes != len(png) || b64.RevisedPrompt != "a fluffy cat" {
+			t.Errorf("base64 item = %+v", b64)
+		}
+		if !b64.Stored || b64.Encoding != "base64" || b64.Data != resp.Data[0].B64JSON {
+			t.Errorf("base64 item should embed the payload verbatim: %+v", b64)
+		}
+		hosted := body.Items[1]
+		if hosted.URL != "https://img/1.png" || hosted.Stored || hosted.Bytes != 0 {
+			t.Errorf("url item = %+v", hosted)
+		}
+		if body.Meta["created"] != int64(1713833628) || body.Meta["size"] != "1024x1024" || body.Meta["quality"] != "high" || body.Meta["provider"] != "openai" {
+			t.Errorf("meta = %+v", body.Meta)
+		}
+		if usage, _ := body.Meta["usage"].(map[string]any); usage == nil || usage["total_tokens"] != 282 {
+			t.Errorf("usage = %+v", body.Meta["usage"])
+		}
+		if _, present := body.Meta["background"]; present {
+			t.Errorf("empty envelope fields must be omitted: %+v", body.Meta)
+		}
+	})
+
+	t.Run("placeholder keeps envelope and urls when disabled", func(t *testing.T) {
+		body := BuildImageResponseBody(resp, false)
+		if body.Items[0].Stored || body.Items[0].Data != "" || body.Items[0].Bytes != len(png) || body.Items[0].ContentType != "image/jpeg" {
+			t.Errorf("base64 item should be a sized placeholder: %+v", body.Items[0])
+		}
+		if body.Items[1].URL != "https://img/1.png" {
+			t.Errorf("url must be kept without image storage: %+v", body.Items[1])
+		}
+		if body.Meta["size"] != "1024x1024" {
+			t.Errorf("meta = %+v", body.Meta)
+		}
+	})
+
+	t.Run("nil response", func(t *testing.T) {
+		body := BuildImageResponseBody(nil, true)
+		if !body.Images || len(body.Items) != 0 || body.Meta != nil {
+			t.Errorf("body = %+v", body)
+		}
+	})
+}
+
+func TestBuildImageResponseBody_BudgetAcrossImages(t *testing.T) {
+	big := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, imageBodyMaxBytes/2+1))
+	resp := &core.ImageGenerationResponse{Data: []core.ImageData{{B64JSON: big}, {B64JSON: big}, {B64JSON: "aGk="}}}
+
+	body := BuildImageResponseBody(resp, true)
+
+	if !body.Items[0].Stored {
+		t.Errorf("first image fits the budget and should be stored: %+v", body.Items[0].Bytes)
+	}
+	if body.Items[1].Stored || !body.Items[1].TooLarge || body.Items[1].Bytes == 0 {
+		t.Errorf("second image exceeds the remaining budget: %+v", body.Items[1].Bytes)
+	}
+	if !body.Items[2].Stored {
+		t.Errorf("small third image still fits: %+v", body.Items[2])
+	}
+}
+
+func TestBase64DecodedLen(t *testing.T) {
+	for _, raw := range []string{"", "a", "ab", "abc", "abcd", "hello world!"} {
+		if got := base64DecodedLen(base64.StdEncoding.EncodeToString([]byte(raw))); got != len(raw) {
+			t.Errorf("base64DecodedLen(%q) = %d, want %d", raw, got, len(raw))
+		}
+	}
+}
+
+func TestImageOutputContentType(t *testing.T) {
+	for format, want := range map[string]string{"": "image/png", "png": "image/png", "JPEG": "image/jpeg", "jpg": "image/jpeg", "webp": "image/webp"} {
+		if got := imageOutputContentType(format); got != want {
+			t.Errorf("imageOutputContentType(%q) = %q, want %q", format, got, want)
+		}
+	}
+}
+
+// TestMiddleware_HandlerCapturedResponseBodyIsKept verifies that a JSON body
+// stored by the handler via EnrichEntryWithResponseBody survives the
+// middleware's generic capture and its truncation flag.
+func TestMiddleware_HandlerCapturedResponseBodyIsKept(t *testing.T) {
+	e := echo.New()
+	logger := &capturingLogger{cfg: Config{Enabled: true, LogBodies: true}}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-1","prompt":"a cat"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	oversized := `{"created":1,"data":[{"b64_json":"` + strings.Repeat("A", int(MaxBodyCapture)+16) + `"}]}`
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		EnrichEntryWithResponseBody(c, ImageBodyLog{Images: true, Items: []ImageItemLog{{Role: "output", Bytes: 12}}})
+		return c.JSONBlob(http.StatusOK, []byte(oversized))
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
+	}
+	entry := logger.entries[0]
+	if entry.Data == nil {
+		t.Fatal("expected log data")
+	}
+	body, ok := entry.Data.ResponseBody.(ImageBodyLog)
+	if !ok || !body.Images || len(body.Items) != 1 {
+		t.Fatalf("response body = %T %+v, want the handler-captured image body", entry.Data.ResponseBody, entry.Data.ResponseBody)
+	}
+	if entry.Data.ResponseBodyTooBigToHandle {
+		t.Error("middleware must not flag a handler-captured body as truncated")
+	}
+}
+
+func TestBuildLoggerConfig_ImageBodies(t *testing.T) {
+	tests := []struct {
+		name            string
+		enabled         bool
+		scope           config.ImageBodyScope
+		wantIn, wantOut bool
+	}{
+		{"disabled", false, config.ImageBodyScopeAll, false, false},
+		{"all", true, config.ImageBodyScopeAll, true, true},
+		{"unset scope defaults to all", true, "", true, true},
+		{"input", true, config.ImageBodyScopeInput, true, false},
+		{"output", true, config.ImageBodyScopeOutput, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := buildLoggerConfig(config.LogConfig{LogBodies: true, LogImageBodies: tt.enabled, LogImageBodiesScope: tt.scope})
+			if cfg.LogImageInputs != tt.wantIn || cfg.LogImageOutputs != tt.wantOut {
+				t.Fatalf("inputs/outputs = %v/%v, want %v/%v", cfg.LogImageInputs, cfg.LogImageOutputs, tt.wantIn, tt.wantOut)
+			}
+		})
+	}
+}

@@ -131,7 +131,22 @@ func EnrichEntryWithCapturedResponseBody(c *echo.Context, body any, truncated bo
 	if truncated {
 		data.ResponseBodyTooBigToHandle = true
 	}
+	markResponseBodyCaptured(c)
 	publishLiveAuditUpdate(c, entry)
+}
+
+// markResponseBodyCaptured records that the handler owns the response body so
+// the middleware's generic capture leaves it alone.
+func markResponseBodyCaptured(c *echo.Context) {
+	c.Set(string(LogEntryResponseCapturedKey), true)
+}
+
+// IsResponseBodyCapturedByHandler reports whether a handler captured the
+// response body itself via EnrichEntryWithResponseBody or
+// EnrichEntryWithCapturedResponseBody.
+func IsResponseBodyCapturedByHandler(c interface{ Get(string) any }) bool {
+	captured, _ := c.Get(string(LogEntryResponseCapturedKey)).(bool)
+	return captured
 }
 
 // EnrichEntryWithResponseBody sets the audit response body from a handler that
@@ -146,6 +161,7 @@ func EnrichEntryWithResponseBody(c *echo.Context, body any) {
 		return
 	}
 	ensureLogData(entry).ResponseBody = body
+	markResponseBodyCaptured(c)
 	publishLiveAuditUpdate(c, entry)
 }
 

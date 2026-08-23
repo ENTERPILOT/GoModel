@@ -31,6 +31,11 @@ const (
 	// handles streaming audit logging.
 	LogEntryStreamingKey contextKey = "auditlog_entry_streaming"
 
+	// LogEntryResponseCapturedKey marks that the handler captured the response
+	// body itself (e.g. an image body with its own size budget), so the
+	// middleware must neither overwrite it nor apply its own truncation flag.
+	LogEntryResponseCapturedKey contextKey = "auditlog_entry_response_captured"
+
 	// LogEntryLivePublisherKey stores an optional realtime dashboard publisher.
 	LogEntryLivePublisherKey contextKey = "auditlog_live_publisher"
 )

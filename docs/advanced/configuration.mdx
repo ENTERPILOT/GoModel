@@ -141,6 +141,8 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | `LOGGING_LOG_BODIES`              | Log request/response bodies                | `true`  |
 | `LOGGING_LOG_REVISION_BODIES`     | Log rewritten bodies from request rewriters | `true`  |
 | `LOGGING_LOG_AUDIO_BODIES`        | Log audio endpoint inputs/outputs          | `false` |
+| `LOGGING_LOG_IMAGE_BODIES`        | Log image endpoint inputs/outputs          | `false` |
+| `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Which image bytes to store: `all`, `input`, `output` | `all` |
 | `LOGGING_LOG_HEADERS`             | Log headers (sensitive ones auto-redacted) | `true`  |
 | `LOGGING_ONLY_MODEL_INTERACTIONS` | Only log AI model endpoints                | `true`  |
 | `LOGGING_BUFFER_SIZE`             | In-memory buffer before flush              | `1000`  |
@@ -189,6 +191,21 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   audio bodies (the speech response and the transcription upload, which keeps its
   metadata) are recorded as a lightweight `{__audio__, content_type, bytes, stored: false}`
   placeholder; when body logging is off, no audio body is stored at all.
+</Note>
+
+<Note>
+  `LOGGING_LOG_IMAGE_BODIES` refines `LOGGING_LOG_BODIES` for the
+  [Images API](/advanced/images-api) — it has no effect unless body logging is
+  enabled. With both on, generated images (`/v1/images/generations`,
+  `/v1/images/edits`) and uploaded edit sources and masks are stored as base64
+  (8 MB per entry, images beyond the budget become placeholders) so the
+  dashboard can display them. `LOGGING_LOG_IMAGE_BODIES_SCOPE` narrows this to
+  `input` (uploads only) or `output` (results only); the default `all` stores
+  both. It defaults to `false` because image payloads are large and grow the
+  audit store quickly. When body logging is on but this is off, image entries
+  keep everything except the pixels: the prompt and parameters, the response
+  envelope (`usage`, `size`, `quality`), hosted URLs, and a sized
+  `{role, content_type, bytes, stored: false}` placeholder per image.
 </Note>
 
 #### Token Usage Tracking
