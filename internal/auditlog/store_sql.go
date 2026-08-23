@@ -30,6 +30,13 @@ type SQLStore struct {
 	retentionDays int
 	stopCleanup   chan struct{}
 	closeOnce     sync.Once
+
+	// indexBuild tracks the background trigram search index build, so tests
+	// can wait for it; production never blocks on it. Close cancels a build
+	// still in flight rather than holding shutdown for it — the interrupted
+	// index is dropped and rebuilt on the next start.
+	indexBuild       sync.WaitGroup
+	cancelIndexBuild context.CancelFunc
 }
 
 var sqlTables = []string{
@@ -170,6 +177,14 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		retentionDays: retentionDays,
 		stopCleanup:   make(chan struct{}),
 	}
+	// The trigram search index can take minutes to build on a large existing
+	// table, so it is built off the startup path (and CONCURRENTLY, so writes
+	// keep flowing); readers pick it up as soon as it exists.
+	buildCtx, cancel := context.WithCancel(context.Background())
+	store.cancelIndexBuild = cancel
+	store.indexBuild.Go(func() {
+		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
+	})
 	if retentionDays > 0 {
 		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
 	}
@@ -317,11 +332,14 @@ func (s *SQLStore) Flush(_ context.Context) error {
 // Close stops the cleanup goroutine. The connection is managed by the storage
 // layer. Safe to call multiple times.
 func (s *SQLStore) Close() error {
-	if s.retentionDays > 0 && s.stopCleanup != nil {
-		s.closeOnce.Do(func() {
+	s.closeOnce.Do(func() {
+		if s.cancelIndexBuild != nil {
+			s.cancelIndexBuild()
+		}
+		if s.retentionDays > 0 && s.stopCleanup != nil {
 			close(s.stopCleanup)
-		})
-	}
+		}
+	})
 	return nil
 }
 

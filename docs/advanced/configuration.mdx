@@ -153,6 +153,15 @@ can appear live but are not written to storage and disappear after a page
 refresh. When audit logging is enabled, writes are asynchronous and can take up
 to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 
+<Note>
+  On PostgreSQL, the audit log's free-text search uses a trigram index from the
+  bundled `pg_trgm` extension. GoModel installs the extension and builds the
+  index on startup when its database role is allowed to; otherwise the search
+  still works but scans every entry in the selected date range. To enable it on
+  a restricted role, run `CREATE EXTENSION pg_trgm;` as a superuser once and
+  restart GoModel.
+</Note>
+
 <Warning>
   When `LOGGING_LOG_BODIES` is enabled, request and response bodies are stored
   in full. These may contain sensitive data such as PII or API keys embedded in

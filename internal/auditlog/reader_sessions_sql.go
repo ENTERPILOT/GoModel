@@ -26,7 +26,7 @@ const auditThreadKey = `COALESCE(NULLIF(session_id, ''), CAST(id AS TEXT))`
 func (r *SQLReader) GetSessions(ctx context.Context, params LogQueryParams) (*SessionListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
-	conditions, args, err := r.logFilters(params)
+	conditions, args, err := r.logFilters(ctx, params)
 	if err != nil {
 		return nil, err
 	}
