@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"strings"
 	"sync/atomic"
-	"unicode/utf8"
 	"time"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 
