@@ -555,6 +555,10 @@ func stampProvider[T any](resp T, providerType string) T {
 		if typed != nil {
 			typed.Provider = providerType
 		}
+	case *core.ImageGenerationResponse:
+		if typed != nil {
+			typed.Provider = providerType
+		}
 	}
 	return resp
 }
@@ -604,6 +608,13 @@ func forwardEmbeddingRequest(req *core.EmbeddingRequest, selector core.ModelSele
 }
 
 func forwardAudioSpeechRequest(req *core.AudioSpeechRequest, selector core.ModelSelector) *core.AudioSpeechRequest {
+	forwardReq := *req
+	forwardReq.Model = selector.Model
+	forwardReq.Provider = ""
+	return &forwardReq
+}
+
+func forwardImageGenerationRequest(req *core.ImageGenerationRequest, selector core.ModelSelector) *core.ImageGenerationRequest {
 	forwardReq := *req
 	forwardReq.Model = selector.Model
 	forwardReq.Provider = ""
@@ -797,6 +808,27 @@ func (r *Router) CreateTranslation(ctx context.Context, req *core.AudioTranscrip
 		},
 	)
 	return resp, err
+}
+
+// CreateImage routes an image generation request to the provider that owns the
+// model, requiring it to implement core.ImageProvider.
+func (r *Router) CreateImage(ctx context.Context, req *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("image generation request is required", nil)
+	}
+	return routeStampedModelResponse(
+		r, ctx, req.Model, req.Provider,
+		func(selector core.ModelSelector) *core.ImageGenerationRequest {
+			return forwardImageGenerationRequest(req, selector)
+		},
+		func(ctx context.Context, provider core.Provider, forwardReq *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
+			ip, ok := provider.(core.ImageProvider)
+			if !ok {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support image generation", req.Model), nil)
+			}
+			return ip.CreateImage(ctx, forwardReq)
+		},
+	)
 }
 
 // routeAudioCall resolves the model, requires the target provider to implement

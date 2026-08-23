@@ -267,3 +267,9 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	return p.compat.Embeddings(ctx, req)
 }
+
+// CreateImage sends an image generation request to xAI's OpenAI-compatible
+// /images/generations endpoint (grok-2-image and successors).
+func (p *Provider) CreateImage(ctx context.Context, req *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
+	return p.compat.CreateImage(ctx, req)
+}

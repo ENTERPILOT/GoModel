@@ -309,7 +309,7 @@ func TestAudioSpeech_AuthorizesResolvedSelector(t *testing.T) {
 		speechResp:   &core.AudioResponse{ContentType: "audio/mpeg", Data: []byte("audio")},
 	}
 	authorizer := &recordingModelAuthorizer{}
-	svc := &audioService{provider: mock, modelAuthorizer: authorizer}
+	svc := &audioService{modelCallService: modelCallService{provider: mock, modelAuthorizer: authorizer}}
 
 	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
@@ -337,7 +337,7 @@ func TestAudioSpeech_AuthorizerDeniesAccess(t *testing.T) {
 		resolved:     &core.ModelSelector{Provider: "openai", Model: "gpt-4o-mini-tts"},
 	}
 	authorizer := &recordingModelAuthorizer{err: core.NewInvalidRequestError("denied", nil)}
-	svc := &audioService{provider: mock, modelAuthorizer: authorizer}
+	svc := &audioService{modelCallService: modelCallService{provider: mock, modelAuthorizer: authorizer}}
 
 	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
@@ -612,7 +612,7 @@ func newTranscriptionMock() *audioMockProvider {
 // the upload metadata attached. Content type falls back to the filename
 // extension when the multipart part declares a non-audio type.
 func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
-	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: true}
+	svc := &audioService{modelCallService: modelCallService{provider: newTranscriptionMock()}, logBodies: true, logAudioBodies: true}
 	c, rec, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
 
 	if err := svc.CreateTranscription(c); err != nil {
@@ -642,7 +642,7 @@ func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
 // but LogAudioBodies off, the upload metadata is still recorded as a placeholder
 // (no audio bytes), mirroring the speech-response behavior.
 func TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled(t *testing.T) {
-	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: false}
+	svc := &audioService{modelCallService: modelCallService{provider: newTranscriptionMock()}, logBodies: true, logAudioBodies: false}
 	c, _, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
 
 	if err := svc.CreateTranscription(c); err != nil {
@@ -663,7 +663,7 @@ func TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled(t *testing.T) {
 // TestAudioTranscription_NoCaptureWhenBodiesDisabled: nothing is captured when
 // the master LogBodies switch is off.
 func TestAudioTranscription_NoCaptureWhenBodiesDisabled(t *testing.T) {
-	svc := &audioService{provider: newTranscriptionMock(), logBodies: false, logAudioBodies: true}
+	svc := &audioService{modelCallService: modelCallService{provider: newTranscriptionMock()}, logBodies: false, logAudioBodies: true}
 	c, _, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
 
 	if err := svc.CreateTranscription(c); err != nil {
@@ -679,7 +679,7 @@ func TestAudioTranscription_NoCaptureWhenBodiesDisabled(t *testing.T) {
 func TestAudioSpeech_LogsUsage(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
-	svc := &audioService{provider: newSpeechMock(), usageLogger: logger}
+	svc := &audioService{modelCallService: modelCallService{provider: newSpeechMock(), usageLogger: logger}}
 	c, rec, _ := newSpeechRequestWithAuditEntry()
 
 	if err := svc.CreateSpeech(c); err != nil {
@@ -738,7 +738,7 @@ func TestAudioSpeech_CostsOutputAudioDuration(t *testing.T) {
 				mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}},
 				speechResp:   &core.AudioResponse{ContentType: tt.contentType, Data: tt.data},
 			}
-			svc := &audioService{provider: mock, usageLogger: logger, pricingResolver: &mockPricingResolver{pricing: pricing}}
+			svc := &audioService{modelCallService: modelCallService{provider: mock, usageLogger: logger, pricingResolver: &mockPricingResolver{pricing: pricing}}}
 
 			body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"`
 			if tt.responseFormat != "" {
@@ -804,7 +804,7 @@ func wavBytes(sampleRate, channels, bitsPerSample int, seconds float64) []byte {
 func TestAudioTranscription_LogsUsage(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
-	svc := &audioService{provider: newTranscriptionMock(), usageLogger: logger}
+	svc := &audioService{modelCallService: modelCallService{provider: newTranscriptionMock(), usageLogger: logger}}
 	c, rec, _ := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("audio-bytes"))
 
 	if err := svc.CreateTranscription(c); err != nil {
@@ -829,7 +829,7 @@ func TestAudioTranscription_LogsUsage(t *testing.T) {
 func TestAudioSpeech_NoUsageWhenDisabled(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: false}, captured: &captured}
-	svc := &audioService{provider: newSpeechMock(), usageLogger: logger}
+	svc := &audioService{modelCallService: modelCallService{provider: newSpeechMock(), usageLogger: logger}}
 	c, rec, _ := newSpeechRequestWithAuditEntry()
 
 	if err := svc.CreateSpeech(c); err != nil {
@@ -915,7 +915,7 @@ func newSpeechMock() *audioMockProvider {
 // LogAudioBodies on, the speech input is logged and the audio output is stored
 // losslessly as base64 for playback.
 func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
-	svc := &audioService{provider: newSpeechMock(), logBodies: true, logAudioBodies: true}
+	svc := &audioService{modelCallService: modelCallService{provider: newSpeechMock()}, logBodies: true, logAudioBodies: true}
 	c, rec, entry := newSpeechRequestWithAuditEntry()
 
 	if err := svc.CreateSpeech(c); err != nil {
@@ -950,7 +950,7 @@ func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
 // LogAudioBodies off, the audio response is a metadata-only placeholder and the
 // input is not captured.
 func TestAudioSpeech_PlaceholderWhenAudioDisabled(t *testing.T) {
-	svc := &audioService{provider: newSpeechMock(), logBodies: true, logAudioBodies: false}
+	svc := &audioService{modelCallService: modelCallService{provider: newSpeechMock()}, logBodies: true, logAudioBodies: false}
 	c, _, entry := newSpeechRequestWithAuditEntry()
 
 	if err := svc.CreateSpeech(c); err != nil {
@@ -975,7 +975,7 @@ func TestAudioSpeech_PlaceholderWhenAudioDisabled(t *testing.T) {
 // TestAudioSpeech_NoAudioBodyWhenBodiesDisabled: LogBodies is the master switch.
 // With it off, no audio body is captured even if LogAudioBodies is on.
 func TestAudioSpeech_NoAudioBodyWhenBodiesDisabled(t *testing.T) {
-	svc := &audioService{provider: newSpeechMock(), logBodies: false, logAudioBodies: true}
+	svc := &audioService{modelCallService: modelCallService{provider: newSpeechMock()}, logBodies: false, logAudioBodies: true}
 	c, rec, entry := newSpeechRequestWithAuditEntry()
 
 	if err := svc.CreateSpeech(c); err != nil {
@@ -1020,10 +1020,10 @@ func TestAudio_NilResponseSkipsUsage(t *testing.T) {
 	t.Run("speech", func(t *testing.T) {
 		var captured *usage.UsageEntry
 		logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
-		svc := &audioService{
+		svc := &audioService{modelCallService: modelCallService{
 			provider:    &audioMockProvider{mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}}, speechResp: nil},
 			usageLogger: logger,
-		}
+		}}
 		c, rec, _ := newSpeechRequestWithAuditEntry()
 
 		if err := svc.CreateSpeech(c); err != nil {
@@ -1040,10 +1040,10 @@ func TestAudio_NilResponseSkipsUsage(t *testing.T) {
 	t.Run("transcription", func(t *testing.T) {
 		var captured *usage.UsageEntry
 		logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
-		svc := &audioService{
+		svc := &audioService{modelCallService: modelCallService{
 			provider:    &audioMockProvider{mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-transcribe"}}, transcriptionResp: nil},
 			usageLogger: logger,
-		}
+		}}
 		c, rec, _ := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("audio-bytes"))
 
 		// Must not panic on resp.Data when resp is nil.

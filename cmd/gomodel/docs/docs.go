@@ -5665,6 +5665,68 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1/images/generations": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "images"
+                ],
+                "summary": "Create image (image generation)",
+                "parameters": [
+                    {
+                        "description": "Image generation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/core.ImageGenerationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/core.ImageGenerationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/messages": {
             "post": {
                 "consumes": [
@@ -9425,6 +9487,98 @@ const docTemplate = `{
                 }
             }
         },
+        "core.ImageData": {
+            "type": "object",
+            "properties": {
+                "b64_json": {
+                    "type": "string"
+                },
+                "revised_prompt": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "core.ImageGenerationRequest": {
+            "type": "object",
+            "properties": {
+                "model": {
+                    "type": "string"
+                },
+                "n": {
+                    "type": "integer"
+                },
+                "prompt": {
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider is gateway routing metadata, stripped before dispatching upstream.",
+                    "type": "string"
+                },
+                "quality": {
+                    "type": "string"
+                },
+                "response_format": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "string"
+                },
+                "stream": {
+                    "description": "Stream is typed only so the gateway can reject it: streaming image\ngeneration returns server-sent events, which this endpoint does not relay.",
+                    "type": "boolean"
+                },
+                "user": {
+                    "type": "string"
+                }
+            }
+        },
+        "core.ImageGenerationResponse": {
+            "type": "object",
+            "properties": {
+                "background": {
+                    "type": "string"
+                },
+                "created": {
+                    "type": "integer"
+                },
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ImageData"
+                    }
+                },
+                "output_format": {
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider is a gateway addition, stamped like every other routed response,\nso clients can tell which provider served the request.",
+                    "type": "string"
+                },
+                "quality": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "string"
+                },
+                "usage": {
+                    "$ref": "#/definitions/core.ImageUsage"
+                }
+            }
+        },
+        "core.ImageTokenDetails": {
+            "type": "object",
+            "properties": {
+                "image_tokens": {
+                    "type": "integer"
+                },
+                "text_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "core.ImageURLContent": {
             "type": "object",
             "properties": {
@@ -9436,6 +9590,23 @@ const docTemplate = `{
                 },
                 "url": {
                     "type": "string"
+                }
+            }
+        },
+        "core.ImageUsage": {
+            "type": "object",
+            "properties": {
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "input_tokens_details": {
+                    "$ref": "#/definitions/core.ImageTokenDetails"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
                 }
             }
         },
