@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 
@@ -18,6 +20,12 @@ import (
 type SQLReader struct {
 	db      sqlx.DB
 	dialect readerDialect
+
+	// searchIndexed caches that the trigram search index exists, so free-text
+	// search matches the indexed searchText expression instead of sweeping
+	// each column. The store builds the index in the background, so until it
+	// is seen each search re-probes; the probe is a catalog lookup.
+	searchIndexed atomic.Bool
 }
 
 // NewSQLReader creates an audit log reader over a SQL database.
@@ -26,6 +34,18 @@ func NewSQLReader(db sqlx.DB) (*SQLReader, error) {
 		return nil, fmt.Errorf("database connection is required")
 	}
 	return &SQLReader{db: db, dialect: readerDialectFor(db.Dialect())}, nil
+}
+
+// searchIsIndexed reports whether free-text search can use the trigram index.
+func (r *SQLReader) searchIsIndexed(ctx context.Context) bool {
+	if r.searchIndexed.Load() {
+		return true
+	}
+	if !hasTrigramSearchIndex(ctx, r.db) {
+		return false
+	}
+	r.searchIndexed.Store(true)
+	return true
 }
 
 // readerDialect holds the handful of spellings the two engines genuinely
@@ -67,7 +87,7 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 			like:               "ILIKE",
 			idColumn:           "id::text",
 			attemptIDColumn:    "audit_log_id::text",
-			errorMessage:       `data->>'error_message'`,
+			errorMessage:       postgresErrorMessage,
 			responseID:         `data #>> '{response_body,id}'`,
 			previousResponseID: `data #>> '{request_body,previous_response_id}'`,
 			timestampBound:     func(t time.Time) any { return t.UTC() },
@@ -112,7 +132,7 @@ func qualifiedLogColumns(alias string) string {
 func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
-	conditions, args, err := r.logFilters(params)
+	conditions, args, err := r.logFilters(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +174,7 @@ func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogLis
 
 // logFilters builds the WHERE conditions for a log query. Placeholders are
 // written as `?` throughout; the adapter renumbers them for PostgreSQL.
-func (r *SQLReader) logFilters(params LogQueryParams) ([]string, []any, error) {
+func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]string, []any, error) {
 	userPath, err := normalizeAuditUserPathFilter(params.UserPath)
 	if err != nil {
 		return nil, nil, err
@@ -215,7 +235,7 @@ func (r *SQLReader) logFilters(params LogQueryParams) ([]string, []any, error) {
 		add("stream = ?", *params.Stream)
 	}
 	if params.Search != "" {
-		condition, values := r.searchFilter(params.Search)
+		condition, values := r.searchFilter(params.Search, r.searchIsIndexed(ctx))
 		add(condition, values...)
 	}
 	return conditions, args, nil
@@ -229,7 +249,7 @@ func (r *SQLReader) logFilters(params LogQueryParams) ([]string, []any, error) {
 // lookups instead of the leading-wildcard LIKE scan every other term needs.
 // The trade is deliberate: a full UUID that only appears inside an error
 // message no longer matches, and identifiers live in these columns.
-func (r *SQLReader) searchFilter(search string) (string, []any) {
+func (r *SQLReader) searchFilter(search string, indexed bool) (string, []any) {
 	if isCanonicalUUID(search) {
 		// Equality is case-sensitive (unlike the LIKE path), and pasted UUIDs
 		// may be uppercase while stored ones are not; match both spellings.
@@ -245,9 +265,12 @@ func (r *SQLReader) searchFilter(search string) (string, []any) {
 	}
 
 	pattern := "%" + sqlutil.EscapeLikeWildcards(search) + "%"
-	searchColumns := []string{
-		"request_id", "auth_key_id", "requested_model", "provider", "provider_name",
-		"method", "path", "user_path", "session_id", "error_type",
+	// With the trigram index, one match against the indexed expression is an
+	// index lookup. Shorter terms yield no trigram and would scan the whole
+	// index only to recheck every row, so they keep the column sweep. pg_trgm
+	// counts characters, not bytes: a single CJK character is one character.
+	if indexed && utf8.RuneCountInString(search) >= minTrigramSearchLength {
+		return r.likeClause(searchText(r.dialect.errorMessage)), []any{pattern}
 	}
 	clauses := make([]string, 0, len(searchColumns)+1)
 	values := make([]any, 0, len(searchColumns)+1)
