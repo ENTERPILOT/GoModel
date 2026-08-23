@@ -62,6 +62,13 @@ type readerDialect struct {
 	idColumn        string
 	attemptIDColumn string
 
+	// userPath is the user_path column under byte-wise ordering, so the
+	// subtree filter's range bounds mean "prefix" and the planner can serve
+	// them from the index userPathIndexes creates on the same expression.
+	// SQLite's default BINARY collation already compares bytes; PostgreSQL's
+	// default collation is locale-aware and must be overridden.
+	userPath string
+
 	// errorMessage, responseID and previousResponseID extract JSON fields.
 	// The PostgreSQL spellings match the expressions jsonPathIndexes creates,
 	// which is what lets the planner use those indexes.
@@ -87,6 +94,7 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 			like:               "ILIKE",
 			idColumn:           "id::text",
 			attemptIDColumn:    "audit_log_id::text",
+			userPath:           `user_path COLLATE "C"`,
 			errorMessage:       postgresErrorMessage,
 			responseID:         `data #>> '{response_body,id}'`,
 			previousResponseID: `data #>> '{request_body,previous_response_id}'`,
@@ -98,6 +106,7 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 		like:               "LIKE",
 		idColumn:           "id",
 		attemptIDColumn:    "audit_log_id",
+		userPath:           "user_path",
 		errorMessage:       `json_extract(data, '$.error_message')`,
 		responseID:         `json_extract(data, '$.response_body.id')`,
 		previousResponseID: `json_extract(data, '$.request_body.previous_response_id')`,
@@ -216,10 +225,10 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 	}
 	if userPath != "" {
 		if params.ExactUserPath {
-			add(auditExactUserPathSQLPredicate(userPath, "user_path = ?"), userPath)
+			add(auditExactUserPathSQLPredicate(userPath, r.dialect.userPath), userPath)
 		} else {
-			add(auditUserPathSQLPredicate(userPath, "user_path = ?", r.likeClause("user_path")),
-				userPath, auditUserPathSubtreePattern(userPath))
+			lower, upper := auditUserPathSubtreeBounds(userPath)
+			add(auditUserPathSQLPredicate(userPath, r.dialect.userPath), userPath, lower, upper)
 		}
 	}
 	if params.ErrorType != "" {

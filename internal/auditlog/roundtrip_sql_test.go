@@ -683,3 +683,59 @@ func TestSQLStoreAndReader_PreserveCacheType(t *testing.T) {
 		}
 	})
 }
+
+func TestSQLReader_GetLogsUserPathSubtreeIsSegmentExact(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+		defer store.Close()
+
+		now := time.Now()
+		entries := []*LogEntry{
+			{ID: "self", Timestamp: now, UserPath: "/team"},
+			{ID: "child", Timestamp: now, UserPath: "/team/a"},
+			{ID: "grandchild", Timestamp: now, UserPath: "/team/a/b"},
+			// Share the byte prefix but are not descendants: "-" sorts before "/"
+			// and "0" is the first byte after it, so both straddle the range bounds.
+			{ID: "prefix-sibling", Timestamp: now, UserPath: "/team-x"},
+			{ID: "prefix-sibling-child", Timestamp: now, UserPath: "/team0/a"},
+			// User paths are case-preserving, and the filter compares bytes.
+			{ID: "other-case", Timestamp: now, UserPath: "/Team/a"},
+		}
+		if err := store.WriteBatch(ctx, entries); err != nil {
+			t.Fatalf("WriteBatch: %v", err)
+		}
+
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
+		ids := func(params LogQueryParams) map[string]bool {
+			t.Helper()
+			logs, err := reader.GetLogs(ctx, params)
+			if err != nil {
+				t.Fatalf("GetLogs(%+v): %v", params, err)
+			}
+			got := make(map[string]bool, len(logs.Entries))
+			for _, entry := range logs.Entries {
+				got[entry.ID] = true
+			}
+			if logs.Total != len(got) {
+				t.Fatalf("Total = %d, want %d", logs.Total, len(got))
+			}
+			return got
+		}
+
+		subtree := ids(LogQueryParams{UserPath: "/team", Limit: 10})
+		if len(subtree) != 3 || !subtree["self"] || !subtree["child"] || !subtree["grandchild"] {
+			t.Fatalf("subtree ids = %v, want self, child, grandchild", subtree)
+		}
+		exact := ids(LogQueryParams{UserPath: "/team", ExactUserPath: true, Limit: 10})
+		if len(exact) != 1 || !exact["self"] {
+			t.Fatalf("exact ids = %v, want self", exact)
+		}
+	})
+}

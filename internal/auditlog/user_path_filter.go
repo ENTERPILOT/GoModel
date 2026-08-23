@@ -1,8 +1,6 @@
 package auditlog
 
 import (
-	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
-
 	"fmt"
 	"regexp"
 
@@ -17,26 +15,37 @@ func normalizeAuditUserPathFilter(raw string) (string, error) {
 	return userPath, nil
 }
 
-func auditUserPathSubtreePattern(userPath string) string {
+// auditUserPathSubtreeBounds returns the half-open range [userPath+"/",
+// userPath+"0") that holds exactly the descendants of userPath under byte-wise
+// ordering: '0' is the byte after '/', so every value starting with
+// userPath+"/" sorts inside the range and nothing else does. Comparing against
+// bounds instead of a LIKE pattern lets a btree index serve the subtree filter
+// and needs no wildcard escaping.
+func auditUserPathSubtreeBounds(userPath string) (lower, upper string) {
 	if userPath == "/" {
-		return "/%"
+		return "/", "0"
 	}
-	return sqlutil.EscapeLikeWildcards(userPath) + "/%"
+	return userPath + "/", userPath + "0"
 }
 
-func auditUserPathSQLPredicate(userPath, exactExpr, subtreeExpr string) string {
-	predicate := "(" + exactExpr + " OR " + subtreeExpr
+// auditUserPathSQLPredicate matches userPath itself and its subtree through
+// column, which must compare bytes (BINARY on SQLite, COLLATE "C" on
+// PostgreSQL) for the bounds from auditUserPathSubtreeBounds to mean "prefix".
+// Bind userPath, then the lower and upper bound. Root also admits the legacy
+// NULL rows written before user paths existed.
+func auditUserPathSQLPredicate(userPath, column string) string {
+	predicate := "(" + column + " = ? OR (" + column + " >= ? AND " + column + " < ?)"
 	if userPath == "/" {
 		predicate += " OR user_path IS NULL"
 	}
 	return predicate + ")"
 }
 
-func auditExactUserPathSQLPredicate(userPath, exactExpr string) string {
+func auditExactUserPathSQLPredicate(userPath, column string) string {
 	if userPath == "/" {
-		return "(" + exactExpr + " OR user_path = '' OR user_path IS NULL)"
+		return "(" + column + " = ? OR user_path = '' OR user_path IS NULL)"
 	}
-	return exactExpr
+	return column + " = ?"
 }
 
 func auditUserPathSubtreeRegex(userPath string) string {

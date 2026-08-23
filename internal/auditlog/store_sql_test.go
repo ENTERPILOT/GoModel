@@ -227,3 +227,61 @@ func TestNewSQLStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
 		}
 	})
 }
+
+func TestNewSQLStoreReplacesSingleColumnUserPathIndex(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		// Databases created before the composite index carry the single-column one.
+		if err := db.Schema(ctx, `
+			CREATE TABLE audit_logs (
+				id TEXT PRIMARY KEY,
+				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
+				user_path TEXT,
+				status_code INTEGER DEFAULT 0
+			)`,
+			`CREATE INDEX idx_audit_user_path ON audit_logs(user_path)`,
+		); err != nil {
+			t.Fatalf("create legacy table: %v", err)
+		}
+
+		if _, err := NewSQLStore(ctx, db, 0); err != nil {
+			t.Fatalf("NewSQLStore: %v", err)
+		}
+
+		// Recreating the old index must succeed, proving the startup drop removed it.
+		if _, err := db.Exec(ctx, `CREATE INDEX idx_audit_user_path ON audit_logs(user_path)`); err != nil {
+			t.Fatalf("single-column index still present after NewSQLStore: %v", err)
+		}
+		// And the composite replacement must now exist.
+		if _, err := db.Exec(ctx, `CREATE INDEX idx_audit_user_path_timestamp ON audit_logs(user_path, timestamp)`); err == nil {
+			t.Fatal("composite user_path index missing after NewSQLStore")
+		}
+	})
+}
+
+// The index must be declared on the same expression the reader compares
+// against (readerDialect.userPath), or the planner cannot use it: on
+// PostgreSQL that is the column under COLLATE "C".
+func TestUserPathIndexesMatchReaderExpression(t *testing.T) {
+	for _, dialect := range []sqlx.Dialect{sqlx.SQLite, sqlx.PostgreSQL} {
+		t.Run(string(dialect), func(t *testing.T) {
+			column := readerDialectFor(dialect).userPath
+			want := []string{
+				"DROP INDEX IF EXISTS idx_audit_user_path",
+				"CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON audit_logs(" + column + ", timestamp)",
+			}
+			got := userPathIndexes(dialect)
+			if len(got) != len(want) {
+				t.Fatalf("userPathIndexes(%s) = %q, want %q", dialect, got, want)
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("userPathIndexes(%s)[%d] = %q, want %q", dialect, i, got[i], want[i])
+				}
+			}
+		})
+	}
+	if got := readerDialectFor(sqlx.PostgreSQL).userPath; got != `user_path COLLATE "C"` {
+		t.Fatalf("PostgreSQL user_path expression = %q, want byte-wise collation", got)
+	}
+}
