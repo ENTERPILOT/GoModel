@@ -12,11 +12,12 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		ctx := context.Background()
 
 		redirect := VirtualModel{
-			Source:      "fast",
-			Targets:     []Target{{Provider: "openai", Model: "gpt-4o"}},
-			Description: "primary",
-			Slowdown:    new(0.4),
-			Enabled:     true,
+			Source:          "fast",
+			Targets:         []Target{{Provider: "openai", Model: "gpt-4o"}},
+			Description:     "primary",
+			Slowdown:        new(0.4),
+			SessionAffinity: new(false),
+			Enabled:         true,
 		}
 		policy := VirtualModel{
 			Source:       "openai/gpt-4o",
@@ -63,6 +64,9 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		if gotRedirect.Slowdown == nil || *gotRedirect.Slowdown != 0.4 {
 			t.Fatalf("Get(fast).Slowdown = %v, want 0.4", gotRedirect.Slowdown)
 		}
+		if gotRedirect.SessionAffinity == nil || *gotRedirect.SessionAffinity {
+			t.Fatalf("Get(fast).SessionAffinity = %v, want explicit false", gotRedirect.SessionAffinity)
+		}
 
 		gotPolicy, err := store.Get(ctx, "openai/gpt-4o")
 		if err != nil {
@@ -76,6 +80,9 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		}
 		if gotPolicy.Slowdown == nil || *gotPolicy.Slowdown != 0.2 {
 			t.Fatalf("Get(policy).Slowdown = %v, want 0.2", gotPolicy.Slowdown)
+		}
+		if gotPolicy.SessionAffinity != nil {
+			t.Fatalf("Get(policy).SessionAffinity = %v, want nil (unset)", *gotPolicy.SessionAffinity)
 		}
 
 		gotDisabled, err := store.Get(ctx, "no-slowdown")
