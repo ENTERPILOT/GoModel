@@ -226,6 +226,17 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 		mappedKeys[rawKeyAudioOutputSeconds] = true
 	}
 
+	// Price generated images for per-image models (DALL·E). The count lives in
+	// RawData (see usage/images.go); token-billed image models carry no
+	// PerImage rate and are priced through the token paths above.
+	if pricing.PerImage != nil {
+		if count := extractInt(rawData, rawKeyImages); count > 0 {
+			outputCost += float64(count) * *pricing.PerImage
+			hasOutput = true
+		}
+		mappedKeys[rawKeyImages] = true
+	}
+
 	// Flag speech priced by output audio duration whose codec the gateway could
 	// not measure (opus/aac/flac), so the cost reads as visibly
 	// partial instead of a silent zero. Transcription rows never set the output

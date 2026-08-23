@@ -28,6 +28,7 @@ const (
 	OperationAudioSpeech         Operation = "audio_speech"
 	OperationAudioTranscriptions Operation = "audio_transcriptions"
 	OperationAudioTranslations   Operation = "audio_translations"
+	OperationImageGenerations    Operation = "image_generations"
 	OperationRealtime            Operation = "realtime"
 	OperationProviderPassthrough Operation = "provider_passthrough"
 	OperationMCP                 Operation = "mcp"
@@ -149,6 +150,16 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationAudioTranslations,
 		}
+	case path == "/v1/images/generations":
+		// Image generation calls a provider and incurs usage, so it is a model
+		// interaction. Like audio it is not IngressManaged: the handler decodes
+		// the JSON body itself rather than going through the translated
+		// inference pipeline.
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			Dialect:          "openai_compat",
+			Operation:        OperationImageGenerations,
+		}
 	case path == "/v1/realtime" || path == "/v1/realtime/calls" || path == "/v1/realtime/client_secrets":
 		// The realtime endpoints relay the provider's schema verbatim: /v1/realtime
 		// upgrades to a websocket, /v1/realtime/calls exchanges WebRTC SDP, and
@@ -217,7 +228,7 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 			return BodyModeMultipart
 		}
 		return BodyModeNone
-	case OperationAudioSpeech:
+	case OperationAudioSpeech, OperationImageGenerations:
 		return BodyModeJSON
 	case OperationAudioTranscriptions, OperationAudioTranslations:
 		return BodyModeMultipart

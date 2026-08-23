@@ -44,6 +44,14 @@ type AudioTranslationProvider interface {
 	CreateTranslation(ctx context.Context, req *AudioTranscriptionRequest) (*AudioResponse, error)
 }
 
+// ImageProvider is implemented by providers that support the OpenAI-compatible
+// image generation endpoint (POST /v1/images/generations). It is optional so
+// providers without image models can omit it; the router discovers support by
+// interface assertion.
+type ImageProvider interface {
+	CreateImage(ctx context.Context, req *ImageGenerationRequest) (*ImageGenerationResponse, error)
+}
+
 // NativeBatchProvider is implemented by providers that support native discounted batching.
 // This is intentionally separate from Provider so unsupported providers can still implement
 // regular synchronous APIs without batch capabilities.

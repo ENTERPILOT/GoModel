@@ -31,6 +31,10 @@ providers:
   `XAI_MODELS=grok-voice-latest` or a configured model list.
 </Note>
 
+Image models such as `grok-2-image` are served through the
+[Images API](/advanced/images-api) (`POST /v1/images/generations`). xAI bills
+them per image; set a `per_image` price for the model if the catalog has none.
+
 ## Reasoning effort mapping
 
 Grok reasoning models (e.g. `grok-4.6`, defaulting to `high`) accept

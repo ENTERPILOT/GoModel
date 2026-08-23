@@ -12,7 +12,8 @@ documented separately in [Admin Endpoints](/advanced/admin-endpoints).
 For request and response details, see the dedicated guides:
 [Responses API](/advanced/responses-api), [Conversations API](/advanced/conversations-api),
 [Anthropic Messages API](/advanced/anthropic-messages-api),
-[Audio API](/advanced/audio-api), and [Usage API](/advanced/usage-api).
+[Audio API](/advanced/audio-api), [Images API](/advanced/images-api), and
+[Usage API](/advanced/usage-api).
 
 ## OpenAI-Compatible API
 
@@ -38,6 +39,7 @@ For request and response details, see the dedicated guides:
 | `/v1/models`                      | GET    | List available models                                                                                        |
 | `/v1/audio/speech`                | POST   | Text-to-speech, returning binary audio                                                                       |
 | `/v1/audio/transcriptions`        | POST   | Speech-to-text from a multipart upload                                                                       |
+| `/v1/images/generations`          | POST   | Image generation from a text prompt (DALL·E, gpt-image-1, grok-2-image)                                     |
 | `/v1/realtime`                    | GET    | Realtime speech-to-speech websocket upgrade; `?call_id=` attaches to an existing WebRTC/SIP call as a sideband channel (when `REALTIME_ENABLED`) |
 | `/v1/realtime/calls`              | POST   | Realtime WebRTC SDP exchange: `application/sdp` offer with `?model=`, or multipart `sdp` + `session` fields (when `REALTIME_ENABLED`)            |
 | `/v1/realtime/client_secrets`     | POST   | Mint an ephemeral realtime client secret for browser clients, routed by `session.model` (when `REALTIME_ENABLED`)                                |

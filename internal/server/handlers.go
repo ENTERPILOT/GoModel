@@ -197,6 +197,18 @@ func (h *Handler) nativeFiles() *nativeFileService {
 	return &nativeFileService{provider: h.provider, fileStore: h.fileStore}
 }
 
+func (h *Handler) modelCalls() modelCallService {
+	return modelCallService{
+		provider:        h.provider,
+		modelResolver:   h.modelResolver,
+		modelAuthorizer: h.modelAuthorizer,
+		budgetChecker:   h.budgetChecker,
+		rateLimiter:     h.rateLimiter,
+		usageLogger:     h.usageLogger,
+		pricingResolver: h.pricingResolver,
+	}
+}
+
 func (h *Handler) audio() *audioService {
 	var logBodies, logAudioBodies bool
 	if h.logger != nil {
@@ -205,16 +217,18 @@ func (h *Handler) audio() *audioService {
 		logAudioBodies = cfg.LogAudioBodies
 	}
 	return &audioService{
-		provider:        h.provider,
-		modelResolver:   h.modelResolver,
-		modelAuthorizer: h.modelAuthorizer,
-		budgetChecker:   h.budgetChecker,
-		rateLimiter:     h.rateLimiter,
-		logBodies:       logBodies,
-		logAudioBodies:  logAudioBodies,
-		usageLogger:     h.usageLogger,
-		pricingResolver: h.pricingResolver,
+		modelCallService: h.modelCalls(),
+		logBodies:        logBodies,
+		logAudioBodies:   logAudioBodies,
 	}
+}
+
+func (h *Handler) images() *imageService {
+	var logBodies bool
+	if h.logger != nil {
+		logBodies = h.logger.Config().LogBodies
+	}
+	return &imageService{modelCallService: h.modelCalls(), logBodies: logBodies}
 }
 
 func (h *Handler) nativeResponses() *nativeResponseService {
@@ -698,6 +712,25 @@ func (h *Handler) AudioSpeech(c *echo.Context) error {
 // @Router       /v1/audio/transcriptions [post]
 func (h *Handler) AudioTranscriptions(c *echo.Context) error {
 	return h.audio().CreateTranscription(c)
+}
+
+// ImageGenerations handles POST /v1/images/generations.
+//
+// @Summary      Create image (image generation)
+// @Tags         images
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        request  body      core.ImageGenerationRequest  true  "Image generation request"
+// @Success      200      {object}  core.ImageGenerationResponse
+// @Failure      400      {object}  core.OpenAIErrorEnvelope
+// @Failure      401      {object}  core.OpenAIErrorEnvelope
+// @Failure      404      {object}  core.OpenAIErrorEnvelope
+// @Failure      429      {object}  core.OpenAIErrorEnvelope
+// @Failure      502      {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/images/generations [post]
+func (h *Handler) ImageGenerations(c *echo.Context) error {
+	return h.images().CreateImage(c)
 }
 
 // AudioTranslations handles POST /v1/audio/translations.
