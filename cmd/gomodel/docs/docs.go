@@ -5713,6 +5713,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -9512,7 +9518,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "n": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 1
                 },
                 "prompt": {
                     "type": "string"

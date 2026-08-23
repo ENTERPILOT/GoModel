@@ -72,12 +72,19 @@ func TestImageGenerations_ReturnsProviderResponse(t *testing.T) {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
 
-	var got core.ImageGenerationResponse
+	var got map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not JSON: %v (body: %s)", err, rec.Body.String())
 	}
-	if got.Created != 1713833628 || len(got.Data) != 1 || got.Data[0].URL != "https://img/1.png" {
-		t.Errorf("response = %+v", got)
+	if got["created"] != float64(1713833628) {
+		t.Errorf("created = %v, want 1713833628", got["created"])
+	}
+	data, _ := got["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("data = %v, want one image", got["data"])
+	}
+	if image, _ := data[0].(map[string]any); image["url"] != "https://img/1.png" {
+		t.Errorf("data[0] = %v, want url https://img/1.png", data[0])
 	}
 
 	if mock.captured == nil {
@@ -284,12 +291,16 @@ func TestImageGenerations_HandlerRoute(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
 	}
-	var got core.ImageGenerationResponse
+	var got map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not JSON: %v (body: %s)", err, rec.Body.String())
 	}
-	if len(got.Data) != 1 || got.Data[0].URL != "https://img/1.png" {
-		t.Errorf("response = %+v", got)
+	data, _ := got["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("data = %v, want one image", got["data"])
+	}
+	if image, _ := data[0].(map[string]any); image["url"] != "https://img/1.png" {
+		t.Errorf("data[0] = %v, want url https://img/1.png", data[0])
 	}
 	if mock.captured == nil || mock.captured.Prompt != "a cat" {
 		t.Errorf("provider did not receive the routed request: %+v", mock.captured)

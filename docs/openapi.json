@@ -8574,6 +8574,16 @@
               }
             }
           },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -13031,7 +13041,8 @@
             "type": "string"
           },
           "n": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "prompt": {
             "type": "string"

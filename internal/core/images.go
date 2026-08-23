@@ -14,7 +14,7 @@ import (
 type ImageGenerationRequest struct {
 	Model          string `json:"model" binding:"required"`
 	Prompt         string `json:"prompt" binding:"required"`
-	N              *int   `json:"n,omitempty"`
+	N              *int   `json:"n,omitempty" minimum:"1"`
 	ResponseFormat string `json:"response_format,omitempty"`
 	Size           string `json:"size,omitempty"`
 	Quality        string `json:"quality,omitempty"`

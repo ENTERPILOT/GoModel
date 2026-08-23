@@ -722,6 +722,7 @@ func (h *Handler) AudioTranscriptions(c *echo.Context) error {
 // @Failure      400      {object}  core.OpenAIErrorEnvelope
 // @Failure      401      {object}  core.OpenAIErrorEnvelope
 // @Failure      404      {object}  core.OpenAIErrorEnvelope
+// @Failure      429      {object}  core.OpenAIErrorEnvelope
 // @Failure      502      {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/images/generations [post]
 func (h *Handler) ImageGenerations(c *echo.Context) error {
