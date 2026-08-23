@@ -540,25 +540,39 @@ func (r *ModelRegistry) ListPublicModels() []core.Model {
 
 // providerCanServeModel reports whether the owning provider implements the
 // capabilities a model needs. Upstream inventories and the metadata registry
-// can list audio-only models (TTS/STT) for providers whose gateway adapter has
-// no audio support; advertising those invites calls that can only fail with
-// "does not support audio operations". Models without mode metadata are kept —
+// can list audio-only (TTS/STT) or image-only models for providers whose
+// gateway adapter has no audio or image support; advertising those invites
+// calls that can only fail with "does not support audio operations" or "does
+// not support image generation". Models without mode metadata are kept —
 // missing data must not hide a model.
 func providerCanServeModel(info *ModelInfo) bool {
-	if !isAudioOnlyModel(info.Model) {
-		return true
+	if isAudioOnlyModel(info.Model) {
+		_, ok := info.Provider.(core.AudioProvider)
+		return ok
 	}
-	_, ok := info.Provider.(core.AudioProvider)
-	return ok
+	if isImageOnlyModel(info.Model) {
+		_, ok := info.Provider.(core.ImageProvider)
+		return ok
+	}
+	return true
 }
 
 // isAudioOnlyModel reports whether every declared mode is an audio operation.
 func isAudioOnlyModel(model core.Model) bool {
+	return onlyHasModes(model, "audio_speech", "audio_transcription")
+}
+
+// isImageOnlyModel reports whether every declared mode is an image operation.
+func isImageOnlyModel(model core.Model) bool {
+	return onlyHasModes(model, "image_generation", "image_edit")
+}
+
+func onlyHasModes(model core.Model, allowed ...string) bool {
 	if model.Metadata == nil || len(model.Metadata.Modes) == 0 {
 		return false
 	}
 	for _, mode := range model.Metadata.Modes {
-		if mode != "audio_speech" && mode != "audio_transcription" {
+		if !slices.Contains(allowed, mode) {
 			return false
 		}
 	}

@@ -124,6 +124,7 @@
                             "advanced/conversations-api",
                             "advanced/anthropic-messages-api",
                             "advanced/audio-api",
+                            "advanced/images-api",
                             "advanced/usage-api",
                             "advanced/guardrails",
                             "advanced/workflows",

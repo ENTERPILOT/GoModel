@@ -2492,6 +2492,57 @@ func TestListPublicModels_HidesAudioOnlyModelsFromProvidersWithoutAudioSupport(t
 	}
 }
 
+// imageRegistryMockProvider extends the mock with image generation support so
+// capability-based visibility can be exercised.
+type imageRegistryMockProvider struct {
+	registryMockProvider
+}
+
+func (m *imageRegistryMockProvider) CreateImage(_ context.Context, _ *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
+	return nil, nil
+}
+
+func TestListPublicModels_HidesImageOnlyModelsFromProvidersWithoutImageSupport(t *testing.T) {
+	inventory := func() *core.ModelsResponse {
+		return &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "image-model", Object: "model", Metadata: &core.ModelMetadata{Modes: []string{"image_generation", "image_edit"}}},
+				{ID: "multimodal-model", Object: "model", Metadata: &core.ModelMetadata{Modes: []string{"chat", "image_generation"}}},
+				{ID: "bare-model", Object: "model"},
+			},
+		}
+	}
+
+	registry := NewModelRegistry()
+	noImages := &registryMockProvider{modelsResponse: inventory()}
+	withImages := &imageRegistryMockProvider{registryMockProvider{modelsResponse: inventory()}}
+	registry.RegisterProviderWithNameAndType(noImages, "gemini", "gemini")
+	registry.RegisterProviderWithNameAndType(withImages, "openai", "openai")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := make(map[string]bool)
+	for _, model := range registry.ListPublicModels() {
+		got[model.ID] = true
+	}
+
+	wantListed := []string{
+		"gemini/multimodal-model", "gemini/bare-model", // chat-capable or no mode data: kept
+		"openai/multimodal-model", "openai/bare-model",
+		"openai/image-model", // provider supports images: kept
+	}
+	for _, id := range wantListed {
+		if !got[id] {
+			t.Errorf("expected %q to be listed", id)
+		}
+	}
+	if got["gemini/image-model"] {
+		t.Error("expected image-only gemini/image-model to be hidden (provider has no image support)")
+	}
+}
+
 // TestProviderByTypeAndNameTrimConfiguredValues verifies that configured provider
 // names and types are normalized at registration so lookups succeed even when the
 // configured value arrives padded with whitespace (e.g. from YAML or env vars).
