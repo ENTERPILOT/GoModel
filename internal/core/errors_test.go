@@ -830,3 +830,17 @@ func TestParseProviderError_Preserves5xxStatusCodes(t *testing.T) {
 		})
 	}
 }
+
+func TestGatewayError_ToJSON_ProviderOnlyWhenUpstream(t *testing.T) {
+	upstream := ParseProviderError("openai", http.StatusUnauthorized, []byte(`{"error":{"message":"bad key"}}`), nil)
+	errorData := upstream.ToJSON()["error"].(map[string]any)
+	if errorData["provider"] != "openai" {
+		t.Fatalf("ToJSON() provider = %v, want openai", errorData["provider"])
+	}
+
+	gateway := NewAuthenticationError("", "invalid API key")
+	errorData = gateway.ToJSON()["error"].(map[string]any)
+	if _, present := errorData["provider"]; present {
+		t.Fatalf("ToJSON() should omit provider for gateway-originated errors, got %v", errorData["provider"])
+	}
+}

@@ -1,0 +1,25 @@
+---
+title: "Playground"
+description: "Try any model through the gateway from the dashboard and inspect the exact request and response JSON."
+icon: "flask"
+keywords: ["playground", "dashboard", "chat completions", "responses", "messages", "streaming"]
+---
+
+The **Playground** page (`/admin/dashboard/playground`) sends requests through the
+gateway's public API with your dashboard key, so every call is routed, logged, and
+metered exactly like a client's request. Pick an endpoint (`/v1/chat/completions`,
+`/v1/responses`, or `/v1/messages`), a model from the inventory or any alias,
+virtual, or failover model by name, and whether to stream; build the conversation
+from editable, reorderable System, User, and Assistant messages; and send a prompt.
+The JSON panel on the right shows the request body as it will be sent (updated live
+as you edit) and the last response with its status, latency, and token usage —
+streamed responses are assembled into the same shape a non-streaming call returns.
+Requests are subject to the same budgets, rate limits, guardrails, and audit logging
+as any other client of the gateway.
+
+<img
+  src="/features/playground.png"
+  alt="GoModel dashboard Playground page with the Messages endpoint selected, a model picker, System, User, and Assistant message cards, a prompt composer, and the request JSON panel on the right"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>

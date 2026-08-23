@@ -87,7 +87,9 @@ confirmations).
   `EmptyState`, `NoDataIllustration`, `CopyButton`, `TableActionButton`,
   `DialogCloseButton`, `SegmentedControl`, `EnabledToggle`, `GoModelLogo`.
 - **molecules** — `LoadingState`, `Pagination`, `DatePicker`, `FilterInput`,
-  `InlineHelpSection`, `ChartCanvas`, `DemoModeBanner`, `FormField`.
+  `SearchSelect` (searchable single-value dropdown; use it instead of a
+  `<datalist>` or a long `<select>`), `InlineHelpSection`, `ChartCanvas`,
+  `DemoModeBanner`, `FormField`.
 - **organisms** — `AuthBanner`, `AuthDialog`, `Sidebar` (nav items in
   `navigation.js`), `ThemeToggle`, `FlashMessages`,
   `TypedConfirmationDialog`, `EditorDialog`.

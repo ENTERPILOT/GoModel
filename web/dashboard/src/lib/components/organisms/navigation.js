@@ -12,6 +12,7 @@ import * as m from "$lib/paraglide/messages.js";
 import {
   Box,
   ChartColumn,
+  FlaskConical,
   Gauge,
   History,
   KeyRound,
@@ -28,6 +29,7 @@ export const NAV_ITEMS = [
   { page: "overview", label: m.navigation_overview, icon: LayoutDashboard },
   { page: "providers-config", label: m.navigation_providers, icon: ServerCog },
   { page: "models", label: m.navigation_models, icon: Box },
+  { page: "playground", label: m.navigation_playground, icon: FlaskConical },
   { page: "audit-logs", label: m.navigation_audit_logs, icon: History },
   { page: "usage", label: m.navigation_usage, icon: ChartColumn },
   {

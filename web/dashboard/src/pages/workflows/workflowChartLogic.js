@@ -107,14 +107,28 @@ function workflowNestedErrorCode(value, depth = 0) {
   return "";
 }
 
+function workflowEntryData(entry) {
+  return entry && entry.data && typeof entry.data === "object" && !Array.isArray(entry.data)
+    ? entry.data
+    : {};
+}
+
 function workflowEntryErrorCode(entry) {
-  const data =
-    entry && entry.data && typeof entry.data === "object" && !Array.isArray(entry.data)
-      ? entry.data
-      : {};
+  const data = workflowEntryData(entry);
   const direct = String(data.error_code || data.errorCode || "").trim();
   if (direct) return direct;
   return workflowNestedErrorCode(data.response_body);
+}
+
+// The gateway's Auth step failed only when the authentication error is the
+// gateway's own. A provider rejecting its key is also an
+// authentication_error, but it names the provider (data.error_provider) and
+// the request had already passed the gateway's authentication.
+function workflowEntryAuthFailed(entry) {
+  const authError =
+    String((entry && entry.error_type) || "").trim().toLowerCase() === "authentication_error";
+  if (!authError) return false;
+  return !String(workflowEntryData(entry).error_provider || "").trim();
 }
 
 function workflowQualifiedSelectorParts(selector) {
@@ -190,8 +204,7 @@ export function workflowRuntimeFromEntry(entry, source) {
   const primaryRoute = workflowPrimaryRouteFromEntry(entry, source);
   const responseSuccess =
     Number.isFinite(statusCode) && statusCode >= 200 && statusCode < 300;
-  const authError =
-    String(entry.error_type || "").trim().toLowerCase() === "authentication_error";
+  const authError = workflowEntryAuthFailed(entry);
   const authMethod = String(entry.auth_method || "").trim().toLowerCase() || null;
   const budgetExceeded =
     workflowEntryErrorCode(entry).toLowerCase() === "budget_exceeded";

@@ -126,6 +126,10 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		})
 	}
 
+	// Best-effort: retire the index on the pre-v0.1.17 execution_plan_version_id
+	// field, which the workflow rename left behind on older collections.
+	_ = collection.Indexes().DropOne(ctx, "execution_plan_version_id_1")
+
 	_, err := collection.Indexes().CreateMany(ctx, indexes)
 	if err != nil {
 		// Log warning but don't fail - indexes may already exist
