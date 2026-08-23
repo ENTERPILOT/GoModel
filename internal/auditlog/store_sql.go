@@ -106,6 +106,9 @@ var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status_code)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider ON audit_logs(provider)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON audit_logs(provider_name)",
+	// Retires the index on the pre-v0.1.17 execution_plan_version_id column,
+	// which the workflow rename left behind on older databases.
+	"DROP INDEX IF EXISTS idx_audit_execution_plan_version_id",
 	"CREATE INDEX IF NOT EXISTS idx_audit_workflow_version_id ON audit_logs(workflow_version_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_principal_id ON audit_logs(principal_id)",
