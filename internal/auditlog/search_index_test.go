@@ -125,6 +125,14 @@ func TestSQLReader_ShortSearchKeepsColumnSweep(t *testing.T) {
 	if condition, _ := reader.searchFilter("abc", true); strings.Contains(condition, "request_id ILIKE") {
 		t.Fatalf("three-character search should use the indexed expression, got %s", condition)
 	}
+	// Characters, not bytes: one CJK character is three bytes but yields no
+	// trigram, while three of them do.
+	if condition, _ := reader.searchFilter("中", true); !strings.Contains(condition, "request_id ILIKE") {
+		t.Fatalf("single multibyte character should sweep columns, got %s", condition)
+	}
+	if condition, _ := reader.searchFilter("中文字", true); strings.Contains(condition, "request_id ILIKE") {
+		t.Fatalf("three multibyte characters should use the indexed expression, got %s", condition)
+	}
 	if condition, _ := reader.searchFilter("abc", false); !strings.Contains(condition, "request_id ILIKE") {
 		t.Fatalf("without the index the search should sweep columns, got %s", condition)
 	}

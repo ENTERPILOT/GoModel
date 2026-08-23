@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync/atomic"
+	"unicode/utf8"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -266,8 +267,9 @@ func (r *SQLReader) searchFilter(search string, indexed bool) (string, []any) {
 	pattern := "%" + sqlutil.EscapeLikeWildcards(search) + "%"
 	// With the trigram index, one match against the indexed expression is an
 	// index lookup. Shorter terms yield no trigram and would scan the whole
-	// index only to recheck every row, so they keep the column sweep.
-	if indexed && len(search) >= minTrigramSearchLength {
+	// index only to recheck every row, so they keep the column sweep. pg_trgm
+	// counts characters, not bytes: a single CJK character is one character.
+	if indexed && utf8.RuneCountInString(search) >= minTrigramSearchLength {
 		return r.likeClause(searchText(r.dialect.errorMessage)), []any{pattern}
 	}
 	clauses := make([]string, 0, len(searchColumns)+1)

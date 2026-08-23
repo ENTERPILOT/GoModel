@@ -19,7 +19,8 @@ var searchColumns = []string{
 
 const trigramSearchIndex = "idx_audit_search_trgm"
 
-// minTrigramSearchLength is the shortest term that yields a trigram.
+// minTrigramSearchLength is the shortest term, in characters, that yields a
+// trigram.
 const minTrigramSearchLength = 3
 
 // postgresErrorMessage extracts the error message from the JSON data blob.
