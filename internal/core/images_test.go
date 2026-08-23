@@ -73,6 +73,7 @@ func TestValidateImageGenerationRequest(t *testing.T) {
 		wantErr string
 	}{
 		{"nil request", nil, "image generation request is required"},
+		{"missing model", &ImageGenerationRequest{Model: " ", Prompt: "a cat"}, "model is required"},
 		{"missing prompt", &ImageGenerationRequest{Model: "dall-e-3", Prompt: "  "}, "prompt is required"},
 		{"zero n", &ImageGenerationRequest{Model: "dall-e-3", Prompt: "a cat", N: &zero}, "n must be at least 1"},
 		{"streaming", &ImageGenerationRequest{Model: "gpt-image-1", Prompt: "a cat", Stream: true}, "streaming image generation is not supported"},

@@ -13022,6 +13022,10 @@
       },
       "core.ImageGenerationRequest": {
         "type": "object",
+        "required": [
+          "model",
+          "prompt"
+        ],
         "properties": {
           "model": {
             "type": "string"
@@ -13052,11 +13056,7 @@
           "user": {
             "type": "string"
           }
-        },
-        "required": [
-          "model",
-          "prompt"
-        ]
+        }
       },
       "core.ImageGenerationResponse": {
         "type": "object",

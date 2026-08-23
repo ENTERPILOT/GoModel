@@ -495,8 +495,6 @@ ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");
 ensureRequiredProperty("core.AudioSpeechRequest", "input");
 ensureRequiredProperty("core.AudioSpeechRequest", "voice");
-ensureRequiredProperty("core.ImageGenerationRequest", "model");
-ensureRequiredProperty("core.ImageGenerationRequest", "prompt");
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertBudgetRequest", "amount");
 ensureRequiredProperty("admin.upsertBudgetRequest", "budget_key");

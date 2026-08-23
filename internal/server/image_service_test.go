@@ -270,17 +270,28 @@ func TestImageGenerations_UsageDisabledWritesNothing(t *testing.T) {
 	}
 }
 
-// TestImageGenerations_HandlerRoute verifies the route is registered on the
-// HTTP server and reaches the image service through the Handler.
+// TestImageGenerations_HandlerRoute verifies POST /v1/images/generations is
+// registered on the HTTP server and reaches the image service end to end.
 func TestImageGenerations_HandlerRoute(t *testing.T) {
 	mock := newImageMock()
-	handler := newHandler(mock, nil, nil, nil, nil, nil, nil, nil)
-	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
+	srv := New(mock, nil)
 
-	if err := handler.ImageGenerations(c); err != nil {
-		t.Fatalf("ImageGenerations returned error: %v", err)
-	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"dall-e-3","prompt":"a cat"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var got core.ImageGenerationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response is not JSON: %v (body: %s)", err, rec.Body.String())
+	}
+	if len(got.Data) != 1 || got.Data[0].URL != "https://img/1.png" {
+		t.Errorf("response = %+v", got)
+	}
+	if mock.captured == nil || mock.captured.Prompt != "a cat" {
+		t.Errorf("provider did not receive the routed request: %+v", mock.captured)
 	}
 }

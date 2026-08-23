@@ -12,8 +12,8 @@ import (
 // moderation, ...) is preserved verbatim in ExtraFields and forwarded upstream
 // so new provider parameters work without a gateway change.
 type ImageGenerationRequest struct {
-	Model          string `json:"model"`
-	Prompt         string `json:"prompt"`
+	Model          string `json:"model" binding:"required"`
+	Prompt         string `json:"prompt" binding:"required"`
 	N              *int   `json:"n,omitempty"`
 	ResponseFormat string `json:"response_format,omitempty"`
 	Size           string `json:"size,omitempty"`
@@ -145,6 +145,9 @@ func DecodeImageGenerationRequest(body []byte, _ *WhiteBoxPrompt) (*ImageGenerat
 func ValidateImageGenerationRequest(req *ImageGenerationRequest) error {
 	if req == nil {
 		return NewInvalidRequestError("image generation request is required", nil)
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return NewInvalidRequestError("model is required", nil)
 	}
 	if strings.TrimSpace(req.Prompt) == "" {
 		return NewInvalidRequestError("prompt is required", nil)

@@ -9503,6 +9503,10 @@ const docTemplate = `{
         },
         "core.ImageGenerationRequest": {
             "type": "object",
+            "required": [
+                "model",
+                "prompt"
+            ],
             "properties": {
                 "model": {
                     "type": "string"
