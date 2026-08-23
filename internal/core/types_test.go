@@ -637,3 +637,22 @@ func TestModelMetadataClone_DeepClonesRankingPointers(t *testing.T) {
 		t.Errorf("original Rank mutated: %v", *m.Rankings["bench"].Rank)
 	}
 }
+
+func TestModelPricingImageTokenRates_CloneAndFieldSources(t *testing.T) {
+	pricing := &ModelPricing{InputImagePerMtok: new(2.5), OutputImagePerMtok: new(8.0)}
+
+	cloned := pricing.Clone()
+	if cloned.InputImagePerMtok == pricing.InputImagePerMtok || *cloned.InputImagePerMtok != 2.5 {
+		t.Errorf("InputImagePerMtok not deep-cloned: %v", cloned.InputImagePerMtok)
+	}
+	if cloned.OutputImagePerMtok == pricing.OutputImagePerMtok || *cloned.OutputImagePerMtok != 8.0 {
+		t.Errorf("OutputImagePerMtok not deep-cloned: %v", cloned.OutputImagePerMtok)
+	}
+
+	sources := pricing.FieldSources(ModelPricingSourceModelRegistry)
+	for _, field := range []string{"input_image_per_mtok", "output_image_per_mtok"} {
+		if sources[field] != ModelPricingSourceModelRegistry {
+			t.Errorf("FieldSources[%q] = %q, want %q", field, sources[field], ModelPricingSourceModelRegistry)
+		}
+	}
+}

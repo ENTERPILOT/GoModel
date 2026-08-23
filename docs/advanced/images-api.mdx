@@ -111,8 +111,10 @@ Image calls are recorded in [usage tracking](/features/cost-tracking) under the
 `/v1/images/generations` endpoint:
 
 - **Token-billed models** (`gpt-image-1` and similar) report `usage` in the
-  response; GoModel stores the input/output token counts and prices them with the
-  model's `input_per_mtok` / `output_per_mtok` rates.
+  response; GoModel stores the input/output token counts and prices text input
+  at `input_per_mtok`, prompt image tokens at `input_image_per_mtok`, and the
+  generated image tokens at `output_image_per_mtok`. The model catalog carries
+  these rates for the `gpt-image` family.
 - **Per-image models** (DALL·E, `grok-2-image`) report no tokens. GoModel records
   the number of returned images (`images` in the raw usage data) and prices it
   with the model's `per_image` rate.

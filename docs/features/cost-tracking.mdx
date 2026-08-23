@@ -21,6 +21,7 @@ For each request GoModel prices:
 
 - **Input** and **output** tokens at the model's per-million-token (MTok) rates.
 - **Cached input**, **reasoning**, and **audio** tokens at their own rates when the provider reports them, so cache-heavy and reasoning-heavy traffic is priced correctly.
+- **Image tokens** from token-billed image models (the `gpt-image` family) at the model's `input_image_per_mtok` and `output_image_per_mtok` rates — every output token of an [image generation](/advanced/images-api) is an image token, and prompt image tokens carry their own input rate. Models without image rates fall back to the plain token rates.
 
 When a provider returns an exact cost (OpenRouter credits, xAI `cost_in_usd_ticks`), GoModel uses that value instead of catalog pricing. Each row records which method was used in its `cost_source` field: `model_pricing`, `openrouter_credits`, or `xai_cost_in_usd_ticks`.
 

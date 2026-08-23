@@ -284,6 +284,8 @@ type ModelPricing struct {
 	BatchOutputPerMtok     *float64           `json:"batch_output_per_mtok,omitempty" yaml:"batch_output_per_mtok,omitempty"`
 	AudioInputPerMtok      *float64           `json:"audio_input_per_mtok,omitempty" yaml:"audio_input_per_mtok,omitempty"`
 	AudioOutputPerMtok     *float64           `json:"audio_output_per_mtok,omitempty" yaml:"audio_output_per_mtok,omitempty"`
+	InputImagePerMtok      *float64           `json:"input_image_per_mtok,omitempty" yaml:"input_image_per_mtok,omitempty"`
+	OutputImagePerMtok     *float64           `json:"output_image_per_mtok,omitempty" yaml:"output_image_per_mtok,omitempty"`
 	PerImage               *float64           `json:"per_image,omitempty" yaml:"per_image,omitempty"`
 	InputPerImage          *float64           `json:"input_per_image,omitempty" yaml:"input_per_image,omitempty"`
 	PerSecondInput         *float64           `json:"per_second_input,omitempty" yaml:"per_second_input,omitempty"`
@@ -323,6 +325,8 @@ func (p *ModelPricing) FieldSources(source string) map[string]string {
 	add("batch_output_per_mtok", p.BatchOutputPerMtok)
 	add("audio_input_per_mtok", p.AudioInputPerMtok)
 	add("audio_output_per_mtok", p.AudioOutputPerMtok)
+	add("input_image_per_mtok", p.InputImagePerMtok)
+	add("output_image_per_mtok", p.OutputImagePerMtok)
 	add("per_image", p.PerImage)
 	add("input_per_image", p.InputPerImage)
 	add("per_second_input", p.PerSecondInput)
@@ -389,6 +393,8 @@ func (p *ModelPricing) Clone() *ModelPricing {
 	out.BatchOutputPerMtok = cloneFloatPtr(p.BatchOutputPerMtok)
 	out.AudioInputPerMtok = cloneFloatPtr(p.AudioInputPerMtok)
 	out.AudioOutputPerMtok = cloneFloatPtr(p.AudioOutputPerMtok)
+	out.InputImagePerMtok = cloneFloatPtr(p.InputImagePerMtok)
+	out.OutputImagePerMtok = cloneFloatPtr(p.OutputImagePerMtok)
 	out.PerImage = cloneFloatPtr(p.PerImage)
 	out.InputPerImage = cloneFloatPtr(p.InputPerImage)
 	out.PerSecondInput = cloneFloatPtr(p.PerSecondInput)

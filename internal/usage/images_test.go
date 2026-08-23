@@ -81,3 +81,90 @@ func TestExtractFromImageResponse_NoPricing(t *testing.T) {
 		t.Errorf("images = %v, want 1", got)
 	}
 }
+
+// TestExtractFromImageResponse_ImageTokenRates verifies token-billed image
+// models are priced with the catalog's image token rates rather than the text
+// rates: every output token of an image generation is an image token, and
+// prompt image tokens are a breakdown of input_tokens priced at their own rate.
+func TestExtractFromImageResponse_ImageTokenRates(t *testing.T) {
+	tests := []struct {
+		name      string
+		usage     *core.ImageUsage
+		pricing   *core.ModelPricing
+		wantInput float64
+		wantOut   float64
+	}{
+		{
+			// gpt-image-1-mini catalog shape: no text output rate at all, so the
+			// image output rate is the only charge on the output side.
+			name:      "output image rate without text output rate",
+			usage:     &core.ImageUsage{InputTokens: 17, OutputTokens: 272, InputTokensDetails: &core.ImageTokenDetails{TextTokens: 17}},
+			pricing:   &core.ModelPricing{InputPerMtok: new(2.0), InputImagePerMtok: new(2.5), OutputImagePerMtok: new(8.0)},
+			wantInput: 17 * 2.0 / 1e6,
+			wantOut:   272 * 8.0 / 1e6,
+		},
+		{
+			// gpt-image-1.5 catalog shape: a text output rate exists too; the
+			// image rate must replace it for image tokens, not stack on top.
+			name:      "output image rate overrides text output rate",
+			usage:     &core.ImageUsage{InputTokens: 10, OutputTokens: 1000},
+			pricing:   &core.ModelPricing{InputPerMtok: new(5.0), OutputPerMtok: new(10.0), OutputImagePerMtok: new(32.0)},
+			wantInput: 10 * 5.0 / 1e6,
+			wantOut:   1000 * 32.0 / 1e6,
+		},
+		{
+			// Prompt image tokens (image edits / references) are part of
+			// input_tokens: base rate for all, plus the image premium for those.
+			name:      "prompt image tokens priced at image input rate",
+			usage:     &core.ImageUsage{InputTokens: 100, OutputTokens: 0, InputTokensDetails: &core.ImageTokenDetails{TextTokens: 40, ImageTokens: 60}},
+			pricing:   &core.ModelPricing{InputPerMtok: new(2.0), InputImagePerMtok: new(2.5)},
+			wantInput: (100*2.0 + 60*(2.5-2.0)) / 1e6,
+			wantOut:   0,
+		},
+		{
+			// No image rates configured: fall back to the plain token rates.
+			name:      "falls back to text rates",
+			usage:     &core.ImageUsage{InputTokens: 100, OutputTokens: 200, InputTokensDetails: &core.ImageTokenDetails{ImageTokens: 60}},
+			pricing:   &core.ModelPricing{InputPerMtok: new(1.0), OutputPerMtok: new(4.0)},
+			wantInput: 100 * 1.0 / 1e6,
+			wantOut:   200 * 4.0 / 1e6,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &core.ImageGenerationResponse{Data: []core.ImageData{{B64JSON: "aGk="}}, Usage: tt.usage}
+			entry := ExtractFromImageResponse(resp, "req", "gpt-image-1-mini", "openai", tt.pricing)
+
+			if entry.InputCost == nil || !costsNearlyEqual(*entry.InputCost, tt.wantInput) {
+				t.Errorf("input cost = %v, want %v", entry.InputCost, tt.wantInput)
+			}
+			if tt.wantOut == 0 {
+				if entry.OutputCost != nil && *entry.OutputCost != 0 {
+					t.Errorf("output cost = %v, want none", *entry.OutputCost)
+				}
+			} else if entry.OutputCost == nil || !costsNearlyEqual(*entry.OutputCost, tt.wantOut) {
+				t.Errorf("output cost = %v, want %v", entry.OutputCost, tt.wantOut)
+			}
+			if entry.TotalCost == nil || !costsNearlyEqual(*entry.TotalCost, tt.wantInput+tt.wantOut) {
+				t.Errorf("total cost = %v, want %v", entry.TotalCost, tt.wantInput+tt.wantOut)
+			}
+			if entry.CostsCalculationCaveat != "" {
+				t.Errorf("caveat = %q, want none", entry.CostsCalculationCaveat)
+			}
+		})
+	}
+}
+
+// TestCalculateGranularCost_PromptImageTokensStayInformationalForChat guards
+// the chat vision path: prompt_image_tokens without an image input rate must
+// keep pricing at the base input rate with no caveat.
+func TestCalculateGranularCost_PromptImageTokensStayInformationalForChat(t *testing.T) {
+	pricing := &core.ModelPricing{InputPerMtok: new(2.0), OutputPerMtok: new(8.0)}
+	result := CalculateGranularCost(1000, 10, map[string]any{"prompt_image_tokens": 800, "prompt_text_tokens": 200}, "openai", pricing)
+	if result.InputCost == nil || !costsNearlyEqual(*result.InputCost, 1000*2.0/1e6) {
+		t.Errorf("input cost = %v, want base rate only", result.InputCost)
+	}
+	if result.Caveat != "" {
+		t.Errorf("caveat = %q, want none", result.Caveat)
+	}
+}

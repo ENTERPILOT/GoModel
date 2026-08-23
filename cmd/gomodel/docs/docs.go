@@ -9786,10 +9786,16 @@ const docTemplate = `{
                 "currency": {
                     "type": "string"
                 },
+                "input_image_per_mtok": {
+                    "type": "number"
+                },
                 "input_per_image": {
                     "type": "number"
                 },
                 "input_per_mtok": {
+                    "type": "number"
+                },
+                "output_image_per_mtok": {
                     "type": "number"
                 },
                 "output_per_mtok": {
@@ -10654,10 +10660,16 @@ const docTemplate = `{
                 "cached_input_per_mtok": {
                     "type": "number"
                 },
+                "input_image_per_mtok": {
+                    "type": "number"
+                },
                 "input_per_image": {
                     "type": "number"
                 },
                 "input_per_mtok": {
+                    "type": "number"
+                },
+                "output_image_per_mtok": {
                     "type": "number"
                 },
                 "output_per_mtok": {

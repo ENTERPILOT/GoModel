@@ -16,6 +16,12 @@ const (
 	// unit cost.go prices via PerImage; token-billed models (gpt-image-1) keep
 	// it as an informational count alongside their token usage.
 	rawKeyImages = "images"
+
+	// rawKeyCompletionImageTokens mirrors the output token count of a
+	// token-billed image model. Every output token of an image generation is an
+	// image token, which OpenAI prices at a separate rate from text output
+	// (output_image_per_mtok), so cost.go maps this key to OutputImagePerMtok.
+	rawKeyCompletionImageTokens = "completion_image_tokens"
 )
 
 // ExtractFromImageResponse builds a usage entry for an image generation call.
@@ -48,6 +54,9 @@ func ExtractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 		entry.TotalTokens = u.TotalTokens
 		if entry.TotalTokens == 0 {
 			entry.TotalTokens = u.InputTokens + u.OutputTokens
+		}
+		if u.OutputTokens > 0 {
+			raw[rawKeyCompletionImageTokens] = u.OutputTokens
 		}
 		if d := u.InputTokensDetails; d != nil {
 			if d.TextTokens > 0 {
