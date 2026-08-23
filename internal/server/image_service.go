@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -13,9 +14,14 @@ import (
 // imageService adapts Echo requests to the model-routed image provider for the
 // OpenAI-compatible /v1/images/generations endpoint. It stays a thin transport
 // layer: validate, authorize, enforce budget, route, and return the JSON
-// response; the audit middleware captures the (JSON) bodies itself.
+// response.
 type imageService struct {
 	modelCallService
+	// logBodies mirrors the audit logger config. The endpoint is not
+	// ingress-managed, so no request snapshot exists for the audit middleware
+	// to read the request body from; the service captures it here instead.
+	// The JSON response is captured by the middleware as usual.
+	logBodies bool
 }
 
 func (s *imageService) router() (core.ImageProvider, error) {
@@ -33,7 +39,14 @@ func (s *imageService) CreateImage(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	req, err := canonicalJSONRequestFromSemantics[*core.ImageGenerationRequest](c, core.DecodeImageGenerationRequest)
+	body, env, err := semanticJSONBody(c)
+	if err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	if s.logBodies {
+		auditlog.EnrichEntryWithRawRequestBody(c, body)
+	}
+	req, err := core.DecodeImageGenerationRequest(body, env)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}

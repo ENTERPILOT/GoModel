@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -304,5 +305,45 @@ func TestImageGenerations_HandlerRoute(t *testing.T) {
 	}
 	if mock.captured == nil || mock.captured.Prompt != "a cat" {
 		t.Errorf("provider did not receive the routed request: %+v", mock.captured)
+	}
+}
+
+// TestImageGenerations_AuditsRequestBody verifies the prompt reaches the audit
+// entry when body logging is on: the endpoint is not ingress-managed, so the
+// middleware has no request snapshot and relies on the service to capture it.
+func TestImageGenerations_AuditsRequestBody(t *testing.T) {
+	for _, logBodies := range []bool{true, false} {
+		t.Run(map[bool]string{true: "enabled", false: "disabled"}[logBodies], func(t *testing.T) {
+			mock := newImageMock()
+			mock.resolved = &core.ModelSelector{Provider: "openai", Model: "dall-e-3"}
+			svc := &imageService{modelCallService: modelCallService{provider: mock}, logBodies: logBodies}
+			c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat","style":"vivid"}`)
+			entry := &auditlog.LogEntry{}
+			c.Set(string(auditlog.LogEntryKey), entry)
+
+			if err := svc.CreateImage(c); err != nil {
+				t.Fatalf("CreateImage returned error: %v", err)
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+			}
+			// mockProvider reports "mock" as the provider type for every model.
+			if entry.RequestedModel != "dall-e-3" || entry.ResolvedModel != "openai/dall-e-3" || entry.Provider != "mock" {
+				t.Errorf("audit route = requested %q resolved %q provider %q, want dall-e-3 / openai/dall-e-3 / mock", entry.RequestedModel, entry.ResolvedModel, entry.Provider)
+			}
+			if !logBodies {
+				if entry.Data != nil && entry.Data.RequestBody != nil {
+					t.Fatalf("request body captured although body logging is off: %v", entry.Data.RequestBody)
+				}
+				return
+			}
+			body, ok := entry.Data.RequestBody.(map[string]any)
+			if !ok {
+				t.Fatalf("request body = %T, want decoded JSON object", entry.Data.RequestBody)
+			}
+			if body["prompt"] != "a cat" || body["style"] != "vivid" {
+				t.Errorf("audited request body = %v, want prompt and extra fields", body)
+			}
+		})
 	}
 }

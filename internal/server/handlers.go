@@ -224,7 +224,11 @@ func (h *Handler) audio() *audioService {
 }
 
 func (h *Handler) images() *imageService {
-	return &imageService{modelCallService: h.modelCalls()}
+	var logBodies bool
+	if h.logger != nil {
+		logBodies = h.logger.Config().LogBodies
+	}
+	return &imageService{modelCallService: h.modelCalls(), logBodies: logBodies}
 }
 
 func (h *Handler) nativeResponses() *nativeResponseService {
