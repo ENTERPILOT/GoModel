@@ -1383,6 +1383,8 @@
   "models_price_audio_output": "Wyjście Audio $/MTok",
   "models_price_per_image": "$/obraz",
   "models_price_input_image": "Wejście $/obraz",
+  "models_price_input_image_tokens": "Wejście obrazu $/MTok",
+  "models_price_output_image_tokens": "Wyjście obrazu $/MTok",
   "models_price_input_second": "Wejście $/sekundę",
   "models_price_output_second": "Wyjście $/sekundę",
   "models_price_per_character": "$/znak",

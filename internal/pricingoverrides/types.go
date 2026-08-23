@@ -20,6 +20,8 @@ type Pricing struct {
 	BatchOutputPerMtok     *float64      `json:"batch_output_per_mtok,omitempty" bson:"batch_output_per_mtok,omitempty"`
 	AudioInputPerMtok      *float64      `json:"audio_input_per_mtok,omitempty" bson:"audio_input_per_mtok,omitempty"`
 	AudioOutputPerMtok     *float64      `json:"audio_output_per_mtok,omitempty" bson:"audio_output_per_mtok,omitempty"`
+	InputImagePerMtok      *float64      `json:"input_image_per_mtok,omitempty" bson:"input_image_per_mtok,omitempty"`
+	OutputImagePerMtok     *float64      `json:"output_image_per_mtok,omitempty" bson:"output_image_per_mtok,omitempty"`
 	PerImage               *float64      `json:"per_image,omitempty" bson:"per_image,omitempty"`
 	InputPerImage          *float64      `json:"input_per_image,omitempty" bson:"input_per_image,omitempty"`
 	PerSecondInput         *float64      `json:"per_second_input,omitempty" bson:"per_second_input,omitempty"`

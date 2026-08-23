@@ -14,6 +14,8 @@ export const PRICE_FIELDS = [
   { value: "audio_output_per_mtok", label: m.models_price_audio_output(), group: m.models_price_group_audio() },
   { value: "per_image", label: m.models_price_per_image(), group: m.models_price_group_image() },
   { value: "input_per_image", label: m.models_price_input_image(), group: m.models_price_group_image() },
+  { value: "input_image_per_mtok", label: m.models_price_input_image_tokens(), group: m.models_price_group_image() },
+  { value: "output_image_per_mtok", label: m.models_price_output_image_tokens(), group: m.models_price_group_image() },
   { value: "per_second_input", label: m.models_price_input_second(), group: m.models_price_group_audio_video() },
   { value: "per_second_output", label: m.models_price_output_second(), group: m.models_price_group_video() },
   { value: "per_character_input", label: m.models_price_per_character(), group: m.models_price_group_audio() },

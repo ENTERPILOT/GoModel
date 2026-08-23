@@ -15,6 +15,8 @@ func clonePricing(p Pricing) Pricing {
 	out.BatchOutputPerMtok = cloneFloatPtr(p.BatchOutputPerMtok)
 	out.AudioInputPerMtok = cloneFloatPtr(p.AudioInputPerMtok)
 	out.AudioOutputPerMtok = cloneFloatPtr(p.AudioOutputPerMtok)
+	out.InputImagePerMtok = cloneFloatPtr(p.InputImagePerMtok)
+	out.OutputImagePerMtok = cloneFloatPtr(p.OutputImagePerMtok)
 	out.PerImage = cloneFloatPtr(p.PerImage)
 	out.InputPerImage = cloneFloatPtr(p.InputPerImage)
 	out.PerSecondInput = cloneFloatPtr(p.PerSecondInput)
@@ -48,6 +50,8 @@ func pricingEmpty(p Pricing) bool {
 		p.BatchOutputPerMtok != nil ||
 		p.AudioInputPerMtok != nil ||
 		p.AudioOutputPerMtok != nil ||
+		p.InputImagePerMtok != nil ||
+		p.OutputImagePerMtok != nil ||
 		p.PerImage != nil ||
 		p.InputPerImage != nil ||
 		p.PerSecondInput != nil ||
@@ -85,6 +89,8 @@ func pricingToCore(p Pricing) *core.ModelPricing {
 		BatchOutputPerMtok:     cloneFloatPtr(p.BatchOutputPerMtok),
 		AudioInputPerMtok:      cloneFloatPtr(p.AudioInputPerMtok),
 		AudioOutputPerMtok:     cloneFloatPtr(p.AudioOutputPerMtok),
+		InputImagePerMtok:      cloneFloatPtr(p.InputImagePerMtok),
+		OutputImagePerMtok:     cloneFloatPtr(p.OutputImagePerMtok),
 		PerImage:               cloneFloatPtr(p.PerImage),
 		InputPerImage:          cloneFloatPtr(p.InputPerImage),
 		PerSecondInput:         cloneFloatPtr(p.PerSecondInput),
@@ -126,6 +132,8 @@ func mergePricing(base *core.ModelPricing, override Pricing) *core.ModelPricing 
 	applyFloatOverride(&out.BatchOutputPerMtok, overlay.BatchOutputPerMtok)
 	applyFloatOverride(&out.AudioInputPerMtok, overlay.AudioInputPerMtok)
 	applyFloatOverride(&out.AudioOutputPerMtok, overlay.AudioOutputPerMtok)
+	applyFloatOverride(&out.InputImagePerMtok, overlay.InputImagePerMtok)
+	applyFloatOverride(&out.OutputImagePerMtok, overlay.OutputImagePerMtok)
 	applyFloatOverride(&out.PerImage, overlay.PerImage)
 	applyFloatOverride(&out.InputPerImage, overlay.InputPerImage)
 	applyFloatOverride(&out.PerSecondInput, overlay.PerSecondInput)

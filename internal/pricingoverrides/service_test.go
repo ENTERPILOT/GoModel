@@ -405,3 +405,37 @@ func TestNormalizedRefreshIntervalClampsBelowRefreshTimeout(t *testing.T) {
 		})
 	}
 }
+
+// TestServiceResolvePricingOverlaysImageTokenRates verifies the image token
+// rates round-trip through overrides: an override can set one while the other
+// keeps inheriting from the catalog.
+func TestServiceResolvePricingOverlaysImageTokenRates(t *testing.T) {
+	service, err := NewService(
+		newTestStore(
+			Override{Selector: "openai/gpt-image-1-mini", Pricing: Pricing{OutputImagePerMtok: new(float64(9))}},
+		),
+		testCatalog{providerNames: []string{"openai"}},
+		staticPricingResolver{pricing: &core.ModelPricing{
+			InputPerMtok:       new(float64(2)),
+			InputImagePerMtok:  new(float64(2.5)),
+			OutputImagePerMtok: new(float64(8)),
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	pricing := service.ResolvePricing("gpt-image-1-mini", "openai")
+	if pricing == nil {
+		t.Fatal("ResolvePricing() = nil")
+	}
+	if pricing.OutputImagePerMtok == nil || *pricing.OutputImagePerMtok != 9 {
+		t.Fatalf("OutputImagePerMtok = %#v, want override 9", pricing.OutputImagePerMtok)
+	}
+	if pricing.InputImagePerMtok == nil || *pricing.InputImagePerMtok != 2.5 {
+		t.Fatalf("InputImagePerMtok = %#v, want catalog 2.5", pricing.InputImagePerMtok)
+	}
+}

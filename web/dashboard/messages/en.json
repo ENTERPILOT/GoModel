@@ -1355,6 +1355,8 @@
   "models_price_audio_output": "Audio output $/MTok",
   "models_price_per_image": "$/Image",
   "models_price_input_image": "Input $/Image",
+  "models_price_input_image_tokens": "Image input $/MTok",
+  "models_price_output_image_tokens": "Image output $/MTok",
   "models_price_input_second": "Input $/Second",
   "models_price_output_second": "Output $/Second",
   "models_price_per_character": "$/Character",

@@ -70,6 +70,12 @@ var openAICompatibleTokenCostMappings = []tokenCostMapping{
 	{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "prompt_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "completion_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+	// Image models (gpt-image-1 family) price image tokens separately from text
+	// tokens on both sides: prompt image tokens are a breakdown of input_tokens
+	// and the whole image-generation output is image tokens (see usage/images.go).
+	// Models without image rates leave these nil and the base rates apply.
+	{rawDataKey: "prompt_image_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.InputImagePerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+	{rawDataKey: "completion_image_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.OutputImagePerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 }
 
 // providerMappings defines the per-provider RawData key to pricing field

@@ -50,6 +50,8 @@ func pricingScalarFields(p Pricing) []pricingField {
 		{"batch_output_per_mtok", p.BatchOutputPerMtok},
 		{"audio_input_per_mtok", p.AudioInputPerMtok},
 		{"audio_output_per_mtok", p.AudioOutputPerMtok},
+		{"input_image_per_mtok", p.InputImagePerMtok},
+		{"output_image_per_mtok", p.OutputImagePerMtok},
 		{"per_image", p.PerImage},
 		{"input_per_image", p.InputPerImage},
 		{"per_second_input", p.PerSecondInput},
