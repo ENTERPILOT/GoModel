@@ -44,6 +44,14 @@ var auditLogPartialWriteFailures = promauto.NewCounter(
 )
 
 // MongoDBStore implements LogStore for MongoDB.
+const legacyExecutionPlanIndex = "execution_plan_version_id_1"
+
+// isIndexNotFound reports MongoDB's IndexNotFound (code 27) server error.
+func isIndexNotFound(err error) bool {
+	var cmdErr mongo.CommandError
+	return errors.As(err, &cmdErr) && cmdErr.HasErrorCode(27)
+}
+
 type MongoDBStore struct {
 	collection    *mongo.Collection
 	retentionDays int
@@ -127,8 +135,11 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 	}
 
 	// Best-effort: retire the index on the pre-v0.1.17 execution_plan_version_id
-	// field, which the workflow rename left behind on older collections.
-	_ = collection.Indexes().DropOne(ctx, "execution_plan_version_id_1")
+	// field, which the workflow rename left behind on older collections. Most
+	// collections never had it, so "not found" is the expected outcome.
+	if err := collection.Indexes().DropOne(ctx, legacyExecutionPlanIndex); err != nil && !isIndexNotFound(err) {
+		slog.Warn("failed to drop legacy MongoDB index", "index", legacyExecutionPlanIndex, "error", err)
+	}
 
 	_, err := collection.Indexes().CreateMany(ctx, indexes)
 	if err != nil {
