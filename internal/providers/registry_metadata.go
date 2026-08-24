@@ -13,12 +13,15 @@ import (
 	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
-// SetModelList stores the parsed model list and its raw bytes for cache persistence.
+// SetModelList stores the parsed model list and its raw bytes for cache
+// persistence. The ETag validator is cleared: callers that fetched
+// conditionally use setModelListAndEnrich, which records it.
 func (r *ModelRegistry) SetModelList(list *modeldata.ModelList, raw json.RawMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.modelList = list
 	r.modelListRaw = raw
+	r.modelListETag = ""
 }
 
 // EnrichModels re-applies model list metadata to all currently registered models.
@@ -60,12 +63,32 @@ func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
 	return stats
 }
 
-func (r *ModelRegistry) setModelListAndEnrich(list *modeldata.ModelList, raw json.RawMessage) metadataEnrichmentStats {
+func (r *ModelRegistry) setModelListAndEnrich(list *modeldata.ModelList, raw json.RawMessage, etag string) metadataEnrichmentStats {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.modelList = list
 	r.modelListRaw = raw
+	r.modelListETag = etag
 	return r.enrichModelsLocked()
+}
+
+// currentModelListETag returns the model list validator for conditional
+// refetches.
+func (r *ModelRegistry) currentModelListETag() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.modelListETag
+}
+
+// modelListModelCount returns the number of models in the currently stored
+// model list, or 0 when none is loaded.
+func (r *ModelRegistry) modelListModelCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.modelList == nil {
+		return 0
+	}
+	return len(r.modelList.Models)
 }
 
 // ResolveMetadata resolves metadata for a model directly via the stored model list,

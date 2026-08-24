@@ -638,7 +638,9 @@ func (r *ModelRegistry) recheckFailedProviders(ctx context.Context) {
 }
 
 // RefreshModelList fetches the external model metadata list and re-enriches all
-// currently registered models. It does not persist the model cache; callers that
+// currently registered models. The fetch is conditional: when upstream reports
+// the list unchanged for the stored ETag, the current data is kept and its
+// model count returned. It does not persist the model cache; callers that
 // want durable startup data should call SaveToCache after this succeeds.
 func (r *ModelRegistry) RefreshModelList(ctx context.Context, url string) (int, error) {
 	if strings.TrimSpace(url) == "" {
@@ -654,21 +656,27 @@ func (r *ModelRegistry) RefreshModelList(ctx context.Context, url string) (int, 
 	}
 	defer release()
 
-	models, _, err := r.refreshModelListLocked(ctx, url)
+	models, _, _, err := r.refreshModelListLocked(ctx, url)
 	return models, err
 }
 
-func (r *ModelRegistry) refreshModelListLocked(ctx context.Context, url string) (int, metadataEnrichmentStats, error) {
-	list, raw, err := modeldata.Fetch(ctx, url)
+// refreshModelListLocked fetches the model list conditionally: when the stored
+// ETag still matches upstream, the download, reparse, and re-enrichment are all
+// skipped and changed=false is returned with the current model count.
+func (r *ModelRegistry) refreshModelListLocked(ctx context.Context, url string) (int, bool, metadataEnrichmentStats, error) {
+	result, err := modeldata.FetchIfChanged(ctx, url, r.currentModelListETag())
 	if err != nil {
-		return 0, metadataEnrichmentStats{}, err
+		return 0, false, metadataEnrichmentStats{}, err
 	}
-	if list == nil {
-		return 0, metadataEnrichmentStats{}, nil
+	if result.NotModified {
+		return r.modelListModelCount(), false, metadataEnrichmentStats{}, nil
+	}
+	if result.List == nil {
+		return 0, false, metadataEnrichmentStats{}, nil
 	}
 
-	metadataStats := r.setModelListAndEnrich(list, raw)
-	return len(list.Models), metadataStats, nil
+	metadataStats := r.setModelListAndEnrich(result.List, result.Raw, result.ETag)
+	return len(result.List.Models), true, metadataStats, nil
 }
 
 // refreshModelList fetches the model list and re-enriches all models.
@@ -685,16 +693,21 @@ func (r *ModelRegistry) refreshModelList(ctx context.Context, url string) {
 	}
 	var (
 		models        int
+		changed       bool
 		metadataStats metadataEnrichmentStats
 	)
 	func() {
 		defer release()
-		models, metadataStats, err = r.refreshModelListLocked(fetchCtx, url)
+		models, changed, metadataStats, err = r.refreshModelListLocked(fetchCtx, url)
 	}()
 	if err != nil {
 		if !isBenignBackgroundRefreshError(ctx, err) {
 			slog.Warn("failed to refresh model list", "url", url, "error", err)
 		}
+		return
+	}
+	if !changed {
+		slog.Debug("model list unchanged", "models", models)
 		return
 	}
 	if models == 0 {

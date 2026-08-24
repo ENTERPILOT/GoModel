@@ -65,8 +65,8 @@ func (r *InitResult) Close() error {
 //  2. Cache initialization (local or Redis based on config)
 //  3. Provider instantiation and registration
 //  4. Async model loading (from cache first, then network refresh)
-//  5. Best-effort background model-list fetch (goroutine with ~45s timeout that
-//     calls modeldata.Fetch, registry.EnrichModels, and SaveToCache)
+//  5. Best-effort background model-list fetch (goroutine with ~45s timeout;
+//     conditional via ETag, then enrich and SaveToCache when content changed)
 //  6. Background refresh scheduling (interval from cfg.Cache.RefreshInterval)
 //  7. Router creation
 //
@@ -133,25 +133,28 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 			fetchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 			defer cancel()
 
-			list, raw, err := modeldata.Fetch(fetchCtx, modelListURL)
+			result, err := modeldata.FetchIfChanged(fetchCtx, modelListURL, registry.currentModelListETag())
 			if err != nil {
 				slog.Warn("failed to fetch model list", "url", modelListURL, "error", err)
 				return
 			}
-			if list == nil {
+			if result.NotModified {
+				slog.Info("model list unchanged since last download, using cached copy")
+				return
+			}
+			if result.List == nil {
 				return
 			}
 
-			registry.SetModelList(list, raw)
-			metadataStats := registry.enrichModels()
+			metadataStats := registry.setModelListAndEnrich(result.List, result.Raw, result.ETag)
 
 			if err := registry.SaveToCache(fetchCtx); err != nil {
 				slog.Warn("failed to save cache after model list fetch", "error", err)
 			}
 			attrs := []any{
-				"models", len(list.Models),
-				"providers", len(list.Providers),
-				"provider_models", len(list.ProviderModels),
+				"models", len(result.List.Models),
+				"providers", len(result.List.Providers),
+				"provider_models", len(result.List.ProviderModels),
 			}
 			attrs = append(attrs, metadataStats.slogAttrs()...)
 			slog.Info("model list loaded", attrs...)

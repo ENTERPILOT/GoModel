@@ -62,6 +62,7 @@ type ModelRegistry struct {
 	refreshOnce      sync.Once            // initializes refreshCh for zero-value safety
 	modelList        *modeldata.ModelList // parsed model list (nil = not loaded)
 	modelListRaw     json.RawMessage      // raw bytes for cache persistence
+	modelListETag    string               // validator for conditional refetches; empty = fetch unconditionally
 	// configMetadataOverrides holds operator-supplied metadata keyed by provider
 	// instance name -> raw model ID. Applied after remote-registry enrichment as
 	// a higher-priority layer. nil if no overrides declared.

@@ -2564,3 +2564,80 @@ func TestProviderByTypeAndNameTrimConfiguredValues(t *testing.T) {
 		t.Fatalf("GetProviderNameForType(openai) = %q, want %q", got, "padded-name")
 	}
 }
+
+func TestRefreshModelList_ConditionalFetch(t *testing.T) {
+	const etag = `"list-v1"`
+	body := []byte(`{
+		"version": 1,
+		"updated_at": "2025-01-01T00:00:00Z",
+		"providers": {"openai": {"display_name": "OpenAI", "api_type": "openai"}},
+		"models": {"test-model": {"display_name": "Test Model", "modes": ["chat"]}},
+		"provider_models": {}
+	}`)
+
+	var fullFetches, notModified atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == etag {
+			notModified.Add(1)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		fullFetches.Add(1)
+		w.Header().Set("ETag", etag)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	registry := NewModelRegistry()
+
+	count, err := registry.RefreshModelList(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("RefreshModelList() error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("RefreshModelList() count = %d, want 1", count)
+	}
+	if fullFetches.Load() != 1 || notModified.Load() != 0 {
+		t.Fatalf("expected one full fetch, got full=%d notModified=%d", fullFetches.Load(), notModified.Load())
+	}
+
+	registry.mu.RLock()
+	listBefore := registry.modelList
+	registry.mu.RUnlock()
+
+	count, err = registry.RefreshModelList(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("RefreshModelList() second call error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("RefreshModelList() second call count = %d, want 1", count)
+	}
+	if notModified.Load() != 1 {
+		t.Fatalf("expected second fetch to be answered 304, got full=%d notModified=%d", fullFetches.Load(), notModified.Load())
+	}
+
+	registry.mu.RLock()
+	listAfter := registry.modelList
+	etagAfter := registry.modelListETag
+	registry.mu.RUnlock()
+	if listAfter != listBefore {
+		t.Fatal("expected 304 refresh to keep the existing parsed model list")
+	}
+	if etagAfter != etag {
+		t.Fatalf("modelListETag = %q, want %q", etagAfter, etag)
+	}
+}
+
+func TestSetModelList_ClearsETag(t *testing.T) {
+	registry := NewModelRegistry()
+	raw := []byte(`{"version": 1, "providers": {}, "models": {}, "provider_models": {}}`)
+	list, err := modeldata.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	registry.setModelListAndEnrich(list, raw, `"old"`)
+	registry.SetModelList(list, raw)
+	if got := registry.currentModelListETag(); got != "" {
+		t.Fatalf("currentModelListETag() = %q, want empty after SetModelList", got)
+	}
+}

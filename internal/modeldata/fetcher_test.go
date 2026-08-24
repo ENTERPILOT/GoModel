@@ -114,6 +114,98 @@ func TestFetch_OversizedBody(t *testing.T) {
 	}
 }
 
+func TestFetchIfChanged_CapturesETag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("If-None-Match"); got != "" {
+			t.Errorf("unexpected If-None-Match header %q on unconditional fetch", got)
+		}
+		w.Header().Set("ETag", `"abc123"`)
+		_, _ = w.Write([]byte(`{"version": 1, "providers": {}, "models": {}, "provider_models": {}}`))
+	}))
+	defer server.Close()
+
+	result, err := FetchIfChanged(context.Background(), server.URL, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NotModified {
+		t.Error("expected NotModified=false for 200 response")
+	}
+	if result.List == nil || result.Raw == nil {
+		t.Fatal("expected list and raw bytes")
+	}
+	if result.ETag != `"abc123"` {
+		t.Errorf("ETag = %q, want %q", result.ETag, `"abc123"`)
+	}
+}
+
+func TestFetchIfChanged_NotModified(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("If-None-Match"); got != `"abc123"` {
+			t.Errorf("If-None-Match = %q, want %q", got, `"abc123"`)
+		}
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer server.Close()
+
+	result, err := FetchIfChanged(context.Background(), server.URL, `"abc123"`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.NotModified {
+		t.Fatal("expected NotModified=true for 304 response")
+	}
+	if result.List != nil || result.Raw != nil {
+		t.Error("expected nil list and raw on 304")
+	}
+	if result.ETag != `"abc123"` {
+		t.Errorf("ETag = %q, want the presented validator carried forward", result.ETag)
+	}
+}
+
+func TestFetchIfChanged_ChangedContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"v2"`)
+		_, _ = w.Write([]byte(`{"version": 2, "providers": {}, "models": {}, "provider_models": {}}`))
+	}))
+	defer server.Close()
+
+	result, err := FetchIfChanged(context.Background(), server.URL, `"v1"`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NotModified {
+		t.Error("expected NotModified=false when content changed")
+	}
+	if result.List == nil || result.List.Version != 2 {
+		t.Fatal("expected updated list")
+	}
+	if result.ETag != `"v2"` {
+		t.Errorf("ETag = %q, want %q", result.ETag, `"v2"`)
+	}
+}
+
+func TestFetchIfChanged_ServerWithoutETagSupport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"version": 1, "providers": {}, "models": {}, "provider_models": {}}`))
+	}))
+	defer server.Close()
+
+	result, err := FetchIfChanged(context.Background(), server.URL, `"stale"`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NotModified {
+		t.Error("expected NotModified=false when server ignores validators")
+	}
+	if result.List == nil {
+		t.Fatal("expected list from 200 response")
+	}
+	if result.ETag != "" {
+		t.Errorf("ETag = %q, want empty when server returns none", result.ETag)
+	}
+}
+
 func TestParse_ValidJSON(t *testing.T) {
 	raw := []byte(`{
 		"version": 1,

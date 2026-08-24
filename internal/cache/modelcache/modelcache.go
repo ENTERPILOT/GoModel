@@ -19,6 +19,9 @@ type ModelCache struct {
 	// ModelListData holds the raw JSON model registry bytes for cache persistence,
 	// allowing the registry to restore its full model list without re-fetching.
 	ModelListData json.RawMessage `json:"model_list_data,omitempty"`
+	// ModelListETag is the HTTP validator ModelListData was downloaded with,
+	// letting the next fetch skip the download when the list is unchanged.
+	ModelListETag string `json:"model_list_etag,omitempty"`
 }
 
 // CachedProvider holds shared fields for all models from a single provider.
