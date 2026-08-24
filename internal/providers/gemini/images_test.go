@@ -357,3 +357,59 @@ func TestListModels_SeedsKnownImagenModels(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateImage_GeminiImageModelMultiImage(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Errorf("request body is not JSON: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"candidates": [
+				{"content": {"role": "model", "parts": [{"inlineData": {"mimeType": "image/png", "data": "aW1nMQ=="}}]}, "finishReason": "STOP"},
+				{"content": {"role": "model", "parts": [{"inlineData": {"mimeType": "image/png", "data": "aW1nMg=="}}]}, "finishReason": "STOP", "index": 1}
+			],
+			"usageMetadata": {"promptTokenCount": 8, "candidatesTokenCount": 2580, "totalTokenCount": 2588}
+		}`))
+	}))
+	defer server.Close()
+
+	p := newNativeTestProvider(t, server)
+	resp, err := p.CreateImage(context.Background(), decodeImageRequest(t, `{"model": "gemini-2.5-flash-image", "prompt": "two variants", "n": 2}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	config, _ := gotBody["generationConfig"].(map[string]any)
+	if config["candidateCount"] != float64(2) {
+		t.Errorf("candidateCount = %v, want 2 for n=2", config["candidateCount"])
+	}
+	if len(resp.Data) != 2 || resp.Data[0].B64JSON != "aW1nMQ==" || resp.Data[1].B64JSON != "aW1nMg==" {
+		t.Fatalf("data = %+v, want both candidates flattened into images", resp.Data)
+	}
+	if resp.Usage == nil || resp.Usage.TotalTokens != 2588 {
+		t.Errorf("usage = %+v, want mapped totals", resp.Usage)
+	}
+}
+
+func TestListModels_SeedsImagenOnExplicitlyEmptyInventory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"models": []}`))
+	}))
+	defer server.Close()
+
+	p := newNativeTestProvider(t, server)
+	resp, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Data) != len(knownImagenModels) {
+		t.Fatalf("models = %+v, want the seeded Imagen models on an empty inventory", resp.Data)
+	}
+	if resp.Data[0].ID != knownImagenModels[0] {
+		t.Errorf("first model = %q, want %q", resp.Data[0].ID, knownImagenModels[0])
+	}
+}

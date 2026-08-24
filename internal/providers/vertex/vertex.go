@@ -191,6 +191,25 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	return p.gemini.StreamChatCompletion(ctx, req)
 }
 
+// CreateImage sends an image generation request through the embedded Gemini
+// adapter, whose Vertex backend serves Imagen through :predict and Gemini
+// image models through generateContent on the publisher endpoints.
+func (p *Provider) CreateImage(ctx context.Context, req *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
+	return p.gemini.CreateImage(ctx, req)
+}
+
+// CreateImageEdit sends an image edit request through the embedded Gemini
+// adapter (Gemini image models only; see the gemini package for the rules).
+func (p *Provider) CreateImageEdit(ctx context.Context, req *core.ImageEditRequest) (*core.ImageGenerationResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
+	return p.gemini.CreateImageEdit(ctx, req)
+}
+
 // ListModels retrieves Vertex AI publisher models.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	if err := p.ready(); err != nil {
@@ -330,4 +349,8 @@ func normalizeVertexModelID(model string) string {
 	return model
 }
 
-var _ core.Provider = (*Provider)(nil)
+var (
+	_ core.Provider          = (*Provider)(nil)
+	_ core.ImageProvider     = (*Provider)(nil)
+	_ core.ImageEditProvider = (*Provider)(nil)
+)

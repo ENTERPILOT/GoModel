@@ -834,9 +834,11 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		}
 		modelEntries := append(geminiResp.Models, geminiResp.PublisherModels...)
 		if len(modelEntries) == 0 {
+			// Still seed Imagen: Google serves those models without ever
+			// listing them, so an explicitly empty inventory must not hide them.
 			return &core.ModelsResponse{
 				Object: "list",
-				Data:   []core.Model{},
+				Data:   p.appendKnownImagenModels([]core.Model{}, now),
 			}, nil
 		}
 
