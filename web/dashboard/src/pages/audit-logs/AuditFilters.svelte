@@ -22,8 +22,6 @@
       oninput={onSearchInput}
       loading={auditList.loading}
     />
-  </div>
-  <div class="audit-filter-row audit-filter-row-controls">
     <select
       id="audit-filter-field"
       aria-label={m.audit_filter_field_label()}
@@ -39,6 +37,8 @@
       <option value="error_type">{m.audit_filter_field_error_type()}</option>
       <option value="search">{m.audit_filter_field_search()}</option>
     </select>
+  </div>
+  <div class="audit-filter-row audit-filter-row-controls">
     <select
       id="audit-filter-method"
       aria-label={m.audit_filter_method_label()}
@@ -115,11 +115,11 @@
   }
 
   .audit-filter-row-search :global(.filter-input-wrap) {
-    grid-column: span 4;
+    grid-column: span 8;
     max-width: none;
   }
 
-  .audit-filter-field { grid-column: span 2; }
+  .audit-filter-field { grid-column: span 4; width: 100%; }
 
   .audit-filter-row-controls .audit-filter-select {
     grid-column: span 2;

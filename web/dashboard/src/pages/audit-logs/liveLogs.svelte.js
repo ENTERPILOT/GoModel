@@ -57,7 +57,7 @@ class LiveLogsStore {
   auditMethod = $state("");
   auditStatusCode = $state("");
   auditStream = $state("");
-  auditField = $state("user_path");
+  auditField = $state("search");
   auditFieldValue = $state("");
 
   // Session grouping view preference (default ON) and the lazily-fetched
