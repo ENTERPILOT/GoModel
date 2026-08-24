@@ -45,7 +45,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	for _, key := range []string{
 		"CONFIG_STRICT",
 		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
-		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL",
+		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"RESPONSE_CACHE_SIMPLE_ENABLED",
 		"SEMANTIC_CACHE_ENABLED", "SEMANTIC_CACHE_THRESHOLD", "SEMANTIC_CACHE_TTL", "SEMANTIC_CACHE_MAX_CONV_MESSAGES",
@@ -1430,6 +1430,76 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 		if cfg.Storage.PostgreSQL.MaxConns != 20 {
 			t.Errorf("expected max conns 20, got %d", cfg.Storage.PostgreSQL.MaxConns)
 		}
+	})
+}
+
+func TestLoad_ModelListURLEnv(t *testing.T) {
+	const defaultURL = "https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.min.json"
+
+	tests := []struct {
+		name  string
+		set   bool
+		value string
+		want  string
+	}{
+		{name: "UnsetKeepsDefault", set: false, want: defaultURL},
+		{name: "MirrorOverridesDefault", set: true, value: "https://mirror.internal/models.min.json", want: "https://mirror.internal/models.min.json"},
+		{name: "EmptyIsSkippedLikeAnyEnvVar", set: true, value: "", want: defaultURL},
+		{name: "OffDisablesDownloads", set: true, value: "off", want: ""},
+		{name: "OffIsCaseInsensitive", set: true, value: "OFF", want: ""},
+		{name: "OffTrimsWhitespace", set: true, value: " off ", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(_ string) {
+				if tt.set {
+					t.Setenv("MODEL_LIST_URL", tt.value)
+				}
+				result, err := Load()
+				if err != nil {
+					t.Fatalf("Load() failed: %v", err)
+				}
+				if got := result.Config.Cache.Model.ModelList.URL; got != tt.want {
+					t.Errorf("Cache.Model.ModelList.URL = %q, want %q", got, tt.want)
+				}
+			})
+		})
+	}
+
+	t.Run("EnvOffWinsOverConfigYAML", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		withTempDir(t, func(dir string) {
+			yaml := "cache:\n  model:\n    model_list:\n      url: \"https://mirror.internal/models.min.json\"\n"
+			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
+				t.Fatalf("failed to write config.yaml: %v", err)
+			}
+			t.Setenv("MODEL_LIST_URL", "off")
+			result, err := Load()
+			if err != nil {
+				t.Fatalf("Load() failed: %v", err)
+			}
+			if got := result.Config.Cache.Model.ModelList.URL; got != "" {
+				t.Errorf("Cache.Model.ModelList.URL = %q, want empty (env off wins over config.yaml)", got)
+			}
+		})
+	})
+
+	t.Run("ConfigYAMLOffDisablesDownloads", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		withTempDir(t, func(dir string) {
+			yaml := "cache:\n  model:\n    model_list:\n      url: \"off\"\n"
+			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
+				t.Fatalf("failed to write config.yaml: %v", err)
+			}
+			result, err := Load()
+			if err != nil {
+				t.Fatalf("Load() failed: %v", err)
+			}
+			if got := result.Config.Cache.Model.ModelList.URL; got != "" {
+				t.Errorf("Cache.Model.ModelList.URL = %q, want empty (yaml off disables)", got)
+			}
+		})
 	})
 }
 

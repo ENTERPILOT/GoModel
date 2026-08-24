@@ -12,7 +12,22 @@ import (
 // applyEnvOverrides walks cfg's struct fields and applies env var overrides
 // based on `env` struct tags. Maps are skipped.
 func applyEnvOverrides(cfg *Config) error {
-	return applyEnvOverridesValue(reflect.ValueOf(cfg).Elem())
+	if err := applyEnvOverridesValue(reflect.ValueOf(cfg).Elem()); err != nil {
+		return err
+	}
+	normalizeModelListURL(cfg)
+	return nil
+}
+
+// normalizeModelListURL maps the sentinel "off" (case-insensitive) to an empty
+// model list URL, disabling catalog downloads for air-gapped installs. A
+// sentinel is used because empty env values are skipped by the generic overlay
+// (so MODEL_LIST_URL="" cannot override the default), and it works identically
+// when set via config.yaml.
+func normalizeModelListURL(cfg *Config) {
+	if strings.EqualFold(strings.TrimSpace(cfg.Cache.Model.ModelList.URL), "off") {
+		cfg.Cache.Model.ModelList.URL = ""
+	}
 }
 
 // hasEnvDescendants reports whether t (a struct type) contains any field (at

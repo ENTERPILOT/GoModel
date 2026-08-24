@@ -128,7 +128,9 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 
 	// Fetch model list in background (best-effort, non-blocking)
 	modelListURL := result.Config.Cache.Model.ModelList.URL
-	if modelListURL != "" {
+	if modelListURL == "" {
+		slog.Info("model list downloads disabled; models rely on provider-reported, configured, and any previously cached catalog metadata")
+	} else {
 		go func() {
 			fetchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 			defer cancel()
