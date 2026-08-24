@@ -1,14 +1,8 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 )
-
-// sessionUpdateMarker gates transcription-model pinning: only session.update
-// frames can select a model, so a cheap byte scan skips the audio appends that
-// dominate the relay hot path.
-var sessionUpdateMarker = []byte(`"session.update"`)
 
 // pinTranscriptionModel returns a client-frame mapper for transcription
 // sessions that rewrites every session.update to carry the gateway-routed
@@ -20,11 +14,13 @@ var sessionUpdateMarker = []byte(`"session.update"`)
 //
 // Frames that are not session.update, or that do not parse, are forwarded
 // unchanged: the upstream is the authority on rejecting malformed events.
+//
+// Every frame is JSON-decoded to find its type: a raw byte-marker pre-filter
+// would be cheaper, but JSON string escapes ("session\u002eupdate") would slip
+// past it and reopen the model bypass this mapper exists to close. Decoding a
+// few audio frames per second is well below the relay's transport cost.
 func pinTranscriptionModel(model string) func([]byte) []byte {
 	return func(frame []byte) []byte {
-		if !bytes.Contains(frame, sessionUpdateMarker) {
-			return frame
-		}
 		var event map[string]any
 		if err := json.Unmarshal(frame, &event); err != nil || event["type"] != "session.update" {
 			return frame

@@ -147,6 +147,11 @@ func TestRealtimeTargetTranscriptionIntent(t *testing.T) {
 		if target.URL != "wss://api.openai.com/v1/realtime?intent=transcription" {
 			t.Errorf("intent %q: url = %q, want intent-only realtime URL", intent, target.URL)
 		}
+		// The URL carries no model, so the provider must ask the gateway to pin
+		// the session.update model selection to the routed model.
+		if target.PinSessionModel != "gpt-4o-transcribe" {
+			t.Errorf("intent %q: PinSessionModel = %q, want the routed model", intent, target.PinSessionModel)
+		}
 	}
 
 	// The model still gates the request: without one there is nothing to route
@@ -162,5 +167,8 @@ func TestRealtimeTargetTranscriptionIntent(t *testing.T) {
 	}
 	if !strings.Contains(target.URL, "model=gpt-realtime") {
 		t.Errorf("url = %q, want model parameter for non-transcription intent", target.URL)
+	}
+	if target.PinSessionModel != "" {
+		t.Errorf("PinSessionModel = %q, want empty: the URL already fixes the model", target.PinSessionModel)
 	}
 }

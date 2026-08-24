@@ -23,7 +23,6 @@ import (
 var (
 	responseDoneMarker       = []byte(`"response.done"`)
 	transcriptionUsageMarker = []byte(`"conversation.item.input_audio_transcription.completed"`)
-	transcriptionIntent      = "transcription"
 )
 
 // realtimeService adapts Echo requests to the realtime websocket reverse proxy.
@@ -138,12 +137,12 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 		// usage; tapping the attach session too would double-count every response.
 		tap = nil
 	}
-	// A transcription session's upstream URL carries no model, so the client's
-	// session.update picks it; pin it to the routed model the caller was
-	// authorized for.
+	// A provider that leaves the model out of the upstream URL (OpenAI
+	// transcription sessions) asks the gateway to pin the client's in-session
+	// model selection to the routed model the caller was authorized for.
 	var mapClientFrame func([]byte) []byte
-	if strings.EqualFold(intent, transcriptionIntent) {
-		mapClientFrame = pinTranscriptionModel(route.selector.Model)
+	if model := strings.TrimSpace(target.PinSessionModel); model != "" {
+		mapClientFrame = pinTranscriptionModel(model)
 	}
 	return s.proxy(c, ctx, target, route, tap, mapClientFrame)
 }

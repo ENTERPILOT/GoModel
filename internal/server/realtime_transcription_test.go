@@ -28,6 +28,13 @@ func TestPinTranscriptionModel(t *testing.T) {
 			frame: `{"type":"session.update","session":{"input_audio_transcription":{"model":"whisper-1"}}}`,
 			want:  `{"session":{"audio":{"input":{"transcription":{"model":"gpt-4o-transcribe"}}},"input_audio_transcription":{"model":"gpt-4o-transcribe"}},"type":"session.update"}`,
 		},
+		{
+			// A raw byte-marker gate would miss the escaped type and let the
+			// frame through unpinned; the decoded type must be what counts.
+			name:  "escape-encoded session.update is still pinned",
+			frame: `{"type":"session\u002eupdate","session":{"audio":{"input":{"transcription":{"model":"whisper-1"}}}}}`,
+			want:  `{"session":{"audio":{"input":{"transcription":{"model":"gpt-4o-transcribe"}}}},"type":"session.update"}`,
+		},
 		{name: "audio append passes untouched", frame: `{"type":"input_audio_buffer.append","audio":"AAAA"}`},
 		{name: "marker in a string value is not a session.update", frame: `{"type":"conversation.item.create","text":"say \"session.update\""}`},
 		{name: "session.update without session object passes to upstream to reject", frame: `{"type":"session.update"}`},

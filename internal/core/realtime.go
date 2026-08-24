@@ -27,6 +27,13 @@ type RealtimeTarget struct {
 	URL          string
 	Headers      http.Header
 	Subprotocols []string
+	// PinSessionModel, when non-empty, names the model the gateway must force
+	// into the client's session.update frames. Providers set it when the
+	// upstream URL carries no model — as in OpenAI transcription sessions —
+	// so the session payload, not the URL, selects the model; pinning keeps
+	// that selection on the model the caller was authorized for. Providers
+	// whose URL fixes the model leave it empty and no frame mapping happens.
+	PinSessionModel string
 }
 
 // RealtimeProvider is implemented by providers that expose an OpenAI-compatible
