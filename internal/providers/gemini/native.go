@@ -34,6 +34,7 @@ type geminiContent struct {
 type geminiPart struct {
 	Text                string                  `json:"text,omitempty"`
 	InlineData          *geminiBlob             `json:"inline_data,omitempty"`
+	InlineDataAlt       *geminiBlob             `json:"inlineData,omitempty"`
 	FileData            *geminiFileData         `json:"file_data,omitempty"`
 	FunctionCall        *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionCallAlt     *geminiFunctionCall     `json:"function_call,omitempty"`
@@ -41,6 +42,16 @@ type geminiPart struct {
 	FunctionResponseAlt *geminiFunctionResponse `json:"function_response,omitempty"`
 	Thought             bool                    `json:"thought,omitempty"`
 	ThoughtSignature    string                  `json:"thoughtSignature,omitempty"`
+}
+
+// inlineData returns the inline blob under either spelling: requests are sent
+// snake_case (inline_data), but Gemini REST responses come back camelCase
+// (inlineData).
+func (p geminiPart) inlineData() *geminiBlob {
+	if p.InlineData != nil {
+		return p.InlineData
+	}
+	return p.InlineDataAlt
 }
 
 func (p geminiPart) functionCall() *geminiFunctionCall {
@@ -52,7 +63,10 @@ func (p geminiPart) functionCall() *geminiFunctionCall {
 
 type geminiBlob struct {
 	MimeType string `json:"mime_type,omitempty"`
-	Data     string `json:"data,omitempty"`
+	// MimeTypeAlt captures the camelCase spelling Gemini REST responses use;
+	// requests populate MimeType only.
+	MimeTypeAlt string `json:"mimeType,omitempty"`
+	Data        string `json:"data,omitempty"`
 }
 
 type geminiFileData struct {
@@ -910,7 +924,8 @@ func displayModelIDFromGemini(model, backend string) string {
 // Families such as imagen-* use different upstream endpoints.
 func isGeminiExposedModel(modelID string) bool {
 	modelID = normalizeGeminiModelID(modelID)
-	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-")
+	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-") ||
+		strings.HasPrefix(modelID, "imagen-")
 }
 
 func nativeProviderError(providerName, message string, err error) *core.GatewayError {
