@@ -159,6 +159,11 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
     m.overview_input_tokens({}, { locale: "pl" }),
     "Input Tokens",
   );
+  assert.equal(m.audit_filter_field_search(), "All fields");
+  assert.equal(
+    m.audit_filter_field_search({}, { locale: "pl" }),
+    "Wszystkie pola",
+  );
   assert.equal(m.rate_limits_title({}, { locale: "pl" }), "Rate Limits");
 });
 

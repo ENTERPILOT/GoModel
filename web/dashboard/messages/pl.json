@@ -219,7 +219,7 @@
   "audit_filter_field_provider": "Dostawca",
   "audit_filter_field_session_id": "ID sesji",
   "audit_filter_field_error_type": "Typ błędu",
-  "audit_filter_field_search": "Wszystkie pola (wolne)",
+  "audit_filter_field_search": "Wszystkie pola",
   "audit_filter_method_label": "Filtr metody HTTP",
   "audit_filter_all_methods": "Wszystkie metody",
   "audit_filter_status_label": "Filtr kodu statusu",

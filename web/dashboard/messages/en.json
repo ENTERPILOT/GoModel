@@ -217,7 +217,7 @@
   "audit_filter_field_provider": "Provider",
   "audit_filter_field_session_id": "Session ID",
   "audit_filter_field_error_type": "Error type",
-  "audit_filter_field_search": "All fields (slow)",
+  "audit_filter_field_search": "All fields",
   "audit_filter_method_label": "HTTP method filter",
   "audit_filter_all_methods": "All Methods",
   "audit_filter_status_label": "Status code filter",
