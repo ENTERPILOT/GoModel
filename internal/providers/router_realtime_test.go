@@ -79,6 +79,23 @@ func TestRouterRealtimeTargetForwardsCallID(t *testing.T) {
 	}
 }
 
+func TestRouterRealtimeTargetForwardsIntent(t *testing.T) {
+	// Transcription sessions carry intent=transcription end to end; the router
+	// must not drop it while re-shaping the request around the resolved selector.
+	rt := &realtimeMockProvider{}
+	lookup := newMockLookup()
+	lookup.addModel("gpt-4o-transcribe", rt, "openai")
+	router, _ := NewRouter(lookup)
+
+	_, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-4o-transcribe", Intent: "transcription"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rt.lastReq == nil || rt.lastReq.Intent != "transcription" {
+		t.Errorf("provider received %+v, want forwarded intent", rt.lastReq)
+	}
+}
+
 func TestRouterRealtimeCallTargetRoutesByModel(t *testing.T) {
 	rt := &realtimeMockProvider{}
 	lookup := newMockLookup()

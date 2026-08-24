@@ -119,3 +119,42 @@ func TestOpenAIRealtimeHTTPURL(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIRealtimeTranscriptionURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		want    string
+		wantErr bool
+	}{
+		// OpenAI rejects a model query parameter in transcription mode, so the
+		// URL must carry intent=transcription and nothing else.
+		{name: "openai https to wss", baseURL: "https://api.openai.com/v1", want: "wss://api.openai.com/v1/realtime?intent=transcription"},
+		{name: "http maps to ws", baseURL: "http://localhost:9000/v1", want: "ws://localhost:9000/v1/realtime?intent=transcription"},
+		{name: "empty base", baseURL: "", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := OpenAIRealtimeTranscriptionURL(tt.baseURL)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("url = %q, want %q", got, tt.want)
+			}
+			u, parseErr := url.Parse(got)
+			if parseErr != nil {
+				t.Fatalf("result is not a valid URL: %v", parseErr)
+			}
+			if u.Query().Has("model") {
+				t.Errorf("url %q carries a model parameter; transcription sessions must not send one", got)
+			}
+		})
+	}
+}

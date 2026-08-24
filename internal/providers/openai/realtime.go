@@ -26,6 +26,11 @@ func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest
 		endpoint, err = providers.OpenAIRealtimeAttachURL(p.GetBaseURL(), req.CallID)
 	} else if strings.TrimSpace(req.Model) == "" {
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
+	} else if strings.EqualFold(strings.TrimSpace(req.Intent), "transcription") {
+		// Transcription sessions pick their model via session.update; OpenAI
+		// rejects a model query parameter in this mode, so the requested model
+		// only routed the request to this provider and is dropped from the URL.
+		endpoint, err = providers.OpenAIRealtimeTranscriptionURL(p.GetBaseURL())
 	} else {
 		endpoint, err = providers.OpenAIRealtimeURL(p.GetBaseURL(), req.Model)
 	}

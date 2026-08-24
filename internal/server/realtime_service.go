@@ -115,7 +115,14 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 	}
 	defer release()
 	// Route on the resolved selector: an alias never reaches the provider lookup.
-	target, err := router.RealtimeTarget(ctx, &core.RealtimeRequest{Model: route.selector.Model, Provider: route.selector.Provider, CallID: callID})
+	target, err := router.RealtimeTarget(ctx, &core.RealtimeRequest{
+		Model:    route.selector.Model,
+		Provider: route.selector.Provider,
+		CallID:   callID,
+		// intent=transcription asks OpenAI for a transcription session; the model
+		// still resolves routing, access, and usage attribution above.
+		Intent: strings.TrimSpace(c.QueryParam("intent")),
+	})
 	if err != nil {
 		return handleError(c, err)
 	}
