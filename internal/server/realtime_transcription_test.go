@@ -38,6 +38,19 @@ func TestPinTranscriptionModel(t *testing.T) {
 		{name: "audio append passes untouched", frame: `{"type":"input_audio_buffer.append","audio":"AAAA"}`},
 		{name: "marker in a string value is not a session.update", frame: `{"type":"conversation.item.create","text":"say \"session.update\""}`},
 		{name: "session.update without session object passes to upstream to reject", frame: `{"type":"session.update"}`},
+		{
+			// Pinning must never destroy a client value: a non-object where the
+			// transcription config nests is the upstream's error to report.
+			name:  "scalar audio passes to upstream to reject",
+			frame: `{"type":"session.update","session":{"audio":"bogus"}}`,
+		},
+		{name: "array input passes to upstream to reject", frame: `{"type":"session.update","session":{"audio":{"input":[1,2]}}}`},
+		{name: "scalar transcription passes to upstream to reject", frame: `{"type":"session.update","session":{"audio":{"input":{"transcription":7}}}}`},
+		{
+			name:  "null audio is treated as absent and pinned",
+			frame: `{"type":"session.update","session":{"audio":null}}`,
+			want:  `{"session":{"audio":{"input":{"transcription":{"model":"gpt-4o-transcribe"}}}},"type":"session.update"}`,
+		},
 		{name: "invalid JSON passes to upstream to reject", frame: `{"type":"session.update",`},
 	}
 	for _, tt := range tests {

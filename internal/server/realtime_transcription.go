@@ -31,7 +31,11 @@ func pinTranscriptionModel(model string) func([]byte) []byte {
 		}
 		// GA shape: session.audio.input.transcription.model. Missing levels are
 		// created so a session.update without a model is pinned too.
-		childMap(childMap(childMap(session, "audio"), "input"), "transcription")["model"] = model
+		transcription, ok := ensurePath(session, "audio", "input", "transcription")
+		if !ok {
+			return frame
+		}
+		transcription["model"] = model
 		// Legacy beta shape: session.input_audio_transcription.model. Only pinned
 		// when the client sent it, so the gateway never introduces the old field.
 		if legacy, ok := session["input_audio_transcription"].(map[string]any); ok {
@@ -45,13 +49,23 @@ func pinTranscriptionModel(model string) func([]byte) []byte {
 	}
 }
 
-// childMap returns parent[key] as an object, creating it when absent or of
-// another type.
-func childMap(parent map[string]any, key string) map[string]any {
-	if m, ok := parent[key].(map[string]any); ok {
-		return m
+// ensurePath descends the nested objects named by keys, creating levels that
+// are absent (or null). An existing non-object value on the path means the
+// frame is malformed: ensurePath reports false so the caller forwards the
+// original frame for the upstream to reject, instead of destroying the
+// client's value.
+func ensurePath(parent map[string]any, keys ...string) (map[string]any, bool) {
+	for _, key := range keys {
+		switch child := parent[key].(type) {
+		case map[string]any:
+			parent = child
+		case nil:
+			m := map[string]any{}
+			parent[key] = m
+			parent = m
+		default:
+			return nil, false
+		}
 	}
-	m := map[string]any{}
-	parent[key] = m
-	return m
+	return parent, true
 }
