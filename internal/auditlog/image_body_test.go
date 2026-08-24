@@ -185,6 +185,35 @@ func TestBase64DecodedLen(t *testing.T) {
 			t.Errorf("base64DecodedLen(%q) = %d, want %d", raw, got, len(raw))
 		}
 	}
+	// Malformed base64 must never yield a negative length: a negative size
+	// handed to the budget would increase it instead of reserving from it.
+	for _, malformed := range []string{"=", "==", "==="} {
+		if got := base64DecodedLen(malformed); got < 0 {
+			t.Errorf("base64DecodedLen(%q) = %d, want >= 0", malformed, got)
+		}
+	}
+}
+
+// TestBuildImageResponseBody_MalformedBase64DoesNotGrowBudget feeds a
+// padding-only b64_json through a shared budget and verifies the budget is
+// left intact for later images instead of being inflated.
+func TestBuildImageResponseBody_MalformedBase64DoesNotGrowBudget(t *testing.T) {
+	budget := NewImageBodyBudget()
+	nearLimit := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x01}, imageBodyMaxBytes))
+
+	body := BuildImageResponseBody(&core.ImageGenerationResponse{
+		Data: []core.ImageData{{B64JSON: "=="}, {B64JSON: nearLimit}},
+	}, true, budget)
+
+	if body.Items[0].Stored || body.Items[0].Bytes != 0 {
+		t.Errorf("malformed payload must not be stored or sized: %+v", body.Items[0])
+	}
+	if !body.Items[1].Stored {
+		t.Errorf("full-budget image should still fit — the malformed entry must not shrink the budget: bytes=%d remaining=%d", body.Items[1].Bytes, budget.remaining)
+	}
+	if budget.remaining != 0 {
+		t.Errorf("remaining = %d, want exactly 0 after a full-budget store", budget.remaining)
+	}
 }
 
 func TestImageOutputContentType(t *testing.T) {

@@ -27,9 +27,10 @@ func NewImageBodyBudget() *ImageBodyBudget {
 	return &ImageBodyBudget{remaining: imageBodyMaxBytes}
 }
 
-// take reserves size bytes, reporting whether they fit.
+// take reserves size bytes, reporting whether they fit. Non-positive sizes
+// are rejected so a caller bug can never grow the budget.
 func (b *ImageBodyBudget) take(size int) bool {
-	if size > b.remaining {
+	if size <= 0 || size > b.remaining {
 		return false
 	}
 	b.remaining -= size
@@ -199,7 +200,8 @@ func bareMediaType(contentType string) string {
 }
 
 // base64DecodedLen returns the byte length a base64 string decodes to, without
-// decoding it.
+// decoding it. Malformed input (e.g. padding only) yields 0, never a negative
+// length that would corrupt the entry's image budget.
 func base64DecodedLen(b64 string) int {
 	n := len(b64)
 	if n == 0 {
@@ -209,5 +211,5 @@ func base64DecodedLen(b64 string) int {
 	for i := n - 1; i >= 0 && i >= n-2 && b64[i] == '='; i-- {
 		padding++
 	}
-	return n*3/4 - padding
+	return max(n*3/4-padding, 0)
 }
