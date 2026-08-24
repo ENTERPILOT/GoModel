@@ -231,6 +231,9 @@ generate through Imagen's `predict` API and Gemini image models
 - Edits work with Gemini image models only: uploads become inline image
   parts ahead of the prompt. `mask` is not supported — describe the region to
   change in the prompt. Imagen models only generate.
+- Google's model listing omits Imagen, so GoModel seeds the documented
+  `imagen-*` IDs into `/v1/models`. Imagen on the Gemini API requires a paid
+  tier; free-tier keys receive Google's not-found error.
 
 In OpenAI-compatible mode, generation forwards to Gemini's
 `/openai/images/generations` endpoint and edits are rejected (that surface has

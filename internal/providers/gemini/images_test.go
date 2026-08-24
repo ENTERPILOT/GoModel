@@ -111,7 +111,7 @@ func TestCreateImage_GeminiImageModelGenerateContent(t *testing.T) {
 			"candidates": [{
 				"content": {"role": "model", "parts": [
 					{"text": "Here is your image."},
-					{"inline_data": {"mime_type": "image/png", "data": "aW1n"}}
+					{"inlineData": {"mimeType": "image/png", "data": "aW1n"}}
 				]},
 				"finishReason": "STOP"
 			}],
@@ -316,6 +316,44 @@ func TestImageAspectRatio(t *testing.T) {
 	for _, tt := range tests {
 		if got := imageAspectRatio(tt.size); got != tt.want {
 			t.Errorf("imageAspectRatio(%q) = %q, want %q", tt.size, got, tt.want)
+		}
+	}
+}
+
+func TestListModels_SeedsKnownImagenModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// One Imagen model listed upstream must not be seeded twice.
+		_, _ = w.Write([]byte(`{"models": [
+			{"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+			{"name": "models/imagen-4.0-generate-001", "supportedGenerationMethods": ["predict"]}
+		]}`))
+	}))
+	defer server.Close()
+
+	p := newNativeTestProvider(t, server)
+	resp, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	counts := make(map[string]int)
+	for _, model := range resp.Data {
+		counts[model.ID]++
+	}
+	for _, id := range knownImagenModels {
+		if counts[id] != 1 {
+			t.Errorf("model %q listed %d times, want exactly once", id, counts[id])
+		}
+	}
+	if counts["gemini-2.5-flash"] != 1 {
+		t.Errorf("gemini-2.5-flash listed %d times, want once", counts["gemini-2.5-flash"])
+	}
+	for _, model := range resp.Data {
+		if strings.HasPrefix(model.ID, "imagen-") {
+			if model.Metadata == nil || len(model.Metadata.Modes) != 1 || model.Metadata.Modes[0] != "image_generation" {
+				t.Errorf("imagen model %q metadata = %+v, want image_generation only", model.ID, model.Metadata)
+			}
 		}
 	}
 }

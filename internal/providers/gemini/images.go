@@ -265,8 +265,8 @@ func (p *Provider) imageResponseFromGenerateContent(resp *geminiGenerateContentR
 	var text strings.Builder
 	for _, candidate := range resp.Candidates {
 		for _, part := range candidate.Content.Parts {
-			if part.InlineData != nil && part.InlineData.Data != "" {
-				out.Data = append(out.Data, core.ImageData{B64JSON: part.InlineData.Data})
+			if blob := part.inlineData(); blob != nil && blob.Data != "" {
+				out.Data = append(out.Data, core.ImageData{B64JSON: blob.Data})
 				continue
 			}
 			if part.Text != "" {

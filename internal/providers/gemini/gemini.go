@@ -764,6 +764,43 @@ func geminiDiscoveredMetadata(supportsGenerate, supportsEmbed, supportsImage boo
 	}
 }
 
+// knownImagenModels are the Imagen models the Gemini API documents for
+// AI Studio. Google serves them but omits them from its model listings, so
+// without seeding they could never be routed; discovery metadata marks them
+// image-only and registry enrichment overrides it when the catalog knows more.
+var knownImagenModels = []string{
+	"imagen-3.0-generate-002",
+	"imagen-4.0-generate-001",
+	"imagen-4.0-fast-generate-001",
+	"imagen-4.0-ultra-generate-001",
+}
+
+// appendKnownImagenModels adds the documented Imagen models missing from an
+// AI Studio listing. Vertex lists Imagen in its publisher models already, so
+// only the AI Studio backend is seeded.
+func (p *Provider) appendKnownImagenModels(models []core.Model, now int64) []core.Model {
+	if p.backend != geminiBackendAIStudio {
+		return models
+	}
+	seen := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		seen[normalizeGeminiModelID(model.ID)] = struct{}{}
+	}
+	for _, id := range knownImagenModels {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		models = append(models, core.Model{
+			ID:       id,
+			Object:   "model",
+			OwnedBy:  "google",
+			Created:  now,
+			Metadata: geminiDiscoveredMetadata(false, false, true),
+		})
+	}
+	return models
+}
+
 // ListModels retrieves the list of available models from Gemini
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	if err := p.ready(); err != nil {
@@ -823,7 +860,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 		return &core.ModelsResponse{
 			Object: "list",
-			Data:   models,
+			Data:   p.appendKnownImagenModels(models, now),
 		}, nil
 	}
 
@@ -846,7 +883,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		}
 		return &core.ModelsResponse{
 			Object: "list",
-			Data:   models,
+			Data:   p.appendKnownImagenModels(models, now),
 		}, nil
 	}
 

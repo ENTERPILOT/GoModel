@@ -621,8 +621,8 @@ func TestSetBaseURLDerivesModelsURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Data) != 1 || resp.Data[0].ID != "gemini-2.5-flash" {
-		t.Fatalf("models = %+v, want gemini-2.5-flash", resp.Data)
+	if len(resp.Data) != 1+len(knownImagenModels) || resp.Data[0].ID != "gemini-2.5-flash" {
+		t.Fatalf("models = %+v, want gemini-2.5-flash plus seeded Imagen models", resp.Data)
 	}
 	if !modelsHit {
 		t.Fatal("models server was not called")
@@ -1908,8 +1908,8 @@ func TestListModels(t *testing.T) {
 				if resp.Object != "list" {
 					t.Errorf("Object = %q, want %q", resp.Object, "list")
 				}
-				if len(resp.Data) != 2 {
-					t.Fatalf("len(Data) = %d, want 2", len(resp.Data))
+				if len(resp.Data) != 2+len(knownImagenModels) {
+					t.Fatalf("len(Data) = %d, want 2 listed plus seeded Imagen models", len(resp.Data))
 				}
 				if resp.Data[0].ID != "gemini-2.0-flash" {
 					t.Errorf("Data[0].ID = %q, want %q", resp.Data[0].ID, "gemini-2.0-flash")
