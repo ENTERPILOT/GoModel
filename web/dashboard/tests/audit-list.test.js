@@ -46,7 +46,7 @@ test("buildAuditLogQuery maps explicit audit fields to indexed API filters", () 
   const base = { dateQuery: "days=7", limit: 25, offset: 0, method: "", statusCode: "", stream: "" };
   assert.match(buildAuditLogQuery({ ...base, field: "user_path", fieldValue: "/team" }), /&user_path=%2Fteam/);
   assert.match(buildAuditLogQuery({ ...base, field: "model", fieldValue: "gpt-5" }), /&requested_model=gpt-5/);
-  assert.match(buildAuditLogQuery({ ...base, field: "request_id", fieldValue: "abc" }), /&search=abc/);
+  assert.match(buildAuditLogQuery({ ...base, field: "request_id", fieldValue: "abc" }), /&request_id=abc/);
   assert.match(buildAuditLogQuery({ ...base, field: "provider", fieldValue: "Azure OpenAI & test" }), /&provider=Azure%20OpenAI%20%26%20test/);
   assert.match(buildAuditLogQuery({ ...base, field: "session_id", fieldValue: "session 123" }), /&session_id=session%20123/);
   assert.match(buildAuditLogQuery({ ...base, field: "error_type", fieldValue: "timeout" }), /&error_type=timeout/);

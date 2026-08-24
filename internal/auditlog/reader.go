@@ -19,6 +19,7 @@ type LogQueryParams struct {
 	Method         string
 	Path           string
 	UserPath       string
+	RequestID      string // exact-match request id filter
 	SessionID      string // exact-match session id filter
 	ErrorType      string
 	Search         string

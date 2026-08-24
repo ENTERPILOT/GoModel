@@ -47,6 +47,7 @@ const conversationBuildTimeout = 10 * time.Second
 // @Param        method       query     string  false  "Filter by HTTP method"
 // @Param        path         query     string  false  "Filter by request path"
 // @Param        user_path    query     string  false  "Filter by tracked user path subtree"
+// @Param        request_id   query     string  false  "Filter by exact request id"
 // @Param        session_id   query     string  false  "Filter by exact session id"
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
@@ -147,6 +148,7 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 		Method:         strings.ToUpper(c.QueryParam("method")),
 		Path:           c.QueryParam("path"),
 		UserPath:       userPath,
+		RequestID:      strings.TrimSpace(c.QueryParam("request_id")),
 		SessionID:      sessionID,
 		ErrorType:      c.QueryParam("error_type"),
 		Search:         c.QueryParam("search"),
@@ -207,6 +209,7 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 // @Param        method       query     string  false  "Filter by HTTP method"
 // @Param        path         query     string  false  "Filter by request path"
 // @Param        user_path    query     string  false  "Filter by tracked user path subtree"
+// @Param        request_id   query     string  false  "Filter by exact request id"
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
 // @Param        stream       query     bool    false  "Filter by stream mode (true/false)"

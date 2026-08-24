@@ -236,6 +236,14 @@
             }
           },
           {
+            "description": "Filter by exact request id",
+            "name": "request_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by exact session id",
             "name": "session_id",
             "in": "query",
@@ -405,6 +413,14 @@
           {
             "description": "Filter by tracked user path subtree",
             "name": "user_path",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact request id",
+            "name": "request_id",
             "in": "query",
             "schema": {
               "type": "string"

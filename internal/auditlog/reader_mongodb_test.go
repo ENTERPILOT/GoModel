@@ -145,3 +145,14 @@ func TestMongoExactUserPathMatchFilter(t *testing.T) {
 		}
 	})
 }
+
+func TestMongoLogMatchFilters_RequestIDUsesExactFieldMatch(t *testing.T) {
+	got, err := mongoLogMatchFilters(LogQueryParams{RequestID: "req-42"})
+	if err != nil {
+		t.Fatalf("mongoLogMatchFilters returned error: %v", err)
+	}
+	want := bson.D{{Key: "request_id", Value: "req-42"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mongoLogMatchFilters(request_id) = %#v, want %#v", got, want)
+	}
+}

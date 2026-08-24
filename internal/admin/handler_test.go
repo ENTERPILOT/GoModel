@@ -1430,7 +1430,7 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&user_path=/team&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
+	c, rec := newHandlerContext("/admin/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&user_path=/team&request_id=req-42&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1453,6 +1453,9 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	}
 	if reader.lastQuery.UserPath != "/team" {
 		t.Errorf("expected user_path filter to match, got %q", reader.lastQuery.UserPath)
+	}
+	if reader.lastQuery.RequestID != "req-42" {
+		t.Errorf("expected request_id filter req-42, got %q", reader.lastQuery.RequestID)
 	}
 	if reader.lastQuery.ErrorType != "provider_error" {
 		t.Errorf("expected error_type provider_error, got %q", reader.lastQuery.ErrorType)

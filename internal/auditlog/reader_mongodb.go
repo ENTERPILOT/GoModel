@@ -274,6 +274,9 @@ func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
 			},
 		})
 	}
+	if params.RequestID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "request_id", Value: params.RequestID})
+	}
 	if params.SessionID != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "session_id", Value: params.SessionID})
 	}

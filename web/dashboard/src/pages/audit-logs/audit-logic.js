@@ -137,7 +137,7 @@ export function buildAuditLogQuery({
   if (fieldValue) {
     const param = {
       user_path: "user_path",
-      request_id: "search",
+      request_id: "request_id",
       model: "requested_model",
       provider: "provider",
       session_id: "session_id",

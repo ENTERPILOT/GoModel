@@ -234,6 +234,9 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 	if params.ErrorType != "" {
 		add(r.likeClause("error_type"), contains(params.ErrorType))
 	}
+	if params.RequestID != "" {
+		add("request_id = ?", params.RequestID)
+	}
 	if params.SessionID != "" {
 		add("session_id = ?", params.SessionID)
 	}

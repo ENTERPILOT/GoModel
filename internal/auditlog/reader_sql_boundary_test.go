@@ -202,6 +202,36 @@ func TestSQLReaderGetLogs_SearchUUIDMatchesIdentifierColumns(t *testing.T) {
 	})
 }
 
+func TestSQLReaderGetLogs_RequestIDMatchesOnlyRequestID(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+
+		ctx := context.Background()
+		if err := store.WriteBatch(ctx, []*LogEntry{
+			{ID: "request-match", Timestamp: time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC), Provider: "openai", RequestID: "req-42"},
+			{ID: "session-only", Timestamp: time.Date(2026, 1, 16, 11, 0, 0, 0, time.UTC), Provider: "openai", SessionID: "req-42"},
+			{ID: "model-only", Timestamp: time.Date(2026, 1, 16, 10, 0, 0, 0, time.UTC), Provider: "openai", RequestedModel: "req-42"},
+		}); err != nil {
+			t.Fatalf("failed to seed audit logs: %v", err)
+		}
+
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
+		result, err := reader.GetLogs(ctx, LogQueryParams{RequestID: "req-42", Limit: 10})
+		if err != nil {
+			t.Fatalf("GetLogs returned error: %v", err)
+		}
+		if result.Total != 1 || len(result.Entries) != 1 || result.Entries[0].ID != "request-match" {
+			t.Fatalf("request_id filter returned total=%d entries=%v, want only request-match", result.Total, result.Entries)
+		}
+	})
+}
+
 func TestSQLReaderGetLogs_SearchMatchesErrorMessage(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 
