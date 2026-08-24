@@ -79,3 +79,43 @@ func TestOpenAIReplayCreateImageValidation(t *testing.T) {
 	_, err := images.CreateImage(context.Background(), &core.ImageGenerationRequest{Model: "dall-e-3"})
 	require.Error(t, err, "missing prompt should be rejected before any upstream call")
 }
+
+func openAIImageEditProvider(t *testing.T, routes map[string]replayRoute) core.ImageEditProvider {
+	t.Helper()
+	provider := newOpenAIReplayProvider(t, routes)
+	editor, ok := provider.(core.ImageEditProvider)
+	require.True(t, ok, "openai provider should implement core.ImageEditProvider")
+	return editor
+}
+
+func TestOpenAIReplayCreateImageEdit(t *testing.T) {
+	editor := openAIImageEditProvider(t, map[string]replayRoute{
+		replayKey(http.MethodPost, "/images/edits"): {
+			statusCode:  http.StatusOK,
+			contentType: "application/json",
+			body:        []byte(`{"created":1713833628,"data":[{"b64_json":"aGVsbG8="}],"usage":{"input_tokens":320,"output_tokens":1056,"total_tokens":1376,"input_tokens_details":{"image_tokens":300,"text_tokens":20}}}`),
+		},
+	})
+
+	resp, err := editor.CreateImageEdit(context.Background(), &core.ImageEditRequest{
+		Model:  "gpt-image-1",
+		Prompt: "Add a red hat",
+		Images: []core.ImageFile{{Filename: "cat.png", ContentType: "image/png", Data: []byte("png-bytes")}},
+		Fields: []core.FormField{{Name: "size", Value: "1024x1024"}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.EqualValues(t, 1713833628, resp.Created)
+	require.Len(t, resp.Data, 1)
+	require.Equal(t, "aGVsbG8=", resp.Data[0].B64JSON)
+	require.NotNil(t, resp.Usage)
+	require.Equal(t, 1376, resp.Usage.TotalTokens)
+	require.Equal(t, 300, resp.Usage.InputTokensDetails.ImageTokens)
+}
+
+func TestOpenAIReplayCreateImageEditValidation(t *testing.T) {
+	editor := openAIImageEditProvider(t, map[string]replayRoute{})
+
+	_, err := editor.CreateImageEdit(context.Background(), &core.ImageEditRequest{Model: "gpt-image-1", Prompt: "x"})
+	require.Error(t, err, "missing image should be rejected before any upstream call")
+}

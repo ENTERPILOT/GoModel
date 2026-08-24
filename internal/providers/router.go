@@ -621,6 +621,13 @@ func forwardImageGenerationRequest(req *core.ImageGenerationRequest, selector co
 	return &forwardReq
 }
 
+func forwardImageEditRequest(req *core.ImageEditRequest, selector core.ModelSelector) *core.ImageEditRequest {
+	forwardReq := *req
+	forwardReq.Model = selector.Model
+	forwardReq.Provider = ""
+	return &forwardReq
+}
+
 func forwardAudioTranscriptionRequest(req *core.AudioTranscriptionRequest, selector core.ModelSelector) *core.AudioTranscriptionRequest {
 	forwardReq := *req
 	forwardReq.Model = selector.Model
@@ -816,17 +823,48 @@ func (r *Router) CreateImage(ctx context.Context, req *core.ImageGenerationReque
 	if req == nil {
 		return nil, core.NewInvalidRequestError("image generation request is required", nil)
 	}
-	return routeStampedModelResponse(
-		r, ctx, req.Model, req.Provider,
+	return routeImageCall(
+		r, ctx, req.Model, req.Provider, "image generation",
 		func(selector core.ModelSelector) *core.ImageGenerationRequest {
 			return forwardImageGenerationRequest(req, selector)
 		},
-		func(ctx context.Context, provider core.Provider, forwardReq *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
-			ip, ok := provider.(core.ImageProvider)
+		core.ImageProvider.CreateImage,
+	)
+}
+
+// CreateImageEdit routes an image edit request to the provider that owns the
+// model, requiring it to implement core.ImageEditProvider.
+func (r *Router) CreateImageEdit(ctx context.Context, req *core.ImageEditRequest) (*core.ImageGenerationResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("image edit request is required", nil)
+	}
+	return routeImageCall(
+		r, ctx, req.Model, req.Provider, "image edits",
+		func(selector core.ModelSelector) *core.ImageEditRequest {
+			return forwardImageEditRequest(req, selector)
+		},
+		core.ImageEditProvider.CreateImageEdit,
+	)
+}
+
+// routeImageCall resolves the model, requires the target provider to implement
+// the image capability P, and invokes call, stamping the provider on the
+// response. capability names the operation in the unsupported-provider error.
+func routeImageCall[Req any, P any](
+	r *Router,
+	ctx context.Context,
+	model, providerHint, capability string,
+	forward func(core.ModelSelector) Req,
+	call func(P, context.Context, Req) (*core.ImageGenerationResponse, error),
+) (*core.ImageGenerationResponse, error) {
+	return routeStampedModelResponse(
+		r, ctx, model, providerHint, forward,
+		func(ctx context.Context, provider core.Provider, forwardReq Req) (*core.ImageGenerationResponse, error) {
+			p, ok := provider.(P)
 			if !ok {
-				return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support image generation", req.Model), nil)
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support %s", model, capability), nil)
 			}
-			return ip.CreateImage(ctx, forwardReq)
+			return call(p, ctx, forwardReq)
 		},
 	)
 }

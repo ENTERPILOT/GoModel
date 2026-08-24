@@ -1,31 +1,34 @@
 ---
 title: "Images API"
-description: "OpenAI-compatible image generation through GoModel, routed by model with the same access rules, budgets, rate limits, and cost tracking as chat."
+description: "OpenAI-compatible image generation and editing through GoModel, routed by model with the same access rules, budgets, rate limits, and cost tracking as chat."
 icon: "image"
-keywords: ["images API", "image generation", "dall-e", "gpt-image-1", "grok-2-image"]
+keywords: ["images API", "image generation", "image edit", "inpainting", "dall-e", "gpt-image-1", "grok-2-image"]
 ---
 
 ## Overview
 
-GoModel exposes the **OpenAI-compatible image generation endpoint**. Clients and
-SDKs that already call OpenAI's `/v1/images/generations` can point at GoModel
-unchanged.
+GoModel exposes the **OpenAI-compatible image endpoints** for generation and
+editing. Clients and SDKs that already call OpenAI's `/v1/images/generations`
+or `/v1/images/edits` can point at GoModel unchanged.
 
 Requests route **by model** through the same registry used for chat and
 embeddings, so `model` selection, `provider` hints, virtual models, per-key model
 access rules ([user paths](/features/user-path)), [budgets](/features/budgets),
 and [rate limits](/features/rate-limits) all apply. Image generation is served by
 OpenAI and the OpenAI-compatible providers that implement the endpoint
-(Azure OpenAI, OpenRouter, [xAI](/providers/xai)). A provider without image
-support returns a clear `model "…" does not support image generation` error
+(Azure OpenAI, OpenRouter, [xAI](/providers/xai)); image edits by OpenAI and
+Azure OpenAI, plus any OpenAI-compatible provider that accepts OpenAI's
+multipart upload on `/images/edits`. A provider without the capability returns
+a clear `model "…" does not support image generation` (or `image edits`) error
 rather than mis-routing, and image-only models are hidden from `/v1/models` for
-such providers.
+providers without image support.
 
 ## Supported endpoints
 
 | Endpoint | Behavior |
 | --- | --- |
 | `POST /v1/images/generations` | Generate images from a text prompt. Accepts a JSON body and returns the OpenAI images envelope (`created`, `data[]`, optional `usage`). |
+| `POST /v1/images/edits` | Edit or extend an uploaded image (inpainting with an optional mask, image-to-image). Accepts `multipart/form-data` and returns the same envelope. |
 
 ## Generate an image
 
@@ -105,10 +108,63 @@ including the `usage` block and echoed output parameters `gpt-image-1` reports.
   providers, exactly as with chat.
 </Tip>
 
+## Edit an image
+
+Edits upload the source image(s) and optional mask as `multipart/form-data`,
+exactly as OpenAI's endpoint expects. `image`, `prompt`, and `model` are
+required; send several source images as `image[]` (gpt-image-1 accepts up to
+16). A `mask` is a PNG whose transparent pixels mark the area to change.
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/images/edits \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F model="gpt-image-1" \
+  -F image="@lighthouse.png" \
+  -F mask="@mask.png" \
+  -F prompt="Add a sailboat on the horizon" \
+  -F size="1024x1024"
+```
+
+```python Python
+result = client.images.edit(
+    model="gpt-image-1",
+    image=open("lighthouse.png", "rb"),
+    mask=open("mask.png", "rb"),
+    prompt="Add a sailboat on the horizon",
+    size="1024x1024",
+)
+
+with open("lighthouse-edited.png", "wb") as f:
+    f.write(base64.b64decode(result.data[0].b64_json))
+```
+
+```javascript JavaScript
+import fs from "node:fs";
+
+const result = await client.images.edit({
+  model: "gpt-image-1",
+  image: fs.createReadStream("lighthouse.png"),
+  mask: fs.createReadStream("mask.png"),
+  prompt: "Add a sailboat on the horizon",
+  size: "1024x1024",
+});
+
+await writeFile("lighthouse-edited.png", Buffer.from(result.data[0].b64_json, "base64"));
+```
+
+</CodeGroup>
+
+As with generation, every other form field (`n`, `size`, `quality`,
+`response_format`, `background`, `output_format`, `input_fidelity`, `user`, …)
+is forwarded to the provider unchanged. The uploaded files count toward the
+gateway's request body limit (`BODY_SIZE_LIMIT`).
+
 ## Cost tracking
 
 Image calls are recorded in [usage tracking](/features/cost-tracking) under the
-`/v1/images/generations` endpoint:
+`/v1/images/generations` and `/v1/images/edits` endpoints:
 
 - **Token-billed models** (`gpt-image-1` and similar) report `usage` in the
   response; GoModel stores the input/output token counts and prices them with the
@@ -135,19 +191,19 @@ providers:
 
 ## Limitations
 
-The images endpoint is a thin, model-routed pass to the provider and **does not
+The image endpoints are a thin, model-routed pass to the provider and **do not
 run through the full inference orchestrator**. Compared with `/v1/chat/completions`:
 
 - **No failover, guardrails, or response cache** — these stages are skipped.
   Requests are still authorized, budget-checked, rate-limited, metered, and
   written to the [audit log](/advanced/admin-endpoints).
 - **No streaming** — `stream: true` is rejected with a `400` because streamed
-  image generation is delivered as server-sent events, which this endpoint does
+  image generation is delivered as server-sent events, which these endpoints do
   not relay. Omit `stream` (or set it to `false`) to receive the complete JSON
   response.
-- **Edits and variations** (`/v1/images/edits`, `/v1/images/variations`) are not
-  exposed. Use the [passthrough API](/features/passthrough-api)
-  (`/p/{provider}/v1/images/...`) to reach them on a specific provider.
+- **Variations** (`/v1/images/variations`) are not exposed. Use the
+  [passthrough API](/features/passthrough-api) (`/p/{provider}/v1/images/...`)
+  to reach them on a specific provider.
 - **OpenAI request shape in, OpenAI-compatible providers out** — providers whose
   native image API differs from OpenAI's (for example Gemini Imagen) are not
   translated behind this endpoint; use passthrough for those.
@@ -157,4 +213,6 @@ run through the full inference orchestrator**. Compared with `/v1/chat/completio
 Image requests appear in the audit log like any other model interaction. When
 `LOGGING_LOG_BODIES` is enabled the JSON request and response are captured;
 responses larger than the 1 MB capture limit (typical for `b64_json` output)
-are stored truncated and flagged `response_body_too_big_to_handle`.
+are stored truncated and flagged `response_body_too_big_to_handle`. For edits
+the request entry records the prompt, parameters, and upload metadata
+(filename, content type, size) — the uploaded image bytes are never stored.

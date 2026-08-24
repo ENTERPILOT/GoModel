@@ -310,6 +310,27 @@ function applyAudioTranscriptionTextSchema() {
   textResponse.schema = { type: "string" };
 }
 
+function applyImageEditMultiImageSchema() {
+  // swag models every formData file as a single binary. The repeatable
+  // image[] field carries several source images, and a request may use it
+  // instead of image, so make image[] an array, drop image from required,
+  // and express the server's actual rule — at least one source image field —
+  // as an anyOf constraint.
+  const body = spec.paths?.["/v1/images/edits"]?.post?.requestBody
+    ?.content?.["multipart/form-data"]?.schema;
+  if (!body?.properties?.["image[]"] || !body?.properties?.image) {
+    throw new Error("missing OpenAPI multipart schema: POST /v1/images/edits");
+  }
+  body.properties["image[]"] = {
+    description: body.properties["image[]"].description,
+    type: "array",
+    maxItems: 16,
+    items: { type: "string", format: "binary" },
+  };
+  body.required = (body.required || []).filter((name) => name !== "image");
+  body.anyOf = [{ required: ["image"] }, { required: ["image[]"] }];
+}
+
 function ensureBearerAuthSecurityScheme() {
   const securitySchemes = spec.components?.securitySchemes;
   if (!securitySchemes?.BearerAuth) {
@@ -491,6 +512,7 @@ ensureResponsesInputElementSchema();
 applyAnthropicMessageSchemas();
 applyAnthropicMessagesStreamSchema();
 applyAudioTranscriptionTextSchema();
+applyImageEditMultiImageSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");
 ensureRequiredProperty("core.AudioSpeechRequest", "input");

@@ -10,6 +10,7 @@ import (
 
 const (
 	endpointImageGenerations = "/v1/images/generations"
+	endpointImageEdits       = "/v1/images/edits"
 
 	// rawKeyImages carries the number of images a generation request returned.
 	// Per-image models (DALL·E) report no token usage, so this is the billable
@@ -25,6 +26,17 @@ const (
 // model is the resolved route model so the row groups and prices consistently
 // with the pricing lookup.
 func ExtractFromImageResponse(resp *core.ImageGenerationResponse, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	return extractFromImageResponse(resp, requestID, model, provider, endpointImageGenerations, pricing...)
+}
+
+// ExtractFromImageEditResponse builds a usage entry for an image edit call.
+// Edits return the same envelope as generation and are priced the same way;
+// only the endpoint label differs.
+func ExtractFromImageEditResponse(resp *core.ImageGenerationResponse, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	return extractFromImageResponse(resp, requestID, model, provider, endpointImageEdits, pricing...)
+}
+
+func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, model, provider, endpoint string, pricing ...*core.ModelPricing) *UsageEntry {
 	if resp == nil {
 		return nil
 	}
@@ -35,7 +47,7 @@ func ExtractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 		Timestamp: time.Now().UTC(),
 		Model:     model,
 		Provider:  provider,
-		Endpoint:  endpointImageGenerations,
+		Endpoint:  endpoint,
 	}
 
 	raw := map[string]any{}
@@ -62,7 +74,7 @@ func ExtractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 		entry.RawData = raw
 	}
 
-	applyUsageCosts(entry, provider, endpointImageGenerations, pricing...)
+	applyUsageCosts(entry, provider, endpoint, pricing...)
 
 	return entry
 }

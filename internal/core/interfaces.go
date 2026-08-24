@@ -52,6 +52,15 @@ type ImageProvider interface {
 	CreateImage(ctx context.Context, req *ImageGenerationRequest) (*ImageGenerationResponse, error)
 }
 
+// ImageEditProvider is implemented by providers that support the OpenAI-compatible
+// image edit endpoint (POST /v1/images/edits). It is separate from ImageProvider
+// because the upstream call is multipart/form-data and not every provider that
+// generates images accepts that shape; the router discovers support by
+// interface assertion.
+type ImageEditProvider interface {
+	CreateImageEdit(ctx context.Context, req *ImageEditRequest) (*ImageGenerationResponse, error)
+}
+
 // NativeBatchProvider is implemented by providers that support native discounted batching.
 // This is intentionally separate from Provider so unsupported providers can still implement
 // regular synchronous APIs without batch capabilities.
