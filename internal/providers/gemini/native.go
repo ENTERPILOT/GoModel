@@ -910,7 +910,8 @@ func displayModelIDFromGemini(model, backend string) string {
 // Families such as imagen-* use different upstream endpoints.
 func isGeminiExposedModel(modelID string) bool {
 	modelID = normalizeGeminiModelID(modelID)
-	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-")
+	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-") ||
+		strings.HasPrefix(modelID, "imagen-")
 }
 
 func nativeProviderError(providerName, message string, err error) *core.GatewayError {

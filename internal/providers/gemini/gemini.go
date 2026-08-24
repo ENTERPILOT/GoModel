@@ -711,13 +711,27 @@ type geminiModelsResponse struct {
 	PublisherModels []geminiModel `json:"publisherModels"`
 }
 
-func geminiModelSupportedMethods(modelID string, methods []string) (supportsGenerate, supportsEmbed bool) {
+func geminiModelSupportedMethods(modelID string, methods []string) (supportsGenerate, supportsEmbed, supportsImage bool) {
+	normalized := normalizeGeminiModelID(modelID)
 	if len(methods) == 0 {
-		normalized := normalizeGeminiModelID(modelID)
-		return strings.HasPrefix(normalized, "gemini-"), strings.HasPrefix(normalized, "text-embedding-")
+		return strings.HasPrefix(normalized, "gemini-"), strings.HasPrefix(normalized, "text-embedding-"),
+			strings.HasPrefix(normalized, "imagen-")
 	}
-	return slices.Contains(methods, "generateContent") || slices.Contains(methods, "streamGenerateContent"),
-		slices.Contains(methods, "embedContent")
+	supportsGenerate = slices.Contains(methods, "generateContent") || slices.Contains(methods, "streamGenerateContent")
+	// Imagen models list only the predict method; Gemini image models carry
+	// generateContent, so their image capability is inferred from the ID.
+	supportsImage = (strings.HasPrefix(normalized, "imagen-") && slices.Contains(methods, "predict")) ||
+		(supportsGenerate && isGeminiImageModelID(normalized))
+	return supportsGenerate, slices.Contains(methods, "embedContent"), supportsImage
+}
+
+// isGeminiImageModelID recognizes generateContent models with image output
+// (gemini-2.5-flash-image, gemini-2.0-flash-preview-image-generation,
+// gemini-3-pro-image-preview, ...) by the -image marker Google uses in their
+// IDs. This only seeds discovery metadata; registry enrichment overrides it.
+func isGeminiImageModelID(normalized string) bool {
+	return strings.HasPrefix(normalized, "gemini-") &&
+		(strings.Contains(normalized, "-image-") || strings.HasSuffix(normalized, "-image"))
 }
 
 // geminiDiscoveredMetadata stamps modes/categories from the native listing's
@@ -725,13 +739,21 @@ func geminiModelSupportedMethods(modelID string, methods []string) (supportsGene
 // remote model registry has no entry (new or preview IDs). Registry enrichment
 // replaces this metadata whenever it does have an entry, and operator config
 // merges on top, so the discovery stamp is only the lowest-precedence signal.
-func geminiDiscoveredMetadata(supportsGenerate, supportsEmbed bool) *core.ModelMetadata {
-	modes := make([]string, 0, 2)
+func geminiDiscoveredMetadata(supportsGenerate, supportsEmbed, supportsImage bool) *core.ModelMetadata {
+	modes := make([]string, 0, 3)
 	if supportsGenerate {
 		modes = append(modes, "chat")
 	}
 	if supportsEmbed {
 		modes = append(modes, "embedding")
+	}
+	if supportsImage {
+		modes = append(modes, "image_generation")
+		if supportsGenerate {
+			// Only generateContent image models accept input images to edit;
+			// Imagen predict models generate from text alone.
+			modes = append(modes, "image_edit")
+		}
 	}
 	if len(modes) == 0 {
 		return nil
@@ -786,17 +808,15 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		for _, gm := range modelEntries {
 			modelID := displayModelIDFromGemini(gm.Name, p.backend)
 
-			// Only include models that support generateContent (chat/completion)
-			supportsGenerate, supportsEmbed := geminiModelSupportedMethods(modelID, gm.SupportedMethods)
+			supportsGenerate, supportsEmbed, supportsImage := geminiModelSupportedMethods(modelID, gm.SupportedMethods)
 
-			isOpenAICompatModel := isGeminiExposedModel(modelID)
-			if (supportsGenerate || supportsEmbed) && isOpenAICompatModel {
+			if (supportsGenerate || supportsEmbed || supportsImage) && isGeminiExposedModel(modelID) {
 				models = append(models, core.Model{
 					ID:       modelID,
 					Object:   "model",
 					OwnedBy:  "google",
 					Created:  now,
-					Metadata: geminiDiscoveredMetadata(supportsGenerate, supportsEmbed),
+					Metadata: geminiDiscoveredMetadata(supportsGenerate, supportsEmbed, supportsImage),
 				})
 			}
 		}
@@ -845,13 +865,20 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	return providers.ResponsesViaChat(ctx, p, req)
 }
 
-// Embeddings sends an embeddings request to Gemini via its OpenAI-compatible endpoint
+// Embeddings sends an embeddings request to Gemini: the native
+// batchEmbedContents API in native mode, or the OpenAI-compatible endpoint
+// otherwise. The Vertex backend always uses the OpenAI-compatible surface —
+// Vertex has no batchEmbedContents; its native prediction path is served by
+// the dedicated vertex provider.
 func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
 	if req == nil {
 		return nil, core.NewInvalidRequestError("embedding request is required", nil)
+	}
+	if p.useNativeAPI && p.backend == geminiBackendAIStudio {
+		return p.nativeEmbeddings(ctx, req)
 	}
 	body, err := p.openAICompatibleEmbeddingBody(req)
 	if err != nil {

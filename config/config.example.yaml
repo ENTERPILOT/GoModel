@@ -377,9 +377,9 @@ providers:
   gemini:
     type: gemini
     api_key: "..."
-    # Chat/responses use Gemini's native generateContent API by default.
+    # Chat/responses, embeddings, and images use Gemini's native APIs by default.
     # Set GEMINI_API_MODE=openai_compatible or api_mode: openai_compatible to use
-    # Gemini's OpenAI-compatible API instead.
+    # Gemini's OpenAI-compatible API instead (image edits require native mode).
     # Native mode accepts image data URLs but does not fetch remote image URLs yet.
 
   vertex:

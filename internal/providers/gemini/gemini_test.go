@@ -987,11 +987,14 @@ func TestVertexListModelsAcceptsPublisherModelsResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Data) != 2 {
-		t.Fatalf("models = %+v, want 2 Gemini-compatible models", resp.Data)
+	if len(resp.Data) != 3 {
+		t.Fatalf("models = %+v, want 3 Gemini-compatible models", resp.Data)
 	}
-	if resp.Data[0].ID != "google/gemini-2.5-flash" || resp.Data[1].ID != "google/text-embedding-005" {
-		t.Fatalf("models = %+v, want google/gemini-2.5-flash and google/text-embedding-005", resp.Data)
+	if resp.Data[0].ID != "google/gemini-2.5-flash" || resp.Data[1].ID != "google/text-embedding-005" || resp.Data[2].ID != "google/imagen-4.0" {
+		t.Fatalf("models = %+v, want gemini-2.5-flash, text-embedding-005, and imagen-4.0", resp.Data)
+	}
+	if modes := resp.Data[2].Metadata.Modes; len(modes) != 1 || modes[0] != "image_generation" {
+		t.Fatalf("imagen modes = %+v, want [image_generation]", modes)
 	}
 }
 
