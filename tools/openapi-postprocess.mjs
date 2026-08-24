@@ -313,7 +313,9 @@ function applyAudioTranscriptionTextSchema() {
 function applyImageEditMultiImageSchema() {
   // swag models every formData file as a single binary. The repeatable
   // image[] field carries several source images, and a request may use it
-  // instead of image, so make image[] an array and drop image from required.
+  // instead of image, so make image[] an array, drop image from required,
+  // and express the server's actual rule — at least one source image field —
+  // as an anyOf constraint.
   const body = spec.paths?.["/v1/images/edits"]?.post?.requestBody
     ?.content?.["multipart/form-data"]?.schema;
   if (!body?.properties?.["image[]"] || !body?.properties?.image) {
@@ -326,7 +328,7 @@ function applyImageEditMultiImageSchema() {
     items: { type: "string", format: "binary" },
   };
   body.required = (body.required || []).filter((name) => name !== "image");
-  body.properties.image.description += " Exactly one of image or image[] is required.";
+  body.anyOf = [{ required: ["image"] }, { required: ["image[]"] }];
 }
 
 function ensureBearerAuthSecurityScheme() {

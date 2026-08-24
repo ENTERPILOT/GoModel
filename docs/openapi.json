@@ -8529,12 +8529,12 @@
                 "type": "object",
                 "properties": {
                   "image": {
-                    "description": "Source image to edit (single-image form; gpt-image-1 and DALL·E 2) Exactly one of image or image[] is required.",
+                    "description": "Source image to edit (single-image form; gpt-image-1 and DALL·E 2). At least one of image or image[] is required",
                     "type": "string",
                     "format": "binary"
                   },
                   "image[]": {
-                    "description": "Alternative to image: repeatable field carrying several source images (gpt-image-1, up to 16)",
+                    "description": "Repeatable field carrying several source images (gpt-image-1, up to 16). At least one of image or image[] is required",
                     "type": "array",
                     "maxItems": 16,
                     "items": {
@@ -8580,11 +8580,22 @@
                 "required": [
                   "prompt",
                   "model"
+                ],
+                "anyOf": [
+                  {
+                    "required": [
+                      "image"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "image[]"
+                    ]
+                  }
                 ]
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
