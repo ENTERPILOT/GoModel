@@ -67,6 +67,12 @@ func FetchIfChanged(ctx context.Context, url, etag string) (FetchResult, error) 
 	defer resp.Body.Close()
 
 	if etag != "" && resp.StatusCode == http.StatusNotModified {
+		// RFC 9111: a 304 may carry updated metadata for the stored
+		// representation; adopt its ETag when present so future conditional
+		// requests use the server's current validator.
+		if respETag := resp.Header.Get("ETag"); respETag != "" {
+			etag = respETag
+		}
 		return FetchResult{ETag: etag, NotModified: true}, nil
 	}
 	if resp.StatusCode != http.StatusOK {

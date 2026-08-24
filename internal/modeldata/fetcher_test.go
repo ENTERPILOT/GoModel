@@ -163,6 +163,25 @@ func TestFetchIfChanged_NotModified(t *testing.T) {
 	}
 }
 
+func TestFetchIfChanged_NotModifiedAdoptsResponseETag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"refreshed"`)
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer server.Close()
+
+	result, err := FetchIfChanged(context.Background(), server.URL, `"stale"`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.NotModified {
+		t.Fatal("expected NotModified=true for 304 response")
+	}
+	if result.ETag != `"refreshed"` {
+		t.Errorf("ETag = %q, want the 304's refreshed validator", result.ETag)
+	}
+}
+
 func TestFetchIfChanged_ChangedContent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", `"v2"`)

@@ -554,6 +554,9 @@ func (r *ModelRegistry) IsInitialized() bool {
 // for the goroutine to exit before returning, so callers should expect it to
 // block during shutdown until any in-flight refresh work unwinds.
 func (r *ModelRegistry) StartBackgroundRefresh(interval, recheckInterval time.Duration, modelListURL string) func() {
+	// Normalize once so a whitespace-only URL disables model list refreshes
+	// here just like it does on the direct RefreshModelList path.
+	modelListURL = strings.TrimSpace(modelListURL)
 	if interval <= 0 {
 		// time.NewTicker panics on non-positive durations and a refresh loop
 		// with a zero interval would be meaningless. Skip the goroutine and
@@ -664,18 +667,20 @@ func (r *ModelRegistry) RefreshModelList(ctx context.Context, url string) (int, 
 // ETag still matches upstream, the download, reparse, and re-enrichment are all
 // skipped and changed=false is returned with the current model count.
 func (r *ModelRegistry) refreshModelListLocked(ctx context.Context, url string) (int, bool, metadataEnrichmentStats, error) {
-	result, err := modeldata.FetchIfChanged(ctx, url, r.currentModelListETag())
+	result, err := modeldata.FetchIfChanged(ctx, url, r.currentModelListETag(url))
 	if err != nil {
 		return 0, false, metadataEnrichmentStats{}, err
 	}
 	if result.NotModified {
+		// A 304 may carry a refreshed validator for the unchanged content.
+		r.updateModelListValidator(result.ETag, url)
 		return r.modelListModelCount(), false, metadataEnrichmentStats{}, nil
 	}
 	if result.List == nil {
 		return 0, false, metadataEnrichmentStats{}, nil
 	}
 
-	metadataStats := r.setModelListAndEnrich(result.List, result.Raw, result.ETag)
+	metadataStats := r.setModelListAndEnrich(result.List, result.Raw, result.ETag, url)
 	return len(result.List.Models), true, metadataStats, nil
 }
 

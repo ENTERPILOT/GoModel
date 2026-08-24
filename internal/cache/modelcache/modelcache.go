@@ -21,7 +21,10 @@ type ModelCache struct {
 	ModelListData json.RawMessage `json:"model_list_data,omitempty"`
 	// ModelListETag is the HTTP validator ModelListData was downloaded with,
 	// letting the next fetch skip the download when the list is unchanged.
+	// ModelListURL records which URL issued it, so the validator is never
+	// presented to a reconfigured model list URL.
 	ModelListETag string `json:"model_list_etag,omitempty"`
+	ModelListURL  string `json:"model_list_url,omitempty"`
 }
 
 // CachedProvider holds shared fields for all models from a single provider.

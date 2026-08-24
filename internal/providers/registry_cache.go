@@ -134,7 +134,7 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	if list != nil {
 		r.modelList = list
 		r.modelListRaw = modelCache.ModelListData
-		r.modelListETag = modelCache.ModelListETag
+		r.setModelListValidatorLocked(modelCache.ModelListETag, modelCache.ModelListURL)
 	}
 	r.mu.Unlock()
 
@@ -168,6 +168,7 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 	maps.Copy(providerTypes, r.providerTypes)
 	modelListRaw := r.modelListRaw
 	modelListETag := r.modelListETag
+	modelListETagURL := r.modelListETagURL
 	r.mu.RUnlock()
 
 	if cacheBackend == nil {
@@ -179,6 +180,7 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 		Providers:     make(map[string]modelcache.CachedProvider, len(modelsByProvider)),
 		ModelListData: modelListRaw,
 		ModelListETag: modelListETag,
+		ModelListURL:  modelListETagURL,
 	}
 
 	var totalModels int

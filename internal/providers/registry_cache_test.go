@@ -909,7 +909,7 @@ func TestCacheFile_ModelListETagRoundtrip(t *testing.T) {
 	}
 	saving.RegisterProviderWithNameAndType(mock, "openai", "openai")
 	_ = saving.Initialize(context.Background())
-	saving.setModelListAndEnrich(list, raw, `"list-v7"`)
+	saving.setModelListAndEnrich(list, raw, `"list-v7"`, "https://example.test/models.min.json")
 	if err := saving.SaveToCache(context.Background()); err != nil {
 		t.Fatalf("SaveToCache() error = %v", err)
 	}
@@ -920,7 +920,10 @@ func TestCacheFile_ModelListETagRoundtrip(t *testing.T) {
 	if _, err := loading.LoadFromCache(context.Background()); err != nil {
 		t.Fatalf("LoadFromCache() error = %v", err)
 	}
-	if got := loading.currentModelListETag(); got != `"list-v7"` {
+	if got := loading.currentModelListETag("https://example.test/models.min.json"); got != `"list-v7"` {
 		t.Fatalf("currentModelListETag() after load = %q, want %q", got, `"list-v7"`)
+	}
+	if got := loading.currentModelListETag("https://other.test/models.min.json"); got != "" {
+		t.Fatalf("currentModelListETag() for another URL = %q, want empty", got)
 	}
 }

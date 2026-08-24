@@ -2628,6 +2628,84 @@ func TestRefreshModelList_ConditionalFetch(t *testing.T) {
 	}
 }
 
+func TestRefreshModelList_ETagNotSentToDifferentURL(t *testing.T) {
+	const etag = `"list-v1"`
+	body := []byte(`{
+		"version": 1,
+		"updated_at": "2025-01-01T00:00:00Z",
+		"providers": {},
+		"models": {"test-model": {"display_name": "Test Model", "modes": ["chat"]}},
+		"provider_models": {}
+	}`)
+
+	newServer := func(counter *atomic.Int64) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("If-None-Match") != "" {
+				counter.Add(1)
+			}
+			w.Header().Set("ETag", etag)
+			_, _ = w.Write(body)
+		}))
+	}
+
+	var firstConditional, secondConditional atomic.Int64
+	first := newServer(&firstConditional)
+	defer first.Close()
+	second := newServer(&secondConditional)
+	defer second.Close()
+
+	registry := NewModelRegistry()
+	if _, err := registry.RefreshModelList(context.Background(), first.URL); err != nil {
+		t.Fatalf("RefreshModelList() error = %v", err)
+	}
+	if _, err := registry.RefreshModelList(context.Background(), second.URL); err != nil {
+		t.Fatalf("RefreshModelList() against second URL error = %v", err)
+	}
+	if secondConditional.Load() != 0 {
+		t.Fatal("expected no If-None-Match against a different URL: validators identify one resource")
+	}
+	if got := registry.currentModelListETag(second.URL); got != etag {
+		t.Fatalf("currentModelListETag(second) = %q, want %q", got, etag)
+	}
+	if got := registry.currentModelListETag(first.URL); got != "" {
+		t.Fatalf("currentModelListETag(first) = %q, want empty after refreshing from second URL", got)
+	}
+}
+
+func TestRefreshModelList_304AdoptsRefreshedETag(t *testing.T) {
+	body := []byte(`{
+		"version": 1,
+		"updated_at": "2025-01-01T00:00:00Z",
+		"providers": {},
+		"models": {"test-model": {"display_name": "Test Model", "modes": ["chat"]}},
+		"provider_models": {}
+	}`)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") != "" {
+			// Same content, refreshed validator: RFC 9111 lets a 304 update
+			// the stored ETag.
+			w.Header().Set("ETag", `"list-v2"`)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `"list-v1"`)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	registry := NewModelRegistry()
+	if _, err := registry.RefreshModelList(context.Background(), server.URL); err != nil {
+		t.Fatalf("RefreshModelList() error = %v", err)
+	}
+	if _, err := registry.RefreshModelList(context.Background(), server.URL); err != nil {
+		t.Fatalf("RefreshModelList() second call error = %v", err)
+	}
+	if got := registry.currentModelListETag(server.URL); got != `"list-v2"` {
+		t.Fatalf("currentModelListETag() = %q, want refreshed %q", got, `"list-v2"`)
+	}
+}
+
 func TestSetModelList_ClearsETag(t *testing.T) {
 	registry := NewModelRegistry()
 	raw := []byte(`{"version": 1, "providers": {}, "models": {}, "provider_models": {}}`)
@@ -2635,9 +2713,9 @@ func TestSetModelList_ClearsETag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	registry.setModelListAndEnrich(list, raw, `"old"`)
+	registry.setModelListAndEnrich(list, raw, `"old"`, "https://example.test/models.min.json")
 	registry.SetModelList(list, raw)
-	if got := registry.currentModelListETag(); got != "" {
+	if got := registry.currentModelListETag("https://example.test/models.min.json"); got != "" {
 		t.Fatalf("currentModelListETag() = %q, want empty after SetModelList", got)
 	}
 }

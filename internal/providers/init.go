@@ -133,12 +133,13 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 			fetchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 			defer cancel()
 
-			result, err := modeldata.FetchIfChanged(fetchCtx, modelListURL, registry.currentModelListETag())
+			result, err := modeldata.FetchIfChanged(fetchCtx, modelListURL, registry.currentModelListETag(modelListURL))
 			if err != nil {
 				slog.Warn("failed to fetch model list", "url", modelListURL, "error", err)
 				return
 			}
 			if result.NotModified {
+				registry.updateModelListValidator(result.ETag, modelListURL)
 				slog.Info("model list unchanged since last download, using cached copy")
 				return
 			}
@@ -146,7 +147,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 				return
 			}
 
-			metadataStats := registry.setModelListAndEnrich(result.List, result.Raw, result.ETag)
+			metadataStats := registry.setModelListAndEnrich(result.List, result.Raw, result.ETag, modelListURL)
 
 			if err := registry.SaveToCache(fetchCtx); err != nil {
 				slog.Warn("failed to save cache after model list fetch", "error", err)
