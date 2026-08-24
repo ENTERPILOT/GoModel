@@ -5680,10 +5680,16 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "file",
-                        "description": "Source image to edit; repeat as image[] to send several (gpt-image-1)",
+                        "description": "Source image to edit (single-image form; gpt-image-1 and DALL·E 2)",
                         "name": "image",
                         "in": "formData",
                         "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "Alternative to image: repeatable field carrying several source images (gpt-image-1, up to 16)",
+                        "name": "image[]",
+                        "in": "formData"
                     },
                     {
                         "type": "string",

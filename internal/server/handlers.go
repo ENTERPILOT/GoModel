@@ -740,7 +740,8 @@ func (h *Handler) ImageGenerations(c *echo.Context) error {
 // @Accept       mpfd
 // @Produce      json
 // @Security     BearerAuth
-// @Param        image            formData  file    true   "Source image to edit; repeat as image[] to send several (gpt-image-1)"
+// @Param        image            formData  file    true   "Source image to edit (single-image form; gpt-image-1 and DALL·E 2)"
+// @Param        image[]          formData  file    false  "Alternative to image: repeatable field carrying several source images (gpt-image-1, up to 16)"
 // @Param        prompt           formData  string  true   "Text description of the desired edit"
 // @Param        model            formData  string  true   "Model ID"
 // @Param        mask             formData  file    false  "PNG whose transparent areas mark where the image should be edited"

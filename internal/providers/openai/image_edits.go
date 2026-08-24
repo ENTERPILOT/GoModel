@@ -83,12 +83,15 @@ func imageEditMultipart(req *core.ImageEditRequest) ([]byte, string, error) {
 
 // writeImagePart appends one file part, defaulting the filename and content
 // type when the client omitted them (OpenAI rejects parts without a filename).
+// Client-declared metadata is stripped of CR/LF before it reaches the MIME
+// headers: multipart.Writer serializes header values verbatim, and a newline
+// smuggled through them could inject arbitrary parts or headers upstream.
 func writeImagePart(writer *multipart.Writer, field string, img core.ImageFile, defaultName string) error {
-	filename := strings.TrimSpace(img.Filename)
+	filename := strings.TrimSpace(stripCRLF(img.Filename))
 	if filename == "" {
 		filename = defaultName
 	}
-	contentType := strings.TrimSpace(img.ContentType)
+	contentType := strings.TrimSpace(stripCRLF(img.ContentType))
 	if contentType == "" {
 		contentType = "image/png"
 	}
@@ -106,6 +109,12 @@ func writeImagePart(writer *multipart.Writer, field string, img core.ImageFile, 
 }
 
 var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+
+var crlfStripper = strings.NewReplacer("\r", "", "\n", "")
+
+func stripCRLF(s string) string {
+	return crlfStripper.Replace(s)
+}
 
 func escapeQuotes(s string) string {
 	return quoteEscaper.Replace(s)

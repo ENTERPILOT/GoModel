@@ -35,6 +35,12 @@ func TestValidateImageEditRequest(t *testing.T) {
 		{name: "n not a number", mutate: func(r *ImageEditRequest) { r.Fields = []FormField{{Name: "n", Value: "two"}} }, wantErr: "n must be at least 1"},
 		{name: "stream true", mutate: func(r *ImageEditRequest) { r.Fields = []FormField{{Name: "stream", Value: "true"}} }, wantErr: "streaming image edits are not supported"},
 		{name: "stream garbage", mutate: func(r *ImageEditRequest) { r.Fields = []FormField{{Name: "stream", Value: "yes"}} }, wantErr: "streaming image edits are not supported"},
+		{name: "duplicate stream sneaks true", mutate: func(r *ImageEditRequest) {
+			r.Fields = []FormField{{Name: "stream", Value: "false"}, {Name: "stream", Value: "true"}}
+		}, wantErr: "streaming image edits are not supported"},
+		{name: "duplicate n sneaks zero", mutate: func(r *ImageEditRequest) {
+			r.Fields = []FormField{{Name: "n", Value: "2"}, {Name: "n", Value: "0"}}
+		}, wantErr: "n must be at least 1"},
 	}
 
 	for _, tt := range tests {

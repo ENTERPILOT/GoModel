@@ -20,8 +20,9 @@ type ImageEditRequest struct {
 	Images []ImageFile
 	// Mask optionally marks the area to edit (transparent pixels are replaced).
 	Mask *ImageFile
-	// Fields carries the remaining form fields in request order, repeated
-	// names included.
+	// Fields carries the remaining form fields. Repeated names are kept and
+	// preserve their relative order; ordering across different names is not
+	// preserved (multipart forms have no cross-field order semantics).
 	Fields []FormField
 
 	// Provider is gateway routing metadata, stripped before dispatching upstream.
@@ -77,15 +78,20 @@ func ValidateImageEditRequest(req *ImageEditRequest) error {
 	if req.Mask != nil && len(req.Mask.Data) == 0 {
 		return NewInvalidRequestError("mask file is empty", nil)
 	}
-	if n, ok := req.Field("n"); ok {
-		if v, err := strconv.Atoi(strings.TrimSpace(n)); err != nil || v < 1 {
-			return NewInvalidRequestError("n must be at least 1", nil)
-		}
-	}
-	// Streaming edits return server-sent events, which this endpoint does not relay.
-	if stream, ok := req.Field("stream"); ok {
-		if v, err := strconv.ParseBool(strings.TrimSpace(stream)); err != nil || v {
-			return NewInvalidRequestError("streaming image edits are not supported; omit stream or set it to false", nil)
+	// Every occurrence of a validated field must pass: the whole form is
+	// forwarded, so a single bad duplicate (n=0, or a second stream=true)
+	// would otherwise reach the provider.
+	for _, field := range req.Fields {
+		switch field.Name {
+		case "n":
+			if v, err := strconv.Atoi(strings.TrimSpace(field.Value)); err != nil || v < 1 {
+				return NewInvalidRequestError("n must be at least 1", nil)
+			}
+		case "stream":
+			// Streaming edits return server-sent events, which this endpoint does not relay.
+			if v, err := strconv.ParseBool(strings.TrimSpace(field.Value)); err != nil || v {
+				return NewInvalidRequestError("streaming image edits are not supported; omit stream or set it to false", nil)
+			}
 		}
 	}
 	return nil

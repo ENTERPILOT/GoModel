@@ -79,8 +79,10 @@ func (s *imageService) CreateImageEdit(c *echo.Context) error {
 
 // imageEditRequestFromForm decodes the OpenAI multipart edit request. Source
 // images arrive as "image" (one) or "image[]" (several); the optional "mask"
-// is a single file. Remaining form values are kept, sorted by name, for
-// verbatim forwarding.
+// is a single file. Remaining form values are kept for verbatim forwarding,
+// sorted by name for a deterministic upstream body; values sharing a name
+// keep their request order (multipart grouping already discards cross-name
+// order, and form fields carry no cross-name order semantics).
 func imageEditRequestFromForm(c *echo.Context) (*core.ImageEditRequest, error) {
 	form, err := c.MultipartForm()
 	if err != nil {

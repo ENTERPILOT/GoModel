@@ -167,3 +167,38 @@ func TestCreateImageEdit_PropagatesUpstreamError(t *testing.T) {
 		t.Fatalf("error = %v, want upstream message", err)
 	}
 }
+
+// TestCreateImageEdit_SanitizesPartMetadata ensures client-declared filenames
+// and content types cannot smuggle CR/LF (header/part injection) or stray
+// quotes into the upstream multipart headers.
+func TestCreateImageEdit_SanitizesPartMetadata(t *testing.T) {
+	var got capturedMultipart
+	provider := newSpeechTestProvider(t, captureMultipartHandler(t, &got, `{}`))
+
+	_, err := provider.CreateImageEdit(context.Background(), &core.ImageEditRequest{
+		Model:  "gpt-image-1",
+		Prompt: "x",
+		Images: []core.ImageFile{{
+			Filename:    "evil\r\nContent-Type: text/html\r\n\r\n.png\"",
+			ContentType: "image/png\r\nX-Smuggled: 1",
+			Data:        []byte("bytes"),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateImageEdit() error = %v", err)
+	}
+	image := got.files["image"]
+	if len(image) != 1 {
+		t.Fatalf("image parts = %+v, want the upstream to parse exactly one", got.files)
+	}
+	if strings.ContainsAny(image[0].filename, "\r\n") || strings.ContainsAny(image[0].contentType, "\r\n") {
+		t.Errorf("CR/LF reached the upstream headers: %+v", image[0])
+	}
+	if image[0].contentType != "image/pngX-Smuggled: 1" && image[0].contentType != "image/png" {
+		// The exact folded remainder is unimportant; the header must stay one line.
+		t.Logf("content type folded to %q", image[0].contentType)
+	}
+	if image[0].data != "bytes" {
+		t.Errorf("image data = %q", image[0].data)
+	}
+}
