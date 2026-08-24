@@ -57,14 +57,16 @@ test("renderImageBody never emits unsafe data or javascript URLs", () => {
   const html = renderImageBody({
     __images__: true,
     images: [
-      { role: "output", content_type: "text/html", bytes: 3, encoding: "base64", data: "aGk=\"><script>", stored: true },
-      { role: "output", url: "javascript:alert(1)", stored: false },
+      { role: "output", content_type: "text/html", bytes: 3, encoding: "base64", data: "aGk=\"><ScRiPt>", stored: true },
+      { role: "output", url: "JaVaScRiPt:alert(1)", stored: false },
     ],
   });
-  assert.match(html, /src="data:image\/png;base64,aGk=script"/);
+  assert.match(html, /src="data:image\/png;base64,aGk=ScRiPt"/);
   assert.doesNotMatch(html, /text\/html;base64/);
-  assert.doesNotMatch(html, /<script>/);
-  assert.doesNotMatch(html, /href="javascript:/);
+  // The renderer escapes everything it interpolates, so no tag of any casing
+  // or spelling may survive beyond the fixed markup it emits itself.
+  assert.doesNotMatch(html, /<\s*script/i);
+  assert.doesNotMatch(html, /href\s*=\s*"\s*javascript:/i);
 });
 
 test("renderImageBody tolerates malformed image entries", () => {
