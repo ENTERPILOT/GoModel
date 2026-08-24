@@ -66,3 +66,21 @@ test("renderImageBody never emits unsafe data or javascript URLs", () => {
   assert.doesNotMatch(html, /<script>/);
   assert.doesNotMatch(html, /href="javascript:/);
 });
+
+test("renderImageBody tolerates malformed image entries", () => {
+  const html = renderImageBody({
+    __images__: true,
+    images: [null, 42, "junk", { role: "output", url: "https://img.example/ok.png" }],
+    meta: { model: "gpt-image-1" },
+  });
+  assert.match(html, /https:\/\/img\.example\/ok\.png/);
+  assert.doesNotMatch(html, /junk/);
+  assert.match(html, /gpt-image-1/);
+  assert.equal((html.match(/<figure/g) || []).length, 1);
+});
+
+test("renderImageBody with a non-array images field renders meta only", () => {
+  const html = renderImageBody({ __images__: true, images: null, meta: { prompt: "p" } });
+  assert.doesNotMatch(html, /<figure/);
+  assert.match(html, /audit-audio-metadata/);
+});

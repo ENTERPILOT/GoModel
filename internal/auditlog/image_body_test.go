@@ -20,7 +20,7 @@ func TestBuildImageUploadBody(t *testing.T) {
 	meta := map[string]any{"model": "gpt-image-1", "prompt": "add a hat"}
 
 	t.Run("stores base64 when enabled", func(t *testing.T) {
-		body := BuildImageUploadBody(images, mask, true, meta)
+		body := BuildImageUploadBody(images, mask, true, meta, nil)
 		if !body.Images || len(body.Items) != 2 || body.Meta["prompt"] != "add a hat" {
 			t.Fatalf("body = %+v", body)
 		}
@@ -40,7 +40,7 @@ func TestBuildImageUploadBody(t *testing.T) {
 	})
 
 	t.Run("keeps metadata only when disabled", func(t *testing.T) {
-		body := BuildImageUploadBody(images, mask, false, meta)
+		body := BuildImageUploadBody(images, mask, false, meta, nil)
 		for _, item := range body.Items {
 			if item.Stored || item.Data != "" || item.TooLarge {
 				t.Errorf("item should be a placeholder: %+v", item)
@@ -55,7 +55,7 @@ func TestBuildImageUploadBody(t *testing.T) {
 	})
 
 	t.Run("no mask", func(t *testing.T) {
-		body := BuildImageUploadBody(images, nil, true, nil)
+		body := BuildImageUploadBody(images, nil, true, nil, nil)
 		if len(body.Items) != 1 {
 			t.Fatalf("items = %+v, want only the source image", body.Items)
 		}
@@ -78,7 +78,7 @@ func TestBuildImageResponseBody(t *testing.T) {
 	}
 
 	t.Run("stores base64 outputs and keeps urls", func(t *testing.T) {
-		body := BuildImageResponseBody(resp, true)
+		body := BuildImageResponseBody(resp, true, nil)
 		if !body.Images || len(body.Items) != 2 {
 			t.Fatalf("body = %+v", body)
 		}
@@ -105,7 +105,7 @@ func TestBuildImageResponseBody(t *testing.T) {
 	})
 
 	t.Run("placeholder keeps envelope and urls when disabled", func(t *testing.T) {
-		body := BuildImageResponseBody(resp, false)
+		body := BuildImageResponseBody(resp, false, nil)
 		if body.Items[0].Stored || body.Items[0].Data != "" || body.Items[0].Bytes != len(png) || body.Items[0].ContentType != "image/jpeg" {
 			t.Errorf("base64 item should be a sized placeholder: %+v", body.Items[0])
 		}
@@ -118,7 +118,7 @@ func TestBuildImageResponseBody(t *testing.T) {
 	})
 
 	t.Run("nil response", func(t *testing.T) {
-		body := BuildImageResponseBody(nil, true)
+		body := BuildImageResponseBody(nil, true, nil)
 		if !body.Images || len(body.Items) != 0 || body.Meta != nil {
 			t.Errorf("body = %+v", body)
 		}
@@ -129,7 +129,7 @@ func TestBuildImageResponseBody_BudgetAcrossImages(t *testing.T) {
 	big := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, imageBodyMaxBytes/2+1))
 	resp := &core.ImageGenerationResponse{Data: []core.ImageData{{B64JSON: big}, {B64JSON: big}, {B64JSON: "aGk="}}}
 
-	body := BuildImageResponseBody(resp, true)
+	body := BuildImageResponseBody(resp, true, nil)
 
 	if !body.Items[0].Stored {
 		t.Errorf("first image fits the budget and should be stored: %+v", body.Items[0].Bytes)
@@ -139,6 +139,43 @@ func TestBuildImageResponseBody_BudgetAcrossImages(t *testing.T) {
 	}
 	if !body.Items[2].Stored {
 		t.Errorf("small third image still fits: %+v", body.Items[2])
+	}
+}
+
+// TestImageBodyBudget_SharedAcrossRequestAndResponse verifies the budget is
+// entry-wide: an edit whose uploads consume most of the allowance leaves only
+// the remainder for the response, so one entry can never hold more than
+// imageBodyMaxBytes of raw image data across both bodies.
+func TestImageBodyBudget_SharedAcrossRequestAndResponse(t *testing.T) {
+	budget := NewImageBodyBudget()
+	bigUpload := core.ImageFile{Filename: "big.png", Data: bytes.Repeat([]byte{0x01}, imageBodyMaxBytes-100)}
+
+	reqBody := BuildImageUploadBody([]core.ImageFile{bigUpload}, nil, true, nil, budget)
+	if !reqBody.Items[0].Stored {
+		t.Fatalf("upload within budget should be stored: %+v", reqBody.Items[0].Bytes)
+	}
+
+	small := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x02}, 60))
+	tooBig := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x03}, 200))
+	respBody := BuildImageResponseBody(&core.ImageGenerationResponse{
+		Data: []core.ImageData{{B64JSON: tooBig}, {B64JSON: small}},
+	}, true, budget)
+
+	if respBody.Items[0].Stored || !respBody.Items[0].TooLarge {
+		t.Errorf("output exceeding the shared remainder must become a placeholder: %+v", respBody.Items[0].Bytes)
+	}
+	if !respBody.Items[1].Stored {
+		t.Errorf("output within the shared remainder should be stored: %+v", respBody.Items[1].Bytes)
+	}
+
+	total := 0
+	for _, item := range append(reqBody.Items, respBody.Items...) {
+		if item.Stored {
+			total += item.Bytes
+		}
+	}
+	if total > imageBodyMaxBytes {
+		t.Errorf("stored %d raw bytes in one entry, budget is %d", total, imageBodyMaxBytes)
 	}
 }
 

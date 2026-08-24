@@ -86,15 +86,17 @@ func (s *imageService) CreateImage(c *echo.Context) error {
 	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
 		return handleError(c, err)
 	}
-	return s.respondImages(c, resp)
+	return s.respondImages(c, resp, nil)
 }
 
 // respondImages writes the JSON response and, when body logging is on, records
 // it in the audit entry as an image body: envelope metadata plus each image as
-// base64 (gated by logImageOutputs) or a sized placeholder.
-func (s *imageService) respondImages(c *echo.Context, resp *core.ImageGenerationResponse) error {
+// base64 (gated by logImageOutputs) or a sized placeholder. budget is the
+// entry-wide image allowance; edits pass the one their upload body already
+// drew from, nil starts a fresh one.
+func (s *imageService) respondImages(c *echo.Context, resp *core.ImageGenerationResponse, budget *auditlog.ImageBodyBudget) error {
 	if s.logBodies {
-		auditlog.EnrichEntryWithResponseBody(c, auditlog.BuildImageResponseBody(resp, s.logImageOutputs))
+		auditlog.EnrichEntryWithResponseBody(c, auditlog.BuildImageResponseBody(resp, s.logImageOutputs, budget))
 	}
 	return c.JSON(http.StatusOK, resp)
 }

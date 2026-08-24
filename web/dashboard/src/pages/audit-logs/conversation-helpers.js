@@ -842,7 +842,11 @@ function renderImageItem(item) {
 // renderImageBody renders an image body as a gallery of inputs/outputs with
 // the request parameters or response envelope listed below.
 export function renderImageBody(value) {
-    const items = Array.isArray(value.images) ? value.images : [];
+    // Stored entries are data: tolerate malformed members (null, primitives)
+    // rather than failing to render the whole audit pane.
+    const items = Array.isArray(value.images)
+        ? value.images.filter((item) => item && typeof item === 'object')
+        : [];
     const gallery = items.length
         ? '<div class="audit-image-gallery">' + items.map(renderImageItem).join('') + '</div>'
         : '';

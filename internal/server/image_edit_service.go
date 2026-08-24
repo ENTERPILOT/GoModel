@@ -40,9 +40,11 @@ func (s *imageService) CreateImageEdit(c *echo.Context) error {
 	}
 	// The upload is multipart, so the audit middleware has no JSON body to
 	// capture; record the edit parameters and the uploads instead. Image
-	// bytes are embedded only when logImageInputs is on.
+	// bytes are embedded only when logImageInputs is on. The budget is shared
+	// with the response body so one entry never exceeds the image allowance.
+	budget := auditlog.NewImageBodyBudget()
 	if s.logBodies {
-		auditlog.EnrichEntryWithRequestBody(c, auditlog.BuildImageUploadBody(req.Images, req.Mask, s.logImageInputs, imageEditAuditMeta(req)))
+		auditlog.EnrichEntryWithRequestBody(c, auditlog.BuildImageUploadBody(req.Images, req.Mask, s.logImageInputs, imageEditAuditMeta(req), budget))
 	}
 	if err := core.ValidateImageEditRequest(req); err != nil {
 		return handleError(c, err)
@@ -74,7 +76,7 @@ func (s *imageService) CreateImageEdit(c *echo.Context) error {
 	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
 		return handleError(c, err)
 	}
-	return s.respondImages(c, resp)
+	return s.respondImages(c, resp, budget)
 }
 
 // imageEditRequestFromForm decodes the OpenAI multipart edit request. Source
