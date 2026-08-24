@@ -201,10 +201,12 @@ normally. What you lose is metadata enrichment.
 </Warning>
 
 <Note>
-  Setting `MODEL_LIST_URL=""` does **not** disable the fetch. Empty environment
-  values are skipped when overrides are applied, so the compiled-in default URL
-  survives. To disable it, set `cache.model.model_list.url: ""` in
-  `config.yaml`. To redirect it, point `MODEL_LIST_URL` at an internal mirror.
+  To disable the fetch entirely — for fully air-gapped installs — set
+  `MODEL_LIST_URL=off` (or `cache.model.model_list.url: "off"` in
+  `config.yaml`). Setting the variable to an empty string does **not**
+  disable it: empty env values are skipped, so the default URL survives.
+  To redirect the fetch instead, point `MODEL_LIST_URL` at an internal
+  mirror.
 </Note>
 
 If a Bedrock provider is configured, the AWS SDK may also probe the link-local
@@ -377,5 +379,6 @@ if the file size matters.
   `terminationGracePeriodSeconds` above 30.
 - Enable metrics and alert on `gomodel_circuit_breaker_state` and on
   `usage log buffer full`.
-- For air-gapped installs, mirror `MODEL_LIST_URL` or declare model pricing in
-  config so cost tracking and budgets keep working.
+- For air-gapped installs, mirror `MODEL_LIST_URL` (or disable it with
+  `MODEL_LIST_URL=off`) and declare model pricing in config so cost tracking
+  and budgets keep working.
