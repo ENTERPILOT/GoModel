@@ -17,8 +17,9 @@ access rules ([user paths](/features/user-path)), [budgets](/features/budgets),
 and [rate limits](/features/rate-limits) all apply. Image generation is served by
 OpenAI and the OpenAI-compatible providers that implement the endpoint
 (Azure OpenAI, OpenRouter, [xAI](/providers/xai)), and by
-[Google Gemini](/providers/gemini) — Imagen and Gemini image models through
-Gemini's native API. Image edits are served by OpenAI and Azure OpenAI, by
+[Google Gemini](/providers/gemini) — Gemini image models through the native
+API, plus Imagen on [Vertex AI](/providers/vertex). Image edits are served by
+OpenAI and Azure OpenAI, by
 Gemini image models (`gemini-2.5-flash-image`, ...), plus any
 OpenAI-compatible provider that accepts OpenAI's multipart upload on
 `/images/edits`. A provider without the capability returns
@@ -98,6 +99,8 @@ await writeFile("lighthouse.png", Buffer.from(result.data[0].b64_json, "base64")
 `moderation`, `user`, and any future parameter — is **forwarded to the provider
 unchanged**, so model-specific options work without a gateway update. The
 provider decides which values it accepts and returns its own error otherwise.
+The exception is Gemini's native adapter, which translates `n` and `size` to
+their native equivalents — see [Google Gemini](#google-gemini).
 
 The response is the OpenAI images envelope. `data[]` entries carry either a
 hosted `url` (DALL·E, `response_format: "url"`) or inline `b64_json`
@@ -215,9 +218,11 @@ run through the full inference orchestrator**. Compared with `/v1/chat/completio
 
 ## Google Gemini
 
-With the Gemini provider in native API mode (the default), `imagen-*` models
-generate through Imagen's `predict` API and Gemini image models
-(`gemini-2.5-flash-image`, ...) through `generateContent`:
+With the Gemini provider in native API mode (the default), Gemini image
+models (`gemini-2.5-flash-image`, ...) generate through `generateContent`,
+and `imagen-*` models through Imagen's `predict` API. Google retired Imagen
+from the Gemini API (AI Studio) on August 17, 2026 — use a Gemini image model
+there; Imagen remains available on [Vertex AI](/providers/vertex).
 
 - `n` maps to Imagen's `sampleCount`; `size` maps to the closest supported
   aspect ratio (`1024x1024` → `1:1`, `1536x1024` → `3:2`, ...), and a raw
@@ -231,9 +236,6 @@ generate through Imagen's `predict` API and Gemini image models
 - Edits work with Gemini image models only: uploads become inline image
   parts ahead of the prompt. `mask` is not supported — describe the region to
   change in the prompt. Imagen models only generate.
-- Google's model listing omits Imagen, so GoModel seeds the documented
-  `imagen-*` IDs into `/v1/models`. Imagen on the Gemini API requires a paid
-  tier; free-tier keys receive Google's not-found error.
 
 In OpenAI-compatible mode, generation forwards to Gemini's
 `/openai/images/generations` endpoint and edits are rejected (that surface has

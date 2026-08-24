@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -166,5 +167,33 @@ func TestEmbeddings_CompatModeUsesOpenAIEndpoint(t *testing.T) {
 	}
 	if len(resp.Data) != 1 || resp.Usage.TotalTokens != 3 {
 		t.Fatalf("response = %+v, want compat passthrough with usage", resp)
+	}
+}
+
+func TestNativeEmbeddings_RejectsMismatchedCount(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "short", body: `{"embeddings": [{"values": [0.1]}]}`},
+		{name: "surplus", body: `{"embeddings": [{"values": [0.1]}, {"values": [0.2]}, {"values": [0.3]}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			p := newNativeTestProvider(t, server)
+			_, err := p.Embeddings(context.Background(), &core.EmbeddingRequest{
+				Model: "gemini-embedding-001",
+				Input: []any{"first", "second"},
+			})
+			if err == nil || !strings.Contains(err.Error(), "embeddings for 2 inputs") {
+				t.Fatalf("error = %v, want mismatched-count rejection", err)
+			}
+		})
 	}
 }

@@ -72,9 +72,11 @@ Default bases are derived from project and location:
 - native Gemini: `.../projects/{project}/locations/{location}/publishers/google`
 
 Vertex embeddings use Vertex AI native prediction regardless of
-`VERTEX_API_MODE`. The [image endpoints](/advanced/images-api) are served in
-native mode through the publisher endpoints (Imagen via `predict`, Gemini
-image models via `generateContent`). Vertex does not expose Gemini Files or
+`VERTEX_API_MODE`. In native mode (the default) the
+[image endpoints](/advanced/images-api) are served through the publisher
+endpoints (Imagen via `predict`, Gemini image models via `generateContent`);
+in `openai_compatible` mode image generation forwards to the OpenAI-compatible
+endpoint and image edits are rejected. Vertex does not expose Gemini Files or
 OpenAI-compatible batch operations.
 
 ## Image input

@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 
@@ -13,9 +14,13 @@ import (
 // Native Gemini embeddings (models/{model}:batchEmbedContents). One batch call
 // covers single- and multi-input OpenAI requests alike.
 type geminiEmbedContentRequest struct {
-	Model                string        `json:"model"`
-	Content              geminiContent `json:"content"`
-	OutputDimensionality *int          `json:"outputDimensionality,omitempty"`
+	Model   string        `json:"model"`
+	Content geminiContent `json:"content"`
+	// The REST reference marks this field deprecated in favor of a nested
+	// EmbedContentConfig, but the live batchEmbedContents endpoint silently
+	// ignores the nested spelling (verified: dimensions come back at the
+	// model default) and honors the top-level field, so this stays.
+	OutputDimensionality *int `json:"outputDimensionality,omitempty"`
 }
 
 type geminiBatchEmbedContentsRequest struct {
@@ -67,6 +72,11 @@ func (p *Provider) nativeEmbeddings(ctx context.Context, req *core.EmbeddingRequ
 	}, &resp)
 	if err != nil {
 		return nil, err
+	}
+	// A mismatched count would silently misalign indexes with inputs.
+	if len(resp.Embeddings) != len(inputs) {
+		return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway,
+			fmt.Sprintf("Gemini returned %d embeddings for %d inputs", len(resp.Embeddings), len(inputs)), nil)
 	}
 
 	out := &core.EmbeddingResponse{

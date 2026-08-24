@@ -221,20 +221,6 @@
       "id": "gemini-3.7-flash",
       "object": "model",
       "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "imagen-3.0-generate-002",
-      "metadata": {
-        "categories": [
-          "image"
-        ],
-        "modes": [
-          "image_generation"
-        ]
-      },
-      "object": "model",
-      "owned_by": "google"
     }
   ],
   "object": "list"

@@ -187,7 +187,9 @@ func imagePredictParameters(req *core.ImageGenerationRequest) (map[string]any, e
 	if err != nil {
 		return nil, err
 	}
-	parameters["sampleCount"] = req.ImageCount()
+	if _, ok := parameters["sampleCount"]; !ok {
+		parameters["sampleCount"] = req.ImageCount()
+	}
 	if aspectRatio := imageAspectRatio(req.Size); aspectRatio != "" {
 		if _, ok := parameters["aspectRatio"]; !ok {
 			parameters["aspectRatio"] = aspectRatio

@@ -320,44 +320,6 @@ func TestImageAspectRatio(t *testing.T) {
 	}
 }
 
-func TestListModels_SeedsKnownImagenModels(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		// One Imagen model listed upstream must not be seeded twice.
-		_, _ = w.Write([]byte(`{"models": [
-			{"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
-			{"name": "models/imagen-4.0-generate-001", "supportedGenerationMethods": ["predict"]}
-		]}`))
-	}))
-	defer server.Close()
-
-	p := newNativeTestProvider(t, server)
-	resp, err := p.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	counts := make(map[string]int)
-	for _, model := range resp.Data {
-		counts[model.ID]++
-	}
-	for _, id := range knownImagenModels {
-		if counts[id] != 1 {
-			t.Errorf("model %q listed %d times, want exactly once", id, counts[id])
-		}
-	}
-	if counts["gemini-2.5-flash"] != 1 {
-		t.Errorf("gemini-2.5-flash listed %d times, want once", counts["gemini-2.5-flash"])
-	}
-	for _, model := range resp.Data {
-		if strings.HasPrefix(model.ID, "imagen-") {
-			if model.Metadata == nil || len(model.Metadata.Modes) != 1 || model.Metadata.Modes[0] != "image_generation" {
-				t.Errorf("imagen model %q metadata = %+v, want image_generation only", model.ID, model.Metadata)
-			}
-		}
-	}
-}
-
 func TestCreateImage_GeminiImageModelMultiImage(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -394,22 +356,25 @@ func TestCreateImage_GeminiImageModelMultiImage(t *testing.T) {
 	}
 }
 
-func TestListModels_SeedsImagenOnExplicitlyEmptyInventory(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+func TestCreateImage_ImagenNativeSampleCountWins(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"models": []}`))
+		_, _ = w.Write([]byte(`{"predictions": [{"bytesBase64Encoded": "aW1n"}]}`))
 	}))
 	defer server.Close()
 
 	p := newNativeTestProvider(t, server)
-	resp, err := p.ListModels(context.Background())
+	// A client speaking native Imagen sends sampleCount directly; the OpenAI
+	// n default must not overwrite it (same precedence rule as aspectRatio).
+	_, err := p.CreateImage(context.Background(), decodeImageRequest(t, `{"model": "imagen-4.0-generate-001", "prompt": "x", "sampleCount": 3}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Data) != len(knownImagenModels) {
-		t.Fatalf("models = %+v, want the seeded Imagen models on an empty inventory", resp.Data)
-	}
-	if resp.Data[0].ID != knownImagenModels[0] {
-		t.Errorf("first model = %q, want %q", resp.Data[0].ID, knownImagenModels[0])
+	parameters, _ := gotBody["parameters"].(map[string]any)
+	if parameters["sampleCount"] != float64(3) {
+		t.Errorf("sampleCount = %v, want client-sent 3 preserved", parameters["sampleCount"])
 	}
 }

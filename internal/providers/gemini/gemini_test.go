@@ -621,8 +621,8 @@ func TestSetBaseURLDerivesModelsURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Data) != 1+len(knownImagenModels) || resp.Data[0].ID != "gemini-2.5-flash" {
-		t.Fatalf("models = %+v, want gemini-2.5-flash plus seeded Imagen models", resp.Data)
+	if len(resp.Data) != 1 || resp.Data[0].ID != "gemini-2.5-flash" {
+		t.Fatalf("models = %+v, want gemini-2.5-flash", resp.Data)
 	}
 	if !modelsHit {
 		t.Fatal("models server was not called")
@@ -1908,8 +1908,8 @@ func TestListModels(t *testing.T) {
 				if resp.Object != "list" {
 					t.Errorf("Object = %q, want %q", resp.Object, "list")
 				}
-				if len(resp.Data) != 2+len(knownImagenModels) {
-					t.Fatalf("len(Data) = %d, want 2 listed plus seeded Imagen models", len(resp.Data))
+				if len(resp.Data) != 2 {
+					t.Fatalf("len(Data) = %d, want 2", len(resp.Data))
 				}
 				if resp.Data[0].ID != "gemini-2.0-flash" {
 					t.Errorf("Data[0].ID = %q, want %q", resp.Data[0].ID, "gemini-2.0-flash")
@@ -2284,5 +2284,24 @@ data: {"responseId":"gemini-native-stream-response","candidates":[{"content":{"r
 	}
 	if !strings.Contains(stream, "data: [DONE]") {
 		t.Fatalf("stream = %q, want [DONE]", stream)
+	}
+}
+
+func TestGeminiModelSupportedMethods_EmptyMethodFallback(t *testing.T) {
+	tests := []struct {
+		model                          string
+		wantChat, wantEmbed, wantImage bool
+	}{
+		{model: "gemini-2.5-flash", wantChat: true},
+		{model: "gemini-embedding-001", wantEmbed: true},
+		{model: "text-embedding-004", wantEmbed: true},
+		{model: "imagen-4.0-generate-001", wantImage: true},
+	}
+	for _, tt := range tests {
+		gotChat, gotEmbed, gotImage := geminiModelSupportedMethods(tt.model, nil)
+		if gotChat != tt.wantChat || gotEmbed != tt.wantEmbed || gotImage != tt.wantImage {
+			t.Errorf("geminiModelSupportedMethods(%q, nil) = %v/%v/%v, want %v/%v/%v",
+				tt.model, gotChat, gotEmbed, gotImage, tt.wantChat, tt.wantEmbed, tt.wantImage)
+		}
 	}
 }

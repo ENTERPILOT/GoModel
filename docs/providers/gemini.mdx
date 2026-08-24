@@ -66,10 +66,10 @@ you need token counts from Gemini embeddings.
 ## Image generation and edits
 
 In native mode the [OpenAI-compatible image endpoints](/advanced/images-api)
-work with both Imagen (`imagen-*`, via `predict`; requires a paid-tier API
-key) and Gemini image models (`gemini-2.5-flash-image`, ..., via
-`generateContent`). Image edits require native mode and a Gemini image model;
-masks are not supported. See the
+work with Gemini image models (`gemini-2.5-flash-image`, ..., via
+`generateContent`). Google retired Imagen from the AI Studio API in August
+2026; Imagen is still served on [Vertex AI](/providers/vertex). Image edits
+require native mode and a Gemini image model; masks are not supported. See the
 [Images API provider notes](/advanced/images-api#google-gemini) for parameter
 mapping and pricing details.
 
