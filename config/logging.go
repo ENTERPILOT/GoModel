@@ -1,5 +1,7 @@
 package config
 
+import "strings"
+
 // LogConfig holds audit logging configuration
 type LogConfig struct {
 	// Enabled controls whether audit logging is active
@@ -20,6 +22,23 @@ type LogConfig struct {
 	// WARNING: stores full audio in the audit log; grows storage quickly.
 	// Default: false
 	LogAudioBodies bool `yaml:"log_audio_bodies" env:"LOGGING_LOG_AUDIO_BODIES"`
+
+	// LogImageBodies refines LogBodies for the image endpoints
+	// (/v1/images/generations, /v1/images/edits): when both are enabled the
+	// image bytes (uploaded sources and masks, generated outputs) are stored as
+	// base64 so the dashboard can display them. Requires LogBodies; when
+	// LogBodies is on but this is off, image bodies keep their metadata
+	// (prompt, parameters, sizes, usage) and URLs but drop the pixels.
+	// WARNING: stores full images in the audit log; grows storage quickly.
+	// Default: false
+	LogImageBodies bool `yaml:"log_image_bodies" env:"LOGGING_LOG_IMAGE_BODIES"`
+
+	// LogImageBodiesScope narrows LogImageBodies to one direction: "all"
+	// stores uploaded inputs and generated outputs, "input" only the uploads
+	// (edit sources and masks), "output" only the generated images. Ignored
+	// while LogImageBodies is off.
+	// Default: all
+	LogImageBodiesScope ImageBodyScope `yaml:"log_image_bodies_scope" env:"LOGGING_LOG_IMAGE_BODIES_SCOPE"`
 
 	// LogRevisionBodies refines LogBodies for the request-revision chain:
 	// when both are enabled, every request rewriter that changed the body
@@ -53,4 +72,43 @@ type LogConfig struct {
 	// Endpoints like /health, /metrics, /admin, /v1/models are skipped
 	// Default: true
 	OnlyModelInteractions bool `yaml:"only_model_interactions" env:"LOGGING_ONLY_MODEL_INTERACTIONS"`
+}
+
+// ImageBodyScope selects which image bytes the audit log embeds when
+// LogImageBodies is enabled.
+type ImageBodyScope string
+
+const (
+	ImageBodyScopeAll    ImageBodyScope = "all"
+	ImageBodyScopeInput  ImageBodyScope = "input"
+	ImageBodyScopeOutput ImageBodyScope = "output"
+)
+
+// ResolveImageBodyScope normalizes a configured scope, defaulting to all.
+func ResolveImageBodyScope(value ImageBodyScope) ImageBodyScope {
+	normalized := ImageBodyScope(strings.ToLower(strings.TrimSpace(string(value))))
+	if normalized == "" {
+		return ImageBodyScopeAll
+	}
+	return normalized
+}
+
+// Valid reports whether the scope is one of the supported values.
+func (s ImageBodyScope) Valid() bool {
+	switch s {
+	case ImageBodyScopeAll, ImageBodyScopeInput, ImageBodyScopeOutput:
+		return true
+	default:
+		return false
+	}
+}
+
+// Inputs reports whether uploaded images (edit sources and masks) are stored.
+func (s ImageBodyScope) Inputs() bool {
+	return s == ImageBodyScopeAll || s == ImageBodyScopeInput
+}
+
+// Outputs reports whether generated images are stored.
+func (s ImageBodyScope) Outputs() bool {
+	return s == ImageBodyScopeAll || s == ImageBodyScopeOutput
 }

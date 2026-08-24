@@ -157,7 +157,9 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				// coercion nor clobber the handler-set body — and do not apply
 				// the writer's truncation flag, which would conflict with the
 				// fully-stored audio body (the handler tracks its own size cap).
-				if !IsAudioContentType(c.Response().Header().Get("Content-Type")) {
+				// The same applies to any handler that captured its own body
+				// (image endpoints store a budgeted gallery instead of raw JSON).
+				if !IsAudioContentType(c.Response().Header().Get("Content-Type")) && !IsResponseBodyCapturedByHandler(c) {
 					// Set truncation flag if response body exceeded limit
 					if responseCapture.truncated {
 						entry.Data.ResponseBodyTooBigToHandle = true

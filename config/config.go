@@ -136,6 +136,7 @@ func buildDefaultConfig() *Config {
 		Logging: LogConfig{
 			Enabled:               true,
 			LogBodies:             true,
+			LogImageBodiesScope:   ImageBodyScopeAll,
 			LogRevisionBodies:     true,
 			LogHeaders:            true,
 			BufferSize:            1000,
@@ -288,6 +289,11 @@ func Load() (*LoadResult, error) {
 
 	if err := ValidateCacheConfig(&cfg.Cache); err != nil {
 		return nil, err
+	}
+
+	cfg.Logging.LogImageBodiesScope = ResolveImageBodyScope(cfg.Logging.LogImageBodiesScope)
+	if !cfg.Logging.LogImageBodiesScope.Valid() {
+		return nil, fmt.Errorf("logging.log_image_bodies_scope must be one of: all, input, output; got %q", cfg.Logging.LogImageBodiesScope)
 	}
 
 	return &LoadResult{

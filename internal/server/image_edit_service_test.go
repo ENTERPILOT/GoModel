@@ -351,14 +351,32 @@ func TestImageEdits_HandlerRoute(t *testing.T) {
 }
 
 // TestImageEdits_AuditsRequestMetadata verifies the edit parameters and upload
-// metadata (never the image bytes) reach the audit entry when body logging is
-// on, along with the resolved route.
+// metadata reach the audit entry when body logging is on, along with the
+// resolved route, and that image bytes are embedded only when input logging
+// is enabled.
 func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
-	for _, logBodies := range []bool{true, false} {
-		t.Run(map[bool]string{true: "enabled", false: "disabled"}[logBodies], func(t *testing.T) {
+	tests := []struct {
+		name            string
+		logBodies       bool
+		logImageInputs  bool
+		logImageOutputs bool
+	}{
+		{name: "bodies off", logBodies: false},
+		{name: "metadata only", logBodies: true},
+		{name: "inputs only", logBodies: true, logImageInputs: true},
+		{name: "outputs only", logBodies: true, logImageOutputs: true},
+		{name: "all", logBodies: true, logImageInputs: true, logImageOutputs: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			mock := newImageEditMock()
 			mock.resolved = &core.ModelSelector{Provider: "openai", Model: "gpt-image-1"}
-			svc := &imageService{modelCallService: modelCallService{provider: mock}, logBodies: logBodies}
+			svc := &imageService{
+				modelCallService: modelCallService{provider: mock},
+				logBodies:        tt.logBodies,
+				logImageInputs:   tt.logImageInputs,
+				logImageOutputs:  tt.logImageOutputs,
+			}
 			c, rec := newImageEditRequest(t,
 				[][2]string{{"model", "gpt-image-1"}, {"prompt", "add a hat"}, {"size", "1024x1024"}, {"provider", "openai"}},
 				catPNG,
@@ -376,32 +394,43 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 			if entry.RequestedModel != "gpt-image-1" || entry.ResolvedModel != "openai/gpt-image-1" || entry.Provider != "mock" {
 				t.Errorf("audit route = requested %q resolved %q provider %q", entry.RequestedModel, entry.ResolvedModel, entry.Provider)
 			}
-			if !logBodies {
-				if entry.Data != nil && entry.Data.RequestBody != nil {
-					t.Fatalf("request body captured although body logging is off: %v", entry.Data.RequestBody)
+			if !tt.logBodies {
+				if entry.Data != nil && (entry.Data.RequestBody != nil || entry.Data.ResponseBody != nil) {
+					t.Fatalf("bodies captured although body logging is off: %+v", entry.Data)
 				}
 				return
 			}
-			body, ok := entry.Data.RequestBody.(map[string]any)
+
+			reqBody, ok := entry.Data.RequestBody.(auditlog.ImageBodyLog)
 			if !ok {
-				t.Fatalf("request body = %T, want map", entry.Data.RequestBody)
+				t.Fatalf("request body = %T, want auditlog.ImageBodyLog", entry.Data.RequestBody)
 			}
-			if body["prompt"] != "add a hat" || body["size"] != "1024x1024" || body["model"] != "gpt-image-1" {
-				t.Errorf("audited request body = %v", body)
+			if reqBody.Meta["prompt"] != "add a hat" || reqBody.Meta["size"] != "1024x1024" || reqBody.Meta["model"] != "gpt-image-1" {
+				t.Errorf("audited request meta = %v", reqBody.Meta)
 			}
-			if _, present := body["provider"]; present {
-				t.Errorf("routing hint must not be audited: %v", body)
+			if _, present := reqBody.Meta["provider"]; present {
+				t.Errorf("routing hint must not be audited: %v", reqBody.Meta)
 			}
-			images, _ := body["images"].([]map[string]any)
-			if len(images) != 1 || images[0]["filename"] != "cat.png" || images[0]["bytes"] != len("cat-bytes") {
-				t.Errorf("audited images = %v", body["images"])
+			if len(reqBody.Items) != 2 {
+				t.Fatalf("audited uploads = %+v, want source and mask", reqBody.Items)
 			}
-			mask, _ := body["mask"].(map[string]any)
-			if mask["filename"] != "mask.png" || mask["bytes"] != len("mask-bytes") {
-				t.Errorf("audited mask = %v", body["mask"])
+			src, mask := reqBody.Items[0], reqBody.Items[1]
+			if src.Role != "input" || src.Filename != "cat.png" || src.Bytes != len("cat-bytes") || mask.Role != "mask" || mask.Filename != "mask.png" {
+				t.Errorf("audited uploads = %+v", reqBody.Items)
 			}
-			if serialized, _ := json.Marshal(body); strings.Contains(string(serialized), "cat-bytes") {
-				t.Errorf("image bytes leaked into audit body: %s", serialized)
+			if src.Stored != tt.logImageInputs || mask.Stored != tt.logImageInputs {
+				t.Errorf("upload bytes stored = %v/%v, want %v", src.Stored, mask.Stored, tt.logImageInputs)
+			}
+
+			respBody, ok := entry.Data.ResponseBody.(auditlog.ImageBodyLog)
+			if !ok {
+				t.Fatalf("response body = %T, want auditlog.ImageBodyLog", entry.Data.ResponseBody)
+			}
+			if len(respBody.Items) != 1 || respBody.Items[0].Role != "output" || respBody.Items[0].Stored != tt.logImageOutputs {
+				t.Errorf("audited outputs = %+v, want one output stored=%v", respBody.Items, tt.logImageOutputs)
+			}
+			if usage, _ := respBody.Meta["usage"].(map[string]any); usage == nil || usage["total_tokens"] != 1050 {
+				t.Errorf("audited response meta = %v, want usage envelope", respBody.Meta)
 			}
 		})
 	}

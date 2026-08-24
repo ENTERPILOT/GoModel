@@ -391,6 +391,13 @@ type Config struct {
 	// this is off, audio responses are recorded as a lightweight placeholder.
 	LogAudioBodies bool
 
+	// LogImageInputs and LogImageOutputs refine LogBodies for the image
+	// endpoints: uploaded edit sources/masks and generated images are embedded
+	// as base64 only when the matching flag is on (LOGGING_LOG_IMAGE_BODIES
+	// plus its scope). Image metadata and hosted URLs are always kept.
+	LogImageInputs  bool
+	LogImageOutputs bool
+
 	// LogRevisionBodies refines LogBodies for the request-revision chain:
 	// rewriters that changed the body store the full rewritten copy only when
 	// both are enabled. Revision metadata is always kept.

@@ -211,8 +211,20 @@ run through the full inference orchestrator**. Compared with `/v1/chat/completio
 ## Audit logging
 
 Image requests appear in the audit log like any other model interaction. When
-`LOGGING_LOG_BODIES` is enabled the JSON request and response are captured;
-responses larger than the 1 MB capture limit (typical for `b64_json` output)
-are stored truncated and flagged `response_body_too_big_to_handle`. For edits
-the request entry records the prompt, parameters, and upload metadata
-(filename, content type, size) — the uploaded image bytes are never stored.
+`LOGGING_LOG_BODIES` is enabled:
+
+- The generation request is stored as JSON. An edit request is stored as an
+  image body: the prompt and parameters plus one item per uploaded source
+  image and mask (filename, content type, size).
+- The response is stored as an image body too — the envelope (`created`,
+  `usage`, `size`, `quality`, …) plus one item per returned image. Hosted URLs
+  are kept as links.
+
+The pixels themselves are **not** stored unless
+[`LOGGING_LOG_IMAGE_BODIES=true`](/advanced/configuration#audit-logging). With
+it on, uploads and generated images are embedded as base64 (8 MB per entry)
+and the dashboard renders them inline; `LOGGING_LOG_IMAGE_BODIES_SCOPE` limits
+this to `input` (edit uploads) or `output` (results). Without it, each image
+is a sized placeholder (`stored: false`), so the entry stays small and
+complete — it never hits the generic 1 MB body truncation even for large
+`b64_json` results.

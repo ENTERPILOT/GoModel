@@ -69,10 +69,13 @@ func createLogStore(ctx context.Context, store storage.Storage, retentionDays in
 
 // buildLoggerConfig creates an auditlog.Config from config.LogConfig.
 func buildLoggerConfig(logCfg config.LogConfig) Config {
+	imageScope := config.ResolveImageBodyScope(logCfg.LogImageBodiesScope)
 	cfg := Config{
 		Enabled:               logCfg.Enabled,
 		LogBodies:             logCfg.LogBodies,
 		LogAudioBodies:        logCfg.LogAudioBodies,
+		LogImageInputs:        logCfg.LogImageBodies && imageScope.Inputs(),
+		LogImageOutputs:       logCfg.LogImageBodies && imageScope.Outputs(),
 		LogRevisionBodies:     logCfg.LogRevisionBodies,
 		LogHeaders:            logCfg.LogHeaders,
 		BufferSize:            logCfg.BufferSize,

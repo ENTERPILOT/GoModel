@@ -39,10 +39,12 @@ func (s *imageService) CreateImageEdit(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	// The upload is multipart, so the audit middleware has no JSON body to
-	// capture; record the edit parameters and upload metadata instead. Image
-	// bytes are never embedded.
+	// capture; record the edit parameters and the uploads instead. Image
+	// bytes are embedded only when logImageInputs is on. The budget is shared
+	// with the response body so one entry never exceeds the image allowance.
+	budget := auditlog.NewImageBodyBudget()
 	if s.logBodies {
-		auditlog.EnrichEntryWithRequestBody(c, imageEditAuditInput(req))
+		auditlog.EnrichEntryWithRequestBody(c, auditlog.BuildImageUploadBody(req.Images, req.Mask, s.logImageInputs, imageEditAuditMeta(req), budget))
 	}
 	if err := core.ValidateImageEditRequest(req); err != nil {
 		return handleError(c, err)
@@ -74,7 +76,7 @@ func (s *imageService) CreateImageEdit(c *echo.Context) error {
 	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
 		return handleError(c, err)
 	}
-	return c.JSON(http.StatusOK, resp)
+	return s.respondImages(c, resp, budget)
 }
 
 // imageEditRequestFromForm decodes the OpenAI multipart edit request. Source
@@ -146,30 +148,22 @@ func readImageFile(header *multipart.FileHeader) (core.ImageFile, error) {
 	}, nil
 }
 
-// imageEditAuditInput builds the audit request body for an image edit: the
-// user-facing parameters plus upload metadata, never the image bytes or
-// routing hints.
-func imageEditAuditInput(req *core.ImageEditRequest) map[string]any {
-	input := map[string]any{
+// imageEditAuditMeta builds the parameter metadata attached to a logged edit
+// request: the user-facing fields, never routing hints. The uploads themselves
+// are recorded as image items alongside it.
+func imageEditAuditMeta(req *core.ImageEditRequest) map[string]any {
+	meta := map[string]any{
 		"model":  req.Model,
 		"prompt": req.Prompt,
 	}
 	for _, field := range req.Fields {
-		if existing, ok := input[field.Name]; ok {
-			input[field.Name] = appendAuditValue(existing, field.Value)
+		if existing, ok := meta[field.Name]; ok {
+			meta[field.Name] = appendAuditValue(existing, field.Value)
 			continue
 		}
-		input[field.Name] = field.Value
+		meta[field.Name] = field.Value
 	}
-	images := make([]map[string]any, 0, len(req.Images))
-	for _, img := range req.Images {
-		images = append(images, imageFileAuditMeta(img))
-	}
-	input["images"] = images
-	if req.Mask != nil {
-		input["mask"] = imageFileAuditMeta(*req.Mask)
-	}
-	return input
+	return meta
 }
 
 func appendAuditValue(existing any, value string) []string {
@@ -181,15 +175,4 @@ func appendAuditValue(existing any, value string) []string {
 	default:
 		return []string{value}
 	}
-}
-
-func imageFileAuditMeta(img core.ImageFile) map[string]any {
-	meta := map[string]any{"bytes": len(img.Data)}
-	if img.Filename != "" {
-		meta["filename"] = img.Filename
-	}
-	if img.ContentType != "" {
-		meta["content_type"] = img.ContentType
-	}
-	return meta
 }

@@ -5,7 +5,12 @@
   import { createCopyState } from "$lib/utils/clipboard.svelte.js";
   import { formatJSON } from "./audit-logic.js";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
-  import { isAudioBody, renderAudioBody } from "./conversation-helpers.js";
+  import {
+    isAudioBody,
+    isImageBody,
+    renderAudioBody,
+    renderImageBody,
+  } from "./conversation-helpers.js";
   import * as m from "$lib/paraglide/messages.js";
 
   let { pane } = $props();
@@ -25,6 +30,9 @@
     if (!pane || !pane.showBody) return "";
     if (isAudioBody(pane.body)) {
       return renderAudioBody(pane.body);
+    }
+    if (isImageBody(pane.body)) {
+      return renderImageBody(pane.body);
     }
     return conversationDrawer.renderBodyWithConversationHighlights(
       pane.entry,
