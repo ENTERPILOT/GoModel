@@ -16,10 +16,14 @@ import (
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
-// responseDoneMarker gates realtime usage parsing: only frames containing a
-// "response.done" event carry usage, so a cheap byte scan avoids JSON-parsing
-// every audio delta on the relay hot path.
-var responseDoneMarker = []byte(`"response.done"`)
+// Usage markers gate realtime usage parsing: conversation sessions report usage
+// in "response.done" events, transcription sessions in
+// "conversation.item.input_audio_transcription.completed" events. A cheap byte
+// scan avoids JSON-parsing every audio delta on the relay hot path.
+var (
+	responseDoneMarker       = []byte(`"response.done"`)
+	transcriptionUsageMarker = []byte(`"conversation.item.input_audio_transcription.completed"`)
+)
 
 // realtimeService adapts Echo requests to the realtime websocket reverse proxy.
 // It stays a thin transport layer: validate, authorize, enforce budget, resolve
@@ -115,7 +119,15 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 	}
 	defer release()
 	// Route on the resolved selector: an alias never reaches the provider lookup.
-	target, err := router.RealtimeTarget(ctx, &core.RealtimeRequest{Model: route.selector.Model, Provider: route.selector.Provider, CallID: callID})
+	// intent=transcription asks OpenAI for a transcription session; the model
+	// still resolves routing, access, and usage attribution above.
+	intent := strings.TrimSpace(c.QueryParam("intent"))
+	target, err := router.RealtimeTarget(ctx, &core.RealtimeRequest{
+		Model:    route.selector.Model,
+		Provider: route.selector.Provider,
+		CallID:   callID,
+		Intent:   intent,
+	})
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -125,7 +137,14 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 		// usage; tapping the attach session too would double-count every response.
 		tap = nil
 	}
-	return s.proxy(c, ctx, target, route, tap)
+	// A provider that leaves the model out of the upstream URL (OpenAI
+	// transcription sessions) asks the gateway to pin the client's in-session
+	// model selection to the routed model the caller was authorized for.
+	var mapClientFrame func([]byte) []byte
+	if model := strings.TrimSpace(target.PinSessionModel); model != "" {
+		mapClientFrame = pinTranscriptionModel(model)
+	}
+	return s.proxy(c, ctx, target, route, tap, mapClientFrame)
 }
 
 // prepare resolves and authorizes the model, enforces budget, and stamps the
@@ -171,7 +190,7 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 // proxy injects credentials, relays frames, and logs the session lifecycle. A
 // pre-upgrade dial failure becomes a normal HTTP error; once upgraded the
 // connection is hijacked and the outcome is logged.
-func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *core.RealtimeTarget, route realtimeRoute, tap func([]byte)) error {
+func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *core.RealtimeTarget, route realtimeRoute, tap func([]byte), mapClientFrame func([]byte) []byte) error {
 	if target == nil || strings.TrimSpace(target.URL) == "" {
 		return handleError(c, core.NewProviderError(route.providerType, http.StatusBadGateway, "provider returned no realtime target", nil))
 	}
@@ -183,7 +202,7 @@ func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *co
 	}
 
 	slog.Info("realtime session opened", "request_id", route.requestID, "model", route.model, "provider", route.providerType)
-	err := realtime.Proxy(c.Response(), c.Request(), t, tap)
+	err := realtime.Proxy(c.Response(), c.Request(), t, tap, mapClientFrame)
 
 	var de *realtime.DialError
 	if errors.As(err, &de) {
@@ -199,7 +218,8 @@ func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *co
 }
 
 // usageTap returns a frame observer that records one usage entry per realtime
-// "response.done" event, or nil when usage tracking is off (so the proxy skips
+// usage event ("response.done", or the transcription completed event for
+// transcription sessions), or nil when usage tracking is off (so the proxy skips
 // the tap entirely). It honors both the global usage setting and per-workflow
 // usage policy, mirroring the other streaming paths. usageLogger.Write is
 // non-blocking, so the tap runs inline.
@@ -211,7 +231,8 @@ func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute) fun
 		return nil
 	}
 	return func(frame []byte) {
-		if !bytes.Contains(frame, responseDoneMarker) {
+		isResponseDone := bytes.Contains(frame, responseDoneMarker)
+		if !isResponseDone && !bytes.Contains(frame, transcriptionUsageMarker) {
 			return
 		}
 		var pricing *core.ModelPricing
@@ -222,7 +243,12 @@ func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute) fun
 			}
 			pricing = s.pricingResolver.ResolvePricing(route.model, provider)
 		}
-		entry := usage.ExtractFromRealtimeResponseDone(frame, route.requestID, route.model, route.providerType, pricing)
+		var entry *usage.UsageEntry
+		if isResponseDone {
+			entry = usage.ExtractFromRealtimeResponseDone(frame, route.requestID, route.model, route.providerType, pricing)
+		} else {
+			entry = usage.ExtractFromRealtimeTranscriptionCompleted(frame, route.requestID, route.model, route.providerType, pricing)
+		}
 		if entry == nil {
 			return
 		}

@@ -20,12 +20,19 @@ func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
 	}
 
+	transcription := false
 	var endpoint string
 	var err error
 	if strings.TrimSpace(req.CallID) != "" {
 		endpoint, err = providers.OpenAIRealtimeAttachURL(p.GetBaseURL(), req.CallID)
 	} else if strings.TrimSpace(req.Model) == "" {
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
+	} else if strings.EqualFold(strings.TrimSpace(req.Intent), "transcription") {
+		transcription = true
+		// Transcription sessions pick their model via session.update; OpenAI
+		// rejects a model query parameter in this mode, so the requested model
+		// only routed the request to this provider and is dropped from the URL.
+		endpoint, err = providers.OpenAIRealtimeTranscriptionURL(p.GetBaseURL())
 	} else {
 		endpoint, err = providers.OpenAIRealtimeURL(p.GetBaseURL(), req.Model)
 	}
@@ -35,7 +42,14 @@ func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest
 	// Note: the legacy "OpenAI-Beta: realtime=v1" header is intentionally NOT set.
 	// The GA endpoint rejects it ("The Realtime Beta API is no longer supported").
 
-	return &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders(ctx)}, nil
+	target := &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders(ctx)}
+	if transcription {
+		// The URL carries no model in transcription mode, so the session.update
+		// payload selects it; ask the gateway to pin that selection to the
+		// routed model.
+		target.PinSessionModel = strings.TrimSpace(req.Model)
+	}
+	return target, nil
 }
 
 // RealtimeCallTarget implements core.RealtimeCallProvider for OpenAI's WebRTC SDP

@@ -81,8 +81,49 @@ func ExtractFromRealtimeResponseDone(payload []byte, requestID, model, provider 
 	if event.Type != "response.done" || event.Response.Usage == nil {
 		return nil
 	}
-	u := event.Response.Usage
+	return realtimeUsageEntry(event.Response.Usage, requestID, model, provider, pricing...)
+}
 
+// ExtractFromRealtimeTranscriptionCompleted builds a usage entry from a
+// "conversation.item.input_audio_transcription.completed" event, which is how
+// transcription sessions report usage — they never emit response.done. Token
+// usage prices like other realtime traffic; whisper-style duration usage is
+// carried as input audio seconds so the per-second input rate prices it, the
+// same as HTTP transcription (see usage/audio.go).
+func ExtractFromRealtimeTranscriptionCompleted(payload []byte, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	var event struct {
+		Type  string `json:"type"`
+		Usage *struct {
+			realtimeUsage
+			Kind    string  `json:"type"`
+			Seconds float64 `json:"seconds"`
+		} `json:"usage"`
+	}
+	if json.Unmarshal(payload, &event) != nil {
+		return nil
+	}
+	if event.Type != "conversation.item.input_audio_transcription.completed" || event.Usage == nil {
+		return nil
+	}
+	if event.Usage.Kind == "duration" {
+		entry := &UsageEntry{
+			ID:        uuid.New().String(),
+			RequestID: requestID,
+			Timestamp: time.Now().UTC(),
+			Model:     model,
+			Provider:  provider,
+			Endpoint:  endpointRealtime,
+			RawData:   map[string]any{rawKeyAudioSeconds: event.Usage.Seconds},
+		}
+		applyUsageCosts(entry, provider, endpointRealtime, pricing...)
+		return entry
+	}
+	return realtimeUsageEntry(&event.Usage.realtimeUsage, requestID, model, provider, pricing...)
+}
+
+// realtimeUsageEntry builds the usage entry shared by every realtime usage
+// event shape.
+func realtimeUsageEntry(u *realtimeUsage, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
 	entry := &UsageEntry{
 		ID:           uuid.New().String(),
 		RequestID:    requestID,

@@ -916,6 +916,7 @@ func (r *Router) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) 
 		Model:    selector.Model,
 		Provider: selector.Provider,
 		CallID:   req.CallID,
+		Intent:   req.Intent,
 	})
 }
 

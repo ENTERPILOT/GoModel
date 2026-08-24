@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/labstack/echo/v5"
 )
 
 func TestIsWebSocketUpgrade(t *testing.T) {
@@ -62,5 +65,31 @@ func TestRealtimeUpstreamHeaders(t *testing.T) {
 		if len(key) >= 13 && http.CanonicalHeaderKey(key)[:13] == "Sec-Websocket" {
 			t.Errorf("handshake header leaked upstream: %q", key)
 		}
+	}
+}
+
+func TestRealtimeForwardsTrimmedIntent(t *testing.T) {
+	// The handler translates the intent query parameter into the provider
+	// request: trimmed, alongside the resolved model. The websocket dial fails
+	// (no upstream), but the request is captured before the dial.
+	mock := &realtimeWebRTCMock{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-transcribe"}},
+	}
+	handler := newRealtimeTestHandler(mock, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/realtime?model=gpt-4o-transcribe&intent=%20transcription%20", nil)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+
+	_ = handler.Realtime(c)
+
+	if mock.capturedRealtime == nil {
+		t.Fatalf("router received no request (status %d, body %s)", rec.Code, rec.Body.String())
+	}
+	if mock.capturedRealtime.Intent != "transcription" {
+		t.Errorf("intent = %q, want trimmed %q", mock.capturedRealtime.Intent, "transcription")
+	}
+	if mock.capturedRealtime.Model != "gpt-4o-transcribe" || mock.capturedRealtime.CallID != "" {
+		t.Errorf("router received %+v, want the resolved model and no call id", mock.capturedRealtime)
 	}
 }

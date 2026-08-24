@@ -131,3 +131,44 @@ func TestRealtimeCallTargetFollowsSetBaseURL(t *testing.T) {
 		t.Errorf("url = %q, want the SetBaseURL host", target.URL)
 	}
 }
+
+func TestRealtimeTargetTranscriptionIntent(t *testing.T) {
+	// A transcription session must dial ?intent=transcription without a model
+	// parameter: OpenAI rejects transcription models as the session model, and
+	// picks the actual model later via session.update. The requested model only
+	// routes the request inside the gateway.
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+
+	for _, intent := range []string{"transcription", " Transcription "} {
+		target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-4o-transcribe", Intent: intent})
+		if err != nil {
+			t.Fatalf("intent %q: unexpected error: %v", intent, err)
+		}
+		if target.URL != "wss://api.openai.com/v1/realtime?intent=transcription" {
+			t.Errorf("intent %q: url = %q, want intent-only realtime URL", intent, target.URL)
+		}
+		// The URL carries no model, so the provider must ask the gateway to pin
+		// the session.update model selection to the routed model.
+		if target.PinSessionModel != "gpt-4o-transcribe" {
+			t.Errorf("intent %q: PinSessionModel = %q, want the routed model", intent, target.PinSessionModel)
+		}
+	}
+
+	// The model still gates the request: without one there is nothing to route
+	// or attribute usage to, transcription intent or not.
+	if _, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Intent: "transcription"}); err == nil {
+		t.Error("expected error for transcription intent without model")
+	}
+
+	// Unknown intents keep today's conversation-session behavior.
+	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime", Intent: "conversation"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(target.URL, "model=gpt-realtime") {
+		t.Errorf("url = %q, want model parameter for non-transcription intent", target.URL)
+	}
+	if target.PinSessionModel != "" {
+		t.Errorf("PinSessionModel = %q, want empty: the URL already fixes the model", target.PinSessionModel)
+	}
+}

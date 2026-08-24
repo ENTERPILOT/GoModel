@@ -25,6 +25,23 @@ func OpenAIRealtimeURL(baseURL, model string) (string, error) {
 	return u.String(), nil
 }
 
+// OpenAIRealtimeTranscriptionURL derives the websocket URL for an OpenAI
+// transcription session: https://host/v1 -> wss://host/v1/realtime?intent=transcription.
+// OpenAI selects the transcription model through the session.update event, and
+// rejects a model query parameter in transcription mode ("transcription model
+// cannot be used as the realtime session model"), so unlike OpenAIRealtimeURL no
+// model is placed in the URL — the caller's model only routes inside the gateway.
+func OpenAIRealtimeTranscriptionURL(baseURL string) (string, error) {
+	u, err := openAIRealtimeBase(baseURL, "ws", "wss")
+	if err != nil {
+		return "", err
+	}
+	q := url.Values{}
+	q.Set("intent", "transcription")
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
 // OpenAIRealtimeAttachURL derives the websocket URL that attaches to an existing
 // realtime call as a sideband channel: https://host/v1 -> wss://host/v1/realtime?call_id=...
 // The call already owns a model, so no model parameter is sent.

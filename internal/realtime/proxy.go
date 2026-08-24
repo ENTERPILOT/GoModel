@@ -39,13 +39,16 @@ func (e *DialError) Unwrap() error { return e.Err }
 // Proxy upgrades the client request to a websocket, dials the upstream target,
 // and relays frames bidirectionally until either side closes. onServerFrame, if
 // non-nil, observes each upstream->client frame for usage tracking; it must be
-// fast and must not block.
+// fast and must not block. mapClientFrame, if non-nil, maps each client->upstream
+// frame before it is forwarded (returning the frame unchanged when it has nothing
+// to do); it carries session policy such as pinning the transcription model, and
+// must be fast and must not block.
 //
 // The upstream is dialed first: if it fails, the client is not yet upgraded, so a
 // *DialError is returned and the caller may write an HTTP error. Once the client
 // is upgraded the connection is hijacked; Proxy then returns nil on a clean close
 // or the terminal transport error (never a *DialError) for the caller to log.
-func Proxy(w http.ResponseWriter, r *http.Request, target Target, onServerFrame func([]byte)) error {
+func Proxy(w http.ResponseWriter, r *http.Request, target Target, onServerFrame func([]byte), mapClientFrame func([]byte) []byte) error {
 	upstream, _, err := websocket.Dial(r.Context(), target.URL, &websocket.DialOptions{
 		HTTPHeader:   target.Headers,
 		Subprotocols: target.Subprotocols,
@@ -68,7 +71,7 @@ func Proxy(w http.ResponseWriter, r *http.Request, target Target, onServerFrame 
 	}
 	client.SetReadLimit(MaxFrameBytes)
 
-	return relay(r.Context(), client, upstream, onServerFrame)
+	return relay(r.Context(), client, upstream, onServerFrame, mapClientFrame)
 }
 
 // Heartbeat cadence. A silently dead peer (NAT timeout, power loss — no RST,
@@ -83,13 +86,13 @@ var (
 // relay runs the two copy loops plus the heartbeat, tears everything down
 // when any of them ends, and returns the terminal cause (nil for a normal
 // close).
-func relay(ctx context.Context, client, upstream *websocket.Conn, onServerFrame func([]byte)) error {
+func relay(ctx context.Context, client, upstream *websocket.Conn, onServerFrame func([]byte), mapClientFrame func([]byte) []byte) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	done := make(chan error, 3)
-	go func() { done <- copyFrames(ctx, upstream, client, nil) }()           // client -> upstream
-	go func() { done <- copyFrames(ctx, client, upstream, onServerFrame) }() // upstream -> client
+	go func() { done <- copyFrames(ctx, upstream, client, mapClientFrame) }()         // client -> upstream
+	go func() { done <- copyFrames(ctx, client, upstream, observe(onServerFrame)) }() // upstream -> client
 	go func() {
 		done <- heartbeat(ctx, func(ctx context.Context) error { return pingBoth(ctx, client, upstream) })
 	}()
@@ -148,21 +151,32 @@ func ping(ctx context.Context, conn *websocket.Conn) error {
 	return conn.Ping(pingCtx)
 }
 
-// copyFrames relays every message from src to dst, invoking tap on each payload
-// before forwarding. It returns the first read or write error, which ends the
-// session.
-func copyFrames(ctx context.Context, dst, src *websocket.Conn, tap func([]byte)) error {
+// copyFrames relays every message from src to dst, passing each payload through
+// mapFrame before forwarding. It returns the first read or write error, which
+// ends the session.
+func copyFrames(ctx context.Context, dst, src *websocket.Conn, mapFrame func([]byte) []byte) error {
 	for {
 		typ, data, err := src.Read(ctx)
 		if err != nil {
 			return err
 		}
-		if tap != nil {
-			tap(data)
+		if mapFrame != nil {
+			data = mapFrame(data)
 		}
 		if err := dst.Write(ctx, typ, data); err != nil {
 			return err
 		}
+	}
+}
+
+// observe adapts a read-only frame tap to copyFrames' mapping shape.
+func observe(tap func([]byte)) func([]byte) []byte {
+	if tap == nil {
+		return nil
+	}
+	return func(frame []byte) []byte {
+		tap(frame)
+		return frame
 	}
 }
 

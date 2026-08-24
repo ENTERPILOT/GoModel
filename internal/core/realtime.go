@@ -9,11 +9,14 @@ import (
 // (speech-to-speech) websocket session. The model selects the provider; the
 // optional Provider hint mirrors the audio endpoints. CallID, when set, attaches
 // to an existing WebRTC/SIP call as a sideband websocket instead of opening a
-// fresh model session.
+// fresh model session. Intent, when set to "transcription", asks the provider
+// for a transcription session instead of a conversation session; the model
+// still routes the request inside the gateway.
 type RealtimeRequest struct {
 	Model    string
 	Provider string
 	CallID   string
+	Intent   string
 }
 
 // RealtimeTarget describes the upstream websocket a provider exposes for realtime
@@ -24,6 +27,13 @@ type RealtimeTarget struct {
 	URL          string
 	Headers      http.Header
 	Subprotocols []string
+	// PinSessionModel, when non-empty, names the model the gateway must force
+	// into the client's session.update frames. Providers set it when the
+	// upstream URL carries no model — as in OpenAI transcription sessions —
+	// so the session payload, not the URL, selects the model; pinning keeps
+	// that selection on the model the caller was authorized for. Providers
+	// whose URL fixes the model leave it empty and no frame mapping happens.
+	PinSessionModel string
 }
 
 // RealtimeProvider is implemented by providers that expose an OpenAI-compatible
