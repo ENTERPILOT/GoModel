@@ -38,9 +38,10 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	rootBaseURL := passthroughBaseURL(baseURL)
 	return &Provider{
 		compatible: openai.NewCompatibleProvider(cfg.APIKey, opts, openai.CompatibleProviderConfig{
-			ProviderName: "vllm",
-			BaseURL:      baseURL,
-			SetHeaders:   setHeaders,
+			ProviderName:     "vllm",
+			BaseURL:          baseURL,
+			SetHeaders:       setHeaders,
+			AdaptChatRequest: adaptChatRequest,
 		}),
 		rootClient: llmclient.New(llmclient.Config{
 			ProviderName:   "vllm",
@@ -62,9 +63,10 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 	rootClientCfg.Hooks = hooks
 	return &Provider{
 		compatible: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-			ProviderName: "vllm",
-			BaseURL:      resolvedBaseURL,
-			SetHeaders:   setHeaders,
+			ProviderName:     "vllm",
+			BaseURL:          resolvedBaseURL,
+			SetHeaders:       setHeaders,
+			AdaptChatRequest: adaptChatRequest,
 		}),
 		rootClient: llmclient.NewWithHTTPClient(httpClient, rootClientCfg, func(req *http.Request) {
 			setHeaders(req, apiKey)
