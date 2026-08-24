@@ -136,3 +136,65 @@ func TestExtractFromRealtimeResponseDoneSkipsNonBillable(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractFromRealtimeTranscriptionCompleted(t *testing.T) {
+	// The real event shape from a gpt-4o-transcribe transcription session.
+	payload := []byte(`{
+		"type": "conversation.item.input_audio_transcription.completed",
+		"item_id": "item_1",
+		"transcript": "Hello there.",
+		"usage": {
+			"type": "tokens",
+			"total_tokens": 30,
+			"input_tokens": 25,
+			"output_tokens": 5,
+			"input_token_details": {"text_tokens": 0, "audio_tokens": 25}
+		}
+	}`)
+
+	entry := ExtractFromRealtimeTranscriptionCompleted(payload, "req-1", "gpt-4o-transcribe", "openai")
+	if entry == nil {
+		t.Fatal("expected a usage entry")
+	}
+	if entry.Endpoint != endpointRealtime {
+		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointRealtime)
+	}
+	if entry.InputTokens != 25 || entry.OutputTokens != 5 || entry.TotalTokens != 30 {
+		t.Errorf("tokens = (%d,%d,%d), want (25,5,30)", entry.InputTokens, entry.OutputTokens, entry.TotalTokens)
+	}
+	if entry.RawData["prompt_audio_tokens"] != 25 {
+		t.Errorf("audio token breakdown missing/miskeyed: %v", entry.RawData)
+	}
+}
+
+func TestExtractFromRealtimeTranscriptionCompletedDuration(t *testing.T) {
+	// whisper-1 reports duration usage instead of tokens; it is recorded for
+	// visibility, not priced.
+	payload := []byte(`{
+		"type": "conversation.item.input_audio_transcription.completed",
+		"usage": {"type": "duration", "seconds": 2.5}
+	}`)
+
+	entry := ExtractFromRealtimeTranscriptionCompleted(payload, "req-1", "whisper-1", "openai")
+	if entry == nil {
+		t.Fatal("expected a usage entry")
+	}
+	if entry.TotalTokens != 0 {
+		t.Errorf("tokens = %d, want 0 for duration usage", entry.TotalTokens)
+	}
+	if entry.RawData["duration_seconds"] != 2.5 {
+		t.Errorf("duration missing/miskeyed: %v", entry.RawData)
+	}
+}
+
+func TestExtractFromRealtimeTranscriptionCompletedSkipsNonBillable(t *testing.T) {
+	for name, payload := range map[string]string{
+		"delta event":     `{"type":"conversation.item.input_audio_transcription.delta","delta":"He"}`,
+		"missing usage":   `{"type":"conversation.item.input_audio_transcription.completed","transcript":"Hi."}`,
+		"malformed frame": `{"type":`,
+	} {
+		if entry := ExtractFromRealtimeTranscriptionCompleted([]byte(payload), "req-1", "m", "openai"); entry != nil {
+			t.Errorf("%s: expected nil entry, got %+v", name, entry)
+		}
+	}
+}
