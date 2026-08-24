@@ -168,23 +168,26 @@ func TestExtractFromRealtimeTranscriptionCompleted(t *testing.T) {
 }
 
 func TestExtractFromRealtimeTranscriptionCompletedDuration(t *testing.T) {
-	// whisper-1 reports duration usage instead of tokens; it is recorded for
-	// visibility, not priced.
+	// whisper-1 reports duration usage instead of tokens: it must carry the
+	// same rawData key as HTTP transcription so the per-second input rate
+	// prices it. 2.5 s at $0.0001/s => $0.00025.
 	payload := []byte(`{
 		"type": "conversation.item.input_audio_transcription.completed",
 		"usage": {"type": "duration", "seconds": 2.5}
 	}`)
+	pricing := &core.ModelPricing{PerSecondInput: new(0.0001)}
 
-	entry := ExtractFromRealtimeTranscriptionCompleted(payload, "req-1", "whisper-1", "openai")
+	entry := ExtractFromRealtimeTranscriptionCompleted(payload, "req-1", "whisper-1", "openai", pricing)
 	if entry == nil {
 		t.Fatal("expected a usage entry")
 	}
 	if entry.TotalTokens != 0 {
 		t.Errorf("tokens = %d, want 0 for duration usage", entry.TotalTokens)
 	}
-	if entry.RawData["duration_seconds"] != 2.5 {
-		t.Errorf("duration missing/miskeyed: %v", entry.RawData)
+	if entry.RawData[rawKeyAudioSeconds] != 2.5 {
+		t.Errorf("audio seconds missing/miskeyed: %v", entry.RawData)
 	}
+	assertCostPtrNear(t, "input cost", entry.InputCost, 0.00025)
 }
 
 func TestExtractFromRealtimeTranscriptionCompletedSkipsNonBillable(t *testing.T) {

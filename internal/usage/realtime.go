@@ -88,7 +88,8 @@ func ExtractFromRealtimeResponseDone(payload []byte, requestID, model, provider 
 // "conversation.item.input_audio_transcription.completed" event, which is how
 // transcription sessions report usage — they never emit response.done. Token
 // usage prices like other realtime traffic; whisper-style duration usage is
-// recorded in rawData for visibility rather than priced.
+// carried as input audio seconds so the per-second input rate prices it, the
+// same as HTTP transcription (see usage/audio.go).
 func ExtractFromRealtimeTranscriptionCompleted(payload []byte, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
 	var event struct {
 		Type  string `json:"type"`
@@ -105,8 +106,16 @@ func ExtractFromRealtimeTranscriptionCompleted(payload []byte, requestID, model,
 		return nil
 	}
 	if event.Usage.Kind == "duration" {
-		entry := realtimeUsageEntry(&realtimeUsage{}, requestID, model, provider, pricing...)
-		entry.RawData = map[string]any{"duration_seconds": event.Usage.Seconds}
+		entry := &UsageEntry{
+			ID:        uuid.New().String(),
+			RequestID: requestID,
+			Timestamp: time.Now().UTC(),
+			Model:     model,
+			Provider:  provider,
+			Endpoint:  endpointRealtime,
+			RawData:   map[string]any{rawKeyAudioSeconds: event.Usage.Seconds},
+		}
+		applyUsageCosts(entry, provider, endpointRealtime, pricing...)
 		return entry
 	}
 	return realtimeUsageEntry(&event.Usage.realtimeUsage, requestID, model, provider, pricing...)
