@@ -2,18 +2,32 @@ package auditlog
 
 import (
 	"encoding/base64"
+	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// imageBodyMaxBytes caps the total *raw* image bytes embedded as base64 in one
-// audit entry, across its request and response bodies together. An edit with
-// input and output storage enabled would otherwise embed two full budgets in
-// one record, whose base64 exceeds a document store's per-record ceiling
-// (MongoDB: 16 MB BSON). Images are stored in order until the entry's budget
-// is spent and the rest are recorded as metadata-only placeholders.
+// imageBodyMaxBytes caps the *stored base64* image bytes in one audit entry,
+// across its request and response bodies together. The budget is charged in
+// encoded bytes — the size the document store actually persists — so together
+// with the capped meta (imageMetaMaxBytes), the capped middleware body
+// captures (MaxBodyCapture), and headers, a full entry stays well under a
+// document store's per-record ceiling (MongoDB: 16 MiB BSON). Images are
+// stored in order until the entry's budget is spent and the rest are recorded
+// as metadata-only placeholders.
 const imageBodyMaxBytes = 8 * 1024 * 1024
+
+// imageMetaMaxBytes bounds the total string bytes kept in an image body's
+// meta. The edit prompt and forwarded fields are client-controlled (up to the
+// request body limit), so without a cap they could consume the headroom the
+// image budget leaves. Values beyond the cap are truncated and flagged.
+const imageMetaMaxBytes = 1024 * 1024
+
+// imageRevisedPromptMaxBytes bounds the provider-returned revised_prompt kept
+// per image item; real revised prompts are a few hundred bytes.
+const imageRevisedPromptMaxBytes = 16 * 1024
 
 // ImageBodyBudget tracks one audit entry's remaining image-byte allowance.
 // Share a single budget between the request and response image bodies of the
@@ -27,8 +41,8 @@ func NewImageBodyBudget() *ImageBodyBudget {
 	return &ImageBodyBudget{remaining: imageBodyMaxBytes}
 }
 
-// take reserves size bytes, reporting whether they fit. Non-positive sizes
-// are rejected so a caller bug can never grow the budget.
+// take reserves size encoded bytes, reporting whether they fit. Non-positive
+// sizes are rejected so a caller bug can never grow the budget.
 func (b *ImageBodyBudget) take(size int) bool {
 	if size <= 0 || size > b.remaining {
 		return false
@@ -72,7 +86,7 @@ type ImageItemLog struct {
 // the entry-wide allowance, shared with the response body — allows; otherwise
 // each item keeps its metadata. A nil budget starts a fresh one.
 func BuildImageUploadBody(images []core.ImageFile, mask *core.ImageFile, storeBytes bool, meta map[string]any, budget *ImageBodyBudget) ImageBodyLog {
-	body := ImageBodyLog{Images: true, Items: []ImageItemLog{}, Meta: meta, budget: budget}
+	body := ImageBodyLog{Images: true, Items: []ImageItemLog{}, Meta: capImageMeta(meta), budget: budget}
 	if body.budget == nil {
 		body.budget = NewImageBodyBudget()
 	}
@@ -99,10 +113,10 @@ func BuildImageResponseBody(resp *core.ImageGenerationResponse, storeBytes bool,
 	if resp == nil {
 		return body
 	}
-	body.Meta = imageResponseMeta(resp)
+	body.Meta = capImageMeta(imageResponseMeta(resp))
 	contentType := imageOutputContentType(resp.OutputFormat)
 	for _, data := range resp.Data {
-		item := ImageItemLog{Role: "output", RevisedPrompt: data.RevisedPrompt}
+		item := ImageItemLog{Role: "output", RevisedPrompt: truncateUTF8(data.RevisedPrompt, imageRevisedPromptMaxBytes)}
 		switch {
 		case data.URL != "":
 			item.URL = data.URL
@@ -130,18 +144,76 @@ func (b *ImageBodyLog) addRaw(role string, img core.ImageFile, storeBytes bool) 
 }
 
 // store attaches the base64 payload when storage is enabled and the item fits
-// the entry's remaining budget; otherwise it flags the item as too large.
+// the entry's remaining budget; otherwise it flags the item as too large. The
+// budget is charged with the encoded length — what the audit store persists —
+// not the smaller decoded size.
 func (b *ImageBodyLog) store(item *ImageItemLog, b64 string, storeBytes bool) {
 	if !storeBytes || item.Bytes == 0 {
 		return
 	}
-	if !b.budget.take(item.Bytes) {
+	if !b.budget.take(len(b64)) {
 		item.TooLarge = true
 		return
 	}
 	item.Encoding = "base64"
 	item.Data = b64
 	item.Stored = true
+}
+
+// capImageMeta bounds the total string bytes in an image body's meta so
+// client-supplied parameters (a multi-megabyte prompt among them) cannot push
+// the audit document past a store's per-record ceiling. Keys are visited in
+// sorted order so truncation is deterministic; when anything is cut the meta
+// is flagged with meta_truncated.
+func capImageMeta(meta map[string]any) map[string]any {
+	if meta == nil {
+		return nil
+	}
+	names := make([]string, 0, len(meta))
+	for name := range meta {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	remaining := imageMetaMaxBytes
+	truncated := false
+	capString := func(value string) string {
+		if len(value) <= remaining {
+			remaining -= len(value)
+			return value
+		}
+		value = truncateUTF8(value, remaining)
+		remaining = 0
+		truncated = true
+		return value
+	}
+	for _, name := range names {
+		switch value := meta[name].(type) {
+		case string:
+			meta[name] = capString(value)
+		case []string:
+			for i, element := range value {
+				value[i] = capString(element)
+			}
+		}
+	}
+	if truncated {
+		meta["meta_truncated"] = true
+	}
+	return meta
+}
+
+// truncateUTF8 cuts s to at most limit bytes without splitting a rune.
+func truncateUTF8(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	if limit <= 0 {
+		return ""
+	}
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit]
 }
 
 // imageResponseMeta copies the response envelope without the image payloads.

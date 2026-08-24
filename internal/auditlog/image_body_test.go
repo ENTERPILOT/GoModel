@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v5"
 
@@ -148,7 +149,9 @@ func TestBuildImageResponseBody_BudgetAcrossImages(t *testing.T) {
 // imageBodyMaxBytes of raw image data across both bodies.
 func TestImageBodyBudget_SharedAcrossRequestAndResponse(t *testing.T) {
 	budget := NewImageBodyBudget()
-	bigUpload := core.ImageFile{Filename: "big.png", Data: bytes.Repeat([]byte{0x01}, imageBodyMaxBytes-100)}
+	// 5.9 MB raw encodes to ~7.87 MB of base64 — within the 8 MiB encoded
+	// budget, leaving ~0.5 MB for the response side.
+	bigUpload := core.ImageFile{Filename: "big.png", Data: bytes.Repeat([]byte{0x01}, 5_900_000)}
 
 	reqBody := BuildImageUploadBody([]core.ImageFile{bigUpload}, nil, true, nil, budget)
 	if !reqBody.Items[0].Stored {
@@ -156,7 +159,7 @@ func TestImageBodyBudget_SharedAcrossRequestAndResponse(t *testing.T) {
 	}
 
 	small := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x02}, 60))
-	tooBig := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x03}, 200))
+	tooBig := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x03}, 600_000))
 	respBody := BuildImageResponseBody(&core.ImageGenerationResponse{
 		Data: []core.ImageData{{B64JSON: tooBig}, {B64JSON: small}},
 	}, true, budget)
@@ -171,11 +174,11 @@ func TestImageBodyBudget_SharedAcrossRequestAndResponse(t *testing.T) {
 	total := 0
 	for _, item := range append(reqBody.Items, respBody.Items...) {
 		if item.Stored {
-			total += item.Bytes
+			total += len(item.Data)
 		}
 	}
 	if total > imageBodyMaxBytes {
-		t.Errorf("stored %d raw bytes in one entry, budget is %d", total, imageBodyMaxBytes)
+		t.Errorf("stored %d encoded bytes in one entry, budget is %d", total, imageBodyMaxBytes)
 	}
 }
 
@@ -199,7 +202,8 @@ func TestBase64DecodedLen(t *testing.T) {
 // left intact for later images instead of being inflated.
 func TestBuildImageResponseBody_MalformedBase64DoesNotGrowBudget(t *testing.T) {
 	budget := NewImageBodyBudget()
-	nearLimit := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x01}, imageBodyMaxBytes))
+	// 6 MiB raw encodes to exactly 8 MiB of base64 — the whole encoded budget.
+	nearLimit := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x01}, imageBodyMaxBytes/4*3))
 
 	body := BuildImageResponseBody(&core.ImageGenerationResponse{
 		Data: []core.ImageData{{B64JSON: "=="}, {B64JSON: nearLimit}},
@@ -281,5 +285,56 @@ func TestBuildLoggerConfig_ImageBodies(t *testing.T) {
 				t.Fatalf("inputs/outputs = %v/%v, want %v/%v", cfg.LogImageInputs, cfg.LogImageOutputs, tt.wantIn, tt.wantOut)
 			}
 		})
+	}
+}
+
+// TestBuildImageUploadBody_CapsClientMeta verifies a multi-megabyte prompt
+// cannot ride the meta into the audit store unbounded: total meta string
+// bytes are capped, the cut is flagged, and the images are unaffected.
+func TestBuildImageUploadBody_CapsClientMeta(t *testing.T) {
+	hugePrompt := strings.Repeat("p", imageMetaMaxBytes+4096)
+	meta := map[string]any{"model": "gpt-image-1", "prompt": hugePrompt, "size": "1024x1024"}
+	images := []core.ImageFile{{Filename: "cat.png", Data: []byte("cat")}}
+
+	body := BuildImageUploadBody(images, nil, true, meta, nil)
+
+	total := 0
+	for _, value := range body.Meta {
+		if s, ok := value.(string); ok {
+			total += len(s)
+		}
+	}
+	if total > imageMetaMaxBytes {
+		t.Errorf("meta keeps %d string bytes, cap is %d", total, imageMetaMaxBytes)
+	}
+	if body.Meta["meta_truncated"] != true {
+		t.Errorf("truncation must be flagged: %v", body.Meta["meta_truncated"])
+	}
+	if body.Meta["model"] != "gpt-image-1" {
+		t.Errorf("small values must survive intact: %v", body.Meta["model"])
+	}
+	if kept, _ := body.Meta["prompt"].(string); len(kept) == 0 || len(kept) >= len(hugePrompt) {
+		t.Errorf("prompt should be truncated, kept %d of %d bytes", len(kept), len(hugePrompt))
+	}
+	if !body.Items[0].Stored {
+		t.Errorf("image storage must be unaffected by meta capping: %+v", body.Items[0])
+	}
+}
+
+// TestBuildImageResponseBody_CapsRevisedPrompt bounds the provider-returned
+// revised_prompt so a misbehaving upstream cannot bloat the entry, and
+// verifies truncation never splits a multi-byte rune.
+func TestBuildImageResponseBody_CapsRevisedPrompt(t *testing.T) {
+	long := strings.Repeat("é", imageRevisedPromptMaxBytes) // 2 bytes per rune
+	body := BuildImageResponseBody(&core.ImageGenerationResponse{
+		Data: []core.ImageData{{URL: "https://img/1.png", RevisedPrompt: long}},
+	}, false, nil)
+
+	kept := body.Items[0].RevisedPrompt
+	if len(kept) > imageRevisedPromptMaxBytes {
+		t.Errorf("revised_prompt keeps %d bytes, cap is %d", len(kept), imageRevisedPromptMaxBytes)
+	}
+	if !utf8.ValidString(kept) {
+		t.Error("truncation split a rune")
 	}
 }
