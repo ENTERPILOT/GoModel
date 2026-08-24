@@ -12,6 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/cache/modelcache"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
 func TestCacheFile(t *testing.T) {
@@ -884,5 +885,45 @@ func TestSaveToCache_SkipsStaleProviderInventory(t *testing.T) {
 	}
 	if _, ok := modelCache.Providers["beta"]; !ok {
 		t.Error("recovered provider beta missing from cache, want persisted again")
+	}
+}
+
+func TestCacheFile_ModelListETagRoundtrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheFile := filepath.Join(tmpDir, "models.json")
+
+	raw := []byte(`{"version": 1, "providers": {}, "models": {"m": {"display_name": "M", "modes": ["chat"]}}, "provider_models": {}}`)
+	list, err := modeldata.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	saving := NewModelRegistry()
+	saving.SetCache(modelcache.NewLocalCache(cacheFile))
+	mock := &registryMockProvider{
+		name: "openai",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "gpt-4o", Object: "model", OwnedBy: "openai"}},
+		},
+	}
+	saving.RegisterProviderWithNameAndType(mock, "openai", "openai")
+	_ = saving.Initialize(context.Background())
+	saving.setModelListAndEnrich(list, raw, `"list-v7"`, "https://example.test/models.min.json")
+	if err := saving.SaveToCache(context.Background()); err != nil {
+		t.Fatalf("SaveToCache() error = %v", err)
+	}
+
+	loading := NewModelRegistry()
+	loading.SetCache(modelcache.NewLocalCache(cacheFile))
+	loading.RegisterProviderWithNameAndType(mock, "openai", "openai")
+	if _, err := loading.LoadFromCache(context.Background()); err != nil {
+		t.Fatalf("LoadFromCache() error = %v", err)
+	}
+	if got := loading.currentModelListETag("https://example.test/models.min.json"); got != `"list-v7"` {
+		t.Fatalf("currentModelListETag() after load = %q, want %q", got, `"list-v7"`)
+	}
+	if got := loading.currentModelListETag("https://other.test/models.min.json"); got != "" {
+		t.Fatalf("currentModelListETag() for another URL = %q, want empty", got)
 	}
 }

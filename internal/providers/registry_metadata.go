@@ -13,12 +13,16 @@ import (
 	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
-// SetModelList stores the parsed model list and its raw bytes for cache persistence.
+// SetModelList stores the parsed model list and its raw bytes for cache
+// persistence. The ETag validator is cleared: callers that fetched
+// conditionally use setModelListAndEnrich, which records it.
 func (r *ModelRegistry) SetModelList(list *modeldata.ModelList, raw json.RawMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.modelList = list
 	r.modelListRaw = raw
+	r.modelListETag = ""
+	r.modelListETagURL = ""
 }
 
 // EnrichModels re-applies model list metadata to all currently registered models.
@@ -60,12 +64,53 @@ func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
 	return stats
 }
 
-func (r *ModelRegistry) setModelListAndEnrich(list *modeldata.ModelList, raw json.RawMessage) metadataEnrichmentStats {
+func (r *ModelRegistry) setModelListAndEnrich(list *modeldata.ModelList, raw json.RawMessage, etag, url string) metadataEnrichmentStats {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.modelList = list
 	r.modelListRaw = raw
+	r.setModelListValidatorLocked(etag, url)
 	return r.enrichModelsLocked()
+}
+
+func (r *ModelRegistry) setModelListValidatorLocked(etag, url string) {
+	if etag == "" {
+		url = ""
+	}
+	r.modelListETag = etag
+	r.modelListETagURL = url
+}
+
+// currentModelListETag returns the model list validator for a conditional
+// refetch of url, or empty when the stored validator was issued by a
+// different URL — validators identify one representation of one resource.
+func (r *ModelRegistry) currentModelListETag(url string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.modelListETagURL != url {
+		return ""
+	}
+	return r.modelListETag
+}
+
+// updateModelListValidator records the validator a 304 response carried for
+// url, keeping the stored model list as-is. Per RFC 9111 a 304 may refresh the
+// stored ETag.
+func (r *ModelRegistry) updateModelListValidator(etag, url string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.setModelListValidatorLocked(etag, url)
+}
+
+// modelListModelCount returns the number of models in the currently stored
+// model list, or 0 when none is loaded.
+func (r *ModelRegistry) modelListModelCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.modelList == nil {
+		return 0
+	}
+	return len(r.modelList.Models)
 }
 
 // ResolveMetadata resolves metadata for a model directly via the stored model list,
