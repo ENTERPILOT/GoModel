@@ -310,7 +310,7 @@ class AuditListStore {
     this.auditMethod = "";
     this.auditStatusCode = "";
     this.auditStream = "";
-    this.auditField = "user_path";
+    this.auditField = "search";
     this.auditFieldValue = "";
     this.fetchAuditLog(true);
   }
