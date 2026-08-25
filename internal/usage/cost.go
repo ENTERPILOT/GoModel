@@ -51,11 +51,20 @@ func imageCostDetermined(pricing *core.ModelPricing, imageCount int) bool {
 // explicit zero rate, a per-request price, or no pricing at all yields the
 // same cost whether or not the provider reported usage, so a zero-token row
 // priced that way is accurate rather than understated.
+//
+// Tier rates count too. A tier is selected by input token count, so a
+// zero-token row is priced by the base rates alone — but reported usage is
+// precisely what would have selected a tier, which makes a model with a zero
+// base rate and a priced tier understated rather than free.
 func tokenRatesAffectCost(pricing *core.ModelPricing) bool {
 	if pricing == nil {
 		return false
 	}
-	for _, rate := range []*float64{pricing.InputPerMtok, pricing.OutputPerMtok} {
+	rates := []*float64{pricing.InputPerMtok, pricing.OutputPerMtok}
+	for _, tier := range pricing.Tiers {
+		rates = append(rates, tier.InputPerMtok, tier.OutputPerMtok)
+	}
+	for _, rate := range rates {
 		if rate != nil && *rate != 0 {
 			return true
 		}
