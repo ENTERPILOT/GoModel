@@ -28,6 +28,8 @@ keywords: ["roadmap", "milestones", "upcoming features", "releases"]
 - [ ] Workflows rework with better UI/UX and a more flexible design
 - [ ] Guardrails hardening: better UI, simpler architecture, easier custom guardrails, and response-side guardrails applied before output reaches the client
 - [ ] Provider-native passthrough for all providers, beyond the current beta coverage
+- [ ] Failover for the image endpoints, so image generation and edits can fall back across providers like chat does
+- [ ] Streaming image generation (SSE relay of partial images on `/v1/images/*`)
 - [x] Full support for the OpenAI `/conversations` lifecycle
 - [x] Full support for the OpenAI `/responses` lifecycle
 - [x] Anthropic-compatible `/messages` ingress and `/messages/count_tokens`
