@@ -185,14 +185,13 @@ func quoteIdentifier(name string) string {
 func dropTestSchema(ctx context.Context, admin *pgxpool.Pool, schema string) error {
 	const attempts = 5
 	var err error
-	for attempt := range attempts {
+	for attempt := 1; ; attempt++ {
 		_, err = admin.Exec(ctx, `DROP SCHEMA `+quoteIdentifier(schema)+` CASCADE`)
-		if err == nil || !isTransientCatalogRace(err) {
+		if err == nil || !isTransientCatalogRace(err) || attempt == attempts {
 			return err
 		}
-		time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+		time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
 	}
-	return err
 }
 
 func isTransientCatalogRace(err error) bool {
