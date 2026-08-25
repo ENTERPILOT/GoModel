@@ -22,16 +22,33 @@ import (
 	"github.com/enterpilot/gomodel/internal/realtime"
 )
 
-// realtimeCallsPath labels usage entries and Location headers for WebRTC calls.
-const realtimeCallsPath = "/v1/realtime/calls"
+// Paths that label usage entries and Location headers for WebRTC calls. The
+// translation surface is a sibling of the conversation one, so a call created
+// there is addressed under its own path.
+const (
+	realtimeCallsPath            = "/v1/realtime/calls"
+	realtimeTranslationCallsPath = "/v1/realtime/translations/calls"
+)
 
 // RealtimeCalls handles POST /v1/realtime/calls: the OpenAI-compatible WebRTC
-// SDP exchange. Like the websocket route it is a transport concern: the gateway
-// resolves the model, injects provider credentials, forwards the SDP offer, and
-// relays the SDP answer verbatim. The media itself flows peer-to-provider and
-// never transits the gateway, so usage is recorded by a sideband observer
-// attached to the created call.
+// SDP exchange.
 func (s *realtimeService) RealtimeCalls(c *echo.Context) error {
+	return s.realtimeCalls(c, "")
+}
+
+// RealtimeTranslationCalls handles POST /v1/realtime/translations/calls, the
+// WebRTC SDP exchange for speech translation sessions.
+func (s *realtimeService) RealtimeTranslationCalls(c *echo.Context) error {
+	return s.realtimeCalls(c, core.RealtimeIntentTranslation)
+}
+
+// realtimeCalls runs the SDP exchange for one session surface. Like the
+// websocket route it is a transport concern: the gateway resolves the model,
+// injects provider credentials, forwards the SDP offer, and relays the SDP
+// answer verbatim. The media itself flows peer-to-provider and never transits
+// the gateway, so usage is recorded by a sideband observer attached to the
+// created call.
+func (s *realtimeService) realtimeCalls(c *echo.Context, intent string) error {
 	router, err := s.callRouter()
 	if err != nil {
 		return handleError(c, err)
@@ -47,7 +64,11 @@ func (s *realtimeService) RealtimeCalls(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	route.endpoint = realtimeCallsPath
+	callsPath := realtimeCallsPath
+	if intent == core.RealtimeIntentTranslation {
+		callsPath = realtimeTranslationCallsPath
+	}
+	route.endpoint = callsPath
 
 	// Signaling is a plain HTTP exchange: the reservation is released when the
 	// exchange finishes. Concurrent-scope rules cannot span the call lifetime
@@ -59,7 +80,7 @@ func (s *realtimeService) RealtimeCalls(c *echo.Context) error {
 	defer release()
 
 	// Route on the resolved selector: an alias never reaches the provider lookup.
-	target, err := router.RealtimeCallTarget(ctx, &core.RealtimeRequest{Model: route.selector.Model, Provider: route.selector.Provider})
+	target, err := router.RealtimeCallTarget(ctx, &core.RealtimeRequest{Model: route.selector.Model, Provider: route.selector.Provider, Intent: intent})
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -84,7 +105,7 @@ func (s *realtimeService) RealtimeCalls(c *echo.Context) error {
 			callProvider = route.providerType
 		}
 		s.calls.Register(callID, realtime.CallRoute{Model: route.model, Provider: callProvider})
-		c.Response().Header().Set("Location", realtimeCallsPath+"/"+callID)
+		c.Response().Header().Set("Location", callsPath+"/"+callID)
 		slog.Info("realtime call created", "request_id", route.requestID, "model", route.model, "provider", route.providerType, "call_id", callID)
 		s.observeCall(ctx, route, callID)
 	}
@@ -93,12 +114,24 @@ func (s *realtimeService) RealtimeCalls(c *echo.Context) error {
 }
 
 // RealtimeClientSecrets handles POST /v1/realtime/client_secrets: minting
-// ephemeral realtime credentials for browser clients. The session model routes
-// the request and is rewritten to the resolved provider model; everything else
-// is relayed verbatim. The minted secret authenticates the client directly
-// against the provider, so usage of sessions opened with it is not observed by
-// the gateway.
+// ephemeral realtime credentials for browser clients.
 func (s *realtimeService) RealtimeClientSecrets(c *echo.Context) error {
+	return s.realtimeClientSecrets(c, "")
+}
+
+// RealtimeTranslationClientSecrets handles POST
+// /v1/realtime/translations/client_secrets, minting ephemeral credentials for
+// browser clients that open a speech translation session.
+func (s *realtimeService) RealtimeTranslationClientSecrets(c *echo.Context) error {
+	return s.realtimeClientSecrets(c, core.RealtimeIntentTranslation)
+}
+
+// realtimeClientSecrets mints an ephemeral credential on one session surface.
+// The session model routes the request and is rewritten to the resolved provider
+// model; everything else is relayed verbatim. The minted secret authenticates
+// the client directly against the provider, so usage of sessions opened with it
+// is not observed by the gateway.
+func (s *realtimeService) realtimeClientSecrets(c *echo.Context, intent string) error {
 	router, err := s.callRouter()
 	if err != nil {
 		return handleError(c, err)
@@ -119,6 +152,9 @@ func (s *realtimeService) RealtimeClientSecrets(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	route.endpoint = "/v1/realtime/client_secrets"
+	if intent == core.RealtimeIntentTranslation {
+		route.endpoint = "/v1/realtime/translations/client_secrets"
+	}
 
 	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{provider: route.providerName, model: route.model})
 	if err != nil {
@@ -127,7 +163,7 @@ func (s *realtimeService) RealtimeClientSecrets(c *echo.Context) error {
 	defer release()
 
 	// Route on the resolved selector: an alias never reaches the provider lookup.
-	target, err := router.RealtimeClientSecretTarget(ctx, &core.RealtimeRequest{Model: route.selector.Model, Provider: route.selector.Provider})
+	target, err := router.RealtimeClientSecretTarget(ctx, &core.RealtimeRequest{Model: route.selector.Model, Provider: route.selector.Provider, Intent: intent})
 	if err != nil {
 		return handleError(c, err)
 	}

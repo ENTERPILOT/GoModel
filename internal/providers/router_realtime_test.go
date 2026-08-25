@@ -96,6 +96,31 @@ func TestRouterRealtimeTargetForwardsIntent(t *testing.T) {
 	}
 }
 
+func TestRouterRealtimeCallTargetsForwardIntent(t *testing.T) {
+	// The signaling routes carry the intent too: it is what points the provider
+	// at its translation surface instead of the conversation one.
+	rt := &realtimeMockProvider{}
+	lookup := newMockLookup()
+	lookup.addModel("gpt-realtime-translate", rt, "openai")
+	router, _ := NewRouter(lookup)
+
+	req := &core.RealtimeRequest{Model: "gpt-realtime-translate", Intent: core.RealtimeIntentTranslation}
+	if _, err := router.RealtimeCallTarget(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rt.lastCallReq == nil || rt.lastCallReq.Intent != core.RealtimeIntentTranslation {
+		t.Errorf("call provider received %+v, want forwarded intent", rt.lastCallReq)
+	}
+
+	rt.lastCallReq = nil
+	if _, err := router.RealtimeClientSecretTarget(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rt.lastCallReq == nil || rt.lastCallReq.Intent != core.RealtimeIntentTranslation {
+		t.Errorf("client secret provider received %+v, want forwarded intent", rt.lastCallReq)
+	}
+}
+
 func TestRouterRealtimeCallTargetRoutesByModel(t *testing.T) {
 	rt := &realtimeMockProvider{}
 	lookup := newMockLookup()

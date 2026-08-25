@@ -60,23 +60,37 @@ type realtimeRoute struct {
 	endpoint     string
 }
 
-// Realtime handles GET /v1/realtime, routing by the model query parameter.
+// Realtime handles GET /v1/realtime, routing by the model query parameter. The
+// intent query parameter selects a specialized session type on providers that
+// offer one.
 func (s *realtimeService) Realtime(c *echo.Context) error {
-	return s.handle(c, strings.TrimSpace(c.QueryParam("model")), strings.TrimSpace(c.QueryParam("provider")))
+	return s.handle(c, strings.TrimSpace(c.QueryParam("model")), strings.TrimSpace(c.QueryParam("provider")), strings.TrimSpace(c.QueryParam("intent")))
 }
 
-// PassthroughRealtime handles a websocket upgrade on /p/{provider}/v1/realtime.
-// It routes by the same model resolution as the typed route, pinning the provider
-// named in the path as the resolution hint.
-func (s *realtimeService) PassthroughRealtime(c *echo.Context, providerType string) error {
-	return s.handle(c, strings.TrimSpace(c.QueryParam("model")), providerType)
+// RealtimeTranslations handles GET /v1/realtime/translations, the dedicated
+// endpoint for speech translation sessions. It is the same session flow with the
+// intent fixed by the route, mirroring the provider surface clients already
+// target.
+func (s *realtimeService) RealtimeTranslations(c *echo.Context) error {
+	return s.handle(c, strings.TrimSpace(c.QueryParam("model")), strings.TrimSpace(c.QueryParam("provider")), core.RealtimeIntentTranslation)
+}
+
+// PassthroughRealtime handles a websocket upgrade on /p/{provider}/v1/realtime
+// and /p/{provider}/v1/realtime/translations. It routes by the same model
+// resolution as the typed routes, pinning the provider named in the path as the
+// resolution hint.
+func (s *realtimeService) PassthroughRealtime(c *echo.Context, providerType, intent string) error {
+	if intent == "" {
+		intent = strings.TrimSpace(c.QueryParam("intent"))
+	}
+	return s.handle(c, strings.TrimSpace(c.QueryParam("model")), providerType, intent)
 }
 
 // handle is the single realtime entry point: gate, resolve+authorize, dial, relay.
 // A call_id query parameter attaches to an existing WebRTC/SIP call as a sideband
 // channel; the route is recalled from the call registry, or taken from explicit
 // model/provider parameters when the call was created elsewhere.
-func (s *realtimeService) handle(c *echo.Context, model, providerHint string) error {
+func (s *realtimeService) handle(c *echo.Context, model, providerHint, intent string) error {
 	if !s.enabled {
 		return handleError(c, core.NewInvalidRequestErrorWithStatus(http.StatusNotImplemented, "realtime sessions are disabled", nil))
 	}
@@ -119,9 +133,8 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 	}
 	defer release()
 	// Route on the resolved selector: an alias never reaches the provider lookup.
-	// intent=transcription asks OpenAI for a transcription session; the model
-	// still resolves routing, access, and usage attribution above.
-	intent := strings.TrimSpace(c.QueryParam("intent"))
+	// The intent asks the provider for a transcription or translation session;
+	// the model still resolves routing, access, and usage attribution above.
 	target, err := router.RealtimeTarget(ctx, &core.RealtimeRequest{
 		Model:    route.selector.Model,
 		Provider: route.selector.Provider,
@@ -137,14 +150,39 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint string) er
 		// usage; tapping the attach session too would double-count every response.
 		tap = nil
 	}
+	hooks := realtime.Hooks{OnServerFrame: tap}
 	// A provider that leaves the model out of the upstream URL (OpenAI
 	// transcription sessions) asks the gateway to pin the client's in-session
 	// model selection to the routed model the caller was authorized for.
-	var mapClientFrame func([]byte) []byte
 	if model := strings.TrimSpace(target.PinSessionModel); model != "" {
-		mapClientFrame = pinTranscriptionModel(model)
+		hooks.MapClientFrame = pinTranscriptionModel(model)
 	}
-	return s.proxy(c, ctx, target, route, tap, mapClientFrame)
+	// A session that reports no usage of its own (OpenAI translation sessions)
+	// is billed from the audio the gateway relays into it.
+	var meter *usage.RealtimeInputAudioMeter
+	if target.MeterInputAudio && tap != nil {
+		meter = &usage.RealtimeInputAudioMeter{}
+		hooks.OnClientFrame = meter.Observe
+	}
+
+	err = s.proxy(c, ctx, target, route, hooks)
+	s.recordMeteredUsage(route, meter)
+	return err
+}
+
+// recordMeteredUsage writes the single usage entry for a metered session once it
+// ends. Metered sessions carry no usage events, so this is their only accounting;
+// a session that relayed no audio produced no billable duration and is skipped.
+func (s *realtimeService) recordMeteredUsage(route realtimeRoute, meter *usage.RealtimeInputAudioMeter) {
+	if meter == nil {
+		return
+	}
+	seconds := meter.Seconds()
+	if seconds <= 0 {
+		return
+	}
+	entry := usage.NewRealtimeDurationEntry(seconds, route.requestID, route.model, route.providerType, s.pricingFor(route))
+	s.writeUsage(entry, route)
 }
 
 // prepare resolves and authorizes the model, enforces budget, and stamps the
@@ -190,7 +228,7 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 // proxy injects credentials, relays frames, and logs the session lifecycle. A
 // pre-upgrade dial failure becomes a normal HTTP error; once upgraded the
 // connection is hijacked and the outcome is logged.
-func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *core.RealtimeTarget, route realtimeRoute, tap func([]byte), mapClientFrame func([]byte) []byte) error {
+func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *core.RealtimeTarget, route realtimeRoute, hooks realtime.Hooks) error {
 	if target == nil || strings.TrimSpace(target.URL) == "" {
 		return handleError(c, core.NewProviderError(route.providerType, http.StatusBadGateway, "provider returned no realtime target", nil))
 	}
@@ -202,7 +240,7 @@ func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *co
 	}
 
 	slog.Info("realtime session opened", "request_id", route.requestID, "model", route.model, "provider", route.providerType)
-	err := realtime.Proxy(c.Response(), c.Request(), t, tap, mapClientFrame)
+	err := realtime.Proxy(c.Response(), c.Request(), t, hooks)
 
 	var de *realtime.DialError
 	if errors.As(err, &de) {
@@ -235,32 +273,44 @@ func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute) fun
 		if !isResponseDone && !bytes.Contains(frame, transcriptionUsageMarker) {
 			return
 		}
-		var pricing *core.ModelPricing
-		if s.pricingResolver != nil {
-			provider := route.providerName
-			if provider == "" {
-				provider = route.providerType
-			}
-			pricing = s.pricingResolver.ResolvePricing(route.model, provider)
-		}
+		pricing := s.pricingFor(route)
 		var entry *usage.UsageEntry
 		if isResponseDone {
 			entry = usage.ExtractFromRealtimeResponseDone(frame, route.requestID, route.model, route.providerType, pricing)
 		} else {
 			entry = usage.ExtractFromRealtimeTranscriptionCompleted(frame, route.requestID, route.model, route.providerType, pricing)
 		}
-		if entry == nil {
-			return
-		}
-		if route.endpoint != "" {
-			entry.Endpoint = route.endpoint
-		}
-		entry.ProviderName = strings.TrimSpace(route.providerName)
-		entry.UserPath = route.userPath
-		entry.SessionID = route.sessionID
-		entry.Labels = route.labels
-		s.usageLogger.Write(entry)
+		s.writeUsage(entry, route)
 	}
+}
+
+// pricingFor resolves the model pricing used to cost a session's usage entries.
+func (s *realtimeService) pricingFor(route realtimeRoute) *core.ModelPricing {
+	if s.pricingResolver == nil {
+		return nil
+	}
+	provider := route.providerName
+	if provider == "" {
+		provider = route.providerType
+	}
+	return s.pricingResolver.ResolvePricing(route.model, provider)
+}
+
+// writeUsage labels a usage entry with the session's routing identity and hands
+// it to the logger. It ignores a nil entry so callers can pass the result of an
+// extraction that found nothing billable.
+func (s *realtimeService) writeUsage(entry *usage.UsageEntry, route realtimeRoute) {
+	if entry == nil || s.usageLogger == nil {
+		return
+	}
+	if route.endpoint != "" {
+		entry.Endpoint = route.endpoint
+	}
+	entry.ProviderName = strings.TrimSpace(route.providerName)
+	entry.UserPath = route.userPath
+	entry.SessionID = route.sessionID
+	entry.Labels = route.labels
+	s.usageLogger.Write(entry)
 }
 
 // realtimeUpstreamHeaders builds the upstream handshake headers: forward the

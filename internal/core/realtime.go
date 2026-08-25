@@ -3,20 +3,39 @@ package core
 import (
 	"context"
 	"net/http"
+	"strings"
+)
+
+// Realtime session intents. An empty intent opens a conversation
+// (speech-to-speech) session; the named intents select a provider's specialized
+// realtime surface, which differs in endpoint, session config, and event
+// namespace. The model routes the request inside the gateway either way.
+const (
+	RealtimeIntentTranscription = "transcription"
+	RealtimeIntentTranslation   = "translation"
 )
 
 // RealtimeRequest carries the resolved parameters for opening a realtime
 // (speech-to-speech) websocket session. The model selects the provider; the
 // optional Provider hint mirrors the audio endpoints. CallID, when set, attaches
 // to an existing WebRTC/SIP call as a sideband websocket instead of opening a
-// fresh model session. Intent, when set to "transcription", asks the provider
-// for a transcription session instead of a conversation session; the model
-// still routes the request inside the gateway.
+// fresh model session. Intent, when set, asks the provider for one of the
+// specialized session types above.
 type RealtimeRequest struct {
 	Model    string
 	Provider string
 	CallID   string
 	Intent   string
+}
+
+// HasIntent reports whether the request asks for the given session intent,
+// accepting padded and differently cased input (Postel) so every provider
+// compares intents the same way.
+func (r *RealtimeRequest) HasIntent(intent string) bool {
+	if r == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Intent), intent)
 }
 
 // RealtimeTarget describes the upstream websocket a provider exposes for realtime
@@ -34,6 +53,13 @@ type RealtimeTarget struct {
 	// that selection on the model the caller was authorized for. Providers
 	// whose URL fixes the model leave it empty and no frame mapping happens.
 	PinSessionModel string
+	// MeterInputAudio asks the gateway to bill the session from the input audio
+	// it relays, at the model's per-second input rate. Providers set it for
+	// session types that report no usage of their own — OpenAI translation
+	// sessions emit only transcript and audio deltas, never a usage event — so
+	// such a session is recorded with its real duration instead of as free.
+	// Sessions that report their own usage leave it false.
+	MeterInputAudio bool
 }
 
 // RealtimeProvider is implemented by providers that expose an OpenAI-compatible

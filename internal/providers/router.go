@@ -954,6 +954,7 @@ func (r *Router) realtimeCallTarget(
 	return call(rp, ctx, &core.RealtimeRequest{
 		Model:    selector.Model,
 		Provider: selector.Provider,
+		Intent:   req.Intent,
 	})
 }
 

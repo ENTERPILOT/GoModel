@@ -93,7 +93,7 @@ type Config struct {
 	ConversationStore               conversationstore.Store                // Optional: Conversations lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
-	RealtimeEnabled                 bool                                   // Enable realtime websocket route /v1/realtime and passthrough upgrades
+	RealtimeEnabled                 bool                                   // Enable the realtime websocket routes (/v1/realtime, /v1/realtime/translations) and passthrough upgrades
 	MCPEnabled                      bool                                   // Enable the MCP gateway routes /mcp and /mcp/{server}
 	MCPGateway                      *mcpgateway.Service                    // MCP gateway service (nil if disabled or not wired)
 	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
@@ -446,6 +446,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.GET("/v1/realtime", handler.Realtime)
 		e.POST("/v1/realtime/calls", handler.RealtimeCalls)
 		e.POST("/v1/realtime/client_secrets", handler.RealtimeClientSecrets)
+		// Speech translation sessions have their own provider surface; the
+		// gateway mirrors it so OpenAI clients need no rewriting.
+		e.GET("/v1/realtime/translations", handler.RealtimeTranslations)
+		e.POST("/v1/realtime/translations/calls", handler.RealtimeTranslationCalls)
+		e.POST("/v1/realtime/translations/client_secrets", handler.RealtimeTranslationClientSecrets)
 	}
 	if cfg != nil && cfg.MCPEnabled && cfg.MCPGateway != nil {
 		e.POST("/mcp", handler.MCP)

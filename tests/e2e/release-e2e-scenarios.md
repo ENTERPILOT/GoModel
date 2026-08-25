@@ -145,6 +145,9 @@ Stateful note:
 - `S216`-`S217` exercise realtime `intent=transcription` sessions and the
   unchanged default speech session; they are read-only and rerunnable in any
   order
+- `S220`-`S222` exercise realtime speech translation sessions on
+  `/v1/realtime/translations`, the equivalent `intent=translation` dial, and the
+  translation client-secret mint; they are read-only and rerunnable in any order
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -5839,4 +5842,67 @@ jq -e '
     and .config.resilience.circuit_breaker.timeout == "30s"
     and (.config.resilience.retry.max_retries | type == "number"))
 ' "$STATUS_FILE" >/dev/null
+```
+
+## 32. Realtime speech translation sessions
+
+These scenarios cover the translation surface (`gpt-realtime-translate`), which
+OpenAI serves from its own endpoint rather than the conversation one. A
+successful handshake plus a relayed `"type":"translation"` session object is what
+proves the gateway dialed `/v1/realtime/translations` upstream while routing,
+authorizing, and metering the requested model. They are read-only and rerunnable
+in any order.
+
+### S220 `/v1/realtime/translations` opens a translation session
+
+```bash
+REQUEST_ID="qa-realtime-translate-$QA_SUFFIX"
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s220.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s220.body.XXXXXX")
+STDERR_FILE=$(mktemp "$QA_RUN_DIR/s220.stderr.XXXXXX")
+assert_realtime_websocket_upgrade \
+  "$BASE_URL/v1/realtime/translations?model=gpt-realtime-translate&provider=openai" \
+  "$HEADERS_FILE" \
+  "$BODY_FILE" \
+  "$REQUEST_ID" \
+  "$STDERR_FILE"
+LC_ALL=C grep -aoE '"type":"[a-z_.]+"' "$BODY_FILE" | head -5
+LC_ALL=C grep -aq '"type":"session.created"' "$BODY_FILE"
+LC_ALL=C grep -aq '"type":"translation"' "$BODY_FILE"
+```
+
+### S221 `intent=translation` reaches the same session
+
+The typed route is a shorthand: dialing `/v1/realtime` with the intent must open
+the identical translation session.
+
+```bash
+REQUEST_ID="qa-realtime-translate-intent-$QA_SUFFIX"
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s221.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s221.body.XXXXXX")
+STDERR_FILE=$(mktemp "$QA_RUN_DIR/s221.stderr.XXXXXX")
+assert_realtime_websocket_upgrade \
+  "$BASE_URL/v1/realtime?model=gpt-realtime-translate&intent=translation&provider=openai" \
+  "$HEADERS_FILE" \
+  "$BODY_FILE" \
+  "$REQUEST_ID" \
+  "$STDERR_FILE"
+LC_ALL=C grep -aoE '"type":"[a-z_.]+"' "$BODY_FILE" | head -5
+LC_ALL=C grep -aq '"type":"translation"' "$BODY_FILE"
+```
+
+### S222 Translation client secrets mint on the translation surface
+
+```bash
+SECRET_FILE="$QA_RUN_DIR/s222.client_secret.json"
+curl -fsS -o "$SECRET_FILE" "$BASE_URL/v1/realtime/translations/client_secrets" \
+  -H 'Content-Type: application/json' \
+  -d '{"session":{"model":"gpt-realtime-translate","audio":{"output":{"language":"es"}}}}'
+jq '{value:(.value[0:6]+"..."),session:{type:.session.type,model:.session.model,language:.session.audio.output.language}}' "$SECRET_FILE"
+jq -e '
+  (.value | startswith("ek_"))
+  and .session.type == "translation"
+  and .session.model == "gpt-realtime-translate"
+  and .session.audio.output.language == "es"
+' "$SECRET_FILE" >/dev/null
 ```

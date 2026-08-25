@@ -41,8 +41,9 @@ type ServerConfig struct {
 	// /p/{provider}/... passthrough routes. Default:
 	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
-	// RealtimeEnabled exposes the realtime (speech-to-speech) websocket endpoint
-	// at /v1/realtime and the /p/{provider}/v1/realtime passthrough upgrade.
+	// RealtimeEnabled exposes the realtime (speech-to-speech) websocket endpoints
+	// at /v1/realtime and /v1/realtime/translations, their WebRTC signaling
+	// siblings, and the /p/{provider}/v1/realtime passthrough upgrade.
 	// Default: true. Only providers implementing realtime accept sessions.
 	RealtimeEnabled bool `yaml:"realtime_enabled" env:"REALTIME_ENABLED"`
 	// PIDFile records the process id of the running gateway so `gomodel --reload`

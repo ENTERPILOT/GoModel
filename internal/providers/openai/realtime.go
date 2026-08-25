@@ -14,26 +14,34 @@ import (
 // base URL so endpoint overrides and OpenAI-compatible realtime backends work
 // without extra config. Bearer auth is injected here and must never be logged.
 // A request carrying a CallID attaches to an existing WebRTC/SIP call as a
-// sideband channel instead of opening a fresh model session.
+// sideband channel instead of opening a fresh model session; an intent selects
+// the transcription or translation session surface instead of a conversation.
 func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
 	}
 
-	transcription := false
+	target := &core.RealtimeTarget{}
 	var endpoint string
 	var err error
-	if strings.TrimSpace(req.CallID) != "" {
+	switch {
+	case strings.TrimSpace(req.CallID) != "":
 		endpoint, err = providers.OpenAIRealtimeAttachURL(p.GetBaseURL(), req.CallID)
-	} else if strings.TrimSpace(req.Model) == "" {
+	case strings.TrimSpace(req.Model) == "":
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
-	} else if strings.EqualFold(strings.TrimSpace(req.Intent), "transcription") {
-		transcription = true
+	case req.HasIntent(core.RealtimeIntentTranslation):
+		// Translation sessions live on their own endpoint and report no usage
+		// events, so the gateway meters the audio it relays to price them.
+		endpoint, err = providers.OpenAIRealtimeTranslationURL(p.GetBaseURL(), req.Model)
+		target.MeterInputAudio = true
+	case req.HasIntent(core.RealtimeIntentTranscription):
 		// Transcription sessions pick their model via session.update; OpenAI
 		// rejects a model query parameter in this mode, so the requested model
 		// only routed the request to this provider and is dropped from the URL.
+		// Pinning keeps the in-session selection on the routed model.
 		endpoint, err = providers.OpenAIRealtimeTranscriptionURL(p.GetBaseURL())
-	} else {
+		target.PinSessionModel = strings.TrimSpace(req.Model)
+	default:
 		endpoint, err = providers.OpenAIRealtimeURL(p.GetBaseURL(), req.Model)
 	}
 	if err != nil {
@@ -42,18 +50,14 @@ func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest
 	// Note: the legacy "OpenAI-Beta: realtime=v1" header is intentionally NOT set.
 	// The GA endpoint rejects it ("The Realtime Beta API is no longer supported").
 
-	target := &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders(ctx)}
-	if transcription {
-		// The URL carries no model in transcription mode, so the session.update
-		// payload selects it; ask the gateway to pin that selection to the
-		// routed model.
-		target.PinSessionModel = strings.TrimSpace(req.Model)
-	}
+	target.URL = endpoint
+	target.Headers = p.realtimeAuthHeaders(ctx)
 	return target, nil
 }
 
 // RealtimeCallTarget implements core.RealtimeCallProvider for OpenAI's WebRTC SDP
-// exchange (POST https://api.openai.com/v1/realtime/calls). The gateway appends
+// exchange (POST https://api.openai.com/v1/realtime/calls, or
+// /v1/realtime/translations/calls for translation sessions). The gateway appends
 // the model query parameter or session form field itself, so the target is the
 // bare calls endpoint.
 func (p *Provider) RealtimeCallTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
@@ -61,7 +65,8 @@ func (p *Provider) RealtimeCallTarget(ctx context.Context, req *core.RealtimeReq
 }
 
 // RealtimeClientSecretTarget implements core.RealtimeCallProvider for minting
-// ephemeral realtime client secrets (POST https://api.openai.com/v1/realtime/client_secrets).
+// ephemeral realtime client secrets (POST https://api.openai.com/v1/realtime/client_secrets,
+// or /v1/realtime/translations/client_secrets for translation sessions).
 func (p *Provider) RealtimeClientSecretTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
 	return p.realtimeHTTPTarget(ctx, req, "client_secrets")
 }
@@ -69,6 +74,11 @@ func (p *Provider) RealtimeClientSecretTarget(ctx context.Context, req *core.Rea
 func (p *Provider) realtimeHTTPTarget(ctx context.Context, req *core.RealtimeRequest, endpoint string) (*core.RealtimeHTTPTarget, error) {
 	if req == nil || strings.TrimSpace(req.Model) == "" {
 		return nil, core.NewInvalidRequestError("model is required for realtime calls", nil)
+	}
+	if req.HasIntent(core.RealtimeIntentTranslation) {
+		// Translation sessions sign their WebRTC calls and client secrets on the
+		// same dedicated surface as their websocket.
+		endpoint = "translations/" + endpoint
 	}
 	target, err := providers.OpenAIRealtimeHTTPURL(p.GetBaseURL(), endpoint)
 	if err != nil {

@@ -47,14 +47,14 @@ func echoServer(t *testing.T) *httptest.Server {
 // reports each Proxy return value on retc.
 func proxyServer(t *testing.T, upstreamWS string, onServerFrame func([]byte), retc chan<- error) *httptest.Server {
 	t.Helper()
-	return mappingProxyServer(t, upstreamWS, onServerFrame, nil, retc)
+	return hookedProxyServer(t, upstreamWS, realtime.Hooks{OnServerFrame: onServerFrame}, retc)
 }
 
-// mappingProxyServer is proxyServer with a client->upstream frame mapper.
-func mappingProxyServer(t *testing.T, upstreamWS string, onServerFrame func([]byte), mapClientFrame func([]byte) []byte, retc chan<- error) *httptest.Server {
+// hookedProxyServer is proxyServer with the full set of relay hooks.
+func hookedProxyServer(t *testing.T, upstreamWS string, hooks realtime.Hooks, retc chan<- error) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		err := realtime.Proxy(w, r, realtime.Target{URL: upstreamWS}, onServerFrame, mapClientFrame)
+		err := realtime.Proxy(w, r, realtime.Target{URL: upstreamWS}, hooks)
 		if retc != nil {
 			retc <- err
 		}
@@ -151,7 +151,7 @@ func TestProxyDialErrorBeforeUpgrade(t *testing.T) {
 	// *DialError before upgrading the client so the caller can write an HTTP error.
 	retc := make(chan error, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		err := realtime.Proxy(w, r, realtime.Target{URL: "ws://127.0.0.1:1/realtime"}, nil, nil)
+		err := realtime.Proxy(w, r, realtime.Target{URL: "ws://127.0.0.1:1/realtime"}, realtime.Hooks{})
 		retc <- err
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -266,8 +266,10 @@ func TestProxyMapsClientFrames(t *testing.T) {
 	// echoed reply proves the session still relays normally.
 	upstream := echoServer(t)
 	defer upstream.Close()
-	proxy := mappingProxyServer(t, wsURL(upstream.URL), nil, func(frame []byte) []byte {
-		return bytes.ReplaceAll(frame, []byte("client"), []byte("mapped"))
+	proxy := hookedProxyServer(t, wsURL(upstream.URL), realtime.Hooks{
+		MapClientFrame: func(frame []byte) []byte {
+			return bytes.ReplaceAll(frame, []byte("client"), []byte("mapped"))
+		},
 	}, nil)
 	defer proxy.Close()
 
@@ -284,5 +286,39 @@ func TestProxyMapsClientFrames(t *testing.T) {
 	}
 	if got := string(echoed); got != `{"from":"mapped"}` {
 		t.Errorf("upstream saw %q, want the mapped frame", got)
+	}
+}
+
+func TestProxyObservesClientFrames(t *testing.T) {
+	// The client->upstream observer backs input metering, so it must see each
+	// frame as the client sent it, before any mapping rewrites it.
+	upstream := echoServer(t)
+	defer upstream.Close()
+	observed := make(chan []byte, 1)
+	proxy := hookedProxyServer(t, wsURL(upstream.URL), realtime.Hooks{
+		OnClientFrame: func(frame []byte) { observed <- bytes.Clone(frame) },
+		MapClientFrame: func(frame []byte) []byte {
+			return bytes.ReplaceAll(frame, []byte("client"), []byte("mapped"))
+		},
+	}, nil)
+	defer proxy.Close()
+
+	c, ctx, cancel := dialClient(t, proxy.URL)
+	defer cancel()
+	defer c.Close(websocket.StatusNormalClosure, "done")
+
+	if err := c.Write(ctx, websocket.MessageText, []byte(`{"from":"client"}`)); err != nil {
+		t.Fatalf("client write failed: %v", err)
+	}
+	select {
+	case frame := <-observed:
+		if got := string(frame); got != `{"from":"client"}` {
+			t.Errorf("observer saw %q, want the unmapped client frame", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("client frame was never observed")
+	}
+	if _, _, err := c.Read(ctx); err != nil {
+		t.Fatalf("client read failed: %v", err)
 	}
 }
