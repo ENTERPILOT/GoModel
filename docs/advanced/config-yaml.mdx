@@ -45,6 +45,59 @@ configured models for providers that define a list and skip their upstream
 inventory — useful for models a provider serves but does not include in its
 `/models` listing.
 
+## Filtering a provider's models
+
+`model_filter` narrows a provider's inventory to the models you actually want
+routable. Use it when a provider's catalog is far larger than what you want to
+expose — for example running OpenRouter's free tier for experiments while a
+separate provider serves production traffic.
+
+```yaml
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "${OPENROUTER_API_KEY}"
+    model_filter:
+      include: ["*:free"]
+      exclude: ["*-preview:free"]
+      max_price_per_mtok: 0
+```
+
+| Field | Default | Behavior |
+| --- | --- | --- |
+| `include` | empty (keep all) | Keeps only models matching at least one pattern. |
+| `exclude` | empty | Drops models matching any pattern. Applied after `include`. |
+| `max_price_per_mtok` | unset (no cap) | Drops models whose highest per-million-token rate — the larger of input and output — is above the cap. |
+
+Patterns are globs matched case-insensitively against the raw provider model ID.
+`*` matches any run of characters **including `/`**, so `*:free` matches
+`deepseek/deepseek-r1:free`; `?` matches exactly one character.
+
+A model with no known pricing is dropped while `max_price_per_mtok` is set: a
+price cap that lets models of unknown price through is not a cap. Prices come
+from the model registry and from what the provider itself reports — OpenRouter
+publishes its own rates, so its catalog (`:free` variants included) is priced
+without extra configuration. Local providers usually report no pricing at all,
+so filter those by pattern rather than by price.
+
+Filtering applies to the final inventory, after
+`configured_provider_models_mode` has resolved, so it also narrows models added
+by `models`. Filtered models leave the catalog entirely: they disappear from
+`GET /v1/models` and requests for them return "model not found".
+
+The same filters are available per provider in env:
+
+```bash
+OPENROUTER_MODEL_FILTER_INCLUDE="*:free"
+OPENROUTER_MODEL_FILTER_EXCLUDE="*-preview:free"
+OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK=0
+```
+
+Each rule overlays independently, so an env price cap narrows a YAML pattern
+filter without restating the patterns. Suffixed instances use the same rule as
+other provider env vars: `OPENROUTER_EU_MODEL_FILTER_INCLUDE` configures
+`openrouter-eu`.
+
 ## Priority Order
 
 Effective precedence is:

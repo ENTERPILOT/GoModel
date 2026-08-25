@@ -191,6 +191,7 @@ func fetchedProviderRefreshError(fetched fetchedInventory) error {
 
 func (r *ModelRegistry) applyFetchedProviderInventory(providerTypes map[core.Provider]string, fetched fetchedInventory) {
 	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
+	fetched.totalModels -= r.filterProviderModelMaps(fetched.modelsByProvider)
 
 	r.mu.Lock()
 	r.dropUnregisteredFetchedProvidersLocked(&fetched)

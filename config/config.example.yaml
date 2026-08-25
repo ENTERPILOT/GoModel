@@ -511,6 +511,15 @@ providers:
   #   models:
   #     - openai/gpt-oss-120b
   #     - anthropic/claude-sonnet-4
+  #   # Narrow the inventory to what should be routable. Patterns are globs
+  #   # matched case-insensitively against the raw model ID; `*` also matches `/`,
+  #   # so `*:free` matches `deepseek/deepseek-r1:free`.
+  #   model_filter:
+  #     include: ["*:free"]         # keep only these models (empty keeps all)
+  #     exclude: ["*-preview:free"] # then drop these
+  #     # Cap the highest per-million-token rate (the larger of input and output).
+  #     # A model with no known price is dropped while a cap is set.
+  #     max_price_per_mtok: 0
 
   # Example: Kilo AI Gateway. Model IDs use provider/model and are forwarded
   # unchanged. You can also set KILO_MODELS as a comma-separated env var.

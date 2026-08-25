@@ -3,6 +3,7 @@ package providers
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -77,6 +78,10 @@ type ModelRegistry struct {
 	// are fallback-only or an allowlist over the discovered upstream inventory.
 	configuredProviderModels     map[string][]string
 	configuredProviderModelsMode config.ConfiguredProviderModelsMode
+	// providerModelFilters holds operator-supplied inventory filters keyed by
+	// configured provider instance name. Applied after metadata enrichment;
+	// providers without a filter are absent from the map.
+	providerModelFilters map[string]modelFilter
 
 	// Cached sorted slices, rebuilt lazily after models change.
 	// nil means cache needs rebuilding. Protected by mu.
@@ -285,6 +290,38 @@ func (r *ModelRegistry) SetProviderConfiguredModels(providerName string, models 
 	r.configuredProviderModels[providerName] = normalized
 }
 
+// SetProviderModelFilter records the inventory filter declared for a configured
+// provider instance. Call with an empty filter to clear it.
+func (r *ModelRegistry) SetProviderModelFilter(providerName string, filter config.ModelFilter) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+	resolved, ok := newModelFilter(filter)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !ok {
+		delete(r.providerModelFilters, providerName)
+		return
+	}
+	if r.providerModelFilters == nil {
+		r.providerModelFilters = make(map[string]modelFilter)
+	}
+	r.providerModelFilters[providerName] = resolved
+}
+
+// snapshotProviderModelFilters copies the configured filters under a read lock.
+func (r *ModelRegistry) snapshotProviderModelFilters() map[string]modelFilter {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.providerModelFilters) == 0 {
+		return nil
+	}
+	out := make(map[string]modelFilter, len(r.providerModelFilters))
+	maps.Copy(out, r.providerModelFilters)
+	return out
+}
+
 // RegisterProviderWithNameAndType adds a provider with a configured provider instance name and type.
 // Name is used for unambiguous provider/model selection (e.g. "provider/model") and cache persistence.
 func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, providerName, providerType string) {
@@ -338,6 +375,7 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	delete(r.providerRuntime, providerName)
 	delete(r.configMetadataOverrides, providerName)
 	delete(r.configuredProviderModels, providerName)
+	delete(r.providerModelFilters, providerName)
 	delete(r.modelsByProvider, providerName)
 	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
 	r.invalidateSortedCaches()

@@ -355,3 +355,69 @@ func TestPassthrough_PreservesUserProvidedAttributionHeaders(t *testing.T) {
 		t.Fatalf("X-OpenRouter-Title = %q, want empty when caller provided X-Title", gotTitle)
 	}
 }
+
+// OpenRouter prices its own catalog, including the ":free" variants it
+// publishes at zero, so ListModels must carry those rates into metadata:
+// enrichment treats what a provider reports as the override, and price-based
+// model filtering and cost-based load balancing both read them.
+func TestListModels_StampsPricing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"openai/gpt-4o-mini","context_length":128000,
+			 "architecture":{"output_modalities":["text"]},
+			 "pricing":{"prompt":"0.00000015","completion":"0.0000006"}},
+			{"id":"deepseek/deepseek-r1:free",
+			 "architecture":{"output_modalities":["text"]},
+			 "pricing":{"prompt":"0","completion":"0"}},
+			{"id":"openrouter/auto",
+			 "architecture":{"output_modalities":["text"]},
+			 "pricing":{"prompt":"-1","completion":"-1"}},
+			{"id":"acme/unpriced","architecture":{"output_modalities":["text"]}}
+		]}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	byID := map[string]core.Model{}
+	for _, m := range resp.Data {
+		byID[m.ID] = m
+	}
+
+	paid := byID["openai/gpt-4o-mini"].Metadata
+	if paid == nil || paid.Pricing == nil {
+		t.Fatalf("gpt-4o-mini pricing = %+v, want per-Mtok rates", paid)
+	}
+	if paid.Pricing.Currency != "USD" {
+		t.Errorf("Currency = %q, want USD", paid.Pricing.Currency)
+	}
+	// Per-token rates are scaled to per million tokens.
+	if paid.Pricing.InputPerMtok == nil || *paid.Pricing.InputPerMtok != 0.15 {
+		t.Errorf("InputPerMtok = %v, want 0.15", paid.Pricing.InputPerMtok)
+	}
+	if paid.Pricing.OutputPerMtok == nil || *paid.Pricing.OutputPerMtok != 0.6 {
+		t.Errorf("OutputPerMtok = %v, want 0.6", paid.Pricing.OutputPerMtok)
+	}
+
+	free := byID["deepseek/deepseek-r1:free"].Metadata
+	if free == nil || free.Pricing == nil || free.Pricing.InputPerMtok == nil {
+		t.Fatalf("free model pricing = %+v, want an explicit zero rate", free)
+	}
+	if *free.Pricing.InputPerMtok != 0 || *free.Pricing.OutputPerMtok != 0 {
+		t.Errorf("free model rates = %v/%v, want 0/0", *free.Pricing.InputPerMtok, *free.Pricing.OutputPerMtok)
+	}
+
+	// "-1" means OpenRouter cannot state the rate up front; reporting it as a
+	// negative price would make an auto-routed model look cheaper than free.
+	if auto := byID["openrouter/auto"].Metadata; auto != nil && auto.Pricing != nil {
+		t.Errorf("auto-router pricing = %+v, want none", auto.Pricing)
+	}
+	if unpriced := byID["acme/unpriced"].Metadata; unpriced != nil && unpriced.Pricing != nil {
+		t.Errorf("unpriced model pricing = %+v, want none", unpriced.Pricing)
+	}
+}

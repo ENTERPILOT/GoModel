@@ -1955,3 +1955,74 @@ func TestBuildProviderConfig_Hetzner_ResolvesBaseURL(t *testing.T) {
 		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["hetzner"].DefaultBaseURL)
 	}
 }
+
+func TestApplyProviderEnvVars_ModelFilter(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
+	t.Setenv("OPENROUTER_MODEL_FILTER_INCLUDE", "*:free, *:nitro")
+	t.Setenv("OPENROUTER_MODEL_FILTER_EXCLUDE", "*-preview:free")
+	t.Setenv("OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK", "0")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["openrouter"]
+	if !exists {
+		t.Fatal("expected openrouter to be discovered from env var")
+	}
+	if want := []string{"*:free", "*:nitro"}; !slices.Equal(p.ModelFilter.Include, want) {
+		t.Errorf("Include = %v, want %v", p.ModelFilter.Include, want)
+	}
+	if want := []string{"*-preview:free"}; !slices.Equal(p.ModelFilter.Exclude, want) {
+		t.Errorf("Exclude = %v, want %v", p.ModelFilter.Exclude, want)
+	}
+	if p.ModelFilter.MaxPricePerMtok == nil || *p.ModelFilter.MaxPricePerMtok != 0 {
+		t.Errorf("MaxPricePerMtok = %v, want 0", p.ModelFilter.MaxPricePerMtok)
+	}
+}
+
+// Each filter rule overlays independently so an env price cap can narrow a YAML
+// pattern filter without restating it.
+func TestApplyProviderEnvVars_ModelFilterOverlaysYAMLPerRule(t *testing.T) {
+	t.Setenv("OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK", "0.5")
+
+	raw := map[string]config.RawProviderConfig{
+		"openrouter": {
+			Type:        "openrouter",
+			APIKey:      "sk-yaml",
+			ModelFilter: config.ModelFilter{Include: []string{"qwen/*"}},
+		},
+	}
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+
+	filter := got["openrouter"].ModelFilter
+	if want := []string{"qwen/*"}; !slices.Equal(filter.Include, want) {
+		t.Errorf("Include = %v, want %v preserved from YAML", filter.Include, want)
+	}
+	if filter.MaxPricePerMtok == nil || *filter.MaxPricePerMtok != 0.5 {
+		t.Errorf("MaxPricePerMtok = %v, want 0.5 from env", filter.MaxPricePerMtok)
+	}
+}
+
+// An unparseable cap must not resolve to a silent zero, which would hide every
+// paid model instead of applying no cap at all.
+func TestApplyProviderEnvVars_ModelFilterIgnoresInvalidPrice(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
+	t.Setenv("OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK", "cheap")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	if cap := got["openrouter"].ModelFilter.MaxPricePerMtok; cap != nil {
+		t.Errorf("MaxPricePerMtok = %v, want nil", *cap)
+	}
+}
+
+func TestBuildProviderConfig_NormalizesModelFilter(t *testing.T) {
+	resolved := buildProviderConfig(config.RawProviderConfig{
+		Type:        "openrouter",
+		APIKey:      "sk-openrouter",
+		ModelFilter: config.ModelFilter{Include: []string{" *:free ", "", "  "}},
+	}, globalResilience)
+
+	if want := []string{"*:free"}; !slices.Equal(resolved.ModelFilter.Include, want) {
+		t.Errorf("Include = %v, want %v", resolved.ModelFilter.Include, want)
+	}
+}

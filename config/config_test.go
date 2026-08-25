@@ -2049,3 +2049,73 @@ func TestParseBodySizeLimitBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_ProviderModelFilterFromYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "sk-yaml-key"
+    model_filter:
+      include:
+        - "*:free"
+      exclude:
+        - "*-preview:free"
+      max_price_per_mtok: 0
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+
+		filter := result.RawProviders["openrouter"].ModelFilter
+		if len(filter.Include) != 1 || filter.Include[0] != "*:free" {
+			t.Errorf("Include = %v, want [*:free]", filter.Include)
+		}
+		if len(filter.Exclude) != 1 || filter.Exclude[0] != "*-preview:free" {
+			t.Errorf("Exclude = %v, want [*-preview:free]", filter.Exclude)
+		}
+		if filter.MaxPricePerMtok == nil || *filter.MaxPricePerMtok != 0 {
+			t.Errorf("MaxPricePerMtok = %v, want 0", filter.MaxPricePerMtok)
+		}
+		if filter.Empty() {
+			t.Error("Empty() = true, want false for a declared filter")
+		}
+	})
+}
+
+func TestModelFilterEmptyAndNormalize(t *testing.T) {
+	tests := []struct {
+		name      string
+		filter    ModelFilter
+		wantEmpty bool
+	}{
+		{name: "zero value", filter: ModelFilter{}, wantEmpty: true},
+		{name: "blank patterns only", filter: ModelFilter{Include: []string{" ", ""}}, wantEmpty: true},
+		{name: "include", filter: ModelFilter{Include: []string{"*:free"}}, wantEmpty: false},
+		{name: "exclude", filter: ModelFilter{Exclude: []string{"*-preview"}}, wantEmpty: false},
+		// A zero cap means "free models only", not "no cap configured".
+		{name: "zero price cap", filter: ModelFilter{MaxPricePerMtok: new(float64)}, wantEmpty: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.filter.Empty(); got != tt.wantEmpty {
+				t.Errorf("Empty() = %v, want %v", got, tt.wantEmpty)
+			}
+			normalized := tt.filter.Normalize()
+			for _, pattern := range append(normalized.Include, normalized.Exclude...) {
+				if strings.TrimSpace(pattern) == "" {
+					t.Errorf("Normalize() kept a blank pattern in %+v", normalized)
+				}
+			}
+		})
+	}
+}

@@ -105,7 +105,6 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 			newModelsByProvider[providerName] = modelInfoMapFromResponse(resp, provider, providerName, providerType)
 		}
 	}
-	newModels = rebuildGlobalModelMap(newModelsByProvider, providerOrderNames)
 
 	// Load model list data from cache if available
 	var list *modeldata.ModelList
@@ -126,6 +125,12 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	configOverrides := r.snapshotConfigOverrides()
 	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
 	metadataStats.Enriched += applyInferredModelMetadata(newModelsByProvider, nil)
+
+	// Filtering follows enrichment so price rules see resolved pricing, and
+	// precedes the global map rebuild so filtered models never claim a bare-ID
+	// slot ahead of a model another provider still serves.
+	r.filterProviderModelMaps(newModelsByProvider)
+	newModels = rebuildGlobalModelMap(newModelsByProvider, providerOrderNames)
 
 	r.mu.Lock()
 	r.models = newModels

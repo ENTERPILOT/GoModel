@@ -48,7 +48,10 @@ type ProviderConfig struct {
 	// these onto remote-registry metadata after enrichment; non-zero fields here
 	// win. Empty/nil when no per-model metadata is declared in YAML.
 	ModelMetadataOverrides map[string]*core.ModelMetadata
-	Resilience             config.ResilienceConfig
+	// ModelFilter narrows the provider's discovered inventory by glob pattern
+	// and price cap. Zero value keeps every model.
+	ModelFilter config.ModelFilter
+	Resilience  config.ResilienceConfig
 }
 
 // resolveProviders applies env var overrides to the raw YAML provider map, filters
@@ -151,6 +154,9 @@ const (
 	providerEnvFieldSessionStickyKeys
 	providerEnvFieldInferenceObjective
 	providerEnvFieldFairnessFromUserPath
+	providerEnvFieldModelFilterInclude
+	providerEnvFieldModelFilterExclude
+	providerEnvFieldModelFilterMaxPrice
 )
 
 type providerEnvSource struct {
@@ -179,8 +185,20 @@ type providerEnvValues struct {
 	GCPScope                 string
 	InferenceObjective       string
 	Models                   []string
+	ModelFilterInclude       []string
+	ModelFilterExclude       []string
+	ModelFilterMaxPrice      *float64
 	SessionStickyKeys        *bool
 	FairnessFromUserPath     *bool
+}
+
+// modelFilter assembles the filter this env group declares.
+func (v providerEnvValues) modelFilter() config.ModelFilter {
+	return config.ModelFilter{
+		Include:         v.ModelFilterInclude,
+		Exclude:         v.ModelFilterExclude,
+		MaxPricePerMtok: v.ModelFilterMaxPrice,
+	}
 }
 
 // apiKeys returns the ordered key set this env group declares: the unsuffixed
@@ -249,7 +267,8 @@ func (v providerEnvValues) empty() bool {
 		strings.TrimSpace(v.InferenceObjective) == "" &&
 		v.SessionStickyKeys == nil &&
 		v.FairnessFromUserPath == nil &&
-		len(v.Models) == 0
+		len(v.Models) == 0 &&
+		v.modelFilter().Empty()
 }
 
 func providerEnvSources(providerType string, spec DiscoveryConfig) []providerEnvSource {
@@ -297,6 +316,14 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 			values.APIVersion = value
 		case providerEnvFieldModels:
 			values.Models = parseCSVEnvList(value)
+		case providerEnvFieldModelFilterInclude:
+			values.ModelFilterInclude = parseCSVEnvList(value)
+		case providerEnvFieldModelFilterExclude:
+			values.ModelFilterExclude = parseCSVEnvList(value)
+		case providerEnvFieldModelFilterMaxPrice:
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+				values.ModelFilterMaxPrice = &parsed
+			}
 		case providerEnvFieldBackend:
 			values.Backend = value
 		case providerEnvFieldAuthType:
@@ -377,6 +404,9 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		{name: "API_MODE", field: providerEnvFieldAPIMode},
 		{name: "BACKEND", field: providerEnvFieldBackend},
 		{name: "API_KEY", field: providerEnvFieldAPIKey},
+		{name: "MODEL_FILTER_MAX_PRICE_PER_MTOK", field: providerEnvFieldModelFilterMaxPrice},
+		{name: "MODEL_FILTER_INCLUDE", field: providerEnvFieldModelFilterInclude},
+		{name: "MODEL_FILTER_EXCLUDE", field: providerEnvFieldModelFilterExclude},
 		{name: "MODELS", field: providerEnvFieldModels},
 	}
 	if strings.EqualFold(prefix, "VERTEX") {
@@ -546,6 +576,7 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		InferenceObjective:       v.InferenceObjective,
 		FairnessFromUserPath:     v.FairnessFromUserPath,
 		Models:                   rawProviderModelsFromIDs(v.Models),
+		ModelFilter:              v.modelFilter(),
 		SessionStickyKeys:        v.SessionStickyKeys,
 	}
 }
@@ -612,6 +643,17 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	}
 	if len(values.Models) > 0 {
 		existing.Models = rawProviderModelsFromIDs(values.Models)
+	}
+	// Each filter rule overlays independently, so an env price cap can narrow a
+	// YAML pattern filter (and vice versa) without restating the other rule.
+	if len(values.ModelFilterInclude) > 0 {
+		existing.ModelFilter.Include = values.ModelFilterInclude
+	}
+	if len(values.ModelFilterExclude) > 0 {
+		existing.ModelFilter.Exclude = values.ModelFilterExclude
+	}
+	if values.ModelFilterMaxPrice != nil {
+		existing.ModelFilter.MaxPricePerMtok = values.ModelFilterMaxPrice
 	}
 	return existing
 }
@@ -880,6 +922,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		GCPScope:                 raw.GCPScope,
 		Models:                   config.ProviderModelIDs(raw.Models),
 		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
+		ModelFilter:              raw.ModelFilter.Normalize(),
 		Resilience:               global,
 	}
 	if resolved.Type == "llmd" {

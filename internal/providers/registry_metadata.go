@@ -55,6 +55,12 @@ func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
 	}
 	stats.Enriched += applyConfigMetadataOverrides(r.configMetadataOverrides, r.modelsByProvider, replacements)
 	stats.Enriched += applyInferredModelMetadata(r.modelsByProvider, replacements)
+	// Re-filter: this pass can change the pricing a price cap is evaluated
+	// against, and a model that has become too expensive must leave the catalog
+	// now rather than staying routable until the next provider fetch sweep.
+	if filterProviderModelMaps(r.providerModelFilters, r.modelsByProvider) > 0 {
+		r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
+	}
 	for modelID, info := range r.models {
 		if replacement, ok := replacements[info]; ok {
 			r.models[modelID] = replacement
