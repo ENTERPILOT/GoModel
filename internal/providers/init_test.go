@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -309,6 +310,90 @@ func TestInit_NormalizesNilContext(t *testing.T) {
 	}
 	if _, err := os.Stat(cacheFile + ".tmp"); !os.IsNotExist(err) {
 		t.Fatalf("expected no in-progress cache temp file, stat error = %v", err)
+	}
+}
+
+const unreachableRedisURL = "redis://127.0.0.1:1"
+
+func TestInitCache_FallsBackToLocalWhenRedisUnreachable(t *testing.T) {
+	cacheDir := t.TempDir()
+	c, err := initCache(&config.Config{
+		Cache: config.CacheConfig{
+			Model: config.ModelCacheConfig{
+				Redis: &config.RedisModelConfig{URL: unreachableRedisURL},
+				Local: &config.LocalCacheConfig{CacheDir: cacheDir},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("initCache() error = %v, want nil (degraded local fallback)", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	if _, ok := c.(*modelcache.LocalCache); !ok {
+		t.Fatalf("initCache() type = %T, want *modelcache.LocalCache", c)
+	}
+
+	ctx := t.Context()
+	want := &modelcache.ModelCache{
+		Providers: map[string]modelcache.CachedProvider{
+			"test": {ProviderType: "test", OwnedBy: "test"},
+		},
+	}
+	if err := c.Set(ctx, want); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+	got, err := c.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got == nil || got.Providers["test"].ProviderType != "test" {
+		t.Fatalf("Get() = %+v, want local cache to round-trip in degraded mode", got)
+	}
+}
+
+func TestInitCache_FailsWhenRedisUnreachableAndNoLocal(t *testing.T) {
+	c, err := initCache(&config.Config{
+		Cache: config.CacheConfig{
+			Model: config.ModelCacheConfig{
+				Redis: &config.RedisModelConfig{URL: unreachableRedisURL},
+			},
+		},
+	})
+	if c != nil {
+		_ = c.Close()
+		t.Fatal("initCache() cache != nil, want nil when redis is the only backend and is unreachable")
+	}
+	if err == nil {
+		t.Fatal("initCache() error = nil, want redis connection error")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to redis") {
+		t.Fatalf("initCache() error = %v, want failed to connect to redis", err)
+	}
+}
+
+func TestInit_SucceedsWhenRedisUnreachableAndLocalConfigured(t *testing.T) {
+	result, err := Init(t.Context(), &config.LoadResult{
+		Config: &config.Config{
+			Cache: config.CacheConfig{
+				Model: config.ModelCacheConfig{
+					RefreshInterval: 1,
+					Redis:           &config.RedisModelConfig{URL: unreachableRedisURL},
+					Local:           &config.LocalCacheConfig{CacheDir: t.TempDir()},
+				},
+			},
+		},
+		RawProviders: map[string]config.RawProviderConfig{},
+	}, NewProviderFactory())
+	if err != nil {
+		t.Fatalf("Init() error = %v, want nil in degraded mode", err)
+	}
+	t.Cleanup(func() { _ = result.Close() })
+	if result.Router == nil {
+		t.Fatal("Router = nil, want a usable router after redis fallback")
+	}
+	if _, ok := result.Cache.(*modelcache.LocalCache); !ok {
+		t.Fatalf("Cache type = %T, want *modelcache.LocalCache", result.Cache)
 	}
 }
 

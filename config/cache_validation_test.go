@@ -12,12 +12,8 @@ func TestValidateCacheConfig_BothLocalAndRedis(t *testing.T) {
 			Redis: &RedisModelConfig{URL: "redis://localhost:6379"},
 		},
 	}
-	err := ValidateCacheConfig(cfg)
-	if err == nil {
-		t.Fatal("expected error when both local and redis configured")
-	}
-	if err.Error() != "cache.model: cannot have both local and redis configured; choose one" {
-		t.Errorf("unexpected error: %v", err)
+	if err := ValidateCacheConfig(cfg); err != nil {
+		t.Fatalf("both local and redis should be valid (redis preferred, local is fallback): %v", err)
 	}
 }
 

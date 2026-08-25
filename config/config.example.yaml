@@ -111,8 +111,8 @@ cache:
     refresh_interval: 3600 # how often to refresh the model registry (seconds, default: 3600)
     recheck_interval: 60 # env: PROVIDER_RECHECK_INTERVAL; how often providers whose last refresh failed are re-probed for recovery (seconds, default: 60; 0 disables)
     local:
-      cache_dir: ".cache" # local cache directory
-    # To use Redis instead of local cache, remove `local` and uncomment:
+      cache_dir: ".cache" # local cache directory; kept as fallback if redis is configured but unreachable
+    # Redis is preferred when set. Leave `local` in place to start in degraded mode if Redis is down:
     # redis:
     #   url: "redis://localhost:6379"
     #   key: "gomodel:models"

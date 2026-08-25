@@ -62,7 +62,7 @@ func (r *InitResult) Close() error {
 //
 // It performs:
 //  1. Provider config resolution (env var overlay, filtering, resilience merging)
-//  2. Cache initialization (local or Redis based on config)
+//  2. Cache initialization (Redis preferred, local fallback if Redis is down)
 //  3. Provider instantiation and registration
 //  4. Async model loading (from cache first, then network refresh)
 //  5. Best-effort background model-list fetch (goroutine with ~45s timeout;
@@ -190,8 +190,11 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 }
 
 // initCache initializes the appropriate cache backend based on configuration.
+// Redis is preferred when configured. If Redis is unreachable and a local
+// backend is also configured, startup continues on the local file cache.
 func initCache(cfg *config.Config) (modelcache.Cache, error) {
 	m := cfg.Cache.Model
+	local := newLocalModelCache(m.Local)
 	if m.Redis != nil && m.Redis.URL != "" {
 		ttl := time.Duration(m.Redis.TTL) * time.Second
 		if ttl == 0 {
@@ -204,7 +207,11 @@ func initCache(cfg *config.Config) (modelcache.Cache, error) {
 		}
 		mc, err := modelcache.NewRedisModelCache(redisCfg)
 		if err != nil {
-			return nil, err
+			if local == nil {
+				return nil, err
+			}
+			slog.Warn("redis model cache unavailable; falling back to local file cache", "error", err, "path", localPath(m.Local))
+			return local, nil
 		}
 		key := m.Redis.Key
 		if key == "" {
@@ -213,16 +220,26 @@ func initCache(cfg *config.Config) (modelcache.Cache, error) {
 		slog.Info("using redis cache", "key", key)
 		return mc, nil
 	}
-	if m.Local != nil {
-		cacheDir := m.Local.CacheDir
-		if cacheDir == "" {
-			cacheDir = defaultModelCacheDir()
-		}
-		cacheFile := filepath.Join(cacheDir, "models.json")
-		slog.Info("using local file cache", "path", cacheFile)
-		return modelcache.NewLocalCache(cacheFile), nil
+	if local != nil {
+		slog.Info("using local file cache", "path", localPath(m.Local))
+		return local, nil
 	}
 	return nil, fmt.Errorf("cache.model: must have either local or redis configured")
+}
+
+func newLocalModelCache(local *config.LocalCacheConfig) modelcache.Cache {
+	if local == nil {
+		return nil
+	}
+	return modelcache.NewLocalCache(localPath(local))
+}
+
+func localPath(local *config.LocalCacheConfig) string {
+	cacheDir := local.CacheDir
+	if cacheDir == "" {
+		cacheDir = defaultModelCacheDir()
+	}
+	return filepath.Join(cacheDir, "models.json")
 }
 
 // defaultModelCacheDir keeps the historical ./.cache location whenever it
