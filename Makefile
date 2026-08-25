@@ -13,6 +13,8 @@ SWAGGER_ENABLED ?= true
 # Build tags covering every file the linter and fixers must see. Without these,
 # tag-gated files (tests/e2e, tests/integration, tests/contract) are skipped.
 BUILD_TAGS ?= swagger,e2e,integration,contract
+GOLANGCI_LINT_VERSION := 2.13.1
+GOLANGCI_LINT ?= $(shell go env GOPATH)/bin/golangci-lint
 
 # Linker flags to inject version info
 LDFLAGS := -X "github.com/enterpilot/gomodel/internal/version.Version=$(VERSION)" \
@@ -20,7 +22,12 @@ LDFLAGS := -X "github.com/enterpilot/gomodel/internal/version.Version=$(VERSION)
            -X "github.com/enterpilot/gomodel/internal/version.Date=$(DATE)"
 
 install-tools:
-	@command -v golangci-lint > /dev/null 2>&1 || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1)
+	@installed_version="$$($(GOLANGCI_LINT) version 2>/dev/null || true)"; \
+	case "$$installed_version" in \
+		*"version $(GOLANGCI_LINT_VERSION) "*) ;; \
+		*) echo "Installing golangci-lint v$(GOLANGCI_LINT_VERSION)..."; \
+			GOBIN="$(dir $(GOLANGCI_LINT))" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_VERSION) ;; \
+	esac
 	@command -v pre-commit > /dev/null 2>&1 || (echo "Installing pre-commit..." && pip install pre-commit==4.5.1)
 	@echo "All tools are ready"
 
@@ -142,12 +149,12 @@ docs-openapi:
 
 # Run linter
 lint:
-	golangci-lint run --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/...
+	$(GOLANGCI_LINT) run --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/...
 
 # Run linter with auto-fix. Mirrors `lint`: same tags, same packages, so the
 # autofix pass cannot silently skip the tag-gated files under tests/.
 lint-fix:
-	golangci-lint run --fix --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/...
+	$(GOLANGCI_LINT) run --fix --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/...
 
 # Report modernizations go fix would apply, without touching the tree.
 # Exits non-zero when the tree has drifted; run `make fix` to apply.
