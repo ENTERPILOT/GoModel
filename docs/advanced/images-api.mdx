@@ -224,7 +224,10 @@ and `imagen-*` models through Imagen's `predict` API. Google retired Imagen
 from the Gemini API (AI Studio) on August 17, 2026 — use a Gemini image model
 there; Imagen remains available on [Vertex AI](/providers/vertex).
 
-- `n` maps to Imagen's `sampleCount`; `size` maps to the closest supported
+- Gemini image models do not support multi-candidate output, so `n` (up to
+  10) is served as `n` parallel `generateContent` calls whose results are
+  merged — each call is billed by Google. For Imagen, `n` maps to
+  `sampleCount`; `size` maps to the closest supported
   aspect ratio (`1024x1024` → `1:1`, `1536x1024` → `3:2`, ...), and a raw
   ratio such as `"16:9"` passes through. Unknown JSON fields are forwarded
   verbatim, so native parameters (`personGeneration`, `sampleImageSize`,

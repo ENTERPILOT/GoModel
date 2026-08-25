@@ -3,11 +3,14 @@ package gemini
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/goccy/go-json"
 
@@ -70,9 +73,9 @@ func (p *Provider) CreateImageEdit(ctx context.Context, req *core.ImageEditReque
 	size, _ := req.Field("size")
 	body := &geminiGenerateContentRequest{
 		Contents:         []geminiContent{{Role: "user", Parts: parts}},
-		GenerationConfig: imageGenerationConfig(size, imageEditCount(req), nil),
+		GenerationConfig: imageGenerationConfig(size, nil),
 	}
-	return p.doGenerateContentImage(ctx, req.Model, body)
+	return p.generateContentImages(ctx, req.Model, body, imageEditCount(req))
 }
 
 func (p *Provider) openAICompatibleCreateImage(ctx context.Context, req *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
@@ -200,6 +203,12 @@ func imagePredictParameters(req *core.ImageGenerationRequest) (map[string]any, e
 
 // Gemini image model generation (generateContent with image modalities).
 
+// maxGeminiImageFanOut bounds n for Gemini image models. They reject
+// candidateCount > 1 ("Multiple candidates is not enabled for this model"),
+// so n is served as n parallel generateContent calls; the cap mirrors
+// OpenAI's images API limit of 10 and keeps a typo from fanning out unbounded.
+const maxGeminiImageFanOut = 10
+
 func (p *Provider) generateContentImage(ctx context.Context, req *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
 	extra, err := imageExtraFields(req)
 	if err != nil {
@@ -207,9 +216,60 @@ func (p *Provider) generateContentImage(ctx context.Context, req *core.ImageGene
 	}
 	body := &geminiGenerateContentRequest{
 		Contents:         []geminiContent{{Role: "user", Parts: []geminiPart{{Text: req.Prompt}}}},
-		GenerationConfig: imageGenerationConfig(req.Size, req.ImageCount(), extra),
+		GenerationConfig: imageGenerationConfig(req.Size, extra),
 	}
-	return p.doGenerateContentImage(ctx, req.Model, body)
+	return p.generateContentImages(ctx, req.Model, body, req.ImageCount())
+}
+
+// generateContentImages serves n images from a model without multi-candidate
+// support by running n identical generateContent calls in parallel and
+// merging the results: images concatenate in call order and token usage sums.
+// Each call is billed by the provider; a failed call cancels the rest and the
+// whole request fails.
+func (p *Provider) generateContentImages(ctx context.Context, model string, body *geminiGenerateContentRequest, count int) (*core.ImageGenerationResponse, error) {
+	if count > maxGeminiImageFanOut {
+		return nil, core.NewInvalidRequestError(fmt.Sprintf("n must be at most %d for Gemini image models", maxGeminiImageFanOut), nil)
+	}
+	if count <= 1 {
+		return p.doGenerateContentImage(ctx, model, body)
+	}
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	results := make([]*core.ImageGenerationResponse, count)
+	for i := range results {
+		group.Go(func() error {
+			resp, err := p.doGenerateContentImage(groupCtx, model, body)
+			if err != nil {
+				return err
+			}
+			results[i] = resp
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+
+	merged := &core.ImageGenerationResponse{
+		Created:  time.Now().Unix(),
+		Data:     []core.ImageData{},
+		Provider: p.responseProviderName(),
+	}
+	var usage core.ImageUsage
+	hasUsage := false
+	for _, resp := range results {
+		merged.Data = append(merged.Data, resp.Data...)
+		if resp.Usage != nil {
+			hasUsage = true
+			usage.InputTokens += resp.Usage.InputTokens
+			usage.OutputTokens += resp.Usage.OutputTokens
+			usage.TotalTokens += resp.Usage.TotalTokens
+		}
+	}
+	if hasUsage {
+		merged.Usage = &usage
+	}
+	return merged, nil
 }
 
 func (p *Provider) doGenerateContentImage(ctx context.Context, model string, body *geminiGenerateContentRequest) (*core.ImageGenerationResponse, error) {
@@ -231,19 +291,14 @@ func (p *Provider) doGenerateContentImage(ctx context.Context, model string, bod
 // request fields merge in verbatim so native options (imageConfig,
 // responseModalities overrides, ...) pass through; the explicit mappings only
 // fill keys the caller did not set.
-func imageGenerationConfig(size string, count int, extra map[string]any) map[string]any {
+func imageGenerationConfig(size string, extra map[string]any) map[string]any {
 	config := extra
 	if config == nil {
-		config = make(map[string]any, 3)
+		config = make(map[string]any, 2)
 	}
 	if _, ok := config["responseModalities"]; !ok {
 		// Gemini image models reject image-only output; TEXT must be allowed.
 		config["responseModalities"] = []string{"TEXT", "IMAGE"}
-	}
-	if count > 1 {
-		if _, ok := config["candidateCount"]; !ok {
-			config["candidateCount"] = count
-		}
 	}
 	aspectRatio := imageAspectRatio(size)
 	if aspectRatio == "" {
