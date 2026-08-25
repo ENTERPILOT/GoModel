@@ -421,3 +421,52 @@ func TestListModels_StampsPricing(t *testing.T) {
 		t.Errorf("unpriced model pricing = %+v, want none", unpriced.Pricing)
 	}
 }
+
+// strconv.ParseFloat accepts "NaN" and "Inf", and scaling a huge per-token rate
+// to per-Mtok can overflow. Either would corrupt every downstream price
+// comparison and cost calculation, so such rates report no price at all.
+func TestListModels_RejectsNonFinitePricing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"acme/nan","architecture":{"output_modalities":["text"]},
+			 "pricing":{"prompt":"NaN","completion":"NaN"}},
+			{"id":"acme/inf","architecture":{"output_modalities":["text"]},
+			 "pricing":{"prompt":"Inf","completion":"Inf"}},
+			{"id":"acme/overflow","architecture":{"output_modalities":["text"]},
+			 "pricing":{"prompt":"1e308","completion":"1e308"}},
+			{"id":"acme/partial","architecture":{"output_modalities":["text"]},
+			 "pricing":{"prompt":"0.000001","completion":"NaN"}}
+		]}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	byID := map[string]core.Model{}
+	for _, m := range resp.Data {
+		byID[m.ID] = m
+	}
+
+	for _, id := range []string{"acme/nan", "acme/inf", "acme/overflow"} {
+		if meta := byID[id].Metadata; meta != nil && meta.Pricing != nil {
+			t.Errorf("%s pricing = %+v, want none", id, meta.Pricing)
+		}
+	}
+
+	// One unusable rate must not discard the other, usable one.
+	partial := byID["acme/partial"].Metadata
+	if partial == nil || partial.Pricing == nil || partial.Pricing.InputPerMtok == nil {
+		t.Fatalf("acme/partial pricing = %+v, want the parseable input rate", partial)
+	}
+	if *partial.Pricing.InputPerMtok != 1 {
+		t.Errorf("InputPerMtok = %v, want 1", *partial.Pricing.InputPerMtok)
+	}
+	if partial.Pricing.OutputPerMtok != nil {
+		t.Errorf("OutputPerMtok = %v, want none", *partial.Pricing.OutputPerMtok)
+	}
+}

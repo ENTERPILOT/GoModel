@@ -1,6 +1,10 @@
 package config
 
-import "strings"
+import (
+	"fmt"
+	"math"
+	"strings"
+)
 
 // ModelFilter narrows a provider's discovered model inventory. It is declared
 // under providers.<name>.model_filter and applied after metadata enrichment, so
@@ -26,6 +30,21 @@ type ModelFilter struct {
 	// dropped while the cap is set: a price cap that lets unpriced models
 	// through is not a cap. Nil disables price filtering.
 	MaxPricePerMtok *float64 `yaml:"max_price_per_mtok"`
+}
+
+// Validate rejects a price cap that cannot express a real limit. NaN silently
+// rejects every model, +Inf silently disables the cap, and a negative cap can
+// never be met — each turns a cost control into something other than what was
+// written, so they fail startup rather than mislead.
+func (f ModelFilter) Validate(field string) error {
+	if f.MaxPricePerMtok == nil {
+		return nil
+	}
+	limit := *f.MaxPricePerMtok
+	if math.IsNaN(limit) || math.IsInf(limit, 0) || limit < 0 {
+		return fmt.Errorf("%s.max_price_per_mtok must be a finite number of 0 or more", field)
+	}
+	return nil
 }
 
 // Normalize trims patterns and drops empty ones.

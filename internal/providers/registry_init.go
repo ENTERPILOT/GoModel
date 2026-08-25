@@ -305,7 +305,6 @@ func (r *ModelRegistry) applyFetchedInventory(
 	totalProviders int,
 ) {
 	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
-	fetched.totalModels -= r.filterProviderModelMaps(fetched.modelsByProvider)
 
 	r.mu.Lock()
 	r.dropUnregisteredFetchedProvidersLocked(&fetched)
@@ -315,7 +314,7 @@ func (r *ModelRegistry) applyFetchedInventory(
 		if _, ok := fetched.modelsByProvider[name]; ok {
 			continue // this sweep produced authoritative inventory
 		}
-		previous := r.modelsByProvider[name]
+		previous := r.discoveredByProvider[name]
 		if len(previous) == 0 {
 			continue // nothing to carry forward
 		}
@@ -323,14 +322,17 @@ func (r *ModelRegistry) applyFetchedInventory(
 		stale[name] = true
 		carriedForward++
 	}
-	r.modelsByProvider = fetched.modelsByProvider
+	r.discoveredByProvider = fetched.modelsByProvider
 	r.applyProviderRuntimeUpdatesLocked(fetched.runtimeUpdates)
 	for name := range fetched.runtimeUpdates {
 		state := r.providerRuntime[name]
 		state.inventoryStale = stale[name]
 		r.providerRuntime[name] = state
 	}
-	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
+	r.publishFilteredInventoryLocked()
+	// Count what the catalog actually serves: filters can hide models, and one
+	// bare ID served by several providers still resolves to a single entry.
+	fetched.totalModels = len(r.models)
 	r.invalidateSortedCaches()
 	r.mu.Unlock()
 

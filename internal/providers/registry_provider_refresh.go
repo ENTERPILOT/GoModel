@@ -191,19 +191,21 @@ func fetchedProviderRefreshError(fetched fetchedInventory) error {
 
 func (r *ModelRegistry) applyFetchedProviderInventory(providerTypes map[core.Provider]string, fetched fetchedInventory) {
 	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
-	fetched.totalModels -= r.filterProviderModelMaps(fetched.modelsByProvider)
 
 	r.mu.Lock()
 	r.dropUnregisteredFetchedProvidersLocked(&fetched)
 	for providerName, providerModels := range fetched.modelsByProvider {
-		r.modelsByProvider[providerName] = providerModels
+		r.discoveredByProvider[providerName] = providerModels
 		// A refresh that produced inventory is authoritative again.
 		state := r.providerRuntime[providerName]
 		state.inventoryStale = false
 		r.providerRuntime[providerName] = state
 	}
 	r.applyProviderRuntimeUpdatesLocked(fetched.runtimeUpdates)
-	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
+	r.publishFilteredInventoryLocked()
+	// Report what these providers actually serve after filtering, keeping the
+	// count scoped to the refreshed providers rather than the whole catalog.
+	fetched.totalModels = r.publishedModelCountLocked(fetched.modelsByProvider)
 	r.invalidateSortedCaches()
 	r.mu.Unlock()
 
@@ -248,4 +250,17 @@ func (r *ModelRegistry) freshFirstProviderOrderLocked() []string {
 		fresh = append(fresh, name)
 	}
 	return append(fresh, staleNames...)
+}
+
+// publishedModelCountLocked counts the distinct model IDs the named providers
+// currently publish, mirroring how the global catalog resolves a bare ID to a
+// single provider. Caller must hold r.mu.
+func (r *ModelRegistry) publishedModelCountLocked(scope map[string]map[string]*ModelInfo) int {
+	seen := make(map[string]struct{})
+	for providerName := range scope {
+		for modelID := range r.modelsByProvider[providerName] {
+			seen[modelID] = struct{}{}
+		}
+	}
+	return len(seen)
 }

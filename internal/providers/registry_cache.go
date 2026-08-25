@@ -38,22 +38,14 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	r.mu.RLock()
 	nameToProvider := make(map[string]core.Provider, len(r.providerNames))
 	nameToProviderType := make(map[string]string, len(r.providerNames))
-	providerOrderNames := make([]string, 0, len(r.providers))
-	for _, provider := range r.providers {
-		providerName := r.providerNames[provider]
-		if providerName == "" {
-			continue
-		}
-		providerOrderNames = append(providerOrderNames, providerName)
-	}
 	for provider, pName := range r.providerNames {
 		nameToProvider[pName] = provider
 		nameToProviderType[pName] = r.providerTypes[provider]
 	}
 	r.mu.RUnlock()
 
-	// Populate model maps from grouped cache structure. Unqualified lookups keep "first provider wins".
-	newModels := make(map[string]*ModelInfo)
+	// Populate the per-provider inventory from the grouped cache structure. The
+	// global "first provider wins" map is derived from it when publishing.
 	newModelsByProvider := make(map[string]map[string]*ModelInfo)
 	cachedProviderTypes := make(map[string]string, len(modelCache.Providers))
 	for providerName, cachedProv := range modelCache.Providers {
@@ -78,9 +70,6 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 				Created: cached.Created,
 			}, provider, providerName, providerType)
 			providerModels[cached.ID] = info
-			if _, exists := newModels[cached.ID]; !exists {
-				newModels[cached.ID] = info
-			}
 		}
 		newModelsByProvider[providerName] = providerModels
 	}
@@ -126,15 +115,12 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
 	metadataStats.Enriched += applyInferredModelMetadata(newModelsByProvider, nil)
 
-	// Filtering follows enrichment so price rules see resolved pricing, and
-	// precedes the global map rebuild so filtered models never claim a bare-ID
-	// slot ahead of a model another provider still serves.
-	r.filterProviderModelMaps(newModelsByProvider)
-	newModels = rebuildGlobalModelMap(newModelsByProvider, providerOrderNames)
-
 	r.mu.Lock()
-	r.models = newModels
-	r.modelsByProvider = newModelsByProvider
+	// Publishing applies model filters after enrichment, so price rules see the
+	// cached pricing while the restored inventory itself stays unfiltered.
+	r.discoveredByProvider = newModelsByProvider
+	r.publishFilteredInventoryLocked()
+	loadedModels := len(r.models)
 	r.invalidateSortedCaches()
 	if list != nil {
 		r.modelList = list
@@ -144,21 +130,24 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	r.mu.Unlock()
 
 	attrs := []any{
-		"models", len(newModels),
+		"models", loadedModels,
 		"cache_updated_at", modelCache.UpdatedAt,
 	}
 	attrs = append(attrs, metadataStats.slogAttrs()...)
 	slog.Info("loaded models from cache", attrs...)
 
-	return len(newModels), nil
+	return loadedModels, nil
 }
 
 // SaveToCache saves the current model list to the cache backend.
 func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 	r.mu.RLock()
 	cacheBackend := r.cache
-	modelsByProvider := make(map[string]map[string]*ModelInfo, len(r.modelsByProvider))
-	for providerName, models := range r.modelsByProvider {
+	// Persist the unfiltered inventory: model filters are a view over what a
+	// provider serves, so a restart with a loosened filter must be able to
+	// re-admit models without waiting for a successful upstream fetch.
+	modelsByProvider := make(map[string]map[string]*ModelInfo, len(r.discoveredByProvider))
+	for providerName, models := range r.discoveredByProvider {
 		// A stale inventory was carried forward from before the provider went
 		// offline; persisting it would resurrect the offline provider's models
 		// on every restart. The provider re-enters the cache once a refresh

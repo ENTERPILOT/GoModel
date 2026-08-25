@@ -83,6 +83,12 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	}
 
 	providerMap, credentialResolved := resolveProviders(result.RawProviders, result.Config.Resilience, factory.discoveryConfigsSnapshot())
+	// Validated after the env overlay so one rule covers both sources: a bad
+	// price cap must not start the gateway with a cost control that silently
+	// admits everything.
+	if err := validateProviderModelFilters(providerMap); err != nil {
+		return nil, err
+	}
 	fromFile, fromEnv := providerOrigins(result.RawProviders, providerMap)
 	slog.Info("providers resolved",
 		"total", len(providerMap),
@@ -290,4 +296,21 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 	}
 
 	return count, nil
+}
+
+// validateProviderModelFilters rejects model filters that cannot express what
+// they were configured to express, naming the provider so the operator knows
+// which declaration (or `<PROVIDER>_MODEL_FILTER_*` variable) to fix.
+func validateProviderModelFilters(providerMap map[string]ProviderConfig) error {
+	names := make([]string, 0, len(providerMap))
+	for name := range providerMap {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := providerMap[name].ModelFilter.Validate("providers." + name + ".model_filter"); err != nil {
+			return err
+		}
+	}
+	return nil
 }

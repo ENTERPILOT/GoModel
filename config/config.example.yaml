@@ -518,7 +518,8 @@ providers:
   #     include: ["*:free"]         # keep only these models (empty keeps all)
   #     exclude: ["*-preview:free"] # then drop these
   #     # Cap the highest per-million-token rate (the larger of input and output).
-  #     # A model with no known price is dropped while a cap is set.
+  #     # A model with no known price is dropped while a cap is set. Must be a
+  #     # finite number of 0 or more.
   #     max_price_per_mtok: 0
 
   # Example: Kilo AI Gateway. Model IDs use provider/model and are forwarded

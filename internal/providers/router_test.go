@@ -45,8 +45,9 @@ func newTestRegistryWithModels(entries ...registryModelEntry) *ModelRegistry {
 		registry.RegisterProviderWithNameAndType(entry.provider, entry.providerName, entry.providerType)
 	}
 
-	registry.models = make(map[string]*ModelInfo)
-	registry.modelsByProvider = make(map[string]map[string]*ModelInfo)
+	// Seed the unfiltered inventory; the routable maps are derived from it the
+	// same way the production paths publish them.
+	registry.discoveredByProvider = make(map[string]map[string]*ModelInfo)
 	for _, entry := range entries {
 		info := &ModelInfo{
 			Model: core.Model{
@@ -57,14 +58,12 @@ func newTestRegistryWithModels(entries ...registryModelEntry) *ModelRegistry {
 			ProviderName: entry.providerName,
 			ProviderType: entry.providerType,
 		}
-		if _, ok := registry.modelsByProvider[entry.providerName]; !ok {
-			registry.modelsByProvider[entry.providerName] = make(map[string]*ModelInfo)
+		if _, ok := registry.discoveredByProvider[entry.providerName]; !ok {
+			registry.discoveredByProvider[entry.providerName] = make(map[string]*ModelInfo)
 		}
-		registry.modelsByProvider[entry.providerName][entry.modelID] = info
-		if _, exists := registry.models[entry.modelID]; !exists {
-			registry.models[entry.modelID] = info
-		}
+		registry.discoveredByProvider[entry.providerName][entry.modelID] = info
 	}
+	registry.publishFilteredInventoryLocked()
 	return registry
 }
 

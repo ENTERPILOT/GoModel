@@ -1,7 +1,9 @@
 package providers
 
 import (
+	"math"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -2024,5 +2026,37 @@ func TestBuildProviderConfig_NormalizesModelFilter(t *testing.T) {
 
 	if want := []string{"*:free"}; !slices.Equal(resolved.ModelFilter.Include, want) {
 		t.Errorf("Include = %v, want %v", resolved.ModelFilter.Include, want)
+	}
+}
+
+// A price cap that parses but cannot express a real limit must fail startup:
+// NaN rejects every model, +Inf disables the cap, and a negative cap can never
+// be met. Validation runs after the env overlay, so it covers both sources.
+func TestValidateProviderModelFilters(t *testing.T) {
+	tests := []struct {
+		name    string
+		filter  config.ModelFilter
+		wantErr bool
+	}{
+		{name: "no filter"},
+		{name: "patterns only", filter: config.ModelFilter{Include: []string{"*:free"}}},
+		{name: "zero cap", filter: config.ModelFilter{MaxPricePerMtok: new(0.0)}},
+		{name: "negative cap", filter: config.ModelFilter{MaxPricePerMtok: new(-1.0)}, wantErr: true},
+		{name: "NaN cap", filter: config.ModelFilter{MaxPricePerMtok: new(math.NaN())}, wantErr: true},
+		{name: "infinite cap", filter: config.ModelFilter{MaxPricePerMtok: new(math.Inf(1))}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateProviderModelFilters(map[string]ProviderConfig{
+				"openrouter": {Type: "openrouter", ModelFilter: tt.filter},
+			})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateProviderModelFilters() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "providers.openrouter.model_filter") {
+				t.Errorf("error = %q, want it to name the offending provider", err)
+			}
+		})
 	}
 }

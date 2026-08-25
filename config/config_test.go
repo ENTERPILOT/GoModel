@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,6 +26,7 @@ func clearProviderEnvVars(t *testing.T) {
 		"XAI_API_KEY", "XAI_BASE_URL", "XAI_MODELS",
 		"GROQ_API_KEY", "GROQ_BASE_URL", "GROQ_MODELS",
 		"OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENROUTER_MODELS", "OPENROUTER_SITE_URL", "OPENROUTER_APP_NAME",
+		"OPENROUTER_MODEL_FILTER_INCLUDE", "OPENROUTER_MODEL_FILTER_EXCLUDE", "OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK",
 		"KILO_API_KEY", "KILO_BASE_URL", "KILO_MODELS",
 		"ZAI_API_KEY", "ZAI_BASE_URL", "ZAI_MODELS",
 		"AZURE_API_KEY", "AZURE_BASE_URL", "AZURE_API_VERSION", "AZURE_MODELS",
@@ -2115,6 +2117,36 @@ func TestModelFilterEmptyAndNormalize(t *testing.T) {
 				if strings.TrimSpace(pattern) == "" {
 					t.Errorf("Normalize() kept a blank pattern in %+v", normalized)
 				}
+			}
+		})
+	}
+}
+
+// A cap that cannot express a real limit must fail loudly: NaN rejects every
+// model, +Inf disables the cap, and a negative cap can never be met.
+func TestModelFilterValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cap     *float64
+		wantErr bool
+	}{
+		{name: "unset", cap: nil},
+		{name: "zero", cap: new(0.0)},
+		{name: "positive", cap: new(1.5)},
+		{name: "negative", cap: new(-1.0), wantErr: true},
+		{name: "NaN", cap: new(math.NaN()), wantErr: true},
+		{name: "positive infinity", cap: new(math.Inf(1)), wantErr: true},
+		{name: "negative infinity", cap: new(math.Inf(-1)), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ModelFilter{MaxPricePerMtok: tt.cap}.Validate("providers.openrouter.model_filter")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "providers.openrouter.model_filter.max_price_per_mtok") {
+				t.Errorf("error = %q, want it to name the offending field", err)
 			}
 		})
 	}

@@ -2,6 +2,7 @@ package providers
 
 import (
 	"log/slog"
+	"maps"
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
@@ -67,10 +68,29 @@ func modelMaxPricePerMtok(model core.Model) (float64, bool) {
 	return price, priced
 }
 
-// filterProviderModelMaps drops the models each provider's filter excludes and
-// returns how many were dropped.
-func (r *ModelRegistry) filterProviderModelMaps(modelsByProvider map[string]map[string]*ModelInfo) int {
-	return filterProviderModelMaps(r.snapshotProviderModelFilters(), modelsByProvider)
+// publishFilteredInventoryLocked rebuilds the routable catalog from the
+// unfiltered inventory by applying each provider's model filter, and returns how
+// many models the filters excluded. Filtering is a view over
+// discoveredByProvider, never a deletion from it: a model a filter rejects today
+// returns as soon as its pricing or the filter changes, and the persisted cache
+// keeps everything the provider actually served.
+//
+// Caller must hold r.mu for writing.
+func (r *ModelRegistry) publishFilteredInventoryLocked() int {
+	published := make(map[string]map[string]*ModelInfo, len(r.discoveredByProvider))
+	for providerName, providerModels := range r.discoveredByProvider {
+		if _, filtered := r.providerModelFilters[providerName]; filtered {
+			// Only a filtered provider needs its own copy; filtering deletes
+			// from the published map and must not touch the inventory.
+			published[providerName] = maps.Clone(providerModels)
+			continue
+		}
+		published[providerName] = providerModels
+	}
+	dropped := filterProviderModelMaps(r.providerModelFilters, published)
+	r.modelsByProvider = published
+	r.models = rebuildGlobalModelMap(published, r.freshFirstProviderOrderLocked())
+	return dropped
 }
 
 // filterProviderModelMaps applies filters to modelsByProvider. It runs after

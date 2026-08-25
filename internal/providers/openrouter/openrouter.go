@@ -2,6 +2,7 @@ package openrouter
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -229,13 +230,20 @@ func openrouterPricing(m openrouterModel) *core.ModelPricing {
 }
 
 // perMtok parses a per-token USD rate and scales it to per million tokens.
-// Unparseable and negative rates report no price rather than a wrong one.
+// Rates that are unparseable, negative, or non-finite report no price rather
+// than a wrong one: ParseFloat accepts "NaN" and "Inf", and scaling a huge rate
+// can overflow to infinity, either of which would corrupt every downstream
+// price comparison and cost calculation.
 func perMtok(rate string) (float64, bool) {
 	perToken, err := strconv.ParseFloat(strings.TrimSpace(rate), 64)
-	if err != nil || perToken < 0 {
+	if err != nil || perToken < 0 || math.IsNaN(perToken) || math.IsInf(perToken, 0) {
 		return 0, false
 	}
-	return perToken * 1_000_000, true
+	scaled := perToken * 1_000_000
+	if math.IsInf(scaled, 0) {
+		return 0, false
+	}
+	return scaled, true
 }
 
 func setHeaders(req *http.Request, apiKey string) {
