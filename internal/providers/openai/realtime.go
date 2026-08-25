@@ -55,6 +55,15 @@ func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest
 	return target, nil
 }
 
+// SupportsRealtimeIntent implements core.RealtimeIntentProvider: OpenAI serves
+// both specialized session surfaces — transcription and translation — on every
+// realtime endpoint the gateway exposes. Any other intent is unknown here and is
+// rejected upstream of the provider rather than served as a conversation.
+func (p *Provider) SupportsRealtimeIntent(intent string) bool {
+	return core.EqualRealtimeIntent(intent, core.RealtimeIntentTranscription) ||
+		core.EqualRealtimeIntent(intent, core.RealtimeIntentTranslation)
+}
+
 // RealtimeCallTarget implements core.RealtimeCallProvider for OpenAI's WebRTC SDP
 // exchange (POST https://api.openai.com/v1/realtime/calls, or
 // /v1/realtime/translations/calls for translation sessions). The gateway appends
@@ -99,6 +108,7 @@ func (p *Provider) realtimeAuthHeaders(ctx context.Context) http.Header {
 
 // Compile-time assertions that OpenAI implements the realtime capabilities.
 var (
-	_ core.RealtimeProvider     = (*Provider)(nil)
-	_ core.RealtimeCallProvider = (*Provider)(nil)
+	_ core.RealtimeProvider       = (*Provider)(nil)
+	_ core.RealtimeCallProvider   = (*Provider)(nil)
+	_ core.RealtimeIntentProvider = (*Provider)(nil)
 )

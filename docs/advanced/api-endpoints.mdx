@@ -79,6 +79,10 @@ in, `session.output_audio.delta` and `session.output_transcript.delta` out) and
 accept 24 kHz PCM16 audio. Frames relay verbatim, so any client written against
 the provider's translation API works unchanged.
 
+Translation is an OpenAI surface today. Routing a translation session to a
+provider that does not serve one fails with a 400 rather than quietly opening an
+ordinary conversation session in its place.
+
 These sessions report no usage events, so the gateway prices them from the input
 audio it relays, at the model's per-second input rate. WebRTC translation calls
 are the exception: their media never transits the gateway, so they are not

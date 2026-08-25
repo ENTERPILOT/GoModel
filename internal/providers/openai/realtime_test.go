@@ -237,3 +237,20 @@ func TestRealtimeTargetTranscriptionIntent(t *testing.T) {
 		t.Errorf("PinSessionModel = %q, want empty: the URL already fixes the model", target.PinSessionModel)
 	}
 }
+
+func TestSupportsRealtimeIntent(t *testing.T) {
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	cases := map[string]bool{
+		core.RealtimeIntentTranscription: true,
+		core.RealtimeIntentTranslation:   true,
+		" Translation ":                  true, // query parameters arrive padded
+		"conversation":                   false,
+		"dictation":                      false,
+		"":                               false,
+	}
+	for intent, want := range cases {
+		if got := p.SupportsRealtimeIntent(intent); got != want {
+			t.Errorf("SupportsRealtimeIntent(%q) = %v, want %v", intent, got, want)
+		}
+	}
+}

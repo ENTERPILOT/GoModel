@@ -28,14 +28,19 @@ type RealtimeRequest struct {
 	Intent   string
 }
 
-// HasIntent reports whether the request asks for the given session intent,
-// accepting padded and differently cased input (Postel) so every provider
-// compares intents the same way.
+// HasIntent reports whether the request asks for the given session intent.
 func (r *RealtimeRequest) HasIntent(intent string) bool {
 	if r == nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(r.Intent), intent)
+	return EqualRealtimeIntent(r.Intent, intent)
+}
+
+// EqualRealtimeIntent compares two session intents, accepting padded and
+// differently cased input (Postel) so every provider compares intents the same
+// way.
+func EqualRealtimeIntent(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
 
 // RealtimeTarget describes the upstream websocket a provider exposes for realtime
@@ -67,6 +72,16 @@ type RealtimeTarget struct {
 // without realtime support simply omit it.
 type RealtimeProvider interface {
 	RealtimeTarget(ctx context.Context, req *RealtimeRequest) (*RealtimeTarget, error)
+}
+
+// RealtimeIntentProvider is implemented by realtime providers that serve one or
+// more specialized session intents. It is optional: a provider that omits it
+// serves conversation sessions only, and the gateway rejects a specialized
+// intent for its models instead of silently opening a conversation session in
+// its place. A provider reports an intent only when every realtime surface it
+// exposes honors it — websocket, WebRTC calls, and client secrets alike.
+type RealtimeIntentProvider interface {
+	SupportsRealtimeIntent(intent string) bool
 }
 
 // RealtimeRouter resolves a realtime target for a request. The Router implements

@@ -145,9 +145,11 @@ Stateful note:
 - `S216`-`S217` exercise realtime `intent=transcription` sessions and the
   unchanged default speech session; they are read-only and rerunnable in any
   order
-- `S220`-`S222` exercise realtime speech translation sessions on
-  `/v1/realtime/translations`, the equivalent `intent=translation` dial, and the
-  translation client-secret mint; they are read-only and rerunnable in any order
+- `S220`-`S223` exercise realtime speech translation sessions on
+  `/v1/realtime/translations`, the equivalent `intent=translation` dial, the
+  translation client-secret mint, and the rejection of a translation session on a
+  provider that has no translation surface; they are read-only and rerunnable in
+  any order
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -5905,4 +5907,28 @@ jq -e '
   and .session.model == "gpt-realtime-translate"
   and .session.audio.output.language == "es"
 ' "$SECRET_FILE" >/dev/null
+```
+
+### S223 Translation on a provider without a translation surface is rejected
+
+Only OpenAI serves translation sessions today. A translation request routed to
+another realtime provider must fail with a 400 instead of quietly opening an
+ordinary conversation session — or minting a client secret for one.
+
+```bash
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s223.body.XXXXXX")
+STATUS=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  "$BASE_URL/v1/realtime/translations?model=grok-voice-latest&provider=xai")
+test "$STATUS" = "400"
+jq -e '.error.message | test("does not support translation realtime sessions")' "$BODY_FILE" >/dev/null
+
+SECRET_FILE=$(mktemp "$QA_RUN_DIR/s223.secret.XXXXXX")
+STATUS=$(curl -sS -o "$SECRET_FILE" -w '%{http_code}' \
+  "$BASE_URL/v1/realtime/translations/client_secrets" \
+  -H 'Content-Type: application/json' \
+  -d '{"session":{"model":"grok-voice-latest"}}')
+test "$STATUS" = "400"
+jq -e '.error.message | test("does not support translation realtime sessions")' "$SECRET_FILE" >/dev/null
 ```
