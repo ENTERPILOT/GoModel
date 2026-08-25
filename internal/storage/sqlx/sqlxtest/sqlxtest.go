@@ -16,12 +16,15 @@ package sqlxtest
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "modernc.org/sqlite" // SQLite driver for the in-memory test database
 
@@ -125,8 +128,7 @@ func NewPostgresPool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("create schema %s: %v", schema, err)
 	}
 	t.Cleanup(func() {
-		_, err := admin.Exec(context.Background(), `DROP SCHEMA `+quoteIdentifier(schema)+` CASCADE`)
-		if err != nil {
+		if err := dropTestSchema(context.Background(), admin, schema); err != nil {
 			t.Errorf("drop schema %s: %v", schema, err)
 		}
 		admin.Close()
@@ -174,4 +176,32 @@ func sanitizeIdentifier(name string) string {
 // quoteIdentifier wraps an identifier in double quotes, escaping any it holds.
 func quoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// dropTestSchema drops a throwaway schema, retrying the transient catalog
+// races parallel teardowns can hit: PostgreSQL raises XX000 "tuple
+// concurrently updated" (and occasionally a 40P01 deadlock) when concurrent
+// DROP SCHEMA ... CASCADE statements touch shared catalog rows.
+func dropTestSchema(ctx context.Context, admin *pgxpool.Pool, schema string) error {
+	const attempts = 5
+	var err error
+	for attempt := range attempts {
+		_, err = admin.Exec(ctx, `DROP SCHEMA `+quoteIdentifier(schema)+` CASCADE`)
+		if err == nil || !isTransientCatalogRace(err) {
+			return err
+		}
+		time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+	}
+	return err
+}
+
+func isTransientCatalogRace(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	if pgErr.Code == "40P01" { // deadlock_detected
+		return true
+	}
+	return pgErr.Code == "XX000" && strings.Contains(pgErr.Message, "tuple concurrently updated")
 }
