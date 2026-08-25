@@ -118,3 +118,30 @@ func TestGeminiNativeReplayListModels(t *testing.T) {
 
 	compareGoldenJSON(t, goldenPathForFixture("gemini/native_models.json"), resp)
 }
+
+func TestGeminiNativeReplayErrorMapping(t *testing.T) {
+	// The fixture is Google's genuine 404 envelope for an unknown model,
+	// recorded live; the adapter must map it to a gateway error carrying the
+	// upstream status and message rather than a decode failure.
+	provider := newGeminiNativeReplayProvider(t, map[string]replayRoute{
+		replayKey(http.MethodPost, "/models/gemini-nonexistent-model:generateContent"): {
+			statusCode:  http.StatusNotFound,
+			contentType: "application/json",
+			body:        loadGoldenFileRaw(t, "gemini/native_error_not_found.json"),
+		},
+	})
+
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "gemini-nonexistent-model",
+		Messages: []core.Message{{
+			Role:    "user",
+			Content: "hello",
+		}},
+	})
+	require.Error(t, err)
+
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusNotFound, gatewayErr.StatusCode)
+	require.Contains(t, gatewayErr.Message, "is not found for API version v1beta")
+}
