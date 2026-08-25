@@ -2725,13 +2725,16 @@ curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
 ### S120 Weighted round-robin honors per-target weight
 
 A target with weight 2 receives twice the share of a weight-1 target. Nine
-requests split 6:3 in favor of the weighted target.
+requests split 6:3 in favor of the weighted target. Session affinity is declared
+off for the same reason as `S119`: these nine requests are byte-identical, so
+`SESSION_AUTO_DETECT` reads them as one session and affinity would pin every one
+of them to the target that served the first — the weighting would never run.
 
 ```bash
 SRC="qa-lb-w-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\",\"weight\":2},{\"model\":\"groq/groq/compound-mini\",\"weight\":1}]}" >/dev/null
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\",\"weight\":2},{\"model\":\"groq/groq/compound-mini\",\"weight\":1}]}" >/dev/null
 for M in openai/gpt-4.1-nano groq/groq/compound-mini; do
   curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
     -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" >/dev/null
@@ -2743,6 +2746,9 @@ for _ in $(seq 1 9); do
   [ "$P" = openai ] && OPENAI=$((OPENAI+1)); [ "$P" = groq ] && GROQ=$((GROQ+1))
 done
 echo "openai=$OPENAI groq=$GROQ"
+# Both targets must serve: a one-sided split would mean the balancer never
+# rotated, which is what a pinned session looks like.
+[ "$GROQ" -gt 0 ]
 [ "$OPENAI" -gt "$GROQ" ]
 curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' -d "{\"source\":\"$SRC\"}" >/dev/null

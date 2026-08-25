@@ -69,7 +69,7 @@ trap 'stop_gw; rm -rf "$WORK"' EXIT
 echo "############ IaC VIRTUAL MODELS (#433) ############"
 
 ############ valid declarative config boots on a COLD catalog (F3 regression) ############
-export VM_ENV='[{"source":"qa-iac-alias","target":"openai/gpt-4.1-nano"},{"source":"qa-iac-lb","strategy":"round_robin","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/groq/compound-mini"}]}]'
+export VM_ENV='[{"source":"qa-iac-alias","target":"openai/gpt-4.1-nano"},{"source":"qa-iac-lb","strategy":"round_robin","session_affinity":false,"targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/groq/compound-mini"}]},{"source":"qa-iac-lb-sticky","strategy":"round_robin","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/groq/compound-mini"}]}]'
 start_gw && ok "I0 gateway starts with valid VIRTUAL_MODELS" || { bad "I0 startup"; tail -20 "$WORK/server.log"; }
 # The in-memory cache is empty at startup, so config validation ran against a cold
 # catalog ("cached_models":0) yet the gateway still came up — this is the fix.
@@ -80,8 +80,18 @@ jq -e 'any(.[];.source=="qa-iac-alias" and .managed==true and .kind=="redirect")
   && ok "I1 managed entries present with managed=true" || bad "I1 managed entries shape"
 
 [ "$(chat_provider qa-iac-alias)" = openai ] && ok "I2 managed alias resolves (openai)" || bad "I2 managed alias resolve"
+# Balancing is only observable with session affinity off: SESSION_AUTO_DETECT
+# derives a session id from the request content, so identical bodies are one
+# session, and affinity (on unless declared false) pins them to one target.
 lb="$(for i in 1 2 3 4; do chat_provider qa-iac-lb; done)"
-{ grep -q openai <<<"$lb" && grep -q groq <<<"$lb"; } && ok "I3 managed round-robin LB spreads across targets" || bad "I3 managed LB spread"
+{ grep -q openai <<<"$lb" && grep -q groq <<<"$lb"; } && ok "I3 managed round-robin LB spreads across targets" || bad "I3 managed LB spread ($(tr '\n' ' ' <<<"$lb"))"
+# The declared default (affinity unspecified) is the mirror image: the same four
+# identical requests are one detected session and stay on one target.
+st="$(for i in 1 2 3 4; do chat_provider qa-iac-lb-sticky; done)"
+pinned="$(sort -u <<<"$st")"
+{ [ "$(grep -c . <<<"$pinned")" = 1 ] && [ "$pinned" != ERR ]; } \
+  && ok "I3b managed session affinity pins one session to one target ($pinned)" \
+  || bad "I3b managed affinity ($(tr '\n' ' ' <<<"$st"))"
 
 managed_rejected(){ # method, name, json
   local code; code=$(curl -sS -o "$WORK/w.json" -w '%{http_code}' -X "$1" "$B/admin/virtual-models" -H 'Content-Type: application/json' -d "$3")
