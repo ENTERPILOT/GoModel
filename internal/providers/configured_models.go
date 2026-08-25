@@ -14,6 +14,7 @@ type configuredProviderModelsApplyReason string
 const (
 	configuredProviderModelsNotApplied    configuredProviderModelsApplyReason = ""
 	configuredProviderModelsAllowlist     configuredProviderModelsApplyReason = "allowlist"
+	configuredProviderModelsMerge         configuredProviderModelsApplyReason = "merge"
 	configuredProviderModelsUpstreamError configuredProviderModelsApplyReason = "upstream_error"
 	configuredProviderModelsUpstreamNil   configuredProviderModelsApplyReason = "upstream_nil"
 	configuredProviderModelsUpstreamEmpty configuredProviderModelsApplyReason = "upstream_empty"
@@ -70,7 +71,66 @@ func applyConfiguredProviderModels(
 	if len(upstream.Data) == 0 {
 		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsUpstreamEmpty
 	}
+	if mode == config.ConfiguredProviderModelsModeMerge {
+		return mergeConfiguredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsMerge
+	}
 	return upstream, configuredProviderModelsNotApplied
+}
+
+// configuredModelOwner picks the owned_by value for synthesized entries.
+func configuredModelOwner(providerName, providerType string) string {
+	owner := strings.TrimSpace(providerType)
+	if owner == "" {
+		owner = strings.TrimSpace(providerName)
+	}
+	return owner
+}
+
+func normalizeFallbackCreated(fallbackCreated int64) int64 {
+	if fallbackCreated <= 0 {
+		return time.Now().Unix()
+	}
+	return fallbackCreated
+}
+
+func synthesizedConfiguredModel(modelID, owner string, created int64) core.Model {
+	return core.Model{
+		ID:      modelID,
+		Object:  "model",
+		OwnedBy: owner,
+		Created: created,
+	}
+}
+
+// mergeConfiguredProviderModelsResponse unions a healthy upstream inventory
+// with the configured list: upstream entries stay authoritative and configured
+// models the upstream does not list are appended as synthesized entries, so
+// models a provider serves without listing them remain routable.
+func mergeConfiguredProviderModelsResponse(providerName, providerType string, configuredModels []string, upstream *core.ModelsResponse, fallbackCreated int64) *core.ModelsResponse {
+	seen := make(map[string]struct{}, len(upstream.Data))
+	data := make([]core.Model, 0, len(upstream.Data)+len(configuredModels))
+	for _, model := range upstream.Data {
+		modelID := strings.TrimSpace(model.ID)
+		if modelID == "" {
+			continue
+		}
+		seen[modelID] = struct{}{}
+		data = append(data, model)
+	}
+
+	owner := configuredModelOwner(providerName, providerType)
+	created := normalizeFallbackCreated(fallbackCreated)
+	for _, modelID := range configuredModels {
+		if _, ok := seen[modelID]; ok {
+			continue
+		}
+		data = append(data, synthesizedConfiguredModel(modelID, owner, created))
+	}
+
+	return &core.ModelsResponse{
+		Object: "list",
+		Data:   data,
+	}
 }
 
 func configuredProviderModelsResponse(providerName, providerType string, configuredModels []string, upstream *core.ModelsResponse, fallbackCreated int64) *core.ModelsResponse {
@@ -85,24 +145,14 @@ func configuredProviderModelsResponse(providerName, providerType string, configu
 		}
 	}
 
-	owner := strings.TrimSpace(providerType)
-	if owner == "" {
-		owner = strings.TrimSpace(providerName)
-	}
-	if fallbackCreated <= 0 {
-		fallbackCreated = time.Now().Unix()
-	}
+	owner := configuredModelOwner(providerName, providerType)
+	fallbackCreated = normalizeFallbackCreated(fallbackCreated)
 
 	data := make([]core.Model, 0, len(configuredModels))
 	for _, modelID := range configuredModels {
 		model, ok := byID[modelID]
 		if !ok {
-			model = core.Model{
-				ID:      modelID,
-				Object:  "model",
-				OwnedBy: owner,
-				Created: fallbackCreated,
-			}
+			model = synthesizedConfiguredModel(modelID, owner, fallbackCreated)
 		} else {
 			model.ID = strings.TrimSpace(model.ID)
 			if model.ID == "" {

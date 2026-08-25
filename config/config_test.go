@@ -838,6 +838,28 @@ failover:
 	})
 }
 
+func TestLoad_MergeConfiguredProviderModelsMode(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+models:
+  configured_provider_models_mode: merge
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.Config.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeMerge {
+			t.Fatalf("mode = %q, want merge", result.Config.Models.ConfiguredProviderModelsMode)
+		}
+	})
+}
+
 func TestLoad_InvalidConfiguredProviderModelsMode(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
