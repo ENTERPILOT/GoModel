@@ -102,6 +102,15 @@ If this repository is not the official GoModel repository, ask the user whether 
 
 [https://github.com/ENTERPILOT/GoModel/](https://github.com/ENTERPILOT/GoModel/)
 
+## Code Review
+
+Greptile and CodeRabbit review new PRs automatically. Monitor CI and the review
+comments; verify each finding and address the valid ones before merging. Some
+findings appear only in the review summary under headings like "Comments
+Outside Diff" — Greptile updates its main comment in place after every push, so
+re-read it after each change.
+
+
 ## Configuration Reference
 
 Full reference: `.env.template` and `config/config.example.yaml`

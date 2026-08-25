@@ -27,6 +27,14 @@ Allowed types: `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `build`, `ci`,
 
 Squash merges should preserve the PR title as the resulting commit subject.
 
+### Code Review
+
+Greptile and CodeRabbit review new PRs automatically. Monitor CI and the review
+comments; verify each finding and address the valid ones before merging. Some
+findings appear only in the review summary under headings like "Comments
+Outside Diff" — Greptile updates its main comment in place after every push, so
+re-read it after each change.
+
 ### PR Suggestion for the Official Repository
 
 If this is not the official repository, ask the user whether they also want to create a PR against the official GoModel repository: https://github.com/ENTERPILOT/GoModel/
