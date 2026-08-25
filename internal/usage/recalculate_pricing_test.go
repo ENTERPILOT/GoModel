@@ -94,6 +94,20 @@ func TestRecalculateEntryCostsPreservesMissingUsageCaveats(t *testing.T) {
 		t.Fatalf("caveat = %q, want preserved without an image count", countless.Caveat)
 	}
 
+	// A caveat compounded by an earlier recalculation still matches; only the
+	// canonical missing-usage part survives re-joining.
+	compound := recalculateEntryCosts(recalculationEntry{
+		ID:       "usage-img-compound",
+		Model:    "gemini-2.5-flash-image",
+		Provider: "gemini",
+		Endpoint: "/v1/images/generations",
+		RawData:  map[string]any{"images": 1},
+		Caveat:   caveatImageMissingUsage + "; unmapped token field: foo",
+	}, &recordingPricingResolver{pricing: tokenPricing})
+	if compound.Caveat != caveatImageMissingUsage {
+		t.Fatalf("caveat = %q, want the canonical missing-usage caveat retained from a compound value", compound.Caveat)
+	}
+
 	// Embedding rows keep the caveat unconditionally: no repricing can
 	// recover usage the provider never reported.
 	embedding := recalculateEntryCosts(recalculationEntry{

@@ -36,14 +36,17 @@ const (
 // The image caveat lifts only when a per_image price has something to count —
 // a stored images total — so the row gains a real cost basis.
 func retainedMissingUsageCaveat(existing string, rawData map[string]any, pricing *core.ModelPricing) string {
-	switch existing {
-	case caveatImageMissingUsage:
+	// A prior recalculation may have joined the missing-usage caveat with its
+	// own caveats, so match by containment and return the canonical constant —
+	// the caller re-joins it with the fresh recalculation caveats.
+	switch {
+	case strings.Contains(existing, caveatImageMissingUsage):
 		if pricing != nil && pricing.PerImage != nil && extractInt(rawData, rawKeyImages) > 0 {
 			return ""
 		}
-		return existing
-	case caveatEmbeddingMissingUsage:
-		return existing
+		return caveatImageMissingUsage
+	case strings.Contains(existing, caveatEmbeddingMissingUsage):
+		return caveatEmbeddingMissingUsage
 	}
 	return ""
 }
