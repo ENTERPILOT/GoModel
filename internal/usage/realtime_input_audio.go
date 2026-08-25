@@ -155,9 +155,13 @@ func topLevelStringField(frame []byte, field string) ([]byte, bool) {
 }
 
 // scanJSONString returns the raw contents of the string starting at i (which
-// must hold its opening quote) and the index just past its closing quote. The
-// contents keep any escape sequences verbatim: callers compare them against
-// known event names or validate them as base64, and both reject an escape.
+// must hold its opening quote) and the index just past its closing quote.
+//
+// Escape sequences are kept verbatim rather than decoded, which costs a copy of
+// every audio payload. A frame that escapes a base64 character (JSON permits
+// "\/" for "/") is therefore skipped rather than billed — the safe direction,
+// and unreachable in practice: no mainstream encoder escapes base64, and an
+// escaped event name would not even pass the marker prefilter.
 func scanJSONString(frame []byte, i int) ([]byte, int, bool) {
 	for j := i + 1; j < len(frame); j++ {
 		switch frame[j] {
