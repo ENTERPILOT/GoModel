@@ -135,15 +135,23 @@ func measureHTTPRoutingOverhead(t *testing.T, client *http.Client, directURL, ro
 
 	direct := make([]time.Duration, 0, voiceLatencySamples)
 	routed := make([]time.Duration, 0, voiceLatencySamples)
+	pairedOverhead := make([]time.Duration, 0, voiceLatencySamples)
 	for i := range voiceLatencySamples + 2 {
-		directDuration := timedHTTPRequest(t, client, directURL, contentType, body)
-		routedDuration := timedHTTPRequest(t, client, routedURL, contentType, body)
+		var directDuration, routedDuration time.Duration
+		if i%2 == 0 {
+			directDuration = timedHTTPRequest(t, client, directURL, contentType, body)
+			routedDuration = timedHTTPRequest(t, client, routedURL, contentType, body)
+		} else {
+			routedDuration = timedHTTPRequest(t, client, routedURL, contentType, body)
+			directDuration = timedHTTPRequest(t, client, directURL, contentType, body)
+		}
 		if i >= 2 { // warm both persistent connections before collecting samples
 			direct = append(direct, directDuration)
 			routed = append(routed, routedDuration)
+			pairedOverhead = append(pairedOverhead, routedDuration-directDuration)
 		}
 	}
-	assertVoiceRoutingOverhead(t, median(direct), median(routed))
+	assertVoiceRoutingOverhead(t, median(direct), median(routed), median(pairedOverhead))
 }
 
 func timedHTTPRequest(t *testing.T, client *http.Client, url, contentType string, body []byte) time.Duration {
@@ -175,15 +183,23 @@ func measureWebsocketRoutingOverhead(t *testing.T, directURL, routedURL string) 
 
 	direct := make([]time.Duration, 0, voiceLatencySamples)
 	routed := make([]time.Duration, 0, voiceLatencySamples)
+	pairedOverhead := make([]time.Duration, 0, voiceLatencySamples)
 	for i := range voiceLatencySamples + 2 {
-		directDuration := timedWebsocketDial(t, directURL)
-		routedDuration := timedWebsocketDial(t, routedURL)
+		var directDuration, routedDuration time.Duration
+		if i%2 == 0 {
+			directDuration = timedWebsocketDial(t, directURL)
+			routedDuration = timedWebsocketDial(t, routedURL)
+		} else {
+			routedDuration = timedWebsocketDial(t, routedURL)
+			directDuration = timedWebsocketDial(t, directURL)
+		}
 		if i >= 2 {
 			direct = append(direct, directDuration)
 			routed = append(routed, routedDuration)
+			pairedOverhead = append(pairedOverhead, routedDuration-directDuration)
 		}
 	}
-	assertVoiceRoutingOverhead(t, median(direct), median(routed))
+	assertVoiceRoutingOverhead(t, median(direct), median(routed), median(pairedOverhead))
 }
 
 func timedWebsocketDial(t *testing.T, url string) time.Duration {
@@ -199,13 +215,12 @@ func timedWebsocketDial(t *testing.T, url string) time.Duration {
 	return duration
 }
 
-func assertVoiceRoutingOverhead(t *testing.T, direct, routed time.Duration) {
+func assertVoiceRoutingOverhead(t *testing.T, direct, routed, pairedOverhead time.Duration) {
 	t.Helper()
 
-	overhead := max(routed-direct, 0)
-	t.Logf("direct_p50=%s routed_p50=%s gomodel_overhead_p50=%s threshold=%s", direct, routed, overhead, maxVoiceRoutingOverhead)
-	if overhead > maxVoiceRoutingOverhead {
-		t.Fatalf("GoModel median routing overhead = %s, want <= %s", overhead, maxVoiceRoutingOverhead)
+	t.Logf("direct_p50=%s routed_p50=%s paired_gomodel_overhead_p50=%s threshold=%s", direct, routed, pairedOverhead, maxVoiceRoutingOverhead)
+	if pairedOverhead > maxVoiceRoutingOverhead {
+		t.Fatalf("GoModel median paired routing overhead = %s, want <= %s", pairedOverhead, maxVoiceRoutingOverhead)
 	}
 }
 

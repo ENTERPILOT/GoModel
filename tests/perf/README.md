@@ -11,7 +11,8 @@ byte ceilings live in `tests/perf/hotpath_test.go`. The same command also
 measures median routing overhead for TTS, STT, realtime WebSocket setup, and
 WebRTC SDP signaling against a zero-delay local mock provider. Those scenarios
 fail above the 5 ms threshold in `tests/perf/voice_routing_latency_test.go`; no
-provider account, API key, or billable request is used.
+provider account, API key, or billable request is used. Direct and routed calls
+alternate order, and the guard uses the median of their paired latency deltas.
 
 Run the underlying benchmarks with allocation output:
 
