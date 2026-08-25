@@ -27,7 +27,7 @@ const (
 // TestVoiceRoutingLatency measures only GoModel's added latency by comparing the
 // same request sent directly to a zero-delay mock provider and routed through the
 // gateway. The median keeps this guard stable on shared CI runners while still
-// catching millisecond-scale regressions in the three voice paths.
+// catching millisecond-scale regressions in the four voice paths.
 func TestVoiceRoutingLatency(t *testing.T) {
 	providerServer := httptest.NewServer(http.HandlerFunc(mockVoiceProvider))
 	t.Cleanup(providerServer.Close)
@@ -67,6 +67,11 @@ func TestVoiceRoutingLatency(t *testing.T) {
 		routedURL := websocketURL(gateway.URL + "/v1/realtime?model=gpt-realtime-mini")
 		measureWebsocketRoutingOverhead(t, directURL, routedURL)
 	})
+
+	t.Run("webrtc", func(t *testing.T) {
+		body := []byte("v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=GoModel latency test\r\n")
+		measureHTTPRoutingOverhead(t, providerServer.Client(), providerServer.URL+"/v1/realtime/calls?model=gpt-realtime-mini", gateway.URL+"/v1/realtime/calls?model=gpt-realtime-mini", "application/sdp", body)
+	})
 }
 
 func mockVoiceProvider(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +98,12 @@ func mockVoiceProvider(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	case "/v1/realtime/calls":
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/sdp")
+		w.Header().Set("Location", "/v1/realtime/calls/rtc_latency_test")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, "v=0\r\ns=Mock SDP answer\r\n")
 	default:
 		http.NotFound(w, r)
 	}
@@ -153,7 +164,7 @@ func timedHTTPRequest(t *testing.T, client *http.Client, url, contentType string
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 		t.Fatalf("read response from %s: %v", url, err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		t.Fatalf("request %s returned %s", url, resp.Status)
 	}
 	return time.Since(started)
