@@ -17,7 +17,7 @@ import (
 // clearProviderEnvVars unsets all known provider-related environment variables.
 func clearProviderEnvVars(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{
+	keys := []string{
 		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODELS",
 		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODELS",
 		"COHERE_API_KEY", "COHERE_BASE_URL", "COHERE_MODELS",
@@ -26,7 +26,6 @@ func clearProviderEnvVars(t *testing.T) {
 		"XAI_API_KEY", "XAI_BASE_URL", "XAI_MODELS",
 		"GROQ_API_KEY", "GROQ_BASE_URL", "GROQ_MODELS",
 		"OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENROUTER_MODELS", "OPENROUTER_SITE_URL", "OPENROUTER_APP_NAME",
-		"OPENROUTER_MODEL_FILTER_INCLUDE", "OPENROUTER_MODEL_FILTER_EXCLUDE", "OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK",
 		"KILO_API_KEY", "KILO_BASE_URL", "KILO_MODELS",
 		"ZAI_API_KEY", "ZAI_BASE_URL", "ZAI_MODELS",
 		"AZURE_API_KEY", "AZURE_BASE_URL", "AZURE_API_VERSION", "AZURE_MODELS",
@@ -35,7 +34,23 @@ func clearProviderEnvVars(t *testing.T) {
 		"LLMD_API_KEY", "LLMD_BASE_URL", "LLMD_MODELS", "LLMD_INFERENCE_OBJECTIVE", "LLMD_FAIRNESS_FROM_USER_PATH",
 		"SGLANG_API_KEY", "SGLANG_BASE_URL", "SGLANG_MODELS",
 		"OLLAMA_API_KEY", "OLLAMA_BASE_URL", "OLLAMA_MODELS",
-	} {
+	}
+	// Model filters are accepted for every provider prefix, so clear them for
+	// each prefix above rather than tracking them provider by provider.
+	prefixes := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		if prefix, _, ok := strings.Cut(key, "_"); ok {
+			prefixes[prefix] = struct{}{}
+		}
+	}
+	for prefix := range prefixes {
+		keys = append(keys,
+			prefix+"_MODEL_FILTER_INCLUDE",
+			prefix+"_MODEL_FILTER_EXCLUDE",
+			prefix+"_MODEL_FILTER_MAX_PRICE_PER_MTOK",
+		)
+	}
+	for _, key := range keys {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
 	}

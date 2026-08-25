@@ -2,6 +2,7 @@ package providers
 
 import (
 	"maps"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -321,9 +322,15 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 		case providerEnvFieldModelFilterExclude:
 			values.ModelFilterExclude = parseCSVEnvList(value)
 		case providerEnvFieldModelFilterMaxPrice:
-			if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
-				values.ModelFilterMaxPrice = &parsed
+			parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+			if err != nil {
+				// A price cap is a cost control: a malformed value must fail
+				// validation, not quietly leave the cap unset and let every
+				// model through. NaN carries "not a number" to the validator,
+				// which rejects it the same way it rejects a literal NaN.
+				parsed = math.NaN()
 			}
+			values.ModelFilterMaxPrice = &parsed
 		case providerEnvFieldBackend:
 			values.Backend = value
 		case providerEnvFieldAuthType:

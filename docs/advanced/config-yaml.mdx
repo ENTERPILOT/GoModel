@@ -82,7 +82,8 @@ so filter those by pattern rather than by price.
 
 `max_price_per_mtok` must be a finite number of 0 or more. A negative, `NaN`, or
 infinite cap fails startup rather than silently rejecting every model or
-disabling the cap.
+disabling the cap, and so does an env value that is not a number at all — a cost
+control the operator believes is in force must never be quietly absent.
 
 Filtering applies to the final inventory, after
 `configured_provider_models_mode` has resolved, so it also narrows models added

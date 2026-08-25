@@ -2004,16 +2004,42 @@ func TestApplyProviderEnvVars_ModelFilterOverlaysYAMLPerRule(t *testing.T) {
 	}
 }
 
-// An unparseable cap must not resolve to a silent zero, which would hide every
-// paid model instead of applying no cap at all.
-func TestApplyProviderEnvVars_ModelFilterIgnoresInvalidPrice(t *testing.T) {
+// A malformed cap must not resolve to a silent zero (hiding every paid model)
+// nor to an absent cap (routing above the operator's intended limit). It is
+// carried through as NaN so startup validation rejects it.
+func TestApplyProviderEnvVars_ModelFilterRejectsMalformedPrice(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
 	t.Setenv("OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK", "cheap")
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
-	if cap := got["openrouter"].ModelFilter.MaxPricePerMtok; cap != nil {
-		t.Errorf("MaxPricePerMtok = %v, want nil", *cap)
+	limit := got["openrouter"].ModelFilter.MaxPricePerMtok
+	if limit == nil || !math.IsNaN(*limit) {
+		t.Fatalf("MaxPricePerMtok = %v, want NaN so validation rejects it", limit)
+	}
+	if err := got["openrouter"].ModelFilter.Validate("providers.openrouter.model_filter"); err == nil {
+		t.Error("Validate() = nil, want an error for a malformed price cap")
+	}
+}
+
+// The malformed value must survive the whole resolution path, not just the env
+// parser: a cost cap that vanishes between parsing and validation is worse than
+// no cap, because the operator believes one is in force.
+func TestResolveProviders_RejectsMalformedModelFilterPrice(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
+	t.Setenv("OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK", "cheap")
+
+	resolved, _ := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+
+	if _, ok := resolved["openrouter"]; !ok {
+		t.Fatal("openrouter was not resolved, want it present so validation can reject its cap")
+	}
+	err := validateProviderModelFilters(resolved)
+	if err == nil {
+		t.Fatal("validateProviderModelFilters() = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "providers.openrouter.model_filter.max_price_per_mtok") {
+		t.Errorf("error = %q, want it to name the offending field", err)
 	}
 }
 
