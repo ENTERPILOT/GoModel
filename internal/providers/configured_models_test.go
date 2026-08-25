@@ -42,7 +42,8 @@ func TestApplyConfiguredProviderModels_MergeAppendsMissingModels(t *testing.T) {
 	upstream := &core.ModelsResponse{
 		Object: "list",
 		Data: []core.Model{
-			{ID: "listed-model", Object: "model", OwnedBy: "upstream", Created: 42},
+			// Padded ID: the retained entry must be normalized, not just deduped.
+			{ID: " listed-model ", Object: "model", OwnedBy: "upstream", Created: 42},
 		},
 	}
 	resp, reason := applyConfiguredProviderModels(

@@ -114,6 +114,9 @@ func mergeConfiguredProviderModelsResponse(providerName, providerType string, co
 		if modelID == "" {
 			continue
 		}
+		// Registry lookups trim requested IDs, so the retained entry must be
+		// indexed under the same normalized key it deduplicates by.
+		model.ID = modelID
 		seen[modelID] = struct{}{}
 		data = append(data, model)
 	}
