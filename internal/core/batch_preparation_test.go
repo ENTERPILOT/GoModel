@@ -32,6 +32,7 @@ func TestCloneBatchRequestDeepCopiesNestedFields(t *testing.T) {
 	cloned := cloneBatchRequest(original)
 	if cloned == nil {
 		t.Fatal("cloneBatchRequest() returned nil")
+		return
 	}
 
 	cloned.Metadata["provider"] = "anthropic"
