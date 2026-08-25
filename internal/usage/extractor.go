@@ -193,6 +193,17 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 	}
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
+	// Some providers report no embedding token usage at all (Gemini does not,
+	// on either API surface), so a zero-token row prices at $0 from token
+	// rates and understates the real call. Flag that — but not when the
+	// configured pricing determines the cost without token counts (a
+	// per-request price, or an explicit zero rate), where the recorded cost is
+	// correct and calling it uncalculated would be false.
+	if resp.Usage.PromptTokens == 0 && resp.Usage.TotalTokens == 0 &&
+		tokenRatesAffectCost(effectiveEndpointPricing(endpoint, pricing...)) &&
+		entry.CostsCalculationCaveat == "" {
+		entry.CostsCalculationCaveat = caveatEmbeddingMissingUsage
+	}
 
 	return entry
 }
@@ -346,6 +357,15 @@ func normalizeCachedResponseEndpoint(endpoint string) string {
 		return "/" + cleaned
 	}
 	return cleaned
+}
+
+// effectiveEndpointPricing resolves the pricing that applies to endpoint, or
+// nil when the caller supplied none.
+func effectiveEndpointPricing(endpoint string, pricing ...*core.ModelPricing) *core.ModelPricing {
+	if len(pricing) == 0 {
+		return nil
+	}
+	return pricingForEndpoint(pricing[0], endpoint)
 }
 
 func pricingForEndpoint(pricing *core.ModelPricing, endpoint string) *core.ModelPricing {

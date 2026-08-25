@@ -66,7 +66,7 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data::text
+		SELECT id::text, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data::text, COALESCE(costs_calculation_caveat, '')
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		FOR UPDATE`, args...)
 	if err != nil {
@@ -89,6 +89,7 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 			&entry.OutputTokens,
 			&entry.RewriteTokensSaved,
 			&rawData,
+			&entry.Caveat,
 		); err != nil {
 			return nil, fmt.Errorf("scan postgres usage cost row: %w", err)
 		}

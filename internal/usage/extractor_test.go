@@ -966,3 +966,56 @@ func assertCostPtrNear(t *testing.T, name string, got *float64, want float64) {
 		t.Fatalf("%s = %f, want %f", name, *got, want)
 	}
 }
+
+func TestExtractFromEmbeddingResponse_NoUsageCaveat(t *testing.T) {
+	pricing := &core.ModelPricing{InputPerMtok: new(0.15)}
+
+	zero := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{Model: "gemini-embedding-001"}, "req", "gemini", "/v1/embeddings", pricing)
+	if zero.CostsCalculationCaveat == "" {
+		t.Fatal("expected a caveat when the provider reports no embedding usage")
+	}
+
+	counted := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{
+		Model: "text-embedding-3-small",
+		Usage: core.EmbeddingUsage{PromptTokens: 8, TotalTokens: 8},
+	}, "req", "openai", "/v1/embeddings", pricing)
+	if counted.CostsCalculationCaveat != "" || counted.TotalCost == nil {
+		t.Fatalf("entry = caveat %q cost %v, want costed and caveat-free", counted.CostsCalculationCaveat, counted.TotalCost)
+	}
+
+	// Pricing that does not depend on token counts determines the cost even
+	// with nothing reported, so the row must not claim it was uncalculated.
+	determined := map[string]*core.ModelPricing{
+		"per request":        {PerRequest: new(0.01)},
+		"explicit zero rate": {InputPerMtok: new(0.0)},
+	}
+	for name, priced := range determined {
+		t.Run(name, func(t *testing.T) {
+			entry := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{Model: "free-embed"}, "req", "openai", "/v1/embeddings", priced)
+			if entry.CostsCalculationCaveat != "" {
+				t.Fatalf("caveat = %q, want none when pricing determines the cost", entry.CostsCalculationCaveat)
+			}
+			if entry.TotalCost == nil {
+				t.Fatal("total cost = nil, want the deterministic model-pricing cost")
+			}
+		})
+	}
+
+	// A tier is selected by input token count, so a zero-token row is priced by
+	// the base rate alone — here $0. Reported usage is exactly what would have
+	// selected the priced tier, so the row is understated and keeps the caveat.
+	tiered := &core.ModelPricing{
+		InputPerMtok: new(0.0),
+		Tiers: []core.ModelPricingTier{
+			{UpToTokens: new(200_000.0), InputPerMtok: new(0.15), OutputPerMtok: new(0.6)},
+			{UpToTokens: new(10_000_000.0), InputPerMtok: new(0.3), OutputPerMtok: new(1.2)},
+		},
+	}
+	unreported := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{Model: "tiered-embed"}, "req", "openai", "/v1/embeddings", tiered)
+	if unreported.CostsCalculationCaveat != caveatEmbeddingMissingUsage {
+		t.Fatalf("caveat = %q, want %q for a zero base rate with a priced tier", unreported.CostsCalculationCaveat, caveatEmbeddingMissingUsage)
+	}
+	if retained := retainedMissingUsageCaveat(caveatEmbeddingMissingUsage, nil, tiered); retained != caveatEmbeddingMissingUsage {
+		t.Fatalf("repricing retained %q, want the caveat kept for tiered token rates", retained)
+	}
+}

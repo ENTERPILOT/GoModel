@@ -23,6 +23,77 @@ const (
 // ticks equals 1 USD.
 const xaiUSDTicksPerUSD = 10_000_000_000
 
+// Missing-usage caveats mark rows whose provider reported no usage at all;
+// they describe the usage report, not the price math, so pricing
+// recalculation preserves them (see retainedMissingUsageCaveat).
+const (
+	caveatImageMissingUsage     = "provider returned no token usage; set a per_image price to cost this model"
+	caveatEmbeddingMissingUsage = "provider reported no token usage; cost not calculated"
+)
+
+// imageCostDetermined reports whether pricing can cost an image row whose
+// provider reported no usage: a per_image rate is not a basis on its own,
+// there must also be images to multiply it by. An explicit zero rate counts —
+// a deliberately free model is a known price, not a missing one. A per-request
+// rate stands alone, since it does not depend on reported usage at all.
+func imageCostDetermined(pricing *core.ModelPricing, imageCount int) bool {
+	if pricing == nil {
+		return false
+	}
+	if pricing.PerRequest != nil {
+		return true
+	}
+	return imageCount > 0 && pricing.PerImage != nil
+}
+
+// tokenRatesAffectCost reports whether reported token usage would have changed
+// the calculated cost. Only a non-zero token rate consumes token counts: an
+// explicit zero rate, a per-request price, or no pricing at all yields the
+// same cost whether or not the provider reported usage, so a zero-token row
+// priced that way is accurate rather than understated.
+//
+// Tier rates count too. A tier is selected by input token count, so a
+// zero-token row is priced by the base rates alone — but reported usage is
+// precisely what would have selected a tier, which makes a model with a zero
+// base rate and a priced tier understated rather than free.
+func tokenRatesAffectCost(pricing *core.ModelPricing) bool {
+	if pricing == nil {
+		return false
+	}
+	rates := []*float64{pricing.InputPerMtok, pricing.OutputPerMtok}
+	for _, tier := range pricing.Tiers {
+		rates = append(rates, tier.InputPerMtok, tier.OutputPerMtok)
+	}
+	for _, rate := range rates {
+		if rate != nil && *rate != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// retainedMissingUsageCaveat keeps a stored missing-usage caveat across
+// repricing: recalculation cannot conjure usage the provider never reported.
+// A caveat lifts once the new pricing determines the cost without that usage.
+func retainedMissingUsageCaveat(existing string, rawData map[string]any, pricing *core.ModelPricing) string {
+	// A prior recalculation may have joined the missing-usage caveat with its
+	// own caveats, so match by containment and return the canonical constant —
+	// the caller re-joins it with the fresh recalculation caveats.
+	switch {
+	case strings.Contains(existing, caveatImageMissingUsage):
+		if imageCostDetermined(pricing, extractInt(rawData, rawKeyImages)) {
+			return ""
+		}
+		return caveatImageMissingUsage
+	case strings.Contains(existing, caveatEmbeddingMissingUsage):
+		if !tokenRatesAffectCost(pricing) {
+			return ""
+		}
+		return caveatEmbeddingMissingUsage
+	}
+	return ""
+}
+
 // CostResult holds the result of a granular cost calculation.
 type CostResult struct {
 	InputCost  *float64
