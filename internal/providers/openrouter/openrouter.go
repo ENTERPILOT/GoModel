@@ -2,8 +2,10 @@ package openrouter
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -94,6 +96,12 @@ type openrouterModel struct {
 		InputModalities  []string `json:"input_modalities"`
 		OutputModalities []string `json:"output_modalities"`
 	} `json:"architecture"`
+	// Pricing holds OpenRouter's per-token USD rates as decimal strings.
+	// "-1" marks a rate OpenRouter cannot state up front (auto-routed models).
+	Pricing struct {
+		Prompt     string `json:"prompt"`
+		Completion string `json:"completion"`
+	} `json:"pricing"`
 }
 
 // ListModels parses OpenRouter's native models listing so architecture
@@ -183,7 +191,8 @@ func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 			modes = append(modes, "audio_transcription")
 		}
 	}
-	if len(modes) == 0 && m.ContextLength <= 0 {
+	pricing := openrouterPricing(m)
+	if len(modes) == 0 && m.ContextLength <= 0 && pricing == nil {
 		return nil
 	}
 	meta := &core.ModelMetadata{}
@@ -195,7 +204,46 @@ func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 		contextWindow := m.ContextLength
 		meta.ContextWindow = &contextWindow
 	}
+	meta.Pricing = pricing
 	return meta
+}
+
+// openrouterPricing converts OpenRouter's per-token rates into the gateway's
+// per-million-token pricing. OpenRouter prices each model itself, including the
+// ":free" variants it publishes at zero, so its own listing is more current
+// than the remote model registry for this catalog — and enrichment already
+// treats what a provider reports as the override.
+func openrouterPricing(m openrouterModel) *core.ModelPricing {
+	input, hasInput := perMtok(m.Pricing.Prompt)
+	output, hasOutput := perMtok(m.Pricing.Completion)
+	if !hasInput && !hasOutput {
+		return nil
+	}
+	pricing := &core.ModelPricing{Currency: "USD"}
+	if hasInput {
+		pricing.InputPerMtok = &input
+	}
+	if hasOutput {
+		pricing.OutputPerMtok = &output
+	}
+	return pricing
+}
+
+// perMtok parses a per-token USD rate and scales it to per million tokens.
+// Rates that are unparseable, negative, or non-finite report no price rather
+// than a wrong one: ParseFloat accepts "NaN" and "Inf", and scaling a huge rate
+// can overflow to infinity, either of which would corrupt every downstream
+// price comparison and cost calculation.
+func perMtok(rate string) (float64, bool) {
+	perToken, err := strconv.ParseFloat(strings.TrimSpace(rate), 64)
+	if err != nil || perToken < 0 || math.IsNaN(perToken) || math.IsInf(perToken, 0) {
+		return 0, false
+	}
+	scaled := perToken * 1_000_000
+	if math.IsInf(scaled, 0) {
+		return 0, false
+	}
+	return scaled, true
 }
 
 func setHeaders(req *http.Request, apiKey string) {

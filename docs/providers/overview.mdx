@@ -163,6 +163,11 @@ support, not every individual model capability exposed by an upstream provider.
   `/models` is unavailable or empty. Set
   `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models
   for providers that define a list, skipping their upstream `/models` calls.
+- **Model filters** — narrow a large catalog by glob pattern or price instead of
+  listing models one by one: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free` keeps only
+  OpenRouter's free tier, and `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` caps
+  what a provider may route to. See
+  [Filtering a provider's models](/advanced/config-yaml#filtering-a-providers-models).
 - **Model categories (chat vs embeddings vs audio)** — a model's category comes
   from its `modes`, resolved from four sources in precedence order: the remote
   model registry, operator metadata declared under `providers.<name>.models` in

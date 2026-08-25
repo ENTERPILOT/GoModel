@@ -324,6 +324,12 @@ providers that define a list and skip their upstream `/models` calls. YAML
 `providers.<name>.models` provides the same model-list input for named provider
 blocks.
 
+To narrow a provider's inventory instead of listing it model by model, use
+`<PROVIDER>_MODEL_FILTER_INCLUDE`, `<PROVIDER>_MODEL_FILTER_EXCLUDE`, and
+`<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` (YAML:
+`providers.<name>.model_filter`). See
+[Filtering a provider's models](/advanced/config-yaml#filtering-a-providers-models).
+
 For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 
 ### 2. `.env` File

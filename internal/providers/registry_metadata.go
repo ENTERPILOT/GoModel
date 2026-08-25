@@ -41,25 +41,26 @@ func (r *ModelRegistry) enrichModels() metadataEnrichmentStats {
 }
 
 func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
-	if len(r.models) == 0 {
+	if len(r.discoveredByProvider) == 0 {
 		return metadataEnrichmentStats{}
 	}
 
 	providerTypes := make(map[core.Provider]string, len(r.providerTypes))
 	maps.Copy(providerTypes, r.providerTypes)
 
+	// Enrichment runs over the unfiltered inventory, so a model a price cap
+	// currently rejects still gets its metadata refreshed and is re-admitted by
+	// the republish below once it prices under the cap again.
 	replacements := make(map[*ModelInfo]*ModelInfo, len(r.models))
 	stats := metadataEnrichmentStats{}
 	if r.modelList != nil {
-		stats = enrichProviderModelMaps(r.modelList, providerTypes, r.modelsByProvider, replacements)
+		stats = enrichProviderModelMaps(r.modelList, providerTypes, r.discoveredByProvider, replacements)
 	}
-	stats.Enriched += applyConfigMetadataOverrides(r.configMetadataOverrides, r.modelsByProvider, replacements)
-	stats.Enriched += applyInferredModelMetadata(r.modelsByProvider, replacements)
-	for modelID, info := range r.models {
-		if replacement, ok := replacements[info]; ok {
-			r.models[modelID] = replacement
-		}
-	}
+	stats.Enriched += applyConfigMetadataOverrides(r.configMetadataOverrides, r.discoveredByProvider, replacements)
+	stats.Enriched += applyInferredModelMetadata(r.discoveredByProvider, replacements)
+	// This pass can change the pricing a cap is evaluated against in either
+	// direction, so the routable catalog is rebuilt rather than patched.
+	r.publishFilteredInventoryLocked()
 	r.invalidateSortedCaches()
 	return stats
 }

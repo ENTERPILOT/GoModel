@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,7 +17,7 @@ import (
 // clearProviderEnvVars unsets all known provider-related environment variables.
 func clearProviderEnvVars(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{
+	keys := []string{
 		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODELS",
 		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODELS",
 		"COHERE_API_KEY", "COHERE_BASE_URL", "COHERE_MODELS",
@@ -33,7 +34,23 @@ func clearProviderEnvVars(t *testing.T) {
 		"LLMD_API_KEY", "LLMD_BASE_URL", "LLMD_MODELS", "LLMD_INFERENCE_OBJECTIVE", "LLMD_FAIRNESS_FROM_USER_PATH",
 		"SGLANG_API_KEY", "SGLANG_BASE_URL", "SGLANG_MODELS",
 		"OLLAMA_API_KEY", "OLLAMA_BASE_URL", "OLLAMA_MODELS",
-	} {
+	}
+	// Model filters are accepted for every provider prefix, so clear them for
+	// each prefix above rather than tracking them provider by provider.
+	prefixes := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		if prefix, _, ok := strings.Cut(key, "_"); ok {
+			prefixes[prefix] = struct{}{}
+		}
+	}
+	for prefix := range prefixes {
+		keys = append(keys,
+			prefix+"_MODEL_FILTER_INCLUDE",
+			prefix+"_MODEL_FILTER_EXCLUDE",
+			prefix+"_MODEL_FILTER_MAX_PRICE_PER_MTOK",
+		)
+	}
+	for _, key := range keys {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
 	}
@@ -2077,6 +2094,106 @@ func TestParseBodySizeLimitBytes(t *testing.T) {
 			}
 			if got != tt.expected {
 				t.Fatalf("ParseBodySizeLimitBytes(%q) = %d, want %d", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoad_ProviderModelFilterFromYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "sk-yaml-key"
+    model_filter:
+      include:
+        - "*:free"
+      exclude:
+        - "*-preview:free"
+      max_price_per_mtok: 0
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+
+		filter := result.RawProviders["openrouter"].ModelFilter
+		if len(filter.Include) != 1 || filter.Include[0] != "*:free" {
+			t.Errorf("Include = %v, want [*:free]", filter.Include)
+		}
+		if len(filter.Exclude) != 1 || filter.Exclude[0] != "*-preview:free" {
+			t.Errorf("Exclude = %v, want [*-preview:free]", filter.Exclude)
+		}
+		if filter.MaxPricePerMtok == nil || *filter.MaxPricePerMtok != 0 {
+			t.Errorf("MaxPricePerMtok = %v, want 0", filter.MaxPricePerMtok)
+		}
+		if filter.Empty() {
+			t.Error("Empty() = true, want false for a declared filter")
+		}
+	})
+}
+
+func TestModelFilterEmptyAndNormalize(t *testing.T) {
+	tests := []struct {
+		name      string
+		filter    ModelFilter
+		wantEmpty bool
+	}{
+		{name: "zero value", filter: ModelFilter{}, wantEmpty: true},
+		{name: "blank patterns only", filter: ModelFilter{Include: []string{" ", ""}}, wantEmpty: true},
+		{name: "include", filter: ModelFilter{Include: []string{"*:free"}}, wantEmpty: false},
+		{name: "exclude", filter: ModelFilter{Exclude: []string{"*-preview"}}, wantEmpty: false},
+		// A zero cap means "free models only", not "no cap configured".
+		{name: "zero price cap", filter: ModelFilter{MaxPricePerMtok: new(float64)}, wantEmpty: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.filter.Empty(); got != tt.wantEmpty {
+				t.Errorf("Empty() = %v, want %v", got, tt.wantEmpty)
+			}
+			normalized := tt.filter.Normalize()
+			for _, pattern := range append(normalized.Include, normalized.Exclude...) {
+				if strings.TrimSpace(pattern) == "" {
+					t.Errorf("Normalize() kept a blank pattern in %+v", normalized)
+				}
+			}
+		})
+	}
+}
+
+// A cap that cannot express a real limit must fail loudly: NaN rejects every
+// model, +Inf disables the cap, and a negative cap can never be met.
+func TestModelFilterValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cap     *float64
+		wantErr bool
+	}{
+		{name: "unset", cap: nil},
+		{name: "zero", cap: new(0.0)},
+		{name: "positive", cap: new(1.5)},
+		{name: "negative", cap: new(-1.0), wantErr: true},
+		{name: "NaN", cap: new(math.NaN()), wantErr: true},
+		{name: "positive infinity", cap: new(math.Inf(1)), wantErr: true},
+		{name: "negative infinity", cap: new(math.Inf(-1)), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ModelFilter{MaxPricePerMtok: tt.cap}.Validate("providers.openrouter.model_filter")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "providers.openrouter.model_filter.max_price_per_mtok") {
+				t.Errorf("error = %q, want it to name the offending field", err)
 			}
 		})
 	}

@@ -31,7 +31,11 @@ type RawProviderConfig struct {
 	// FairnessFromUserPath controls whether the llmd provider derives its
 	// fairness ID from GoModel's effective (authenticated) user path. It
 	// defaults to true; nil preserves that default.
-	FairnessFromUserPath *bool                `yaml:"fairness_from_user_path"`
-	Models               []RawProviderModel   `yaml:"models"`
-	Resilience           *RawResilienceConfig `yaml:"resilience"`
+	FairnessFromUserPath *bool              `yaml:"fairness_from_user_path"`
+	Models               []RawProviderModel `yaml:"models"`
+	// ModelFilter narrows the provider's model inventory to the models that
+	// match its patterns and price cap. It applies to the final inventory, so
+	// it also narrows models added by `models` in merge or allowlist mode.
+	ModelFilter ModelFilter          `yaml:"model_filter"`
+	Resilience  *RawResilienceConfig `yaml:"resilience"`
 }
