@@ -982,4 +982,22 @@ func TestExtractFromEmbeddingResponse_NoUsageCaveat(t *testing.T) {
 	if counted.CostsCalculationCaveat != "" || counted.TotalCost == nil {
 		t.Fatalf("entry = caveat %q cost %v, want costed and caveat-free", counted.CostsCalculationCaveat, counted.TotalCost)
 	}
+
+	// Pricing that does not depend on token counts determines the cost even
+	// with nothing reported, so the row must not claim it was uncalculated.
+	determined := map[string]*core.ModelPricing{
+		"per request":        {PerRequest: new(0.01)},
+		"explicit zero rate": {InputPerMtok: new(0.0)},
+	}
+	for name, priced := range determined {
+		t.Run(name, func(t *testing.T) {
+			entry := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{Model: "free-embed"}, "req", "openai", "/v1/embeddings", priced)
+			if entry.CostsCalculationCaveat != "" {
+				t.Fatalf("caveat = %q, want none when pricing determines the cost", entry.CostsCalculationCaveat)
+			}
+			if entry.TotalCost == nil {
+				t.Fatal("total cost = nil, want the deterministic model-pricing cost")
+			}
+		})
+	}
 }

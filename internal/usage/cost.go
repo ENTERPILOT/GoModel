@@ -31,21 +31,55 @@ const (
 	caveatEmbeddingMissingUsage = "provider reported no token usage; cost not calculated"
 )
 
+// imageCostDetermined reports whether pricing can cost an image row whose
+// provider reported no usage: a per_image rate is not a basis on its own,
+// there must also be images to multiply it by. An explicit zero rate counts —
+// a deliberately free model is a known price, not a missing one. A per-request
+// rate stands alone, since it does not depend on reported usage at all.
+func imageCostDetermined(pricing *core.ModelPricing, imageCount int) bool {
+	if pricing == nil {
+		return false
+	}
+	if pricing.PerRequest != nil {
+		return true
+	}
+	return imageCount > 0 && pricing.PerImage != nil
+}
+
+// tokenRatesAffectCost reports whether reported token usage would have changed
+// the calculated cost. Only a non-zero token rate consumes token counts: an
+// explicit zero rate, a per-request price, or no pricing at all yields the
+// same cost whether or not the provider reported usage, so a zero-token row
+// priced that way is accurate rather than understated.
+func tokenRatesAffectCost(pricing *core.ModelPricing) bool {
+	if pricing == nil {
+		return false
+	}
+	for _, rate := range []*float64{pricing.InputPerMtok, pricing.OutputPerMtok} {
+		if rate != nil && *rate != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // retainedMissingUsageCaveat keeps a stored missing-usage caveat across
 // repricing: recalculation cannot conjure usage the provider never reported.
-// The image caveat lifts only when a per_image price has something to count —
-// a stored images total — so the row gains a real cost basis.
+// A caveat lifts once the new pricing determines the cost without that usage.
 func retainedMissingUsageCaveat(existing string, rawData map[string]any, pricing *core.ModelPricing) string {
 	// A prior recalculation may have joined the missing-usage caveat with its
 	// own caveats, so match by containment and return the canonical constant —
 	// the caller re-joins it with the fresh recalculation caveats.
 	switch {
 	case strings.Contains(existing, caveatImageMissingUsage):
-		if pricing != nil && pricing.PerImage != nil && extractInt(rawData, rawKeyImages) > 0 {
+		if imageCostDetermined(pricing, extractInt(rawData, rawKeyImages)) {
 			return ""
 		}
 		return caveatImageMissingUsage
 	case strings.Contains(existing, caveatEmbeddingMissingUsage):
+		if !tokenRatesAffectCost(pricing) {
+			return ""
+		}
 		return caveatEmbeddingMissingUsage
 	}
 	return ""

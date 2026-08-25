@@ -178,8 +178,9 @@ Image calls are recorded in [usage tracking](/features/cost-tracking) under the
 - **Per-image models** (DALL·E, `grok-2-image`, Imagen) report no tokens.
   GoModel records the number of returned images (`images` in the raw usage
   data) and prices it with the model's `per_image` rate.
-- When a response carries no `usage` block and no `per_image` price is set,
-  the usage row records no cost and is flagged with a cost-calculation caveat
+- When a response carries no `usage` block and the configured pricing cannot
+  cost it without one (no `per_image` rate to apply to the returned images, no
+  `per_request` rate), the usage row is flagged with a cost-calculation caveat
   so it reads as "unreported usage" rather than a free call.
 
 Set `per_image` through a [pricing override](/features/cost-tracking#override-pricing)

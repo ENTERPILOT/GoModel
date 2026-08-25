@@ -121,6 +121,19 @@ func TestRecalculateEntryCostsPreservesMissingUsageCaveats(t *testing.T) {
 		t.Fatalf("caveat = %q, want the embedding missing-usage caveat preserved", embedding.Caveat)
 	}
 
+	// Repricing an embedding row onto usage-independent pricing lifts the
+	// caveat: the recalculated cost no longer depends on the missing usage.
+	embeddingRepriced := recalculateEntryCosts(recalculationEntry{
+		ID:       "usage-emb-flat",
+		Model:    "gemini-embedding-001",
+		Provider: "gemini",
+		Endpoint: "/v1/embeddings",
+		Caveat:   caveatEmbeddingMissingUsage,
+	}, &recordingPricingResolver{pricing: &core.ModelPricing{PerRequest: new(0.01)}})
+	if embeddingRepriced.Caveat != "" {
+		t.Fatalf("caveat = %q, want cleared once a per-request price determines the cost", embeddingRepriced.Caveat)
+	}
+
 	// Unrelated caveats are recalculation's own business and are replaced.
 	unrelated := recalculateEntryCosts(recalculationEntry{
 		ID:       "usage-other",

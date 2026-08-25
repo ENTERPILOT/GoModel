@@ -147,6 +147,13 @@ func TestExtractFromImageResponse_NoUsageCaveat(t *testing.T) {
 		t.Fatal("expected a caveat when there are no images and no usage to price")
 	}
 
+	// A per-request price does not depend on usage at all, so it costs the
+	// row on its own and needs no caveat.
+	perRequest := ExtractFromImageResponse(resp, "req", "flat-rate-model", "openai", &core.ModelPricing{PerRequest: new(0.02)})
+	if perRequest.CostsCalculationCaveat != "" || perRequest.TotalCost == nil {
+		t.Fatalf("entry = caveat %q cost %v, want costed and caveat-free", perRequest.CostsCalculationCaveat, perRequest.TotalCost)
+	}
+
 	// A usage-carrying response keeps its token costs and stays caveat-free.
 	withUsage := ExtractFromImageResponse(&core.ImageGenerationResponse{
 		Data:  []core.ImageData{{B64JSON: "aGk="}},

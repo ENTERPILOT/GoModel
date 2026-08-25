@@ -77,24 +77,11 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	applyUsageCosts(entry, provider, endpoint, pricing...)
 	// A response without a usage block cannot be costed by token rates, and
 	// zero-token math quietly yields $0 — indistinguishable from a free call.
-	// A per_image price (any value, including an explicit zero for a free
-	// model) is a real basis only when there are images to count, so flag the
-	// row unless both hold.
-	if resp.Usage == nil && !perImagePriced(len(resp.Data), endpoint, pricing...) && entry.CostsCalculationCaveat == "" {
+	// Flag that unless the configured pricing can cost the row without usage.
+	if resp.Usage == nil && entry.CostsCalculationCaveat == "" &&
+		!imageCostDetermined(effectiveEndpointPricing(endpoint, pricing...), len(resp.Data)) {
 		entry.CostsCalculationCaveat = caveatImageMissingUsage
 	}
 
 	return entry
-}
-
-// perImagePriced reports whether a per_image rate can actually cost this
-// response: the price alone is not a basis, there must also be images to
-// multiply it by. An explicit zero rate counts — a deliberately free model is
-// a known price, not a missing one.
-func perImagePriced(imageCount int, endpoint string, pricing ...*core.ModelPricing) bool {
-	if imageCount <= 0 || len(pricing) == 0 || pricing[0] == nil {
-		return false
-	}
-	effective := pricingForEndpoint(pricing[0], endpoint)
-	return effective != nil && effective.PerImage != nil
 }
