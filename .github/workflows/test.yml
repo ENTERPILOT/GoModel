@@ -173,8 +173,8 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Run hot-path performance guard
-        # Thresholds are maintained in tests/perf/hotpath_test.go.
+      - name: Run performance guards
+        # Allocation and voice-routing latency thresholds are maintained in tests/perf/.
         run: make perf-check
 
   vulncheck:
