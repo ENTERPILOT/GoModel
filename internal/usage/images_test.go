@@ -133,6 +133,13 @@ func TestExtractFromImageResponse_NoUsageCaveat(t *testing.T) {
 		t.Fatalf("caveat = %q, want none when per-image cost was calculated", priced.CostsCalculationCaveat)
 	}
 
+	// An explicit zero per_image price means a deliberately free model — its
+	// known $0 cost must not read as unavailable.
+	free := ExtractFromImageResponse(resp, "req", "free-image-model", "openai", &core.ModelPricing{PerImage: new(0.0)})
+	if free.CostsCalculationCaveat != "" {
+		t.Fatalf("caveat = %q, want none for an explicitly free per-image model", free.CostsCalculationCaveat)
+	}
+
 	// A usage-carrying response keeps its token costs and stays caveat-free.
 	withUsage := ExtractFromImageResponse(&core.ImageGenerationResponse{
 		Data:  []core.ImageData{{B64JSON: "aGk="}},
