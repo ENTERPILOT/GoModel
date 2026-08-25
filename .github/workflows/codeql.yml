@@ -44,6 +44,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          queries: security-and-quality
 
       - name: Build Go application
         if: matrix.language == 'go'
