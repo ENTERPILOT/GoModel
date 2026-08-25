@@ -87,6 +87,10 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	return entry
 }
 
+// perImagePriced reports whether a per_image rate can actually cost this
+// response: the price alone is not a basis, there must also be images to
+// multiply it by. An explicit zero rate counts — a deliberately free model is
+// a known price, not a missing one.
 func perImagePriced(imageCount int, endpoint string, pricing ...*core.ModelPricing) bool {
 	if imageCount <= 0 || len(pricing) == 0 || pricing[0] == nil {
 		return false
