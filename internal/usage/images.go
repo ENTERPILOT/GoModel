@@ -75,6 +75,16 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	}
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
+	// A response without a usage block (Gemini's OpenAI-compatible surface,
+	// per-image models without a per_image price) yields no cost at all, which
+	// is indistinguishable from an unpriced model. Say why the row is empty.
+	if resp.Usage == nil && !entryHasCost(entry) && entry.CostsCalculationCaveat == "" {
+		entry.CostsCalculationCaveat = "provider returned no token usage; set a per_image price to cost this model"
+	}
 
 	return entry
+}
+
+func entryHasCost(entry *UsageEntry) bool {
+	return entry.TotalCost != nil && *entry.TotalCost > 0
 }

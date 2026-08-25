@@ -966,3 +966,20 @@ func assertCostPtrNear(t *testing.T, name string, got *float64, want float64) {
 		t.Fatalf("%s = %f, want %f", name, *got, want)
 	}
 }
+
+func TestExtractFromEmbeddingResponse_NoUsageCaveat(t *testing.T) {
+	pricing := &core.ModelPricing{InputPerMtok: new(0.15)}
+
+	zero := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{Model: "gemini-embedding-001"}, "req", "gemini", "/v1/embeddings", pricing)
+	if zero.CostsCalculationCaveat == "" {
+		t.Fatal("expected a caveat when the provider reports no embedding usage")
+	}
+
+	counted := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{
+		Model: "text-embedding-3-small",
+		Usage: core.EmbeddingUsage{PromptTokens: 8, TotalTokens: 8},
+	}, "req", "openai", "/v1/embeddings", pricing)
+	if counted.CostsCalculationCaveat != "" || counted.TotalCost == nil {
+		t.Fatalf("entry = caveat %q cost %v, want costed and caveat-free", counted.CostsCalculationCaveat, counted.TotalCost)
+	}
+}

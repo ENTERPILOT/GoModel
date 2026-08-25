@@ -193,6 +193,12 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 	}
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
+	// Some providers report no embedding token usage at all (Gemini does not,
+	// on either API surface); flag the row so a zero-cost entry reads as
+	// "unreported usage" rather than a free call.
+	if resp.Usage.PromptTokens == 0 && resp.Usage.TotalTokens == 0 && !entryHasCost(entry) && entry.CostsCalculationCaveat == "" {
+		entry.CostsCalculationCaveat = "provider reported no token usage; cost not calculated"
+	}
 
 	return entry
 }
