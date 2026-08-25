@@ -167,10 +167,10 @@ seed() {
   jput /admin/virtual-models \
     '{"source":"compat-alias","target_model":"openai/gpt-4.1-nano","description":"upgrade compat alias"}' >/dev/null
   jput /admin/virtual-models \
-    '{"source":"compat-lb","targets":[{"provider":"openai","model":"gpt-4.1-nano","weight":2},{"provider":"groq","model":"llama-3.1-8b-instant"}],"strategy":"round_robin"}' >/dev/null
+    '{"source":"compat-lb","targets":[{"provider":"openai","model":"gpt-4.1-nano","weight":2},{"provider":"groq","model":"groq/compound-mini"}],"strategy":"round_robin"}' >/dev/null
 
   jput /admin/failover \
-    '{"primary_model":"compat-failover-src","fallback_models":["groq/llama-3.1-8b-instant","gemini/gemini-2.5-flash-lite"]}' >/dev/null
+    '{"primary_model":"compat-failover-src","fallback_models":["groq/groq/compound-mini","gemini/gemini-2.5-flash-lite"]}' >/dev/null
 
   jput /admin/guardrails \
     '{"name":"compat-guardrail","type":"system_prompt","description":"upgrade compat","config":{"mode":"inject","content":"compat guardrail content"}}' >/dev/null
@@ -359,7 +359,7 @@ write_check() {
 }
 
 write_check "virtual-models upsert" jput /admin/virtual-models '{"source":"compat-alias","target_model":"openai/gpt-4.1-mini","description":"updated after upgrade"}'
-write_check "failover upsert" jput /admin/failover '{"primary_model":"compat-failover-src","fallback_models":["groq/llama-3.1-8b-instant"]}'
+write_check "failover upsert" jput /admin/failover '{"primary_model":"compat-failover-src","fallback_models":["groq/groq/compound-mini"]}'
 write_check "guardrail upsert" jput /admin/guardrails '{"name":"compat-guardrail","type":"system_prompt","description":"updated","config":{"mode":"inject","content":"updated content"}}'
 write_check "budget upsert" jput /admin/budgets '{"user_path":"/compat/budget","budget_key":{"period":"daily"},"amount":22.5}'
 write_check "label budget upsert" jput /admin/budgets '{"scope":"label","subject":"compat-label","budget_key":{"period":"daily"},"amount":7.5}'

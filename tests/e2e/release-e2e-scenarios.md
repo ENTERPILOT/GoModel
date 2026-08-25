@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 207 end-to-end curl scenarios for release validation.
+This file contains 219 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -132,6 +132,24 @@ Stateful note:
   a `$QA_SUFFIX`-scoped **shared** hour rule (not `per_child` — this stack has
   no `quota_templates` entitlement) and deletes it. They reload a shared
   gateway, which is safe in this sequential runner.
+- `S208`-`S215` exercise the OpenAI-compatible image endpoints
+  (`/v1/images/generations`, `/v1/images/edits`) across OpenAI and Gemini's
+  native API, including registry routing, negatives, metering, and audit
+  image-body placeholders; each is self-contained (`S210` creates and deletes
+  its own alias) and rerunnable in any order. Storing image pixels in the audit
+  log (`LOGGING_LOG_IMAGE_BODIES`) needs a gateway booted with that variable
+  on, so it is covered by unit tests rather than this matrix
+- `MODEL_LIST_URL=off`, conditional model-list fetches (`ETag`/`304`), and the
+  vLLM `reasoning_content` rename need a custom-booted gateway or an upstream
+  this stack has no credentials for, so they stay on unit tests too
+- `S216`-`S217` exercise realtime `intent=transcription` sessions and the
+  unchanged default speech session; they are read-only and rerunnable in any
+  order
+- `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
+  `dimensions`); read-only and rerunnable in any order
+- `S219` asserts the effective resilience configuration on
+  `/admin/providers/status`, including the circuit-breaker enable switch;
+  read-only and rerunnable in any order
 - For stateful partial reruns, prefer a contiguous range that includes the
   prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
   `--keep-artifacts`
@@ -166,7 +184,9 @@ reload_release_gateway() {
   pid="$(cat "$pid_file")"
   before="$(wc -l < "$log_file" | tr -d ' ')"
   kill -HUP "$pid"
-  for _ in $(seq 1 50); do
+  # A reload drains in-flight connections first, so it can take as long as the
+  # server's graceful drain window (10s) before the new configuration is live.
+  for _ in $(seq 1 200); do
     if tail -n +$((before + 1)) "$log_file" 2>/dev/null | grep -Fq 'configuration reloaded'; then
       for __ in $(seq 1 20); do
         if curl -fsS --connect-timeout 1 --max-time 2 "$url/health" >/dev/null 2>&1; then
@@ -190,8 +210,24 @@ EOF
 
 printf 'qa file payload\n' > "$QA_RUN_DIR/qa-upload.txt"
 
+# Source image for the /v1/images/edits scenarios: a 1x1 PNG, kept inline so an
+# edit scenario never has to pay for a generation round trip first. Providers
+# accept it as a valid upload; the edited result is what the scenarios assert.
+printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' \
+  | base64 -d > "$QA_RUN_DIR/qa-image-source.png"
+
 export BATCH_FILE="$QA_RUN_DIR/qa-openai-batch.jsonl"
 export UPLOAD_FILE="$QA_RUN_DIR/qa-upload.txt"
+export IMAGE_SOURCE_FILE="$QA_RUN_DIR/qa-image-source.png"
+
+# Decodes an images-envelope entry and asserts the bytes really are a PNG.
+# usage: assert_png_from_b64_json RESPONSE_FILE INDEX OUTPUT_FILE
+assert_png_from_b64_json() {
+  local file="$1" index="$2" out="$3"
+  jq -er --argjson i "$index" '.data[$i].b64_json' "$file" | base64 -d > "$out"
+  test "$(head -c 8 "$out" | od -An -tx1 | tr -d ' \n')" = "89504e470d0a1a0a"
+  test "$(wc -c < "$out")" -gt 100
+}
 
 wait_release_usage_entry() {
   local base_url="$1"
@@ -3415,14 +3451,15 @@ assert_chat_stream_has_usage "$SSE_FILE"
 ### S151 Ollama local non-streaming chat
 
 Checks translated chat against a local Ollama server through the shared
-OpenAI-compatible core. Skips loudly when no Ollama models are registered
-(local server not running); any gateway-side failure still fails the scenario.
+OpenAI-compatible core. Skips loudly when no chat-capable Ollama model is
+registered (local server not running, or it only serves embedding models); any
+gateway-side failure still fails the scenario.
 
 ```bash
 OLLAMA_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
-  | jq -r '[.data[].id | select(startswith("ollama/"))] | (map(select(endswith("qwen3:8b"))) + .)[0] // empty')
+  | jq -r '[.data[] | select((.id | startswith("ollama/")) and (((.metadata.modes // []) | index("chat")) != null)) | .id] | (map(select(endswith("qwen3:8b"))) + .)[0] // empty')
 if [ -z "$OLLAMA_MODEL" ]; then
-  echo "SKIPPED: no ollama models are registered (local Ollama server unavailable)" >&2
+  echo "SKIPPED: no ollama chat models are registered (local Ollama server unavailable, or it serves embedding models only)" >&2
   exit 0
 fi
 RESP_FILE="$QA_RUN_DIR/s151.chat.json"
@@ -3431,7 +3468,17 @@ curl -fsS "$BASE_URL/v1/chat/completions" \
   -d "{\"model\":\"$OLLAMA_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_OLLAMA_OK and nothing else. /no_think\"}],\"max_tokens\":600}" \
   > "$RESP_FILE"
 jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
-assert_chat_response_contains "$RESP_FILE" "ollama" "QA_OLLAMA_OK"
+# The local model is whatever this machine has pulled, and a small one will not
+# reliably echo a marker, so the assertion covers what the gateway owns —
+# routing, translation, and usage — rather than instruction following.
+jq -e '
+  .object == "chat.completion"
+  and .provider == "ollama"
+  and (.model | type == "string" and length > 0)
+  and (.choices[0].message.role == "assistant")
+  and (.choices[0].message.content | type == "string" and length > 0)
+  and (.usage.total_tokens > 0)
+' "$RESP_FILE" >/dev/null
 ```
 
 ### S152 Ollama local streaming chat
@@ -3440,9 +3487,9 @@ Checks SSE chat streaming and the final usage chunk against local Ollama.
 
 ```bash
 OLLAMA_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
-  | jq -r '[.data[].id | select(startswith("ollama/"))] | (map(select(endswith("qwen3:8b"))) + .)[0] // empty')
+  | jq -r '[.data[] | select((.id | startswith("ollama/")) and (((.metadata.modes // []) | index("chat")) != null)) | .id] | (map(select(endswith("qwen3:8b"))) + .)[0] // empty')
 if [ -z "$OLLAMA_MODEL" ]; then
-  echo "SKIPPED: no ollama models are registered (local Ollama server unavailable)" >&2
+  echo "SKIPPED: no ollama chat models are registered (local Ollama server unavailable, or it serves embedding models only)" >&2
   exit 0
 fi
 SSE_FILE="$QA_RUN_DIR/s152.chat.sse"
@@ -3451,7 +3498,15 @@ curl -fsS --no-buffer "$BASE_URL/v1/chat/completions" \
   -d "{\"model\":\"$OLLAMA_MODEL\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_OLLAMA_STREAM_OK and nothing else. /no_think\"}],\"max_tokens\":600}" \
   > "$SSE_FILE"
 sed -n '1,8p' "$SSE_FILE"
-assert_chat_stream_contains "$SSE_FILE" "QA_OLLAMA_STREAM_OK"
+# As in S151, the marker is not asserted: the stream shape, a non-empty
+# assembled delta, a terminal finish_reason, and the final usage chunk are.
+grep -qF 'data: [DONE]' "$SSE_FILE"
+grep '^data: {' "$SSE_FILE" | sed 's/^data: //' \
+  | jq -s -e '
+      any(.[]; .object == "chat.completion.chunk")
+      and ([.[]?.choices[]?.delta.content? // empty] | join("") | length > 0)
+      and any(.[]; (.choices[]?.finish_reason? // "") != "")
+    ' >/dev/null
 assert_chat_stream_has_usage "$SSE_FILE"
 ```
 
@@ -4598,10 +4653,22 @@ jq -e --arg id "$BATCH_ID" '.id == $id and (.processing_status == "canceling" or
 ### S188 Delete guard rejects a still-processing Message Batch (negative)
 
 Batches still processing must be canceled first, matching the Anthropic
-Message Batches contract.
+Message Batches contract. The scenario submits its own batch and tries to
+delete it immediately, rather than reusing `S183`'s, so the batch cannot have
+ended in the meantime; if the upstream reports it ended anyway, the guard has
+nothing to reject and the scenario skips loudly.
 
 ```bash
-BATCH_ID=$(cat "$QA_RUN_DIR/s183.batch-id")
+CREATE_FILE="$QA_RUN_DIR/s188.create.json"
+curl -fsS "$BASE_URL/v1/messages/batches" \
+  -H 'Content-Type: application/json' \
+  -d '{"requests":[{"custom_id":"qa-msgbatch-delete-guard","params":{"model":"claude-sonnet-4-6","max_tokens":32,"messages":[{"role":"user","content":"Reply with exactly QA_MSGBATCH_DELETE_GUARD"}]}}]}' \
+  > "$CREATE_FILE"
+BATCH_ID=$(jq -er '.id' "$CREATE_FILE")
+if [ "$(jq -r '.processing_status' "$CREATE_FILE")" = "ended" ]; then
+  echo "SKIPPED: batch $BATCH_ID already ended, so the delete guard does not apply" >&2
+  exit 0
+fi
 HEADERS_FILE="$QA_RUN_DIR/s188.headers"
 BODY_FILE="$QA_RUN_DIR/s188.body"
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X DELETE "$BASE_URL/v1/messages/batches/$BATCH_ID"
@@ -4635,8 +4702,20 @@ jq -e '.error.message | test("required")' "$BODY_FILE" >/dev/null
 
 ### S190 Message Batch results before ready returns the not-ready envelope (negative)
 
+Like `S188`, this submits its own batch and reads results immediately, so the
+batch is still processing when the envelope is checked.
+
 ```bash
-BATCH_ID=$(cat "$QA_RUN_DIR/s183.batch-id")
+CREATE_FILE="$QA_RUN_DIR/s190.create.json"
+curl -fsS "$BASE_URL/v1/messages/batches" \
+  -H 'Content-Type: application/json' \
+  -d '{"requests":[{"custom_id":"qa-msgbatch-not-ready","params":{"model":"claude-sonnet-4-6","max_tokens":32,"messages":[{"role":"user","content":"Reply with exactly QA_MSGBATCH_NOT_READY"}]}}]}' \
+  > "$CREATE_FILE"
+BATCH_ID=$(jq -er '.id' "$CREATE_FILE")
+if [ "$(jq -r '.processing_status' "$CREATE_FILE")" = "ended" ]; then
+  echo "SKIPPED: batch $BATCH_ID already ended, so results are ready" >&2
+  exit 0
+fi
 HEADERS_FILE="$QA_RUN_DIR/s190.headers"
 BODY_FILE="$QA_RUN_DIR/s190.body"
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/messages/batches/$BATCH_ID/results"
@@ -5380,4 +5459,378 @@ for item in "pg-smoke $PG_BASE_URL" "mongo-smoke $MONGO_BASE_URL"; do
     -d "{\"user_path\":\"$RL_PATH\",\"limit_key\":{\"period\":\"hour\"}}" \
     | jq -e --arg p "$RL_PATH" 'all(.rate_limits[]?; .user_path != $p)' >/dev/null
 done
+```
+
+## 28. Images API
+
+These scenarios exercise the OpenAI-compatible image endpoints
+(`POST /v1/images/generations`, `POST /v1/images/edits`) on the main SQLite
+gateway, across OpenAI and Gemini's native API. They are self-contained
+(`S210` creates and deletes its own alias) and rerunnable in any order. Edits
+upload `$IMAGE_SOURCE_FILE` from the common setup, so no scenario depends on
+another's output.
+
+### S208 Generate an image on OpenAI
+
+Checks `POST /v1/images/generations`: a JSON request returns the OpenAI images
+envelope with inline base64 pixels, the `provider` field GoModel adds, and the
+token usage `gpt-image-1`-family models report.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s208.images.json"
+HTTP=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/images/generations" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-image-1-mini","prompt":"a small red circle centered on a white background","n":1,"size":"1024x1024","quality":"low"}')
+jq '{created,provider,size,quality,usage,data_count:(.data|length)}' "$RESP_FILE"
+[ "$HTTP" = "200" ]
+jq -e '
+  (.created | type == "number")
+  and .provider == "openai"
+  and (.data | length) == 1
+  and (.data[0].b64_json | type == "string" and length > 0)
+  and (.usage.total_tokens > 0)
+' "$RESP_FILE" >/dev/null
+assert_png_from_b64_json "$RESP_FILE" 0 "$QA_RUN_DIR/s208.png"
+```
+
+### S209 Generate an image through Gemini's native API
+
+Checks that a Gemini image model generates through the native
+`generateContent` API behind the same OpenAI-shaped endpoint: images always come
+back as `b64_json`, and Gemini image models report token usage.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s209.images.json"
+# A Gemini image model sometimes answers a generation prompt with text only,
+# which the gateway surfaces as `502 Gemini returned no images`. Retry a couple
+# of times so the scenario fails on a broken path, not on model variance.
+HTTP=000
+for _ in $(seq 1 3); do
+  HTTP=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/images/generations" \
+    -H 'Content-Type: application/json' \
+    -d '{"model":"gemini/gemini-2.5-flash-image","prompt":"Generate an image: a solid red circle centered on a plain white square background.","n":1}')
+  [ "$HTTP" = "200" ] && break
+  jq -c '.error' "$RESP_FILE"
+done
+jq '{created,provider,usage,data_count:(.data|length)}' "$RESP_FILE"
+[ "$HTTP" = "200" ]
+jq -e '
+  .provider == "gemini"
+  and (.data | length) == 1
+  and (.data[0].url // "") == ""
+  and (.data[0].b64_json | type == "string" and length > 0)
+  and (.usage.total_tokens > 0)
+' "$RESP_FILE" >/dev/null
+assert_png_from_b64_json "$RESP_FILE" 0 "$QA_RUN_DIR/s209.png"
+```
+
+### S210 Image generation routes through virtual models and the provider hint
+
+Image requests resolve through the same registry as chat: an alias redirects to
+an image model, and a `provider` hint disambiguates a model ID that several
+providers serve.
+
+```bash
+SRC="qa-img-alias-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$SRC\",\"target_model\":\"openai/gpt-image-1-mini\",\"description\":\"qa images alias\"}" \
+  | jq -e --arg s "$SRC" '.source == $s and .kind == "redirect"' >/dev/null
+
+RESP_FILE="$QA_RUN_DIR/s210.alias.json"
+curl -fsS -o "$RESP_FILE" "$BASE_URL/v1/images/generations" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$SRC\",\"prompt\":\"a small blue square\",\"n\":1,\"size\":\"1024x1024\",\"quality\":\"low\"}"
+jq -e '.provider == "openai" and (.data[0].b64_json | type == "string" and length > 0)' "$RESP_FILE" >/dev/null
+
+curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' -d "{\"source\":\"$SRC\"}" >/dev/null
+
+HINT_FILE="$QA_RUN_DIR/s210.hint.json"
+curl -fsS -o "$HINT_FILE" "$BASE_URL/v1/images/generations" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemini-2.5-flash-image","provider":"gemini","prompt":"Generate an image: a solid green triangle on a plain white background.","n":1}'
+jq -e '.provider == "gemini" and (.data[0].b64_json | type == "string" and length > 0)' "$HINT_FILE" >/dev/null
+```
+
+### S211 Edit an uploaded image on OpenAI
+
+Checks `POST /v1/images/edits`: a multipart upload returns the same envelope,
+and `gpt-image-1`-family usage counts the uploaded pixels as input image tokens.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s211.edits.json"
+HTTP=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/images/edits" \
+  -F model=gpt-image-1-mini \
+  -F "image=@$IMAGE_SOURCE_FILE;type=image/png" \
+  -F 'prompt=Paint the whole canvas solid blue' \
+  -F size=1024x1024 \
+  -F quality=low)
+jq '{created,provider,usage,data_count:(.data|length)}' "$RESP_FILE"
+[ "$HTTP" = "200" ]
+jq -e '
+  .provider == "openai"
+  and (.data | length) == 1
+  and (.data[0].b64_json | type == "string" and length > 0)
+  and (.usage.input_tokens_details.image_tokens > 0)
+' "$RESP_FILE" >/dev/null
+assert_png_from_b64_json "$RESP_FILE" 0 "$QA_RUN_DIR/s211.png"
+```
+
+### S212 Edit an uploaded image through Gemini's native API
+
+Checks the Gemini edit path: uploads become inline image parts ahead of the
+prompt on `generateContent`, and the result comes back as `b64_json`.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s212.edits.json"
+# Same upstream variance as S209: a Gemini image model sometimes answers with
+# text only (`502 Gemini returned no images`), so retry before failing.
+HTTP=000
+for _ in $(seq 1 3); do
+  HTTP=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/images/edits" \
+    -F model=gemini/gemini-2.5-flash-image \
+    -F "image=@$IMAGE_SOURCE_FILE;type=image/png" \
+    -F 'prompt=Edit this image: paint the whole canvas solid blue and return the image.')
+  [ "$HTTP" = "200" ] && break
+  jq -c '.error' "$RESP_FILE"
+done
+jq '{created,provider,usage,data_count:(.data|length)}' "$RESP_FILE"
+[ "$HTTP" = "200" ]
+jq -e '
+  .provider == "gemini"
+  and (.data | length) == 1
+  and (.data[0].b64_json | type == "string" and length > 0)
+  and (.usage.input_tokens > 0)
+' "$RESP_FILE" >/dev/null
+assert_png_from_b64_json "$RESP_FILE" 0 "$QA_RUN_DIR/s212.png"
+```
+
+### S213 Image generation negatives
+
+Streaming is rejected before any upstream call, an unknown model is a `404`, a
+missing prompt is a `400`, and a chat model on a provider that has no image
+support is refused by the router rather than mis-routed.
+
+```bash
+# Sends one generation request, asserts the status line, and leaves the parsed
+# body in $IMG_BODY for the caller's own assertion.
+img_gen_error() {
+  local name="$1" body="$2" want_status="$3"
+  local headers_file="$QA_RUN_DIR/s213.$name.headers"
+  IMG_BODY="$QA_RUN_DIR/s213.$name.json"
+  curl -sS -D "$headers_file" -o "$IMG_BODY" "$BASE_URL/v1/images/generations" \
+    -H 'Content-Type: application/json' -d "$body"
+  jq -c '.error' "$IMG_BODY"
+  grep -Eiq "^HTTP/.* $want_status " "$headers_file"
+}
+
+img_gen_error stream '{"model":"gpt-image-1-mini","prompt":"a circle","stream":true}' 400
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("stream"))' "$IMG_BODY" >/dev/null
+
+img_gen_error unknown '{"model":"this-model-does-not-exist","prompt":"a circle"}' 404
+jq -e '.error.type == "not_found_error"' "$IMG_BODY" >/dev/null
+
+img_gen_error noprompt '{"model":"gpt-image-1-mini"}' 400
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("prompt"))' "$IMG_BODY" >/dev/null
+
+img_gen_error unsupported '{"model":"anthropic/claude-sonnet-5","prompt":"a circle"}' 400
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("does not support image generation"))' "$IMG_BODY" >/dev/null
+```
+
+### S214 Image edit negatives
+
+A missing upload and a streamed edit are rejected before any upstream call, a
+provider without edit support is refused by the router, and Gemini rejects a
+`mask` with the documented pointer instead of silently dropping it.
+
+```bash
+# Same shape as S213: asserts the status line and leaves the body in $IMG_BODY.
+img_edit_error() {
+  local name="$1" want_status="$2"
+  shift 2
+  local headers_file="$QA_RUN_DIR/s214.$name.headers"
+  IMG_BODY="$QA_RUN_DIR/s214.$name.json"
+  curl -sS -D "$headers_file" -o "$IMG_BODY" "$BASE_URL/v1/images/edits" "$@"
+  jq -c '.error' "$IMG_BODY"
+  grep -Eiq "^HTTP/.* $want_status " "$headers_file"
+}
+
+img_edit_error noimage 400 -F model=gpt-image-1-mini -F 'prompt=a circle'
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("image"))' "$IMG_BODY" >/dev/null
+
+img_edit_error stream 400 \
+  -F model=gpt-image-1-mini -F "image=@$IMAGE_SOURCE_FILE;type=image/png" \
+  -F 'prompt=a circle' -F stream=true
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("stream"))' "$IMG_BODY" >/dev/null
+
+img_edit_error unsupported 400 \
+  -F model=anthropic/claude-sonnet-5 -F "image=@$IMAGE_SOURCE_FILE;type=image/png" \
+  -F 'prompt=a circle'
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("does not support image edits"))' "$IMG_BODY" >/dev/null
+
+img_edit_error mask 400 \
+  -F model=gemini/gemini-2.5-flash-image \
+  -F "image=@$IMAGE_SOURCE_FILE;type=image/png" \
+  -F "mask=@$IMAGE_SOURCE_FILE;type=image/png" \
+  -F 'prompt=a circle'
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("mask"))' "$IMG_BODY" >/dev/null
+```
+
+### S215 Image calls are metered and audited with image-body placeholders
+
+An image request is billed like any other model call and lands in the audit log
+as an image body. The release stack runs with `LOGGING_LOG_IMAGE_BODIES`
+unset (the default), so each image is a sized placeholder (`stored: false`)
+rather than embedded base64 — the entry stays small and never trips generic body
+truncation. Storing the pixels themselves needs a gateway booted with that
+variable on, so it is covered by unit tests
+(`config/logging_test.go`, `internal/auditlog/image_body_test.go`).
+
+```bash
+REQUEST_ID="qa-images-usage-$QA_SUFFIX"
+USER_PATH="/qa/images/$QA_SUFFIX"
+RESP_FILE="$QA_RUN_DIR/s215.images.json"
+
+curl -fsS -o "$RESP_FILE" "$BASE_URL/v1/images/generations" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQUEST_ID" \
+  -H "X-GoModel-User-Path: $USER_PATH" \
+  -d '{"model":"gpt-image-1-mini","prompt":"a small yellow star","n":1,"size":"1024x1024","quality":"low"}'
+jq -e '(.data[0].b64_json | length) > 0' "$RESP_FILE" >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s215.usage.json"
+wait_release_usage_entry "$BASE_URL" "$REQUEST_ID" "$USER_PATH" "$USAGE_FILE"
+jq -e --arg request_id "$REQUEST_ID" '
+  any(.entries[]?;
+    .request_id == $request_id
+    and .endpoint == "/v1/images/generations"
+    and .provider == "openai"
+    and (.model | test("gpt-image-1-mini")))
+' "$USAGE_FILE" >/dev/null
+
+AUDIT_FILE="$QA_RUN_DIR/s215.audit.json"
+DETAIL_FILE="$QA_RUN_DIR/s215.detail.json"
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_FILE"
+  if jq -e --arg request_id "$REQUEST_ID" 'any(.entries[]?; .request_id == $request_id)' "$AUDIT_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+LOG_ID=$(jq -er --arg request_id "$REQUEST_ID" 'first(.entries[]? | select(.request_id == $request_id) | .id)' "$AUDIT_FILE")
+curl -fsS "$BASE_URL/admin/audit/detail?log_id=$LOG_ID" > "$DETAIL_FILE"
+jq '{path,status_code,response_images:.data.response_body.images}' "$DETAIL_FILE"
+jq -e '
+  .path == "/v1/images/generations"
+  and .status_code == 200
+  and .data.request_body.prompt == "a small yellow star"
+  and .data.response_body.__images__ == true
+  and (.data.response_body.images | length) == 1
+  and .data.response_body.images[0].role == "output"
+  and .data.response_body.images[0].stored == false
+  and (.data.response_body.images[0].bytes > 0)
+  and (.data.response_body.images[0].b64 // null) == null
+' "$DETAIL_FILE" >/dev/null
+```
+
+## 29. Realtime transcription sessions
+
+These scenarios cover `intent=transcription` on `/v1/realtime` (#750). OpenAI
+rejects a `model` query parameter on a transcription session, so a successful
+handshake plus a relayed `realtime.transcription_session` object is what proves
+the gateway dialed the intent-only URL while still routing, authorizing, and
+metering the requested model. They are read-only and rerunnable in any order.
+
+### S216 `intent=transcription` opens a transcription session
+
+```bash
+REQUEST_ID="qa-realtime-transcribe-$QA_SUFFIX"
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s216.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s216.body.XXXXXX")
+STDERR_FILE=$(mktemp "$QA_RUN_DIR/s216.stderr.XXXXXX")
+assert_realtime_websocket_upgrade \
+  "$BASE_URL/v1/realtime?model=gpt-4o-transcribe&intent=transcription&provider=openai" \
+  "$HEADERS_FILE" \
+  "$BODY_FILE" \
+  "$REQUEST_ID" \
+  "$STDERR_FILE"
+LC_ALL=C grep -aoE '"(type|object)":"[a-z_.]+"' "$BODY_FILE" | head -5
+LC_ALL=C grep -aq '"type":"session.created"' "$BODY_FILE"
+LC_ALL=C grep -aq '"object":"realtime.transcription_session"' "$BODY_FILE"
+```
+
+### S217 A realtime dial without `intent` stays a speech session (regression)
+
+The same entry point without `intent` must keep opening an ordinary realtime
+session, so forwarding the parameter did not change the default.
+
+```bash
+REQUEST_ID="qa-realtime-speech-$QA_SUFFIX"
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s217.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s217.body.XXXXXX")
+STDERR_FILE=$(mktemp "$QA_RUN_DIR/s217.stderr.XXXXXX")
+assert_realtime_websocket_upgrade \
+  "$BASE_URL/v1/realtime?model=gpt-realtime-mini&provider=openai" \
+  "$HEADERS_FILE" \
+  "$BODY_FILE" \
+  "$REQUEST_ID" \
+  "$STDERR_FILE"
+LC_ALL=C grep -aoE '"object":"[a-z_.]+"' "$BODY_FILE" | head -3
+LC_ALL=C grep -aq '"object":"realtime.session"' "$BODY_FILE"
+! LC_ALL=C grep -aq '"object":"realtime.transcription_session"' "$BODY_FILE"
+```
+
+## 30. Gemini native embeddings
+
+`S34` covers a single Gemini embedding; these cover the native
+`batchEmbedContents` path (#754): several inputs in one call, and `dimensions`
+mapped to `outputDimensionality`. Gemini reports no token usage on either
+surface, so the usage block is present but zero. Read-only and rerunnable.
+
+### S218 Gemini embeddings batch input and `dimensions` mapping
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s218.embeddings.json"
+curl -fsS -o "$RESP_FILE" "$BASE_URL/v1/embeddings" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemini/gemini-embedding-001","input":["qa gemini batch alpha","qa gemini batch beta"]}'
+jq '{object,model,usage,indexes:[.data[].index],dims:[.data[].embedding|length]}' "$RESP_FILE"
+assert_embeddings_response "$RESP_FILE" 2 0
+jq -e '[.data[].index] == [0,1] and ([.data[].embedding | length] | unique | length) == 1' "$RESP_FILE" >/dev/null
+
+DIM_FILE="$QA_RUN_DIR/s218.dimensions.json"
+curl -fsS -o "$DIM_FILE" "$BASE_URL/v1/embeddings" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemini/gemini-embedding-001","input":"qa gemini dimension probe","dimensions":256}'
+jq '{dims:(.data[0].embedding|length),usage}' "$DIM_FILE"
+assert_embeddings_response "$DIM_FILE" 1 0
+jq -e '(.data[0].embedding | length) == 256' "$DIM_FILE" >/dev/null
+```
+
+## 31. Effective resilience configuration
+
+### S219 Provider status exposes the circuit-breaker switch and its thresholds
+
+`/admin/providers/status` reports the effective resilience settings per
+provider, including the circuit-breaker enable switch (#729). The release stack
+sets no resilience overrides, so every provider must report the documented
+defaults: the breaker on, five failures to open, two successes to close, and a
+30s timeout. Turning the breaker off needs a gateway booted with
+`RESILIENCE_CIRCUIT_BREAKER_ENABLED=false`, so that path is covered by the
+`config` and `internal/llmclient` unit tests.
+
+```bash
+STATUS_FILE="$QA_RUN_DIR/s219.status.json"
+curl -fsS -o "$STATUS_FILE" "$BASE_URL/admin/providers/status"
+jq -c '[.providers[] | {name, cb: .config.resilience.circuit_breaker}] | .[0:3]' "$STATUS_FILE"
+jq -e '
+  (.providers | length) > 0
+  and all(.providers[];
+    .config.resilience.circuit_breaker.enabled == true
+    and .config.resilience.circuit_breaker.failure_threshold == 5
+    and .config.resilience.circuit_breaker.success_threshold == 2
+    and .config.resilience.circuit_breaker.timeout == "30s"
+    and (.config.resilience.retry.max_retries | type == "number"))
+' "$STATUS_FILE" >/dev/null
 ```
