@@ -7,7 +7,11 @@ make perf-check
 ```
 
 The CI job and pre-commit hook both run this guard. The current allocation and
-byte ceilings live in `tests/perf/hotpath_test.go`.
+byte ceilings live in `tests/perf/hotpath_test.go`. The same command also
+measures median routing overhead for TTS, STT, and realtime WebSocket setup
+against a zero-delay local mock provider. Those scenarios fail above the 5 ms
+threshold in `tests/perf/voice_routing_latency_test.go`; no provider account,
+API key, or billable request is used.
 
 Run the underlying benchmarks with allocation output:
 
