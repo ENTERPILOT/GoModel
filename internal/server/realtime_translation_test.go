@@ -294,12 +294,16 @@ func newEchoingRealtimeUpstream(t *testing.T) *realtimeUpstream {
 }
 
 // waitForUsageEntries blocks until the logger has recorded want entries, which
-// happens after the relay tears the session down.
+// happens after the relay tears the session down, and fails on any extra entry:
+// a session must be billed once, so a duplicate is as wrong as a missing one.
 func waitForUsageEntries(t *testing.T, logger *usageCaptureLogger, want int) []*usage.UsageEntry {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if entries := logger.Entries(); len(entries) >= want {
+			if len(entries) != want {
+				t.Fatalf("usage entries = %d, want exactly %d: %+v", len(entries), want, entries)
+			}
 			return entries
 		}
 		if time.Now().After(deadline) {
