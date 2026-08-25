@@ -35,6 +35,13 @@ jobs:
           # v2.10's staticcheck mis-analyzed `if x == nil { t.Fatal() }` guards
           # under GO_VERSION 1.26.4 and emitted false-positive SA5011 warnings.
           version: v2.12
+          # The shared analysis cache went bad on 2026-08-25: staticcheck lost
+          # t.Fatal no-return facts and every run flagged a different set of
+          # SA5011 false positives in untouched files, on PR branches and main
+          # alike. A cold analysis is deterministic, so skip the cache; it costs
+          # a few minutes per run. Revisit if golangci-lint-action gets a way to
+          # rotate a corrupted cache key.
+          skip-cache: true
           # Temporary workaround: config verification fetches the remote JSON schema and
           # intermittently times out in CI before lint runs. Re-enable by 2026-04-01 once
           # the schema fetch is reliable again; track in this PR/branch discussion.
