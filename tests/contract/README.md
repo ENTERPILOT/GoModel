@@ -32,6 +32,20 @@ testdata/
 
 Each folder contains recorded JSON and SSE payloads used by replay tests.
 
+Gemini has two recorded surfaces: the OpenAI-compatible payloads (`chat_*`,
+`models.json`) and the native API payloads (`native_*`), recorded with the
+`gemini-native` recorder provider:
+
+```bash
+GEMINI_API_KEY=... go run ./cmd/recordapi -provider=gemini-native   -endpoint=generate_content -output=tests/contract/testdata/gemini/native_chat_completion.json
+# endpoints: generate_content, generate_content_stream, image_generate_content,
+#            batch_embed_contents, models
+```
+
+The `inlineData.data` payload in `native_image_generation.json` is truncated
+post-recording to a 1x1 PNG — the recorded envelope (field names, casing,
+usage metadata) is unchanged.
+
 ## Running
 
 The CI workflow runs this suite in the `test-contract` job (`.github/workflows/test.yml`).

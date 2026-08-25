@@ -53,6 +53,14 @@ var providerConfigs = map[string]struct {
 		authHeader:  "Authorization",
 		contentType: "application/json",
 	},
+	// gemini-native records Gemini's native API shapes (generateContent,
+	// batchEmbedContents); model IDs live in the path, not the body.
+	"gemini-native": {
+		baseURL:     "https://generativelanguage.googleapis.com/v1beta",
+		envKey:      "GEMINI_API_KEY",
+		authHeader:  "x-goog-api-key",
+		contentType: "application/json",
+	},
 	"groq": {
 		baseURL:     "https://api.groq.com/openai",
 		envKey:      "GROQ_API_KEY",
@@ -137,6 +145,65 @@ var endpointConfigs = map[string]struct {
 			"input": "hello world",
 		},
 	},
+	// Native Gemini endpoints (gemini-native provider only).
+	"generate_content": {
+		path:   "/models/gemini-2.5-flash:generateContent",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			"contents": []map[string]any{
+				{"role": "user", "parts": []map[string]any{{"text": "Say 'Hello, World!' and nothing else."}}},
+			},
+			"generationConfig": map[string]any{"maxOutputTokens": 50},
+		},
+	},
+	"generate_content_stream": {
+		path:   "/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			"contents": []map[string]any{
+				{"role": "user", "parts": []map[string]any{{"text": "Say 'Hello, World!' and nothing else."}}},
+			},
+			"generationConfig": map[string]any{"maxOutputTokens": 50},
+		},
+	},
+	"image_generate_content": {
+		path:   "/models/gemini-2.5-flash-image:generateContent",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			"contents": []map[string]any{
+				{"role": "user", "parts": []map[string]any{{"text": "A tiny solid red square on a white background"}}},
+			},
+			"generationConfig": map[string]any{"responseModalities": []string{"TEXT", "IMAGE"}},
+		},
+	},
+	"batch_embed_contents": {
+		path:   "/models/gemini-embedding-001:batchEmbedContents",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			// Small output dimensionality keeps the recorded fixture readable.
+			"requests": []map[string]any{
+				{
+					"model":                "models/gemini-embedding-001",
+					"content":              map[string]any{"parts": []map[string]any{{"text": "hello world"}}},
+					"outputDimensionality": 8,
+				},
+				{
+					"model":                "models/gemini-embedding-001",
+					"content":              map[string]any{"parts": []map[string]any{{"text": "second input"}}},
+					"outputDimensionality": 8,
+				},
+			},
+		},
+	},
+}
+
+// providerExclusiveEndpoints restricts endpoints whose paths only exist on a
+// single provider's API surface.
+var providerExclusiveEndpoints = map[string]string{
+	"generate_content":        "gemini-native",
+	"generate_content_stream": "gemini-native",
+	"image_generate_content":  "gemini-native",
+	"batch_embed_contents":    "gemini-native",
 }
 
 var providerCapabilities = map[string]map[string]bool{
@@ -193,6 +260,9 @@ var providerEndpointPathOverrides = map[string]map[string]string{
 	"openai": {
 		"embeddings": "/v1/embeddings",
 	},
+	"gemini-native": {
+		"models": "/models",
+	},
 	"groq": {
 		"embeddings": "/v1/embeddings",
 	},
@@ -226,8 +296,8 @@ func providerSupportsEmbeddings(provider string) bool {
 }
 
 func main() {
-	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, groq, xai, kimicode, oracle)")
-	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream, embeddings)")
+	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, gemini-native, groq, xai, kimicode, oracle)")
+	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream, embeddings, generate_content, generate_content_stream, image_generate_content, batch_embed_contents)")
 	output := flag.String("output", "", "Output file path (required)")
 	model := flag.String("model", "", "Override model in request")
 	flag.Parse()
@@ -264,6 +334,10 @@ func main() {
 	}
 	if endpointRequiresEmbeddingsCapability(*endpoint) && !providerSupportsEmbeddings(*provider) {
 		fmt.Fprintf(os.Stderr, "Error: provider %q is missing embeddings capability (/embeddings)\n", *provider)
+		os.Exit(1)
+	}
+	if required, ok := providerExclusiveEndpoints[*endpoint]; ok && *provider != required {
+		fmt.Fprintf(os.Stderr, "Error: endpoint %q is only recordable for provider %q\n", *endpoint, required)
 		os.Exit(1)
 	}
 

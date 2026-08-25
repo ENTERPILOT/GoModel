@@ -1,0 +1,15 @@
+{
+  "created": 0,
+  "data": [
+    {
+      "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+      "revised_prompt": "Here you go! "
+    }
+  ],
+  "provider": "gemini",
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 1295,
+    "total_tokens": 1305
+  }
+}
