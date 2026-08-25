@@ -912,6 +912,9 @@ func (r *Router) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) 
 	if !ok {
 		return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support realtime sessions", req.Model), nil)
 	}
+	if err := checkRealtimeIntent(p, req.Model, req.Intent); err != nil {
+		return nil, err
+	}
 	return rp.RealtimeTarget(ctx, &core.RealtimeRequest{
 		Model:    selector.Model,
 		Provider: selector.Provider,
@@ -951,10 +954,29 @@ func (r *Router) realtimeCallTarget(
 	if !ok {
 		return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support realtime calls", req.Model), nil)
 	}
+	if err := checkRealtimeIntent(p, req.Model, req.Intent); err != nil {
+		return nil, err
+	}
 	return call(rp, ctx, &core.RealtimeRequest{
 		Model:    selector.Model,
 		Provider: selector.Provider,
+		Intent:   req.Intent,
 	})
+}
+
+// checkRealtimeIntent rejects a specialized session intent the resolved provider
+// does not serve. Providers build their targets from the intent, so one that
+// ignores it would answer a translation request with an ordinary conversation
+// session — or mint a client secret for one. Failing here keeps that mismatch
+// from reaching the caller as a valid-looking session.
+func checkRealtimeIntent(p core.Provider, model, intent string) error {
+	if strings.TrimSpace(intent) == "" {
+		return nil
+	}
+	if ip, ok := p.(core.RealtimeIntentProvider); ok && ip.SupportsRealtimeIntent(intent) {
+		return nil
+	}
+	return core.NewInvalidRequestError(fmt.Sprintf("model %q does not support %s realtime sessions", model, strings.TrimSpace(intent)), nil)
 }
 
 // GetProviderType returns the provider type string for the given model.

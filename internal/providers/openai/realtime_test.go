@@ -132,6 +132,71 @@ func TestRealtimeCallTargetFollowsSetBaseURL(t *testing.T) {
 	}
 }
 
+func TestRealtimeTargetTranslationIntent(t *testing.T) {
+	// A translation session dials the dedicated translations endpoint and, unlike
+	// a transcription session, keeps the model in the URL. It reports no usage
+	// events of its own, so the provider asks the gateway to meter the audio it
+	// relays.
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+
+	for _, intent := range []string{"translation", " Translation "} {
+		target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime-translate", Intent: intent})
+		if err != nil {
+			t.Fatalf("intent %q: unexpected error: %v", intent, err)
+		}
+		if target.URL != "wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate" {
+			t.Errorf("intent %q: url = %q, want the translations endpoint with the model", intent, target.URL)
+		}
+		if !target.MeterInputAudio {
+			t.Errorf("intent %q: MeterInputAudio = false, want the session metered", intent)
+		}
+		// The model is in the URL, so nothing has to be pinned in-session.
+		if target.PinSessionModel != "" {
+			t.Errorf("intent %q: PinSessionModel = %q, want empty", intent, target.PinSessionModel)
+		}
+		if got := target.Headers.Get("Authorization"); got != "Bearer k" {
+			t.Errorf("intent %q: Authorization = %q, want bearer with key", intent, got)
+		}
+	}
+}
+
+func TestRealtimeTargetConversationIsNotMetered(t *testing.T) {
+	// Conversation sessions report usage in response.done events, so the gateway
+	// must not meter (and double-count) their audio.
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+
+	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if target.MeterInputAudio {
+		t.Error("MeterInputAudio = true, want false for a session that reports its own usage")
+	}
+}
+
+func TestRealtimeHTTPTargetsTranslationIntent(t *testing.T) {
+	// Translation sessions sign WebRTC calls and mint client secrets on the same
+	// dedicated surface as their websocket.
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	req := &core.RealtimeRequest{Model: "gpt-realtime-translate", Intent: core.RealtimeIntentTranslation}
+
+	call, err := p.RealtimeCallTarget(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if call.URL != "https://api.openai.com/v1/realtime/translations/calls" {
+		t.Errorf("calls url = %q, want the translations calls endpoint", call.URL)
+	}
+
+	secret, err := p.RealtimeClientSecretTarget(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if secret.URL != "https://api.openai.com/v1/realtime/translations/client_secrets" {
+		t.Errorf("client secrets url = %q, want the translations client secrets endpoint", secret.URL)
+	}
+}
+
 func TestRealtimeTargetTranscriptionIntent(t *testing.T) {
 	// A transcription session must dial ?intent=transcription without a model
 	// parameter: OpenAI rejects transcription models as the session model, and
@@ -170,5 +235,22 @@ func TestRealtimeTargetTranscriptionIntent(t *testing.T) {
 	}
 	if target.PinSessionModel != "" {
 		t.Errorf("PinSessionModel = %q, want empty: the URL already fixes the model", target.PinSessionModel)
+	}
+}
+
+func TestSupportsRealtimeIntent(t *testing.T) {
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	cases := map[string]bool{
+		core.RealtimeIntentTranscription: true,
+		core.RealtimeIntentTranslation:   true,
+		" Translation ":                  true, // query parameters arrive padded
+		"conversation":                   false,
+		"dictation":                      false,
+		"":                               false,
+	}
+	for intent, want := range cases {
+		if got := p.SupportsRealtimeIntent(intent); got != want {
+			t.Errorf("SupportsRealtimeIntent(%q) = %v, want %v", intent, got, want)
+		}
 	}
 }

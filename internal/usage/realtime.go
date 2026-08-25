@@ -106,19 +106,29 @@ func ExtractFromRealtimeTranscriptionCompleted(payload []byte, requestID, model,
 		return nil
 	}
 	if event.Usage.Kind == "duration" {
-		entry := &UsageEntry{
-			ID:        uuid.New().String(),
-			RequestID: requestID,
-			Timestamp: time.Now().UTC(),
-			Model:     model,
-			Provider:  provider,
-			Endpoint:  endpointRealtime,
-			RawData:   map[string]any{rawKeyAudioSeconds: event.Usage.Seconds},
-		}
-		applyUsageCosts(entry, provider, endpointRealtime, pricing...)
-		return entry
+		return NewRealtimeDurationEntry(event.Usage.Seconds, requestID, model, provider, pricing...)
 	}
 	return realtimeUsageEntry(&event.Usage.realtimeUsage, requestID, model, provider, pricing...)
+}
+
+// NewRealtimeDurationEntry builds a usage entry for realtime audio billed by
+// duration rather than tokens. The duration is carried as input audio seconds so
+// the model's per-second input rate prices it, the same as HTTP transcription
+// (see usage/audio.go). It serves both providers that report duration usage
+// themselves (whisper-style transcription sessions) and sessions the gateway has
+// to meter because they report no usage at all (OpenAI translation sessions).
+func NewRealtimeDurationEntry(seconds float64, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	entry := &UsageEntry{
+		ID:        uuid.New().String(),
+		RequestID: requestID,
+		Timestamp: time.Now().UTC(),
+		Model:     model,
+		Provider:  provider,
+		Endpoint:  endpointRealtime,
+		RawData:   map[string]any{rawKeyAudioSeconds: seconds},
+	}
+	applyUsageCosts(entry, provider, endpointRealtime, pricing...)
+	return entry
 }
 
 // realtimeUsageEntry builds the usage entry shared by every realtime usage

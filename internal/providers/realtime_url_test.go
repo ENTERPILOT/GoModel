@@ -120,6 +120,48 @@ func TestOpenAIRealtimeHTTPURL(t *testing.T) {
 	}
 }
 
+func TestOpenAIRealtimeTranslationURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		baseURL  string
+		model    string
+		wantBase string // scheme://host/path before query
+		wantErr  bool
+	}{
+		{name: "openai https to wss", baseURL: "https://api.openai.com/v1", model: "gpt-realtime-translate", wantBase: "wss://api.openai.com/v1/realtime/translations"},
+		{name: "trailing slash normalized", baseURL: "https://api.openai.com/v1/", model: "m", wantBase: "wss://api.openai.com/v1/realtime/translations"},
+		{name: "compatible host preserved", baseURL: "http://localhost:9000/v1", model: "m", wantBase: "ws://localhost:9000/v1/realtime/translations"},
+		{name: "empty base", baseURL: "", model: "m", wantErr: true},
+		{name: "unsupported scheme", baseURL: "ftp://example.com/v1", model: "m", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := OpenAIRealtimeTranslationURL(tt.baseURL, tt.model)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			u, parseErr := url.Parse(got)
+			if parseErr != nil {
+				t.Fatalf("result is not a valid URL: %v", parseErr)
+			}
+			if base := u.Scheme + "://" + u.Host + u.Path; base != tt.wantBase {
+				t.Errorf("base = %q, want %q", base, tt.wantBase)
+			}
+			// Unlike transcription sessions, translation sessions keep the model
+			// in the URL.
+			if got := u.Query().Get("model"); got != tt.model {
+				t.Errorf("model = %q, want %q", got, tt.model)
+			}
+		})
+	}
+}
+
 func TestOpenAIRealtimeTranscriptionURL(t *testing.T) {
 	tests := []struct {
 		name    string
