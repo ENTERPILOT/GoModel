@@ -1,0 +1,3 @@
+data: {"candidates": [{"content": {"parts": [{"text": "Hello"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 11,"candidatesTokenCount": 1,"totalTokenCount": 30,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 11}],"thoughtsTokenCount": 18,"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash","responseId": "cWmNaqOEH9CRkdUP1bWcsQU"}
+
+data: {"candidates": [{"content": {"parts": [{"text": ", World!"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 11,"candidatesTokenCount": 4,"totalTokenCount": 33,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 11}],"thoughtsTokenCount": 18,"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash","responseId": "cWmNaqOEH9CRkdUP1bWcsQU"}

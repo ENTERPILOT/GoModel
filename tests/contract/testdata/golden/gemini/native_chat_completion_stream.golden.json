@@ -1,0 +1,39 @@
+{
+  "chunks": [
+    {
+      "choices": [
+        {
+          "delta": {
+            "content": "Hello",
+            "role": "assistant"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "cWmNaqOEH9CRkdUP1bWcsQU",
+      "model": "gemini-2.5-flash",
+      "object": "chat.completion.chunk",
+      "provider": "gemini"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "content": ", World!"
+          },
+          "finish_reason": "stop",
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "cWmNaqOEH9CRkdUP1bWcsQU",
+      "model": "gemini-2.5-flash",
+      "object": "chat.completion.chunk",
+      "provider": "gemini"
+    }
+  ],
+  "done": true,
+  "text": "Hello, World!"
+}

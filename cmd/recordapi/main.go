@@ -53,6 +53,14 @@ var providerConfigs = map[string]struct {
 		authHeader:  "Authorization",
 		contentType: "application/json",
 	},
+	// gemini-native records Gemini's native API shapes (generateContent,
+	// batchEmbedContents); model IDs live in the path, not the body.
+	"gemini-native": {
+		baseURL:     "https://generativelanguage.googleapis.com/v1beta",
+		envKey:      "GEMINI_API_KEY",
+		authHeader:  "x-goog-api-key",
+		contentType: "application/json",
+	},
 	"groq": {
 		baseURL:     "https://api.groq.com/openai",
 		envKey:      "GROQ_API_KEY",
@@ -137,6 +145,77 @@ var endpointConfigs = map[string]struct {
 			"input": "hello world",
 		},
 	},
+	// Native Gemini endpoints (gemini-native provider only).
+	"generate_content": {
+		path:   "/models/gemini-2.5-flash:generateContent",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			"contents": []map[string]any{
+				{"role": "user", "parts": []map[string]any{{"text": "Say 'Hello, World!' and nothing else."}}},
+			},
+			"generationConfig": map[string]any{"maxOutputTokens": 50},
+		},
+	},
+	"generate_content_stream": {
+		path:   "/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			"contents": []map[string]any{
+				{"role": "user", "parts": []map[string]any{{"text": "Say 'Hello, World!' and nothing else."}}},
+			},
+			"generationConfig": map[string]any{"maxOutputTokens": 50},
+		},
+	},
+	"image_generate_content": {
+		path:   "/models/gemini-2.5-flash-image:generateContent",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			"contents": []map[string]any{
+				{"role": "user", "parts": []map[string]any{{"text": "A tiny solid red square on a white background"}}},
+			},
+			"generationConfig": map[string]any{"responseModalities": []string{"TEXT", "IMAGE"}},
+		},
+	},
+	"batch_embed_contents": {
+		path:   "/models/gemini-embedding-001:batchEmbedContents",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			// Small output dimensionality keeps the recorded fixture readable.
+			"requests": []map[string]any{
+				{
+					"model":                "models/gemini-embedding-001",
+					"content":              map[string]any{"parts": []map[string]any{{"text": "hello world"}}},
+					"outputDimensionality": 8,
+				},
+				{
+					"model":                "models/gemini-embedding-001",
+					"content":              map[string]any{"parts": []map[string]any{{"text": "second input"}}},
+					"outputDimensionality": 8,
+				},
+			},
+		},
+	},
+}
+
+// providerExclusiveEndpoints restricts endpoints whose paths only exist on a
+// single provider's API surface.
+var providerExclusiveEndpoints = map[string]string{
+	"generate_content":        "gemini-native",
+	"generate_content_stream": "gemini-native",
+	"image_generate_content":  "gemini-native",
+	"batch_embed_contents":    "gemini-native",
+}
+
+// providerAllowedEndpoints restricts providers whose base URL cannot serve the
+// generic OpenAI-style endpoint paths; only the listed endpoints are valid.
+var providerAllowedEndpoints = map[string]map[string]bool{
+	"gemini-native": {
+		"generate_content":        true,
+		"generate_content_stream": true,
+		"image_generate_content":  true,
+		"batch_embed_contents":    true,
+		"models":                  true,
+	},
 }
 
 var providerCapabilities = map[string]map[string]bool{
@@ -193,6 +272,9 @@ var providerEndpointPathOverrides = map[string]map[string]string{
 	"openai": {
 		"embeddings": "/v1/embeddings",
 	},
+	"gemini-native": {
+		"models": "/models",
+	},
 	"groq": {
 		"embeddings": "/v1/embeddings",
 	},
@@ -226,8 +308,8 @@ func providerSupportsEmbeddings(provider string) bool {
 }
 
 func main() {
-	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, groq, xai, kimicode, oracle)")
-	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream, embeddings)")
+	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, gemini-native, groq, xai, kimicode, oracle)")
+	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream, embeddings, generate_content, generate_content_stream, image_generate_content, batch_embed_contents)")
 	output := flag.String("output", "", "Output file path (required)")
 	model := flag.String("model", "", "Override model in request")
 	flag.Parse()
@@ -266,11 +348,31 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: provider %q is missing embeddings capability (/embeddings)\n", *provider)
 		os.Exit(1)
 	}
+	if required, ok := providerExclusiveEndpoints[*endpoint]; ok && *provider != required {
+		fmt.Fprintf(os.Stderr, "Error: endpoint %q is only recordable for provider %q\n", *endpoint, required)
+		os.Exit(1)
+	}
+	if allowed, ok := providerAllowedEndpoints[*provider]; ok && !allowed[*endpoint] {
+		fmt.Fprintf(os.Stderr, "Error: provider %q does not serve endpoint %q\n", *provider, *endpoint)
+		os.Exit(1)
+	}
 
 	apiKey := os.Getenv(pConfig.envKey)
 	if apiKey == "" {
 		fmt.Fprintf(os.Stderr, "Error: %s environment variable is required\n", pConfig.envKey)
 		os.Exit(1)
+	}
+
+	// The endpoint path is resolved before the body: native Gemini model
+	// overrides rewrite both the path and nested body fields.
+	endpointPath := eConfig.path
+	if overrides, ok := providerEndpointPathOverrides[*provider]; ok {
+		if override, ok := overrides[*endpoint]; ok {
+			endpointPath = override
+		}
+	}
+	if *provider == "gemini-native" {
+		endpointPath = applyNativeGeminiModelOverride(endpointPath, eConfig.requestBody, *model)
 	}
 
 	// Build request body
@@ -280,8 +382,12 @@ func main() {
 
 		// Provider-specific defaults override the generic fixture model when no
 		// explicit model override is supplied (e.g., Oracle's OCI-hosted IDs or
-		// Kimicode's provider-specific chat/embeddings models).
-		if *model != "" {
+		// Kimicode's provider-specific chat/embeddings models). Native Gemini
+		// bodies carry no top-level model — the ID lives in the path (and in
+		// requests[].model for batches), rewritten below.
+		if *provider == "gemini-native" {
+			// handled by applyNativeGeminiModelOverride
+		} else if *model != "" {
 			reqBody["model"] = *model
 		} else if providerDefaults, ok := providerDefaultModels[*provider]; ok {
 			if defaultModel, ok := providerDefaults[*endpoint]; ok {
@@ -302,13 +408,6 @@ func main() {
 		bodyReader = bytes.NewReader(bodyBytes)
 	}
 
-	// Build URL, applying any provider-specific endpoint path override.
-	endpointPath := eConfig.path
-	if overrides, ok := providerEndpointPathOverrides[*provider]; ok {
-		if override, ok := overrides[*endpoint]; ok {
-			endpointPath = override
-		}
-	}
 	url := baseURL + endpointPath
 
 	// Create request
@@ -393,6 +492,30 @@ func main() {
 			fmt.Printf("Model: %s\n", model)
 		}
 	}
+}
+
+// applyNativeGeminiModelOverride points a native Gemini recording at another
+// model: the ID lives in the endpoint path (/models/{id}:{verb}) and, for
+// batch embeddings, in each requests[].model value — never as a top-level
+// body field.
+func applyNativeGeminiModelOverride(endpointPath string, reqBody map[string]any, model string) string {
+	if model == "" {
+		return endpointPath
+	}
+	if rest, ok := strings.CutPrefix(endpointPath, "/models/"); ok {
+		if _, verb, found := strings.Cut(rest, ":"); found {
+			endpointPath = "/models/" + model + ":" + verb
+		}
+	}
+	if reqBody == nil {
+		return endpointPath
+	}
+	if requests, ok := reqBody["requests"].([]map[string]any); ok {
+		for _, request := range requests {
+			request["model"] = "models/" + model
+		}
+	}
+	return endpointPath
 }
 
 // adjustForAnthropic converts OpenAI-style request to Anthropic format

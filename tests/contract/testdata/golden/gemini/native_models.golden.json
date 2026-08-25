@@ -1,0 +1,457 @@
+{
+  "data": [
+    {
+      "created": 0,
+      "id": "gemini-2.5-flash",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-2.5-pro",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-2.5-flash-preview-tts",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-2.5-pro-preview-tts",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-flash-latest",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-flash-lite-latest",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-pro-latest",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-2.5-flash-lite",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-2.5-flash-image",
+      "metadata": {
+        "categories": [
+          "text_generation",
+          "image"
+        ],
+        "modes": [
+          "chat",
+          "image_generation",
+          "image_edit"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3-flash-preview",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-pro-preview",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-pro-preview-customtools",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-lite-preview",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-lite",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3-pro-image-preview",
+      "metadata": {
+        "categories": [
+          "text_generation",
+          "image"
+        ],
+        "modes": [
+          "chat",
+          "image_generation",
+          "image_edit"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3-pro-image",
+      "metadata": {
+        "categories": [
+          "text_generation",
+          "image"
+        ],
+        "modes": [
+          "chat",
+          "image_generation",
+          "image_edit"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-image-preview",
+      "metadata": {
+        "categories": [
+          "text_generation",
+          "image"
+        ],
+        "modes": [
+          "chat",
+          "image_generation",
+          "image_edit"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-image",
+      "metadata": {
+        "categories": [
+          "text_generation",
+          "image"
+        ],
+        "modes": [
+          "chat",
+          "image_generation",
+          "image_edit"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-lite-image",
+      "metadata": {
+        "categories": [
+          "text_generation",
+          "image"
+        ],
+        "modes": [
+          "chat",
+          "image_generation",
+          "image_edit"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.5-flash",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.5-flash-lite",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-omni-flash-preview",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.6-flash",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.7-flash",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-tts-preview",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-robotics-er-1.6-preview",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-robotics-er-2-preview",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-2.5-computer-use-preview-10-2025",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-embedding-001",
+      "metadata": {
+        "categories": [
+          "embedding"
+        ],
+        "modes": [
+          "embedding"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-embedding-2-preview",
+      "metadata": {
+        "categories": [
+          "embedding"
+        ],
+        "modes": [
+          "embedding"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-embedding-2",
+      "metadata": {
+        "categories": [
+          "embedding"
+        ],
+        "modes": [
+          "embedding"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    }
+  ],
+  "object": "list"
+}
