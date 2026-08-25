@@ -44,6 +44,8 @@ func TestApplyConfiguredProviderModels_MergeAppendsMissingModels(t *testing.T) {
 		Data: []core.Model{
 			// Padded ID: the retained entry must be normalized, not just deduped.
 			{ID: " listed-model ", Object: "model", OwnedBy: "upstream", Created: 42},
+			// A whitespace variant of the same ID must not create a duplicate.
+			{ID: "listed-model", Object: "model", OwnedBy: "upstream-dup", Created: 43},
 		},
 	}
 	resp, reason := applyConfiguredProviderModels(

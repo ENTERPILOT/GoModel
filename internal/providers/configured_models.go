@@ -114,6 +114,11 @@ func mergeConfiguredProviderModelsResponse(providerName, providerType string, co
 		if modelID == "" {
 			continue
 		}
+		if _, ok := seen[modelID]; ok {
+			// Upstream listings can repeat an ID (also via whitespace
+			// variants that normalize to one); the first entry wins.
+			continue
+		}
 		// Registry lookups trim requested IDs, so the retained entry must be
 		// indexed under the same normalized key it deduplicates by.
 		model.ID = modelID
@@ -127,6 +132,7 @@ func mergeConfiguredProviderModelsResponse(providerName, providerType string, co
 		if _, ok := seen[modelID]; ok {
 			continue
 		}
+		seen[modelID] = struct{}{}
 		data = append(data, synthesizedConfiguredModel(modelID, owner, created))
 	}
 
