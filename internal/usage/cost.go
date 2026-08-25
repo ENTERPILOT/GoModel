@@ -23,6 +23,30 @@ const (
 // ticks equals 1 USD.
 const xaiUSDTicksPerUSD = 10_000_000_000
 
+// Missing-usage caveats mark rows whose provider reported no usage at all;
+// they describe the usage report, not the price math, so pricing
+// recalculation preserves them (see retainedMissingUsageCaveat).
+const (
+	caveatImageMissingUsage     = "provider returned no token usage; set a per_image price to cost this model"
+	caveatEmbeddingMissingUsage = "provider reported no token usage; cost not calculated"
+)
+
+// retainedMissingUsageCaveat keeps a stored missing-usage caveat across
+// repricing: recalculation cannot conjure usage the provider never reported.
+// The image caveat lifts once a per_image price gives the row a real basis.
+func retainedMissingUsageCaveat(existing string, pricing *core.ModelPricing) string {
+	switch existing {
+	case caveatImageMissingUsage:
+		if pricing != nil && pricing.PerImage != nil {
+			return ""
+		}
+		return existing
+	case caveatEmbeddingMissingUsage:
+		return existing
+	}
+	return ""
+}
+
 // CostResult holds the result of a granular cost calculation.
 type CostResult struct {
 	InputCost  *float64

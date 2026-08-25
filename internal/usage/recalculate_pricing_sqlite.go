@@ -88,7 +88,7 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 	args = append(args, limit)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data
+		SELECT id, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, '')
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		ORDER BY id
 		LIMIT ?`, args...)
@@ -112,6 +112,7 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 			&entry.OutputTokens,
 			&entry.RewriteTokensSaved,
 			&rawData,
+			&entry.Caveat,
 		); err != nil {
 			return nil, fmt.Errorf("scan sqlite usage cost row: %w", err)
 		}

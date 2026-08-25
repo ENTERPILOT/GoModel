@@ -80,7 +80,7 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	// Only a per_image price (any value, including an explicit zero for a free
 	// model) prices such a response, so flag the row when none is set.
 	if resp.Usage == nil && !perImagePriced(endpoint, pricing...) && entry.CostsCalculationCaveat == "" {
-		entry.CostsCalculationCaveat = "provider returned no token usage; set a per_image price to cost this model"
+		entry.CostsCalculationCaveat = caveatImageMissingUsage
 	}
 
 	return entry

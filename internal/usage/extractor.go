@@ -198,7 +198,7 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 	// whatever the pricing, the resulting cost reflects unreported usage — so
 	// flag the row on that condition alone.
 	if resp.Usage.PromptTokens == 0 && resp.Usage.TotalTokens == 0 && entry.CostsCalculationCaveat == "" {
-		entry.CostsCalculationCaveat = "provider reported no token usage; cost not calculated"
+		entry.CostsCalculationCaveat = caveatEmbeddingMissingUsage
 	}
 
 	return entry
