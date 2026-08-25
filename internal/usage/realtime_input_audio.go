@@ -46,8 +46,16 @@ func (m *RealtimeInputAudioMeter) Observe(frame []byte) {
 	if !ok || !isRealtimeInputAudioEvent(eventType) {
 		return
 	}
-	if encoded, ok := jsonStringField(frame, "audio"); ok {
-		m.audioBytes.Add(int64(base64DecodedLen(encoded)))
+	encoded, ok := jsonStringField(frame, "audio")
+	if !ok {
+		return
+	}
+	// A payload the provider will reject ("invalid_base64") never reaches the
+	// session's input buffer, so it is not audio the caller received and must not
+	// be billed. Translation sessions acknowledge nothing, so a well-formed
+	// payload the gateway relayed is the closest measure of what was accepted.
+	if decoded, ok := base64DecodedLen(encoded); ok {
+		m.audioBytes.Add(int64(decoded))
 	}
 }
 
@@ -102,8 +110,29 @@ func jsonStringField(frame []byte, field string) ([]byte, bool) {
 
 // base64DecodedLen returns the number of bytes a base64 payload decodes to,
 // without decoding it: every four encoded characters carry three bytes, less one
-// byte per padding character.
-func base64DecodedLen(encoded []byte) int {
+// byte per padding character. It reports false for a payload no decoder accepts
+// — a stray character, or a length that leaves a single dangling character —
+// which is what the provider answers with an invalid_base64 error.
+func base64DecodedLen(encoded []byte) (int, bool) {
 	trimmed := bytes.TrimRight(encoded, "=")
-	return len(trimmed)/4*3 + len(trimmed)%4*3/4
+	if len(trimmed)%4 == 1 {
+		return 0, false
+	}
+	for _, c := range trimmed {
+		if !base64Alphabet[c] {
+			return 0, false
+		}
+	}
+	return len(trimmed)/4*3 + len(trimmed)%4*3/4, true
 }
+
+// base64Alphabet marks the characters both base64 alphabets use, so the scan
+// accepts standard and URL-safe payloads alike (Postel) while rejecting anything
+// that is not base64 at all.
+var base64Alphabet = func() [256]bool {
+	var table [256]bool
+	for _, c := range []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/-_") {
+		table[c] = true
+	}
+	return table
+}()

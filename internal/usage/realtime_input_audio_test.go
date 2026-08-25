@@ -103,3 +103,46 @@ func TestRealtimeInputAudioMeterIgnoresMarkerOutsideEventType(t *testing.T) {
 		t.Errorf("Seconds() = %v, want 0 for frames that only mention the append event", got)
 	}
 }
+
+func TestRealtimeInputAudioMeterIgnoresUndecodablePayloads(t *testing.T) {
+	// The provider answers a malformed payload with invalid_base64 and never adds
+	// it to the input buffer, so the gateway must not bill it either.
+	valid := base64.StdEncoding.EncodeToString(make([]byte, 48000))
+	frames := map[string][]byte{
+		"stray characters": []byte(`{"type":"session.input_audio_buffer.append","audio":"!!! not base64 !!!"}`),
+		"dangling char":    []byte(`{"type":"session.input_audio_buffer.append","audio":"` + valid[:len(valid)-3] + `"}`),
+		"escaped quote":    []byte(`{"type":"session.input_audio_buffer.append","audio":"AAAA\"BBBB"}`),
+		"empty payload":    []byte(`{"type":"session.input_audio_buffer.append","audio":""}`),
+	}
+	for name, frame := range frames {
+		t.Run(name, func(t *testing.T) {
+			var meter RealtimeInputAudioMeter
+			meter.Observe(frame)
+			if got := meter.Seconds(); got != 0 {
+				t.Errorf("Seconds() = %v, want 0 for a payload the provider rejects", got)
+			}
+		})
+	}
+}
+
+func TestBase64DecodedLen(t *testing.T) {
+	tests := map[string]struct {
+		encoded string
+		want    int
+		wantOK  bool
+	}{
+		"padded":       {encoded: base64.StdEncoding.EncodeToString(make([]byte, 100)), want: 100, wantOK: true},
+		"unpadded":     {encoded: base64.RawStdEncoding.EncodeToString(make([]byte, 100)), want: 100, wantOK: true},
+		"url safe":     {encoded: base64.RawURLEncoding.EncodeToString([]byte{0xfb, 0xff, 0xbf}), want: 3, wantOK: true},
+		"one leftover": {encoded: "AAAAA", wantOK: false},
+		"not base64":   {encoded: "hello world!", wantOK: false},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, ok := base64DecodedLen([]byte(tt.encoded))
+			if ok != tt.wantOK || (ok && got != tt.want) {
+				t.Errorf("base64DecodedLen(%q) = (%d, %v), want (%d, %v)", tt.encoded, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
