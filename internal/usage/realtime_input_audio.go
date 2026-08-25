@@ -5,11 +5,19 @@ import (
 	"sync/atomic"
 )
 
-// realtimeInputAudioMarker matches the client event that appends audio to a
-// realtime input buffer. It is a suffix of both spellings in use: conversation
-// and transcription sessions send "input_audio_buffer.append", translation
-// sessions send "session.input_audio_buffer.append".
-var realtimeInputAudioMarker = []byte(`input_audio_buffer.append`)
+// realtimeInputAudioMarker is the cheap prefilter for the client event that
+// appends audio to a realtime input buffer: it is a suffix of both spellings in
+// use, so a frame without it cannot be an append. realtimeInputAudioEvents are
+// the exact event names — conversation and transcription sessions send the bare
+// one, translation sessions the namespaced one — that a frame must carry to be
+// billed.
+var (
+	realtimeInputAudioMarker = []byte(`input_audio_buffer.append`)
+	realtimeInputAudioEvents = [][]byte{
+		[]byte(`input_audio_buffer.append`),
+		[]byte(`session.input_audio_buffer.append`),
+	}
+)
 
 // RealtimeInputAudioMeter accumulates the audio a client streams into a realtime
 // session. It exists for session types that report no usage of their own —
@@ -31,9 +39,27 @@ func (m *RealtimeInputAudioMeter) Observe(frame []byte) {
 	if !bytes.Contains(frame, realtimeInputAudioMarker) {
 		return
 	}
+	// The marker can appear anywhere in a frame — inside a transcript, a prompt,
+	// an item id — so the event type decides. Billing on the marker alone would
+	// charge for audio the session never received.
+	eventType, ok := jsonStringField(frame, "type")
+	if !ok || !isRealtimeInputAudioEvent(eventType) {
+		return
+	}
 	if encoded, ok := jsonStringField(frame, "audio"); ok {
 		m.audioBytes.Add(int64(base64DecodedLen(encoded)))
 	}
+}
+
+// isRealtimeInputAudioEvent reports whether an event type names an input audio
+// append.
+func isRealtimeInputAudioEvent(eventType []byte) bool {
+	for _, name := range realtimeInputAudioEvents {
+		if bytes.Equal(eventType, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // Seconds returns the metered audio duration. Realtime input is PCM16 mono at

@@ -27,6 +27,7 @@ import (
 // there is addressed under its own path.
 const (
 	realtimeCallsPath            = "/v1/realtime/calls"
+	realtimeTranslationsPath     = "/v1/realtime/translations"
 	realtimeTranslationCallsPath = "/v1/realtime/translations/calls"
 )
 

@@ -9530,20 +9530,7 @@
           }
         ],
         "requestBody": {
-          "content": {
-            "application/sdp": {
-              "schema": {
-                "type": "string"
-              }
-            },
-            "multipart/form-data": {
-              "schema": {
-                "type": "string"
-              }
-            }
-          },
-          "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
-          "required": true
+          "$ref": "#/components/requestBodies/Request"
         },
         "responses": {
           "201": {
@@ -9850,6 +9837,16 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -9891,11 +9888,19 @@
             }
           }
         ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Request"
+        },
         "responses": {
           "201": {
             "description": "SDP answer",
             "content": {
               "application/sdp": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
                 "schema": {
                   "type": "string"
                 }
@@ -9909,6 +9914,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
               }
             }
           },
@@ -9916,6 +9926,11 @@
             "description": "Unauthorized",
             "content": {
               "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
@@ -9929,6 +9944,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
               }
             }
           },
@@ -9936,6 +9956,11 @@
             "description": "Too Many Requests",
             "content": {
               "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
@@ -9949,6 +9974,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
               }
             }
           },
@@ -9956,6 +9986,11 @@
             "description": "Bad Gateway",
             "content": {
               "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
@@ -10964,6 +10999,22 @@
   ],
   "components": {
     "requestBodies": {
+      "Request": {
+        "content": {
+          "application/sdp": {
+            "schema": {
+              "type": "string"
+            }
+          },
+          "multipart/form-data": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
+        "required": true
+      },
       "anthropicapi.MessagesRequest": {
         "content": {
           "application/json": {

@@ -80,3 +80,26 @@ func TestRealtimeInputAudioMeterReadsAudioAfterOtherFields(t *testing.T) {
 		t.Errorf("Seconds() = %v, want 1", got)
 	}
 }
+
+func TestRealtimeInputAudioMeterIgnoresMarkerOutsideEventType(t *testing.T) {
+	// The append marker can ride along inside any field — a transcript, a prompt,
+	// an item id. Only the event type makes a frame billable, so a frame that
+	// merely mentions the marker while carrying an "audio" string must not be
+	// charged.
+	payload := base64.StdEncoding.EncodeToString(make([]byte, 48000))
+	frames := [][]byte{
+		[]byte(`{"type":"conversation.item.create","item":{"content":[{"type":"input_text","text":"send input_audio_buffer.append frames"}],"audio":"` + payload + `"}}`),
+		[]byte(`{"type":"session.update","session":{"instructions":"input_audio_buffer.append"},"audio":"` + payload + `"}`),
+		// A near-miss event name is not the append event either.
+		[]byte(`{"type":"custom.input_audio_buffer.append","audio":"` + payload + `"}`),
+		// No event type at all: nothing identifies the frame as an append.
+		[]byte(`{"note":"input_audio_buffer.append","audio":"` + payload + `"}`),
+	}
+	var meter RealtimeInputAudioMeter
+	for _, frame := range frames {
+		meter.Observe(frame)
+	}
+	if got := meter.Seconds(); got != 0 {
+		t.Errorf("Seconds() = %v, want 0 for frames that only mention the append event", got)
+	}
+}

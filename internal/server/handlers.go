@@ -404,6 +404,7 @@ func (h *Handler) Realtime(c *echo.Context) error {
 // @Failure      404       {object}  core.OpenAIErrorEnvelope
 // @Failure      429       {object}  core.OpenAIErrorEnvelope
 // @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/realtime/translations [get]
 func (h *Handler) RealtimeTranslations(c *echo.Context) error {
 	return h.realtime().RealtimeTranslations(c)
@@ -483,9 +484,11 @@ func (h *Handler) RealtimeCalls(c *echo.Context) error {
 // @Accept       application/sdp
 // @Accept       mpfd
 // @Produce      application/sdp
+// @Produce      json
 // @Security     BearerAuth
 // @Param        model     query     string  false  "Translation model that owns the session (required for raw SDP offers)"
 // @Param        provider  query     string  false  "Optional provider hint"
+// @Param        request   body      string  true   "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields"
 // @Success      201       {string}  string  "SDP answer"
 // @Failure      400       {object}  core.OpenAIErrorEnvelope
 // @Failure      401       {object}  core.OpenAIErrorEnvelope

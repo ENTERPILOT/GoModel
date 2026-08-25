@@ -6602,6 +6602,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
                     }
                 },
                 "security": [
@@ -6619,7 +6625,8 @@ const docTemplate = `{
                     "multipart/form-data"
                 ],
                 "produces": [
-                    "application/sdp"
+                    "application/sdp",
+                    "application/json"
                 ],
                 "tags": [
                     "realtime"
@@ -6637,6 +6644,15 @@ const docTemplate = `{
                         "description": "Optional provider hint",
                         "name": "provider",
                         "in": "query"
+                    },
+                    {
+                        "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 ],
                 "responses": {

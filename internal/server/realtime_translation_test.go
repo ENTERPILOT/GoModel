@@ -190,8 +190,8 @@ func TestRealtimeMeteredSessionRecordsAudioDuration(t *testing.T) {
 
 	entries := waitForUsageEntries(t, usageLogger, 1)
 	entry := entries[0]
-	if entry.Endpoint != "/v1/realtime" {
-		t.Errorf("endpoint = %q, want /v1/realtime", entry.Endpoint)
+	if entry.Endpoint != "/v1/realtime/translations" {
+		t.Errorf("endpoint = %q, want the translation surface", entry.Endpoint)
 	}
 	if entry.Model != "gpt-realtime-translate" {
 		t.Errorf("model = %q, want the routed model", entry.Model)

@@ -125,6 +125,12 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint, intent st
 	if err != nil {
 		return handleError(c, err)
 	}
+	// Translation sessions are priced per second rather than per token, so their
+	// usage is labeled with the surface they ran on — the same label the typed
+	// route and the intent dial share, and the one the signaling routes use.
+	if core.EqualRealtimeIntent(intent, core.RealtimeIntentTranslation) {
+		route.endpoint = realtimeTranslationsPath
+	}
 	// The proxy call blocks for the whole websocket session, so the released
 	// concurrency slot spans the session lifetime.
 	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{provider: route.providerName, model: route.model})
