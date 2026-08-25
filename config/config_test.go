@@ -1905,6 +1905,38 @@ func TestValidateBodySizeLimit(t *testing.T) {
 	}
 }
 
+func TestLoad_LocalYAMLAndRedisURLAreBothKept(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		cfgDir := filepath.Join(dir, "config")
+		if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		yamlContent := "cache:\n  model:\n    local:\n      cache_dir: \".cache\"\n"
+		if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yamlContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		t.Setenv("REDIS_URL", "redis://env-host:6379")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v, want nil", err)
+		}
+		cfg := result.Config
+		if cfg.Cache.Model.Local == nil || cfg.Cache.Model.Local.CacheDir != ".cache" {
+			t.Fatalf("expected local cache kept as fallback, got %+v", cfg.Cache.Model.Local)
+		}
+		if cfg.Cache.Model.Redis == nil {
+			t.Fatal("expected Cache.Model.Redis from REDIS_URL")
+		}
+		if cfg.Cache.Model.Redis.URL != "redis://env-host:6379" {
+			t.Errorf("expected REDIS_URL=redis://env-host:6379, got %s", cfg.Cache.Model.Redis.URL)
+		}
+	})
+}
+
 func TestLoad_EnvOnlyRedisModelCache(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
