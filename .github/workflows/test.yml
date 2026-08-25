@@ -31,13 +31,8 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          # Build the linter with Go 1.27 until upstream publishes binaries built
-          # with Go 1.27; older toolchains reject modules targeting newer Go.
-          install-mode: goinstall
-          # v2.12+ ships a staticcheck that understands modern Go control flow.
-          # v2.10's staticcheck mis-analyzed `if x == nil { t.Fatal() }` guards
-          # under GO_VERSION 1.26.4 and emitted false-positive SA5011 warnings.
-          version: v2.12.2
+          # v2.13+ supports Go 1.27 and bundles a compatible staticcheck.
+          version: v2.13.1
           # The shared analysis cache went bad on 2026-08-25: staticcheck lost
           # t.Fatal no-return facts and every run flagged a different set of
           # SA5011 false positives in untouched files, on PR branches and main
