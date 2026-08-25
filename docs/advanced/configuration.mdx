@@ -500,7 +500,9 @@ settings), use the YAML file:
 ```yaml
 models:
   # fallback is the default. Use allowlist when configured provider model lists
-  # should hide upstream models and skip upstream /models calls.
+  # should hide upstream models and skip upstream /models calls, or merge to add
+  # configured models on top of the discovered inventory (models a provider
+  # serves but does not list).
   configured_provider_models_mode: fallback
 
 providers:

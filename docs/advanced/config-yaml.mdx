@@ -39,9 +39,11 @@ example `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, `SGLANG_MODELS`,
 `LLMD_<SUFFIX>_INFERENCE_OBJECTIVE` and
 `LLMD_<SUFFIX>_FAIRNESS_FROM_USER_PATH` controls.
 Set `CONFIGURED_PROVIDER_MODELS_MODE=fallback` (default) to use those lists only
-when upstream `/models` fails or is empty, or `allowlist` to expose only the
+when upstream `/models` fails or is empty, `allowlist` to expose only the
 configured models for providers that define a list and skip their upstream
-`/models` calls.
+`/models` calls, or `merge` to add configured models on top of the discovered
+inventory — useful for models a provider serves but does not include in its
+`/models` listing.
 
 ## Priority Order
 
