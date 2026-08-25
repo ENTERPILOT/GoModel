@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -321,20 +323,26 @@ func TestImageAspectRatio(t *testing.T) {
 }
 
 func TestCreateImage_GeminiImageModelMultiImage(t *testing.T) {
-	var gotBody map[string]any
+	// Gemini image models reject candidateCount > 1, so n is served as n
+	// parallel single-candidate calls whose results merge.
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
 		body, _ := io.ReadAll(r.Body)
-		if err := json.Unmarshal(body, &gotBody); err != nil {
+		var got map[string]any
+		if err := json.Unmarshal(body, &got); err != nil {
 			t.Errorf("request body is not JSON: %v", err)
 		}
+		config, _ := got["generationConfig"].(map[string]any)
+		if _, ok := config["candidateCount"]; ok {
+			t.Errorf("candidateCount sent upstream: %+v", config)
+		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"candidates": [
-				{"content": {"role": "model", "parts": [{"inlineData": {"mimeType": "image/png", "data": "aW1nMQ=="}}]}, "finishReason": "STOP"},
-				{"content": {"role": "model", "parts": [{"inlineData": {"mimeType": "image/png", "data": "aW1nMg=="}}]}, "finishReason": "STOP", "index": 1}
-			],
-			"usageMetadata": {"promptTokenCount": 8, "candidatesTokenCount": 2580, "totalTokenCount": 2588}
-		}`))
+		fmt.Fprintf(w, `{
+			"candidates": [{"content": {"role": "model", "parts": [{"inlineData": {"mimeType": "image/png", "data": "aW1nJTAxZA=="}}]}, "finishReason": "STOP"}],
+			"usageMetadata": {"promptTokenCount": 8, "candidatesTokenCount": 1290, "totalTokenCount": 1298}
+		}`)
+		_ = call
 	}))
 	defer server.Close()
 
@@ -344,15 +352,47 @@ func TestCreateImage_GeminiImageModelMultiImage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	config, _ := gotBody["generationConfig"].(map[string]any)
-	if config["candidateCount"] != float64(2) {
-		t.Errorf("candidateCount = %v, want 2 for n=2", config["candidateCount"])
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("upstream calls = %d, want one per requested image", got)
 	}
-	if len(resp.Data) != 2 || resp.Data[0].B64JSON != "aW1nMQ==" || resp.Data[1].B64JSON != "aW1nMg==" {
-		t.Fatalf("data = %+v, want both candidates flattened into images", resp.Data)
+	if len(resp.Data) != 2 {
+		t.Fatalf("data = %+v, want both fan-out results merged", resp.Data)
 	}
-	if resp.Usage == nil || resp.Usage.TotalTokens != 2588 {
-		t.Errorf("usage = %+v, want mapped totals", resp.Usage)
+	if resp.Usage == nil || resp.Usage.InputTokens != 16 || resp.Usage.OutputTokens != 2580 || resp.Usage.TotalTokens != 2596 {
+		t.Errorf("usage = %+v, want summed token counts", resp.Usage)
+	}
+}
+
+func TestCreateImage_GeminiImageModelFanOutCap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("no upstream call expected above the fan-out cap")
+	}))
+	defer server.Close()
+
+	p := newNativeTestProvider(t, server)
+	_, err := p.CreateImage(context.Background(), decodeImageRequest(t, `{"model": "gemini-2.5-flash-image", "prompt": "x", "n": 11}`))
+	if err == nil || !strings.Contains(err.Error(), "at most 10") {
+		t.Fatalf("error = %v, want fan-out cap rejection", err)
+	}
+}
+
+func TestCreateImage_GeminiImageModelFanOutFailureFails(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"candidates": [{"content": {"role": "model", "parts": [{"inlineData": {"mimeType": "image/png", "data": "aW1n"}}]}, "finishReason": "STOP"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error": {"message": "boom"}}`))
+	}))
+	defer server.Close()
+
+	p := newNativeTestProvider(t, server)
+	_, err := p.CreateImage(context.Background(), decodeImageRequest(t, `{"model": "gemini-2.5-flash-image", "prompt": "x", "n": 2}`))
+	if err == nil {
+		t.Fatal("expected a failed fan-out call to fail the request")
 	}
 }
 
