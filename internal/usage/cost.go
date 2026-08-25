@@ -33,11 +33,12 @@ const (
 
 // retainedMissingUsageCaveat keeps a stored missing-usage caveat across
 // repricing: recalculation cannot conjure usage the provider never reported.
-// The image caveat lifts once a per_image price gives the row a real basis.
-func retainedMissingUsageCaveat(existing string, pricing *core.ModelPricing) string {
+// The image caveat lifts only when a per_image price has something to count —
+// a stored images total — so the row gains a real cost basis.
+func retainedMissingUsageCaveat(existing string, rawData map[string]any, pricing *core.ModelPricing) string {
 	switch existing {
 	case caveatImageMissingUsage:
-		if pricing != nil && pricing.PerImage != nil {
+		if pricing != nil && pricing.PerImage != nil && extractInt(rawData, rawKeyImages) > 0 {
 			return ""
 		}
 		return existing

@@ -140,6 +140,13 @@ func TestExtractFromImageResponse_NoUsageCaveat(t *testing.T) {
 		t.Fatalf("caveat = %q, want none for an explicitly free per-image model", free.CostsCalculationCaveat)
 	}
 
+	// A per_image price with nothing to count is no basis: an empty response
+	// without usage stays flagged.
+	empty := ExtractFromImageResponse(&core.ImageGenerationResponse{}, "req", "dall-e-3", "openai", &core.ModelPricing{PerImage: new(0.04)})
+	if empty.CostsCalculationCaveat == "" {
+		t.Fatal("expected a caveat when there are no images and no usage to price")
+	}
+
 	// A usage-carrying response keeps its token costs and stays caveat-free.
 	withUsage := ExtractFromImageResponse(&core.ImageGenerationResponse{
 		Data:  []core.ImageData{{B64JSON: "aGk="}},

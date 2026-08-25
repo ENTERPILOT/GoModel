@@ -81,6 +81,19 @@ func TestRecalculateEntryCostsPreservesMissingUsageCaveats(t *testing.T) {
 		t.Fatalf("total = %v, want 0.08 from the per_image rate", repriced.TotalCost)
 	}
 
+	// A per_image price cannot lift the caveat for a row that recorded no
+	// image count — there is nothing to price.
+	countless := recalculateEntryCosts(recalculationEntry{
+		ID:       "usage-img-empty",
+		Model:    "gemini-2.5-flash-image",
+		Provider: "gemini",
+		Endpoint: "/v1/images/generations",
+		Caveat:   caveatImageMissingUsage,
+	}, &recordingPricingResolver{pricing: &core.ModelPricing{PerImage: new(0.04)}})
+	if countless.Caveat != caveatImageMissingUsage {
+		t.Fatalf("caveat = %q, want preserved without an image count", countless.Caveat)
+	}
+
 	// Embedding rows keep the caveat unconditionally: no repricing can
 	// recover usage the provider never reported.
 	embedding := recalculateEntryCosts(recalculationEntry{
