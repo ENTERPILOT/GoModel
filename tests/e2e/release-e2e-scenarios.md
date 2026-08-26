@@ -5810,7 +5810,7 @@ surface, so the usage block is present but zero. Read-only and rerunnable.
 ### S218 Gemini embeddings batch input and `dimensions` mapping
 
 ```bash
-REQUEST_ID="qa-gemini-embeddings-$QA_SUFFIX"
+REQUEST_ID="qa-gemini-embeddings-$QA_SUFFIX-$$-$RANDOM"
 USER_PATH="/qa/embeddings/$QA_SUFFIX"
 RESP_FILE="$QA_RUN_DIR/s218.embeddings.json"
 curl -fsS -o "$RESP_FILE" "$BASE_URL/v1/embeddings" \
