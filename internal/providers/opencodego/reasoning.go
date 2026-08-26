@@ -31,10 +31,14 @@ func adaptChatRequest(defaultEffort string) func(*core.ChatRequest) (*core.ChatR
 		if req == nil {
 			return req, nil
 		}
+		// GoModel's nested reasoning.effort is the canonical field: as with
+		// every other provider using AdaptReasoningEffortRequest, it wins over
+		// a flat reasoning_effort the client sent alongside it.
 		if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
 			return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Reasoning.Effort))
 		}
-		// A client that already speaks the flat wire shape keeps full control.
+		// Nothing canonical to map: a client that speaks the flat wire shape
+		// asked for reasoning too, so the default must not overwrite it.
 		if defaultEffort == "" || req.ExtraFields.Lookup("reasoning_effort") != nil {
 			return req, nil
 		}

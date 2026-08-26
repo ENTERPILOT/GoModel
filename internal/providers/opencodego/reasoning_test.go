@@ -115,6 +115,37 @@ func TestChatCompletion_KeepsClientSuppliedFlatReasoningEffort(t *testing.T) {
 	}
 }
 
+// TestChatCompletion_NestedReasoningWinsOverFlatField pins the precedence a
+// self-contradicting request gets: reasoning.effort is GoModel's canonical
+// field, so it wins over a flat reasoning_effort sent alongside it, matching
+// every other provider built on AdaptReasoningEffortRequest. The flat field is
+// only authoritative when no canonical reasoning is present, where it stops the
+// default from being injected over it.
+func TestChatCompletion_NestedReasoningWinsOverFlatField(t *testing.T) {
+	var got map[string]any
+	server := captureBody(t, &got)
+	defer server.Close()
+
+	extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
+		"reasoning_effort": json.RawMessage(`"max"`),
+	})
+	if err != nil {
+		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+	}
+
+	if _, err := newTestProvider(server.URL, server.Client()).ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:       "ox-alpha-free",
+		Messages:    []core.Message{{Role: "user", Content: "hi"}},
+		Reasoning:   &core.Reasoning{Effort: "medium"},
+		ExtraFields: extra,
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if got["reasoning_effort"] != "low" {
+		t.Fatalf("reasoning_effort = %v, want low (canonical reasoning.effort wins)", got["reasoning_effort"])
+	}
+}
+
 func TestChatCompletion_DefaultReasoningEffortEnvOverride(t *testing.T) {
 	t.Setenv(defaultReasoningEffortEnvVar, "high")
 
@@ -183,6 +214,25 @@ func TestStreamChatCompletion_InjectsDefaultReasoningEffort(t *testing.T) {
 	_, _ = io.Copy(io.Discard, body)
 	_ = body.Close()
 
+	if got["reasoning_effort"] != "low" {
+		t.Fatalf("reasoning_effort = %v, want low", got["reasoning_effort"])
+	}
+}
+
+// TestResponses_InjectsDefaultReasoningEffort covers the /v1/responses path:
+// it is translated to a chat completion by ResponsesViaChat, so the adaptation
+// must reach the upstream body there too.
+func TestResponses_InjectsDefaultReasoningEffort(t *testing.T) {
+	var got map[string]any
+	server := captureBody(t, &got)
+	defer server.Close()
+
+	if _, err := newTestProvider(server.URL, server.Client()).Responses(context.Background(), &core.ResponsesRequest{
+		Model: "ox-alpha-free",
+		Input: "hi",
+	}); err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
 	if got["reasoning_effort"] != "low" {
 		t.Fatalf("reasoning_effort = %v, want low", got["reasoning_effort"])
 	}
