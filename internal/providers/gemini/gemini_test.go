@@ -2305,3 +2305,57 @@ func TestGeminiModelSupportedMethods_EmptyMethodFallback(t *testing.T) {
 		}
 	}
 }
+
+// TestGeminiGenerationConfig_ThinkingFromFlatReasoningEffort covers the wire
+// shape OpenAI-compatible coding agents send. The native endpoint has no
+// reasoning_effort field, so without translation the client's intent is
+// dropped and the model thinks at its own default.
+func TestGeminiGenerationConfig_ThinkingFromFlatReasoningEffort(t *testing.T) {
+	extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
+		"reasoning_effort": json.RawMessage(`"low"`),
+	})
+	if err != nil {
+		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+	}
+
+	cfg := geminiGenerationConfig(&core.ChatRequest{
+		Model:       "gemini-2.5-flash",
+		Messages:    []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: extra,
+	})
+
+	thinking, ok := cfg["thinkingConfig"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinkingConfig = %#v, want a config map", cfg["thinkingConfig"])
+	}
+	if got := thinking["thinkingBudget"]; got != 1024 {
+		t.Fatalf("thinkingBudget = %#v, want 1024", got)
+	}
+}
+
+// TestChatCompletion_MapsFlatReasoningEffortOnOpenAICompatibleEndpoint pins
+// that the flat field survives the OpenAI-compatible path as a single,
+// normalized field rather than being forwarded alongside a nested object.
+func TestChatCompletion_MapsFlatReasoningEffortOnOpenAICompatibleEndpoint(t *testing.T) {
+	extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
+		"reasoning_effort": json.RawMessage(`" High "`),
+	})
+	if err != nil {
+		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+	}
+
+	adapted, err := adaptChatRequest(&core.ChatRequest{
+		Model:       "gemini-3-pro",
+		Messages:    []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: extra,
+	})
+	if err != nil {
+		t.Fatalf("adaptChatRequest() error = %v", err)
+	}
+	if adapted.Reasoning != nil {
+		t.Fatalf("nested reasoning = %#v, want nil", adapted.Reasoning)
+	}
+	if got := string(adapted.ExtraFields.Lookup("reasoning_effort")); got != `"high"` {
+		t.Fatalf("reasoning_effort = %s, want \"high\"", got)
+	}
+}

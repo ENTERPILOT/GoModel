@@ -91,27 +91,50 @@ func TestChatCompletion_MapsExplicitReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestChatCompletion_KeepsClientSuppliedFlatReasoningEffort(t *testing.T) {
-	var got map[string]any
-	server := captureBody(t, &got)
-	defer server.Close()
-
-	extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
-		"reasoning_effort": json.RawMessage(`"max"`),
-	})
-	if err != nil {
-		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+// TestChatCompletion_MapsClientSuppliedFlatReasoningEffort covers the wire
+// shape OpenAI-compatible coding agents send: a top-level reasoning_effort
+// string rather than GoModel's nested object. It carries the same intent, so
+// it gets the same per-model mapping — "medium" is not a level OpenCode Zen
+// accepts, and must not reach the upstream verbatim.
+func TestChatCompletion_MapsClientSuppliedFlatReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name string
+		sent string
+		want string
+	}{
+		{name: "supported level preserved", sent: "max", want: "max"},
+		{name: "unsupported level downgraded", sent: "medium", want: "low"},
+		{name: "spelling normalized", sent: " HIGH ", want: "high"},
 	}
 
-	if _, err := newTestProvider(server.URL, server.Client()).ChatCompletion(context.Background(), &core.ChatRequest{
-		Model:       "ox-alpha-free",
-		Messages:    []core.Message{{Role: "user", Content: "hi"}},
-		ExtraFields: extra,
-	}); err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if got["reasoning_effort"] != "max" {
-		t.Fatalf("reasoning_effort = %v, want max (client value preserved)", got["reasoning_effort"])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got map[string]any
+			server := captureBody(t, &got)
+			defer server.Close()
+
+			sent, err := json.Marshal(tt.sent)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
+				"reasoning_effort": sent,
+			})
+			if err != nil {
+				t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+			}
+
+			if _, err := newTestProvider(server.URL, server.Client()).ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:       "ox-alpha-free",
+				Messages:    []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: extra,
+			}); err != nil {
+				t.Fatalf("ChatCompletion() error = %v", err)
+			}
+			if got["reasoning_effort"] != tt.want {
+				t.Fatalf("reasoning_effort = %v, want %v", got["reasoning_effort"], tt.want)
+			}
+		})
 	}
 }
 

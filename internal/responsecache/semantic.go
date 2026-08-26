@@ -445,6 +445,7 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, gu
 		Stream          bool                `json:"stream,omitempty"`
 		StreamOptions   *core.StreamOptions `json:"stream_options"`
 		Reasoning       json.RawMessage     `json:"reasoning"`
+		ReasoningEffort string              `json:"reasoning_effort"`
 		Instructions    string              `json:"instructions"`
 	}
 	_ = json.Unmarshal(body, &req)
@@ -490,6 +491,11 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, gu
 		} else {
 			h.Write(req.Reasoning)
 		}
+	}
+	// The flat Chat Completions spelling shapes the answer exactly like the
+	// nested object, so two efforts must never share a cache entry.
+	if req.ReasoningEffort != "" {
+		h.Write([]byte(req.ReasoningEffort))
 	}
 	h.Write([]byte{0})
 

@@ -40,8 +40,12 @@ them per image; set a `per_image` price for the model if the catalog has none.
 Grok reasoning models (e.g. `grok-4.6`, defaulting to `high`) accept
 `reasoning_effort` as a top-level string on Chat Completions. GoModel rewrites
 the OpenAI-shaped `"reasoning": {"effort": "..."}` into that flat field — no
-client change required. On the Responses API the nested shape is xAI-native
-and passes through unchanged.
+client change required. A client that already sends the flat string (most
+OpenAI-compatible coding agents do) gets the same per-model mapping, so an
+effort level the target model does not accept is downgraded rather than
+forwarded verbatim; a non-empty `reasoning.effort` wins when a request carries
+both. On the Responses API the nested shape is xAI-native and passes through
+unchanged.
 
 | Client sends | xAI receives |
 | ------------ | ------------ |

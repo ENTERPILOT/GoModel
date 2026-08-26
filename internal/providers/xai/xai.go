@@ -85,10 +85,11 @@ func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
 // default high), not "reasoning": {"effort": "..."}; the nested shape is
 // native only to xAI's Responses API, which passes through untouched.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
-	if req == nil || req.Reasoning == nil || strings.TrimSpace(req.Reasoning.Effort) == "" {
+	effort := providers.ResolveReasoningEffort(req)
+	if effort == "" {
 		return req, nil
 	}
-	return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Model, req.Reasoning.Effort))
+	return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Model, effort))
 }
 
 // normalizeReasoningEffort downgrades GoModel effort levels xAI does not

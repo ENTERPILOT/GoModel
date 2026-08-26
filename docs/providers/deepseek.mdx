@@ -43,7 +43,10 @@ with two permitted levels: `high` and `max`.
 | anything else | passed through by GoModel, then rejected by DeepSeek |
 
 GoModel rewrites the OpenAI-shaped `"reasoning": {"effort": "..."}` into
-DeepSeek's top-level `reasoning_effort` — no client change required. Validate
+DeepSeek's top-level `reasoning_effort` — no client change required. Clients
+that already send the flat `"reasoning_effort": "..."` string (most
+OpenAI-compatible coding agents do) get the same mapping; a non-empty
+`reasoning.effort` wins when a request carries both. Validate
 or normalize custom client values to `high` or `max` before calling GoModel.
 To disable reasoning, omit the `reasoning` field entirely; any provided
 `reasoning.effort`, including `low`, is mapped and enables reasoning.

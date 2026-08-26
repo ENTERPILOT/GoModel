@@ -14,6 +14,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 type geminiGenerateContentRequest struct {
@@ -508,9 +509,9 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 	copyStopSequences(req.ExtraFields.Lookup("stop"), cfg)
 	copyResponseFormat(req.ExtraFields.Lookup("response_format"), cfg)
 	copyGoogleThinkingConfig(req.ExtraFields.Lookup("extra_body"), cfg)
-	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
+	if effort := providers.ResolveReasoningEffort(req); effort != "" {
 		if _, exists := cfg["thinkingConfig"]; !exists {
-			if thinkingConfig := thinkingConfigForEffort(req.Model, req.Reasoning.Effort); len(thinkingConfig) > 0 {
+			if thinkingConfig := thinkingConfigForEffort(req.Model, effort); len(thinkingConfig) > 0 {
 				cfg["thinkingConfig"] = thinkingConfig
 			}
 		}

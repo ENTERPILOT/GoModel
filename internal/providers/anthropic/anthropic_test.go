@@ -1592,51 +1592,6 @@ func TestConvertToAnthropicRequest_EmptyReasoningObjectFallsBackToReasoningEffor
 	}
 }
 
-func TestResolveAnthropicReasoningEffort_NormalizesSpelling(t *testing.T) {
-	tests := []struct {
-		name string
-		req  *core.ChatRequest
-		want string
-	}{
-		{
-			name: "object form uppercase with whitespace",
-			req:  &core.ChatRequest{Reasoning: &core.Reasoning{Effort: " HIGH "}},
-			want: "high",
-		},
-		{
-			name: "string form mixed case",
-			req: &core.ChatRequest{ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-				"reasoning_effort": json.RawMessage(`" Max "`),
-			})},
-			want: "max",
-		},
-		{
-			name: "whitespace-only object effort falls back to string form",
-			req: &core.ChatRequest{
-				Reasoning: &core.Reasoning{Effort: "  "},
-				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-					"reasoning_effort": json.RawMessage(`"medium"`),
-				}),
-			},
-			want: "medium",
-		},
-		{
-			name: "whitespace-only string form resolves to empty",
-			req: &core.ChatRequest{ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-				"reasoning_effort": json.RawMessage(`"  "`),
-			})},
-			want: "",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveAnthropicReasoningEffort(tt.req); got != tt.want {
-				t.Fatalf("resolveAnthropicReasoningEffort() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestConvertToAnthropicRequest_InvalidToolArguments(t *testing.T) {
 	_, err := convertToAnthropicRequest(&core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",

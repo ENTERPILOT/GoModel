@@ -1023,3 +1023,66 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 		}
 	}
 }
+
+// TestChatCompletion_MapsFlatReasoningEffortForModel covers the wire shape
+// OpenAI-compatible coding agents send: reasoning_effort as a top-level string
+// rather than GoModel's nested object. It must get the same per-model mapping,
+// or an effort level the target model rejects reaches xAI verbatim.
+func TestChatCompletion_MapsFlatReasoningEffortForModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+		sent  string
+		want  string
+	}{
+		{name: "supported level preserved", model: "grok-4.6", sent: "xhigh", want: "xhigh"},
+		{name: "unsupported level downgraded", model: "grok-4.5", sent: "xhigh", want: "high"},
+		{name: "spelling normalized", model: "grok-4.5", sent: " High ", want: "high"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]any
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					http.Error(w, "decode error", http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{
+					"id":"chatcmpl-xai",
+					"created":1677652288,
+					"model":"grok-4.5",
+					"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]
+				}`))
+			}))
+			defer server.Close()
+
+			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider.SetBaseURL(server.URL)
+
+			sent, err := json.Marshal(tt.sent)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
+				"reasoning_effort": sent,
+			})
+			if err != nil {
+				t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+			}
+
+			if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:       tt.model,
+				Messages:    []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: extra,
+			}); err != nil {
+				t.Fatalf("ChatCompletion() error = %v", err)
+			}
+			if gotBody["reasoning_effort"] != tt.want {
+				t.Fatalf("reasoning_effort = %#v, want %v", gotBody["reasoning_effort"], tt.want)
+			}
+		})
+	}
+}

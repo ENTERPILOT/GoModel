@@ -55,3 +55,22 @@ func TestComputeParamsHash_IncludesReasoning(t *testing.T) {
 		t.Fatal("expected different params hashes when reasoning differs")
 	}
 }
+
+// TestComputeParamsHash_IncludesFlatReasoningEffort covers the Chat
+// Completions spelling: it shapes the answer just like the nested object, so
+// two efforts must not share a cached response.
+func TestComputeParamsHash_IncludesFlatReasoningEffort(t *testing.T) {
+	low := []byte(`{"model":"m","reasoning_effort":"low"}`)
+	high := []byte(`{"model":"m","reasoning_effort":"high"}`)
+	none := []byte(`{"model":"m"}`)
+
+	h1 := computeParamsHash(low, "/v1/chat/completions", nil, "", "embed")
+	h2 := computeParamsHash(high, "/v1/chat/completions", nil, "", "embed")
+	h3 := computeParamsHash(none, "/v1/chat/completions", nil, "", "embed")
+	if h1 == h2 {
+		t.Fatal("expected different params hashes when reasoning_effort differs")
+	}
+	if h1 == h3 {
+		t.Fatal("expected a different params hash from a request without reasoning_effort")
+	}
+}

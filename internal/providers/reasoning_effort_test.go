@@ -72,3 +72,92 @@ func TestAdaptReasoningEffortRequestPreservesExistingExtraFields(t *testing.T) {
 		t.Fatalf("reasoning_effort = %s, want adaptation to win over stale extra field", got)
 	}
 }
+
+func TestResolveReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *core.ChatRequest
+		want string
+	}{
+		{name: "nil request", req: nil, want: ""},
+		{name: "no reasoning", req: &core.ChatRequest{Model: "m"}, want: ""},
+		{
+			name: "nested object",
+			req:  &core.ChatRequest{Reasoning: &core.Reasoning{Effort: "high"}},
+			want: "high",
+		},
+		{
+			name: "flat chat completions field",
+			req: &core.ChatRequest{ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_effort": json.RawMessage(`"medium"`),
+			})},
+			want: "medium",
+		},
+		{
+			name: "nested wins over flat",
+			req: &core.ChatRequest{
+				Reasoning: &core.Reasoning{Effort: "low"},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"reasoning_effort": json.RawMessage(`"high"`),
+				}),
+			},
+			want: "low",
+		},
+		{
+			name: "empty nested object falls back to flat",
+			req: &core.ChatRequest{
+				Reasoning: &core.Reasoning{},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"reasoning_effort": json.RawMessage(`"high"`),
+				}),
+			},
+			want: "high",
+		},
+		{
+			name: "spelling normalized",
+			req: &core.ChatRequest{ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_effort": json.RawMessage(`" XHigh "`),
+			})},
+			want: "xhigh",
+		},
+		{
+			name: "whitespace-only nested effort falls back to flat",
+			req: &core.ChatRequest{
+				Reasoning: &core.Reasoning{Effort: "  "},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"reasoning_effort": json.RawMessage(`"medium"`),
+				}),
+			},
+			want: "medium",
+		},
+		{
+			name: "whitespace-only flat field",
+			req: &core.ChatRequest{ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_effort": json.RawMessage(`"  "`),
+			})},
+			want: "",
+		},
+		{
+			name: "null flat field",
+			req: &core.ChatRequest{ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_effort": json.RawMessage(`null`),
+			})},
+			want: "",
+		},
+		{
+			name: "non-string flat field",
+			req: &core.ChatRequest{ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_effort": json.RawMessage(`{"effort":"high"}`),
+			})},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveReasoningEffort(tt.req); got != tt.want {
+				t.Fatalf("ResolveReasoningEffort() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

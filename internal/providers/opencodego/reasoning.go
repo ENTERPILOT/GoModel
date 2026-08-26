@@ -31,15 +31,15 @@ func adaptChatRequest(defaultEffort string) func(*core.ChatRequest) (*core.ChatR
 		if req == nil {
 			return req, nil
 		}
-		// GoModel's nested reasoning.effort is the canonical field: as with
-		// every other provider using AdaptReasoningEffortRequest, it wins over
-		// a flat reasoning_effort the client sent alongside it.
-		if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
-			return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Reasoning.Effort))
+		// Either wire shape expresses the client's intent: the nested
+		// reasoning.effort object GoModel documents, or the flat
+		// reasoning_effort string OpenAI-compatible clients send. Both are
+		// mapped onto the levels OpenCode Zen accepts.
+		if effort := providers.ResolveReasoningEffort(req); effort != "" {
+			return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(effort))
 		}
-		// Nothing canonical to map: a client that speaks the flat wire shape
-		// asked for reasoning too, so the default must not overwrite it.
-		if defaultEffort == "" || req.ExtraFields.Lookup("reasoning_effort") != nil {
+		// The client asked for no reasoning at all.
+		if defaultEffort == "" {
 			return req, nil
 		}
 		return providers.AdaptReasoningEffortRequest(req, defaultEffort)

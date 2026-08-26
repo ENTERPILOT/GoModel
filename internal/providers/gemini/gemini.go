@@ -415,10 +415,11 @@ func nativeBaseURLFromOpenAICompatibleBaseURL(baseURL string) (string, bool) {
 // Gemini uses "reasoning_effort" as a top-level string (e.g. "low", "medium", "high"),
 // not the nested "reasoning": {"effort": "..."} format.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
-	if req.Reasoning == nil || req.Reasoning.Effort == "" {
+	effort := providers.ResolveReasoningEffort(req)
+	if effort == "" {
 		return req, nil
 	}
-	return providers.AdaptReasoningEffortRequest(req, req.Reasoning.Effort)
+	return providers.AdaptReasoningEffortRequest(req, effort)
 }
 
 func (p *Provider) openAICompatibleChatBody(req *core.ChatRequest) (any, error) {

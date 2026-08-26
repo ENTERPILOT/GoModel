@@ -125,6 +125,55 @@ Then export the GoModel key:
 export OPENAI_API_KEY=change-me
 ```
 
+#### Thinking effort in OpenCode
+
+OpenCode's thinking-effort switcher (the `variant_cycle` keybind) is driven by
+each model's entry in its own registry. A custom provider such as `gomodel` has
+no registry entry, so its models start with no variants and the switcher has
+nothing to offer — nothing is missing on the GoModel side. Declare the variants
+you want on the model:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "gomodel": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "GoModel",
+      "options": {
+        "baseURL": "http://localhost:8080/v1",
+        "apiKey": "{env:OPENAI_API_KEY}"
+      },
+      "models": {
+        "claude-opus-4-5": {
+          "name": "Claude Opus 4.5 (via GoModel)",
+          "reasoning": true,
+          "variants": {
+            "low": { "reasoningEffort": "low" },
+            "high": { "reasoningEffort": "high" },
+            "max": { "reasoningEffort": "max" }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Each variant sends `reasoning_effort` as a top-level string on
+`/v1/chat/completions`. GoModel accepts that spelling alongside its own
+`"reasoning": {"effort": "..."}` object and translates either one into whatever
+the routed provider expects — Anthropic thinking budgets, Gemini
+`thinkingConfig`, xAI's flat field — downgrading levels the target model does
+not support. Use the same effort names GoModel documents: `low`, `medium`,
+`high`, `xhigh`, `max`.
+
+<Note>
+  Declare variants only for models that actually reason. A model without
+  thinking support rejects the parameter upstream, and GoModel forwards that
+  error unchanged.
+</Note>
+
 ### Cline
 
 In Cline, choose:
@@ -208,6 +257,7 @@ following your GoModel traffic and usage.
 ## References
 
 - OpenCode providers docs: [Providers](https://opencode.ai/docs/providers/)
+- OpenCode model variants docs: [Models](https://opencode.ai/docs/models/)
 - Cline OpenAI-compatible provider docs: [OpenAI Compatible](https://docs.cline.bot/provider-config/openai-compatible)
 - Roo Code OpenAI-compatible provider docs: [OpenAI Compatible](https://docs.roocode.com/providers/openai-compatible)
 - Kilo Code OpenAI-compatible provider docs: [OpenAI Compatible](https://kilo.ai/docs/providers/openai-compatible)

@@ -75,8 +75,8 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 
 	adapted := req
 	var err error
-	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
-		adapted, err = providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Reasoning.Effort))
+	if effort := providers.ResolveReasoningEffort(req); effort != "" {
+		adapted, err = providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(effort))
 		if err != nil {
 			return nil, err
 		}

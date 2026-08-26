@@ -530,3 +530,46 @@ func TestEmbeddings_ReturnsUnsupported(t *testing.T) {
 		t.Fatal("expected unsupported embeddings error, got nil")
 	}
 }
+
+// TestChatCompletion_MapsFlatReasoningEffort covers the top-level
+// reasoning_effort string OpenAI-compatible clients send: it carries the same
+// intent as GoModel's nested object, so DeepSeek's level mapping applies to it
+// too.
+func TestChatCompletion_MapsFlatReasoningEffort(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			http.Error(w, "decode error", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-deepseek",
+			"created":1677652288,
+			"model":"deepseek-v4-pro",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
+		"reasoning_effort": json.RawMessage(`"medium"`),
+	})
+	if err != nil {
+		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+	}
+
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:       "deepseek-v4-pro",
+		Messages:    []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: extra,
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotBody["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort = %#v, want high", gotBody["reasoning_effort"])
+	}
+}
