@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 219 end-to-end curl scenarios for release validation.
+This file contains 224 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -150,6 +150,10 @@ Stateful note:
   translation client-secret mint, and the rejection of a translation session on a
   provider that has no translation surface; they are read-only and rerunnable in
   any order
+- `S224` exercises provider inventory filtering on OpenRouter. The stack manager
+  defaults `OPENROUTER_MODEL_FILTER_INCLUDE` to `*:free`, which leaves models
+  used by the rest of the matrix untouched; the scenario is read-only and
+  rerunnable in any order
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -684,7 +688,11 @@ Checks `/admin/models/categories`.
 
 ```bash
 curl -fsS "$BASE_URL/admin/models/categories" \
-  | jq -e 'type == "array" and all(.[]; (.category | type == "string") and (.count | type == "number"))' >/dev/null
+  | jq -e '
+      type == "array"
+      and length > 0
+      and all(.[]; (.category | type == "string" and length > 0) and (.count | type == "number" and . >= 0))
+    ' >/dev/null
 ```
 
 ### S06 Usage summary endpoint
@@ -5802,13 +5810,38 @@ surface, so the usage block is present but zero. Read-only and rerunnable.
 ### S218 Gemini embeddings batch input and `dimensions` mapping
 
 ```bash
+REQUEST_ID="qa-gemini-embeddings-$QA_SUFFIX"
+USER_PATH="/qa/embeddings/$QA_SUFFIX"
 RESP_FILE="$QA_RUN_DIR/s218.embeddings.json"
 curl -fsS -o "$RESP_FILE" "$BASE_URL/v1/embeddings" \
   -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQUEST_ID" \
+  -H "X-GoModel-User-Path: $USER_PATH" \
   -d '{"model":"gemini/gemini-embedding-001","input":["qa gemini batch alpha","qa gemini batch beta"]}'
 jq '{object,model,usage,indexes:[.data[].index],dims:[.data[].embedding|length]}' "$RESP_FILE"
 assert_embeddings_response "$RESP_FILE" 2 0
 jq -e '[.data[].index] == [0,1] and ([.data[].embedding | length] | unique | length) == 1' "$RESP_FILE" >/dev/null
+
+# Gemini currently reports no embedding token usage. A token-priced call must
+# therefore carry the cost caveat instead of looking deterministically free.
+USAGE_FILE="$QA_RUN_DIR/s218.usage.json"
+FOUND=0
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/usage/log?search=$REQUEST_ID&limit=5" > "$USAGE_FILE"
+  if jq -e --arg request_id "$REQUEST_ID" '
+    any(.entries[]?;
+      .request_id == $request_id
+      and .endpoint == "/v1/embeddings"
+      and .provider == "gemini"
+      and .total_tokens == 0
+      and .costs_calculation_caveat == "provider reported no token usage; cost not calculated")
+  ' "$USAGE_FILE" >/dev/null; then
+    FOUND=1
+    break
+  fi
+  sleep 1
+done
+test "$FOUND" = 1
 
 DIM_FILE="$QA_RUN_DIR/s218.dimensions.json"
 curl -fsS -o "$DIM_FILE" "$BASE_URL/v1/embeddings" \
@@ -5931,4 +5964,35 @@ STATUS=$(curl -sS -o "$SECRET_FILE" -w '%{http_code}' \
   -d '{"session":{"model":"grok-voice-latest"}}')
 test "$STATUS" = "400"
 jq -e '.error.message | test("does not support translation realtime sessions")' "$SECRET_FILE" >/dev/null
+```
+
+## 33. Provider inventory filtering
+
+The release stack narrows OpenRouter to its `:free` inventory with
+`OPENROUTER_MODEL_FILTER_INCLUDE=*:free`. No other release scenario routes to
+OpenRouter, so this exercises the production filter without reducing coverage
+elsewhere or adding a billable provider call.
+
+### S224 OpenRouter inventory includes only free-tier models
+
+The admin inventory is the routing catalog, while `/v1/models` is its public
+projection. Both must contain at least one OpenRouter model and must not leak a
+model rejected by the configured glob.
+
+```bash
+ADMIN_MODELS_FILE="$QA_RUN_DIR/s224.admin-models.json"
+PUBLIC_MODELS_FILE="$QA_RUN_DIR/s224.public-models.json"
+curl -fsS -o "$ADMIN_MODELS_FILE" "$BASE_URL/admin/models"
+curl -fsS -o "$PUBLIC_MODELS_FILE" "$BASE_URL/v1/models"
+
+jq -e '
+  [.[] | select(.provider_name == "openrouter")] as $models
+  | ($models | length) > 0
+    and all($models[]; .model.id | endswith(":free"))
+' "$ADMIN_MODELS_FILE" >/dev/null
+jq -e '
+  [.data[] | select(.id | startswith("openrouter/"))] as $models
+  | ($models | length) > 0
+    and all($models[]; .id | endswith(":free"))
+' "$PUBLIC_MODELS_FILE" >/dev/null
 ```
