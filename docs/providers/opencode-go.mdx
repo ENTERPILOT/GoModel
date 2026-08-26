@@ -68,6 +68,40 @@ OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
   once the upstream model list distinguishes endpoints.
 </Note>
 
+## Reasoning
+
+Some OpenCode Zen models always think and reject requests that leave the
+reasoning parameter out:
+
+```text
+[1210] This model always engages in thinking and cannot be disabled; please use low, high, or max
+```
+
+GoModel therefore sends `reasoning_effort: "low"` on `/chat/completions` when a
+request carries no reasoning parameter at all. Models that ignore the parameter
+are unaffected. Raise the default per deployment:
+
+```bash
+OPENCODE_GO_DEFAULT_REASONING_EFFORT=high
+```
+
+Set it to `none` (or `off`) to inject nothing and forward requests untouched.
+
+Clients keep full control when they ask for reasoning themselves: an explicit
+`reasoning.effort` (or a top-level `reasoning_effort`) is forwarded rather than
+replaced. Effort levels OpenCode Zen does not accept are mapped to their nearest
+supported equivalent:
+
+| Requested effort         | Sent upstream |
+| ------------------------ | ------------- |
+| `none`, `minimal`, `low` | `low`         |
+| `medium`                 | `low`         |
+| `high`                   | `high`        |
+| `xhigh`, `max`           | `max`         |
+
+Models routed to `/messages` use the Anthropic thinking dialect instead and are
+not affected by this mapping.
+
 ## Not supported
 
 - Embeddings (returns `invalid_request_error`).

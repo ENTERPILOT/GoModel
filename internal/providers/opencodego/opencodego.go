@@ -72,10 +72,7 @@ var _ core.Provider = (*Provider)(nil)
 // New creates a new OpenCode Go provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
-	chat := openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
-		ProviderName: "opencode_go",
-		BaseURL:      baseURL,
-	})
+	chat := openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(baseURL))
 	// opts carries the shared keyring, so the /messages client rotates in step
 	// with the chat client above rather than pinning the primary key.
 	messages := anthropic.New(providers.ProviderConfig{APIKey: cfg.APIKey, APIKeys: cfg.APIKeys, BaseURL: baseURL}, opts)
@@ -90,16 +87,25 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	resolved := providers.ResolveBaseURL(baseURL, defaultBaseURL)
-	chat := openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-		ProviderName: "opencode_go",
-		BaseURL:      resolved,
-	})
+	chat := openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(resolved))
 	messages := anthropic.NewWithHTTPClient(apiKey, httpClient, hooks)
 	messages.SetBaseURL(resolved)
 	return &Provider{
 		ChatCompatible: chat,
 		messages:       messages,
 		messagesModels: loadMessagesModels(),
+	}
+}
+
+// compatibleConfig describes the OpenAI-compatible /chat/completions half of
+// the provider. The AdaptChatRequest hook carries OpenCode Zen's reasoning
+// quirk (see reasoning.go), so /v1/responses picks it up through
+// ResponsesViaChat as well.
+func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
+	return openai.CompatibleProviderConfig{
+		ProviderName:     "opencode_go",
+		BaseURL:          baseURL,
+		AdaptChatRequest: adaptChatRequest(loadDefaultReasoningEffort()),
 	}
 }
 

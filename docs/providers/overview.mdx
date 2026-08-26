@@ -126,8 +126,11 @@ support, not every individual model capability exposed by an upstream provider.
 - **OpenCode Go (OpenCode Zen)** — routes per model: most models use
   OpenAI-style `/chat/completions`, while `/messages`-only models (default
   `qwen3.7-max`, override with `OPENCODE_GO_MESSAGES_MODELS`) are sent to the
-  Anthropic-native endpoint. Set `OPENCODE_GO_API_KEY`; the base URL defaults to
-  `https://opencode.ai/zen/go/v1`.
+  Anthropic-native endpoint. Chat requests without a reasoning parameter get
+  `reasoning_effort: "low"` injected, because some models always think and
+  reject requests that omit it (override with
+  `OPENCODE_GO_DEFAULT_REASONING_EFFORT`). Set `OPENCODE_GO_API_KEY`; the base
+  URL defaults to `https://opencode.ai/zen/go/v1`.
 - **ChatGPT subscription** — serves `/v1/responses` only, billed against the
   ChatGPT plan's quota rather than API credit. The upstream accepts a strict
   parameter allowlist and streams only; GoModel adapts requests and collapses
