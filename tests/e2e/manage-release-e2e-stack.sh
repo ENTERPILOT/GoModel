@@ -93,6 +93,10 @@ load_env() {
 
   export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
   export CONFIGURED_PROVIDER_MODELS_MODE="${CONFIGURED_PROVIDER_MODELS_MODE:-allowlist}"
+  # Exercise provider inventory filtering in the normal release matrix without
+  # removing any models used by the scenarios. OpenRouter is inventory-only in
+  # this suite, and its free tier gives the filter a stable, useful boundary.
+  export OPENROUTER_MODEL_FILTER_INCLUDE="${OPENROUTER_MODEL_FILTER_INCLUDE:-*:free}"
   export XAI_MODELS="${XAI_MODELS:-grok-4.3,grok-voice-latest}"
   export BAILIAN_MODELS="${BAILIAN_MODELS:-qwen3-omni-flash-realtime}"
   export ENABLED_PASSTHROUGH_PROVIDERS="${ENABLED_PASSTHROUGH_PROVIDERS:-openai,anthropic,openrouter,zai,vllm,deepseek,bailian,xai}"
