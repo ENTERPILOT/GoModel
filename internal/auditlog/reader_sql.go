@@ -227,8 +227,10 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 		if params.ExactUserPath {
 			add(auditExactUserPathSQLPredicate(userPath, r.dialect.userPath), userPath)
 		} else {
-			lower, upper := auditUserPathSubtreeBounds(userPath)
-			add(auditUserPathSQLPredicate(userPath, r.dialect.userPath), userPath, lower, upper)
+			// The dashboard field filter is an incremental text search. Keep
+			// matching useful while a path is still being typed instead of
+			// treating the fragment as a complete hierarchy node.
+			add(r.likeClause("user_path"), contains(userPath))
 		}
 	}
 	if params.ErrorType != "" {

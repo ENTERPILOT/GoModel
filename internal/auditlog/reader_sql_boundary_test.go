@@ -133,6 +133,33 @@ func TestSQLReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
 	})
 }
 
+func TestSQLReaderGetLogs_UserPathFilterMatchesPartialPath(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+		if err := store.WriteBatch(context.Background(), []*LogEntry{{
+			ID: "partial-user-path", Timestamp: time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
+			RequestedModel: "gpt-5", Provider: "openai", UserPath: "/team/alpha",
+		}}); err != nil {
+			t.Fatalf("failed to seed audit log: %v", err)
+		}
+
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
+		result, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "alpha", Limit: 10})
+		if err != nil {
+			t.Fatalf("GetLogs returned error: %v", err)
+		}
+		if result.Total != 1 || result.Entries[0].ID != "partial-user-path" {
+			t.Fatalf("partial user path returned %#v, want partial-user-path", result.Entries)
+		}
+	})
+}
+
 // A full canonical UUID takes the indexed-identifier fast path: equality on
 // id/request_id/auth_key_id/session_id, case-insensitively — and deliberately
 // no longer the LIKE sweep over the free-text columns.

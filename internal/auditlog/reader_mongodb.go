@@ -262,7 +262,10 @@ func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
 		if params.ExactUserPath {
 			matchFilters = append(matchFilters, mongoExactUserPathMatchFilter(userPath))
 		} else {
-			matchFilters = append(matchFilters, mongoUserPathMatchFilter(userPath))
+			matchFilters = append(matchFilters, bson.E{Key: "user_path", Value: bson.D{
+				{Key: "$regex", Value: regexp.QuoteMeta(userPath)},
+				{Key: "$options", Value: "i"},
+			}})
 		}
 	}
 	if params.ErrorType != "" {
