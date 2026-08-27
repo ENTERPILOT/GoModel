@@ -11,6 +11,7 @@
   import { dateRange } from "$lib/stores/dateRange.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { versionStore } from "$lib/stores/version.svelte.js";
   import { syncDocumentLocale } from "$lib/i18n/locale.js";
 
   import OverviewPage from "$pages/overview/OverviewPage.svelte";
@@ -52,6 +53,7 @@
   themeStore.init();
   sidebar.init();
   router.init();
+  versionStore.init();
 
   // Shared inventory refetch on boot and whenever the API key changes.
   $effect(() => {

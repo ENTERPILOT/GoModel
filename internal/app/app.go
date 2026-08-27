@@ -46,6 +46,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/versioncheck"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 	"github.com/enterpilot/gomodel/internal/workflows"
 )
@@ -76,6 +77,7 @@ type App struct {
 	server              *server.Server
 	storage             storage.Storage
 	runtimeSettings     *runtimesettings.Service
+	versionCheck        *versioncheck.Checker
 	extensionAuth       bool
 
 	// registered records every successfully initialized subsystem in
@@ -727,6 +729,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		}
 	}
 
+	// The update check owns the only outbound connection core makes that is
+	// not a provider call. It is constructed even when disabled so GET
+	// /version keeps reporting the local build.
+	versionChecker := newVersionChecker(appCfg.VersionCheck)
+	app.versionCheck = versionChecker
+
 	serverCfg := &server.Config{
 		BasePath:                        appCfg.Server.BasePath,
 		MasterKey:                       appCfg.Server.MasterKey,
@@ -762,6 +770,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		Tagging:                         taggingResult.Service,
 		SessionDetector:                 session.NewDetectorFromConfig(appCfg.Session),
 		MCPEnabled:                      appCfg.MCP.Enabled,
+		VersionChecker:                  versionChecker,
 	}
 	if mcpResult != nil {
 		serverCfg.MCPGateway = mcpResult.Service
@@ -994,6 +1003,9 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 
 	if a.rateLimits != nil && a.rateLimits.Service != nil {
 		a.rateLimits.Service.Start(ctx)
+	}
+	if a.versionCheck.Enabled() {
+		go a.versionCheck.Run(serverCtx)
 	}
 
 	slog.Info("starting server", "address", address)

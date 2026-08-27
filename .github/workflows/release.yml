@@ -204,6 +204,28 @@ jobs:
             -d "deploy ${GITHUB_REF_NAME}" \
             https://demo.enterpilot.io/hooks/update-demo
 
+  publish-version-manifest:
+    name: Publish version manifest
+    runs-on: ubuntu-latest
+    # Runs after the GitHub release exists: the website regenerates
+    # public/version/core.txt from the latest release, so dispatching earlier
+    # would republish the previous version.
+    needs: github-release
+    # Prereleases (v1.2.3-rc1) are not "latest" on GitHub, so the website
+    # would regenerate the same manifest it already serves.
+    if: ${{ !contains(github.ref_name, '-') }}
+    # Best-effort: running gateways keep working on a stale manifest, and the
+    # website's nightly deploy regenerates it anyway.
+    continue-on-error: true
+    steps:
+      - name: Dispatch website deploy
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+        run: |
+          gh api repos/ENTERPILOT/gomodel.enterpilot.io/dispatches \
+            -f event_type=gomodel-release \
+            -f "client_payload[version]=${GITHUB_REF_NAME#v}"
+
   publish-mcp:
     name: Publish to MCP Registry
     runs-on: ubuntu-latest

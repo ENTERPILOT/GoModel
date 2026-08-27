@@ -119,6 +119,7 @@
                             "advanced/cli",
                             "advanced/api-endpoints",
                             "advanced/resilience",
+                            "advanced/version-awareness",
                             "advanced/responses-api",
                             "advanced/responses-compatibility",
                             "advanced/conversations-api",

@@ -1,0 +1,150 @@
+---
+title: "Version Awareness"
+description: "How GoModel checks for a newer release, exactly what the check sends, and how to turn it off."
+icon: "arrow-up-circle"
+keywords: ["version", "update", "upgrade", "telemetry", "privacy", "air-gapped"]
+---
+
+GoModel checks once a day whether a newer release exists, so you find out about
+an upgrade without watching the repository. The result appears at the top of the
+dashboard's **Settings** page and is available as JSON from `GET /version`.
+
+## Why we ask for this
+
+We use it to see how many deployments are running which version of GoModel.
+
+That matters most when a vulnerability is found. It tells us how many people are
+affected and how many are still on a release that needs patching, so we know how
+urgently to push a fix and how loudly to warn. Without it we would be guessing.
+
+**We recommend leaving it on.** It sends no API keys, no prompts, no model names
+and no usage data — see [What the check sends](#what-the-check-sends) for the
+exact list, and turn it off with one environment variable if you prefer.
+
+If you have any concerns about this data, please tell us: open an issue on
+[GitHub](https://github.com/ENTERPILOT/GoModel/issues) or find us on
+[Discord](https://discord.gg/gaEB9BQSPH). For anything security-sensitive, use
+the contact in [SECURITY.md](https://github.com/ENTERPILOT/GoModel/blob/main/SECURITY.md).
+
+The check reads one plain-text file:
+
+| Distribution | URL                              | Contents    |
+| ------------ | -------------------------------- | ----------- |
+| GoModel      | `(thiswebsite)/version/core.txt` | `X.Y.Z`     |
+| GoModel Pro  | `(thiswebsite)/version/pro.txt`  | `X.Y.Z-pro` |
+
+## When it runs
+
+Two triggers, both throttled:
+
+- **A daily timer**, so a headless gateway nobody opens a dashboard on still
+  notices releases. The first check waits a random few minutes after startup and
+  the interval carries ±10% jitter, so a fleet restarted together does not check
+  in lockstep.
+- **The first dashboard visit of each day**, per browser. A cookie named
+  `gomodel_version_check` holds `YYYY-MM-DD-{id}` — the day this browser last
+  checked plus a random id minted on its first visit. On every page load after
+  the first one each day, the dashboard reads that date and makes no request at
+  all.
+
+A failed or unreachable check is never an error. The gateway serves its cached
+result and tries again later.
+
+## What the check sends
+
+<Note>
+  Nothing about your traffic is ever sent: no model names, no provider names, no
+  prompts or responses, no usage or cost data, no user paths.
+</Note>
+
+Every check carries:
+
+| Header              | Example     | Meaning                             |
+| ------------------- | ----------- | ----------------------------------- |
+| `X-GoModel-Version` | `0.1.81`    | the release you are running         |
+| `X-GoModel-App`     | `GoModel`   | `GoModel` or `GoModel Pro`          |
+| `X-GoModel-Install` | a UUID      | random per-deployment id, see below |
+| `X-GoModel-Source`  | `scheduled` | `scheduled` or `dashboard`          |
+
+A check triggered by a dashboard visit also forwards an **allowlisted** slice of
+that visit: the browser's `User-Agent`, `Accept-Language`, `Sec-CH-UA*` client
+hints, and the visit cookie value (`X-GoModel-Date`).
+
+Because it is an allowlist, anything not on it is dropped — including `Cookie`,
+`Authorization`, `X-API-Key`, and `Referer`. A dashboard session credential or
+master key cannot leave your deployment through this path.
+
+Two things are withheld on purpose: **the hostname your dashboard is served on**,
+which would identify your organization, and **client IP addresses**, which are
+personal data. Neither is ever sent.
+
+### The install identifier
+
+A random UUID stored in `install-id` in the gateway's data directory, created on
+first use. It encodes nothing about your host, your organization, or your
+configuration; it exists only so repeated checks from one deployment count as
+one deployment. Disabling the check means it is never created.
+
+## Turning it off if you don't want to get the updates
+
+```bash
+GOMODEL_VERSION_CHECK_ENABLED=false
+```
+
+This stops everything: no timer, no outbound request, no install id on disk.
+`GET /version` still reports your local build with `"enabled": false`, and the
+dashboard simply shows no update notice.
+
+## Air-gapped and mirrored deployments
+
+Point the check at your own host and serve `core.txt` (or `pro.txt`) from it:
+
+```bash
+GOMODEL_VERSION_CHECK_URL=https://releases.internal.example.com/version
+```
+
+The gateway appends `/core.txt` or `/pro.txt` based on its distribution, and
+expects a bare version string with no leading `v`.
+
+## Configuration
+
+| Setting                           | Environment variable                      | Default                                 |
+| --------------------------------- | ----------------------------------------- | --------------------------------------- |
+| `version_check.enabled`           | `GOMODEL_VERSION_CHECK_ENABLED`           | `true`                                  |
+| `version_check.url`               | `GOMODEL_VERSION_CHECK_URL`               | `https://gomodel.enterpilot.io/version` |
+| `version_check.interval_hours`    | `GOMODEL_VERSION_CHECK_INTERVAL_HOURS`    | `24`                                    |
+| `version_check.timeout_seconds`   | `GOMODEL_VERSION_CHECK_TIMEOUT_SECONDS`   | `5`                                     |
+| `version_check.max_daily_checks`  | `GOMODEL_VERSION_CHECK_MAX_DAILY`         | `500`                                   |
+
+`max_daily_checks` caps the gateway's total outbound checks per day, so
+`/version` cannot be used as an outbound request amplifier.
+
+```yaml config.yaml
+version_check:
+  enabled: true
+  interval_hours: 24
+```
+
+## The `/version` endpoint
+
+Public and unauthenticated, alongside `/health`. It answers from the cache and
+never blocks on the network:
+
+```bash
+curl -s http://localhost:8080/version
+```
+
+```json
+{
+  "app": "GoModel",
+  "version": "0.1.81",
+  "latest": "0.1.82",
+  "update_available": true,
+  "checked_at": "2026-08-26T09:12:44Z",
+  "enabled": true
+}
+```
+
+`update_available` is conservative: build metadata is ignored, a prerelease
+ranks below its final release, and a development build (`dev`, a bare commit)
+never reports an update.
