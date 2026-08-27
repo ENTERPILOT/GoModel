@@ -58,6 +58,13 @@ test("checkedToday requires the separator after the date", () => {
   assert.equal(checkedToday("2026-08-26xabc", "2026-08-26"), false);
 });
 
+// The gateway's SplitVisit rejects an empty identifier, so this must too or
+// the two disagree about whether the browser has checked in.
+test("checkedToday rejects a marker with no identifier", () => {
+  assert.equal(checkedToday("2026-08-26-", "2026-08-26"), false);
+  assert.equal(checkPlan("2026-08-26-", "2026-08-26").delayed, true);
+});
+
 // Regression: gating the request on the cookie made the update indicator show
 // on the day's first page load and disappear on every load after it. The
 // status must be fetched every time; only the timing depends on the cookie.

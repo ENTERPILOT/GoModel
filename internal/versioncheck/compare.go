@@ -48,11 +48,10 @@ func prereleaseLess(a, b string) bool {
 		if aFields[i] == bFields[i] {
 			continue
 		}
-		aNum, aIsNum := prereleaseNumber(aFields[i])
-		bNum, bIsNum := prereleaseNumber(bFields[i])
+		aIsNum, bIsNum := isNumericField(aFields[i]), isNumericField(bFields[i])
 		switch {
 		case aIsNum && bIsNum:
-			return aNum < bNum
+			return numericFieldLess(aFields[i], bFields[i])
 		case aIsNum != bIsNum:
 			return aIsNum
 		default:
@@ -62,12 +61,30 @@ func prereleaseLess(a, b string) bool {
 	return len(aFields) < len(bFields)
 }
 
-func prereleaseNumber(field string) (int, bool) {
-	n, err := strconv.Atoi(field)
-	if err != nil || n < 0 {
-		return 0, false
+// isNumericField reports whether a prerelease field is a numeric identifier.
+// Deliberately not strconv.Atoi: semantic versioning allows numeric
+// identifiers of any length, and converting to int would reject an oversized
+// one as alphanumeric and rank it wrongly.
+func isNumericField(field string) bool {
+	if field == "" {
+		return false
 	}
-	return n, true
+	for i := range len(field) {
+		if field[i] < '0' || field[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// numericFieldLess compares two numeric identifiers as digit strings. Semantic
+// versioning forbids leading zeroes, so the longer string is the larger
+// number and equal lengths compare lexically.
+func numericFieldLess(a, b string) bool {
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+	return a < b
 }
 
 func at(numbers []int, i int) int {

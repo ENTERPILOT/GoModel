@@ -46,7 +46,10 @@ export function readVisitCookie(cookieHeader = "") {
  */
 export function checkedToday(cookieValue, today = utcDateKey()) {
   const value = String(cookieValue || "");
-  if (value.length <= DATE_LENGTH) return false;
+  // The identifier after the separator must be non-empty: the gateway treats
+  // "2026-08-27-" as a first visit, and disagreeing with it here would skip
+  // the delay for a cookie it is about to replace.
+  if (value.length <= DATE_LENGTH + 1) return false;
   return value.slice(0, DATE_LENGTH) === today && value[DATE_LENGTH] === "-";
 }
 

@@ -34,6 +34,11 @@ func TestIsNewer(t *testing.T) {
 		{"longer prerelease supersedes its prefix", "1.0.0-rc", "1.0.0-rc.1", true},
 		{"double digit prerelease beats single", "1.0.0-rc.9", "1.0.0-rc.10", true},
 		{"identical pro suffix", "1.0.0-pro", "1.0.0-pro", false},
+		// A numeric identifier larger than an int must still rank below an
+		// alphanumeric one rather than falling back to a lexical comparison.
+		{"oversized numeric prerelease ranks below alphanumeric", "1.0.0-999999999999999999999", "1.0.0-2foo", true},
+		{"oversized numeric prereleases compare by magnitude", "1.0.0-999999999999999999998", "1.0.0-999999999999999999999", true},
+		{"longer numeric prerelease is the larger number", "1.0.0-9", "1.0.0-10", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

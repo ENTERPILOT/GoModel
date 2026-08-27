@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -79,6 +80,8 @@ type Status struct {
 type Checker struct {
 	cfg Config
 	url string
+	// safeURL is url with credentials and query stripped, for errors and logs.
+	safeURL string
 
 	mu            sync.Mutex
 	latest        string
@@ -111,12 +114,28 @@ func New(cfg Config) *Checker {
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{Timeout: cfg.Timeout}
 	}
-	return &Checker{cfg: cfg, url: manifestURL(cfg.URL, cfg.App)}
+	manifest := manifestURL(cfg.URL, cfg.App)
+	return &Checker{cfg: cfg, url: manifest, safeURL: safeURL(manifest)}
 }
 
 // manifestURL appends the distribution's channel file to the configured base.
 func manifestURL(base, app string) string {
 	return strings.TrimRight(base, "/") + "/" + version.ChannelFor(app) + ".txt"
+}
+
+// safeURL is the manifest URL with anything an operator might have embedded in
+// it removed. The URL is configurable, so a private mirror could carry
+// credentials in userinfo or a token in the query; errors and logs quote only
+// scheme, host, and path.
+func safeURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "the configured manifest URL"
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 // Enabled reports whether outbound checks are configured.
@@ -159,9 +178,8 @@ func (c *Checker) Run(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
-		if _, err := c.Refresh(ctx, Beacon{}); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Debug("version check failed", "error", err, "url", c.url)
-		}
+		// Refresh logs its own failures.
+		_, _ = c.Refresh(ctx, Beacon{})
 		// +/- 10% around the interval keeps a restarted fleet from
 		// re-converging on the same minute after the first check.
 		timer.Reset(c.cfg.Interval - c.cfg.Interval/10 + jitter(c.cfg.Interval/5))
@@ -186,6 +204,12 @@ func (c *Checker) Refresh(ctx context.Context, beacon Beacon) (Status, error) {
 
 	latest, err := c.fetch(ctx, beacon)
 	if err != nil {
+		// Logged here rather than at each call site: the dashboard dispatches
+		// its refresh in the background and has nowhere to surface an error,
+		// so a mirror that is persistently failing would otherwise be silent.
+		if !errors.Is(err, context.Canceled) {
+			slog.Debug("version check failed", "error", err, "url", c.safeURL)
+		}
 		return c.Status(), err
 	}
 
@@ -266,7 +290,7 @@ func (c *Checker) fetch(ctx context.Context, beacon Beacon) (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("version manifest %s returned %d", c.url, resp.StatusCode)
+		return "", fmt.Errorf("version manifest %s returned %d", c.safeURL, resp.StatusCode)
 	}
 	// One byte past the cap distinguishes "at the limit" from "longer than
 	// the limit", so an oversized body is rejected rather than silently
@@ -276,11 +300,11 @@ func (c *Checker) fetch(ctx context.Context, beacon Beacon) (string, error) {
 		return "", err
 	}
 	if len(body) > maxManifestBytes {
-		return "", fmt.Errorf("version manifest %s is larger than %d bytes", c.url, maxManifestBytes)
+		return "", fmt.Errorf("version manifest %s is larger than %d bytes", c.safeURL, maxManifestBytes)
 	}
 	latest := strings.TrimSpace(string(body))
 	if latest == "" || strings.ContainsAny(latest, " \t\n<") {
-		return "", fmt.Errorf("version manifest %s did not contain a version", c.url)
+		return "", fmt.Errorf("version manifest %s did not contain a version", c.safeURL)
 	}
 	return latest, nil
 }
