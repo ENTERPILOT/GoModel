@@ -59,11 +59,17 @@ type RealtimeTarget struct {
 	// whose URL fixes the model leave it empty and no frame mapping happens.
 	PinSessionModel string
 	// MeterInputAudio asks the gateway to bill the session from the input audio
-	// it relays, at the model's per-second input rate. Providers set it for
-	// session types that report no usage of their own — OpenAI translation
-	// sessions emit only transcript and audio deltas, never a usage event — so
-	// such a session is recorded with its real duration instead of as free.
-	// Sessions that report their own usage leave it false.
+	// it relays, at the model's per-second input rate, when the session reports
+	// no usage of its own. Providers set it for session types that may report
+	// nothing: OpenAI translation sessions emit only transcript and audio
+	// deltas and never a usage event, and a transcription session whose model
+	// omits usage from its completed event reports nothing either. Such a
+	// session is then recorded with its real duration instead of as free.
+	//
+	// It is a fallback, not a second meter: a session that recorded even one
+	// usage entry of its own is already billed, and metering the same audio on
+	// top of it would double-count the session. Session types that always
+	// report their own usage leave it false and are never metered.
 	MeterInputAudio bool
 }
 
