@@ -207,24 +207,25 @@ jobs:
   publish-version-manifest:
     name: Publish version manifest
     runs-on: ubuntu-latest
-    # Runs after the GitHub release exists: the website regenerates
-    # public/version/core.txt from the latest release, so dispatching earlier
-    # would republish the previous version.
+    # Gateways check this manifest daily, so it must only ever advertise a
+    # release operators can actually download.
     needs: github-release
-    # Prereleases (v1.2.3-rc1) are not "latest" on GitHub, so the website
-    # would regenerate the same manifest it already serves.
+    # Prereleases are not an upgrade the manifest should offer.
     if: ${{ !contains(github.ref_name, '-') }}
-    # Best-effort: running gateways keep working on a stale manifest, and the
-    # website's nightly deploy regenerates it anyway.
+    # Best-effort: running gateways keep working on a stale manifest.
     continue-on-error: true
     steps:
-      - name: Dispatch website deploy
-        env:
-          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
-        run: |
-          gh api repos/ENTERPILOT/gomodel.enterpilot.io/dispatches \
-            -f event_type=gomodel-release \
-            -f "client_payload[version]=${GITHUB_REF_NAME#v}"
+      - name: Checkout website repository
+        uses: actions/checkout@v7
+        with:
+          repository: ENTERPILOT/gomodel.enterpilot.io
+          # A deploy key is scoped to that one repository and carries no user
+          # identity. Pushing the manifest is itself the website's deploy
+          # trigger, so the new version is served within minutes.
+          ssh-key: ${{ secrets.WEBSITE_PUSH_KEY }}
+
+      - name: Publish core.txt
+        run: ./scripts/publish-version.sh core "${GITHUB_REF_NAME#v}"
 
   publish-mcp:
     name: Publish to MCP Registry
