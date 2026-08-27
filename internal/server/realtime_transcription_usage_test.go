@@ -93,9 +93,12 @@ func TestRealtimeTranscriptionWithoutUsageEventsRecordsAudioDuration(t *testing.
 	for range 2 {
 		send(frame)
 	}
-	// Transcript deltas carry no usage, so they must not count as a report and
-	// suppress the fallback.
+	// Neither a transcript delta nor a completed event without a usage object
+	// reports anything billable, so neither may suppress the fallback. The
+	// completed event matters most: it takes the extraction path that does
+	// produce entries, and only its missing usage keeps this session unbilled.
 	send([]byte(`{"type":"conversation.item.input_audio_transcription.delta","delta":"He"}`))
+	send([]byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"Hello there."}`))
 	_ = client.Close(websocket.StatusNormalClosure, "done")
 
 	entries := waitForUsageEntries(t, usageLogger, 1)
@@ -141,6 +144,34 @@ func TestRealtimeTranscriptionReportingUsageIsNotMeteredTwice(t *testing.T) {
 	}
 	if _, metered := entry.RawData["audio_seconds"]; metered {
 		t.Errorf("raw data = %v, want no metered duration for a session that reported usage", entry.RawData)
+	}
+}
+
+func TestRealtimeTranscriptionZeroUsageStillMetersAudio(t *testing.T) {
+	// A usage object of all zeros reports a number, not a bill. Treating it as a
+	// report would leave the relayed speech unbilled, so the fallback still
+	// meters it; the provider's own zero-value entry is recorded alongside,
+	// because what a provider reported is worth keeping even at zero.
+	upstream := newEchoingRealtimeUpstream(t)
+	defer upstream.Close()
+
+	client, usageLogger, send := newTranscriptionSession(t, upstream)
+	send(realtimeAudioFrame(t, 2))
+	send([]byte(`{
+		"type": "conversation.item.input_audio_transcription.completed",
+		"transcript": "Hello there.",
+		"usage": {"type": "duration", "seconds": 0}
+	}`))
+	_ = client.Close(websocket.StatusNormalClosure, "done")
+
+	entries := waitForUsageEntries(t, usageLogger, 2)
+	var metered float64
+	for _, entry := range entries {
+		seconds, _ := entry.RawData["audio_seconds"].(float64)
+		metered += seconds
+	}
+	if math.Abs(metered-2) > 1e-9 {
+		t.Errorf("metered audio seconds = %v, want the 2 seconds relayed: %+v", metered, entries)
 	}
 }
 

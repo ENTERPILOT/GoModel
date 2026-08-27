@@ -188,6 +188,12 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint, intent st
 // is their only accounting; a session that relayed no audio produced no billable
 // duration and is skipped. A session that did report is already billed by its
 // own usage events, and billing the same audio again would double-count it.
+//
+// The fallback is all or nothing by design. A session that reports usage for
+// only part of what it heard leaves the rest unbilled, because the gateway
+// cannot tell which audio a partial report already covered, and billing the
+// whole session on top of it would overcharge for the part that was reported.
+// Undercounting a provider that reports inconsistently is the safer error.
 func (s *realtimeService) recordMeteredUsage(route realtimeRoute, meter *usage.RealtimeInputAudioMeter, reported bool) {
 	if meter == nil || reported {
 		return
@@ -300,9 +306,11 @@ func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute, rep
 		} else {
 			entry = usage.ExtractFromRealtimeTranscriptionCompleted(frame, route.requestID, route.model, route.providerType, pricing)
 		}
-		// An event that carries no usage (a completed event whose model omits
-		// the usage object) bills nothing and leaves the session unreported.
-		if entry != nil && reported != nil {
+		// Only billable usage counts as a report. An event that carries no usage
+		// object bills nothing, and neither does one whose usage is present but
+		// all zeros, so in both cases the session is still unaccounted for and
+		// the fallback must remain free to meter the audio it relayed.
+		if reported != nil && usage.HasBillableUsage(entry) {
 			reported.Store(true)
 		}
 		s.writeUsage(entry, route)
