@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/labstack/echo/v5"
 
@@ -150,7 +151,10 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint, intent st
 	if err != nil {
 		return handleError(c, err)
 	}
-	tap := s.usageTap(ctx, route)
+	// Raised by the tap when the session records usage of its own; it decides
+	// whether a metered session falls back to billing the audio it relayed.
+	var reported atomic.Bool
+	tap := s.usageTap(ctx, route, &reported)
 	if registered {
 		// The gateway created this call and its sideband observer already records
 		// usage; tapping the attach session too would double-count every response.
@@ -163,8 +167,11 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint, intent st
 	if model := strings.TrimSpace(target.PinSessionModel); model != "" {
 		hooks.MapClientFrame = pinTranscriptionModel(model)
 	}
-	// A session that reports no usage of its own (OpenAI translation sessions)
-	// is billed from the audio the gateway relays into it.
+	// A session that may report no usage of its own — translation sessions never
+	// do, transcription sessions do unless their model omits usage from the
+	// completed event — is billed from the audio the gateway relays into it.
+	// The audio is metered as it flows, because the session only reveals at its
+	// end whether it reported anything, and by then the frames are gone.
 	var meter *usage.RealtimeInputAudioMeter
 	if target.MeterInputAudio && tap != nil {
 		meter = &usage.RealtimeInputAudioMeter{}
@@ -172,15 +179,17 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint, intent st
 	}
 
 	err = s.proxy(c, ctx, target, route, hooks)
-	s.recordMeteredUsage(route, meter)
+	s.recordMeteredUsage(route, meter, reported.Load())
 	return err
 }
 
 // recordMeteredUsage writes the single usage entry for a metered session once it
-// ends. Metered sessions carry no usage events, so this is their only accounting;
-// a session that relayed no audio produced no billable duration and is skipped.
-func (s *realtimeService) recordMeteredUsage(route realtimeRoute, meter *usage.RealtimeInputAudioMeter) {
-	if meter == nil {
+// ends. It is a fallback for sessions that reported no usage of their own, so it
+// is their only accounting; a session that relayed no audio produced no billable
+// duration and is skipped. A session that did report is already billed by its
+// own usage events, and billing the same audio again would double-count it.
+func (s *realtimeService) recordMeteredUsage(route realtimeRoute, meter *usage.RealtimeInputAudioMeter, reported bool) {
+	if meter == nil || reported {
 		return
 	}
 	seconds := meter.Seconds()
@@ -267,7 +276,12 @@ func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *co
 // the tap entirely). It honors both the global usage setting and per-workflow
 // usage policy, mirroring the other streaming paths. usageLogger.Write is
 // non-blocking, so the tap runs inline.
-func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute) func([]byte) {
+//
+// reported, when non-nil, is raised as soon as the session records usage of its
+// own, which tells a metered session it is already billed and must not be
+// metered on top. It is set on the relay goroutine and read after the session
+// ends, so it is atomic.
+func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute, reported *atomic.Bool) func([]byte) {
 	if s.usageLogger == nil || !s.usageLogger.Config().Enabled {
 		return nil
 	}
@@ -285,6 +299,11 @@ func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute) fun
 			entry = usage.ExtractFromRealtimeResponseDone(frame, route.requestID, route.model, route.providerType, pricing)
 		} else {
 			entry = usage.ExtractFromRealtimeTranscriptionCompleted(frame, route.requestID, route.model, route.providerType, pricing)
+		}
+		// An event that carries no usage (a completed event whose model omits
+		// the usage object) bills nothing and leaves the session unreported.
+		if entry != nil && reported != nil {
+			reported.Store(true)
 		}
 		s.writeUsage(entry, route)
 	}
