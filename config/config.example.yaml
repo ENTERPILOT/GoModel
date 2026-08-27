@@ -14,12 +14,12 @@ server:
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
   enabled_passthrough_providers: ["openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
-  realtime_enabled: true # env: REALTIME_ENABLED; expose /v1/realtime websocket and /p/{provider}/v1/realtime upgrades (OpenAI only)
+  realtime_enabled: true # env: REALTIME_ENABLED; expose the /v1/realtime and /v1/realtime/translations websockets, their calls/client_secrets siblings, and /p/{provider}/v1/realtime upgrades
   pid_file: "data/gomodel.pid" # env: PID_FILE; where the running gateway records its process id so `gomodel --reload` can find it. Set per instance when several gateways share a host; empty writes no pid file and disables --reload; changing it needs a restart, not a reload
 
 models:
   enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an access override allows one or more user paths
-  configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists
+  configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists, "merge" adds configured models on top of the upstream inventory (for models a provider serves but does not list)
 
 # Tagging based on headers: label every request from the listed headers. Labels
 # are recorded in usage tracking and audit logs. A header value can carry several
@@ -111,8 +111,8 @@ cache:
     refresh_interval: 3600 # how often to refresh the model registry (seconds, default: 3600)
     recheck_interval: 60 # env: PROVIDER_RECHECK_INTERVAL; how often providers whose last refresh failed are re-probed for recovery (seconds, default: 60; 0 disables)
     local:
-      cache_dir: ".cache" # local cache directory
-    # To use Redis instead of local cache, remove `local` and uncomment:
+      cache_dir: ".cache" # local cache directory; kept as fallback if redis is configured but unreachable
+    # Redis is preferred when set. Leave `local` in place to start in degraded mode if Redis is down:
     # redis:
     #   url: "redis://localhost:6379"
     #   key: "gomodel:models"
@@ -377,9 +377,9 @@ providers:
   gemini:
     type: gemini
     api_key: "..."
-    # Chat/responses use Gemini's native generateContent API by default.
+    # Chat/responses, embeddings, and images use Gemini's native APIs by default.
     # Set GEMINI_API_MODE=openai_compatible or api_mode: openai_compatible to use
-    # Gemini's OpenAI-compatible API instead.
+    # Gemini's OpenAI-compatible API instead (image edits require native mode).
     # Native mode accepts image data URLs but does not fetch remote image URLs yet.
 
   vertex:
@@ -511,6 +511,16 @@ providers:
   #   models:
   #     - openai/gpt-oss-120b
   #     - anthropic/claude-sonnet-4
+  #   # Narrow the inventory to what should be routable. Patterns are globs
+  #   # matched case-insensitively against the raw model ID; `*` also matches `/`,
+  #   # so `*:free` matches `deepseek/deepseek-r1:free`.
+  #   model_filter:
+  #     include: ["*:free"]         # keep only these models (empty keeps all)
+  #     exclude: ["*-preview:free"] # then drop these
+  #     # Cap the highest per-million-token rate (the larger of input and output).
+  #     # A model with no known price is dropped while a cap is set. Must be a
+  #     # finite number of 0 or more.
+  #     max_price_per_mtok: 0
 
   # Example: Kilo AI Gateway. Model IDs use provider/model and are forwarded
   # unchanged. You can also set KILO_MODELS as a comma-separated env var.

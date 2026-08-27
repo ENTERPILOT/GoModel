@@ -75,6 +75,13 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	}
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
+	// A response without a usage block cannot be costed by token rates, and
+	// zero-token math quietly yields $0 — indistinguishable from a free call.
+	// Flag that unless the configured pricing can cost the row without usage.
+	if resp.Usage == nil && entry.CostsCalculationCaveat == "" &&
+		!imageCostDetermined(effectiveEndpointPricing(endpoint, pricing...), len(resp.Data)) {
+		entry.CostsCalculationCaveat = caveatImageMissingUsage
+	}
 
 	return entry
 }

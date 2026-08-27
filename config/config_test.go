@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,7 +17,7 @@ import (
 // clearProviderEnvVars unsets all known provider-related environment variables.
 func clearProviderEnvVars(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{
+	keys := []string{
 		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODELS",
 		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODELS",
 		"COHERE_API_KEY", "COHERE_BASE_URL", "COHERE_MODELS",
@@ -33,7 +34,23 @@ func clearProviderEnvVars(t *testing.T) {
 		"LLMD_API_KEY", "LLMD_BASE_URL", "LLMD_MODELS", "LLMD_INFERENCE_OBJECTIVE", "LLMD_FAIRNESS_FROM_USER_PATH",
 		"SGLANG_API_KEY", "SGLANG_BASE_URL", "SGLANG_MODELS",
 		"OLLAMA_API_KEY", "OLLAMA_BASE_URL", "OLLAMA_MODELS",
-	} {
+	}
+	// Model filters are accepted for every provider prefix, so clear them for
+	// each prefix above rather than tracking them provider by provider.
+	prefixes := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		if prefix, _, ok := strings.Cut(key, "_"); ok {
+			prefixes[prefix] = struct{}{}
+		}
+	}
+	for prefix := range prefixes {
+		keys = append(keys,
+			prefix+"_MODEL_FILTER_INCLUDE",
+			prefix+"_MODEL_FILTER_EXCLUDE",
+			prefix+"_MODEL_FILTER_MAX_PRICE_PER_MTOK",
+		)
+	}
+	for _, key := range keys {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
 	}
@@ -45,7 +62,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	for _, key := range []string{
 		"CONFIG_STRICT",
 		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
-		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL",
+		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"RESPONSE_CACHE_SIMPLE_ENABLED",
 		"SEMANTIC_CACHE_ENABLED", "SEMANTIC_CACHE_THRESHOLD", "SEMANTIC_CACHE_TTL", "SEMANTIC_CACHE_MAX_CONV_MESSAGES",
@@ -838,6 +855,28 @@ failover:
 	})
 }
 
+func TestLoad_MergeConfiguredProviderModelsMode(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+models:
+  configured_provider_models_mode: merge
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.Config.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeMerge {
+			t.Fatalf("mode = %q, want merge", result.Config.Models.ConfiguredProviderModelsMode)
+		}
+	})
+}
+
 func TestLoad_InvalidConfiguredProviderModelsMode(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
@@ -1433,6 +1472,76 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 	})
 }
 
+func TestLoad_ModelListURLEnv(t *testing.T) {
+	const defaultURL = "https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.min.json"
+
+	tests := []struct {
+		name  string
+		set   bool
+		value string
+		want  string
+	}{
+		{name: "UnsetKeepsDefault", set: false, want: defaultURL},
+		{name: "MirrorOverridesDefault", set: true, value: "https://mirror.internal/models.min.json", want: "https://mirror.internal/models.min.json"},
+		{name: "EmptyIsSkippedLikeAnyEnvVar", set: true, value: "", want: defaultURL},
+		{name: "OffDisablesDownloads", set: true, value: "off", want: ""},
+		{name: "OffIsCaseInsensitive", set: true, value: "OFF", want: ""},
+		{name: "OffTrimsWhitespace", set: true, value: " off ", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(_ string) {
+				if tt.set {
+					t.Setenv("MODEL_LIST_URL", tt.value)
+				}
+				result, err := Load()
+				if err != nil {
+					t.Fatalf("Load() failed: %v", err)
+				}
+				if got := result.Config.Cache.Model.ModelList.URL; got != tt.want {
+					t.Errorf("Cache.Model.ModelList.URL = %q, want %q", got, tt.want)
+				}
+			})
+		})
+	}
+
+	t.Run("EnvOffWinsOverConfigYAML", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		withTempDir(t, func(dir string) {
+			yaml := "cache:\n  model:\n    model_list:\n      url: \"https://mirror.internal/models.min.json\"\n"
+			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
+				t.Fatalf("failed to write config.yaml: %v", err)
+			}
+			t.Setenv("MODEL_LIST_URL", "off")
+			result, err := Load()
+			if err != nil {
+				t.Fatalf("Load() failed: %v", err)
+			}
+			if got := result.Config.Cache.Model.ModelList.URL; got != "" {
+				t.Errorf("Cache.Model.ModelList.URL = %q, want empty (env off wins over config.yaml)", got)
+			}
+		})
+	})
+
+	t.Run("ConfigYAMLOffDisablesDownloads", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		withTempDir(t, func(dir string) {
+			yaml := "cache:\n  model:\n    model_list:\n      url: \"off\"\n"
+			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
+				t.Fatalf("failed to write config.yaml: %v", err)
+			}
+			result, err := Load()
+			if err != nil {
+				t.Fatalf("Load() failed: %v", err)
+			}
+			if got := result.Config.Cache.Model.ModelList.URL; got != "" {
+				t.Errorf("Cache.Model.ModelList.URL = %q, want empty (yaml off disables)", got)
+			}
+		})
+	})
+}
+
 func TestLoad_ProviderFromYAML(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
@@ -1813,6 +1922,38 @@ func TestValidateBodySizeLimit(t *testing.T) {
 	}
 }
 
+func TestLoad_LocalYAMLAndRedisURLAreBothKept(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		cfgDir := filepath.Join(dir, "config")
+		if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		yamlContent := "cache:\n  model:\n    local:\n      cache_dir: \".cache\"\n"
+		if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yamlContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		t.Setenv("REDIS_URL", "redis://env-host:6379")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v, want nil", err)
+		}
+		cfg := result.Config
+		if cfg.Cache.Model.Local == nil || cfg.Cache.Model.Local.CacheDir != ".cache" {
+			t.Fatalf("expected local cache kept as fallback, got %+v", cfg.Cache.Model.Local)
+		}
+		if cfg.Cache.Model.Redis == nil {
+			t.Fatal("expected Cache.Model.Redis from REDIS_URL")
+		}
+		if cfg.Cache.Model.Redis.URL != "redis://env-host:6379" {
+			t.Errorf("expected REDIS_URL=redis://env-host:6379, got %s", cfg.Cache.Model.Redis.URL)
+		}
+	})
+}
+
 func TestLoad_EnvOnlyRedisModelCache(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
@@ -1953,6 +2094,106 @@ func TestParseBodySizeLimitBytes(t *testing.T) {
 			}
 			if got != tt.expected {
 				t.Fatalf("ParseBodySizeLimitBytes(%q) = %d, want %d", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoad_ProviderModelFilterFromYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "sk-yaml-key"
+    model_filter:
+      include:
+        - "*:free"
+      exclude:
+        - "*-preview:free"
+      max_price_per_mtok: 0
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+
+		filter := result.RawProviders["openrouter"].ModelFilter
+		if len(filter.Include) != 1 || filter.Include[0] != "*:free" {
+			t.Errorf("Include = %v, want [*:free]", filter.Include)
+		}
+		if len(filter.Exclude) != 1 || filter.Exclude[0] != "*-preview:free" {
+			t.Errorf("Exclude = %v, want [*-preview:free]", filter.Exclude)
+		}
+		if filter.MaxPricePerMtok == nil || *filter.MaxPricePerMtok != 0 {
+			t.Errorf("MaxPricePerMtok = %v, want 0", filter.MaxPricePerMtok)
+		}
+		if filter.Empty() {
+			t.Error("Empty() = true, want false for a declared filter")
+		}
+	})
+}
+
+func TestModelFilterEmptyAndNormalize(t *testing.T) {
+	tests := []struct {
+		name      string
+		filter    ModelFilter
+		wantEmpty bool
+	}{
+		{name: "zero value", filter: ModelFilter{}, wantEmpty: true},
+		{name: "blank patterns only", filter: ModelFilter{Include: []string{" ", ""}}, wantEmpty: true},
+		{name: "include", filter: ModelFilter{Include: []string{"*:free"}}, wantEmpty: false},
+		{name: "exclude", filter: ModelFilter{Exclude: []string{"*-preview"}}, wantEmpty: false},
+		// A zero cap means "free models only", not "no cap configured".
+		{name: "zero price cap", filter: ModelFilter{MaxPricePerMtok: new(float64)}, wantEmpty: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.filter.Empty(); got != tt.wantEmpty {
+				t.Errorf("Empty() = %v, want %v", got, tt.wantEmpty)
+			}
+			normalized := tt.filter.Normalize()
+			for _, pattern := range append(normalized.Include, normalized.Exclude...) {
+				if strings.TrimSpace(pattern) == "" {
+					t.Errorf("Normalize() kept a blank pattern in %+v", normalized)
+				}
+			}
+		})
+	}
+}
+
+// A cap that cannot express a real limit must fail loudly: NaN rejects every
+// model, +Inf disables the cap, and a negative cap can never be met.
+func TestModelFilterValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cap     *float64
+		wantErr bool
+	}{
+		{name: "unset", cap: nil},
+		{name: "zero", cap: new(0.0)},
+		{name: "positive", cap: new(1.5)},
+		{name: "negative", cap: new(-1.0), wantErr: true},
+		{name: "NaN", cap: new(math.NaN()), wantErr: true},
+		{name: "positive infinity", cap: new(math.Inf(1)), wantErr: true},
+		{name: "negative infinity", cap: new(math.Inf(-1)), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ModelFilter{MaxPricePerMtok: tt.cap}.Validate("providers.openrouter.model_filter")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "providers.openrouter.model_filter.max_price_per_mtok") {
+				t.Errorf("error = %q, want it to name the offending field", err)
 			}
 		})
 	}

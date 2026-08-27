@@ -39,11 +39,14 @@ For request and response details, see the dedicated guides:
 | `/v1/models`                      | GET    | List available models                                                                                        |
 | `/v1/audio/speech`                | POST   | Text-to-speech, returning binary audio                                                                       |
 | `/v1/audio/transcriptions`        | POST   | Speech-to-text from a multipart upload                                                                       |
-| `/v1/images/generations`          | POST   | Image generation from a text prompt (DALL·E, gpt-image-1, grok-2-image)                                     |
+| `/v1/images/generations`          | POST   | Image generation from a text prompt (DALL·E, gpt-image-1, grok-2-image, Imagen, Gemini image models)                                     |
 | `/v1/images/edits`                | POST   | Image editing / inpainting from a multipart upload (image, optional mask, prompt)                             |
 | `/v1/realtime`                    | GET    | Realtime speech-to-speech websocket upgrade; `?call_id=` attaches to an existing WebRTC/SIP call as a sideband channel (when `REALTIME_ENABLED`) |
 | `/v1/realtime/calls`              | POST   | Realtime WebRTC SDP exchange: `application/sdp` offer with `?model=`, or multipart `sdp` + `session` fields (when `REALTIME_ENABLED`)            |
 | `/v1/realtime/client_secrets`     | POST   | Mint an ephemeral realtime client secret for browser clients, routed by `session.model` (when `REALTIME_ENABLED`)                                |
+| `/v1/realtime/translations`       | GET    | Realtime speech translation websocket upgrade (e.g. `gpt-realtime-translate`); same as `/v1/realtime?intent=translation` (when `REALTIME_ENABLED`) |
+| `/v1/realtime/translations/calls` | POST   | WebRTC SDP exchange for a translation session (when `REALTIME_ENABLED`)                                                                          |
+| `/v1/realtime/translations/client_secrets` | POST | Mint an ephemeral client secret for a translation session (when `REALTIME_ENABLED`)                                                     |
 | `/v1/files`                       | POST   | Upload a file (OpenAI-compatible multipart)                                                                  |
 | `/v1/files`                       | GET    | List files                                                                                                   |
 | `/v1/files/{id}`                  | GET    | Retrieve file metadata                                                                                       |
@@ -54,6 +57,36 @@ For request and response details, see the dedicated guides:
 | `/v1/batches/{id}`                | GET    | Retrieve one stored batch                                                                                    |
 | `/v1/batches/{id}/cancel`         | POST   | Cancel a pending batch                                                                                       |
 | `/v1/batches/{id}/results`        | GET    | Retrieve native batch results when available                                                                 |
+
+### Realtime translation sessions
+
+Speech translation models (OpenAI `gpt-realtime-translate`) run on their own
+session surface, so the gateway mirrors it. Connect to `/v1/realtime/translations`
+— or `/v1/realtime?intent=translation`, which is the same session — and set the
+target language after the socket opens:
+
+```bash
+wscat -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -c "ws://localhost:8080/v1/realtime/translations?model=gpt-realtime-translate"
+```
+
+```json
+{"type": "session.update", "session": {"audio": {"output": {"language": "pl"}}}}
+```
+
+Translation sessions use their own event names (`session.input_audio_buffer.append`
+in, `session.output_audio.delta` and `session.output_transcript.delta` out) and
+accept 24 kHz PCM16 audio. Frames relay verbatim, so any client written against
+the provider's translation API works unchanged.
+
+Translation is an OpenAI surface today. Routing a translation session to a
+provider that does not serve one fails with a 400 rather than quietly opening an
+ordinary conversation session in its place.
+
+These sessions report no usage events, so the gateway prices them from the input
+audio it relays, at the model's per-second input rate. WebRTC translation calls
+are the exception: their media never transits the gateway, so they are not
+metered.
 
 ## Anthropic-Compatible API
 

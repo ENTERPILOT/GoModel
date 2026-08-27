@@ -15,7 +15,8 @@ type CacheConfig struct {
 }
 
 // ModelCacheConfig holds cache configuration for model registry.
-// Exactly one of Local or Redis must be non-nil.
+// At least one of Local or Redis must be non-nil. When both are set, Redis is
+// preferred and Local is the fallback if Redis is unreachable.
 type ModelCacheConfig struct {
 	RefreshInterval int `yaml:"refresh_interval" env:"CACHE_REFRESH_INTERVAL"`
 	// RecheckInterval is how often (seconds) providers whose latest refresh
@@ -135,10 +136,11 @@ type WeaviateConfig struct {
 }
 
 // ValidateCacheConfig validates the cache configuration in c.
-// For the model cache, exactly one backend (Local or Redis) must be configured;
-// having both or neither is an error. When Redis is selected, its URL must be
-// non-empty. Returns a descriptive error if any constraint is violated, or nil
-// if the configuration is valid.
+// For the model cache, at least one backend (Local or Redis) must be configured;
+// having neither is an error. Both may be set: Redis is preferred and Local is
+// the fallback if Redis is unreachable at startup. When Redis is selected, its
+// URL must be non-empty. Returns a descriptive error if any constraint is
+// violated, or nil if the configuration is valid.
 func ValidateCacheConfig(c *CacheConfig) error {
 	if c == nil {
 		return fmt.Errorf("cache: configuration is required")
@@ -147,9 +149,6 @@ func ValidateCacheConfig(c *CacheConfig) error {
 	hasLocal := m.Local != nil
 	hasRedis := m.Redis != nil
 
-	if hasLocal && hasRedis {
-		return fmt.Errorf("cache.model: cannot have both local and redis configured; choose one")
-	}
 	if !hasLocal && !hasRedis {
 		return fmt.Errorf("cache.model: must have either local or redis configured")
 	}

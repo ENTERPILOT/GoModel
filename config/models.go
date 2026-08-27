@@ -16,7 +16,7 @@ type ModelsConfig struct {
 
 	// ConfiguredProviderModelsMode controls how providers.<name>.models and
 	// provider *_MODELS env vars affect the provider model inventory.
-	// Supported values: "fallback", "allowlist". Default: "fallback".
+	// Supported values: "fallback", "allowlist", "merge". Default: "fallback".
 	ConfiguredProviderModelsMode ConfiguredProviderModelsMode `yaml:"configured_provider_models_mode" env:"CONFIGURED_PROVIDER_MODELS_MODE"`
 }
 
@@ -25,14 +25,22 @@ type ModelsConfig struct {
 type ConfiguredProviderModelsMode string
 
 const (
-	ConfiguredProviderModelsModeFallback  ConfiguredProviderModelsMode = "fallback"
+	// ConfiguredProviderModelsModeFallback uses configured models only when the
+	// upstream /models call fails or returns nothing.
+	ConfiguredProviderModelsModeFallback ConfiguredProviderModelsMode = "fallback"
+	// ConfiguredProviderModelsModeAllowlist exposes only the configured models
+	// and skips the upstream /models call.
 	ConfiguredProviderModelsModeAllowlist ConfiguredProviderModelsMode = "allowlist"
+	// ConfiguredProviderModelsModeMerge unions the upstream inventory with the
+	// configured models, so models a provider serves but does not list stay
+	// routable without hiding the discovered ones.
+	ConfiguredProviderModelsModeMerge ConfiguredProviderModelsMode = "merge"
 )
 
 // Valid reports whether mode is one of the supported configured-provider-models modes.
 func (m ConfiguredProviderModelsMode) Valid() bool {
 	switch NormalizeConfiguredProviderModelsMode(m) {
-	case ConfiguredProviderModelsModeFallback, ConfiguredProviderModelsModeAllowlist:
+	case ConfiguredProviderModelsModeFallback, ConfiguredProviderModelsModeAllowlist, ConfiguredProviderModelsModeMerge:
 		return true
 	default:
 		return false

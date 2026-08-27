@@ -93,6 +93,7 @@ func TestAuditLogSlimsListEntries(t *testing.T) {
 	d := entry.Data
 	if d == nil {
 		t.Fatal("entry data must survive slimming")
+		return
 	}
 	if d.RequestBody != nil || d.ResponseBody != nil {
 		t.Error("list entry bodies must be stripped")
@@ -217,6 +218,7 @@ func TestAuditConversationSlimsEntries(t *testing.T) {
 	d := result.Entries[0].Data
 	if d == nil {
 		t.Fatal("entry data must survive")
+		return
 	}
 	if d.RequestBody == nil || d.ResponseBody == nil {
 		t.Error("the transcript is built from the bodies; they must survive")

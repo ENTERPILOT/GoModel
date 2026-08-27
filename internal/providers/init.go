@@ -62,7 +62,7 @@ func (r *InitResult) Close() error {
 //
 // It performs:
 //  1. Provider config resolution (env var overlay, filtering, resilience merging)
-//  2. Cache initialization (local or Redis based on config)
+//  2. Cache initialization (Redis preferred, local fallback if Redis is down)
 //  3. Provider instantiation and registration
 //  4. Async model loading (from cache first, then network refresh)
 //  5. Best-effort background model-list fetch (goroutine with ~45s timeout;
@@ -83,6 +83,12 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	}
 
 	providerMap, credentialResolved := resolveProviders(result.RawProviders, result.Config.Resilience, factory.discoveryConfigsSnapshot())
+	// Validated after the env overlay so one rule covers both sources: a bad
+	// price cap must not start the gateway with a cost control that silently
+	// admits everything.
+	if err := validateProviderModelFilters(providerMap); err != nil {
+		return nil, err
+	}
 	fromFile, fromEnv := providerOrigins(result.RawProviders, providerMap)
 	slog.Info("providers resolved",
 		"total", len(providerMap),
@@ -128,7 +134,9 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 
 	// Fetch model list in background (best-effort, non-blocking)
 	modelListURL := result.Config.Cache.Model.ModelList.URL
-	if modelListURL != "" {
+	if modelListURL == "" {
+		slog.Info("model list downloads disabled; models rely on provider-reported, configured, and any previously cached catalog metadata")
+	} else {
 		go func() {
 			fetchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 			defer cancel()
@@ -188,8 +196,11 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 }
 
 // initCache initializes the appropriate cache backend based on configuration.
+// Redis is preferred when configured. If Redis is unreachable and a local
+// backend is also configured, startup continues on the local file cache.
 func initCache(cfg *config.Config) (modelcache.Cache, error) {
 	m := cfg.Cache.Model
+	local := newLocalModelCache(m.Local)
 	if m.Redis != nil && m.Redis.URL != "" {
 		ttl := time.Duration(m.Redis.TTL) * time.Second
 		if ttl == 0 {
@@ -202,7 +213,11 @@ func initCache(cfg *config.Config) (modelcache.Cache, error) {
 		}
 		mc, err := modelcache.NewRedisModelCache(redisCfg)
 		if err != nil {
-			return nil, err
+			if local == nil {
+				return nil, err
+			}
+			slog.Warn("redis model cache unavailable; falling back to local file cache", "error", err, "path", localPath(m.Local))
+			return local, nil
 		}
 		key := m.Redis.Key
 		if key == "" {
@@ -211,16 +226,26 @@ func initCache(cfg *config.Config) (modelcache.Cache, error) {
 		slog.Info("using redis cache", "key", key)
 		return mc, nil
 	}
-	if m.Local != nil {
-		cacheDir := m.Local.CacheDir
-		if cacheDir == "" {
-			cacheDir = defaultModelCacheDir()
-		}
-		cacheFile := filepath.Join(cacheDir, "models.json")
-		slog.Info("using local file cache", "path", cacheFile)
-		return modelcache.NewLocalCache(cacheFile), nil
+	if local != nil {
+		slog.Info("using local file cache", "path", localPath(m.Local))
+		return local, nil
 	}
 	return nil, fmt.Errorf("cache.model: must have either local or redis configured")
+}
+
+func newLocalModelCache(local *config.LocalCacheConfig) modelcache.Cache {
+	if local == nil {
+		return nil
+	}
+	return modelcache.NewLocalCache(localPath(local))
+}
+
+func localPath(local *config.LocalCacheConfig) string {
+	cacheDir := local.CacheDir
+	if cacheDir == "" {
+		cacheDir = defaultModelCacheDir()
+	}
+	return filepath.Join(cacheDir, "models.json")
 }
 
 // defaultModelCacheDir keeps the historical ./.cache location whenever it
@@ -282,9 +307,27 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 		if len(pCfg.ModelMetadataOverrides) > 0 {
 			registry.SetProviderMetadataOverrides(name, pCfg.ModelMetadataOverrides)
 		}
+		registry.SetProviderModelFilter(name, pCfg.ModelFilter)
 		count++
 		slog.Info("provider registered", "name", name, "type", pCfg.Type)
 	}
 
 	return count, nil
+}
+
+// validateProviderModelFilters rejects model filters that cannot express what
+// they were configured to express, naming the provider so the operator knows
+// which declaration (or `<PROVIDER>_MODEL_FILTER_*` variable) to fix.
+func validateProviderModelFilters(providerMap map[string]ProviderConfig) error {
+	names := make([]string, 0, len(providerMap))
+	for name := range providerMap {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := providerMap[name].ModelFilter.Validate("providers." + name + ".model_filter"); err != nil {
+			return err
+		}
+	}
+	return nil
 }

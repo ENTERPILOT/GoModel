@@ -69,7 +69,7 @@ trap 'stop_gw; rm -rf "$WORK"' EXIT
 echo "############ IaC VIRTUAL MODELS (#433) ############"
 
 ############ valid declarative config boots on a COLD catalog (F3 regression) ############
-export VM_ENV='[{"source":"qa-iac-alias","target":"openai/gpt-4.1-nano"},{"source":"qa-iac-lb","strategy":"round_robin","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/llama-3.1-8b-instant"}]}]'
+export VM_ENV='[{"source":"qa-iac-alias","target":"openai/gpt-4.1-nano"},{"source":"qa-iac-lb","strategy":"round_robin","session_affinity":false,"targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/groq/compound-mini"}]},{"source":"qa-iac-lb-sticky","strategy":"round_robin","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/groq/compound-mini"}]}]'
 start_gw && ok "I0 gateway starts with valid VIRTUAL_MODELS" || { bad "I0 startup"; tail -20 "$WORK/server.log"; }
 # The in-memory cache is empty at startup, so config validation ran against a cold
 # catalog ("cached_models":0) yet the gateway still came up — this is the fix.
@@ -80,14 +80,24 @@ jq -e 'any(.[];.source=="qa-iac-alias" and .managed==true and .kind=="redirect")
   && ok "I1 managed entries present with managed=true" || bad "I1 managed entries shape"
 
 [ "$(chat_provider qa-iac-alias)" = openai ] && ok "I2 managed alias resolves (openai)" || bad "I2 managed alias resolve"
+# Balancing is only observable with session affinity off: SESSION_AUTO_DETECT
+# derives a session id from the request content, so identical bodies are one
+# session, and affinity (on unless declared false) pins them to one target.
 lb="$(for i in 1 2 3 4; do chat_provider qa-iac-lb; done)"
-{ grep -q openai <<<"$lb" && grep -q groq <<<"$lb"; } && ok "I3 managed round-robin LB spreads across targets" || bad "I3 managed LB spread"
+{ grep -q openai <<<"$lb" && grep -q groq <<<"$lb"; } && ok "I3 managed round-robin LB spreads across targets" || bad "I3 managed LB spread ($(tr '\n' ' ' <<<"$lb"))"
+# The declared default (affinity unspecified) is the mirror image: the same four
+# identical requests are one detected session and stay on one target.
+st="$(for i in 1 2 3 4; do chat_provider qa-iac-lb-sticky; done)"
+pinned="$(sort -u <<<"$st")"
+{ [ "$(grep -c . <<<"$pinned")" = 1 ] && [ "$pinned" != ERR ]; } \
+  && ok "I3b managed session affinity pins one session to one target ($pinned)" \
+  || bad "I3b managed affinity ($(tr '\n' ' ' <<<"$st"))"
 
 managed_rejected(){ # method, name, json
   local code; code=$(curl -sS -o "$WORK/w.json" -w '%{http_code}' -X "$1" "$B/admin/virtual-models" -H 'Content-Type: application/json' -d "$3")
   if [ "$code" = 400 ] && jq -e '(.error.message|test("managed by config"))' "$WORK/w.json" >/dev/null; then ok "$2"; else bad "$2 (code=$code)"; fi
 }
-managed_rejected PUT    "I4 admin PUT on managed source rejected"    '{"source":"qa-iac-alias","target_model":"groq/llama-3.1-8b-instant"}'
+managed_rejected PUT    "I4 admin PUT on managed source rejected"    '{"source":"qa-iac-alias","target_model":"groq/groq/compound-mini"}'
 managed_rejected DELETE "I5 admin DELETE on managed source rejected" '{"source":"qa-iac-alias"}'
 managed_rejected PUT    "I6 rename of managed source rejected"       '{"source":"qa-iac-renamed","old_source":"qa-iac-alias","target_model":"openai/gpt-4.1-nano"}'
 stop_gw
@@ -95,7 +105,7 @@ stop_gw
 ############ managed overrides store row of same source (restart) ############
 export VM_ENV=""; rm -f "$WORK/data/gomodel.db"*
 start_gw >/dev/null || bad "I7 setup gateway"
-curl -sS -o /dev/null -X PUT "$B/admin/virtual-models" -H 'Content-Type: application/json' -d '{"source":"qa-iac-ovr","target_model":"groq/llama-3.1-8b-instant"}'
+curl -sS -o /dev/null -X PUT "$B/admin/virtual-models" -H 'Content-Type: application/json' -d '{"source":"qa-iac-ovr","target_model":"groq/groq/compound-mini"}'
 note "store baseline qa-iac-ovr -> $(chat_provider qa-iac-ovr)"
 stop_gw
 export VM_ENV='[{"source":"qa-iac-ovr","target":"openai/gpt-4.1-nano"}]'
@@ -114,9 +124,9 @@ rm -f "$WORK/data/gomodel.db"*
 cat > "$WORK/config.yaml" <<'YAML'
 virtual_models:
   - source: qa-iac-merge
-    target: groq/llama-3.1-8b-instant
+    target: groq/groq/compound-mini
   - source: qa-iac-yamlonly
-    target: groq/llama-3.1-8b-instant
+    target: groq/groq/compound-mini
 YAML
 export VM_ENV='[{"source":"qa-iac-merge","target":"openai/gpt-4.1-nano"}]'
 start_gw >/dev/null || { bad "I8 merge gateway"; tail -20 "$WORK/server.log"; }
@@ -134,7 +144,7 @@ fail_start(){ # name, VM_ENV  -> expect the process to EXIT with a clear error
   else bad "$1 (no clear error)"; tail -3 "$WORK/neg.log"; fi
   kill "$(cat "$WORK/neg.pid")" 2>/dev/null; rm -f "$WORK/data/neg.db"* "$WORK/neg.pid"
 }
-fail_start "I9 unknown strategy aborts startup"         '[{"source":"qa-iac-bad","strategy":"weighted","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/llama-3.1-8b-instant"}]}]'
+fail_start "I9 unknown strategy aborts startup"         '[{"source":"qa-iac-bad","strategy":"weighted","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/groq/compound-mini"}]}]'
 fail_start "I10 self-referential target aborts startup" '[{"source":"openai/gpt-4.1-nano","target":"openai/gpt-4.1-nano"}]'
 # Explicit target provider names are static config, so a typo is caught before
 # any API call (#464) — unlike model availability, which stays a resolve-time

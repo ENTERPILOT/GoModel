@@ -169,13 +169,14 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationImageEdits,
 		}
-	case path == "/v1/realtime" || path == "/v1/realtime/calls" || path == "/v1/realtime/client_secrets":
+	case isRealtimePath(path):
 		// The realtime endpoints relay the provider's schema verbatim: /v1/realtime
 		// upgrades to a websocket, /v1/realtime/calls exchanges WebRTC SDP, and
-		// /v1/realtime/client_secrets mints ephemeral browser credentials. They are
-		// model interactions (incur usage, must be observable) but not
-		// IngressManaged: the handlers parse or hijack the transport themselves
-		// rather than going through the JSON inference pipeline.
+		// /v1/realtime/client_secrets mints ephemeral browser credentials, each
+		// with a /v1/realtime/translations sibling for speech translation
+		// sessions. They are model interactions (incur usage, must be observable)
+		// but not IngressManaged: the handlers parse or hijack the transport
+		// themselves rather than going through the JSON inference pipeline.
 		return EndpointDescriptor{
 			ModelInteraction: true,
 			Dialect:          "openai_compat",
@@ -242,10 +243,13 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 	case OperationAudioTranscriptions, OperationAudioTranslations, OperationImageEdits:
 		return BodyModeMultipart
 	case OperationRealtime:
-		if method == http.MethodPost && path == "/v1/realtime/client_secrets" {
+		if method != http.MethodPost {
+			return BodyModeNone
+		}
+		if strings.HasSuffix(path, "/client_secrets") {
 			return BodyModeJSON
 		}
-		if method == http.MethodPost && path == "/v1/realtime/calls" {
+		if strings.HasSuffix(path, "/calls") {
 			// SDP exchange bodies are application/sdp or multipart form data.
 			return BodyModeOpaque
 		}
@@ -271,6 +275,18 @@ func matchesEndpointPath(path, prefix string) bool {
 	}
 	next := path[len(prefix):]
 	return strings.HasPrefix(next, "/")
+}
+
+// isRealtimePath reports whether a normalized path is one of the realtime
+// endpoints: the conversation surface and the translation surface that mirrors
+// it one path segment deeper.
+func isRealtimePath(path string) bool {
+	switch path {
+	case "/v1/realtime", "/v1/realtime/calls", "/v1/realtime/client_secrets",
+		"/v1/realtime/translations", "/v1/realtime/translations/calls", "/v1/realtime/translations/client_secrets":
+		return true
+	}
+	return false
 }
 
 func normalizeEndpointPath(path string) string {

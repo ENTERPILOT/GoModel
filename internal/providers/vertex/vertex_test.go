@@ -494,3 +494,36 @@ func vertexServiceAccountCredentials(t *testing.T, tokenURL string) string {
 	}
 	return string(encoded)
 }
+
+func TestCreateImageDelegatesToGeminiPredict(t *testing.T) {
+	t.Setenv("USE_GOOGLE_GEMINI_NATIVE_API", "true")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/imagen-4.0-generate-001:predict" {
+			t.Errorf("Path = %q, want Vertex Imagen predict endpoint", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer vertex-token" {
+			t.Errorf("Authorization = %q, want Bearer vertex-token", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"predictions": [{"bytesBase64Encoded": "aW1n", "mimeType": "image/png"}]}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig()
+	cfg.BaseURL = server.URL + "/v1/projects/prod-ai/locations/us-central1/publishers/google"
+	provider := newProvider(cfg, providers.ProviderOptions{}, authedTestClient(server.Client()))
+
+	resp, err := provider.CreateImage(context.Background(), &core.ImageGenerationRequest{
+		Model:  "google/imagen-4.0-generate-001",
+		Prompt: "a mountain",
+	})
+	if err != nil {
+		t.Fatalf("CreateImage() error = %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].B64JSON != "aW1n" {
+		t.Fatalf("data = %+v, want the predicted image", resp.Data)
+	}
+	if resp.Provider != "vertex" {
+		t.Fatalf("Provider = %q, want vertex", resp.Provider)
+	}
+}

@@ -3,16 +3,11 @@ package vertex
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"strings"
-
-	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/httpclient"
@@ -196,6 +191,25 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	return p.gemini.StreamChatCompletion(ctx, req)
 }
 
+// CreateImage sends an image generation request through the embedded Gemini
+// adapter, whose Vertex backend serves Imagen through :predict and Gemini
+// image models through generateContent on the publisher endpoints.
+func (p *Provider) CreateImage(ctx context.Context, req *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
+	return p.gemini.CreateImage(ctx, req)
+}
+
+// CreateImageEdit sends an image edit request through the embedded Gemini
+// adapter (Gemini image models only; see the gemini package for the rules).
+func (p *Provider) CreateImageEdit(ctx context.Context, req *core.ImageEditRequest) (*core.ImageGenerationResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
+	return p.gemini.CreateImageEdit(ctx, req)
+}
+
 // ListModels retrieves Vertex AI publisher models.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	if err := p.ready(); err != nil {
@@ -228,7 +242,7 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	if req == nil {
 		return nil, core.NewInvalidRequestError("embedding request is required", nil)
 	}
-	inputs, err := embeddingInputs(req.Input)
+	inputs, err := providers.EmbeddingInputs(req.Input)
 	if err != nil {
 		return nil, err
 	}
@@ -288,42 +302,6 @@ type vertexEmbeddingStatistics struct {
 	Truncated  bool `json:"truncated"`
 }
 
-func embeddingInputs(input any) ([]string, error) {
-	switch v := input.(type) {
-	case string:
-		if strings.TrimSpace(v) == "" {
-			return nil, core.NewInvalidRequestError("embedding input is required", nil)
-		}
-		return []string{v}, nil
-	case []string:
-		return nonEmptyEmbeddingInputs(v)
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			text, ok := item.(string)
-			if !ok {
-				return nil, core.NewInvalidRequestError("vertex AI embeddings support string inputs", nil)
-			}
-			out = append(out, text)
-		}
-		return nonEmptyEmbeddingInputs(out)
-	default:
-		return nil, core.NewInvalidRequestError("vertex AI embeddings support string inputs", nil)
-	}
-}
-
-func nonEmptyEmbeddingInputs(inputs []string) ([]string, error) {
-	for _, input := range inputs {
-		if strings.TrimSpace(input) == "" {
-			return nil, core.NewInvalidRequestError("embedding input must not be empty", nil)
-		}
-	}
-	if len(inputs) == 0 {
-		return nil, core.NewInvalidRequestError("embedding input is required", nil)
-	}
-	return inputs, nil
-}
-
 func openAIEmbeddingResponse(req *core.EmbeddingRequest, resp *vertexEmbeddingPredictResponse) (*core.EmbeddingResponse, error) {
 	out := &core.EmbeddingResponse{
 		Object:   "list",
@@ -336,7 +314,7 @@ func openAIEmbeddingResponse(req *core.EmbeddingRequest, resp *vertexEmbeddingPr
 		if len(values) == 0 {
 			values = prediction.Values
 		}
-		embedding, err := encodeEmbedding(values, req.EncodingFormat)
+		embedding, err := providers.EncodeEmbeddingValues(values, req.EncodingFormat)
 		if err != nil {
 			return nil, core.NewProviderError("vertex", http.StatusBadGateway, "failed to encode Vertex AI embedding response", err)
 		}
@@ -349,17 +327,6 @@ func openAIEmbeddingResponse(req *core.EmbeddingRequest, resp *vertexEmbeddingPr
 	}
 	out.Usage.TotalTokens = out.Usage.PromptTokens
 	return out, nil
-}
-
-func encodeEmbedding(values []float64, encodingFormat string) (json.RawMessage, error) {
-	if strings.EqualFold(strings.TrimSpace(encodingFormat), "base64") {
-		buf := make([]byte, len(values)*4)
-		for i, value := range values {
-			binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(float32(value)))
-		}
-		return json.Marshal(base64.StdEncoding.EncodeToString(buf))
-	}
-	return json.Marshal(values)
 }
 
 func vertexNativeBaseURL(providerCfg providers.ProviderConfig) string {
@@ -382,4 +349,8 @@ func normalizeVertexModelID(model string) string {
 	return model
 }
 
-var _ core.Provider = (*Provider)(nil)
+var (
+	_ core.Provider          = (*Provider)(nil)
+	_ core.ImageProvider     = (*Provider)(nil)
+	_ core.ImageEditProvider = (*Provider)(nil)
+)

@@ -114,3 +114,52 @@ func TestExtractFromImageEditResponse(t *testing.T) {
 		t.Errorf("output cost = %v, want 0.04 per-image", entry.OutputCost)
 	}
 }
+
+func TestExtractFromImageResponse_NoUsageCaveat(t *testing.T) {
+	// A token-priced model whose serving surface returns no usage block
+	// (e.g. Gemini's OpenAI-compatible images endpoint) must say why the
+	// row carries no cost.
+	resp := &core.ImageGenerationResponse{Data: []core.ImageData{{B64JSON: "aGk="}}}
+	pricing := &core.ModelPricing{InputPerMtok: new(0.3), OutputPerMtok: new(30.0)}
+
+	entry := ExtractFromImageResponse(resp, "req", "gemini-2.5-flash-image", "gemini", pricing)
+	if entry.CostsCalculationCaveat == "" {
+		t.Fatal("expected a caveat for a usage-less response without per-image pricing")
+	}
+
+	// With a per_image price the cost is real, so no caveat.
+	priced := ExtractFromImageResponse(resp, "req", "dall-e-3", "openai", &core.ModelPricing{PerImage: new(0.04)})
+	if priced.CostsCalculationCaveat != "" {
+		t.Fatalf("caveat = %q, want none when per-image cost was calculated", priced.CostsCalculationCaveat)
+	}
+
+	// An explicit zero per_image price means a deliberately free model — its
+	// known $0 cost must not read as unavailable.
+	free := ExtractFromImageResponse(resp, "req", "free-image-model", "openai", &core.ModelPricing{PerImage: new(0.0)})
+	if free.CostsCalculationCaveat != "" {
+		t.Fatalf("caveat = %q, want none for an explicitly free per-image model", free.CostsCalculationCaveat)
+	}
+
+	// A per_image price with nothing to count is no basis: an empty response
+	// without usage stays flagged.
+	empty := ExtractFromImageResponse(&core.ImageGenerationResponse{}, "req", "dall-e-3", "openai", &core.ModelPricing{PerImage: new(0.04)})
+	if empty.CostsCalculationCaveat == "" {
+		t.Fatal("expected a caveat when there are no images and no usage to price")
+	}
+
+	// A per-request price does not depend on usage at all, so it costs the
+	// row on its own and needs no caveat.
+	perRequest := ExtractFromImageResponse(resp, "req", "flat-rate-model", "openai", &core.ModelPricing{PerRequest: new(0.02)})
+	if perRequest.CostsCalculationCaveat != "" || perRequest.TotalCost == nil {
+		t.Fatalf("entry = caveat %q cost %v, want costed and caveat-free", perRequest.CostsCalculationCaveat, perRequest.TotalCost)
+	}
+
+	// A usage-carrying response keeps its token costs and stays caveat-free.
+	withUsage := ExtractFromImageResponse(&core.ImageGenerationResponse{
+		Data:  []core.ImageData{{B64JSON: "aGk="}},
+		Usage: &core.ImageUsage{InputTokens: 10, OutputTokens: 1000, TotalTokens: 1010},
+	}, "req", "gemini-2.5-flash-image", "gemini", pricing)
+	if withUsage.CostsCalculationCaveat != "" || withUsage.TotalCost == nil {
+		t.Fatalf("entry = caveat %q cost %v, want costed and caveat-free", withUsage.CostsCalculationCaveat, withUsage.TotalCost)
+	}
+}

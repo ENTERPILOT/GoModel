@@ -344,4 +344,5 @@ func (s *CredentialsService) install(name string, provider core.Provider, cfg Pr
 	if len(cfg.ModelMetadataOverrides) > 0 {
 		s.registry.SetProviderMetadataOverrides(name, cfg.ModelMetadataOverrides)
 	}
+	s.registry.SetProviderModelFilter(name, cfg.ModelFilter)
 }

@@ -43,6 +43,7 @@ type recalculationEntry struct {
 	OutputTokens       int
 	RewriteTokensSaved int
 	RawData            map[string]any
+	Caveat             string
 }
 
 type recalculationUpdate struct {
@@ -72,6 +73,14 @@ func recalculateEntryCosts(entry recalculationEntry, resolver PricingResolver) r
 	}
 	effectivePricing := pricingForEndpoint(pricing, entry.Endpoint)
 	result := CalculateUsageCost(entry.InputTokens, entry.OutputTokens, entry.RawData, entry.Provider, effectivePricing)
+	caveat := result.Caveat
+	if retained := retainedMissingUsageCaveat(entry.Caveat, entry.RawData, effectivePricing); retained != "" {
+		if caveat == "" {
+			caveat = retained
+		} else {
+			caveat = retained + "; " + caveat
+		}
+	}
 	return recalculationUpdate{
 		ID:         entry.ID,
 		InputCost:  result.InputCost,
@@ -87,7 +96,7 @@ func recalculateEntryCosts(entry recalculationEntry, resolver PricingResolver) r
 			entry.RewriteTokensSaved,
 		),
 		CostSource: result.Source,
-		Caveat:     result.Caveat,
+		Caveat:     caveat,
 		HasPricing: result.TotalCost != nil || result.InputCost != nil || result.OutputCost != nil,
 	}
 }

@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.26.6"
+  GO_VERSION: "1.27.0"
 
 # Restrict token permissions to minimum required
 permissions:
@@ -31,10 +31,15 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          # v2.12+ ships a staticcheck that understands Go 1.26 control flow.
-          # v2.10's staticcheck mis-analyzed `if x == nil { t.Fatal() }` guards
-          # under GO_VERSION 1.26.4 and emitted false-positive SA5011 warnings.
-          version: v2.12
+          # v2.13+ supports Go 1.27 and bundles a compatible staticcheck.
+          version: v2.13.1
+          # The shared analysis cache went bad on 2026-08-25: staticcheck lost
+          # t.Fatal no-return facts and every run flagged a different set of
+          # SA5011 false positives in untouched files, on PR branches and main
+          # alike. A cold analysis is deterministic, so skip the cache; it costs
+          # a few minutes per run. Revisit if golangci-lint-action gets a way to
+          # rotate a corrupted cache key.
+          skip-cache: true
           # Temporary workaround: config verification fetches the remote JSON schema and
           # intermittently times out in CI before lint runs. Re-enable by 2026-04-01 once
           # the schema fetch is reliable again; track in this PR/branch discussion.
@@ -166,8 +171,8 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Run hot-path performance guard
-        # Thresholds are maintained in tests/perf/hotpath_test.go.
+      - name: Run performance guards
+        # Allocation and voice-routing latency thresholds are maintained in tests/perf/.
         run: make perf-check
 
   vulncheck:

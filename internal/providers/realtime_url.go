@@ -42,6 +42,24 @@ func OpenAIRealtimeTranscriptionURL(baseURL string) (string, error) {
 	return u.String(), nil
 }
 
+// OpenAIRealtimeTranslationURL derives the websocket URL for an OpenAI realtime
+// translation session: https://host/v1 -> wss://host/v1/realtime/translations?model=...
+// Translation models (gpt-realtime-translate) run on their own endpoint with
+// their own event namespace ("session.input_audio_buffer.append",
+// "session.output_audio.delta"); unlike transcription sessions they still select
+// the model in the URL, and the target language is set by session.update.
+func OpenAIRealtimeTranslationURL(baseURL, model string) (string, error) {
+	u, err := openAIRealtimeBase(baseURL, "ws", "wss")
+	if err != nil {
+		return "", err
+	}
+	u.Path += "/translations"
+	q := url.Values{}
+	q.Set("model", strings.TrimSpace(model)) // accept padded input; forward clean (Postel)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
 // OpenAIRealtimeAttachURL derives the websocket URL that attaches to an existing
 // realtime call as a sideband channel: https://host/v1 -> wss://host/v1/realtime?call_id=...
 // The call already owns a model, so no model parameter is sent.
@@ -63,7 +81,9 @@ func OpenAIRealtimeAttachURL(baseURL, callID string) (string, error) {
 // OpenAIRealtimeHTTPURL derives an OpenAI-style realtime HTTP signaling URL from
 // an HTTP(S) base URL: https://host/v1 + "calls" -> https://host/v1/realtime/calls.
 // It is the HTTP sibling of OpenAIRealtimeURL for the WebRTC SDP exchange and
-// client secret endpoints; ws/wss base schemes map back to http/https.
+// client secret endpoints; ws/wss base schemes map back to http/https. The
+// endpoint may name a nested path ("translations/calls") for the specialized
+// session surfaces.
 func OpenAIRealtimeHTTPURL(baseURL, endpoint string) (string, error) {
 	u, err := openAIRealtimeBase(baseURL, "http", "https")
 	if err != nil {

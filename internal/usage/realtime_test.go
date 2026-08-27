@@ -190,6 +190,31 @@ func TestExtractFromRealtimeTranscriptionCompletedDuration(t *testing.T) {
 	assertCostPtrNear(t, "input cost", entry.InputCost, 0.00025)
 }
 
+func TestNewRealtimeDurationEntry(t *testing.T) {
+	// Sessions the gateway meters itself (OpenAI translation sessions report no
+	// usage events) price the same way as provider-reported duration usage:
+	// 90 s at $0.00056667/s => $0.051.
+	pricing := &core.ModelPricing{PerSecondInput: new(0.00056667)}
+
+	entry := NewRealtimeDurationEntry(90, "req-1", "gpt-realtime-translate", "openai", pricing)
+	if entry == nil {
+		t.Fatal("expected a usage entry")
+	}
+	if entry.Endpoint != endpointRealtime {
+		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointRealtime)
+	}
+	if entry.Model != "gpt-realtime-translate" || entry.Provider != "openai" {
+		t.Errorf("entry = %+v, want the session's model and provider", entry)
+	}
+	if entry.TotalTokens != 0 {
+		t.Errorf("tokens = %d, want 0 for duration usage", entry.TotalTokens)
+	}
+	if entry.RawData[rawKeyAudioSeconds] != float64(90) {
+		t.Errorf("audio seconds missing/miskeyed: %v", entry.RawData)
+	}
+	assertCostPtrNear(t, "input cost", entry.InputCost, 0.0510003)
+}
+
 func TestExtractFromRealtimeTranscriptionCompletedSkipsNonBillable(t *testing.T) {
 	for name, payload := range map[string]string{
 		"delta event":     `{"type":"conversation.item.input_audio_transcription.delta","delta":"He"}`,

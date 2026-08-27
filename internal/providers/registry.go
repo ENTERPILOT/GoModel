@@ -3,6 +3,7 @@ package providers
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -48,20 +49,29 @@ func newModelInfo(model core.Model, provider core.Provider, providerName, provid
 // It fetches models from providers on startup and caches them in memory.
 // Supports loading from a cache (local file or Redis) for instant startup.
 type ModelRegistry struct {
-	mu               sync.RWMutex
-	models           map[string]*ModelInfo            // model ID -> model info (first provider wins)
+	mu     sync.RWMutex
+	models map[string]*ModelInfo // model ID -> model info (first provider wins)
+	// modelsByProvider is the ROUTABLE catalog: discoveredByProvider with each
+	// provider's model filter applied. Everything that serves, lists, or
+	// resolves a model reads this map.
 	modelsByProvider map[string]map[string]*ModelInfo // provider instance name -> model ID -> model info
-	providers        []core.Provider
-	providerTypes    map[core.Provider]string // provider -> type string
-	providerNames    map[core.Provider]string // provider -> configured provider instance name
-	providerRuntime  map[string]providerRuntimeState
-	cache            modelcache.Cache     // cache backend (local or redis)
-	initialized      bool                 // true when at least one successful network fetch completed
-	initMu           sync.Mutex           // protects initialized flag
-	refreshCh        chan struct{}        // serializes provider/model-list refresh cycles
-	refreshOnce      sync.Once            // initializes refreshCh for zero-value safety
-	modelList        *modeldata.ModelList // parsed model list (nil = not loaded)
-	modelListRaw     json.RawMessage      // raw bytes for cache persistence
+	// discoveredByProvider is the unfiltered inventory as fetched or restored
+	// from cache, before model filters. It is what enrichment runs over and
+	// what is persisted, so a model a filter currently rejects returns as soon
+	// as its pricing or the filter changes, without waiting for a refetch.
+	// Providers without a filter share their inner map with modelsByProvider.
+	discoveredByProvider map[string]map[string]*ModelInfo
+	providers            []core.Provider
+	providerTypes        map[core.Provider]string // provider -> type string
+	providerNames        map[core.Provider]string // provider -> configured provider instance name
+	providerRuntime      map[string]providerRuntimeState
+	cache                modelcache.Cache     // cache backend (local or redis)
+	initialized          bool                 // true when at least one successful network fetch completed
+	initMu               sync.Mutex           // protects initialized flag
+	refreshCh            chan struct{}        // serializes provider/model-list refresh cycles
+	refreshOnce          sync.Once            // initializes refreshCh for zero-value safety
+	modelList            *modeldata.ModelList // parsed model list (nil = not loaded)
+	modelListRaw         json.RawMessage      // raw bytes for cache persistence
 	// modelListETag is the validator for conditional refetches and
 	// modelListETagURL the URL it was issued by; the validator is only sent
 	// back to that same URL, so a reconfigured MODEL_LIST_URL always fetches
@@ -77,6 +87,10 @@ type ModelRegistry struct {
 	// are fallback-only or an allowlist over the discovered upstream inventory.
 	configuredProviderModels     map[string][]string
 	configuredProviderModelsMode config.ConfiguredProviderModelsMode
+	// providerModelFilters holds operator-supplied inventory filters keyed by
+	// configured provider instance name. Applied after metadata enrichment;
+	// providers without a filter are absent from the map.
+	providerModelFilters map[string]modelFilter
 
 	// Cached sorted slices, rebuilt lazily after models change.
 	// nil means cache needs rebuilding. Protected by mu.
@@ -112,6 +126,7 @@ func NewModelRegistry() *ModelRegistry {
 	return &ModelRegistry{
 		models:                       make(map[string]*ModelInfo),
 		modelsByProvider:             make(map[string]map[string]*ModelInfo),
+		discoveredByProvider:         make(map[string]map[string]*ModelInfo),
 		providerTypes:                make(map[core.Provider]string),
 		providerNames:                make(map[core.Provider]string),
 		providerRuntime:              make(map[string]providerRuntimeState),
@@ -285,6 +300,44 @@ func (r *ModelRegistry) SetProviderConfiguredModels(providerName string, models 
 	r.configuredProviderModels[providerName] = normalized
 }
 
+// SetProviderModelFilter records the inventory filter declared for a configured
+// provider instance. Call with an empty filter to clear it.
+func (r *ModelRegistry) SetProviderModelFilter(providerName string, filter config.ModelFilter) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+	resolved, ok := newModelFilter(filter)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !ok {
+		delete(r.providerModelFilters, providerName)
+	} else {
+		if r.providerModelFilters == nil {
+			r.providerModelFilters = make(map[string]modelFilter)
+		}
+		r.providerModelFilters[providerName] = resolved
+	}
+	// Republish so a filter set or cleared after the catalog loaded takes effect
+	// immediately rather than at the next refresh.
+	if len(r.discoveredByProvider) > 0 {
+		r.publishFilteredInventoryLocked()
+		r.invalidateSortedCaches()
+	}
+}
+
+// snapshotProviderModelFilters copies the configured filters under a read lock.
+func (r *ModelRegistry) snapshotProviderModelFilters() map[string]modelFilter {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.providerModelFilters) == 0 {
+		return nil
+	}
+	out := make(map[string]modelFilter, len(r.providerModelFilters))
+	maps.Copy(out, r.providerModelFilters)
+	return out
+}
+
 // RegisterProviderWithNameAndType adds a provider with a configured provider instance name and type.
 // Name is used for unambiguous provider/model selection (e.g. "provider/model") and cache persistence.
 func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, providerName, providerType string) {
@@ -338,8 +391,9 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	delete(r.providerRuntime, providerName)
 	delete(r.configMetadataOverrides, providerName)
 	delete(r.configuredProviderModels, providerName)
-	delete(r.modelsByProvider, providerName)
-	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
+	delete(r.providerModelFilters, providerName)
+	delete(r.discoveredByProvider, providerName)
+	r.publishFilteredInventoryLocked()
 	r.invalidateSortedCaches()
 }
 

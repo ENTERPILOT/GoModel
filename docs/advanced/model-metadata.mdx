@@ -69,6 +69,6 @@ flowchart LR
 If the catalog fetch fails or the deployment is air-gapped, the gateway runs
 normally — only the catalog-supplied defaults (including catalog pricing) are
 missing. Pricing overrides, `config.yaml` metadata, provider discovery signals,
-and the ID heuristic still apply. Mirror `MODEL_LIST_URL` internally or declare
-metadata in `config.yaml`; see [Production guide](/guides/production) for
-details.
+and the ID heuristic still apply. Mirror `MODEL_LIST_URL` internally, or set
+`MODEL_LIST_URL=off` to turn the download off entirely and declare metadata in
+`config.yaml`; see [Production guide](/guides/production) for details.

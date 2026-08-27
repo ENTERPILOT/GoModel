@@ -16,9 +16,13 @@ embeddings, so `model` selection, `provider` hints, virtual models, per-key mode
 access rules ([user paths](/features/user-path)), [budgets](/features/budgets),
 and [rate limits](/features/rate-limits) all apply. Image generation is served by
 OpenAI and the OpenAI-compatible providers that implement the endpoint
-(Azure OpenAI, OpenRouter, [xAI](/providers/xai)); image edits by OpenAI and
-Azure OpenAI, plus any OpenAI-compatible provider that accepts OpenAI's
-multipart upload on `/images/edits`. A provider without the capability returns
+(Azure OpenAI, OpenRouter, [xAI](/providers/xai)), and by
+[Google Gemini](/providers/gemini) — Gemini image models through the native
+API, plus Imagen on [Vertex AI](/providers/vertex). Image edits are served by
+OpenAI and Azure OpenAI, by
+Gemini image models (`gemini-2.5-flash-image`, ...), plus any
+OpenAI-compatible provider that accepts OpenAI's multipart upload on
+`/images/edits`. A provider without the capability returns
 a clear `model "…" does not support image generation` (or `image edits`) error
 rather than mis-routing, and image-only models are hidden from `/v1/models` for
 providers without image support.
@@ -95,6 +99,8 @@ await writeFile("lighthouse.png", Buffer.from(result.data[0].b64_json, "base64")
 `moderation`, `user`, and any future parameter — is **forwarded to the provider
 unchanged**, so model-specific options work without a gateway update. The
 provider decides which values it accepts and returns its own error otherwise.
+The exception is Gemini's native adapter, which translates `n` and `size` to
+their native equivalents — see [Google Gemini](#google-gemini).
 
 The response is the OpenAI images envelope. `data[]` entries carry either a
 hosted `url` (DALL·E, `response_format: "url"`) or inline `b64_json`
@@ -169,9 +175,13 @@ Image calls are recorded in [usage tracking](/features/cost-tracking) under the
 - **Token-billed models** (`gpt-image-1` and similar) report `usage` in the
   response; GoModel stores the input/output token counts and prices them with the
   model's `input_per_mtok` / `output_per_mtok` rates.
-- **Per-image models** (DALL·E, `grok-2-image`) report no tokens. GoModel records
-  the number of returned images (`images` in the raw usage data) and prices it
-  with the model's `per_image` rate.
+- **Per-image models** (DALL·E, `grok-2-image`, Imagen) report no tokens.
+  GoModel records the number of returned images (`images` in the raw usage
+  data) and prices it with the model's `per_image` rate.
+- When a response carries no `usage` block and the configured pricing cannot
+  cost it without one (no `per_image` rate to apply to the returned images, no
+  `per_request` rate), the usage row is flagged with a cost-calculation caveat
+  so it reads as "unreported usage" rather than a free call.
 
 Set `per_image` through a [pricing override](/features/cost-tracking#override-pricing)
 or in `config.yaml` when the model catalog has no price for an image model:
@@ -204,9 +214,39 @@ run through the full inference orchestrator**. Compared with `/v1/chat/completio
 - **Variations** (`/v1/images/variations`) are not exposed. Use the
   [passthrough API](/features/passthrough-api) (`/p/{provider}/v1/images/...`)
   to reach them on a specific provider.
-- **OpenAI request shape in, OpenAI-compatible providers out** — providers whose
-  native image API differs from OpenAI's (for example Gemini Imagen) are not
-  translated behind this endpoint; use passthrough for those.
+- **OpenAI request shape in** — Google Gemini's native image APIs (Imagen
+  `predict`, Gemini image model `generateContent`) are translated behind these
+  endpoints; see [provider notes](#google-gemini) below. Other providers whose
+  native image API differs from OpenAI's are not translated; use passthrough
+  for those.
+
+## Google Gemini
+
+With the Gemini provider in native API mode (the default), Gemini image
+models (`gemini-2.5-flash-image`, ...) generate through `generateContent`,
+and `imagen-*` models through Imagen's `predict` API. Google retired Imagen
+from the Gemini API (AI Studio) on August 17, 2026 — use a Gemini image model
+there; Imagen remains available on [Vertex AI](/providers/vertex).
+
+- Gemini image models do not support multi-candidate output, so `n` (up to
+  10) is served as `n` parallel `generateContent` calls whose results are
+  merged — each call is billed by Google. For Imagen, `n` maps to
+  `sampleCount`; `size` maps to the closest supported
+  aspect ratio (`1024x1024` → `1:1`, `1536x1024` → `3:2`, ...), and a raw
+  ratio such as `"16:9"` passes through. Unknown JSON fields are forwarded
+  verbatim, so native parameters (`personGeneration`, `sampleImageSize`,
+  `imageConfig`, ...) work unchanged.
+- Images always return as `b64_json`. Any text a Gemini image model produces
+  alongside the image is surfaced as `revised_prompt`.
+- Gemini image models report token `usage` (token-billed); Imagen reports
+  none (price it `per_image`).
+- Edits work with Gemini image models only: uploads become inline image
+  parts ahead of the prompt. `mask` is not supported — describe the region to
+  change in the prompt. Imagen models only generate.
+
+In OpenAI-compatible mode, generation forwards to Gemini's
+`/openai/images/generations` endpoint and edits are rejected (that surface has
+no edits endpoint).
 
 ## Audit logging
 

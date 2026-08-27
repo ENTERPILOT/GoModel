@@ -36,19 +36,46 @@ type DialError struct{ Err error }
 func (e *DialError) Error() string { return "realtime upstream dial failed: " + e.Err.Error() }
 func (e *DialError) Unwrap() error { return e.Err }
 
+// Hooks observe and shape the frames a session relays. Every hook is optional
+// and runs inline on the relay path, so each must be fast and must not block.
+type Hooks struct {
+	// OnClientFrame observes each client->upstream frame. It backs metering of
+	// what the client sends, such as input audio for sessions the provider bills
+	// by duration.
+	OnClientFrame func([]byte)
+	// MapClientFrame rewrites each client->upstream frame before it is
+	// forwarded, returning the frame unchanged when it has nothing to do. It
+	// carries session policy such as pinning the transcription model.
+	MapClientFrame func([]byte) []byte
+	// OnServerFrame observes each upstream->client frame. It backs usage
+	// tracking, which reads the provider's usage events.
+	OnServerFrame func([]byte)
+}
+
+// clientFrames folds the client-frame observer and mapper into the single
+// transform the client->upstream copy loop applies.
+func (h Hooks) clientFrames() func([]byte) []byte {
+	if h.OnClientFrame == nil {
+		return h.MapClientFrame
+	}
+	return func(frame []byte) []byte {
+		h.OnClientFrame(frame)
+		if h.MapClientFrame == nil {
+			return frame
+		}
+		return h.MapClientFrame(frame)
+	}
+}
+
 // Proxy upgrades the client request to a websocket, dials the upstream target,
-// and relays frames bidirectionally until either side closes. onServerFrame, if
-// non-nil, observes each upstream->client frame for usage tracking; it must be
-// fast and must not block. mapClientFrame, if non-nil, maps each client->upstream
-// frame before it is forwarded (returning the frame unchanged when it has nothing
-// to do); it carries session policy such as pinning the transcription model, and
-// must be fast and must not block.
+// and relays frames bidirectionally until either side closes, running hooks on
+// the frames as they pass.
 //
 // The upstream is dialed first: if it fails, the client is not yet upgraded, so a
 // *DialError is returned and the caller may write an HTTP error. Once the client
 // is upgraded the connection is hijacked; Proxy then returns nil on a clean close
 // or the terminal transport error (never a *DialError) for the caller to log.
-func Proxy(w http.ResponseWriter, r *http.Request, target Target, onServerFrame func([]byte), mapClientFrame func([]byte) []byte) error {
+func Proxy(w http.ResponseWriter, r *http.Request, target Target, hooks Hooks) error {
 	upstream, _, err := websocket.Dial(r.Context(), target.URL, &websocket.DialOptions{
 		HTTPHeader:   target.Headers,
 		Subprotocols: target.Subprotocols,
@@ -71,7 +98,7 @@ func Proxy(w http.ResponseWriter, r *http.Request, target Target, onServerFrame 
 	}
 	client.SetReadLimit(MaxFrameBytes)
 
-	return relay(r.Context(), client, upstream, onServerFrame, mapClientFrame)
+	return relay(r.Context(), client, upstream, hooks)
 }
 
 // Heartbeat cadence. A silently dead peer (NAT timeout, power loss — no RST,
@@ -86,13 +113,13 @@ var (
 // relay runs the two copy loops plus the heartbeat, tears everything down
 // when any of them ends, and returns the terminal cause (nil for a normal
 // close).
-func relay(ctx context.Context, client, upstream *websocket.Conn, onServerFrame func([]byte), mapClientFrame func([]byte) []byte) error {
+func relay(ctx context.Context, client, upstream *websocket.Conn, hooks Hooks) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	done := make(chan error, 3)
-	go func() { done <- copyFrames(ctx, upstream, client, mapClientFrame) }()         // client -> upstream
-	go func() { done <- copyFrames(ctx, client, upstream, observe(onServerFrame)) }() // upstream -> client
+	go func() { done <- copyFrames(ctx, upstream, client, hooks.clientFrames()) }()         // client -> upstream
+	go func() { done <- copyFrames(ctx, client, upstream, observe(hooks.OnServerFrame)) }() // upstream -> client
 	go func() {
 		done <- heartbeat(ctx, func(ctx context.Context) error { return pingBoth(ctx, client, upstream) })
 	}()

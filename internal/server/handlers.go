@@ -353,12 +353,18 @@ func (h *Handler) ProviderPassthrough(c *echo.Context) error {
 			return handleError(c, h.passthrough().unsupportedPassthroughProviderError(providerType))
 		}
 		// endpoint may carry the query string (e.g. "realtime?model=..."); compare
-		// only the path segment.
+		// only the path segment. The translations path selects the translation
+		// session surface, exactly as the typed route does.
 		endpointPath := strings.Trim(strings.SplitN(endpoint, "?", 2)[0], "/")
-		if endpointPath != "realtime" {
+		intent := ""
+		switch endpointPath {
+		case "realtime":
+		case "realtime/translations":
+			intent = core.RealtimeIntentTranslation
+		default:
 			return handleError(c, core.NewNotFoundError("unsupported realtime passthrough endpoint: "+endpointPath))
 		}
-		return h.realtime().PassthroughRealtime(c, providerType)
+		return h.realtime().PassthroughRealtime(c, providerType, intent)
 	}
 	return h.passthrough().ProviderPassthrough(c)
 }
@@ -382,6 +388,26 @@ func (h *Handler) ProviderPassthrough(c *echo.Context) error {
 // @Router       /v1/realtime [get]
 func (h *Handler) Realtime(c *echo.Context) error {
 	return h.realtime().Realtime(c)
+}
+
+// RealtimeTranslations handles GET /v1/realtime/translations.
+//
+// @Summary      Open a realtime translation session
+// @Description  Upgrades to a websocket and relays an OpenAI-compatible realtime speech translation session (e.g. gpt-realtime-translate) to the provider that owns the model named in the ?model= query parameter. Translation sessions use their own event namespace and set the target language with session.update (session.audio.output.language); provider credentials are injected by the gateway. Equivalent to /v1/realtime?intent=translation.
+// @Tags         realtime
+// @Security     BearerAuth
+// @Param        model     query     string  true   "Translation model that owns the session"
+// @Param        provider  query     string  false  "Optional provider hint"
+// @Success      101       {string}  string  "Switching Protocols"
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      429       {object}  core.OpenAIErrorEnvelope
+// @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/realtime/translations [get]
+func (h *Handler) RealtimeTranslations(c *echo.Context) error {
+	return h.realtime().RealtimeTranslations(c)
 }
 
 // MCP handles the aggregated MCP endpoint at /mcp.
@@ -450,6 +476,31 @@ func (h *Handler) RealtimeCalls(c *echo.Context) error {
 	return h.realtime().RealtimeCalls(c)
 }
 
+// RealtimeTranslationCalls handles POST /v1/realtime/translations/calls.
+//
+// @Summary      Create a realtime translation call (WebRTC)
+// @Description  OpenAI-compatible WebRTC SDP exchange for speech translation sessions. Identical to /v1/realtime/calls except that the session runs on the provider's translation surface; the created call is addressed at /v1/realtime/translations/calls/{call_id}.
+// @Tags         realtime
+// @Accept       application/sdp
+// @Accept       mpfd
+// @Produce      application/sdp
+// @Produce      json
+// @Security     BearerAuth
+// @Param        model     query     string  false  "Translation model that owns the session (required for raw SDP offers)"
+// @Param        provider  query     string  false  "Optional provider hint"
+// @Param        request   body      string  true   "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields"
+// @Success      201       {string}  string  "SDP answer"
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      429       {object}  core.OpenAIErrorEnvelope
+// @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/realtime/translations/calls [post]
+func (h *Handler) RealtimeTranslationCalls(c *echo.Context) error {
+	return h.realtime().RealtimeTranslationCalls(c)
+}
+
 // RealtimeClientSecrets handles POST /v1/realtime/client_secrets.
 //
 // @Summary      Mint an ephemeral realtime client secret
@@ -469,6 +520,28 @@ func (h *Handler) RealtimeCalls(c *echo.Context) error {
 // @Router       /v1/realtime/client_secrets [post]
 func (h *Handler) RealtimeClientSecrets(c *echo.Context) error {
 	return h.realtime().RealtimeClientSecrets(c)
+}
+
+// RealtimeTranslationClientSecrets handles POST /v1/realtime/translations/client_secrets.
+//
+// @Summary      Mint an ephemeral realtime translation client secret
+// @Description  OpenAI-compatible ephemeral credential minting for browser and mobile clients that open a speech translation session. Identical to /v1/realtime/client_secrets except that the credential is minted on the provider's translation surface.
+// @Tags         realtime
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        provider  query     string  false  "Optional provider hint"
+// @Param        request   body      object  true   "Realtime translation session config carrying session.model"
+// @Success      200       {object}  map[string]interface{}
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      429       {object}  core.OpenAIErrorEnvelope
+// @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/realtime/translations/client_secrets [post]
+func (h *Handler) RealtimeTranslationClientSecrets(c *echo.Context) error {
+	return h.realtime().RealtimeTranslationClientSecrets(c)
 }
 
 // ChatCompletion handles POST /v1/chat/completions

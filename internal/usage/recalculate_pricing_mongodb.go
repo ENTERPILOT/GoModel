@@ -155,6 +155,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 			OutputTokens       int            `bson:"output_tokens"`
 			RewriteTokensSaved int            `bson:"rewrite_tokens_saved"`
 			RawData            map[string]any `bson:"raw_data"`
+			Caveat             string         `bson:"costs_calculation_caveat"`
 		}
 		if err := cursor.Decode(&row); err != nil {
 			return RecalculatePricingResult{}, fmt.Errorf("scan mongodb usage cost row: %w", err)
@@ -170,6 +171,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 			OutputTokens:       row.OutputTokens,
 			RewriteTokensSaved: row.RewriteTokensSaved,
 			RawData:            row.RawData,
+			Caveat:             row.Caveat,
 		}, resolver)
 
 		if _, err := s.collection.UpdateByID(ctx, update.ID, mongoRecalculationUpdate(update)); err != nil {

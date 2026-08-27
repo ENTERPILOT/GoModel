@@ -9546,20 +9546,7 @@
           }
         ],
         "requestBody": {
-          "content": {
-            "application/sdp": {
-              "schema": {
-                "type": "string"
-              }
-            },
-            "multipart/form-data": {
-              "schema": {
-                "type": "string"
-              }
-            }
-          },
-          "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
-          "required": true
+          "$ref": "#/components/requestBodies/Request"
         },
         "responses": {
           "201": {
@@ -9776,6 +9763,382 @@
             "sidebarTitle": "/v1/realtime/client_secrets",
             "title": "Mint an ephemeral realtime client secret",
             "description": "GoModel API reference for POST /v1/realtime/client_secrets: Mint an ephemeral realtime client secret."
+          }
+        }
+      }
+    },
+    "/v1/realtime/translations": {
+      "get": {
+        "description": "Upgrades to a websocket and relays an OpenAI-compatible realtime speech translation session (e.g. gpt-realtime-translate) to the provider that owns the model named in the ?model= query parameter. Translation sessions use their own event namespace and set the target language with session.update (session.audio.output.language); provider credentials are injected by the gateway. Equivalent to /v1/realtime?intent=translation.",
+        "tags": [
+          "realtime"
+        ],
+        "summary": "Open a realtime translation session",
+        "parameters": [
+          {
+            "description": "Translation model that owns the session",
+            "name": "model",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional provider hint",
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/realtime/translations",
+            "title": "Open a realtime translation session",
+            "description": "GoModel API reference for GET /v1/realtime/translations: Open a realtime translation session."
+          }
+        }
+      }
+    },
+    "/v1/realtime/translations/calls": {
+      "post": {
+        "description": "OpenAI-compatible WebRTC SDP exchange for speech translation sessions. Identical to /v1/realtime/calls except that the session runs on the provider's translation surface; the created call is addressed at /v1/realtime/translations/calls/{call_id}.",
+        "tags": [
+          "realtime"
+        ],
+        "summary": "Create a realtime translation call (WebRTC)",
+        "parameters": [
+          {
+            "description": "Translation model that owns the session (required for raw SDP offers)",
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional provider hint",
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Request"
+        },
+        "responses": {
+          "201": {
+            "description": "SDP answer",
+            "content": {
+              "application/sdp": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/sdp": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/realtime/translations/calls",
+            "title": "Create a realtime translation call (WebRTC)",
+            "description": "GoModel API reference for POST /v1/realtime/translations/calls: Create a realtime translation call (WebRTC)."
+          }
+        }
+      }
+    },
+    "/v1/realtime/translations/client_secrets": {
+      "post": {
+        "description": "OpenAI-compatible ephemeral credential minting for browser and mobile clients that open a speech translation session. Identical to /v1/realtime/client_secrets except that the credential is minted on the provider's translation surface.",
+        "tags": [
+          "realtime"
+        ],
+        "summary": "Mint an ephemeral realtime translation client secret",
+        "parameters": [
+          {
+            "description": "Optional provider hint",
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "Realtime translation session config carrying session.model",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/realtime/translations/client_secrets",
+            "title": "Mint an ephemeral realtime translation client secret",
+            "description": "GoModel API reference for POST /v1/realtime/translations/client_secrets: Mint an ephemeral realtime translation client secret."
           }
         }
       }
@@ -10652,6 +11015,22 @@
   ],
   "components": {
     "requestBodies": {
+      "Request": {
+        "content": {
+          "application/sdp": {
+            "schema": {
+              "type": "string"
+            }
+          },
+          "multipart/form-data": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
+        "required": true
+      },
       "anthropicapi.MessagesRequest": {
         "content": {
           "application/json": {

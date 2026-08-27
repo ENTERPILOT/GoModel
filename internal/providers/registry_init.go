@@ -181,6 +181,8 @@ func (r *ModelRegistry) fetchAllProviderModels(
 				slog.Warn("upstream ListModels failed, using configured provider models", attrs...)
 			} else if configuredReason == configuredProviderModelsAllowlist {
 				slog.Debug("using configured provider models", attrs...)
+			} else if configuredReason == configuredProviderModelsMerge {
+				slog.Debug("merged configured provider models into upstream inventory", attrs...)
 			} else {
 				slog.Warn("using configured provider models", attrs...)
 			}
@@ -242,14 +244,20 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		//    response) — reason is configuredProviderModelsNotApplied
 		//  - allowlist mode intentionally skipped upstream and produced the
 		//    inventory from configuration — reason is configuredProviderModelsAllowlist
+		//  - merge mode overlaid configured models on a healthy upstream
+		//    response — reason is configuredProviderModelsMerge
 		// Fallback cases (configured*UpstreamError, *Nil, *Empty) keep
 		// lastModelFetchSuccessAt unset so health surfaces "live refresh failed,
 		// serving configured fallback".
 		if configuredReason == configuredProviderModelsNotApplied ||
-			configuredReason == configuredProviderModelsAllowlist {
+			configuredReason == configuredProviderModelsAllowlist ||
+			configuredReason == configuredProviderModelsMerge {
 			runtimeUpdate.lastModelFetchSuccessAt = fetchAt
 		}
-		if configuredReason == configuredProviderModelsNotApplied {
+		// Merge keeps availability signals too: the upstream call actually
+		// succeeded, unlike the fallback reasons.
+		if configuredReason == configuredProviderModelsNotApplied ||
+			configuredReason == configuredProviderModelsMerge {
 			runtimeUpdate.lastAvailabilityCheckAt = fetchAt
 			runtimeUpdate.lastAvailabilityOKAt = fetchAt
 		}
@@ -306,7 +314,7 @@ func (r *ModelRegistry) applyFetchedInventory(
 		if _, ok := fetched.modelsByProvider[name]; ok {
 			continue // this sweep produced authoritative inventory
 		}
-		previous := r.modelsByProvider[name]
+		previous := r.discoveredByProvider[name]
 		if len(previous) == 0 {
 			continue // nothing to carry forward
 		}
@@ -314,14 +322,17 @@ func (r *ModelRegistry) applyFetchedInventory(
 		stale[name] = true
 		carriedForward++
 	}
-	r.modelsByProvider = fetched.modelsByProvider
+	r.discoveredByProvider = fetched.modelsByProvider
 	r.applyProviderRuntimeUpdatesLocked(fetched.runtimeUpdates)
 	for name := range fetched.runtimeUpdates {
 		state := r.providerRuntime[name]
 		state.inventoryStale = stale[name]
 		r.providerRuntime[name] = state
 	}
-	r.models = rebuildGlobalModelMap(r.modelsByProvider, r.freshFirstProviderOrderLocked())
+	r.publishFilteredInventoryLocked()
+	// Count what the catalog actually serves: filters can hide models, and one
+	// bare ID served by several providers still resolves to a single entry.
+	fetched.totalModels = len(r.models)
 	r.invalidateSortedCaches()
 	r.mu.Unlock()
 

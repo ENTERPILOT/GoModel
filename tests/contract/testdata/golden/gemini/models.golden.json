@@ -170,6 +170,36 @@
     },
     {
       "created": 0,
+      "id": "imagen-4.0-generate-preview-06-06",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "imagen-4.0-ultra-generate-preview-06-06",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "imagen-4.0-generate-001",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "imagen-4.0-ultra-generate-001",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "imagen-4.0-fast-generate-001",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
       "id": "gemini-2.5-flash-native-audio-latest",
       "object": "model",
       "owned_by": "google"

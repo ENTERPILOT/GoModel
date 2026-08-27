@@ -35,6 +35,23 @@ func (m *realtimeMockProvider) RealtimeClientSecretTarget(_ context.Context, req
 	return &core.RealtimeHTTPTarget{URL: "https://upstream.example/v1/realtime/client_secrets"}, nil
 }
 
+// intentRealtimeMockProvider also implements core.RealtimeIntentProvider, like
+// the providers that serve specialized session surfaces. The bare
+// realtimeMockProvider stands in for a conversation-only realtime provider.
+type intentRealtimeMockProvider struct {
+	realtimeMockProvider
+	intents []string
+}
+
+func (m *intentRealtimeMockProvider) SupportsRealtimeIntent(intent string) bool {
+	for _, supported := range m.intents {
+		if core.EqualRealtimeIntent(intent, supported) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRouterRealtimeTargetRoutesByModel(t *testing.T) {
 	rt := &realtimeMockProvider{}
 	lookup := newMockLookup()
@@ -82,7 +99,7 @@ func TestRouterRealtimeTargetForwardsCallID(t *testing.T) {
 func TestRouterRealtimeTargetForwardsIntent(t *testing.T) {
 	// Transcription sessions carry intent=transcription end to end; the router
 	// must not drop it while re-shaping the request around the resolved selector.
-	rt := &realtimeMockProvider{}
+	rt := &intentRealtimeMockProvider{intents: []string{core.RealtimeIntentTranscription}}
 	lookup := newMockLookup()
 	lookup.addModel("gpt-4o-transcribe", rt, "openai")
 	router, _ := NewRouter(lookup)
@@ -93,6 +110,31 @@ func TestRouterRealtimeTargetForwardsIntent(t *testing.T) {
 	}
 	if rt.lastReq == nil || rt.lastReq.Intent != "transcription" {
 		t.Errorf("provider received %+v, want forwarded intent", rt.lastReq)
+	}
+}
+
+func TestRouterRealtimeCallTargetsForwardIntent(t *testing.T) {
+	// The signaling routes carry the intent too: it is what points the provider
+	// at its translation surface instead of the conversation one.
+	rt := &intentRealtimeMockProvider{intents: []string{core.RealtimeIntentTranslation}}
+	lookup := newMockLookup()
+	lookup.addModel("gpt-realtime-translate", rt, "openai")
+	router, _ := NewRouter(lookup)
+
+	req := &core.RealtimeRequest{Model: "gpt-realtime-translate", Intent: core.RealtimeIntentTranslation}
+	if _, err := router.RealtimeCallTarget(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rt.lastCallReq == nil || rt.lastCallReq.Intent != core.RealtimeIntentTranslation {
+		t.Errorf("call provider received %+v, want forwarded intent", rt.lastCallReq)
+	}
+
+	rt.lastCallReq = nil
+	if _, err := router.RealtimeClientSecretTarget(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rt.lastCallReq == nil || rt.lastCallReq.Intent != core.RealtimeIntentTranslation {
+		t.Errorf("client secret provider received %+v, want forwarded intent", rt.lastCallReq)
 	}
 }
 
@@ -159,5 +201,69 @@ func TestRouterRealtimeTargetWithProviderHint(t *testing.T) {
 	}
 	if target == nil || target.URL == "" {
 		t.Fatal("expected a realtime target")
+	}
+}
+
+func TestRouterRealtimeIntentRejectedByProviderWithoutSupport(t *testing.T) {
+	// A provider that does not serve a specialized surface must not receive the
+	// request at all: silently building a conversation target would answer a
+	// translation session — or mint a client secret for one — with the wrong
+	// capability. Every realtime surface is gated the same way.
+	conversationOnly := &realtimeMockProvider{}
+	translationOnly := &intentRealtimeMockProvider{intents: []string{core.RealtimeIntentTranslation}}
+	lookup := newMockLookup()
+	lookup.addModel("conversation-only", conversationOnly, "xai")
+	lookup.addModel("translator", translationOnly, "openai")
+	router, _ := NewRouter(lookup)
+
+	surfaces := map[string]func(*core.RealtimeRequest) error{
+		"websocket": func(req *core.RealtimeRequest) error {
+			_, err := router.RealtimeTarget(context.Background(), req)
+			return err
+		},
+		"calls": func(req *core.RealtimeRequest) error {
+			_, err := router.RealtimeCallTarget(context.Background(), req)
+			return err
+		},
+		"client secrets": func(req *core.RealtimeRequest) error {
+			_, err := router.RealtimeClientSecretTarget(context.Background(), req)
+			return err
+		},
+	}
+	cases := map[string]struct {
+		model  string
+		intent string
+	}{
+		"unsupported provider": {model: "conversation-only", intent: core.RealtimeIntentTranslation},
+		"unsupported intent":   {model: "translator", intent: core.RealtimeIntentTranscription},
+		"unknown intent":       {model: "translator", intent: "dictation"},
+	}
+	for surface, call := range surfaces {
+		for name, tc := range cases {
+			t.Run(surface+"/"+name, func(t *testing.T) {
+				err := call(&core.RealtimeRequest{Model: tc.model, Intent: tc.intent})
+				if err == nil || !strings.Contains(err.Error(), "does not support "+tc.intent+" realtime sessions") {
+					t.Fatalf("err = %v, want %s rejected for %q", err, tc.intent, tc.model)
+				}
+			})
+		}
+	}
+
+	// Conversation sessions carry no intent and stay unaffected.
+	if _, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "conversation-only"}); err != nil {
+		t.Fatalf("conversation session rejected: %v", err)
+	}
+}
+
+func TestRouterRealtimeIntentAcceptsPaddedCasing(t *testing.T) {
+	// Intents arrive from a query parameter, so the gate compares them the way
+	// providers do (Postel): trimmed and case-insensitively.
+	rt := &intentRealtimeMockProvider{intents: []string{core.RealtimeIntentTranslation}}
+	lookup := newMockLookup()
+	lookup.addModel("translator", rt, "openai")
+	router, _ := NewRouter(lookup)
+
+	if _, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "translator", Intent: " Translation "}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
