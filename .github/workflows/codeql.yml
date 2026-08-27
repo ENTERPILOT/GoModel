@@ -39,6 +39,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node.js
+        if: matrix.language == 'go'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/dashboard/package-lock.json
+
+      - name: Build dashboard assets
+        if: matrix.language == 'go'
+        run: make frontend
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:

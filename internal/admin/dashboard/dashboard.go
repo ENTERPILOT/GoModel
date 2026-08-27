@@ -1,7 +1,7 @@
 // Package dashboard provides the embedded admin dashboard UI for GoModel.
 //
-// The UI is a Svelte single-page app built from web/dashboard into
-// static/dist (see `make frontend`). This handler serves the built
+// The UI is a Svelte single-page app built from web/dashboard into the ignored
+// static/dist directory (see `make frontend`). This handler serves the built
 // index.html — with runtime globals (base path, version, demo mode) injected
 // — and the hashed static assets under /admin/static/.
 package dashboard

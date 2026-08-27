@@ -30,6 +30,8 @@ export default defineConfig(({ command }) => ({
     chunkSizeWarningLimit: 1024,
   },
   server: {
+    port: Number(process.env.GOMODEL_DEV_PORT || 5173),
+    strictPort: true,
     // Local dev against a running gateway: `npm run dev` proxies API calls
     // to the Go server (default :8080, override with GOMODEL_DEV_PROXY).
     proxy: {

@@ -1,3 +1,15 @@
+# Build the dashboard once on the build host. Generated assets are not stored
+# in Git; the Go stage embeds this output into the final binary.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
+
+WORKDIR /app/web/dashboard
+
+COPY web/dashboard/package.json web/dashboard/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY web/dashboard/ ./
+RUN npm run build
+
 # Build stage — run on the build host's native arch for speed, cross-compile for target
 FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine3.24 AS builder
 
@@ -18,6 +30,7 @@ RUN go mod download
 
 # Copy source and cross-compile for the target platform
 COPY . .
+COPY --from=frontend /app/internal/admin/dashboard/static/dist ./internal/admin/dashboard/static/dist
 ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown

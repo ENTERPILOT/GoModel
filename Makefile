@@ -1,4 +1,4 @@
-.PHONY: all build run demo clean tidy mod-check frontend test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
+.PHONY: all build run run-backend demo clean tidy mod-check frontend test test-race test-dashboard check-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
 
 all: build
 
@@ -9,12 +9,16 @@ DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 DOCS_API_SERVERS ?= http://localhost:8080
 LOG_LEVEL ?= debug
 SWAGGER_ENABLED ?= true
+PORT ?= 8080
+FRONTEND_PORT ?= 5173
 
 # Build tags covering every file the linter and fixers must see. Without these,
 # tag-gated files (tests/e2e, tests/integration, tests/contract) are skipped.
 BUILD_TAGS ?= swagger,e2e,integration,contract
 GOLANGCI_LINT_VERSION := 2.13.1
 GOLANGCI_LINT ?= $(shell go env GOPATH)/bin/golangci-lint
+FRONTEND_DIR := web/dashboard
+FRONTEND_DEPS_STAMP := $(FRONTEND_DIR)/node_modules/.install-stamp
 
 # Linker flags to inject version info
 LDFLAGS := -X "github.com/enterpilot/gomodel/internal/version.Version=$(VERSION)" \
@@ -31,18 +35,19 @@ install-tools:
 	@command -v pre-commit > /dev/null 2>&1 || (echo "Installing pre-commit..." && pip install pre-commit==4.5.1)
 	@echo "All tools are ready"
 
-build:
+build: frontend
 	go build -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
-# Run the application.
-#
-# Built and exec'd rather than `go run`: `go run` exits 1 when it is
-# interrupted, even after the program it supervises shuts down cleanly, so
-# Ctrl+C always ended in a bogus "make: *** [run] Error 1". exec replaces the
-# recipe shell, which also puts the gateway directly under make's signal
-# handling instead of behind a supervisor.
-run:
+# Run the gateway and watched dashboard behind Vite's browser-facing :5173.
+# Vite proxies API traffic to the gateway on :8080, so the browser sees one
+# origin and frontend edits are applied with hot module replacement.
+run: frontend
 	go build -tags=swagger -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
-	LOG_LEVEL="$(LOG_LEVEL)" SWAGGER_ENABLED="$(SWAGGER_ENABLED)" exec ./bin/gomodel
+	PORT="$(PORT)" FRONTEND_PORT="$(FRONTEND_PORT)" LOG_LEVEL="$(LOG_LEVEL)" SWAGGER_ENABLED="$(SWAGGER_ENABLED)" sh tools/run-dev.sh
+
+# Run only the compiled gateway and its embedded production dashboard on :8080.
+run-backend: frontend
+	go build -tags=swagger -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
+	PORT="$(PORT)" LOG_LEVEL="$(LOG_LEVEL)" SWAGGER_ENABLED="$(SWAGGER_ENABLED)" exec ./bin/gomodel
 
 # Seed the local SQLite database and start GoModel with a populated dashboard.
 demo: seed-demo-data
@@ -50,7 +55,7 @@ demo: seed-demo-data
 
 # Clean build artifacts
 clean:
-	rm -rf bin/
+	rm -rf bin/ internal/admin/dashboard/static/dist/
 
 # Tidy dependencies
 tidy:
@@ -76,41 +81,56 @@ seed-demo-data:
 	bash tools/seed-demo-data.sh
 
 # Run unit tests only
-test:
+test: frontend
 	go test ./cmd/... ./config/... ./ext/... ./internal/... ./run/... -v
 
 # Run unit tests with race detection and coverage
-test-race:
+test-race: frontend
 	go test -v -race -coverprofile=coverage.out ./cmd/... ./config/... ./ext/... ./internal/... ./run/...
 
 # Build the Svelte dashboard into internal/admin/dashboard/static/dist
-# (embedded into the Go binary; commit the dist output).
+# (embedded into the Go binary; generated output is intentionally untracked).
+$(FRONTEND_DEPS_STAMP): $(FRONTEND_DIR)/package.json $(FRONTEND_DIR)/package-lock.json
+	cd $(FRONTEND_DIR) && npm ci --no-audit --no-fund
+	@touch $@
+
+ifeq ($(FRONTEND_PREBUILT),1)
 frontend:
-	cd web/dashboard && npm ci --no-audit --no-fund && npm run build
+	@test -s internal/admin/dashboard/static/dist/index.html && \
+		test -d internal/admin/dashboard/static/dist/assets || \
+		{ echo "prebuilt dashboard artifact is missing or incomplete" >&2; exit 1; }
+else
+frontend: $(FRONTEND_DEPS_STAMP)
+	cd $(FRONTEND_DIR) && npm run build
+endif
 
 # Run dashboard JavaScript unit tests
-test-dashboard:
-	cd web/dashboard && npm test
+test-dashboard: $(FRONTEND_DEPS_STAMP)
+	cd $(FRONTEND_DIR) && npm test
+
+# Run frontend type/component checks in addition to unit tests.
+check-dashboard: $(FRONTEND_DEPS_STAMP)
+	cd $(FRONTEND_DIR) && npm run check
 
 # Run e2e tests (uses an in-process mock LLM server; no Docker required)
-test-e2e:
+test-e2e: frontend
 	go test -v -tags=e2e ./tests/e2e/...
 
 # Run integration tests (requires Docker)
-test-integration:
+test-integration: frontend
 	go test -v -tags=integration -timeout=10m ./tests/integration/...
 
 # Run contract tests (validates API response structures against golden files)
-test-contract:
+test-contract: frontend
 	go test -v -tags=contract -timeout=5m ./tests/contract/...
 
 # Run all tests including dashboard, e2e, integration, and contract tests
-test-all: test test-dashboard test-e2e test-integration test-contract
+test-all: test test-dashboard check-dashboard test-e2e test-integration test-contract
 
-perf-check:
+perf-check: frontend
 	go test -run '^Test(HotPathPerfGuard|VoiceRoutingLatency)$$' -count=1 -v ./tests/perf/...
 
-perf-bench:
+perf-bench: frontend
 	go test -bench=. -benchmem ./tests/perf/...
 
 # Record API responses for contract tests
@@ -148,17 +168,17 @@ docs-openapi:
 	DOCS_API_SERVERS="$(DOCS_API_SERVERS)" node tools/openapi-postprocess.mjs docs/openapi.json
 
 # Run linter
-lint:
+lint: frontend
 	$(GOLANGCI_LINT) run --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/...
 
 # Run linter with auto-fix. Mirrors `lint`: same tags, same packages, so the
 # autofix pass cannot silently skip the tag-gated files under tests/.
-lint-fix:
+lint-fix: frontend
 	$(GOLANGCI_LINT) run --fix --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/...
 
 # Report modernizations go fix would apply, without touching the tree.
 # Exits non-zero when the tree has drifted; run `make fix` to apply.
-fix-check:
+fix-check: frontend
 	go fix -diff -tags=$(BUILD_TAGS) ./...
 
 # Apply go fix modernizations in place.
@@ -167,5 +187,5 @@ fix-check:
 # inlines the callers on the *next* run, which can leave the helper orphaned.
 # Re-run until `make fix-check` is clean, then delete any helper `make lint`
 # now reports as unused.
-fix:
+fix: frontend
 	go fix -tags=$(BUILD_TAGS) ./...

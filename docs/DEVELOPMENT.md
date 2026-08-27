@@ -19,12 +19,26 @@ After installing tools, set up the pre-commit hooks:
 pre-commit install
 ```
 
+## Running locally
+
+```bash
+make run         # Go gateway on :8080 plus watched Vite dashboard on :5173
+make run-backend # Gateway with the embedded production dashboard on :8080
+```
+
+For frontend development, open
+`http://localhost:5173/admin/dashboard`. Vite serves the dashboard with hot
+module replacement and proxies its API requests to the gateway, so the browser
+uses a single origin. Override occupied defaults with, for example,
+`make run PORT=18080 FRONTEND_PORT=15173`.
+
 ## Testing
 
 ```bash
 make test            # Go unit tests
 make test-race       # Go unit tests with race detection and coverage
 make test-dashboard  # Dashboard JavaScript unit tests
+make check-dashboard # Dashboard Svelte and TypeScript checks
 make test-e2e        # End-to-end tests (requires -tags=e2e; uses in-process mock servers, no Docker)
 make test-all        # All tests
 ```

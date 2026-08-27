@@ -165,5 +165,5 @@ Run from `web/dashboard/`:
 ```sh
 npm run check   # svelte-check: zero errors required (warnings OK)
 npm test        # compile messages + node --test tests/*.test.js
-npm run build   # keeps the embedded dist/ in sync — CI enforces drift
+npm run build   # generates the ignored dist/ embedded by Go production builds
 ```

@@ -22,8 +22,14 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
+    needs: test-dashboard
     steps:
       - uses: actions/checkout@v7
+      - name: Download dashboard assets
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/admin/dashboard/static/dist
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -57,6 +63,7 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
+    needs: test-dashboard
     services:
       postgres:
         # Mirrors Docker Hub's official image. Anonymous pulls of
@@ -77,6 +84,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Download dashboard assets
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/admin/dashboard/static/dist
+
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -86,6 +99,7 @@ jobs:
       - name: Run tests
         run: make test-race
         env:
+          FRONTEND_PREBUILT: "1"
           # Deliberately not POSTGRES_URL: the suite creates and drops schemas,
           # so pointing it at a configured application database is opt-in.
           GOMODEL_TEST_POSTGRES_URL: postgres://gomodel:gomodel@localhost:5432/gomodel
@@ -104,6 +118,7 @@ jobs:
   go-tests:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    needs: test-dashboard
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +132,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Download dashboard assets
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/admin/dashboard/static/dist
+
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -127,7 +148,7 @@ jobs:
         run: ${{ matrix.cmd }}
 
   test-dashboard:
-    name: Dashboard Unit Tests
+    name: Dashboard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -136,34 +157,38 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '22'
-
-      - name: Install frontend dependencies
-        run: cd web/dashboard && npm ci --no-audit --no-fund
+          cache: npm
+          cache-dependency-path: web/dashboard/package-lock.json
 
       - name: Run dashboard JavaScript tests
         run: make test-dashboard
 
       - name: Check dashboard sources
-        run: cd web/dashboard && npx svelte-check --tsconfig ./jsconfig.json
+        run: make check-dashboard
 
-      - name: Verify committed dashboard build is current
-        run: |
-          (cd web/dashboard && npm run build)
-          git diff --exit-code --stat -- internal/admin/dashboard/static/dist
-          # git diff ignores untracked files: a build emitting a new asset
-          # must also fail the check, or a clean checkout won't embed it.
-          untracked="$(git status --porcelain -- internal/admin/dashboard/static/dist)"
-          if [ -n "$untracked" ]; then
-            echo "Dashboard build produced uncommitted files:"
-            echo "$untracked"
-            exit 1
-          fi
+      - name: Build dashboard assets
+        run: make frontend
+
+      - name: Upload dashboard assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/admin/dashboard/static/dist
+          if-no-files-found: error
+          retention-days: 1
 
   performance:
     name: Performance Guard
     runs-on: ubuntu-latest
+    needs: test-dashboard
     steps:
       - uses: actions/checkout@v7
+
+      - name: Download dashboard assets
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/admin/dashboard/static/dist
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -174,13 +199,22 @@ jobs:
       - name: Run performance guards
         # Allocation and voice-routing latency thresholds are maintained in tests/perf/.
         run: make perf-check
+        env:
+          FRONTEND_PREBUILT: "1"
 
   vulncheck:
     name: Vulnerability Scan
     runs-on: ubuntu-latest
+    needs: test-dashboard
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+
+      - name: Download dashboard assets
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/admin/dashboard/static/dist
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -218,13 +252,19 @@ jobs:
         run: npx mint validate
         working-directory: docs
 
-  # Compiling the binary doesn't depend on tests passing, so this runs in
-  # parallel with the test jobs rather than gating behind them.
+  # Compile against the exact dashboard artifact shared by the test jobs.
   build:
     name: Build
     runs-on: ubuntu-latest
+    needs: test-dashboard
     steps:
       - uses: actions/checkout@v7
+
+      - name: Download dashboard assets
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/admin/dashboard/static/dist
 
       - name: Set up Go
         uses: actions/setup-go@v7

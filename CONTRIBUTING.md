@@ -25,8 +25,10 @@ Allowed types are `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `build`, `c
 ## Dashboard frontend
 
 The admin dashboard is a Svelte 5 single-page app in `web/dashboard/`. The
-built assets are committed under `internal/admin/dashboard/static/dist/` and
-embedded into the Go binary, so plain `go build` works without Node.
+built assets are generated under `internal/admin/dashboard/static/dist/` and
+embedded into the Go binary. Generated assets are intentionally ignored by
+Git; use the Make targets rather than invoking `go build` directly so the
+dashboard is built first.
 
 Dashboard translations are welcome; see the
 [translation guide](web/dashboard/src/lib/i18n/README.md).
@@ -34,14 +36,18 @@ Dashboard translations are welcome; see the
 When you change dashboard sources:
 
 ```sh
-make frontend        # npm ci + vite build (requires Node 22+)
+make frontend        # install locked dependencies as needed, then run Vite
 make test-dashboard  # frontend unit tests
+make check-dashboard # Svelte and TypeScript checks
+make build            # build the dashboard and the Go binary
 ```
 
-Commit the regenerated `static/dist` output together with your source change —
-CI verifies the committed build matches the sources. For live-reload
-development, run the gateway on :8080 and `npm run dev` in `web/dashboard/`
-(the Vite dev server proxies `/admin` and `/v1` API calls to the gateway).
+Do not commit `static/dist`; CI, Docker, and release builds generate it from
+the committed sources and lockfile. `make run` starts both the gateway and the
+watched Vite frontend. Open `http://localhost:5173/admin/dashboard`; Vite keeps
+the browser on one origin while proxying `/admin`, `/v1`, and `/version` to the
+gateway on :8080. Use `make run-backend` when you specifically want the
+embedded production dashboard on `http://localhost:8080/admin/dashboard`.
 
 ## Questions
 

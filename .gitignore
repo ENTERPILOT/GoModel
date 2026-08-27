@@ -40,3 +40,4 @@
 
 # Dashboard frontend
 /web/dashboard/node_modules/
+/internal/admin/dashboard/static/dist/

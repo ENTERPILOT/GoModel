@@ -10,6 +10,8 @@
 bin/
 gomodel
 coverage.out
+**/node_modules/
+internal/admin/dashboard/static/dist/
 
 # ===================
 # Tests
