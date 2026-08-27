@@ -128,7 +128,8 @@ version_check:
 ## The `/version` endpoint
 
 Public and unauthenticated, alongside `/health`. It answers from the cache and
-never blocks on the network:
+never blocks on the network — a due check runs in the background, so an
+unreachable release host never slows the dashboard down:
 
 ```bash
 curl -s http://localhost:8080/version
@@ -145,6 +146,7 @@ curl -s http://localhost:8080/version
 }
 ```
 
-`update_available` is conservative: build metadata is ignored, a prerelease
-ranks below its final release, and a development build (`dev`, a bare commit)
-never reports an update.
+`update_available` is conservative: build metadata is ignored, prereleases are
+compared the way semantic versioning specifies (`1.0.0-rc1` < `1.0.0-rc2` <
+`1.0.0`), and a development build (`dev`, a bare commit) never reports an
+update.

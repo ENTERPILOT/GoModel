@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -12,8 +13,9 @@ import (
 
 // Version handles GET /version.
 //
-// It always answers immediately from the gateway's cached result, so the
-// dashboard never waits on the network. The first visit of each day — the
+// It always answers from the gateway's cached result and never waits on the
+// network: a due check is dispatched in the background and lands in the cache
+// for the next caller. The first visit of each day — the
 // browser's gomodel_version_check cookie carries a date older than today —
 // also refreshes that cache, forwarding an allowlisted slice of the visit
 // (user agent, language, client hints, visit marker) to the release host.
@@ -49,9 +51,21 @@ func (h *Handler) Version(c *echo.Context) error {
 	if versioncheck.DueToday(visit, now) {
 		next := versioncheck.NewVisit(id, now)
 		if checker.Enabled() {
-			// Refresh is bounded by the checker's own timeout and daily
-			// budget, and falls back to the cached status on any failure.
-			status, _ = checker.Refresh(request.Context(), versioncheck.BeaconFromRequest(request, next))
+			// Detached from the request: the refresh must outlive the
+			// response, and the dashboard must never wait on the release
+			// host. A slow or unreachable manifest would otherwise stall
+			// this endpoint for the checker's whole timeout. The result
+			// lands in the cache for the next caller; Refresh applies its
+			// own timeout, throttles, and budget.
+			// The beacon is snapshotted here on purpose: echo recycles the
+			// request once the handler returns, so nothing derived from it
+			// may be read inside the goroutine. Background context because
+			// the refresh outlives the response and needs no request-scoped
+			// values; Refresh applies its own timeout.
+			beacon := versioncheck.BeaconFromRequest(request, next)
+			go func() {
+				_, _ = checker.Refresh(context.Background(), beacon)
+			}()
 		}
 		// Stamped even when no check ran, so a deployment that opted out
 		// still gets a well-formed marker instead of the dashboard treating

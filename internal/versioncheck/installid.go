@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -14,6 +15,10 @@ import (
 // gateway's other durable state.
 const installIDFile = "install-id"
 
+// installID memoizes the identifier so a data directory that cannot be written
+// still yields one stable value for the process instead of a fresh id per call.
+var installID = sync.OnceValue(readOrCreateInstallID)
+
 // InstallID returns a stable, anonymous identifier for this deployment,
 // creating one on first use. It is a random UUID: it encodes nothing about
 // the host, the operator, or the configuration, and only ever leaves the
@@ -21,7 +26,9 @@ const installIDFile = "install-id"
 //
 // A read-only or unwritable data directory is not an error; the caller gets a
 // process-lifetime identifier instead.
-func InstallID() string {
+func InstallID() string { return installID() }
+
+func readOrCreateInstallID() string {
 	path := platformdir.DataFile(installIDFile)
 	if raw, err := os.ReadFile(path); err == nil {
 		if id := strings.TrimSpace(string(raw)); id != "" {

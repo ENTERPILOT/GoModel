@@ -104,7 +104,11 @@
         <Icon icon={item.icon} class="nav-icon" />
         <span class="nav-label">{item.label()}</span>
         {#if item.notify?.()}
-          <span class="nav-notify" aria-label={m.sidebar_has_notice()}></span>
+          <span
+            class="nav-notify"
+            role="img"
+            aria-label={m.sidebar_has_notice()}
+          ></span>
         {/if}
       </a>
     {/each}
@@ -425,6 +429,15 @@
 
   .sidebar-nav .nav-item .nav-label {
           display: none;
+        }
+
+  /* No label to sit beside once it is hidden, so the dot moves onto the
+           icon exactly as it does in the collapsed desktop sidebar. */
+  .sidebar-nav .nav-item .nav-notify {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          box-shadow: 0 0 0 2px var(--bg-surface);
         }
 
   .sidebar-footer {

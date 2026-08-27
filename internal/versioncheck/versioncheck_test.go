@@ -225,16 +225,19 @@ func TestRefreshRejectsNonVersionBody(t *testing.T) {
 	}
 }
 
-func TestRefreshBoundsManifestSize(t *testing.T) {
+func TestRefreshRejectsOversizedManifest(t *testing.T) {
 	checker, _ := newTestChecker(t, Config{}, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(strings.Repeat("9", 4096)))
 	})
 
-	if _, err := checker.Refresh(context.Background(), Beacon{}); err != nil {
-		t.Fatalf("Refresh: %v", err)
+	// Truncating would leave a plausible-looking but wrong version in the
+	// cache, so an oversized body must be refused outright.
+	status, err := checker.Refresh(context.Background(), Beacon{})
+	if err == nil {
+		t.Fatal("expected an error for an oversized manifest")
 	}
-	if got := checker.Status().Latest; len(got) != maxManifestBytes {
-		t.Fatalf("read %d bytes, want the response capped at %d", len(got), maxManifestBytes)
+	if status.Latest != "" {
+		t.Fatalf("latest = %q, want the cache left untouched", status.Latest)
 	}
 }
 

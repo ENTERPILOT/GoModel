@@ -8,13 +8,20 @@ import {
   VISIT_COOKIE,
   checkPlan,
   checkedToday,
-  localDateKey,
+  utcDateKey,
   readVisitCookie,
 } from "../src/lib/stores/versionVisit.js";
 
-test("localDateKey formats the browser's own date, zero padded", () => {
-  assert.equal(localDateKey(new Date(2026, 7, 26, 23, 59)), "2026-08-26");
-  assert.equal(localDateKey(new Date(2026, 0, 5, 0, 1)), "2026-01-05");
+test("utcDateKey formats the UTC date, zero padded", () => {
+  assert.equal(utcDateKey(new Date(Date.UTC(2026, 7, 26, 23, 59))), "2026-08-26");
+  assert.equal(utcDateKey(new Date(Date.UTC(2026, 0, 5, 0, 1))), "2026-01-05");
+});
+
+// The gateway stamps the cookie in UTC; a browser comparing local dates would
+// roll over at a different moment and check on the wrong schedule.
+test("utcDateKey ignores the browser timezone", () => {
+  assert.equal(utcDateKey(new Date("2026-08-26T23:30:00Z")), "2026-08-26");
+  assert.equal(utcDateKey(new Date("2026-08-27T00:30:00Z")), "2026-08-27");
 });
 
 test("readVisitCookie finds the marker among other cookies", () => {

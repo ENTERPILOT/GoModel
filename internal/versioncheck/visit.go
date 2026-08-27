@@ -37,16 +37,20 @@ func SplitVisit(value string) (date, id string) {
 
 // NewVisit builds a cookie value for today, reusing id when the browser
 // already has one and minting a fresh one otherwise.
+//
+// The day is UTC on both sides of the cookie: the dashboard reads the same
+// value back, and a browser in a different timezone to the gateway would
+// otherwise disagree about when a new day starts.
 func NewVisit(id string, now time.Time) string {
 	if id == "" {
 		id = uuid.NewString()
 	}
-	return now.Format(time.DateOnly) + "-" + id
+	return now.UTC().Format(time.DateOnly) + "-" + id
 }
 
 // DueToday reports whether a browser presenting this cookie value has yet to
 // check in on the given day.
 func DueToday(value string, now time.Time) bool {
 	date, id := SplitVisit(value)
-	return id == "" || date != now.Format(time.DateOnly)
+	return id == "" || date != now.UTC().Format(time.DateOnly)
 }

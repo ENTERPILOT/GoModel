@@ -177,7 +177,7 @@
   "usage_locally_cached_output": "Lokalny cache (wyjście)",
   "settings_title": "Ustawienia",
   "update_banner_link": "Informacje o wydaniu",
-  "update_banner_message": "Dostępny jest GoModel {latest} - używasz wersji {current}.",
+  "update_banner_message": "Dostępny jest {app} {latest} - używasz wersji {current}.",
   "update_banner_label": "Dostępna aktualizacja GoModel",
   "update_banner_dismiss": "Ukryj do następnego odświeżenia",
   "sidebar_has_notice": "ma powiadomienie",

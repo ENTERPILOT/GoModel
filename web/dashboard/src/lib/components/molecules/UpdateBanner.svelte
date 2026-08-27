@@ -19,6 +19,7 @@
     <Icon icon={ArrowUpCircle} class="update-banner-icon" />
     <p class="update-banner-copy">
       {m.update_banner_message({
+        app: versionStore.app,
         latest: versionStore.latest,
         current: versionStore.current,
       })}

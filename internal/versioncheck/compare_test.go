@@ -27,6 +27,13 @@ func TestIsNewer(t *testing.T) {
 		{"empty current", "", "0.1.82", false},
 		{"empty latest", "0.1.81", "", false},
 		{"garbage manifest", "0.1.81", "<!doctype html>", false},
+		{"later numeric prerelease", "1.0.0-rc1", "1.0.0-rc2", true},
+		{"earlier numeric prerelease", "1.0.0-rc2", "1.0.0-rc1", false},
+		{"dotted prerelease counts up", "1.0.0-rc.1", "1.0.0-rc.2", true},
+		{"numeric prerelease field ranks below alphanumeric", "1.0.0-1", "1.0.0-alpha", true},
+		{"longer prerelease supersedes its prefix", "1.0.0-rc", "1.0.0-rc.1", true},
+		{"double digit prerelease beats single", "1.0.0-rc.9", "1.0.0-rc.10", true},
+		{"identical pro suffix", "1.0.0-pro", "1.0.0-pro", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

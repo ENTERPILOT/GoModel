@@ -1,8 +1,7 @@
 // Package versioncheck reports whether a newer GoModel release exists.
 //
-// It reads a plain-text manifest (for example
-// https://gomodel.enterpilot.io/version/core.txt, containing "0.1.81") on a
-// daily schedule and on the first dashboard visit of each day. The request
+// It reads a plain-text manifest on a daily schedule and on the first
+// dashboard visit of each day. The request
 // carries the running version, the distribution name, an anonymous install
 // identifier, and the dashboard's own hostname; it never carries API keys,
 // provider credentials, model names, prompts, or usage data.
@@ -269,9 +268,15 @@ func (c *Checker) fetch(ctx context.Context, beacon Beacon) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("version manifest %s returned %d", c.url, resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes))
+	// One byte past the cap distinguishes "at the limit" from "longer than
+	// the limit", so an oversized body is rejected rather than silently
+	// truncated into a plausible-looking version.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
 	if err != nil {
 		return "", err
+	}
+	if len(body) > maxManifestBytes {
+		return "", fmt.Errorf("version manifest %s is larger than %d bytes", c.url, maxManifestBytes)
 	}
 	latest := strings.TrimSpace(string(body))
 	if latest == "" || strings.ContainsAny(latest, " \t\n<") {

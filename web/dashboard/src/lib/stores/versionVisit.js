@@ -8,11 +8,15 @@ export const VISIT_COOKIE = "gomodel_version_check";
 
 const DATE_LENGTH = "2026-08-26".length;
 
-/** localDateKey returns a date in the browser's own timezone as YYYY-MM-DD. */
-export function localDateKey(now = new Date()) {
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
+/**
+ * utcDateKey returns a date as YYYY-MM-DD in UTC.
+ *
+ * UTC, not local time: the gateway stamps the cookie in UTC, and a browser in
+ * a different timezone comparing local dates would disagree with it about when
+ * a new day begins.
+ */
+export function utcDateKey(now = new Date()) {
+  return now.toISOString().slice(0, 10);
 }
 
 /**
@@ -40,7 +44,7 @@ export function readVisitCookie(cookieHeader = "") {
  * and that carries an id means this browser has already checked in. Anything
  * missing or malformed counts as due, so a corrupted cookie self-heals.
  */
-export function checkedToday(cookieValue, today = localDateKey()) {
+export function checkedToday(cookieValue, today = utcDateKey()) {
   const value = String(cookieValue || "");
   if (value.length <= DATE_LENGTH) return false;
   return value.slice(0, DATE_LENGTH) === today && value[DATE_LENGTH] === "-";
@@ -60,6 +64,6 @@ export function checkedToday(cookieValue, today = localDateKey()) {
  * when it is not due, nothing outbound can happen and the status should paint
  * immediately.
  */
-export function checkPlan(cookieValue, today = localDateKey()) {
+export function checkPlan(cookieValue, today = utcDateKey()) {
   return { fetch: true, delayed: !checkedToday(cookieValue, today) };
 }

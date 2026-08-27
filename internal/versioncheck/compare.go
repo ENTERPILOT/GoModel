@@ -27,8 +27,47 @@ func IsNewer(current, latest string) bool {
 			return b > a
 		}
 	}
-	// Equal release numbers: only a prerelease can still be superseded.
-	return currentPre != "" && latestPre == ""
+	if currentPre == latestPre {
+		return false
+	}
+	// Equal release numbers: a prerelease is superseded by the final release,
+	// and by a later prerelease of the same one (rc1 -> rc2).
+	if currentPre == "" || latestPre == "" {
+		return currentPre != "" && latestPre == ""
+	}
+	return prereleaseLess(currentPre, latestPre)
+}
+
+// prereleaseLess compares two semantic-versioning prerelease strings. Fields
+// are dot separated; numeric fields compare numerically and rank below
+// alphanumeric ones, and a shorter prerelease ranks below a longer one that
+// shares its prefix.
+func prereleaseLess(a, b string) bool {
+	aFields, bFields := strings.Split(a, "."), strings.Split(b, ".")
+	for i := range min(len(aFields), len(bFields)) {
+		if aFields[i] == bFields[i] {
+			continue
+		}
+		aNum, aIsNum := prereleaseNumber(aFields[i])
+		bNum, bIsNum := prereleaseNumber(bFields[i])
+		switch {
+		case aIsNum && bIsNum:
+			return aNum < bNum
+		case aIsNum != bIsNum:
+			return aIsNum
+		default:
+			return aFields[i] < bFields[i]
+		}
+	}
+	return len(aFields) < len(bFields)
+}
+
+func prereleaseNumber(field string) (int, bool) {
+	n, err := strconv.Atoi(field)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 func at(numbers []int, i int) int {

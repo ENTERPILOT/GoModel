@@ -996,6 +996,10 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 		return fmt.Errorf("server is already running")
 	}
 	serverCtx, cancel := context.WithCancel(ctx)
+	// Cancelled on every exit path, not just Shutdown: the server can also
+	// stop by returning an error, and background workers started on this
+	// context (the update check) would otherwise outlive it.
+	defer cancel()
 	done := make(chan error, 1)
 	a.serverStop = cancel
 	a.serverDone = done

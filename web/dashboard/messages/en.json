@@ -177,7 +177,7 @@
   "usage_locally_cached_output": "Locally Cached (Output)",
   "settings_title": "Settings",
   "update_banner_link": "Release notes",
-  "update_banner_message": "GoModel {latest} is available - you are running {current}.",
+  "update_banner_message": "{app} {latest} is available - you are running {current}.",
   "update_banner_label": "GoModel update available",
   "update_banner_dismiss": "Hide until the next reload",
   "sidebar_has_notice": "has a notice",

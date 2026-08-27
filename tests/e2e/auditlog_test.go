@@ -146,6 +146,12 @@ func setupAuditLogTestServer(t *testing.T, cfg auditlog.Config, store *mockLogSt
 	}
 
 	cleanup := func() {
+		// These tests issue requests through the shared default client, whose
+		// keep-alive connections outlive each request. Graceful shutdown waits
+		// for them up to server.GracefulDrainTimeout (10s), which is longer
+		// than the 5s budget below, so leaving them open makes shutdown look
+		// like a hang. Releasing them first lets the drain finish at once.
+		http.DefaultClient.CloseIdleConnections()
 		cancel()
 		select {
 		case err := <-serverDone:

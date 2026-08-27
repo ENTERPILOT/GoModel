@@ -621,7 +621,3 @@ providers:
 # the dashboard hostname. Set enabled: false to stop all outbound traffic.
 # version_check:
 #   enabled: true
-#   url: https://gomodel.enterpilot.io/version
-#   interval_hours: 24
-#   timeout_seconds: 5
-#   max_daily_checks: 500
