@@ -39,6 +39,10 @@ func TestIsNewer(t *testing.T) {
 		{"oversized numeric prerelease ranks below alphanumeric", "1.0.0-999999999999999999999", "1.0.0-2foo", true},
 		{"oversized numeric prereleases compare by magnitude", "1.0.0-999999999999999999998", "1.0.0-999999999999999999999", true},
 		{"longer numeric prerelease is the larger number", "1.0.0-9", "1.0.0-10", true},
+		// Leading zeroes are invalid in a numeric identifier, so such a field
+		// is alphanumeric and must not be length-compared as a number.
+		{"zero padded field is not treated as a number", "1.0.0-007", "1.0.0-10", false},
+		{"zero padded fields compare lexically", "1.0.0-007", "1.0.0-008", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

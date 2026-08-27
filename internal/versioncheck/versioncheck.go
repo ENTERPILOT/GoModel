@@ -119,23 +119,33 @@ func New(cfg Config) *Checker {
 }
 
 // manifestURL appends the distribution's channel file to the configured base.
+//
+// The suffix goes on the URL's path, not on the end of the string: a private
+// mirror may authenticate with a query parameter, and appending after it would
+// produce ".../version?token=abc/core.txt", leaving the path pointing at the
+// wrong file.
 func manifestURL(base, app string) string {
-	return strings.TrimRight(base, "/") + "/" + version.ChannelFor(app) + ".txt"
+	channel := version.ChannelFor(app) + ".txt"
+	parsed, err := url.Parse(base)
+	if err != nil {
+		// Left for http.NewRequest to reject, so the operator sees the parse
+		// error rather than a check that silently reads the wrong path.
+		return strings.TrimRight(base, "/") + "/" + channel
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + channel
+	return parsed.String()
 }
 
-// safeURL is the manifest URL with anything an operator might have embedded in
-// it removed. The URL is configurable, so a private mirror could carry
-// credentials in userinfo or a token in the query; errors and logs quote only
-// scheme, host, and path.
+// safeURL identifies the manifest host for errors and logs without quoting
+// anything an operator may have embedded in the configured URL. A private
+// mirror can carry a secret in userinfo, in the query, or in the path itself,
+// so only the scheme and host survive.
 func safeURL(raw string) string {
 	parsed, err := url.Parse(raw)
-	if err != nil {
-		return "the configured manifest URL"
+	if err != nil || parsed.Host == "" {
+		return "the configured manifest host"
 	}
-	parsed.User = nil
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	return parsed.String()
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 // Enabled reports whether outbound checks are configured.
@@ -208,7 +218,7 @@ func (c *Checker) Refresh(ctx context.Context, beacon Beacon) (Status, error) {
 		// its refresh in the background and has nowhere to surface an error,
 		// so a mirror that is persistently failing would otherwise be silent.
 		if !errors.Is(err, context.Canceled) {
-			slog.Debug("version check failed", "error", err, "url", c.safeURL)
+			slog.Debug("version check failed", "error", err, "host", c.safeURL, "channel", version.ChannelFor(c.cfg.App))
 		}
 		return c.Status(), err
 	}

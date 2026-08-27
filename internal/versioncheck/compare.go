@@ -69,6 +69,12 @@ func isNumericField(field string) bool {
 	if field == "" {
 		return false
 	}
+	// A leading zero makes the identifier invalid under semantic versioning.
+	// Treating it as alphanumeric keeps numericFieldLess exact, which relies
+	// on a longer digit string always being the larger number.
+	if len(field) > 1 && field[0] == '0' {
+		return false
+	}
 	for i := range len(field) {
 		if field[i] < '0' || field[i] > '9' {
 			return false

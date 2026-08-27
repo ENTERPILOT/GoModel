@@ -27,20 +27,57 @@ func newTestChecker(t *testing.T, cfg Config, handler http.HandlerFunc) (*Checke
 	return New(cfg), srv
 }
 
-func TestManifestURLPicksChannel(t *testing.T) {
+func TestManifestURL(t *testing.T) {
 	tests := []struct {
+		name string
+		base string
 		app  string
 		want string
 	}{
-		{"GoModel", "https://example.test/version/core.txt"},
-		{"GoModel Pro", "https://example.test/version/pro.txt"},
-		{"gomodel pro", "https://example.test/version/pro.txt"},
-		{"Custom Gateway", "https://example.test/version/core.txt"},
+		{"core channel", "https://example.test/version/", "GoModel", "https://example.test/version/core.txt"},
+		{"pro channel", "https://example.test/version/", "GoModel Pro", "https://example.test/version/pro.txt"},
+		{"channel name is case insensitive", "https://example.test/version/", "gomodel pro", "https://example.test/version/pro.txt"},
+		{"custom distribution reads core", "https://example.test/version/", "Custom Gateway", "https://example.test/version/core.txt"},
+		{"no trailing slash", "https://example.test/version", "GoModel", "https://example.test/version/core.txt"},
+		// A mirror that authenticates with a query parameter must still be
+		// asked for the manifest, not for the base path with the file glued
+		// onto the end of the query.
+		{"query-authenticated mirror", "https://mirror.test/version?token=abc", "GoModel", "https://mirror.test/version/core.txt?token=abc"},
+		{"port and subpath", "http://mirror.test:8080/a/b", "GoModel Pro", "http://mirror.test:8080/a/b/pro.txt"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.app, func(t *testing.T) {
-			if got := manifestURL("https://example.test/version/", tt.app); got != tt.want {
-				t.Fatalf("manifestURL(%q) = %q, want %q", tt.app, got, tt.want)
+		t.Run(tt.name, func(t *testing.T) {
+			if got := manifestURL(tt.base, tt.app); got != tt.want {
+				t.Fatalf("manifestURL(%q, %q) = %q, want %q", tt.base, tt.app, got, tt.want)
+			}
+		})
+	}
+}
+
+// A configured mirror can carry a secret in userinfo, the query, or the path.
+// None of them may reach an error message or a log line.
+func TestSafeURLKeepsOnlySchemeAndHost(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want string
+	}{
+		{"https://user:hunter2@mirror.test/version/core.txt", "https://mirror.test"},
+		{"https://mirror.test/version/core.txt?token=abc", "https://mirror.test"},
+		{"https://mirror.test/s3cr3t-path/core.txt", "https://mirror.test"},
+		{"http://mirror.test:8080/core.txt#frag", "http://mirror.test:8080"},
+		{"://not a url", "the configured manifest host"},
+		{"core.txt", "the configured manifest host"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want+" "+tt.raw, func(t *testing.T) {
+			got := safeURL(tt.raw)
+			if got != tt.want {
+				t.Fatalf("safeURL(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+			for _, secret := range []string{"hunter2", "token=abc", "s3cr3t"} {
+				if strings.Contains(got, secret) {
+					t.Fatalf("safeURL(%q) leaked %q", tt.raw, secret)
+				}
 			}
 		})
 	}
